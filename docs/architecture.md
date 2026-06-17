@@ -3,7 +3,7 @@ covers:
   - ragspine/agent/
   - ragspine/retrieval/
   - ragspine/service/faq/
-verified-against: ff7ad2d
+verified-against: bcb7144
 ---
 
 # Architecture — request flow & dual channel

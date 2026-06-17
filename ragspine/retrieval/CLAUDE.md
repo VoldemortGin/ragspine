@@ -1,7 +1,7 @@
 ---
 covers:
   - ragspine/retrieval/
-verified-against: 3c6bf0b
+verified-against: bcb7144
 ---
 
 # retrieval — agent contract
@@ -13,8 +13,10 @@ in `ragspine/retrieval/docs/`.
 
 Narrative RAG. `chunking/` (paragraph-granular chunker + versioned store),
 `lexical/` (Okapi BM25, CJK uni+bigram, RRF fusion), `vector/` (injectable
-embedding backends; default none = pure BM25), `rerank/` (LLM listwise reranker,
-RRF-fallback), `link/` (adapter wiring retrieval into the agent).
+embedding backends, default none = pure BM25; + a pluggable `VectorStore` seam —
+`store.py` — with an invariant-binding conformance kit in `tests/conformance/`),
+`rerank/` (LLM listwise reranker, RRF-fallback), `link/` (adapter wiring
+retrieval into the agent).
 
 ## Invariants
 

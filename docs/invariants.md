@@ -4,7 +4,7 @@ covers:
   - ragspine/retrieval/link/
   - ragspine/retrieval/rerank/
   - ragspine/common/observability/
-verified-against: ff7ad2d
+verified-against: bcb7144
 ---
 
 # Invariants (code-enforced)

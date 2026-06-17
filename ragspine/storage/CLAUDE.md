@@ -1,7 +1,7 @@
 ---
 covers:
   - ragspine/storage/
-verified-against: 3c6bf0b
+verified-against: bcb7144
 ---
 
 # storage — agent contract
