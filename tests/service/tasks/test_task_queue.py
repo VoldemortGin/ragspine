@@ -1,7 +1,7 @@
 """task_queue 规格（TDD）：FakeQueue 同步内联执行 + map_rq_status 纯函数映射。
 
 不依赖 Redis/rq。样例 job 函数定义在 MODULE LEVEL，便于以点路径
-"tests.test_task_queue.<fn>" 被 importlib 解析。
+"tests.service.tasks.test_task_queue.<fn>" 被 importlib 解析。
 """
 
 from ragspine.service.tasks.task_queue import (
@@ -38,13 +38,13 @@ def setup_function(_fn) -> None:
 
 def test_enqueue_returns_job_id():
     q = FakeQueue()
-    jid = q.enqueue("tests.test_task_queue.job_ok", {"x": 1})
+    jid = q.enqueue("tests.service.tasks.test_task_queue.job_ok", {"x": 1})
     assert isinstance(jid, str) and jid
 
 
 def test_fake_runs_inline_and_finishes():
     q = FakeQueue()
-    jid = q.enqueue("tests.test_task_queue.job_ok", {"x": 42})
+    jid = q.enqueue("tests.service.tasks.test_task_queue.job_ok", {"x": 42})
     st = q.get(jid)
     assert isinstance(st, JobStatus)
     assert st.id == jid
@@ -55,7 +55,7 @@ def test_fake_runs_inline_and_finishes():
 
 def test_failing_job_plain_exception():
     q = FakeQueue()
-    jid = q.enqueue("tests.test_task_queue.job_plain_boom", {})
+    jid = q.enqueue("tests.service.tasks.test_task_queue.job_plain_boom", {})
     st = q.get(jid)
     assert st.status == JOB_FAILED
     assert st.result is None
@@ -68,7 +68,7 @@ def test_failing_job_plain_exception():
 
 def test_failing_job_joberror_propagates_stage_retryable():
     q = FakeQueue()
-    jid = q.enqueue("tests.test_task_queue.job_typed_boom", {})
+    jid = q.enqueue("tests.service.tasks.test_task_queue.job_typed_boom", {})
     st = q.get(jid)
     assert st.status == JOB_FAILED
     assert st.error["type"] == "JobError"
@@ -80,17 +80,17 @@ def test_failing_job_joberror_propagates_stage_retryable():
 def test_enqueue_never_raises_out_on_failure():
     q = FakeQueue()
     # 不应抛出，只把失败记进 JobStatus
-    jid = q.enqueue("tests.test_task_queue.job_plain_boom", {})
+    jid = q.enqueue("tests.service.tasks.test_task_queue.job_plain_boom", {})
     assert q.get(jid).status == JOB_FAILED
 
 
 def test_idempotent_explicit_job_id_does_not_rerun():
     q = FakeQueue()
-    jid1 = q.enqueue("tests.test_task_queue.job_ok", {"x": 1}, job_id="fixed")
+    jid1 = q.enqueue("tests.service.tasks.test_task_queue.job_ok", {"x": 1}, job_id="fixed")
     assert jid1 == "fixed"
     assert _CALL_COUNT.get("ok") == 1
     # 再次提交同 job_id：返回同 id，不重跑
-    jid2 = q.enqueue("tests.test_task_queue.job_ok", {"x": 2}, job_id="fixed")
+    jid2 = q.enqueue("tests.service.tasks.test_task_queue.job_ok", {"x": 2}, job_id="fixed")
     assert jid2 == "fixed"
     assert _CALL_COUNT.get("ok") == 1  # 计数没变 -> 没重跑
     st = q.get("fixed")
@@ -107,7 +107,7 @@ def test_payload_stays_plain_serializable_dict():
 
     q = FakeQueue()
     payload = {"path": "/tmp/a.xlsx", "dry_run": True, "tags": ["x", "y"]}
-    jid = q.enqueue("tests.test_task_queue.job_ok", payload)
+    jid = q.enqueue("tests.service.tasks.test_task_queue.job_ok", payload)
     st = q.get(jid)
     # payload 与结果都能 json round-trip（即纯可序列化）
     json.dumps(payload)
