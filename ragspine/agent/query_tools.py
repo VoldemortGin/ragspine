@@ -158,30 +158,74 @@ def execute_query_metric(
     period: str,
     channel: str = "TOTAL",
 ) -> dict[str, object]:
-    """确定性执行 query_metric。
+    """确定性执行 query_metric（对外签名冻结）。
+
+    薄封装：把位置参数转交泛化的 execute_fact_query（按默认 profile 的声明维度执行）。
+    三态语义、channel 直通、found-dict 形状对默认 profile 字节级一致。
 
     参数无法归一 -> {"status":"unrecognized_param","param":...,"raw":...}
     命中 -> {"status":"found","value",...,"source":{"doc","locator"}}
     未命中 -> {"status":"not_found","normalized":{...}}（绝不编造）
     """
-    metric_code = normalize_metric(metric)
-    if metric_code is None:
-        return {"status": "unrecognized_param", "param": "metric", "raw": metric}
+    return execute_fact_query(
+        store, _PROFILE, metric=metric, entity=entity, period=period, channel=channel
+    )
 
-    entity_code = normalize_entity(entity)
-    if entity_code is None:
-        return {"status": "unrecognized_param", "param": "entity", "raw": entity}
 
-    parsed_period = normalize_period(period)
-    if parsed_period is None:
-        return {"status": "unrecognized_param", "param": "period", "raw": period}
-    period_type, period_norm = parsed_period
+def execute_fact_query(
+    store: FactStore,
+    profile: DomainProfile,
+    **dims: str,
+) -> dict[str, object]:
+    """按 profile 的声明维度确定性执行事实查询。
 
-    chan = (channel or "TOTAL").upper()
+    - 必填维（required 且 derived_from is None）按声明顺序逐个 normalize；任一落空 ->
+      {"status":"unrecognized_param","param":<dim.name>,"raw":<原值>}（三态、顺序一致）。
+    - 可选 channel 维：保持 (channel or "TOTAL").upper() 字面直通——不做同义词校验、不对
+      "传了但不认识的值"静默回退 TOTAL（typo'd channel 查不到 -> not_found）；default 仅
+      对缺省/空生效。
+    - 派生维（如 geography ← entity）经 derivation 映射推导，不作必填输入。
+    - store.query() 以钉死的位置签名调用；found-dict 仍把 period_type 与 period 作为两个
+      分开的键返回（agent 两期差值比较 + _period_label 依赖），源 / 值 / 单位 / 受控代码
+      等键对默认 profile 字节级一致。
+    """
+    declared = list(profile.dimensions) or list(_default_profile().dimensions)
+
+    # 必填非派生维：按声明顺序逐个 normalize（按维名分派归一器），任一落空即 unrecognized
+    # （三态、顺序与声明一致）。period 维归一返回 (period_type, period) 二元组。
+    resolved: dict[str, str] = {}
+    period_type = ""
+    period_norm = ""
+    for dim in declared:
+        if not (dim.required and dim.derived_from is None):
+            continue
+        raw = dims.get(dim.name, "")
+        if dim.name == "period":
+            parsed_period = normalize_period(raw)
+            if parsed_period is None:
+                return {"status": "unrecognized_param", "param": dim.name, "raw": dims.get(dim.name)}
+            period_type, period_norm = parsed_period
+            continue
+        normalizer = normalize_metric if dim.name == "metric" else normalize_entity
+        code = normalizer(raw)
+        if code is None:
+            return {"status": "unrecognized_param", "param": dim.name, "raw": dims.get(dim.name)}
+        resolved[dim.name] = code
+    metric_code = resolved["metric"]
+    entity_code = resolved["entity"]
+
+    # 可选 channel：字面直通（present-but-unknown 不强转 TOTAL；default 仅对缺省/空生效）。
+    channel_dim = next((d for d in declared if d.name == "channel"), None)
+    channel_default = (channel_dim.default if channel_dim else None) or "TOTAL"
+    chan = (dims.get("channel") or channel_default).upper()
+
+    # 派生维（geography ← entity）：经 derivation 映射推导，不作必填输入。
+    geography = geography_for_entity(entity_code)
+
     normalized = {
         "metric_code": metric_code,
         "entity": entity_code,
-        "geography": geography_for_entity(entity_code),
+        "geography": geography,
         "period_type": period_type,
         "period": period_norm,
         "channel": chan,
