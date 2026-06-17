@@ -1,7 +1,7 @@
 ---
 covers:
   - ragspine/eval/
-verified-against: 3112e68
+verified-against: 7256d34
 ---
 
 # eval — agent contract
