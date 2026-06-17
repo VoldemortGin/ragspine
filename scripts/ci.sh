@@ -19,16 +19,19 @@ fi
 
 echo "==> using interpreter: $("$PY" -c 'import sys; print(sys.executable)')"
 
-echo "==> [1/4] docstring reference integrity (no dead src/ or docs/ links; package indexes match)"
+echo "==> [1/5] docstring reference integrity (no dead src/ or docs/ links; package indexes match)"
 "$PY" scripts/check_docstring_refs.py
 
-echo "==> [2/4] doc-drift (contracts re-verified against their covered code)"
+echo "==> [2/5] doc-drift (contracts re-verified against their covered code)"
 "$PY" scripts/check_doc_drift.py --quiet
 
-echo "==> [3/4] test suite (excluding gpu-marked integration tests)"
-"$PY" -m pytest tests/ -q -m "not gpu"
+echo "==> [3/5] test suite (excludes gpu + docling — the bulk, no heavy 3rd-party models)"
+"$PY" -m pytest tests/ -q -m "not gpu and not docling"
 
-echo "==> [4/4] end-to-end demo smoke"
+echo "==> [4/5] docling extractor tests (own process — isolates 3rd-party ML nondeterminism)"
+"$PY" -m pytest tests/ -q -m "docling"
+
+echo "==> [5/5] end-to-end demo smoke"
 "$PY" scripts/run_demo.py | tail -1
 
 echo

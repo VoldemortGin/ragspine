@@ -259,6 +259,7 @@ def test_d2_pptx_extractor_version_distinct(store, registry, queue, tmp_path):
 # ===========================================================================
 # D3 — pdf(digital) 入库：pdf_router 判 digital -> 走 pdf_digital_extractor
 # ===========================================================================
+@pytest.mark.docling  # 唯一真跑 docling 抽取的 dispatch 用例：隔离进程跑（见 test_pdf_digital_extractor）。
 def test_d3_pdf_digital_routed_to_digital_extractor(
     store, registry, queue, digital_pdf_path, monkeypatch
 ):

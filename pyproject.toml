@@ -70,6 +70,7 @@ packages = ["ragspine"]
 [tool.pytest.ini_options]
 markers = [
     "gpu: 需要 Ubuntu+NVIDIA GPU 与真实 OCR 模型，本地默认跳过",
+    "docling: 走 docling 重模型抽取的测试；ci.sh 放独立进程跑，避免全套并跑时的第三方不确定性",
 ]
 
 # Lint config exists so cleanup is incremental and consistent; the CI gate does NOT yet
