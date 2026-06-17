@@ -10,7 +10,7 @@ RESTRICTED 文档若漏标即以 INTERNAL 流进检索/prompt/回答，两道出
 （escalate_unknown_to_restricted，默认 False 保行为）。
 
 规则全部由 SensitivityPolicy 承载，从 config 的 [sensitivity] 段读入
-（见 src/company_profile.py），代码里不硬编码任何公司专属词。
+（见 ragspine/common/company_profile.py），代码里不硬编码任何公司专属词。
 """
 
 from dataclasses import dataclass, field

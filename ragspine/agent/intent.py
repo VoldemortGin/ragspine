@@ -5,7 +5,7 @@
     structured —— 纯查数（含"多少"等数字意图但指标缺失的情况，由澄清网关兜底）
     narrative  —— 归因/监管/人物等叙事问题
     composite  —— 复合问题（数字子任务 + 归因子任务）
-澄清原则（docs/02 §2）：默认先答 + 显式暴露假设 + 一键收窄；
+澄清原则（docs/architecture.md 请求流程「clarification gate」）：默认先答 + 显式暴露假设 + 一键收窄；
 只有歧义会导致实质错误（如指标缺失）才前置单选反问。
 """
 
@@ -205,7 +205,7 @@ def expand_subtasks(
     default_entity: str | None = None,
     default_period: tuple[str, str] | None = None,
 ) -> list[SubTask]:
-    """把解析结果展开为 1..N 个 query_metric 子任务（docs/02 §2 Query Planner）。
+    """把解析结果展开为 1..N 个 query_metric 子任务（docs/architecture.md 请求流程：route 展开为子任务）。
 
     展开规则：笛卡尔积只在用户明确列举（多值槽位 len>1）的轴上进行；
     未列举的轴固定为单值（解析出的单槽位值，缺失时用注入的默认值），

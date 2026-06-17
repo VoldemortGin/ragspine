@@ -1,6 +1,6 @@
 """Claude listwise 二审（精排）：协议 + prompt 构造 + 鲁棒解析 + 退化策略。
 
-拍板（docs/02 §3）：精排直接用 Claude listwise 二审（低 QPS 成本可承受），不默认部署
+拍板（docs/architecture.md）：精排直接用 Claude listwise 二审（低 QPS 成本可承受），不默认部署
 本地 reranker；Restricted 敏感层数据不出域。本模块只做协议 / prompt / 解析 / 编排，
 真实 Claude provider 由集成线实现 ListwiseJudge 注入，本文件零 SDK、零网络。
 

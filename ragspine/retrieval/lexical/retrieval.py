@@ -1,14 +1,14 @@
 """叙事通路混合检索：BM25（纯 Python）+ 向量（注入）+ RRF 融合 + 元数据预过滤 + multi-query。
 
-检索配置拍板（docs/02 §3，2026-06-12）：召回 top-50；覆盖率靠三件套——混合召回
+检索配置拍板（docs/architecture.md，2026-06-12）：召回 top-50；覆盖率靠三件套——混合召回
 （BM25+向量+RRF）、元数据预过滤（过滤在打分之前）、multi-query 改写；精排走 Claude
-listwise 二审（src/listwise_rerank，Restricted 不出域）。
+listwise 二审（ragspine.retrieval.rerank.listwise_rerank，Restricted 不出域）。
 
-依赖注入（范式同 src/extractors/pdf_scanned_extractor 的 OcrBackend）：
+依赖注入（范式同 ragspine/extraction/extractors/pdf_scanned_extractor 的 OcrBackend）：
     - EmbeddingBackend：embed_texts(list[str]) -> list[list[float]]，真实现（GenAI Hub
       网关等）由集成线提供，本模块零 SDK；测试用确定性 fake。
     - QueryRewriter：rewrite(query) -> list[str]（含原 query）；默认提供基于
-      src/glossary 同义词的确定性规则改写器（只读复用 glossary）。
+      ragspine.common.glossary 同义词的确定性规则改写器（只读复用 glossary）。
 
 BM25 为标准 Okapi（k1=1.5、b=0.75，idf = ln(1 + (N-df+0.5)/(df+0.5))），不引入
 rank-bm25 等新依赖。分词处理中英混排：ASCII 连续串按词、CJK 按字符 unigram+bigram、
@@ -32,7 +32,7 @@ from ragspine.retrieval.chunking.chunking import (
 from ragspine.common.glossary import ENTITY_SYNONYMS, METRIC_SYNONYMS
 from ragspine.retrieval.rerank.listwise_rerank import DEFAULT_TOP_N, ListwiseJudge, listwise_rerank
 
-DEFAULT_TOP_K = 50      # 拍板召回深度（docs/02 §3）。
+DEFAULT_TOP_K = 50      # 拍板召回深度（docs/architecture.md）。
 DEFAULT_RRF_K = 60      # RRF 标准值。
 DEFAULT_BM25_K1 = 1.5   # Okapi 标准参数。
 DEFAULT_BM25_B = 0.75
@@ -120,7 +120,7 @@ def rrf_fuse(rankings: list[list[str]], k: float = DEFAULT_RRF_K) -> dict[str, f
 
 
 class GlossaryQueryRewriter:
-    """基于 src/glossary 同义词的确定性规则改写器（只读复用，不修改 glossary）。
+    """基于 ragspine.common.glossary 同义词的确定性规则改写器（只读复用，不修改 glossary）。
 
     在归一化后的 query 中查找指标/实体同义词词条（ASCII 词条要求词边界，避免
     'cn' 命中 'concern'），每个命中词条生成「替换为受控代码 / 其他同义词」的变体，
@@ -355,7 +355,7 @@ class NarrativeIndex:
     ) -> list[RetrievalResult]:
         """混合检索 +（给了 judge 且 rerank=True 时）listwise 二审。
 
-        二审遵守 src/listwise_rerank 的 Restricted 不出域策略；judge 缺省或
+        二审遵守 ragspine.retrieval.rerank.listwise_rerank 的 Restricted 不出域策略；judge 缺省或
         rerank=False 时直接返回 RRF 序 top_k。
         """
         # 预过滤下推到块库（iter_chunks 即"打分之前"的元数据过滤）。

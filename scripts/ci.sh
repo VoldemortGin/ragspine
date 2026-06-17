@@ -19,10 +19,13 @@ fi
 
 echo "==> using interpreter: $("$PY" -c 'import sys; print(sys.executable)')"
 
-echo "==> [1/2] test suite (excluding gpu-marked integration tests)"
+echo "==> [1/3] docstring reference integrity (no dead src/ or docs/ links in comments)"
+"$PY" scripts/check_docstring_refs.py
+
+echo "==> [2/3] test suite (excluding gpu-marked integration tests)"
 "$PY" -m pytest tests/ -q -m "not gpu"
 
-echo "==> [2/2] end-to-end demo smoke"
+echo "==> [3/3] end-to-end demo smoke"
 "$PY" scripts/run_demo.py | tail -1
 
 echo

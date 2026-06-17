@@ -1,7 +1,7 @@
-"""embedding 后端实现（B 线 src/retrieval.EmbeddingBackend 协议）+ 后端工厂。
+"""embedding 后端实现（B 线 ragspine.retrieval.lexical.retrieval.EmbeddingBackend 协议）+ 后端工厂。
 
 OpenAIEmbeddingBackend：OpenAI embeddings API（openai>=1.0 SDK）。
-设计约束（范式同 src/llm_provider.AnthropicProvider）：
+设计约束（范式同 ragspine.agent.llm_provider.AnthropicProvider）：
 - SDK 延迟 import：不装 openai 也能 import 本模块；
 - base_url 可覆盖：适配企业网关（GenAI Hub）转发 OpenAI API；
 - 默认模型名集中在 DEFAULT_OPENAI_EMBEDDING_MODEL 一处；
@@ -27,7 +27,7 @@ import re
 
 from ragspine.agent.llm_provider import ProviderError
 
-# 默认 embedding 模型名（唯一出处，改这里即全局生效；docs/06 混合栈推荐）
+# 默认 embedding 模型名（唯一出处，改这里即全局生效）
 DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-large"
 
 # 默认 SentenceTransformer 模型名（缺省 Qwen3-Embedding-0.6B，唯一出处）。
@@ -49,7 +49,7 @@ DEFAULT_DETERMINISTIC_DIM = 256
 # 确定性后端读取的环境变量名（缺省 spec 时生效）。
 EMBEDDING_BACKEND_ENV = "RAGSPINE_EMBEDDING_BACKEND"
 
-# 确定性后端分词：与 src/retrieval.tokenize 同口径（ASCII 串按词、CJK 串 unigram+bigram）。
+# 确定性后端分词：与 ragspine.retrieval.lexical.retrieval.tokenize 同口径（ASCII 串按词、CJK 串 unigram+bigram）。
 _CJK_RANGE = "㐀-䶿一-鿿豈-﫿"
 _TOKEN_RE = re.compile(rf"[a-z0-9]+|[{_CJK_RANGE}]+")
 
@@ -155,7 +155,7 @@ class OpenAIEmbeddingBackend:
 
 
 def _tokenize(text: str) -> list[str]:
-    """中英混排分词（与 src/retrieval.tokenize 同口径，本模块内复刻以保持零互依赖）。"""
+    """中英混排分词（与 ragspine.retrieval.lexical.retrieval.tokenize 同口径，本模块内复刻以保持零互依赖）。"""
     tokens: list[str] = []
     for match in _TOKEN_RE.finditer(text.lower()):
         run = match.group(0)

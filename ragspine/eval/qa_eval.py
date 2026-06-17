@@ -1,4 +1,4 @@
-"""Q&A 评测闭环 harness：四命门指标 + 基线门禁（docs/02 §4「评测闭环」）。
+"""Q&A 评测闭环 harness：四命门指标 + 基线门禁（docs/adr/0006-quality-bar-invariants-and-benchmark.md）。
 
 四个命门指标分别报告，绝不合并成笼统 pass rate：
     ①数字准确率（NUMERIC_ACCURACY）：exact match——数值+单位与期望完全一致（结构化通路）。
@@ -24,7 +24,7 @@ golden set 约定（data/golden/qa_golden_set.jsonl，git 版本化，置于 dat
     expected 统一含 clarification（none|ask_first|answer_with_assumptions）与 refuse（bool）；
     numeric、composite 另含 value+unit+source；narrative、composite 另含 narrative_doc。
 
-基线门禁仿 src/extraction_eval 模式：基线存 data/golden/qa_baseline.json（按 mode 分键），
+基线门禁仿 ragspine/eval/extraction_eval 模式：基线存 data/golden/qa_baseline.json（按 mode 分键），
 compare_to_baseline 以「任一命门指标 pass_rate 低于基线，或 fabrication_count 高于基线」
 为 gate fail；首次运行由 CLI 生成基线。
 """

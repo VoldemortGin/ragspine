@@ -7,7 +7,7 @@
 阈值常量沿用 scripts/classify_pdfs.py（TEXT_MIN_CHARS=50、IMG_COVER_SCAN=0.55），
 保证库化前后分类规则一致。
 
-实现已完成，dataclass 字段契约保持冻结，行为契约见 tests/test_pdf_router.py。
+实现已完成，dataclass 字段契约保持冻结，行为契约见 tests/extraction/routing/test_pdf_router.py。
 """
 
 from dataclasses import dataclass, field

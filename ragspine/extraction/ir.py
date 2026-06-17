@@ -4,7 +4,7 @@
 只消费它。每个单元格带值、解析后的真实颜色、合并范围、数字格式、精确血缘与来源
 告警标记，理解层与数据源格式彻底解耦（PRD user story 1）。
 
-实现已完成，dataclass 字段契约保持冻结，行为契约见 tests/test_ir.py。
+实现已完成，dataclass 字段契约保持冻结，行为契约见 tests/extraction/test_ir.py。
 """
 
 from dataclasses import dataclass, field

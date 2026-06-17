@@ -129,7 +129,7 @@ def build_narrative_retriever(
     默认链：纯 BM25+RRF（无向量后端）+ glossary 规则 multi-query 改写 +
     （给了 provider 时）Claude listwise 二审。返回 (retriever, store)，
     store 由调用方负责 close。
-    embedding_backend：可选向量通道后端（如 src/embedding_backends 的
+    embedding_backend：可选向量通道后端（如 ragspine.retrieval.vector.embedding_backends 的
     OpenAIEmbeddingBackend），默认 None＝纯 BM25 现状，既有调用零影响。
     """
     store = ChunkStore(chunk_db)

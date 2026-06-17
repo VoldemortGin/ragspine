@@ -9,7 +9,7 @@
     - 值冲突      -> reason='dual_channel_conflict'，payload 含双方值与 locator。
     - 单通道独有  -> reason='single_channel_only'，优先级低于 conflict。
 
-实现已完成，dataclass 字段契约保持冻结，行为契约见 tests/test_dual_channel_verifier.py。
+实现已完成，dataclass 字段契约保持冻结，行为契约见 tests/extraction/verification/test_dual_channel_verifier.py。
 """
 
 from dataclasses import dataclass

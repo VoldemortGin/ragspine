@@ -1,6 +1,6 @@
-"""叙事文本抽取：真实文档 -> 可直接喂 src/chunking.py 的「文档文本 + 定位段」。
+"""叙事文本抽取：真实文档 -> 可直接喂 ragspine/retrieval/chunking/chunking.py 的「文档文本 + 定位段」。
 
-叙事通路（Narrative Path）吃的是归因 / 监管 / 会议纪要类文本（docs/02 §1/§3），
+叙事通路（Narrative Path）吃的是归因 / 监管 / 会议纪要类文本（docs/architecture.md「Channels」），
 本模块只做确定性文本抽取，零 OCR、零 LLM：
 
     - pptx：python-pptx 遍历每页文本框（含占位符）+ 演讲者备注，按 slide 聚合；

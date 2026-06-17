@@ -1,6 +1,6 @@
 """PPT 增强抽取契约（三期 PPT 增强，story #12/#13）—— 新模块，与旧 pptx_extractor 并存。
 
-旧 src/extractors/pptx_extractor.py 是 MVP 确定性抽取器（表格 + 原生图表 -> Fact），
+旧 ragspine/extraction/extractors/pptx_extractor.py 是 MVP 确定性抽取器（表格 + 原生图表 -> Fact），
 38 个 e2e 测试依赖它、**不许改**。本模块是三期的「样式感知 + 叙述数字」增强，
 产出统一中间表示 StyledGrid（与 xlsx/pdf 抽取器对齐），并新增叙述层数字抽取
 （文本框 + 演讲者备注），让藏在叙述里的关键数字不会漏掉（PRD user stories 12、13）。
@@ -82,7 +82,7 @@ class NoteFragment:
         locator:        原文精确定位回链（如 'slide2/notes' / 'slide1/textbox3'），
                         供 citation 与复核回指。
         text:           句段文本，空白归一化（首尾 strip + 内部连续空白折叠为单空格）。
-        glossary_hits:  经 src/glossary.py 命中的指标代码列表（确定性词典匹配，
+        glossary_hits:  经 ragspine/common/glossary.py 命中的指标代码列表（确定性词典匹配，
                         如 ['REVENUE']；无命中为空列表，绝不做 LLM 推断）。
     """
 
@@ -314,7 +314,7 @@ def extract_note_fragments(path: str | Path) -> list[NoteFragment]:
         - 遍历每页所有文本框（source_kind='textbox'）与演讲者备注（source_kind='notes'）。
         - 只收集**含 digit** 的 run / 段落（叙述里的指标性数字线索）。
         - text 空白归一化。
-        - glossary_hits = 经 src/glossary.py 确定性词典命中的指标代码列表
+        - glossary_hits = 经 ragspine/common/glossary.py 确定性词典命中的指标代码列表
           （如句段含 'REVENUE' -> ['REVENUE']；'PROFIT' -> ['PROFIT']）。
 
     返回顺序按幻灯片号、再按页内出现顺序。无含数字句段 -> 返回 []。

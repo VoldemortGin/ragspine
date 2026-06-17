@@ -10,7 +10,7 @@
     list_versions —— 生产配置清单：事实表里出现过的 extractor_version 集合 +
         registry 各 scope 当前 active 的映射版本，回答「现在生产用的是哪套配置」。
 
-实现已完成，dataclass 字段契约保持冻结，行为契约见 tests/test_manifest.py。
+实现已完成，dataclass 字段契约保持冻结，行为契约见 tests/ingestion/structured/test_manifest.py。
 """
 
 import sqlite3

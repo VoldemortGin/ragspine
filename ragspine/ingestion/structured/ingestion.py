@@ -20,7 +20,7 @@
     - 抽取/入库过程中的 grid 告警与归一失败告警都汇聚进 report.warnings。
     - 任意环节抛错时 status='failed' 且 error 记录原因，已成功部分按实现的事务策略处理。
 
-实现已完成，dataclass 字段契约保持冻结，行为契约见 tests/test_ingestion.py。
+实现已完成，dataclass 字段契约保持冻结，行为契约见 tests/ingestion/structured/test_ingestion.py。
 """
 
 from dataclasses import dataclass, field
