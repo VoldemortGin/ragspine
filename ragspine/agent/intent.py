@@ -19,7 +19,11 @@ from ragspine.agent.security_gate import (
     SECURITY_REFUSE_OUT_OF_SCOPE,
     SecurityGate,
 )
-from ragspine.common.company_profile import load_company_profile
+from ragspine.common.company_profile import (
+    DimensionSpec,
+    DomainProfile,
+    load_company_profile,
+)
 from ragspine.common.glossary import (
     ENTITY_SYNONYMS,
     EXTERNAL_ENTITY_SYNONYMS,
@@ -47,16 +51,6 @@ _NARRATIVE_CUES = (
     "why", "reason", "driver", "regulat", "trend", "impact",
 )
 
-# 渠道同义词（glossary 暂无渠道维度词典，先在意图层维护）
-_CHANNEL_SYNONYMS: dict[str, str] = {
-    "代理": "AGENCY",
-    "代理人": "AGENCY",
-    "agency": "AGENCY",
-    "银保": "BANCA",
-    "bancassurance": "BANCA",
-    "banca": "BANCA",
-}
-
 # 相对期间词（长词优先匹配，避免"去年上半年"被"去年"截胡）
 _RELATIVE_PERIOD_TOKENS = (
     "去年上半年", "去年下半年", "今年上半年", "今年下半年", "前年上半年", "前年下半年",
@@ -70,13 +64,37 @@ _ABS_PERIOD_RE = re.compile(
     re.IGNORECASE,
 )
 
-# 支持的指标（澄清反问时列给用户选）
-_SUPPORTED_METRICS = ("REVENUE", "NEWSALES", "PROFIT", "ROE")
-
 # home 公司 profile（默认实体 + 拒答提议文案用的公司名，皆配置化，不硬编码）。
 _PROFILE = load_company_profile()
 # 默认假设：实体= home 集团口径
 _DEFAULT_ENTITY = _PROFILE.home_entity_code
+
+
+def _dim(profile: DomainProfile, name: str) -> DimensionSpec | None:
+    """按名取维度规格（缺失返回 None）。与 glossary._dim 同形，意图层自持以免引入跨模块私有依赖。"""
+    return next((d for d in profile.dimensions if d.name == name), None)
+
+
+def _channel_synonyms() -> dict[str, str]:
+    """当前 _PROFILE 的渠道同义词，调用期读取——monkeypatch 换 _PROFILE 即随之切换；
+    该域未声明 channel 维度时返回空表（匹配落空即默认 TOTAL）。"""
+    dim = _dim(_PROFILE, "channel")
+    return dict(dim.synonyms) if dim is not None else {}
+
+
+def _supported_metrics() -> tuple[str, ...]:
+    """当前 _PROFILE 支持的指标代码，去重保序（默认 REVENUE,NEWSALES,PROFIT,ROE）。
+
+    澄清反问时列给用户选；从指标维度同义词的取值去重得到，调用期读取当前 _PROFILE；
+    该域未声明 metric 维度时返回空元组。
+    """
+    dim = _dim(_PROFILE, "metric")
+    return tuple(dict.fromkeys(dim.synonyms.values())) if dim is not None else ()
+
+
+# 模块级默认派生别名（供外部 importer / 冻结 golden 引用）；与历史字面量字节一致。
+_CHANNEL_SYNONYMS: dict[str, str] = _channel_synonyms()
+_SUPPORTED_METRICS: tuple[str, ...] = _supported_metrics()
 
 
 @dataclass
@@ -269,7 +287,7 @@ def parse_intent(question: str, reference_date: date | None = None) -> ParsedInt
     metric = _match_longest(text, METRIC_SYNONYMS)
     entity = _match_longest(entity_text, ENTITY_SYNONYMS)
     period = _extract_period(text, reference_date)
-    channel = _match_longest(text, _CHANNEL_SYNONYMS) or "TOTAL"
+    channel = _match_longest(text, _channel_synonyms()) or "TOTAL"
 
     has_numeric_cue = metric is not None or any(c in text for c in _NUMERIC_CUES)
     has_narrative_cue = any(c in text for c in _NARRATIVE_CUES)
@@ -312,11 +330,12 @@ def clarify_scope(
 
     # 指标缺失：猜错指标=实质错误 → 前置单选
     if intent.metric is None:
-        metric_options = "、".join(_SUPPORTED_METRICS)
+        supported = _supported_metrics()
+        metric_options = "、".join(supported)
         return ClarificationResult(
             mode=CLARIFY_ASK_FIRST,
             question=f"想查询哪个指标？目前支持：{metric_options}。",
-            narrowing_options=list(_SUPPORTED_METRICS),
+            narrowing_options=list(supported),
         )
 
     assumed: AssumedSlots = {}
