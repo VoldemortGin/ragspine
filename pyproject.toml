@@ -1,7 +1,9 @@
 [project]
 name = "rag-spine"
 version = "0.1.0"
-description = "RAGSpine — 结构化数字通路 MVP（确定性事实抽取 + 参数化查询）"
+description = "Framework-free backend RAG: deterministic dual-channel retrieval + agent orchestration with built-in anti-fabrication and source provenance."
+readme = "README.md"
+license = "Apache-2.0"
 requires-python = ">=3.10"
 dependencies = [
     "python-pptx>=0.6.23",
@@ -19,6 +21,9 @@ dev = [
     "reportlab>=4.0",
     # 文档站构建（scripts/build_docs.py，md→HTML，BSD）。
     "markdown>=3.5",
+    # 可选 lint / type-check（scripts/lint.sh，目前为非阻塞信息性步骤）。
+    "ruff>=0.6",
+    "mypy>=1.11",
 ]
 # 二期 PDF 线的重依赖（数字型 PDF 表格解析），绿色实现阶段才安装。
 pdf = [
@@ -64,3 +69,13 @@ packages = ["ragspine"]
 markers = [
     "gpu: 需要 Ubuntu+NVIDIA GPU 与真实 OCR 模型，本地默认跳过",
 ]
+
+# Lint config exists so cleanup is incremental and consistent; the CI gate does NOT yet
+# block on ruff (the extracted codebase predates linting — see scripts/lint.sh).
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]
+ignore = ["E501"]  # long lines are abundant in the inherited code; don't gate on them yet

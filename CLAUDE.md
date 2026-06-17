@@ -18,12 +18,29 @@ ragspine/{common, extraction, ingestion, storage, retrieval, agent, eval, servic
 
 See the "Architecture" tree in `README.md` for what lives where and the request flow.
 
+## Docs map (find docs by folder, like code)
+
+Docs are a retrieval system, not a library — at scale no agent reads them whole.
+Full convention in `docs/README.md`. Short version:
+
+- **This file** — the always-on routing table. Keep it small; no content lives here.
+- `ragspine/<domain>/CLAUDE.md` — per-domain contract, auto-loaded in that subtree.
+- `ragspine/<domain>/docs/*.md` — deep dives, pulled by grep / explicit read.
+- `docs/` — cross-cutting: `architecture.md`, `invariants.md`, `glossary.md`, `adr/`.
+- `docs/generated/` — script-produced (API ref, indexes); git-ignored, never hand-edited.
+
+Docs describing code carry `covers:` + `verified-against:` frontmatter;
+`scripts/check_doc_drift.py` flags any whose code changed since last verified.
+
 ## Run (always from the project root)
 
 - **Setup:** `uv venv .venv` then `VIRTUAL_ENV="$(pwd)/.venv" uv pip install -e ".[dev,service]"`
   (the `VIRTUAL_ENV=` prefix is required so `uv` targets this venv, not a system Python).
   Extras: `[pdf]` `[ocr]` `[llm]` `[embed]`.
 - **Tests:** `.venv/bin/python -m pytest tests/ -q` → expect **943 passed, 1 gpu-skipped**.
+- **CI (local):** `scripts/ci.sh` is the gate (tests + demo smoke); enable the pre-push hook
+  once with `git config core.hooksPath .githooks`. GitHub Actions is dormant (manual-only) to
+  avoid consuming quota — see README "Continuous integration (local)".
 - **Demo:** `.venv/bin/python scripts/run_demo.py` → expect `ALL CHECKS PASSED`.
 - **Ask:** `.venv/bin/python scripts/ask.py --provider mock --db data/fact_metric.db "中国内地FY2024的REVENUE是多少"`.
 - **Service:** `scripts/run_server.py` (FastAPI) + `scripts/run_worker.py` (RQ, needs Redis).

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+#
+# Pre-push CI gate: run the local CI before allowing a push, so red code never leaves
+# your machine. This replaces server-side CI (no GitHub Actions minutes used).
+#
+# Enable once per clone:   git config core.hooksPath .githooks
+# Bypass in an emergency:  git push --no-verify
+#
+exec "$(git rev-parse --show-toplevel)/scripts/ci.sh"

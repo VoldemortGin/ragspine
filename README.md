@@ -213,6 +213,22 @@ adding a provider / vector store / reranker / OCR engine touches one new file.
 The project is **test-driven**: tests are the spec. The `gpu` marker gates real-OCR
 integration tests to a Linux + NVIDIA GPU box; everything else runs anywhere.
 
+## Continuous integration (local)
+
+CI runs **on your machine**, not on GitHub Actions. `scripts/ci.sh` is the gate (full test
+suite, gpu-excluded, + demo smoke), and a pre-push hook enforces it so red code never gets
+pushed:
+
+```bash
+scripts/ci.sh                        # run the gate manually
+git config core.hooksPath .githooks  # enable the pre-push gate (once per clone)
+```
+
+`.github/workflows/ci.yml` is included but **dormant** — manual-trigger only — so it consumes
+zero Actions minutes. Uncomment its `push:` / `pull_request:` triggers to enable server-side
+CI; it runs the exact same `scripts/ci.sh`. Lint / type-check (`scripts/lint.sh`, ruff + mypy)
+is opt-in and informational for now (the inherited code predates linting).
+
 ## Demo data
 
 The bundled demo uses a **fictional** company (ACME), synthetic figures, and a fictional

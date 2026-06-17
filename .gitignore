@@ -23,7 +23,15 @@ data/*
 .claude/settings.local.json
 .claude/*.local.json
 
+# Generated docs (API ref, symbol/dependency indexes) — script-produced, regenerable.
+# Ignore contents but keep the directory present, mirroring the data/ rule above.
+docs/generated/*
+!docs/generated/.gitkeep
+
 # OS / editor
 .DS_Store
 .idea/
 .vscode/
+
+# Local tooling artifacts (eval scratch output)
+.jbeval/
