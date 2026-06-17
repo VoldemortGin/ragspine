@@ -22,10 +22,17 @@ from ragspine.agent.query_tools import (
 )
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _ensure_synthetic():
+    """合成数据在本模块任何测试前生成一次。test_extractors_no_warnings 不经 store
+    fixture 却直读 data/synthetic/*，故不能只靠 store 触发生成——否则收集顺序一变
+    （如新增 tests/conformance 后）该用例可能先跑而 FileNotFoundError。"""
+    make_synthetic()
+
+
 @pytest.fixture(scope="module")
 def store(tmp_path_factory):
-    """生成合成数据、抽取入临时库，供整模块复用。"""
-    make_synthetic()
+    """抽取合成数据入临时库，供整模块复用（合成数据由 _ensure_synthetic 预生成）。"""
     db_path = tmp_path_factory.mktemp("db") / "fact_metric.db"
     fs = FactStore(db_path)
     fs.init_schema()
