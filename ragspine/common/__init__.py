@@ -1,10 +1,11 @@
-"""common —— 跨域基础原语：company profile、敏感度模型、glossary、可观测性。
+"""common —— 跨域基础原语：company profile、敏感度模型、glossary、可观测性、全局常量。
 
 身份/指标/竞品均由 CompanyProfile 配置驱动，绝不硬编码公司；trace 仅记录
 代码/计数/时序，从不记录答案、事实值或 chunk 文本。
 
 Submodules:
     company_profile.py — 所属公司（home company）身份的配置化载入。
+    core.py — 跨切面全局常量（数据根 + 各 sqlite 库默认路径）的单一出处。
     glossary.py — 维度同义词词典与归一化。
     observability.py — 可观测性原语：request_id 生成 + 结构化 trace 发射。
     sensitivity.py — 叙事入库的确定性敏感度分级策略与纯函数分级器。

@@ -11,7 +11,8 @@ Auto-loaded when working under `ragspine/common/`. Keep terse; deep dives go in
 
 ## What lives here
 
-Cross-cutting primitives: company profile, sensitivity model, glossary, observability.
+Cross-cutting primitives: company profile, sensitivity model, glossary, observability,
+global constants (`core` — data dir + default sqlite paths; single source of truth).
 
 ## Invariants
 

@@ -21,8 +21,7 @@ from scripts.make_synthetic_deck import (
 from ragspine.extraction.extractors import pptx_extractor, xlsx_extractor
 from ragspine.storage.fact_store import FactStore
 from ragspine.agent.query_tools import execute_query_metric
-
-DB_PATH = ROOT_DIR / "data" / "fact_metric.db"
+from ragspine.common.core import DEFAULT_FACT_DB
 
 
 def _ensure_synthetic() -> None:
@@ -32,9 +31,9 @@ def _ensure_synthetic() -> None:
 
 def _ingest() -> tuple[FactStore, int, list[str]]:
     """抽取两个源文件并入库（先删旧库）。返回 (store, 入库条数, warnings)。"""
-    if DB_PATH.exists():
-        DB_PATH.unlink()
-    store = FactStore(DB_PATH)
+    if DEFAULT_FACT_DB.exists():
+        DEFAULT_FACT_DB.unlink()
+    store = FactStore(DEFAULT_FACT_DB)
     store.init_schema()
 
     warnings: list[str] = []

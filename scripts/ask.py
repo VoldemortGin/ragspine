@@ -19,8 +19,7 @@ from ragspine.retrieval.vector.embedding_backends import make_embedding_backend
 from ragspine.storage.fact_store import FactStore
 from ragspine.agent.llm_provider import DEFAULT_ANTHROPIC_MODEL, AnthropicProvider, MockProvider
 from ragspine.retrieval.link.narrative_link import build_narrative_retriever
-
-DEFAULT_DB = ROOT_DIR / "data" / "fact_metric.db"
+from ragspine.common.core import DEFAULT_FACT_DB
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -30,7 +29,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--provider", choices=["mock", "anthropic"], default="mock",
         help="mock=离线确定性（默认）；anthropic=真实 Claude 调用",
     )
-    parser.add_argument("--db", default=str(DEFAULT_DB), help="fact_metric sqlite 路径")
+    parser.add_argument("--db", default=str(DEFAULT_FACT_DB), help="fact_metric sqlite 路径")
     parser.add_argument(
         "--chunk-db", default=None,
         help="叙事块库 sqlite 路径；提供时 narrative/composite 问题走真实检索"

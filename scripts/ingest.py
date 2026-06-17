@@ -28,26 +28,27 @@ from ragspine.storage.fact_store import FactStore
 from ragspine.ingestion.structured.ingestion import ingest_file
 from ragspine.ingestion.structured.ingestion_manifest import ManifestStore
 from ragspine.ingestion.review.review_queue import ReviewQueue
-
-DEFAULT_DB = ROOT_DIR / "data" / "fact_metric.db"
-DEFAULT_MAPPING_DB = ROOT_DIR / "data" / "color_mapping.db"
-DEFAULT_QUEUE_DB = ROOT_DIR / "data" / "review_queue.db"
+from ragspine.common.core import (
+    DEFAULT_FACT_DB,
+    DEFAULT_MAPPING_DB,
+    DEFAULT_REVIEW_QUEUE_DB,
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="RAGSpine 结构化入库（xlsx/pptx/pdf）")
     parser.add_argument("file", help="待入库的 xlsx/pptx/pdf 文件路径")
     parser.add_argument(
-        "--db", default=str(DEFAULT_DB),
-        help=f"fact_store sqlite 路径（默认 {DEFAULT_DB}，fact_metric 表）",
+        "--db", default=str(DEFAULT_FACT_DB),
+        help=f"fact_store sqlite 路径（默认 {DEFAULT_FACT_DB}，fact_metric 表）",
     )
     parser.add_argument(
         "--mapping-db", default=str(DEFAULT_MAPPING_DB),
         help=f"MappingRegistry sqlite 路径（默认 {DEFAULT_MAPPING_DB}，颜色映射注册表）",
     )
     parser.add_argument(
-        "--queue-db", default=str(DEFAULT_QUEUE_DB),
-        help=f"ReviewQueue sqlite 路径（默认 {DEFAULT_QUEUE_DB}，复核队列）",
+        "--queue-db", default=str(DEFAULT_REVIEW_QUEUE_DB),
+        help=f"ReviewQueue sqlite 路径（默认 {DEFAULT_REVIEW_QUEUE_DB}，复核队列）",
     )
     parser.add_argument(
         "--manifest-db", default=None,

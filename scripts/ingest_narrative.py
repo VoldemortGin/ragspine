@@ -20,16 +20,15 @@ ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpa
 
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
 from ragspine.ingestion.narrative.narrative_ingest import STATUS_FAILED, ingest_narrative
-
-DEFAULT_DB = ROOT_DIR / "data" / "fact_metric.db"
+from ragspine.common.core import DEFAULT_FACT_DB
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="RAGSpine 叙事语料批量入库")
     parser.add_argument("inputs", nargs="+", help="文件夹或 pptx/pdf 文件路径")
     parser.add_argument(
-        "--db", default=str(DEFAULT_DB),
-        help=f"块库 sqlite 路径（默认 {DEFAULT_DB}，narrative_chunk + narrative_doc 表）",
+        "--db", default=str(DEFAULT_FACT_DB),
+        help=f"块库 sqlite 路径（默认 {DEFAULT_FACT_DB}，narrative_chunk + narrative_doc 表）",
     )
     parser.add_argument(
         "--meta", default=None,
