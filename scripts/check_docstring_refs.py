@@ -25,6 +25,12 @@ What it flags (a reference that resolves to nothing in the current repo):
 It does NOT (yet) check backtick symbol references — prose mentions too many
 names that are not meant as live links; that would be a noisier opt-in mode.
 
+Second check: every package ``__init__.py`` must carry a ``Submodules:`` index
+that matches its directory's real members exactly (subpackages as ``name/``,
+modules as ``name.py``). A listed-but-absent member is dead; a real-but-unlisted
+member is incomplete. This keeps the per-level "what I do + what's below me"
+self-description from silently rotting as modules are added or moved.
+
 Usage (always from the repo root):
 
     .venv/bin/python scripts/check_docstring_refs.py          # report, exit 1 if any dead ref
@@ -100,6 +106,67 @@ def resolves(ref: str, root: Path) -> bool:
     return any((root / f'{candidate}{suffix}').exists() for suffix in ('', '.py', '.md'))
 
 
+def _actual_children(pkg_dir: Path) -> set[str]:
+    """Real package members — subpackages as 'name/', modules as 'name.py'
+    (excluding __init__.py, caches, dotfiles, and non-package dirs / docs)."""
+    out: set[str] = set()
+    for child in pkg_dir.iterdir():
+        if child.name in {'__init__.py', '__pycache__'} or child.name.startswith('.'):
+            continue
+        if child.is_dir() and (child / '__init__.py').exists():
+            out.add(f'{child.name}/')
+        elif child.is_file() and child.suffix == '.py':
+            out.add(child.name)
+    return out
+
+
+def _listed_submodules(docstring: str | None) -> set[str] | None:
+    """Tokens under a package docstring's 'Submodules:' section, or None if absent."""
+    if not docstring:
+        return None
+    lines = docstring.splitlines()
+    try:
+        start = next(i for i, ln in enumerate(lines) if ln.strip() == 'Submodules:')
+    except StopIteration:
+        return None
+    out: set[str] = set()
+    for ln in lines[start + 1:]:
+        if not ln.strip() or not ln.startswith((' ', '\t')):
+            break  # blank line or dedent ends the section
+        token = re.split(r'\s*[—–-]\s*', ln.strip(), maxsplit=1)[0].strip()
+        if token:
+            out.add(token)
+    return out
+
+
+def check_package_index(root: Path) -> int:
+    """Verify each package __init__.py's 'Submodules:' index matches its real
+    members exactly: listed-but-absent = dead, real-but-unlisted = incomplete.
+    Keeps the per-level "what I do + what's below me" self-description from
+    silently rotting when modules are added or moved. Returns the issue count."""
+    issues = 0
+    for init in sorted((root / SCAN_ROOT).glob('**/__init__.py')):
+        if '__pycache__' in init.parts:
+            continue
+        actual = _actual_children(init.parent)
+        if not actual:
+            continue  # leaf package with nothing to index
+        rel = init.relative_to(root).as_posix()
+        listed = _listed_submodules(
+            ast.get_docstring(ast.parse(init.read_text(encoding='utf-8'))))
+        if listed is None:
+            issues += 1
+            print(f'NO-INDEX  {rel}  (no "Submodules:" section)')
+            continue
+        for tok in sorted(listed - actual):
+            issues += 1
+            print(f'DEAD-SUB  {rel}  lists "{tok}" — not a real member')
+        for tok in sorted(actual - listed):
+            issues += 1
+            print(f'UNLISTED  {rel}  real member "{tok}" not in Submodules')
+    return issues
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--quiet', action='store_true', help='print only dead refs')
@@ -126,9 +193,11 @@ def main() -> int:
                         else 'path/doc does not exist'
                     print(f'DEAD  {rel}:{lineno + line_off}  {ref}  ({why})')
 
-    if not args.quiet or dead:
-        print(f'\n{scanned} files scanned · {dead} dead references')
-    return 1 if dead else 0
+    issues = check_package_index(root)
+    if not args.quiet or dead or issues:
+        print(f'\n{scanned} files scanned · {dead} dead references · '
+              f'{issues} package-index issues')
+    return 1 if (dead or issues) else 0
 
 
 if __name__ == '__main__':
