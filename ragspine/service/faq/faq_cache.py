@@ -141,8 +141,10 @@ class FAQCache:
             return None
         if intent.metrics or intent.entities or intent.periods:
             return None
-        lowered = question.casefold()
-        if any(cue in lowered for cue in _REALTIME_CUES):
+        # 实时线索扫描须与索引匹配同口径归一（NFKC + casefold + 空白折叠），否则
+        # 全角/兼容形实时词（如"ｃｕｒｒｅｎｔ"）会绕过本排除、把实时问句短路成陈旧答案。
+        normalized_q = _normalize(question)
+        if any(cue in normalized_q for cue in _REALTIME_CUES):
             return None
 
         # 2-3) 归一化精确匹配（question/alias）。
@@ -154,8 +156,9 @@ class FAQCache:
         if not item.enabled or not _within_validity(item, ref):
             return None
 
-        # 5) 敏感度门：v1 不短路 RESTRICTED。
-        if item.sensitivity == "RESTRICTED":
+        # 5) 敏感度门：v1 不短路 RESTRICTED。大小写无关 + 去首尾空白——手写 JSON 里
+        #    'restricted' / 'Restricted' / ' RESTRICTED ' 同样视为受限，绝不漏短路。
+        if item.sensitivity.strip().upper() == "RESTRICTED":
             return None
 
         # 6) 命中。

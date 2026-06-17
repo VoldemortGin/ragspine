@@ -153,6 +153,25 @@ def test_internal_sensitivity_default_hits():
     assert _cache(item).lookup("RAGSpine 是什么", reference_date=REF) is not None
 
 
+def test_exclude_restricted_sensitivity_is_case_insensitive():
+    """RESTRICTED 门必须大小写无关：小写 / 混合 / 带首尾空白的 'restricted' 同样
+    绝不得短路——否则一条手写 JSON 里 sensitivity='restricted' 的机密条目会泄露。"""
+    for sens in ("restricted", "Restricted", " RESTRICTED "):
+        item = FAQItem(
+            id="r", question="RAGSpine 是什么", answer="机密", sensitivity=sens
+        )
+        assert _cache(item).lookup("RAGSpine 是什么", reference_date=REF) is None, (
+            f"sensitivity={sens!r} 漏短路 RESTRICTED 内容"
+        )
+
+
+def test_exclude_realtime_cue_is_nfkc_symmetric():
+    """实时线索排除须与索引匹配同口径归一（NFKC）：全角实时词（'ｃｕｒｒｅｎｔ'）也要
+    排除——否则全角实时问句会绕过排除、被短路成陈旧缓存答案。"""
+    item = FAQItem(id="bad3", question="ｃｕｒｒｅｎｔ 产品愿景", answer="旧愿景")
+    assert _cache(item).lookup("ｃｕｒｒｅｎｔ 产品愿景", reference_date=REF) is None
+
+
 # --- 纯函数性：lookup 不触达 provider/store/retriever -------------------------
 
 def test_lookup_is_pure_no_side_channels(monkeypatch):
