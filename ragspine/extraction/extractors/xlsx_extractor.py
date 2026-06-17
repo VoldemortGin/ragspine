@@ -12,7 +12,6 @@ from pathlib import Path
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
-from ragspine.storage.fact_store import Fact
 from ragspine.common.glossary import (
     geography_for_entity,
     normalize_entity,
@@ -20,9 +19,10 @@ from ragspine.common.glossary import (
     normalize_period,
     unit_for_metric,
 )
+from ragspine.storage.fact_store import Fact
 
 
-def _coerce_number(value) -> float | None:
+def _coerce_number(value: object) -> float | None:
     """单元格值转数值；非数值返回 None。"""
     if value is None:
         return None

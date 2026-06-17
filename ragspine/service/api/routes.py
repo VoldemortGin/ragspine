@@ -4,6 +4,7 @@
 """
 
 from datetime import date
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
@@ -55,6 +56,12 @@ _NARRATIVE_SUFFIXES = (".pptx", ".pdf")
 
 router = APIRouter()
 
+# DI 别名（Annotated 形式，避免在参数默认值里直接调用 Depends）。
+ConfigDep = Annotated[ServiceConfig, Depends(get_config)]
+ProviderDep = Annotated[LLMProvider, Depends(get_provider)]
+FAQCacheDep = Annotated[FAQCache, Depends(get_faq_cache)]
+QueueDep = Annotated[TaskQueue, Depends(get_queue)]
+
 
 def _error_response(status_code: int, *, type_: str, message: str,
                     request_id: str | None = None) -> JSONResponse:
@@ -64,7 +71,7 @@ def _error_response(status_code: int, *, type_: str, message: str,
     return JSONResponse(status_code=status_code, content=payload.model_dump())
 
 
-def _tool_status_summary(tool_results: list[dict]) -> dict:
+def _tool_status_summary(tool_results: list[dict[str, Any]]) -> dict[str, int]:
     counts = {"found": 0, "not_found": 0, "unrecognized": 0}
     for r in tool_results:
         status = r.get("status")
@@ -77,7 +84,7 @@ def _tool_status_summary(tool_results: list[dict]) -> dict:
     return counts
 
 
-def _answer_kind(result: AgentResult, summary: dict) -> str:
+def _answer_kind(result: AgentResult, summary: dict[str, int]) -> str:
     clar = result.clarification
     if clar is not None and clar.mode == CLARIFY_ASK_FIRST:
         return "clarification"
@@ -113,14 +120,14 @@ def _ref_date(req_ref: str | None, config: ServiceConfig) -> date | None:
 # health
 # ---------------------------------------------------------------------------
 @router.get("/healthz")
-def healthz() -> dict:
+def healthz() -> dict[str, str]:
     return {"status": "ok"}
 
 
 @router.get("/readyz")
 def readyz(
-    config: ServiceConfig = Depends(get_config),
-    queue: TaskQueue = Depends(get_queue),
+    config: ConfigDep,
+    queue: QueueDep,
 ) -> JSONResponse:
     checks: dict[str, bool] = {}
 
@@ -151,10 +158,10 @@ def readyz(
 @router.post("/v1/ask", response_model=None)
 def ask(
     req: AskRequest,
-    config: ServiceConfig = Depends(get_config),
-    provider: LLMProvider = Depends(get_provider),
-    faq_cache: FAQCache = Depends(get_faq_cache),
-):
+    config: ConfigDep,
+    provider: ProviderDep,
+    faq_cache: FAQCacheDep,
+) -> AskResponse | JSONResponse:
     request_id = new_request_id()
     try:
         ref = _ref_date(req.reference_date, config)
@@ -201,7 +208,7 @@ def ask(
             route=result.route,
             answer_kind=answer_kind,
             clarification=_clarification_info(result),
-            sources=[SourceInfo(**s) for s in result.sources],
+            sources=[SourceInfo.model_validate(s) for s in result.sources],
             tool_status_summary=summary,
             cache=CacheInfo(hit=False),
         )
@@ -218,9 +225,9 @@ def ask(
 @router.post("/v1/ingest/structured/jobs", response_model=None)
 def submit_structured_job(
     req: IngestStructuredJobRequest,
-    config: ServiceConfig = Depends(get_config),
-    queue: TaskQueue = Depends(get_queue),
-):
+    config: ConfigDep,
+    queue: QueueDep,
+) -> JobSubmitResponse | JSONResponse:
     try:
         resolved = validate_ingest_path(
             req.file, config, suffixes=_STRUCTURED_SUFFIXES
@@ -246,9 +253,9 @@ def submit_structured_job(
 @router.post("/v1/ingest/narrative/jobs", response_model=None)
 def submit_narrative_job(
     req: IngestNarrativeJobRequest,
-    config: ServiceConfig = Depends(get_config),
-    queue: TaskQueue = Depends(get_queue),
-):
+    config: ConfigDep,
+    queue: QueueDep,
+) -> JobSubmitResponse | JSONResponse:
     raw_inputs = [req.inputs] if isinstance(req.inputs, str) else list(req.inputs)
     resolved_inputs: list[str] = []
     try:
@@ -274,8 +281,8 @@ def submit_narrative_job(
 @router.get("/v1/jobs/{job_id}", response_model=None)
 def get_job(
     job_id: str,
-    queue: TaskQueue = Depends(get_queue),
-):
+    queue: QueueDep,
+) -> JobStatusResponse | JSONResponse:
     st = queue.get(job_id)
     if st is None:
         return _error_response(404, type_="JobNotFound", message="job not found")

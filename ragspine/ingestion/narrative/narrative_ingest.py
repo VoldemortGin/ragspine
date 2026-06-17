@@ -23,17 +23,18 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
-from ragspine.retrieval.chunking.chunk_store import ChunkStore
-from ragspine.retrieval.chunking.chunking import DocumentMeta, chunk_document
 from ragspine.common.company_profile import load_company_profile
 from ragspine.common.glossary import normalize_period
+from ragspine.common.sensitivity import classify_sensitivity
+from ragspine.extraction.extractors.pptx_styled_extractor import compute_file_hash
 from ragspine.ingestion.narrative.narrative_extract import (
     SUPPORTED_SUFFIXES,
-    compute_file_hash,
     extract_narrative,
 )
-from ragspine.common.sensitivity import classify_sensitivity
+from ragspine.retrieval.chunking.chunk_store import ChunkStore
+from ragspine.retrieval.chunking.chunking import DocumentMeta, chunk_document
 
 # 模块级 home 公司 profile（沿用 glossary/intent/query_tools 的 env-aware 装载模式，
 # 测试可 monkeypatch 它演示运行期换部署）。敏感度分级器从 _PROFILE.sensitivity 取规则。
@@ -120,7 +121,7 @@ def ingest_narrative(
     inputs: str | Path | list[str | Path],
     store: ChunkStore,
     *,
-    meta_by_doc: dict[str, dict] | None = None,
+    meta_by_doc: dict[str, dict[str, Any]] | None = None,
     dry_run: bool = False,
 ) -> NarrativeIngestReport:
     """批量叙事入库编排，返回逐文件汇总报告。
@@ -165,7 +166,7 @@ def _ingest_one(
     path: Path,
     store: ChunkStore,
     registry: sqlite3.Connection,
-    meta_by_doc: dict[str, dict],
+    meta_by_doc: dict[str, dict[str, Any]],
     dry_run: bool,
 ) -> FileReport:
     """单文件：hash 比对 -> 抽取 -> 切块 -> 写入；任何异常落进 failed 报告。"""

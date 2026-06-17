@@ -18,6 +18,11 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
+
+from ragspine.extraction.color.color_semantics import MappingRegistry
+from ragspine.ingestion.review.review_queue import ReviewQueue
+from ragspine.storage.fact_store import FactStore
 
 # 批次状态机取值
 BATCH_RUNNING = "running"
@@ -51,12 +56,12 @@ class ManifestRecord:
     started_at: str | None = None
     finished_at: str | None = None
     status: str = BATCH_RUNNING
-    inputs: list[dict] = field(default_factory=list)
+    inputs: list[dict[str, str | None]] = field(default_factory=list)
     n_facts: int = 0
     n_warnings: int = 0
     n_failed: int = 0
     duration_s: float | None = None
-    failures: list = field(default_factory=list)
+    failures: list[dict[str, str | None]] = field(default_factory=list)
 
 
 class ManifestStore:
@@ -192,8 +197,8 @@ class ManifestStore:
             "SELECT * FROM manifest_input WHERE batch_id = ? ORDER BY seq ASC",
             (batch_row["batch_id"],),
         ).fetchall()
-        inputs: list[dict] = []
-        failures: list[dict] = []
+        inputs: list[dict[str, str | None]] = []
+        failures: list[dict[str, str | None]] = []
         n_facts = 0
         n_warnings = 0
         n_failed = 0
@@ -220,7 +225,9 @@ class ManifestStore:
         )
 
 
-def compute_metrics(manifest_store, queue, store) -> dict:
+def compute_metrics(
+    manifest_store: ManifestStore, queue: ReviewQueue, store: FactStore
+) -> dict[str, Any]:
     """汇总关键可观测指标（user story #31）。
 
     跨 manifest / 复核队列 / 事实表计算并返回 dict，至少包含：
@@ -265,7 +272,7 @@ def compute_metrics(manifest_store, queue, store) -> dict:
     }
 
 
-def list_versions(store, registry) -> dict:
+def list_versions(store: FactStore, registry: MappingRegistry) -> dict[str, Any]:
     """生产配置版本清单（user story #33）。
 
     返回 dict，至少包含：

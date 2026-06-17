@@ -6,14 +6,14 @@
 命中→返回确定值 + 血缘；未命中→明确 not_found，绝不编造。
 """
 
-from ragspine.common.company_profile import load_company_profile
-from ragspine.storage.fact_store import FactStore
+from ragspine.common.company_profile import DomainProfile, load_company_profile
 from ragspine.common.glossary import (
     geography_for_entity,
     normalize_entity,
     normalize_metric,
     normalize_period,
 )
+from ragspine.storage.fact_store import FactStore
 
 # home 公司 profile（tool schema 里的实体示例由此派生，不硬编码 "ACME"）。
 _PROFILE = load_company_profile()
@@ -22,7 +22,7 @@ _TOOL_NAME = "query_metric"
 _REQUIRED = ["metric", "entity", "period"]
 
 
-def _entity_examples(profile) -> str:
+def _entity_examples(profile: DomainProfile) -> str:
     """从 profile 派生 entity 示例串：展示名 + 本地语言同义词（去掉受控代码本身）。
 
     顺序稳定（labels 插入序的展示名在前，再补 synonyms 插入序的非代码别名），
@@ -40,7 +40,7 @@ def _entity_examples(profile) -> str:
     return "、".join(examples)
 
 
-def _tool_description(profile) -> str:
+def _tool_description(profile: DomainProfile) -> str:
     return (
         "查询单个财务/经营指标的确定值，返回数值、单位与数据血缘（源文件+定位）。"
         "参数接受同义词与中文：metric 如 'REVENUE'/'营收'/'NEWSALES'/'新签金额'/'PROFIT'/'ROE'；"
@@ -49,7 +49,7 @@ def _tool_description(profile) -> str:
     )
 
 
-def _properties(profile) -> dict:
+def _properties(profile: DomainProfile) -> dict[str, dict[str, str]]:
     return {
         "metric": {
             "type": "string",
@@ -70,7 +70,9 @@ def _properties(profile) -> dict:
     }
 
 
-def build_query_metric_tool_anthropic(profile=None) -> dict:
+def build_query_metric_tool_anthropic(
+    profile: DomainProfile | None = None,
+) -> dict[str, object]:
     """按当前（或指定）profile 动态构造 Anthropic 格式 tool schema。
 
     实体示例随 profile 切换——换公司后 description 不再说硬编码的 ACME 实体名。
@@ -88,7 +90,9 @@ def build_query_metric_tool_anthropic(profile=None) -> dict:
     }
 
 
-def build_query_metric_tool_openai(profile=None) -> dict:
+def build_query_metric_tool_openai(
+    profile: DomainProfile | None = None,
+) -> dict[str, object]:
     """按当前（或指定）profile 动态构造 OpenAI 格式 tool schema。"""
     prof = profile if profile is not None else _PROFILE
     return {
@@ -116,7 +120,7 @@ def execute_query_metric(
     entity: str,
     period: str,
     channel: str = "TOTAL",
-) -> dict:
+) -> dict[str, object]:
     """确定性执行 query_metric。
 
     参数无法归一 -> {"status":"unrecognized_param","param":...,"raw":...}

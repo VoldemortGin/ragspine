@@ -11,6 +11,7 @@
 """
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import pypdfium2 as pdfium
 import pypdfium2.raw as pdfium_raw
@@ -89,7 +90,7 @@ class RoutingDecision:
     error: str | None = None
 
 
-def classify_page(page, page_no: int = 1) -> PageInfo:
+def classify_page(page: pdfium.PdfPage, page_no: int = 1) -> PageInfo:
     """对单页（pypdfium2 PdfPage）做逐页分类，返回 PageInfo。
 
     信号与判定规则沿用 scripts/classify_pdfs.py：
@@ -136,7 +137,7 @@ def classify_page(page, page_no: int = 1) -> PageInfo:
     )
 
 
-def route(path) -> RoutingDecision:
+def route(path: str | Path) -> RoutingDecision:
     """对一个 PDF 文件分诊并生成逐页路由计划，返回 RoutingDecision。
 
     行为约定：

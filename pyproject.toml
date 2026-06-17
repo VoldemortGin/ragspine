@@ -82,3 +82,20 @@ target-version = "py310"
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP", "B"]
 ignore = ["E501"]  # long lines are abundant in the inherited code; don't gate on them yet
+
+# Strict static typing on the library (ADR 0004 quality bar: "no warnings = qualified").
+# Gate: `mypy ragspine` (ci.sh). tests/ + scripts/ are intentionally out of scope.
+[tool.mypy]
+python_version = "3.10"
+files = ["ragspine"]
+strict = true
+
+# Third-party packages without type stubs — ignore their missing imports rather than
+# vendoring stubs (most are lazy-imported optional extras).
+[[tool.mypy.overrides]]
+module = [
+    "anthropic.*", "openai.*", "openpyxl.*", "paddleocr.*", "pypdfium2.*",
+    "sentence_transformers.*", "tomli", "docling.*", "rq.*", "redis.*",
+    "pptx.*", "markdown.*", "reportlab.*", "rootutils.*",
+]
+ignore_missing_imports = true

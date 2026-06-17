@@ -14,9 +14,11 @@ import hashlib
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
+from openpyxl.cell.cell import Cell
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.cell import range_boundaries
+from openpyxl.worksheet.worksheet import Worksheet
 
 from ragspine.extraction.ir import StyledCell, StyledGrid
 
@@ -57,12 +59,10 @@ def resolve_theme_color(theme_index: int, tint: float, theme_rgbs: list[str]) ->
     else:
         lum = lum * (1.0 - tint) + tint
     r2, g2, b2 = colorsys.hls_to_rgb(h, lum, s)
-    return "{:02X}{:02X}{:02X}".format(
-        round(r2 * 255), round(g2 * 255), round(b2 * 255)
-    )
+    return f"{round(r2 * 255):02X}{round(g2 * 255):02X}{round(b2 * 255):02X}"
 
 
-def _parse_theme_rgbs(wb) -> list[str]:
+def _parse_theme_rgbs(wb: Workbook) -> list[str]:
     """从 workbook 主题 XML 解析有序基色表（与单元格 theme index 对齐）。"""
     rgbs = ["FFFFFF"] * len(_THEME_SLOTS)
     raw = getattr(wb, "loaded_theme", None)
@@ -77,12 +77,12 @@ def _parse_theme_rgbs(wb) -> list[str]:
         if node is None:
             continue
         srgb = node.find(f"{_A_NS}srgbClr")
-        if srgb is not None and srgb.get("val"):
-            rgbs[idx] = srgb.get("val").upper()
+        if srgb is not None and (val := srgb.get("val")):
+            rgbs[idx] = val.upper()
             continue
         sys_clr = node.find(f"{_A_NS}sysClr")
-        if sys_clr is not None and sys_clr.get("lastClr"):
-            rgbs[idx] = sys_clr.get("lastClr").upper()
+        if sys_clr is not None and (last_clr := sys_clr.get("lastClr")):
+            rgbs[idx] = last_clr.upper()
     return rgbs
 
 
@@ -94,7 +94,7 @@ def _normalize_rgb(argb: str) -> str:
     return argb
 
 
-def _resolve_fill_rgb(cell, theme_rgbs: list[str]) -> str | None:
+def _resolve_fill_rgb(cell: Cell, theme_rgbs: list[str]) -> str | None:
     """解析单元格填充色为真实 'RRGGBB'；无填充返回 None。"""
     fill = cell.fill
     if fill is None or fill.patternType != "solid":
@@ -116,7 +116,9 @@ def _resolve_fill_rgb(cell, theme_rgbs: list[str]) -> str | None:
     return None
 
 
-def _build_grid(ws, doc_id: str, file_hash: str, theme_rgbs: list[str]) -> StyledGrid:
+def _build_grid(
+    ws: Worksheet, doc_id: str, file_hash: str, theme_rgbs: list[str]
+) -> StyledGrid:
     grid = StyledGrid(
         sheet=ws.title,
         source_doc_id=doc_id,

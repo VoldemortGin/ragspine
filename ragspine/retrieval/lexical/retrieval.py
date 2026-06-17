@@ -18,9 +18,11 @@ rank-bm25 等新依赖。分词处理中英混排：ASCII 连续串按词、CJK 
 import math
 import re
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Protocol, Sequence, runtime_checkable
+from typing import Protocol, runtime_checkable
 
+from ragspine.common.glossary import ENTITY_SYNONYMS, METRIC_SYNONYMS
 from ragspine.retrieval.chunking.chunk_store import ChunkStore, StoredChunk
 from ragspine.retrieval.chunking.chunking import (
     DEFAULT_CHUNK_CHARS,
@@ -29,7 +31,6 @@ from ragspine.retrieval.chunking.chunking import (
     DocumentMeta,
     chunk_document,
 )
-from ragspine.common.glossary import ENTITY_SYNONYMS, METRIC_SYNONYMS
 from ragspine.retrieval.rerank.listwise_rerank import DEFAULT_TOP_N, ListwiseJudge, listwise_rerank
 
 DEFAULT_TOP_K = 50      # 拍板召回深度（docs/architecture.md）。
@@ -102,7 +103,7 @@ def bm25_scores(
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
     """余弦相似度；零向量一律 0.0。"""
-    dot = sum(x * y for x, y in zip(a, b))
+    dot = sum(x * y for x, y in zip(a, b, strict=False))
     norm_a = math.sqrt(sum(x * x for x in a))
     norm_b = math.sqrt(sum(y * y for y in b))
     if norm_a == 0.0 or norm_b == 0.0:
@@ -259,7 +260,7 @@ class HybridRetriever:
             missing = [c for c in candidates if c.chunk_id not in self._embedding_cache]
             if missing:
                 vectors = self.embedding_backend.embed_texts([c.text for c in missing])
-                for c, vec in zip(missing, vectors):
+                for c, vec in zip(missing, vectors, strict=False):
                     self._embedding_cache[c.chunk_id] = vec
             chunk_vectors = [self._embedding_cache[c.chunk_id] for c in candidates]
 
@@ -269,7 +270,7 @@ class HybridRetriever:
         for q in queries:
             scores = bm25_scores(tokenize(q), docs_tokens, self.k1, self.b)
             hit = sorted(
-                ((s, c.chunk_id) for s, c in zip(scores, candidates) if s > 0.0),
+                ((s, c.chunk_id) for s, c in zip(scores, candidates, strict=False) if s > 0.0),
                 key=lambda pair: (-pair[0], pair[1]),
             )
             rankings.append([cid for _, cid in hit])
@@ -277,14 +278,15 @@ class HybridRetriever:
                 best_bm25[cid] = max(best_bm25.get(cid, 0.0), s)
 
             if chunk_vectors is not None:
+                assert self.embedding_backend is not None  # chunk_vectors 非空即此处已注入后端
                 query_vec = self.embedding_backend.embed_texts([q])[0]
                 sims = [cosine_similarity(query_vec, vec) for vec in chunk_vectors]
                 ranked = sorted(
-                    zip(sims, (c.chunk_id for c in candidates)),
+                    zip(sims, (c.chunk_id for c in candidates), strict=False),
                     key=lambda pair: (-pair[0], pair[1]),
                 )
                 rankings.append([cid for _, cid in ranked])
-                for s, c in zip(sims, candidates):
+                for s, c in zip(sims, candidates, strict=False):
                     best_vector[c.chunk_id] = max(best_vector.get(c.chunk_id, 0.0), s)
 
         # 4) RRF 融合 -> top_k（确定性平分破除）。

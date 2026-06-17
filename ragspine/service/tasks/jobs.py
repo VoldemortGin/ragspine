@@ -11,6 +11,7 @@
 """
 
 from pathlib import Path
+from typing import Any, cast
 
 from ragspine.extraction.color.color_semantics import MappingRegistry
 from ragspine.ingestion.narrative.narrative_ingest import (
@@ -40,7 +41,7 @@ def _ensure_parent(path: str) -> None:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
 
 
-def ingest_report_to_dict(report: IngestReport) -> dict:
+def ingest_report_to_dict(report: IngestReport) -> dict[str, Any]:
     """IngestReport -> 纯 JSON dict（只含计数 / 状态 / 告警，无原始事实数值）。"""
     return {
         "source_path": report.source_path,
@@ -58,7 +59,7 @@ def ingest_report_to_dict(report: IngestReport) -> dict:
     }
 
 
-def narrative_report_to_dict(report: NarrativeIngestReport) -> dict:
+def narrative_report_to_dict(report: NarrativeIngestReport) -> dict[str, Any]:
     """NarrativeIngestReport -> 纯 JSON dict（逐文件状态，无 chunk 正文）。"""
     return {
         "dry_run": report.dry_run,
@@ -79,7 +80,7 @@ def narrative_report_to_dict(report: NarrativeIngestReport) -> dict:
     }
 
 
-def run_structured_ingest_job(payload: dict) -> dict:
+def run_structured_ingest_job(payload: dict[str, Any]) -> dict[str, Any]:
     """结构化 ingestion worker job：自开自闭 store，返回 JSON report。"""
     config = ServiceConfig(
         db_path=payload["db_path"],
@@ -128,7 +129,8 @@ def run_structured_ingest_job(payload: dict) -> dict:
         )
         if manifest is not None:
             status = "failed" if report.status == "failed" else "done"
-            manifest.close_batch(batch_id, status=status)
+            # batch_id was reassigned by manifest.open_batch (-> str) in the same guard.
+            manifest.close_batch(cast(str, batch_id), status=status)
         return ingest_report_to_dict(report)
     finally:
         store.close()
@@ -138,7 +140,7 @@ def run_structured_ingest_job(payload: dict) -> dict:
             manifest.close()
 
 
-def run_narrative_ingest_job(payload: dict) -> dict:
+def run_narrative_ingest_job(payload: dict[str, Any]) -> dict[str, Any]:
     """叙事 ingestion worker job：自开自闭 ChunkStore，返回 JSON report。"""
     inputs = payload["inputs"]
     allowed_upload_root = payload.get("allowed_upload_root")

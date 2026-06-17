@@ -13,8 +13,10 @@
 from pathlib import Path
 
 from pptx import Presentation
+from pptx.chart.chart import Chart
+from pptx.slide import Slide
+from pptx.table import Table
 
-from ragspine.storage.fact_store import Fact
 from ragspine.common.glossary import (
     geography_for_entity,
     normalize_entity,
@@ -22,17 +24,19 @@ from ragspine.common.glossary import (
     normalize_period,
     unit_for_metric,
 )
+from ragspine.storage.fact_store import Fact
 
 
-def _slide_title(slide) -> str | None:
+def _slide_title(slide: Slide) -> str | None:
     """取 slide 标题占位符文本；没有则退回首个有文字的文本框。"""
     if slide.shapes.title is not None and slide.shapes.title.has_text_frame:
-        text = slide.shapes.title.text_frame.text.strip()
+        text = str(slide.shapes.title.text_frame.text.strip())
         if text:
             return text
     for shape in slide.shapes:
-        if shape.has_text_frame and shape.text_frame.text.strip():
-            return shape.text_frame.text.strip()
+        # pptx 静态类型在 BaseShape 上未暴露 text_frame，由 has_text_frame 守卫。
+        if shape.has_text_frame and shape.text_frame.text.strip():  # type: ignore[attr-defined]
+            return str(shape.text_frame.text.strip())  # type: ignore[attr-defined]
     return None
 
 
@@ -49,7 +53,15 @@ def _coerce_number(raw: str) -> float | None:
         return None
 
 
-def _extract_table(table, slide_idx, table_idx, entity, geography, doc_id, warnings):
+def _extract_table(
+    table: Table,
+    slide_idx: int,
+    table_idx: int,
+    entity: str,
+    geography: str,
+    doc_id: str,
+    warnings: list[str],
+) -> list[Fact]:
     facts: list[Fact] = []
     rows = list(table.rows)
     if not rows:
@@ -107,7 +119,15 @@ def _extract_table(table, slide_idx, table_idx, entity, geography, doc_id, warni
     return facts
 
 
-def _extract_chart(chart, slide_idx, chart_idx, entity, geography, doc_id, warnings):
+def _extract_chart(
+    chart: Chart,
+    slide_idx: int,
+    chart_idx: int,
+    entity: str,
+    geography: str,
+    doc_id: str,
+    warnings: list[str],
+) -> list[Fact]:
     facts: list[Fact] = []
     plot = chart.plots[0] if chart.plots else None
     if plot is None:
@@ -130,7 +150,9 @@ def _extract_chart(chart, slide_idx, chart_idx, entity, geography, doc_id, warni
             )
             continue
         unit = unit_for_metric(metric_code) or "USD_M"
-        for cat_raw, parsed, value in zip(categories, parsed_cats, series.values):
+        for cat_raw, parsed, value in zip(
+            categories, parsed_cats, series.values, strict=False
+        ):
             if parsed is None or value is None:
                 continue
             period_type, period = parsed

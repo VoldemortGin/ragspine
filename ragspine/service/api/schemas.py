@@ -4,6 +4,8 @@
 route 层计算后填入。
 """
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -42,7 +44,7 @@ class AskResponse(BaseModel):
     answer_kind: str
     clarification: ClarificationInfo | None = None
     sources: list[SourceInfo] = Field(default_factory=list)
-    tool_status_summary: dict = Field(default_factory=dict)
+    tool_status_summary: dict[str, Any] = Field(default_factory=dict)
     cache: CacheInfo = Field(default_factory=CacheInfo)
 
 
@@ -57,7 +59,7 @@ class IngestStructuredJobRequest(BaseModel):
 class IngestNarrativeJobRequest(BaseModel):
     inputs: list[str] | str
     dry_run: bool = False
-    meta_by_doc: dict | None = None
+    meta_by_doc: dict[str, Any] | None = None
     job_id: str | None = None
 
 
@@ -68,9 +70,9 @@ class JobSubmitResponse(BaseModel):
 class JobStatusResponse(BaseModel):
     id: str
     status: str
-    result: dict | None = None
-    error: dict | None = None
+    result: dict[str, Any] | None = None
+    error: dict[str, Any] | None = None
 
 
 class ErrorResponse(BaseModel):
-    error: dict  # {type, message, request_id}
+    error: dict[str, Any]  # {type, message, request_id}

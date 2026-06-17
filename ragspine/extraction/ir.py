@@ -7,8 +7,8 @@
 实现已完成，dataclass 字段契约保持冻结，行为契约见 tests/extraction/test_ir.py。
 """
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Iterator
 
 
 @dataclass

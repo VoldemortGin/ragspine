@@ -23,7 +23,7 @@ def new_request_id() -> str:
     return uuid.uuid4().hex[:12]
 
 
-def emit_trace(logger: logging.Logger | None = None, **fields) -> None:
+def emit_trace(logger: logging.Logger | None = None, **fields: object) -> None:
     """以结构化方式记一条 INFO trace：字段经 extra 挂到 LogRecord 属性上。
 
     message 固定为 "trace"（不含任何敏感内容）；调用方只应传入非敏感元数据。

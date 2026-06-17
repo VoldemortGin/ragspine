@@ -13,11 +13,8 @@ import json
 import time
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Protocol
+from typing import Protocol, cast
 
-from ragspine.common.company_profile import load_company_profile
-from ragspine.storage.fact_store import FactStore
-from ragspine.common.glossary import normalize_period, resolve_relative_period
 from ragspine.agent.intent import (
     CLARIFY_ANSWER_WITH_ASSUMPTIONS,
     CLARIFY_ASK_FIRST,
@@ -38,8 +35,11 @@ from ragspine.agent.llm_provider import (
     ProviderError,
     ProviderResponse,
 )
-from ragspine.common.observability import emit_trace, new_request_id
 from ragspine.agent.query_tools import build_query_metric_tool_anthropic, execute_query_metric
+from ragspine.common.company_profile import load_company_profile
+from ragspine.common.glossary import normalize_period, resolve_relative_period
+from ragspine.common.observability import emit_trace, new_request_id
+from ragspine.storage.fact_store import FactStore
 
 MAX_TOOL_ITERATIONS = 5
 
@@ -67,8 +67,8 @@ class NarrativeRetriever(Protocol):
     """叙事检索协议（duck-typed）：另一条线的实现按此签名注入。"""
 
     def retrieve(
-        self, query: str, *, filters: dict | None = None, top_k: int = 50
-    ) -> list[dict]: ...
+        self, query: str, *, filters: dict[str, object] | None = None, top_k: int = 50
+    ) -> list[dict[str, object]]: ...
 
 
 @dataclass
@@ -78,8 +78,8 @@ class AgentResult:
     answer: str
     route: str
     clarification: ClarificationResult | None = None
-    tool_results: list[dict] = field(default_factory=list)
-    sources: list[dict] = field(default_factory=list)
+    tool_results: list[dict[str, object]] = field(default_factory=list)
+    sources: list[dict[str, object]] = field(default_factory=list)
 
 
 @dataclass
@@ -91,10 +91,12 @@ class _TraceCtx:
     input_tokens: int = 0
     output_tokens: int = 0
     has_usage: bool = False
-    chunk_ids: list = field(default_factory=list)
-    chunk_scores: list = field(default_factory=list)
+    chunk_ids: list[object] = field(default_factory=list)
+    chunk_scores: list[object] = field(default_factory=list)
 
-    def record_provider(self, seconds: float, usage: dict | None) -> None:
+    def record_provider(
+        self, seconds: float, usage: dict[str, int | None] | None
+    ) -> None:
         self.provider_seconds += seconds
         if usage:
             self.has_usage = True
@@ -110,9 +112,11 @@ def _system_prompt(reference_date: date) -> str:
     )
 
 
-def _execute_tool(store: FactStore, tool_input: dict, reference_date: date) -> dict:
+def _execute_tool(
+    store: FactStore, tool_input: dict[str, object], reference_date: date
+) -> dict[str, object]:
     """执行 query_metric：period 先试绝对归一，失败再按 reference_date 解析相对期间。"""
-    period = tool_input.get("period", "")
+    period = str(tool_input.get("period", ""))
     if normalize_period(period) is None:
         resolved = resolve_relative_period(period, reference_date)
         if resolved is not None:
@@ -120,10 +124,10 @@ def _execute_tool(store: FactStore, tool_input: dict, reference_date: date) -> d
             period = f"FY{value}" if period_type == "FY" else value
     return execute_query_metric(
         store,
-        metric=tool_input.get("metric", ""),
-        entity=tool_input.get("entity", ""),
+        metric=str(tool_input.get("metric", "")),
+        entity=str(tool_input.get("entity", "")),
         period=period,
-        channel=tool_input.get("channel") or "TOTAL",
+        channel=str(tool_input.get("channel") or "TOTAL"),
     )
 
 
@@ -133,7 +137,7 @@ def _run_tool_loop(
     provider: LLMProvider,
     reference_date: date,
     ctx: _TraceCtx,
-) -> tuple[str, list[dict]]:
+) -> tuple[str, list[dict[str, object]]]:
     """标准 tool use 循环：user → (tool_use → tool_result)* → 最终文本。
 
     provider 网络/API 失败（ProviderError）→ 诚实降级：返回固定降级文案、空结果，
@@ -141,8 +145,8 @@ def _run_tool_loop(
     """
     system = _system_prompt(reference_date)
     tools = [build_query_metric_tool_anthropic()]
-    messages: list[dict] = [{"role": "user", "content": question}]
-    tool_results: list[dict] = []
+    messages: list[dict[str, object]] = [{"role": "user", "content": question}]
+    tool_results: list[dict[str, object]] = []
 
     resp: ProviderResponse | None = None
     for _ in range(MAX_TOOL_ITERATIONS):
@@ -173,8 +177,9 @@ def _run_tool_loop(
     return (resp.text if resp else ""), tool_results
 
 
-def _not_found_answer(result: dict) -> str:
-    norm = result.get("normalized", {})
+def _not_found_answer(result: dict[str, object]) -> str:
+    raw_norm = result.get("normalized", {})
+    norm = raw_norm if isinstance(raw_norm, dict) else {}
     return (
         f"查不到：{norm.get('metric_code')} / {norm.get('entity')} / "
         f"{norm.get('period')}（渠道 {norm.get('channel')}）未在事实表中找到。"
@@ -182,22 +187,31 @@ def _not_found_answer(result: dict) -> str:
     )
 
 
-def _unrecognized_answer(result: dict) -> str:
+def _unrecognized_answer(result: dict[str, object]) -> str:
     return (
         f"无法识别参数 {result.get('param')}：'{result.get('raw')}'。"
         "请确认指标/实体/期间的说法后重试。"
     )
 
 
-def _structured_answer(model_text: str, tool_results: list[dict]) -> tuple[str, list[dict]]:
+def _source_of(result: dict[str, object]) -> dict[str, object]:
+    """取 found 结果的 source 子字典（缺失则 KeyError，与既有索引语义一致）。"""
+    source = result["source"]
+    return source if isinstance(source, dict) else {}
+
+
+def _structured_answer(
+    model_text: str, tool_results: list[dict[str, object]]
+) -> tuple[str, list[dict[str, object]]]:
     """结构化回答的硬约束后处理：防编造 + 血缘补全。返回 (answer, sources)。"""
     found = [r for r in tool_results if r.get("status") == "found"]
     if found:
-        sources = [r["source"] for r in found]
+        sources = [_source_of(r) for r in found]
         answer = model_text or ""
         for r in found:
-            doc = r["source"].get("doc", "")
-            locator = r["source"].get("locator", "")
+            source = _source_of(r)
+            doc = str(source.get("doc", ""))
+            locator = str(source.get("locator", ""))
             # valid_as_of 存在时附「截至」业务时点；为 None 时文案字节级不变。
             valid_as_of = r.get("valid_as_of")
             asof = f" · 截至 {valid_as_of}" if valid_as_of else ""
@@ -232,7 +246,7 @@ def _period_label(period_type: str, period: str) -> str:
 
 def _run_subtasks(
     subtasks: list[SubTask], store: FactStore
-) -> list[dict]:
+) -> list[dict[str, object]]:
     """确定性执行多个 query_metric 子任务（不经 LLM，参数已是受控代码）。"""
     return [
         execute_query_metric(
@@ -246,30 +260,35 @@ def _run_subtasks(
     ]
 
 
-def _multi_subtask_answer(tool_results: list[dict]) -> tuple[str, list[dict]]:
+def _multi_subtask_answer(
+    tool_results: list[dict[str, object]],
+) -> tuple[str, list[dict[str, object]]]:
     """多子任务对比式合成（确定性）：逐项列数+血缘；not_found 子项明确说查不到，
     绝不编造，也不拖垮其他子项。返回 (answer, sources)。"""
     lines: list[str] = []
-    sources: list[dict] = []
-    found: list[dict] = []
+    sources: list[dict[str, object]] = []
+    found: list[dict[str, object]] = []
     for r in tool_results:
         if r.get("status") == "found":
             found.append(r)
-            sources.append(r["source"])
+            source = _source_of(r)
+            sources.append(source)
             label = (
-                f"{r['entity']} {_period_label(r['period_type'], r['period'])} "
+                f"{r['entity']} "
+                f"{_period_label(str(r['period_type']), str(r['period']))} "
                 f"{r['metric_code']}"
             )
             if r.get("channel") and r["channel"] != "TOTAL":
                 label += f"（渠道 {r['channel']}）"
             lines.append(
                 f"- {label}：{r['value']:g} {r['unit']}"
-                f"（来源：{r['source'].get('doc')} · {r['source'].get('locator')}）"
+                f"（来源：{source.get('doc')} · {source.get('locator')}）"
             )
         elif r.get("status") == "not_found":
-            norm = r.get("normalized", {})
+            raw_norm = r.get("normalized", {})
+            norm = raw_norm if isinstance(raw_norm, dict) else {}
             lines.append(
-                f"- {norm.get('entity')} {_period_label(norm.get('period_type', ''), norm.get('period', ''))} "
+                f"- {norm.get('entity')} {_period_label(str(norm.get('period_type', '')), str(norm.get('period', '')))} "
                 f"{norm.get('metric_code')}：查不到（未在事实表中找到，不提供推测数字）"
             )
         else:  # unrecognized_param 或未知状态
@@ -286,23 +305,25 @@ def _multi_subtask_answer(tool_results: list[dict]) -> tuple[str, list[dict]]:
             a[k] == b[k] for k in ("metric_code", "entity", "channel", "unit")
         )
         if same_scope and (a["period_type"], a["period"]) != (b["period_type"], b["period"]):
-            diff = b["value"] - a["value"]
+            a_value = cast(float, a["value"])
+            b_value = cast(float, b["value"])
+            diff = b_value - a_value
             delta = (
-                f"对比：{_period_label(b['period_type'], b['period'])} 较 "
-                f"{_period_label(a['period_type'], a['period'])} {diff:+g} {a['unit']}"
+                f"对比：{_period_label(str(b['period_type']), str(b['period']))} 较 "
+                f"{_period_label(str(a['period_type']), str(a['period']))} {diff:+g} {a['unit']}"
             )
-            if a["value"]:
-                delta += f"（{diff / a['value'] * 100:+.1f}%）"
+            if a_value:
+                delta += f"（{diff / a_value * 100:+.1f}%）"
             answer = f"{answer}\n{delta}"
 
     return answer, sources
 
 
-def _snippet_text(snippet: dict) -> str:
-    return snippet.get("text") or snippet.get("content") or ""
+def _snippet_text(snippet: dict[str, object]) -> str:
+    return str(snippet.get("text") or snippet.get("content") or "")
 
 
-def _snippet_source(snippet: dict) -> dict:
+def _snippet_source(snippet: dict[str, object]) -> dict[str, object]:
     doc = (
         snippet.get("doc_id") or snippet.get("source_doc_id")
         or snippet.get("doc") or ""
@@ -317,7 +338,7 @@ def _run_narrative(
     retriever: NarrativeRetriever | None,
     intent: ParsedIntent,
     ctx: _TraceCtx,
-) -> tuple[str, list[dict]]:
+) -> tuple[str, list[dict[str, object]]]:
     """叙事通路：检索 → 合成 → 附来源。检索未接入/无结果时坦白降级；
 
     provider 失败（ProviderError）→ 诚实降级文案，不崩、不编造；其他异常照常抛出。
@@ -328,7 +349,7 @@ def _run_narrative(
             "数字类问题可直接提问。", [],
         )
 
-    filters: dict = {}
+    filters: dict[str, object] = {}
     if intent.entity:
         filters["entity"] = intent.entity
     if intent.period:
@@ -344,7 +365,7 @@ def _run_narrative(
     sources = [_snippet_source(s) for s in snippets]
     body = "\n".join(
         f"[{i + 1}] {_snippet_text(s)}（来源：{src['doc']} {src['locator']}）"
-        for i, (s, src) in enumerate(zip(snippets, sources))
+        for i, (s, src) in enumerate(zip(snippets, sources, strict=True))
     )
     prompt = f"{NARRATIVE_PROMPT_PREFIX}。\n问题：{question}\n检索片段：\n{body}"
     started = time.perf_counter()
@@ -363,14 +384,14 @@ def _run_narrative(
     ctx.record_provider(time.perf_counter() - started, resp.usage)
     answer = resp.text
     # 血缘兜底：来源文件名必须出现在回答里
-    missing = [s for s in sources if s["doc"] and s["doc"] not in answer]
+    missing = [s for s in sources if s["doc"] and str(s["doc"]) not in answer]
     if missing:
         cite = "；".join(f"{s['doc']} {s['locator']}".strip() for s in missing)
         answer = f"{answer}\n（资料来源：{cite}）"
     return answer, sources
 
 
-def _tool_status_counts(tool_results: list[dict]) -> dict:
+def _tool_status_counts(tool_results: list[dict[str, object]]) -> dict[str, int]:
     """统计 found / not_found / unrecognized 三态条数（trace 用，非数值）。"""
     counts = {"found": 0, "not_found": 0, "unrecognized": 0}
     for r in tool_results:
@@ -388,7 +409,7 @@ def _emit_request_trace(
     request_id: str,
     intent: ParsedIntent,
     clar: ClarificationResult,
-    tool_results: list[dict],
+    tool_results: list[dict[str, object]],
     ctx: _TraceCtx,
 ) -> None:
     """结束前发一条结构化 trace（仅非敏感元数据，日志按 Restricted 对待）。
@@ -398,7 +419,7 @@ def _emit_request_trace(
     """
     counts = _tool_status_counts(tool_results)
     fabrication_guard_triggered = bool(tool_results) and counts["found"] == 0
-    fields: dict = {
+    fields: dict[str, object] = {
         "request_id": request_id,
         "route": intent.route,
         "metric": intent.metric,
@@ -419,7 +440,7 @@ def _emit_request_trace(
             "input_tokens": ctx.input_tokens,
             "output_tokens": ctx.output_tokens,
         }
-    emit_trace(**fields)
+    emit_trace(None, **fields)
 
 
 def answer_question(

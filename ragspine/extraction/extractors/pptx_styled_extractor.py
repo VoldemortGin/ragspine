@@ -31,11 +31,14 @@ import colorsys
 import hashlib
 import re
 import xml.etree.ElementTree as ET
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from pptx import Presentation
 from pptx.enum.dml import MSO_COLOR_TYPE, MSO_FILL
+from pptx.slide import Slide
+from pptx.table import Table, _Cell
 
 from ragspine.common.glossary import METRIC_SYNONYMS
 from ragspine.extraction.ir import StyledCell, StyledGrid
@@ -117,15 +120,15 @@ def _scheme_slot_rgb(scheme: ET.Element, slot: str) -> str | None:
     if node is None:
         return None
     srgb = node.find(f"{_A_NS}srgbClr")
-    if srgb is not None and srgb.get("val"):
-        return srgb.get("val").upper()
+    if srgb is not None and (val := srgb.get("val")):
+        return val.upper()
     sysc = node.find(f"{_A_NS}sysClr")
-    if sysc is not None and sysc.get("lastClr"):
-        return sysc.get("lastClr").upper()
+    if sysc is not None and (last_clr := sysc.get("lastClr")):
+        return last_clr.upper()
     return None
 
 
-def _theme_scheme_for_slide(slide) -> ET.Element | None:
+def _theme_scheme_for_slide(slide: Slide) -> ET.Element | None:
     """沿 slide -> slide_layout -> slide_master -> theme 解析出 clrScheme 元素。"""
     try:
         master = slide.slide_layout.slide_master
@@ -153,12 +156,10 @@ def _apply_brightness(base_rgb: str, brightness: float | None) -> str:
     else:
         lum = lum + (1.0 - lum) * brightness
     r2, g2, b2 = colorsys.hls_to_rgb(h, lum, s)
-    return "{:02X}{:02X}{:02X}".format(
-        round(r2 * 255), round(g2 * 255), round(b2 * 255)
-    )
+    return f"{round(r2 * 255):02X}{round(g2 * 255):02X}{round(b2 * 255):02X}"
 
 
-def _resolve_cell_fill(cell, scheme: ET.Element | None) -> str | None:
+def _resolve_cell_fill(cell: _Cell, scheme: ET.Element | None) -> str | None:
     """解析表格单元格填充色为真实 'RRGGBB'；无填充 / 无法解析返回 None。"""
     fill = cell.fill
     try:
@@ -191,8 +192,9 @@ def _resolve_cell_fill(cell, scheme: ET.Element | None) -> str | None:
     return None
 
 
-def _build_grid(slide, slide_no: int, table_no: int, table, doc_id: str,
-                file_hash: str, scheme: ET.Element | None) -> StyledGrid:
+def _build_grid(slide: Slide, slide_no: int, table_no: int, table: Table,
+                doc_id: str, file_hash: str,
+                scheme: ET.Element | None) -> StyledGrid:
     """把一张原生表格 shape 构建为 StyledGrid。"""
     n_rows = len(table.rows)
     n_cols = len(table.columns)
@@ -287,23 +289,27 @@ def _has_digit(text: str) -> bool:
     return any(ch.isdigit() for ch in text)
 
 
-def _iter_textbox_texts(slide):
+def _iter_textbox_texts(slide: Slide) -> Iterator[str]:
     """产出该 slide 内非表格文本框的归一化文本（按 shape 出现顺序）。"""
     for shape in slide.shapes:
         if shape.has_table:
             continue
         if not shape.has_text_frame:
             continue
-        text = _normalize_text(shape.text_frame.text)
+        # pptx 静态类型在 BaseShape 上未暴露 text_frame，由 has_text_frame 守卫。
+        text = _normalize_text(shape.text_frame.text)  # type: ignore[attr-defined]
         if text:
             yield text
 
 
-def _notes_text(slide) -> str | None:
+def _notes_text(slide: Slide) -> str | None:
     """该 slide 演讲者备注的归一化文本；无备注返回 None。"""
     if not slide.has_notes_slide:
         return None
-    text = _normalize_text(slide.notes_slide.notes_text_frame.text)
+    tf = slide.notes_slide.notes_text_frame
+    if tf is None:
+        return None
+    text = _normalize_text(tf.text)
     return text or None
 
 

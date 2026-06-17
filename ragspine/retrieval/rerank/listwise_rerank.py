@@ -19,7 +19,8 @@ Restricted 不出域策略（方案 B，理由见模块尾注）：
 """
 
 import re
-from typing import Protocol, Sequence
+from collections.abc import Sequence
+from typing import Any, Protocol
 
 DEFAULT_TOP_N = 10
 RESTRICTED_SENSITIVITY = "RESTRICTED"
@@ -81,11 +82,11 @@ def parse_listwise_response(text: str, n_candidates: int) -> list[int]:
 
 def listwise_rerank(
     query: str,
-    results: Sequence,
+    results: Sequence[Any],
     judge: ListwiseJudge | None,
     *,
     top_n: int = DEFAULT_TOP_N,
-) -> list:
+) -> list[Any]:
     """对混合检索结果（RRF 序）做 listwise 二审，返回 top_n。
 
     results 为鸭子类型：元素须有 .chunk.text 与 .chunk.sensitivity（即

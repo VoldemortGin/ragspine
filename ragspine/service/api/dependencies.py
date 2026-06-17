@@ -3,6 +3,8 @@
 均可被 app.dependency_overrides 覆盖，便于测试注入。
 """
 
+from typing import cast
+
 from fastapi import Request
 
 from ragspine.agent.llm_provider import LLMProvider
@@ -12,16 +14,16 @@ from ragspine.service.tasks.task_queue import TaskQueue
 
 
 def get_config(request: Request) -> ServiceConfig:
-    return request.app.state.config
+    return cast(ServiceConfig, request.app.state.config)
 
 
 def get_provider(request: Request) -> LLMProvider:
-    return request.app.state.provider
+    return cast(LLMProvider, request.app.state.provider)
 
 
 def get_faq_cache(request: Request) -> FAQCache:
-    return request.app.state.faq_cache
+    return cast(FAQCache, request.app.state.faq_cache)
 
 
 def get_queue(request: Request) -> TaskQueue:
-    return request.app.state.queue
+    return cast(TaskQueue, request.app.state.queue)

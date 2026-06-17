@@ -35,11 +35,9 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import cast
 
 from ragspine.agent.agent import answer_question
-from ragspine.retrieval.chunking.chunk_store import ChunkStore
-from ragspine.retrieval.chunking.chunking import DocumentMeta, chunk_document
-from ragspine.storage.fact_store import Fact, FactStore
 from ragspine.agent.intent import (
     CLARIFY_ANSWER_WITH_ASSUMPTIONS,
     CLARIFY_ASK_FIRST,
@@ -52,8 +50,14 @@ from ragspine.agent.intent import (
     parse_intent,
 )
 from ragspine.agent.llm_provider import MockProvider
-from ragspine.retrieval.link.narrative_link import build_narrative_retriever
 from ragspine.agent.query_tools import execute_query_metric
+from ragspine.retrieval.chunking.chunk_store import ChunkStore
+from ragspine.retrieval.chunking.chunking import DocumentMeta, chunk_document
+from ragspine.retrieval.link.narrative_link import (
+    NarrativeIndexRetriever,
+    build_narrative_retriever,
+)
+from ragspine.storage.fact_store import Fact, FactStore
 
 # 四命门指标名（基线/报告的键，一处定义）。
 NUMERIC_ACCURACY = "numeric_accuracy"
@@ -105,12 +109,12 @@ class GoldenCase:
     id: str
     question: str
     case_type: str
-    expected: dict
-    tags: dict
+    expected: dict[str, object]
+    tags: dict[str, object]
     reference_date: date
 
 
-def _validate_case(record: dict, lineno: int) -> GoldenCase:
+def _validate_case(record: dict[str, object], lineno: int) -> GoldenCase:
     """单条记录的结构校验；不合法抛 ValueError（带行号与 id 便于定位）。"""
     where = f"golden set 第 {lineno} 行（id={record.get('id')!r}）"
     for key in ("id", "question", "case_type", "expected", "tags", "reference_date"):
@@ -192,7 +196,9 @@ _DOC_R24 = "ACME_FY2024_Results.pptx"
 _DOC_I25 = "ACME_2025_Interim_Results.pptx"
 
 # (metric, entity, geography, channel, period_type, period, value, unit, doc, locator)
-_EVAL_FACT_ROWS: tuple[tuple, ...] = (
+_EVAL_FACT_ROWS: tuple[
+    tuple[str, str, str, str, str, str, float, str, str, str], ...
+] = (
     ("REVENUE", "ACME_GROUP", "ASIA", "TOTAL", "FY", "2025", 4500.0, "USD_M",
      _DOC_R25, "slide=3,table=1,row=2,col=3"),
     ("NEWSALES", "ACME_GROUP", "ASIA", "TOTAL", "FY", "2025", 8180.0, "USD_M",
@@ -303,9 +309,9 @@ class CaseOutcome:
     answer: str = ""
     found_value: float | None = None
     found_unit: str | None = None
-    found_source: dict | None = None
+    found_source: dict[str, object] | None = None
     refused: bool = False
-    sources: list[dict] = field(default_factory=list)
+    sources: list[dict[str, object]] = field(default_factory=list)
     tool_statuses: list[str] = field(default_factory=list)
     route: str = ""
 
@@ -318,7 +324,7 @@ def _period_param(period: tuple[str, str] | None) -> str:
     return f"FY{value}" if period_type == "FY" else value
 
 
-def _snippet_source(snippet: dict) -> dict:
+def _snippet_source(snippet: dict[str, object]) -> dict[str, object]:
     """检索 snippet → {doc, locator}（与 agent 层的字段兼容规则一致）。"""
     doc = (
         snippet.get("doc_id") or snippet.get("source_doc_id")
@@ -328,7 +334,9 @@ def _snippet_source(snippet: dict) -> dict:
     return {"doc": doc, "locator": locator}
 
 
-def run_case_tool_direct(case: GoldenCase, store: FactStore, retriever) -> CaseOutcome:
+def run_case_tool_direct(
+    case: GoldenCase, store: FactStore, retriever: NarrativeIndexRetriever
+) -> CaseOutcome:
     """tool-direct 模式：intent 解析 → 澄清网关 → 工具/检索直接执行（零 LLM）。"""
     ref = case.reference_date
     intent = parse_intent(case.question, reference_date=ref)
@@ -352,11 +360,11 @@ def run_case_tool_direct(case: GoldenCase, store: FactStore, retriever) -> CaseO
             store, metric=intent.metric or "", entity=entity,
             period=_period_param(period), channel=intent.channel,
         )
-        out.tool_statuses.append(result["status"])
+        out.tool_statuses.append(cast("str", result["status"]))
         if result["status"] == "found":
-            source = dict(result["source"])
-            out.found_value = result["value"]
-            out.found_unit = result["unit"]
+            source = dict(cast("dict[str, object]", result["source"]))
+            out.found_value = cast("float", result["value"])
+            out.found_unit = cast("str", result["unit"])
             out.found_source = source
             out.sources.append(source)
             parts.append(
@@ -366,7 +374,7 @@ def run_case_tool_direct(case: GoldenCase, store: FactStore, retriever) -> CaseO
             )
         elif result["status"] == "not_found":
             out.refused = True
-            norm = result["normalized"]
+            norm = cast("dict[str, object]", result["normalized"])
             parts.append(
                 f"查不到：{norm['metric_code']} / {norm['entity']} / "
                 f"{norm['period']}（渠道 {norm['channel']}）未在事实表中找到，"
@@ -379,7 +387,7 @@ def run_case_tool_direct(case: GoldenCase, store: FactStore, retriever) -> CaseO
             )
 
     if intent.route in (ROUTE_NARRATIVE, ROUTE_COMPOSITE):
-        filters: dict = {}
+        filters: dict[str, str] = {}
         if intent.entity:
             filters["entity"] = intent.entity
         if intent.period:
@@ -405,7 +413,9 @@ def run_case_tool_direct(case: GoldenCase, store: FactStore, retriever) -> CaseO
     return out
 
 
-def run_case_agent(case: GoldenCase, store: FactStore, retriever) -> CaseOutcome:
+def run_case_agent(
+    case: GoldenCase, store: FactStore, retriever: NarrativeIndexRetriever
+) -> CaseOutcome:
     """agent 模式：answer_question + MockProvider（确定性脚本化 tool use 循环）。"""
     provider = MockProvider(reference_date=case.reference_date)
     result = answer_question(
@@ -416,13 +426,13 @@ def run_case_agent(case: GoldenCase, store: FactStore, retriever) -> CaseOutcome
     out = CaseOutcome(
         case_id=case.id, route=result.route, clarification_mode=clar_mode,
         answer=result.answer, sources=[dict(s) for s in result.sources],
-        tool_statuses=[r.get("status", "") for r in result.tool_results],
+        tool_statuses=[cast("str", r.get("status", "")) for r in result.tool_results],
     )
     found = [r for r in result.tool_results if r.get("status") == "found"]
     if found:
-        out.found_value = found[0]["value"]
-        out.found_unit = found[0]["unit"]
-        out.found_source = dict(found[0]["source"])
+        out.found_value = cast("float", found[0]["value"])
+        out.found_unit = cast("str", found[0]["unit"])
+        out.found_source = dict(cast("dict[str, object]", found[0]["source"]))
 
     # 外部/竞品实体越权无 tool 调用也无检索，refused 不会被下方推导命中——显式置位，
     # 保证与 tool-direct 模式一致（answer_question 已最前置拒答，不输出 home 数字）。
@@ -466,10 +476,12 @@ class GateMetric:
     total: int = 0
     passed: int = 0
     pass_rate: float = 0.0
-    failures: list[dict] = field(default_factory=list)
-    by_tag: dict = field(default_factory=dict)
+    failures: list[dict[str, object]] = field(default_factory=list)
+    by_tag: dict[str, dict[str, dict[str, int]]] = field(default_factory=dict)
 
-    def tally(self, case: GoldenCase, ok: bool, expected, actual) -> None:
+    def tally(
+        self, case: GoldenCase, ok: bool, expected: object, actual: object
+    ) -> None:
         """记一个样本：总数/通过/失败明细/按 tags 分层。"""
         self.total += 1
         if ok:
@@ -488,7 +500,7 @@ class GateMetric:
     def finalize(self) -> None:
         self.pass_rate = 1.0 if self.total == 0 else self.passed / self.total
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, object]:
         return {
             "name": self.name,
             "total": self.total,
@@ -515,7 +527,7 @@ class QAEvalReport:
         """出现编造数字的拒答 case 数（目标恒为 0）。"""
         return self.fabrication.total - self.fabrication.passed
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, object]:
         return {
             "mode": self.mode,
             "n_cases": self.n_cases,
@@ -552,13 +564,14 @@ def evaluate(
             ok = True
             actual_bits: list[str] = []
             if "source" in exp:
+                exp_source = cast("dict[str, str]", exp["source"])
                 ok = (
-                    out.found_source == exp["source"]
-                    and exp["source"]["doc"] in out.answer
+                    out.found_source == exp_source
+                    and exp_source["doc"] in out.answer
                 )
                 actual_bits.append(f"structured_source={out.found_source}")
             if "narrative_doc" in exp:
-                doc = exp["narrative_doc"]
+                doc = cast("str", exp["narrative_doc"])
                 ok = ok and any(s.get("doc") == doc for s in out.sources) \
                     and doc in out.answer
                 actual_bits.append(
@@ -611,10 +624,10 @@ class BaselineComparison:
     """与基线比对结果：任一命门指标退化（或编造增加）即 passed=False。"""
 
     passed: bool = False
-    regressions: list[dict] = field(default_factory=list)
+    regressions: list[dict[str, object]] = field(default_factory=list)
 
 
-def make_baseline_entry(report: QAEvalReport) -> dict:
+def make_baseline_entry(report: QAEvalReport) -> dict[str, object]:
     """从报告生成基线条目（按 mode 存入 data/golden/qa_baseline.json）。"""
     return {
         "metrics": {name: m.pass_rate for name, m in report.metrics.items()},
@@ -623,13 +636,16 @@ def make_baseline_entry(report: QAEvalReport) -> dict:
     }
 
 
-def compare_to_baseline(report: QAEvalReport, baseline: dict) -> BaselineComparison:
+def compare_to_baseline(
+    report: QAEvalReport, baseline: dict[str, object]
+) -> BaselineComparison:
     """任一命门指标 pass_rate 低于基线、或 fabrication_count 高于基线 → gate fail。
 
     只检查 baseline.metrics 中列出的指标；恰好等于基线视为通过。
     """
-    regressions: list[dict] = []
-    for name, threshold in baseline.get("metrics", {}).items():
+    regressions: list[dict[str, object]] = []
+    baseline_metrics = cast("dict[str, float]", baseline.get("metrics", {}))
+    for name, threshold in baseline_metrics.items():
         metric = report.metrics.get(name)
         if metric is None:
             continue
@@ -640,7 +656,7 @@ def compare_to_baseline(report: QAEvalReport, baseline: dict) -> BaselineCompari
                 "current": metric.pass_rate,
                 "delta": metric.pass_rate - threshold,
             })
-    baseline_fab = baseline.get("fabrication_count", 0)
+    baseline_fab = cast("int", baseline.get("fabrication_count", 0))
     if report.fabrication_count > baseline_fab:
         regressions.append({
             "metric": FABRICATION,

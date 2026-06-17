@@ -14,8 +14,8 @@ from pathlib import Path
 
 from ragspine.agent.agent import NarrativeRetriever
 from ragspine.agent.llm_provider import (
-    AnthropicProvider,
     DEFAULT_ANTHROPIC_MODEL,
+    AnthropicProvider,
     LLMProvider,
     MockProvider,
 )

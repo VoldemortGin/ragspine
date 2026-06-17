@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import date
 from itertools import product
-from typing import Protocol, runtime_checkable
+from typing import Protocol, TypedDict, runtime_checkable
 
 from ragspine.agent.security_gate import (
     SECURITY_REFUSE_OUT_OF_SCOPE,
@@ -110,12 +110,19 @@ class SubTask:
     channel: str = "TOTAL"
 
 
+class AssumedSlots(TypedDict, total=False):
+    """澄清网关回填的默认槽位：entity 为受控代码，period 为 (period_type, value)。"""
+
+    entity: str
+    period: tuple[str, str]
+
+
 @dataclass
 class ClarificationResult:
     """澄清网关输出：先答携带的假设说明，或前置单选问题。"""
 
     mode: str
-    assumed_slots: dict = field(default_factory=dict)
+    assumed_slots: AssumedSlots = field(default_factory=AssumedSlots)
     assumption_note: str | None = None
     narrowing_options: list[str] = field(default_factory=list)
     question: str | None = None
@@ -172,15 +179,16 @@ def _extract_all_periods(
     spans: list[tuple[int, int, tuple[str, str]]] = []
     for m in _ABS_PERIOD_RE.finditer(text):
         year, h1, h2, h_num, q_num = m.groups()
+        abs_resolved: tuple[str, str]
         if h1 or (h_num == "1"):
-            resolved = ("HY", f"{year}H1")
+            abs_resolved = ("HY", f"{year}H1")
         elif h2 or (h_num == "2"):
-            resolved = ("HY", f"{year}H2")
+            abs_resolved = ("HY", f"{year}H2")
         elif q_num:
-            resolved = ("QUARTER", f"{year}Q{q_num}")
+            abs_resolved = ("QUARTER", f"{year}Q{q_num}")
         else:
-            resolved = ("FY", year)
-        spans.append((m.start(), m.end(), resolved))
+            abs_resolved = ("FY", year)
+        spans.append((m.start(), m.end(), abs_resolved))
 
     for token in _RELATIVE_PERIOD_TOKENS:
         start = 0
@@ -212,9 +220,13 @@ def expand_subtasks(
     绝不向"全部支持的指标/实体"做全笛卡尔扩张。channel 整体共享。
     子任务顺序：实体外层 → 指标 → 期间（与用户列举顺序一致）。
     """
-    metrics = intent.metrics or [intent.metric]
-    entities = intent.entities or [intent.entity or default_entity]
-    periods = intent.periods or [intent.period or default_period]
+    metrics: list[str | None] = list(intent.metrics) or [intent.metric]
+    entities: list[str | None] = list(intent.entities) or [
+        intent.entity or default_entity
+    ]
+    periods: list[tuple[str, str] | None] = list(intent.periods) or [
+        intent.period or default_period
+    ]
     return [
         SubTask(metric=m, entity=e, period=p, channel=intent.channel)
         for e, m, p in product(entities, metrics, periods)
@@ -300,14 +312,14 @@ def clarify_scope(
 
     # 指标缺失：猜错指标=实质错误 → 前置单选
     if intent.metric is None:
-        options = "、".join(_SUPPORTED_METRICS)
+        metric_options = "、".join(_SUPPORTED_METRICS)
         return ClarificationResult(
             mode=CLARIFY_ASK_FIRST,
-            question=f"想查询哪个指标？目前支持：{options}。",
+            question=f"想查询哪个指标？目前支持：{metric_options}。",
             narrowing_options=list(_SUPPORTED_METRICS),
         )
 
-    assumed: dict = {}
+    assumed: AssumedSlots = {}
     notes: list[str] = []
     options: list[str] = []
 

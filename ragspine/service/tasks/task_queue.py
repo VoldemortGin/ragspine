@@ -7,10 +7,11 @@
 - job payload 必须是纯可序列化 dict；func_path 是点路径，末段为可调用对象，签名 fn(payload)->dict。
 """
 
+import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from importlib import import_module
-from typing import Protocol, runtime_checkable
-import uuid
+from typing import Any, Protocol, cast, runtime_checkable
 
 # job 状态常量（与 RQ 语义对齐后的统一口径）
 JOB_QUEUED = "queued"
@@ -23,8 +24,8 @@ JOB_FAILED = "failed"
 class JobStatus:
     id: str
     status: str
-    result: dict | None = None
-    error: dict | None = None
+    result: dict[str, Any] | None = None
+    error: dict[str, Any] | None = None
     # 失败时 error 形如：{"type": str, "message": str, "stage": str, "retryable": bool}
 
 
@@ -42,7 +43,7 @@ class TaskQueue(Protocol):
     def enqueue(
         self,
         func_path: str,
-        payload: dict,
+        payload: dict[str, Any],
         *,
         job_id: str | None = None,
         timeout: int | None = None,
@@ -67,16 +68,17 @@ def map_rq_status(rq_status: str | None) -> str:
     return JOB_QUEUED
 
 
-def _resolve_callable(func_path: str):
+def _resolve_callable(func_path: str) -> Callable[..., Any]:
     """点路径 -> 可调用对象（末段为属性名）。"""
     module_path, _, attr = func_path.rpartition(".")
     if not module_path:
         raise ValueError(f"func_path must be a dotted path: {func_path!r}")
     mod = import_module(module_path)
-    return getattr(mod, attr)
+    # getattr on a dynamically imported module yields Any; the contract is fn(payload)->dict.
+    return cast("Callable[..., Any]", getattr(mod, attr))
 
 
-def _error_dict_from_exc(exc: BaseException) -> dict:
+def _error_dict_from_exc(exc: BaseException) -> dict[str, Any]:
     if isinstance(exc, JobError):
         stage, retryable = exc.stage, exc.retryable
     else:
@@ -98,7 +100,7 @@ class FakeQueue:
     def enqueue(
         self,
         func_path: str,
-        payload: dict,
+        payload: dict[str, Any],
         *,
         job_id: str | None = None,
         timeout: int | None = None,
@@ -130,12 +132,12 @@ class RQQueue:
         self._redis_url = redis_url
         self._queue_name = queue_name
 
-    def _connection(self):
+    def _connection(self) -> Any:
         import redis
 
         return redis.Redis.from_url(self._redis_url)
 
-    def _queue(self, connection):
+    def _queue(self, connection: Any) -> Any:
         import rq
 
         return rq.Queue(self._queue_name, connection=connection)
@@ -143,7 +145,7 @@ class RQQueue:
     def enqueue(
         self,
         func_path: str,
-        payload: dict,
+        payload: dict[str, Any],
         *,
         job_id: str | None = None,
         timeout: int | None = None,
@@ -165,7 +167,7 @@ class RQQueue:
             result_ttl=result_ttl,
             failure_ttl=failure_ttl,
         )
-        return job.id
+        return cast(str, job.id)
 
     def get(self, job_id: str) -> JobStatus | None:
         import rq
@@ -177,8 +179,8 @@ class RQQueue:
             return None
 
         status = map_rq_status(job.get_status())
-        error: dict | None = None
-        result: dict | None = None
+        error: dict[str, Any] | None = None
+        result: dict[str, Any] | None = None
         if status == JOB_FINISHED:
             raw = job.result
             result = raw if isinstance(raw, dict) else {"value": raw}

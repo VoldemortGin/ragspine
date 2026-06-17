@@ -26,6 +26,7 @@ StyledGrid，使 citation 能精确回指到「页 + 表 + 格」。与 xlsx_sty
 
 import hashlib
 from pathlib import Path
+from typing import Any
 
 import pypdfium2 as pdfium
 import pypdfium2.raw as pdfium_raw
@@ -50,7 +51,7 @@ def _file_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _page_image_cover(page) -> float:
+def _page_image_cover(page: pdfium.PdfPage) -> float:
     """图片对页面的覆盖率 [0.0, 1.0]（多图叠放封顶为 1.0）。"""
     width, height = page.get_size()
     page_area = (width * height) or 1.0
@@ -67,7 +68,7 @@ def _page_image_cover(page) -> float:
     return min(cover, 1.0)
 
 
-def _page_chars(page) -> int:
+def _page_chars(page: pdfium.PdfPage) -> int:
     """可提取文本字符数（strip 后），与 pdf_router 度量口径一致。"""
     textpage = page.get_textpage()
     try:
@@ -102,7 +103,7 @@ def _has_digital_page(path: Path) -> bool:
         doc.close()
 
 
-def _table_page_no(table) -> int:
+def _table_page_no(table: Any) -> int:
     """从 Docling TableItem 的 provenance 取所在页号（1-based）。"""
     prov = getattr(table, "prov", None) or []
     if prov:
@@ -112,7 +113,7 @@ def _table_page_no(table) -> int:
     return 1
 
 
-def _build_grid(table, sheet: str, source_doc_id: str,
+def _build_grid(table: Any, sheet: str, source_doc_id: str,
                 source_file_hash: str) -> StyledGrid:
     """把一个 Docling TableItem 转成 StyledGrid（稀疏：只存非空文本格）。
 

@@ -43,7 +43,7 @@ class ChannelMetric:
     total: int = 0
     correct: int = 0
     accuracy: float = 0.0
-    mismatches: list[dict] = field(default_factory=list)
+    mismatches: list[dict[str, object]] = field(default_factory=list)
 
 
 @dataclass
@@ -69,22 +69,28 @@ class BaselineComparison:
     """
 
     passed: bool = False
-    regressions: list[dict] = field(default_factory=list)
+    regressions: list[dict[str, object]] = field(default_factory=list)
 
 
-def _gt_cells(ground_truth: dict | list) -> list[dict]:
+def _gt_cells(
+    ground_truth: dict[str, object] | list[dict[str, object]],
+) -> list[dict[str, object]]:
     """取逐格真值列表：ground_truth 可为带 'cells' 的 dict，也可直接为 list[dict]。"""
     if isinstance(ground_truth, dict):
-        return ground_truth.get("cells", [])
+        cells = ground_truth.get("cells", [])
+        return cells if isinstance(cells, list) else []
     return list(ground_truth)
 
 
-def _locator(cell: dict) -> str:
+def _locator(cell: dict[str, object]) -> str:
     """定位字符串：sheet!cell_ref。"""
     return f"{cell.get('sheet')}!{cell.get('cell_ref')}"
 
 
-def run_eval(facts: list, ground_truth: dict | list) -> EvalReport:
+def run_eval(
+    facts: list[dict[str, object]],
+    ground_truth: dict[str, object] | list[dict[str, object]],
+) -> EvalReport:
     """比对 facts 与 ground truth，分通道计算准确率，返回 EvalReport。
 
     通道：
@@ -129,7 +135,7 @@ def compare_to_baseline(metrics: EvalReport, baseline: dict[str, float]) -> Base
 
     只检查 baseline 中列出的通道；恰好等于基线视为通过。
     """
-    regressions: list[dict] = []
+    regressions: list[dict[str, object]] = []
     for name, threshold in baseline.items():
         ch = metrics.channels.get(name)
         if ch is None:

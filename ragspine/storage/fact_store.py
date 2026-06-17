@@ -41,7 +41,7 @@ class Fact:
     source_doc_id: str
     source_locator: str
     # --- v2 扩展（全部可选，默认保持旧行为）------------------------------
-    tags: dict = field(default_factory=dict)
+    tags: dict[str, object] = field(default_factory=dict)
     source_file_hash: str | None = None
     extractor_version: str | None = None
     mapping_version: int | None = None
@@ -189,7 +189,7 @@ class FactStore:
             "WHERE metric_code = ? AND entity = ? AND period_type = ? "
             "AND period = ? AND channel = ?"
         )
-        params: list = [metric_code, entity, period_type, period, channel]
+        params: list[object] = [metric_code, entity, period_type, period, channel]
         if review_statuses is not None:
             marks = ", ".join(["?"] * len(review_statuses))
             sql += f" AND review_status IN ({marks})"
@@ -199,9 +199,14 @@ class FactStore:
 
     def count(self) -> int:
         """事实总条数。"""
-        return self._conn.execute("SELECT COUNT(*) FROM fact_metric").fetchone()[0]
+        count: int = self._conn.execute(
+            "SELECT COUNT(*) FROM fact_metric"
+        ).fetchone()[0]
+        return count
 
-    def execute_read(self, sql: str, params: tuple = ()) -> list[sqlite3.Row]:
+    def execute_read(
+        self, sql: str, params: tuple[object, ...] = ()
+    ) -> list[sqlite3.Row]:
         """只读查询入口：跑参数化 SELECT 返回行列表（供台账/指标等观测面复用，
         免去外部直访私有连接）。"""
         return self._conn.execute(sql, params).fetchall()
@@ -224,8 +229,8 @@ class FactStore:
     # --- 行 <-> Fact 序列化（tags 走 JSON）--------------------------------
 
     @staticmethod
-    def _to_row(fact: Fact, ingested_at: str | None = None) -> tuple:
-        values = []
+    def _to_row(fact: Fact, ingested_at: str | None = None) -> tuple[object, ...]:
+        values: list[object] = []
         for col in _COLUMNS:
             if col == "ingested_at":
                 # store 盖的审计戳胜出（覆盖 Fact 自带值），写入以 store 为准。

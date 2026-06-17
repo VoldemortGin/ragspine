@@ -21,7 +21,7 @@ from pathlib import Path
 try:  # Python >= 3.11
     import tomllib  # type: ignore[import-not-found]
 except ModuleNotFoundError:  # Python 3.10
-    import tomli as tomllib  # type: ignore[no-redef]
+    import tomli as tomllib
 
 from ragspine.common.sensitivity import SensitivityPolicy
 
@@ -304,7 +304,7 @@ def _str_list(raw: object) -> list[str]:
     return [str(x) for x in raw]
 
 
-def _sensitivity_policy(data: dict) -> SensitivityPolicy:
+def _sensitivity_policy(data: dict[str, object]) -> SensitivityPolicy:
     """从 [sensitivity] 段构建策略；缺段或字段缺失逐项回退内置默认。"""
     raw = data.get("sensitivity")
     if not isinstance(raw, dict):

@@ -20,19 +20,20 @@ Restricted 出口拦截：B 线只保证 Restricted 文本不进 judge prompt，
 """
 
 from pathlib import Path
+from typing import Any
 
-from ragspine.retrieval.chunking.chunk_store import ChunkStore
-from ragspine.retrieval.rerank.listwise_rerank import (
-    RESTRICTED_SENSITIVITY,
-    build_listwise_prompt,
-    parse_listwise_response,
-)
 from ragspine.agent.llm_provider import LLMProvider
+from ragspine.retrieval.chunking.chunk_store import ChunkStore
 from ragspine.retrieval.lexical.retrieval import (
     EmbeddingBackend,
     GlossaryQueryRewriter,
     NarrativeIndex,
     RetrievalResult,
+)
+from ragspine.retrieval.rerank.listwise_rerank import (
+    RESTRICTED_SENSITIVITY,
+    build_listwise_prompt,
+    parse_listwise_response,
 )
 
 # A 线 filters dict 中允许透传给 NarrativeIndex.retrieve 的元数据键。
@@ -75,8 +76,8 @@ class NarrativeIndexRetriever:
         self.retry_without_filters = retry_without_filters
 
     def retrieve(
-        self, query: str, *, filters: dict | None = None, top_k: int = 50
-    ) -> list[dict]:
+        self, query: str, *, filters: dict[str, Any] | None = None, top_k: int = 50
+    ) -> list[dict[str, Any]]:
         """A 线协议入口：filters 映射为元数据 kwargs，结果转 snippet dict。
 
         - 只透传 _FILTER_KEYS 中的非空键，未知键/空值丢弃；
@@ -95,7 +96,7 @@ class NarrativeIndexRetriever:
         ]
 
 
-def _to_snippet(result: RetrievalResult) -> dict:
+def _to_snippet(result: RetrievalResult) -> dict[str, Any]:
     """RetrievalResult → A 线 snippet dict（agent 取 text / doc_id / source_locator）。"""
     c = result.chunk
     return {

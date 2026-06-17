@@ -11,7 +11,7 @@
 import json
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Protocol
+from typing import Protocol, cast
 
 from ragspine.agent.intent import parse_intent
 
@@ -36,7 +36,7 @@ class ToolCall:
 
     id: str
     name: str
-    input: dict
+    input: dict[str, object]
 
 
 @dataclass
@@ -50,15 +50,19 @@ class ProviderResponse:
     text: str
     tool_calls: list[ToolCall] = field(default_factory=list)
     stop_reason: str = "end_turn"
-    raw_content: list = field(default_factory=list)
-    usage: dict | None = None
+    raw_content: list[object] = field(default_factory=list)
+    usage: dict[str, int | None] | None = None
 
 
 class LLMProvider(Protocol):
     """provider 协议：发送 system+messages+tools，拿回统一响应。"""
 
     def create_message(
-        self, *, system: str, messages: list[dict], tools: list[dict]
+        self,
+        *,
+        system: str,
+        messages: list[dict[str, object]],
+        tools: list[dict[str, object]],
     ) -> ProviderResponse: ...
 
 
@@ -83,7 +87,10 @@ class AnthropicProvider:
             ) from exc
 
         # 超时/重试透传给 SDK：429/5xx/超时由 SDK 原生指数退避处理，不自造退避。
-        client_kwargs: dict = {"timeout": timeout, "max_retries": max_retries}
+        client_kwargs: dict[str, object] = {
+            "timeout": timeout,
+            "max_retries": max_retries,
+        }
         if api_key is not None:
             client_kwargs["api_key"] = api_key
         if base_url is not None:
@@ -93,7 +100,11 @@ class AnthropicProvider:
         self.max_tokens = max_tokens
 
     def create_message(
-        self, *, system: str, messages: list[dict], tools: list[dict]
+        self,
+        *,
+        system: str,
+        messages: list[dict[str, object]],
+        tools: list[dict[str, object]],
     ) -> ProviderResponse:
         try:
             resp = self._client.messages.create(
@@ -126,12 +137,12 @@ class AnthropicProvider:
         )
 
 
-def _map_usage(usage) -> dict | None:
+def _map_usage(usage: object) -> dict[str, int | None] | None:
     """SDK resp.usage → {"input_tokens", "output_tokens"}；属性缺失则 None（防御式）。"""
     if usage is None:
         return None
-    input_tokens = getattr(usage, "input_tokens", None)
-    output_tokens = getattr(usage, "output_tokens", None)
+    input_tokens: int | None = getattr(usage, "input_tokens", None)
+    output_tokens: int | None = getattr(usage, "output_tokens", None)
     if input_tokens is None and output_tokens is None:
         return None
     return {"input_tokens": input_tokens, "output_tokens": output_tokens}
@@ -143,7 +154,7 @@ def _period_param(period: tuple[str, str]) -> str:
     return f"FY{value}" if period_type == "FY" else value
 
 
-def _last_tool_result(messages: list[dict]) -> dict | None:
+def _last_tool_result(messages: list[dict[str, object]]) -> dict[str, object] | None:
     """从消息序列尾部找最近一条 tool_result，解析其 JSON 内容。"""
     for msg in reversed(messages):
         content = msg.get("content")
@@ -152,16 +163,17 @@ def _last_tool_result(messages: list[dict]) -> dict | None:
         for item in reversed(content):
             if isinstance(item, dict) and item.get("type") == "tool_result":
                 try:
-                    return json.loads(item["content"])
+                    return cast("dict[str, object]", json.loads(item["content"]))
                 except (TypeError, ValueError, KeyError):
                     return None
     return None
 
 
-def _last_user_text(messages: list[dict]) -> str:
+def _last_user_text(messages: list[dict[str, object]]) -> str:
     for msg in reversed(messages):
-        if msg.get("role") == "user" and isinstance(msg.get("content"), str):
-            return msg["content"]
+        content = msg.get("content")
+        if msg.get("role") == "user" and isinstance(content, str):
+            return content
     return ""
 
 
@@ -177,7 +189,11 @@ class MockProvider:
         self.reference_date = reference_date
 
     def create_message(
-        self, *, system: str, messages: list[dict], tools: list[dict]
+        self,
+        *,
+        system: str,
+        messages: list[dict[str, object]],
+        tools: list[dict[str, object]],
     ) -> ProviderResponse:
         result = _last_tool_result(messages)
         if result is not None:
@@ -194,7 +210,7 @@ class MockProvider:
 
         intent = parse_intent(text, reference_date=self.reference_date)
         if intent.metric and intent.entity and intent.period:
-            call_input = {
+            call_input: dict[str, object] = {
                 "metric": intent.metric,
                 "entity": intent.entity,
                 "period": _period_param(intent.period),
@@ -217,10 +233,11 @@ class MockProvider:
         )
 
     @staticmethod
-    def _final_answer(result: dict) -> ProviderResponse:
+    def _final_answer(result: dict[str, object]) -> ProviderResponse:
         status = result.get("status")
         if status == "found":
-            source = result.get("source", {})
+            raw_source = result.get("source", {})
+            source = raw_source if isinstance(raw_source, dict) else {}
             # valid_as_of 存在时附「截至」业务时点；为 None 时文案字节级不变。
             valid_as_of = result.get("valid_as_of")
             asof = f" · 截至 {valid_as_of}" if valid_as_of else ""
@@ -230,7 +247,8 @@ class MockProvider:
                 f"（来源：{source.get('doc')} · {source.get('locator')}{asof}）"
             )
         elif status == "not_found":
-            norm = result.get("normalized", {})
+            raw_norm = result.get("normalized", {})
+            norm = raw_norm if isinstance(raw_norm, dict) else {}
             text = (
                 f"查不到：{norm.get('metric_code')} / {norm.get('entity')} / "
                 f"{norm.get('period')}（{norm.get('channel')}）未在事实表中找到，"

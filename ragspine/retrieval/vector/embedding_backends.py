@@ -24,8 +24,10 @@ import hashlib
 import math
 import os
 import re
+from typing import Any
 
 from ragspine.agent.llm_provider import ProviderError
+from ragspine.retrieval.lexical.retrieval import EmbeddingBackend
 
 # 默认 embedding 模型名（唯一出处，改这里即全局生效）
 DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-large"
@@ -119,7 +121,7 @@ class OpenAIEmbeddingBackend:
             raise ValueError(f"batch_size 必须 >= 1，得到 {batch_size}")
 
         # 超时/重试透传给 SDK：由 SDK 原生退避处理，不自造退避。
-        client_kwargs: dict = {"timeout": timeout, "max_retries": max_retries}
+        client_kwargs: dict[str, Any] = {"timeout": timeout, "max_retries": max_retries}
         if api_key is not None:
             client_kwargs["api_key"] = api_key
         if base_url is not None:
@@ -237,7 +239,7 @@ class SentenceTransformerEmbeddingBackend:
         self.batch_size = batch_size
         self._model = None  # 延迟加载缓存
 
-    def _load_model(self):
+    def _load_model(self) -> Any:
         """首次调用时延迟 import sentence_transformers 并加载模型（之后复用缓存）。"""
         if self._model is None:
             try:
@@ -274,7 +276,7 @@ class SentenceTransformerEmbeddingBackend:
         return vectors
 
 
-def make_embedding_backend(spec: str | None = None, **kwargs):
+def make_embedding_backend(spec: str | None = None, **kwargs: Any) -> EmbeddingBackend | None:
     """后端工厂：把「接通向量通道」从改代码降为一个 flag/env，默认仍为 None＝纯 BM25。
 
     spec 取值（大小写不敏感；缺省读环境变量 RAGSPINE_EMBEDDING_BACKEND）：

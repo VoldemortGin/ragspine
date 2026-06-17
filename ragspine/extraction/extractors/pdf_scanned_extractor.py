@@ -36,7 +36,7 @@ import hashlib
 import io
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 import pypdfium2 as pdfium
 
@@ -100,6 +100,18 @@ class OcrPageResult:
     warnings: list[str] = field(default_factory=list)
 
 
+class _ReviewQueue(Protocol):
+    """低置信入队所需的接口（与 review_queue.ReviewQueue.enqueue 对齐）。"""
+
+    def enqueue(
+        self,
+        reason: str,
+        payload: dict[str, object],
+        locator: str,
+        priority: int = ...,
+    ) -> int: ...
+
+
 class OcrBackend(Protocol):
     """OCR/VLM 后端协议（依赖注入点）。
 
@@ -161,7 +173,7 @@ def _build_grid(
     source_doc_id: str,
     source_file_hash: str,
     min_confidence: float,
-    queue,
+    queue: _ReviewQueue | None,
 ) -> StyledGrid:
     """把一个 OcrTable 转成 StyledGrid（稀疏：只存 backend 给出的格）。
 
@@ -213,7 +225,7 @@ def extract_grids(
     backend: OcrBackend,
     *,
     min_confidence: float = 0.85,
-    queue=None,
+    queue: _ReviewQueue | None = None,
 ) -> list[StyledGrid]:
     """抽取一个扫描型 PDF 的全部表格 -> list[StyledGrid]（每张表一个 StyledGrid）。
 
@@ -293,13 +305,16 @@ class PaddleOcrVlBackend:
                       公式识别、指定 GPU device、选择表格结构模型等），缺省用管线默认。
     """
 
-    def __init__(self, model_config: dict | None = None, **kwargs):
+    def __init__(
+        self, model_config: dict[str, object] | None = None, **kwargs: object
+    ) -> None:
         # 延迟初始化：仅保存配置，不在此 import / 加载模型（避免非 GPU 平台构造即失败）。
-        self._model_config: dict = dict(model_config or {})
+        self._model_config: dict[str, object] = dict(model_config or {})
         self._model_config.update(kwargs)
-        self._pipeline = None  # 首次 recognize 时惰性构建。
+        # paddleocr 的 PPStructureV3 无类型信息（GPU 专用、惰性 import），故为 Any。
+        self._pipeline: Any = None  # 首次 recognize 时惰性构建。
 
-    def _ensure_pipeline(self):
+    def _ensure_pipeline(self) -> Any:
         """首次使用时惰性 import paddleocr 并构建 PPStructureV3 管线（延迟初始化）。"""
         if self._pipeline is None:
             from paddleocr import PPStructureV3  # 惰性 import：仅 GPU 环境可用。
@@ -342,7 +357,7 @@ class PaddleOcrVlBackend:
         return OcrPageResult(page_no=page_no, tables=tables, warnings=warnings)
 
     @staticmethod
-    def _table_res_to_ocr_table(table_res: dict) -> OcrTable | None:
+    def _table_res_to_ocr_table(table_res: dict[str, Any]) -> OcrTable | None:
         """把单张表的 PaddleOCR 结果（pred_html + table_ocr_pred）映射为 OcrTable。
 
         - 用 pred_html 解析出行列网格（每个 <td> 一格，跳过纯结构空格）。
@@ -356,7 +371,7 @@ class PaddleOcrVlBackend:
 
         # text -> 该文本各次出现的置信度队列（按出现顺序消费，支持重复文本）。
         score_by_text: dict[str, list[float]] = {}
-        for text, score in zip(rec_texts, rec_scores):
+        for text, score in zip(rec_texts, rec_scores, strict=False):
             score_by_text.setdefault(_normalize_text(text), []).append(float(score))
         default_score = (
             sum(rec_scores) / len(rec_scores) if rec_scores else 1.0

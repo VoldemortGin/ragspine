@@ -10,6 +10,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 # 状态机取值
 STATUS_PENDING = "pending"
@@ -38,7 +39,7 @@ class ReviewItem:
     """
 
     reason: str
-    payload: dict
+    payload: dict[str, Any]
     locator: str
     priority: int = 100
     id: int | None = None
@@ -66,7 +67,7 @@ class AuditRecord:
     actor: str | None = None
     at: str | None = None
     note: str | None = None
-    detail: dict = field(default_factory=dict)
+    detail: dict[str, Any] = field(default_factory=dict)
 
 
 class IllegalTransitionError(Exception):
@@ -128,7 +129,7 @@ class ReviewQueue:
     def enqueue(
         self,
         reason: str,
-        payload: dict,
+        payload: dict[str, Any],
         locator: str,
         priority: int = 100,
     ) -> int:
@@ -144,6 +145,7 @@ class ReviewQueue:
                 STATUS_PENDING,
             ),
         )
+        assert cur.lastrowid is not None
         item_id = int(cur.lastrowid)
         self._append_audit(item_id, "enqueue")
         self._conn.commit()
@@ -213,7 +215,7 @@ class ReviewQueue:
                 f"review item {item_id} 已是终态 {row['status']}，不可再 {action}"
             )
 
-        detail: dict = {}
+        detail: dict[str, Any] = {}
         has_correction = corrected_value is not _UNSET
         if has_correction:
             self._conn.execute(
@@ -243,7 +245,7 @@ class ReviewQueue:
         action: str,
         actor: str | None = None,
         note: str | None = None,
-        detail: dict | None = None,
+        detail: dict[str, Any] | None = None,
     ) -> None:
         self._conn.execute(
             "INSERT INTO review_audit (item_id, action, actor, at, note, detail) "

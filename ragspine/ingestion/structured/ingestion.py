@@ -23,16 +23,13 @@
 实现已完成，dataclass 字段契约保持冻结，行为契约见 tests/ingestion/structured/test_ingestion.py。
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, cast
 
 from openpyxl.utils import get_column_letter
 
-from ragspine.extraction.color.color_semantics import apply_mapping
-from ragspine.extraction.extractors import pdf_digital_extractor, pptx_styled_extractor
-from ragspine.extraction.extractors.xlsx_styled_extractor import extract_grids
-from ragspine.extraction.routing import pdf_router
-from ragspine.storage.fact_store import Fact, REVIEW_AUTO_APPROVED
 from ragspine.common.glossary import (
     geography_for_entity,
     normalize_entity,
@@ -40,6 +37,14 @@ from ragspine.common.glossary import (
     normalize_period,
     unit_for_metric,
 )
+from ragspine.extraction.color.color_semantics import MappingRegistry, apply_mapping
+from ragspine.extraction.extractors import pdf_digital_extractor, pptx_styled_extractor
+from ragspine.extraction.extractors.xlsx_styled_extractor import extract_grids
+from ragspine.extraction.ir import StyledGrid
+from ragspine.extraction.routing import pdf_router
+from ragspine.ingestion.review.review_queue import ReviewQueue
+from ragspine.ingestion.structured.ingestion_manifest import ManifestStore
+from ragspine.storage.fact_store import REVIEW_AUTO_APPROVED, Fact, FactStore
 
 
 @dataclass
@@ -75,7 +80,7 @@ class IngestReport:
     error: str | None = None
 
 
-def _coerce_number(value) -> float | None:
+def _coerce_number(value: object) -> float | None:
     """单元格值转数值；非数值返回 None（沿用 MVP xlsx_extractor 约定）。"""
     if value is None:
         return None
@@ -90,7 +95,7 @@ def _coerce_number(value) -> float | None:
         return None
 
 
-def _grid_value(grid, col: int, row: int):
+def _grid_value(grid: StyledGrid, col: int, row: int) -> object:
     """取网格 (col, row) 处的原始值；空格返回 None。
 
     兼容两种坐标键：xlsx 用 'A1' 风格（get_column_letter），pptx/pdf 表格用
@@ -102,7 +107,7 @@ def _grid_value(grid, col: int, row: int):
     return cell.value if cell is not None else None
 
 
-def _grid_has_candidate_data(grid) -> bool:
+def _grid_has_candidate_data(grid: StyledGrid) -> bool:
     """该表是否含可抽取的「指标×期间×数值」候选数据（与抽取布局同套规则）。
 
     只在实体无法解析时用于区分「确含数据但无法归因的表」与「无数据的辅助表 /
@@ -125,7 +130,7 @@ def _grid_has_candidate_data(grid) -> bool:
 
 
 def _extract_facts_from_grid(
-    grid,
+    grid: StyledGrid,
     cell_tags: dict[str, dict[str, str]],
     extractor_version: str,
 ) -> tuple[list[Fact], list[str], int, bool]:
@@ -141,7 +146,8 @@ def _extract_facts_from_grid(
     warnings: list[str] = []
     n_tags_applied = 0
 
-    entity = normalize_entity(_grid_value(grid, 1, 1)) or normalize_entity(grid.sheet)
+    a1 = cast("str | None", _grid_value(grid, 1, 1))
+    entity = normalize_entity(a1) or normalize_entity(grid.sheet)
     if entity is None:
         warnings.append(
             f"sheet={grid.sheet}: A1/sheet 名无法解析实体，跳过该表"
@@ -183,7 +189,7 @@ def _extract_facts_from_grid(
             value = _coerce_number(_grid_value(grid, col, row))
             if value is None:
                 continue
-            tags = dict(cell_tags.get(coord, {}))
+            tags: dict[str, object] = dict(cell_tags.get(coord, {}))
             if tags:
                 n_tags_applied += 1
             facts.append(
@@ -209,7 +215,7 @@ def _extract_facts_from_grid(
     return facts, warnings, n_tags_applied, False
 
 
-def _grid_has_colored_cells(grid) -> bool:
+def _grid_has_colored_cells(grid: StyledGrid) -> bool:
     """该网格是否含「可靠着色」的格（resolved_rgb 非空且非条件格式）。
 
     用于判断文件确有颜色编码需翻译成 tag —— 若此时 scope 无 active 颜色映射，
@@ -220,10 +226,10 @@ def _grid_has_colored_cells(grid) -> bool:
 
 def _ingest_grids(
     report: IngestReport,
-    grids,
-    store,
-    registry,
-    queue,
+    grids: Sequence[StyledGrid],
+    store: FactStore,
+    registry: MappingRegistry,
+    queue: ReviewQueue,
     *,
     dry_run: bool,
     extractor_version: str,
@@ -258,9 +264,9 @@ def _ingest_grids(
 
     all_facts: list[Fact] = []
     needs_color_mapping = False
-    enqueues: list[tuple[str, dict, str]] = []  # (reason, payload, locator)
+    enqueues: list[tuple[str, dict[str, Any], str]] = []  # (reason, payload, locator)
     any_entity_resolved = False
-    unattributable_grids: list = []  # 实体不可解析但确含数据的表（待文件级裁决）
+    unattributable_grids: list[StyledGrid] = []  # 实体不可解析但确含数据的表（待文件级裁决）
     for grid in grids:
         # grid 级告警（条件格式 / 来源不可靠等）汇聚进报告。
         report.warnings.extend(grid.warnings)
@@ -327,14 +333,14 @@ def _ingest_grids(
 
 def ingest_excel(
     path: str | Path,
-    store,
-    registry,
-    queue,
+    store: FactStore,
+    registry: MappingRegistry,
+    queue: ReviewQueue,
     *,
     dry_run: bool = False,
     extractor_version: str = "xlsx_styled@1",
-    manifest=None,
-    batch_id=None,
+    manifest: ManifestStore | None = None,
+    batch_id: str | None = None,
 ) -> IngestReport:
     """编排单个 xlsx 的端到端 ingestion，返回 IngestReport。
 
@@ -402,13 +408,13 @@ _EXTRACTOR_BY_SUFFIX = {
 
 def ingest_file(
     path: str | Path,
-    store,
-    registry,
-    queue,
+    store: FactStore,
+    registry: MappingRegistry,
+    queue: ReviewQueue,
     *,
     dry_run: bool = False,
-    manifest=None,
-    batch_id=None,
+    manifest: ManifestStore | None = None,
+    batch_id: str | None = None,
     valid_as_of: str | None = None,
 ) -> IngestReport:
     """统一多格式分发入口：按后缀把文件路由到对应抽取器并复用共享入库逻辑。
@@ -480,7 +486,14 @@ def ingest_file(
 
 
 def _ingest_pdf(
-    report, path, store, registry, queue, *, dry_run: bool, valid_as_of: str | None = None
+    report: IngestReport,
+    path: Path,
+    store: FactStore,
+    registry: MappingRegistry,
+    queue: ReviewQueue,
+    *,
+    dry_run: bool,
+    valid_as_of: str | None = None,
 ) -> None:
     """PDF 分支：先分诊路由，再决定走数字抽取入库还是越界入复核。"""
     decision = pdf_router.route(str(path))
@@ -533,7 +546,14 @@ def _ingest_pdf(
     )
 
 
-def _enqueue_or_count(report, queue, dry_run, reason, payload, locator) -> None:
+def _enqueue_or_count(
+    report: IngestReport,
+    queue: ReviewQueue,
+    dry_run: bool,
+    reason: str,
+    payload: dict[str, Any],
+    locator: str,
+) -> None:
     """统一入队入口：dry_run 时只算报告不写队列（沿用「只看不动」硬约定）。"""
     if dry_run:
         return
@@ -541,7 +561,15 @@ def _enqueue_or_count(report, queue, dry_run, reason, payload, locator) -> None:
     report.n_enqueued_review += 1
 
 
-def _record_manifest(report, path, manifest, batch_id, file_type, *, failed=False) -> None:
+def _record_manifest(
+    report: IngestReport,
+    path: Path,
+    manifest: ManifestStore | None,
+    batch_id: str | None,
+    file_type: str,
+    *,
+    failed: bool = False,
+) -> None:
     """按真实格式把本文件登记进批次台账（manifest/batch_id 任一缺失则跳过）。"""
     if manifest is None or batch_id is None:
         return

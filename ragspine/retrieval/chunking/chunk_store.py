@@ -9,6 +9,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from ragspine.retrieval.chunking.chunking import Chunk
 
@@ -198,7 +199,7 @@ class ChunkStore:
         row = self._conn.execute(f"SELECT COUNT(*) FROM narrative_chunk{where}").fetchone()
         return int(row[0])
 
-    def execute_read(self, sql: str, params: tuple = ()) -> list[sqlite3.Row]:
+    def execute_read(self, sql: str, params: tuple[Any, ...] = ()) -> list[sqlite3.Row]:
         """只读查询入口：跑参数化 SELECT 返回行列表（与 fact_store 约定一致）。"""
         return self._conn.execute(sql, params).fetchall()
 

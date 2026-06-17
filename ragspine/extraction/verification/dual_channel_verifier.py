@@ -13,6 +13,20 @@
 """
 
 from dataclasses import dataclass
+from typing import Protocol
+
+
+class _ReviewQueue(Protocol):
+    """双通道校验所需的入队接口（与 review_queue.ReviewQueue.enqueue 对齐）。"""
+
+    def enqueue(
+        self,
+        reason: str,
+        payload: dict[str, object],
+        locator: str,
+        priority: int = ...,
+    ) -> int: ...
+
 
 # 入队原因（与 review_queue 约定一致）。
 REASON_CONFLICT = "dual_channel_conflict"
@@ -45,7 +59,7 @@ class ChannelFact:
     source_locator: str
     channel_name: str
 
-    def dim_key(self) -> tuple:
+    def dim_key(self) -> tuple[str, str, str, str, str]:
         """返回用于跨通道对齐的维度键（不含 value / locator / channel_name）。"""
         return (
             self.metric_code,
@@ -71,10 +85,10 @@ class VerificationResult:
         n_enqueued:    实际入队的条数（冲突 + 单通道独有，仅在给了 queue 时 > 0）。
     """
 
-    agreed: list = None
-    conflicts: list = None
-    only_in_a: list = None
-    only_in_b: list = None
+    agreed: list[ChannelFact] | None = None
+    conflicts: list[dict[str, object]] | None = None
+    only_in_a: list[ChannelFact] | None = None
+    only_in_b: list[ChannelFact] | None = None
     n_auto_passed: int = 0
     n_enqueued: int = 0
 
@@ -92,7 +106,7 @@ class VerificationResult:
 def verify(
     facts_a: list[ChannelFact],
     facts_b: list[ChannelFact],
-    queue=None,
+    queue: _ReviewQueue | None = None,
     tolerance: float = 0.0,
 ) -> VerificationResult:
     """对两通道事实做维度键对齐的交叉校验。
@@ -109,10 +123,23 @@ def verify(
 
     返回 VerificationResult（n_auto_passed=len(agreed)、n_enqueued=实际入队数）。
     """
-    by_key_a: dict[tuple, ChannelFact] = {f.dim_key(): f for f in facts_a}
-    by_key_b: dict[tuple, ChannelFact] = {f.dim_key(): f for f in facts_b}
+    by_key_a: dict[tuple[str, str, str, str, str], ChannelFact] = {
+        f.dim_key(): f for f in facts_a
+    }
+    by_key_b: dict[tuple[str, str, str, str, str], ChannelFact] = {
+        f.dim_key(): f for f in facts_b
+    }
 
     result = VerificationResult()
+    # __post_init__ 保证以下列表均已初始化为非 None。
+    agreed = result.agreed
+    conflicts = result.conflicts
+    only_in_a = result.only_in_a
+    only_in_b = result.only_in_b
+    assert agreed is not None
+    assert conflicts is not None
+    assert only_in_a is not None
+    assert only_in_b is not None
     n_enqueued = 0
 
     # 两侧共有的维度键：在容差内放行，否则记冲突（按需入队）。
@@ -122,10 +149,10 @@ def verify(
         fa = by_key_a[key]
         fb = by_key_b[key]
         if abs(fa.value - fb.value) <= tolerance:
-            result.agreed.append(fa)
+            agreed.append(fa)
             continue
 
-        detail = {
+        detail: dict[str, object] = {
             "dim_key": list(key),
             "channel_a": fa.channel_name,
             "value_a": fa.value,
@@ -143,13 +170,13 @@ def verify(
             )
             detail["queue_item_id"] = item_id
             n_enqueued += 1
-        result.conflicts.append(detail)
+        conflicts.append(detail)
 
     # 仅 A 侧独有。
     for key, fa in by_key_a.items():
         if key in by_key_b:
             continue
-        result.only_in_a.append(fa)
+        only_in_a.append(fa)
         if queue is not None:
             queue.enqueue(
                 reason=REASON_SINGLE_ONLY,
@@ -163,7 +190,7 @@ def verify(
     for key, fb in by_key_b.items():
         if key in by_key_a:
             continue
-        result.only_in_b.append(fb)
+        only_in_b.append(fb)
         if queue is not None:
             queue.enqueue(
                 reason=REASON_SINGLE_ONLY,
@@ -173,12 +200,12 @@ def verify(
             )
             n_enqueued += 1
 
-    result.n_auto_passed = len(result.agreed)
+    result.n_auto_passed = len(agreed)
     result.n_enqueued = n_enqueued
     return result
 
 
-def _single_payload(fact: ChannelFact) -> dict:
+def _single_payload(fact: ChannelFact) -> dict[str, object]:
     """单通道独有项的入队载荷：含该侧维度键、值、locator、channel_name。"""
     return {
         "dim_key": list(fact.dim_key()),
