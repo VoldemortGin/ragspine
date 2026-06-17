@@ -1,0 +1,66 @@
+[project]
+name = "rag-spine"
+version = "0.1.0"
+description = "RAGSpine — 结构化数字通路 MVP（确定性事实抽取 + 参数化查询）"
+requires-python = ">=3.10"
+dependencies = [
+    "python-pptx>=0.6.23",
+    "openpyxl>=3.1.0",
+    "rootutils>=1.0.7",
+    "pypdfium2>=5.0",
+    # company profile TOML 读取：3.11+ 用 stdlib tomllib（无需此包），仅 3.10 需 tomli。
+    "tomli>=2.0; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    # PDF fixture 生成（scripts/make_fixtures_pdf.py 绘制用，BSD-3）。
+    "reportlab>=4.0",
+    # 文档站构建（scripts/build_docs.py，md→HTML，BSD）。
+    "markdown>=3.5",
+]
+# 二期 PDF 线的重依赖（数字型 PDF 表格解析），绿色实现阶段才安装。
+pdf = [
+    "docling>=2.0.0",
+]
+# 三期扫描线的重依赖（扫描型 PDF OCR/VLM 抽取），仅在 Ubuntu+NVIDIA GPU 上的
+# 真实集成测试阶段安装。注意：paddlepaddle-gpu 需按官方指引在 Ubuntu 上单独装
+# （CUDA 版本相关，不在此声明，避免在非目标平台误装）。
+ocr = [
+    "paddleocr>=3.0",
+]
+# Agent 编排层接真实 Claude 时安装（mock 模式不需要，SDK 延迟 import）。
+# openai：OpenAIEmbeddingBackend（src/embedding_backends）用，同样延迟 import。
+llm = [
+    "anthropic>=0.40.0",
+    "openai>=1.0",
+]
+# 通用 SentenceTransformer 向量后端（默认 Qwen3-Embedding-0.6B）。
+# 延迟 import：不装也能 import 模块、跑离线/纯 BM25 默认；transformers/torch 由其带入。
+# 真实模型加载/编码在 GPU 盒子上跑（pytest -m gpu），不在离线单测内。
+embed = [
+    "sentence-transformers>=3.0",
+]
+# 服务层：FastAPI HTTP 层 + RQ/Redis 异步任务队列（docs/09 PRD）。
+# rq/redis 延迟 import（RQQueue 内），不装也能 import task_queue、用 FakeQueue 跑离线测试。
+# httpx 供 fastapi.testclient 的 TestClient 使用（服务层测试必需）。
+service = [
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    "httpx>=0.27",
+    "rq>=1.16",
+    "redis>=5.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ragspine"]
+
+[tool.pytest.ini_options]
+markers = [
+    "gpu: 需要 Ubuntu+NVIDIA GPU 与真实 OCR 模型，本地默认跳过",
+]

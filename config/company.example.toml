@@ -1,0 +1,52 @@
+# 通用 home 公司 profile 模板（虚构占位，零 specifics）。
+# 复制为 config/company.toml 并按你的部署改写：home 公司身份、实体同义词、
+# 默认地理口径、外部 / 竞品实体清单。代码不硬编码任何公司名——全部读这里。
+
+[home]
+company_name = "YourCo"
+entity_code = "YOURCO_GROUP"
+
+# home 实体同义词：别名（小写 / 缩写 / 本地语言）→ 受控 entity_code。
+[home.synonyms]
+"yourco group" = "YOURCO_GROUP"
+"yourco" = "YOURCO_GROUP"
+"group" = "YOURCO_GROUP"
+"yourco north" = "YOURCO_NORTH"
+"north" = "YOURCO_NORTH"
+"yourco south" = "YOURCO_SOUTH"
+"south" = "YOURCO_SOUTH"
+# 受控代码本身可直接传入（已归一的查询参数）。
+"yourco_group" = "YOURCO_GROUP"
+"yourco_north" = "YOURCO_NORTH"
+"yourco_south" = "YOURCO_SOUTH"
+
+# 实体默认地理口径：entity_code → geography。
+[home.geography]
+YOURCO_GROUP = "GLOBAL"
+YOURCO_NORTH = "NORTH"
+YOURCO_SOUTH = "SOUTH"
+
+# home 实体展示名：entity_code → 用户可见名。表现层文案（澄清假设/收窄项、
+# 系统 prompt、tool schema 示例）由此派生，不再硬编码公司名。
+[home.labels]
+YOURCO_GROUP = "YourCo Group"
+YOURCO_NORTH = "YourCo North"
+YOURCO_SOUTH = "YourCo South"
+
+# 外部 / 竞品实体清单：别名 → 展示名。命中即拒答并提议改查 home 等价口径。
+[external_entities]
+"globex" = "Globex"
+"initech" = "Initech"
+"umbrella" = "Umbrella Corp"
+"soylent" = "Soylent"
+
+# 叙事入库的确定性敏感度分级规则（通用占位，按你的部署改写）。漏标 = 泄露，故文件名/
+# 正文命中受限信号即升级 RESTRICTED（出域过滤随后剔除）。default_level 与 strict 开关
+# 保守默认：无信号文档落 INTERNAL，普通报告不被误升级。strict 开关打开则一切未分类升级。
+[sensitivity]
+default_level = "INTERNAL"
+escalate_unknown_to_restricted = false
+# 文件名/路径命中任一即 RESTRICTED（大小写不敏感子串）。
+restricted_filename_patterns = ["board_minutes", "exec_comp", "performance_review"]
+# 正文命中任一即 RESTRICTED（大小写不敏感子串）。
+restricted_keywords = ["board_minutes", "exec_comp", "绩效"]

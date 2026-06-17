@@ -1,0 +1,16 @@
+{"doc_id": "HK_REVENUE_ZH.pptx", "text": "香港业务营收持续增长，主要由代理渠道与高净值客群贡献。", "language": "zh", "entity": "ACME_HK", "geography": "HK"}
+{"doc_id": "CN_REVENUE_ZH.pptx", "text": "中国内地营收受银保渠道扩张与代理人产能提升驱动。", "language": "zh", "entity": "ACME_CN", "geography": "CN"}
+{"doc_id": "GRP_PROFIT_ZH.pptx", "text": "集团营运利润稳步上升，反映各市场承保与投资表现改善。", "language": "zh", "entity": "ACME_GROUP", "geography": "ASIA"}
+{"doc_id": "HK_NEWSALES_ZH.pptx", "text": "香港新签金额同比上升，长期储蓄型产品需求旺盛。", "language": "zh", "entity": "ACME_HK", "geography": "HK"}
+{"doc_id": "GRP_ROE_ZH.pptx", "text": "集团股东权益回报率维持双位数，资本配置效率持续提升。", "language": "zh", "entity": "ACME_GROUP", "geography": "ASIA"}
+{"doc_id": "CN_EV_ZH.pptx", "text": "中国内地内含价值增长，新业务贡献与运营经验偏差均为正向。", "language": "zh", "entity": "ACME_CN", "geography": "CN"}
+{"doc_id": "SOLV_EN.pptx", "text": "Group solvency remained well above the regulatory minimum, with a strong capital buffer.", "language": "en", "entity": "ACME_GROUP", "geography": "ASIA"}
+{"doc_id": "DIVIDEND_EN.pptx", "text": "The board proposed a higher final dividend, reflecting resilient free surplus generation.", "language": "en", "entity": "ACME_GROUP", "geography": "ASIA"}
+{"doc_id": "CLAIMS_EN.pptx", "text": "Claims experience normalised after the pandemic, improving the underwriting margin.", "language": "en", "entity": "ACME_GROUP", "geography": "ASIA"}
+{"doc_id": "HK_REG_ZH.pptx", "text": "香港监管动态：强积金 MPFA 新规要求基金披露管理费明细。", "language": "zh", "entity": "ACME_HK", "geography": "HK"}
+{"doc_id": "CN_REG_ZH.pptx", "text": "中国内地监管收紧，人身险产品预定利率下调，渠道佣金受到限制。", "language": "zh", "entity": "ACME_CN", "geography": "CN"}
+{"doc_id": "EU_REG_EN.pptx", "text": "European regulators tightened disclosure rules on sustainability reporting for insurers.", "language": "en", "entity": "ACME_GROUP", "geography": "ASIA"}
+{"doc_id": "SPORTS_ZH.pptx", "text": "上周末公司球队参加了城市羽毛球友谊赛，现场气氛热烈。", "language": "zh", "entity": "ACME_GROUP", "geography": "ASIA"}
+{"doc_id": "CANTEEN_ZH.pptx", "text": "员工食堂本月推出新菜单，并延长了晚餐供应时间。", "language": "zh", "entity": "ACME_GROUP", "geography": "ASIA"}
+{"doc_id": "WEATHER_EN.pptx", "text": "A typhoon signal was hoisted on Friday and the office switched to remote work.", "language": "en", "entity": "ACME_GROUP", "geography": "ASIA"}
+{"doc_id": "ITSYS_EN.pptx", "text": "The internal IT system will undergo scheduled maintenance over the weekend.", "language": "en", "entity": "ACME_GROUP", "geography": "ASIA"}

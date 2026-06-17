@@ -1,0 +1,29 @@
+# Virtualenvs & caches
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.pyc
+*.egg-info/
+build/
+dist/
+
+# data/ holds regenerable artifacts (synthetic fixtures, sqlite DBs) — ignore its
+# contents, but KEEP the directory present and force-track the version-controlled
+# golden evaluation sets. NOTE: this must be `data/*` (ignore contents), not `data/`
+# (ignore the dir) — git won't descend into a wholesale-excluded directory, so a bare
+# `!data/golden/` would have no effect.
+data/*
+!data/golden/
+!data/.gitkeep
+
+# Claude Code: share project settings, ignore local/personal overrides
+.claude/settings.local.json
+.claude/*.local.json
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

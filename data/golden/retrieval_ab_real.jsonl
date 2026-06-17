@@ -1,0 +1,12 @@
+{"query": "香港 营收 增长", "relevant_chunk_ids": ["HK_REVENUE_ZH.pptx#c0"], "type": "lexical"}
+{"query": "强积金 管理费 披露 新规", "relevant_chunk_ids": ["HK_REG_ZH.pptx#c0"], "type": "lexical"}
+{"query": "revenue growth in Hong Kong", "relevant_chunk_ids": ["HK_REVENUE_ZH.pptx#c0"], "type": "crosslingual_en2zh"}
+{"query": "mainland China revenue drivers", "relevant_chunk_ids": ["CN_REVENUE_ZH.pptx#c0"], "type": "crosslingual_en2zh"}
+{"query": "group operating profit trend", "relevant_chunk_ids": ["GRP_PROFIT_ZH.pptx#c0"], "type": "crosslingual_en2zh"}
+{"query": "集团偿付能力充足，资本缓冲强劲", "relevant_chunk_ids": ["SOLV_EN.pptx#c0"], "type": "crosslingual_zh2en"}
+{"query": "董事会建议提高末期股息", "relevant_chunk_ids": ["DIVIDEND_EN.pptx#c0"], "type": "crosslingual_zh2en"}
+{"query": "理赔经验恢复正常，承保利润改善", "relevant_chunk_ids": ["CLAIMS_EN.pptx#c0"], "type": "crosslingual_zh2en"}
+{"query": "欧洲监管收紧可持续信息披露要求", "relevant_chunk_ids": ["EU_REG_EN.pptx#c0"], "type": "crosslingual_zh2en"}
+{"query": "EV 提升的主要贡献来源", "relevant_chunk_ids": ["CN_EV_ZH.pptx#c0"], "type": "paraphrase_zh"}
+{"query": "权益回报率保持两位数", "relevant_chunk_ids": ["GRP_ROE_ZH.pptx#c0"], "type": "paraphrase_zh"}
+{"query": "mainland life insurance pricing rate cut and commission caps", "relevant_chunk_ids": ["CN_REG_ZH.pptx#c0"], "type": "crosslingual_en2zh"}

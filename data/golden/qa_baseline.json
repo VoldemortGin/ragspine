@@ -1,0 +1,22 @@
+{
+  "tool": {
+    "metrics": {
+      "numeric_accuracy": 1.0,
+      "citation_validity": 1.0,
+      "refusal_appropriateness": 1.0,
+      "clarification_appropriateness": 1.0
+    },
+    "fabrication_count": 0,
+    "n_cases": 41
+  },
+  "agent": {
+    "metrics": {
+      "numeric_accuracy": 1.0,
+      "citation_validity": 1.0,
+      "refusal_appropriateness": 1.0,
+      "clarification_appropriateness": 1.0
+    },
+    "fabrication_count": 0,
+    "n_cases": 41
+  }
+}

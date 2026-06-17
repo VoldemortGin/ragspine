@@ -1,0 +1,251 @@
+"""指标事实表 fact_metric 的存储层（stdlib sqlite3）。
+
+确定性抽取出的每个数值落成一条 Fact，带完整数据血缘（源文件 + 定位串）。
+查询走参数化 SQL，命中即确定值，未命中即"查不到"，不做任何插值/推断。
+
+v2（多模态抽取期）：Fact 增加可选的样式语义与版本血缘字段
+（tags / source_file_hash / extractor_version / mapping_version / confidence /
+review_status），schema 自动迁移补列；query() 默认只返回 review_status 可见的数据。
+所有新字段都有默认值，旧调用（不传新字段）行为不变。
+"""
+
+import json
+import sqlite3
+from dataclasses import dataclass, field, fields
+from datetime import datetime, timezone
+from pathlib import Path
+
+# review_status 取值：默认确定性抽取自动通过；进复核 / 被拦截 / 被驳回不可见。
+REVIEW_AUTO_APPROVED = "auto_approved"
+REVIEW_PENDING = "pending"
+REVIEW_APPROVED = "approved"
+REVIEW_REJECTED = "rejected"
+REVIEW_BLOCKED = "blocked"
+
+# 默认对查询可见的状态（确定性抽取与人工通过）。
+VISIBLE_REVIEW_STATUSES = (REVIEW_AUTO_APPROVED, REVIEW_APPROVED)
+
+
+@dataclass
+class Fact:
+    """一条指标事实：维度 + 数值 + 血缘（+ v2 样式语义与版本血缘）。"""
+
+    metric_code: str
+    entity: str
+    geography: str
+    channel: str
+    period_type: str
+    period: str
+    value: float
+    unit: str
+    source_doc_id: str
+    source_locator: str
+    # --- v2 扩展（全部可选，默认保持旧行为）------------------------------
+    tags: dict = field(default_factory=dict)
+    source_file_hash: str | None = None
+    extractor_version: str | None = None
+    mapping_version: int | None = None
+    confidence: float | None = None
+    review_status: str = REVIEW_AUTO_APPROVED
+    # --- provenance 时效列（默认 None：既有构造处零改动、答案字节级不变）--------
+    # valid_as_of —— 事实「截至 / 生效」业务日期（调用方 / CLI 提供，可空）。
+    # ingested_at —— 写入时间戳（store 在 upsert 时统一盖 UTC ISO；此处仅读回填充）。
+    valid_as_of: str | None = None
+    ingested_at: str | None = None
+
+
+# 基础列（与原始 schema 顺序一致，旧测试依赖）。
+_BASE_COLUMNS = [
+    "metric_code",
+    "entity",
+    "geography",
+    "channel",
+    "period_type",
+    "period",
+    "value",
+    "unit",
+    "source_doc_id",
+    "source_locator",
+]
+# v2 新增列（迁移时按需 ALTER 补上）。
+_V2_COLUMNS = [
+    "tags",
+    "source_file_hash",
+    "extractor_version",
+    "mapping_version",
+    "confidence",
+    "review_status",
+    # provenance 时效列（与 v2 同款幂等 ALTER 补列，旧库平滑迁移）。
+    "valid_as_of",
+    "ingested_at",
+]
+_COLUMNS = [f.name for f in fields(Fact)]
+
+
+class FactStore:
+    """fact_metric 表的读写。维度组合唯一，重复入库走 upsert 覆盖。"""
+
+    def __init__(self, db_path: str | Path):
+        self.db_path = str(db_path)
+        self._conn = sqlite3.connect(self.db_path)
+        self._conn.row_factory = sqlite3.Row
+
+    def init_schema(self) -> None:
+        """建表 + 唯一索引（同一指标×实体×期间×渠道只允许一条）+ v2 迁移补列。"""
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS fact_metric (
+                metric_code   TEXT NOT NULL,
+                entity        TEXT NOT NULL,
+                geography     TEXT NOT NULL,
+                channel       TEXT NOT NULL,
+                period_type   TEXT NOT NULL,
+                period        TEXT NOT NULL,
+                value         REAL NOT NULL,
+                unit          TEXT NOT NULL,
+                source_doc_id TEXT NOT NULL,
+                source_locator TEXT NOT NULL
+            )
+            """
+        )
+        self._conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_fact_metric
+            ON fact_metric (metric_code, entity, period_type, period, channel)
+            """
+        )
+        self._migrate_v2()
+        self._conn.commit()
+
+    def _migrate_v2(self) -> None:
+        """幂等地为既有表补上 v2 列（已有则跳过）。"""
+        existing = {row["name"] for row in self._conn.execute("PRAGMA table_info(fact_metric)")}
+        coldefs = {
+            "tags": "TEXT NOT NULL DEFAULT '{}'",
+            "source_file_hash": "TEXT",
+            "extractor_version": "TEXT",
+            "mapping_version": "INTEGER",
+            "confidence": "REAL",
+            "review_status": f"TEXT NOT NULL DEFAULT '{REVIEW_AUTO_APPROVED}'",
+            "valid_as_of": "TEXT",
+            "ingested_at": "TEXT",
+        }
+        for col in _V2_COLUMNS:
+            if col not in existing:
+                self._conn.execute(f"ALTER TABLE fact_metric ADD COLUMN {col} {coldefs[col]}")
+
+    def upsert_facts(self, facts: list[Fact], ingested_at: str | None = None) -> int:
+        """批量写入；唯一键冲突时覆盖数值与血缘（含 v2 / 时效字段）。返回写入条数。
+
+        ingested_at：本批入库时间戳（审计用，store 统一盖、调用方不能伪造）。
+        缺省（None）时盖当下 UTC ISO；显式传入时以传入值为准（可测）。
+        Fact 上即便自带 ingested_at 也被此戳覆盖（写入以 store 为准）。
+        """
+        stamp = ingested_at or datetime.now(timezone.utc).isoformat()
+        cols = ", ".join(_COLUMNS)
+        placeholders = ", ".join(["?"] * len(_COLUMNS))
+        update_cols = (
+            "geography",
+            "value",
+            "unit",
+            "source_doc_id",
+            "source_locator",
+            "tags",
+            "source_file_hash",
+            "extractor_version",
+            "mapping_version",
+            "confidence",
+            "review_status",
+            "valid_as_of",
+            "ingested_at",
+        )
+        updates = ", ".join(f"{c}=excluded.{c}" for c in update_cols)
+        sql = (
+            f"INSERT INTO fact_metric ({cols}) VALUES ({placeholders}) "
+            f"ON CONFLICT (metric_code, entity, period_type, period, channel) "
+            f"DO UPDATE SET {updates}"
+        )
+        rows = [self._to_row(f, ingested_at=stamp) for f in facts]
+        self._conn.executemany(sql, rows)
+        self._conn.commit()
+        return len(rows)
+
+    def query(
+        self,
+        metric_code: str,
+        entity: str,
+        period_type: str,
+        period: str,
+        channel: str = "TOTAL",
+        review_statuses: tuple[str, ...] | None = VISIBLE_REVIEW_STATUSES,
+    ) -> list[Fact]:
+        """参数化精确查询，返回匹配的 Fact 列表（命中 0 或 1 条）。
+
+        review_statuses：默认只返回可见状态（auto_approved / approved）；
+        传 None 放开全部状态（用于审计 / 复核视图）。
+        """
+        sql = (
+            "SELECT * FROM fact_metric "
+            "WHERE metric_code = ? AND entity = ? AND period_type = ? "
+            "AND period = ? AND channel = ?"
+        )
+        params: list = [metric_code, entity, period_type, period, channel]
+        if review_statuses is not None:
+            marks = ", ".join(["?"] * len(review_statuses))
+            sql += f" AND review_status IN ({marks})"
+            params.extend(review_statuses)
+        cur = self._conn.execute(sql, params)
+        return [self._from_row(row) for row in cur.fetchall()]
+
+    def count(self) -> int:
+        """事实总条数。"""
+        return self._conn.execute("SELECT COUNT(*) FROM fact_metric").fetchone()[0]
+
+    def execute_read(self, sql: str, params: tuple = ()) -> list[sqlite3.Row]:
+        """只读查询入口：跑参数化 SELECT 返回行列表（供台账/指标等观测面复用，
+        免去外部直访私有连接）。"""
+        return self._conn.execute(sql, params).fetchall()
+
+    def delete_by_source_doc(self, source_doc_id: str) -> int:
+        """按源文件一键撤下其全部事实（不论 review_status），返回删除条数。
+
+        story #32：发现源文件有误时快速止血，物理删除而非隐藏。
+        幂等：对不存在的 source_doc_id 调用返回 0、不报错。
+        """
+        cur = self._conn.execute(
+            "DELETE FROM fact_metric WHERE source_doc_id = ?", (source_doc_id,)
+        )
+        self._conn.commit()
+        return cur.rowcount
+
+    def close(self) -> None:
+        self._conn.close()
+
+    # --- 行 <-> Fact 序列化（tags 走 JSON）--------------------------------
+
+    @staticmethod
+    def _to_row(fact: Fact, ingested_at: str | None = None) -> tuple:
+        values = []
+        for col in _COLUMNS:
+            if col == "ingested_at":
+                # store 盖的审计戳胜出（覆盖 Fact 自带值），写入以 store 为准。
+                values.append(ingested_at)
+                continue
+            val = getattr(fact, col)
+            if col == "tags":
+                val = json.dumps(val or {}, ensure_ascii=False)
+            values.append(val)
+        return tuple(values)
+
+    @staticmethod
+    def _from_row(row: sqlite3.Row) -> "Fact":
+        data = {}
+        keys = set(row.keys())
+        for col in _COLUMNS:
+            if col not in keys:
+                continue
+            val = row[col]
+            if col == "tags":
+                val = json.loads(val) if val else {}
+            data[col] = val
+        return Fact(**data)
