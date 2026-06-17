@@ -25,11 +25,12 @@ from ragspine.agent.intent import (
     ROUTE_COMPOSITE,
     ROUTE_NARRATIVE,
     ClarificationResult,
+    IntentParser,
     ParsedIntent,
+    RuleIntentParser,
     SubTask,
     clarify_scope,
     expand_subtasks,
-    parse_intent,
 )
 from ragspine.agent.llm_provider import (
     NARRATIVE_PROMPT_PREFIX,
@@ -428,16 +429,20 @@ def answer_question(
     *,
     reference_date: date | None = None,
     narrative_retriever: NarrativeRetriever | None = None,
+    intent_parser: IntentParser | None = None,
 ) -> AgentResult:
     """单条问题端到端编排入口。
 
     reference_date：相对期间（去年/上半年…）的换算基准，默认今天；
-    narrative_retriever：叙事检索实现（duck-typed 注入），缺省时叙事路坦白降级。
+    narrative_retriever：叙事检索实现（duck-typed 注入），缺省时叙事路坦白降级；
+    intent_parser：意图解析器（ADR 0010 可插拔），缺省用零-LLM 规则实现。
+        无论用哪个解析器，澄清网关里的安全门都从 raw_question 独立复核越权/竞品。
     """
     request_id = new_request_id()
     ctx = _TraceCtx()
     ref = reference_date or date.today()
-    intent = parse_intent(question, reference_date=ref)
+    parser = intent_parser or RuleIntentParser()
+    intent = parser.parse(question, reference_date=ref)
     clar = clarify_scope(intent, reference_date=ref)
 
     # 外部/竞品实体越权：最前置拒答，绝不调 tool/检索/LLM，绝不输出 home 公司数字

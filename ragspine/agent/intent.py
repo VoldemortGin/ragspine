@@ -13,7 +13,12 @@ import re
 from dataclasses import dataclass, field
 from datetime import date
 from itertools import product
+from typing import Protocol, runtime_checkable
 
+from ragspine.agent.security_gate import (
+    SECURITY_REFUSE_OUT_OF_SCOPE,
+    SecurityGate,
+)
 from ragspine.common.company_profile import load_company_profile
 from ragspine.common.glossary import (
     ENTITY_SYNONYMS,
@@ -128,23 +133,13 @@ def _match_longest(text: str, synonyms: dict[str, str]) -> str | None:
     return None
 
 
-def _match_external(text: str) -> tuple[str | None, str]:
-    """外部/竞品实体最长匹配 + 命中遮蔽。
+def _security_gate() -> SecurityGate:
+    """以当前模块级 profile + 外部清单构建安全门（按调用即读，兼容运行期换公司）。
 
-    按外部别名长度降序在已归一文本中找首个命中，整体吃掉（如"中国竞安"长于"竞安"），
-    返回 (展示名, 遮蔽后文本)。遮蔽= 把命中子串替换为等长空格，保持后续 home 实体
-    匹配的位置语义，且让残留文本不再含可泄露成 home 实体的子串（防"中国"碰撞）。
-    未命中返回 (None, 原文本)。
+    检测数据沿用 glossary 的 EXTERNAL_ENTITY_SYNONYMS（外部/竞品清单），home 名取
+    本模块 _PROFILE——两者均为安全决策所需的 DomainProfile 切片。详见 security_gate.py。
     """
-    for alias in sorted(EXTERNAL_ENTITY_SYNONYMS, key=len, reverse=True):
-        if not alias:
-            continue
-        pos = text.find(alias.lower())
-        if pos >= 0:
-            end = pos + len(alias)
-            masked = text[:pos] + " " * len(alias) + text[end:]
-            return EXTERNAL_ENTITY_SYNONYMS[alias], masked
-    return None, text
+    return SecurityGate(EXTERNAL_ENTITY_SYNONYMS, _PROFILE.home_company_name)
 
 
 def _match_all(text: str, synonyms: dict[str, str]) -> list[str]:
@@ -255,7 +250,9 @@ def parse_intent(question: str, reference_date: date | None = None) -> ParsedInt
     # 先做外部/竞品实体最长匹配并遮蔽命中子串，再在遮蔽后文本上做 home 实体匹配：
     # 这样"中国竞安"命中外部"竞安"（实命中更长的"中国竞安"）遮蔽后不再有"中国"
     # 泄露成 ACME_CN；standalone"中国"无外部命中、遮蔽为空，照常解析为 home 实体。
-    external_entity, entity_text = _match_external(text)
+    # 检测/遮蔽逻辑集中在安全门（唯一真源），意图层只消费其结果。
+    _screen = _security_gate().detect(text)
+    external_entity, entity_text = _screen.external_entity, _screen.masked_text
 
     metric = _match_longest(text, METRIC_SYNONYMS)
     entity = _match_longest(entity_text, ENTITY_SYNONYMS)
@@ -287,19 +284,15 @@ def clarify_scope(
 ) -> ClarificationResult:
     """澄清网关：结构化/复合路线检查槽位完整性，按"默认先答"原则产出假设或反问。"""
     # 外部/竞品实体越权检查最前置（先于 narrative 早返回、先于 metric 缺失检查）：
-    # 无论哪条路我们都没有外部数据，命中即拒答并提议改查 home 等价口径，
-    # 绝不把 home 公司数字当成外部主体答案输出。
-    if intent.external_entity is not None:
-        home_name = _PROFILE.home_company_name
-        metric_clause = f"的 {intent.metric}" if intent.metric else "的对应数字"
-        message = (
-            f"系统不掌握「{intent.external_entity}」的数据，无法回答该外部/竞品主体的"
-            f"问题。可改查 {home_name}{metric_clause}。"
-        )
+    # 委托确定性安全门，从 raw_question 独立复核——不信任解析器产出的 external 字段，
+    # 这样换上别的意图解析器（如 LLM 后端）也无法绕过越权拒答。命中即拒答并提议改查
+    # home 等价口径，绝不把 home 公司数字当成外部主体答案输出。
+    verdict = _security_gate().screen(raw_question=intent.raw_question, metric=intent.metric)
+    if verdict.decision == SECURITY_REFUSE_OUT_OF_SCOPE:
         return ClarificationResult(
             mode=CLARIFY_OUT_OF_SCOPE_ENTITY,
-            question=message,
-            narrowing_options=[f"改查 {home_name}{metric_clause}"],
+            question=verdict.message,
+            narrowing_options=list(verdict.narrowing_options),
         )
 
     if intent.route == ROUTE_NARRATIVE:
@@ -346,3 +339,34 @@ def clarify_scope(
         assumption_note="；".join(notes),
         narrowing_options=options,
     )
+
+
+# ---------------------------------------------------------------------------
+# IntentParser 协议（ADR 0010）：意图抽取可插拔，安全判定不可插拔。
+# "确定性在该确定处（安全门），灵活在可灵活处（意图）。"
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class IntentParser(Protocol):
+    """意图抽取协议：从问句解析 metric/entity/period/channel + 路由。
+
+    默认实现 RuleIntentParser 为零-LLM、配置驱动的规则解析器（ADR 0009 离线默认）；
+    可选 LLM-classifier 后端按 ADR 0005 作为 extra 后续接入。
+
+    契约：实现【必须】把原始问句填入返回的 ParsedIntent.raw_question——安全门据此
+    独立复核越权/竞品，绝不依赖本协议产出的 external_entity 字段（安全不可托付给可插拔件）。
+    """
+
+    def parse(
+        self, question: str, *, reference_date: date | None = None
+    ) -> ParsedIntent: ...
+
+
+class RuleIntentParser:
+    """默认零-LLM、配置驱动的规则意图解析器（委托模块级 parse_intent）。"""
+
+    def parse(
+        self, question: str, *, reference_date: date | None = None
+    ) -> ParsedIntent:
+        return parse_intent(question, reference_date=reference_date)
