@@ -292,6 +292,7 @@ def _default_profile() -> DomainProfile:
                 label="地理",
                 identity=False,
                 expand=False,
+                default="UNKNOWN",
                 derived_from="entity",
                 derivation=dict(_DEFAULT_ENTITY_GEOGRAPHY),
             ),

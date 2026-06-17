@@ -23,6 +23,7 @@
 实现已完成，dataclass 字段契约保持冻结，行为契约见 tests/ingestion/structured/test_ingestion.py。
 """
 
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,6 +31,7 @@ from typing import Any, cast
 
 from openpyxl.utils import get_column_letter
 
+from ragspine.common.company_profile import DimensionSpec, load_company_profile
 from ragspine.common.glossary import (
     geography_for_entity,
     normalize_entity,
@@ -45,6 +47,36 @@ from ragspine.extraction.routing import pdf_router
 from ragspine.ingestion.review.review_queue import ReviewQueue
 from ragspine.ingestion.structured.ingestion_manifest import ManifestStore
 from ragspine.storage.fact_store import REVIEW_AUTO_APPROVED, Fact, FactStore
+
+# home 领域 profile（声明维度默认值的来源，配置化，不硬编码）。抽取兜底的
+# channel / geography / unit 默认皆从活跃 profile 的维度派生，调用期读取本全局。
+_PROFILE = load_company_profile()
+
+
+def _dim(name: str) -> DimensionSpec | None:
+    """按名取当前 _PROFILE 的维度规格（缺失返回 None）。与 glossary/intent 同形。"""
+    return next((d for d in _PROFILE.dimensions if d.name == name), None)
+
+
+def _channel_default() -> str:
+    """实体未细分渠道时的兜底渠道（金融默认 = 'TOTAL'，取自 channel 维 default）。"""
+    dim = _dim("channel")
+    return (dim.default if dim is not None else None) or "TOTAL"
+
+
+def _geography_default() -> str:
+    """实体未映射到地理时的兜底口径（金融默认 = 'UNKNOWN'，取自 geography 维 default）。"""
+    dim = _dim("geography")
+    return (dim.default if dim is not None else None) or "UNKNOWN"
+
+
+def _default_unit() -> str:
+    """指标无受控单位时的兜底单位：取 metric 维 units 取值的众数（金融默认 = 'USD_M'）。"""
+    dim = _dim("metric")
+    units = dim.units if dim is not None else {}
+    if not units:
+        return "USD_M"
+    return Counter(units.values()).most_common(1)[0][0]
 
 
 @dataclass
@@ -155,7 +187,7 @@ def _extract_facts_from_grid(
         # entity_unresolved=True；第 4 位仅当该表确含可抽取数据（指标×期间×数值）时
         # 报 has_candidate_data，供编排层判断是否「整文件不可归因」入复核（绝不臆造实体）。
         return facts, warnings, n_tags_applied, _grid_has_candidate_data(grid)
-    geography = geography_for_entity(entity) or "UNKNOWN"
+    geography = geography_for_entity(entity) or _geography_default()
 
     # 期间表头：第 1 行 B 列起。
     periods: dict[int, tuple[tuple[str, str], str]] = {}
@@ -183,7 +215,7 @@ def _extract_facts_from_grid(
                     f"sheet={grid.sheet}!A{row}: 无法识别指标 '{metric_label}'，跳过该行"
                 )
             continue
-        unit = unit_for_metric(metric_code) or "USD_M"
+        unit = unit_for_metric(metric_code) or _default_unit()
         for col, ((period_type, period), _raw) in periods.items():
             coord = f"{get_column_letter(col)}{row}"
             value = _coerce_number(_grid_value(grid, col, row))
@@ -197,7 +229,7 @@ def _extract_facts_from_grid(
                     metric_code=metric_code,
                     entity=entity,
                     geography=geography,
-                    channel="TOTAL",
+                    channel=_channel_default(),
                     period_type=period_type,
                     period=period,
                     value=value,
