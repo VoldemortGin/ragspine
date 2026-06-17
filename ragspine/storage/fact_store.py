@@ -25,6 +25,26 @@ REVIEW_BLOCKED = "blocked"
 # 默认对查询可见的状态（确定性抽取与人工通过）。
 VISIBLE_REVIEW_STATUSES = (REVIEW_AUTO_APPROVED, REVIEW_APPROVED)
 
+# 维度袋（dimensions）的保留名：这些名字属于结构/血缘列或样式/版本/时效列，
+# 绝不能被任意维度遮蔽，否则会污染血缘与确定性身份。命中即拒。
+_RESERVED_DIM_NAMES = frozenset(
+    {
+        "value",
+        "unit",
+        "source_doc_id",
+        "source_locator",
+        "tags",
+        "review_status",
+        "dim_key",
+        "source_file_hash",
+        "extractor_version",
+        "mapping_version",
+        "confidence",
+        "valid_as_of",
+        "ingested_at",
+    }
+)
+
 
 @dataclass
 class Fact:
@@ -52,6 +72,22 @@ class Fact:
     # ingested_at —— 写入时间戳（store 在 upsert 时统一盖 UTC ISO；此处仅读回填充）。
     valid_as_of: str | None = None
     ingested_at: str | None = None
+    # --- 任意维度袋（内存态，不入 DB）-----------------------------------
+    # 空时由 __post_init__ 从身份列派生镜像；非空时校验不与保留名冲突。
+    dimensions: dict[str, str] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.dimensions:
+            for k in self.dimensions:
+                if k in _RESERVED_DIM_NAMES:
+                    raise ValueError(f"dimension name {k!r} 与结构/血缘列冲突")
+        else:
+            self.dimensions = {
+                "metric": str(self.metric_code),
+                "entity": str(self.entity),
+                "channel": str(self.channel),
+                "period": f"{self.period_type}{self.period}",
+            }
 
 
 # 基础列（与原始 schema 顺序一致，旧测试依赖）。
@@ -79,7 +115,31 @@ _V2_COLUMNS = [
     "valid_as_of",
     "ingested_at",
 ]
+# Fact 的全部 dataclass 字段名（含 dimensions）。仅供需要读 Fact 字段名处使用；
+# DB I/O 一律走显式列表（_DB_COLUMNS / _from_row 的字段名子集），不被此驱动。
 _COLUMNS = [f.name for f in fields(Fact)]
+# DB 物理列：基础 + v2/时效 + dim_key（dimensions 不入 DB）。upsert/_to_row 走它。
+_DB_COLUMNS = _BASE_COLUMNS + _V2_COLUMNS + ["dim_key"]
+
+
+def _compute_dim_key(fact: Fact) -> str:
+    """从类型化身份列算确定性自然键（不读 dimensions 袋）。
+
+    身份维度 = channel/entity/metric/period；geography 是 identity=False、不入键。
+    period 用 period_type 前缀保证跨 FY/HY/Q 粒度单射
+    （('FY','2024') 与 ('HY','2024') 得到不同 key）。sorted_keys 保证字节稳定。
+    """
+    return json.dumps(
+        {
+            "channel": str(fact.channel),
+            "entity": str(fact.entity),
+            "metric": str(fact.metric_code),
+            "period": f"{fact.period_type}{fact.period}",
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
 
 
 class FactStore:
@@ -104,7 +164,8 @@ class FactStore:
                 value         REAL NOT NULL,
                 unit          TEXT NOT NULL,
                 source_doc_id TEXT NOT NULL,
-                source_locator TEXT NOT NULL
+                source_locator TEXT NOT NULL,
+                dim_key        TEXT
             )
             """
         )
@@ -115,10 +176,15 @@ class FactStore:
             """
         )
         self._migrate_v2()
+        self._conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_fact_dim_key "
+            "ON fact_metric (dim_key)"
+        )
         self._conn.commit()
 
     def _migrate_v2(self) -> None:
-        """幂等地为既有表补上 v2 列（已有则跳过）。"""
+        """幂等地为既有表补上 v2 列与 dim_key 列（已有则跳过）；dim_key 现存
+        NULL 行在同一事务内按该行身份列逐行回填（旧库平滑迁移、非破坏）。"""
         existing = {row["name"] for row in self._conn.execute("PRAGMA table_info(fact_metric)")}
         coldefs = {
             "tags": "TEXT NOT NULL DEFAULT '{}'",
@@ -133,6 +199,31 @@ class FactStore:
         for col in _V2_COLUMNS:
             if col not in existing:
                 self._conn.execute(f"ALTER TABLE fact_metric ADD COLUMN {col} {coldefs[col]}")
+        if "dim_key" not in existing:
+            self._conn.execute("ALTER TABLE fact_metric ADD COLUMN dim_key TEXT")
+        self._backfill_dim_key()
+
+    def _backfill_dim_key(self) -> None:
+        """对 dim_key IS NULL 的行，用该行身份列在 Python 算出 dim_key 并回填。"""
+        rows = self._conn.execute(
+            "SELECT rowid, metric_code, entity, channel, period_type, period "
+            "FROM fact_metric WHERE dim_key IS NULL"
+        ).fetchall()
+        for row in rows:
+            key = json.dumps(
+                {
+                    "channel": str(row["channel"]),
+                    "entity": str(row["entity"]),
+                    "metric": str(row["metric_code"]),
+                    "period": f"{row['period_type']}{row['period']}",
+                },
+                sort_keys=True,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            self._conn.execute(
+                "UPDATE fact_metric SET dim_key = ? WHERE rowid = ?", (key, row["rowid"])
+            )
 
     def upsert_facts(self, facts: list[Fact], ingested_at: str | None = None) -> int:
         """批量写入；唯一键冲突时覆盖数值与血缘（含 v2 / 时效字段）。返回写入条数。
@@ -142,8 +233,8 @@ class FactStore:
         Fact 上即便自带 ingested_at 也被此戳覆盖（写入以 store 为准）。
         """
         stamp = ingested_at or datetime.now(timezone.utc).isoformat()
-        cols = ", ".join(_COLUMNS)
-        placeholders = ", ".join(["?"] * len(_COLUMNS))
+        cols = ", ".join(_DB_COLUMNS)
+        placeholders = ", ".join(["?"] * len(_DB_COLUMNS))
         update_cols = (
             "geography",
             "value",
@@ -162,7 +253,7 @@ class FactStore:
         updates = ", ".join(f"{c}=excluded.{c}" for c in update_cols)
         sql = (
             f"INSERT INTO fact_metric ({cols}) VALUES ({placeholders}) "
-            f"ON CONFLICT (metric_code, entity, period_type, period, channel) "
+            f"ON CONFLICT (dim_key) "
             f"DO UPDATE SET {updates}"
         )
         rows = [self._to_row(f, ingested_at=stamp) for f in facts]
@@ -231,7 +322,11 @@ class FactStore:
     @staticmethod
     def _to_row(fact: Fact, ingested_at: str | None = None) -> tuple[object, ...]:
         values: list[object] = []
-        for col in _COLUMNS:
+        for col in _DB_COLUMNS:
+            if col == "dim_key":
+                # storage-only：从类型化身份列重算，从不读 dimensions 袋。
+                values.append(_compute_dim_key(fact))
+                continue
             if col == "ingested_at":
                 # store 盖的审计戳胜出（覆盖 Fact 自带值），写入以 store 为准。
                 values.append(ingested_at)
@@ -244,9 +339,12 @@ class FactStore:
 
     @staticmethod
     def _from_row(row: sqlite3.Row) -> "Fact":
+        # 只用 Fact 的 18 个 dataclass 字段名（基础 + v2/时效）从 row 取值；
+        # dim_key 是 storage-only（喂进 Fact 会 TypeError），dimensions 由
+        # __post_init__ 重新派生——二者都不回灌进构造。
         data = {}
         keys = set(row.keys())
-        for col in _COLUMNS:
+        for col in _BASE_COLUMNS + _V2_COLUMNS:
             if col not in keys:
                 continue
             val = row[col]
