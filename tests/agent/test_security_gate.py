@@ -66,6 +66,30 @@ def test_detect_other_china_prefixed_competitors_masked_whole():
     assert "中国" not in b.masked_text
 
 
+def test_detect_resists_internal_whitespace_evasion():
+    """对抗：在竞品名内部插入空白（竞 安 / 中国 竞安 / JING CHENG）不得绕过检测；
+    命中后掩码须按原跨度整体抹除，仍不残留"竞安"/"中国"。"""
+    gate = _default_gate()
+    a = gate.detect("竞 安的营收")
+    assert a.external_entity == "竞安(Jingan)"
+    assert "竞安" not in a.masked_text
+    b = gate.detect("中国 竞安的营收")
+    assert b.external_entity == "竞安(Jingan)"
+    assert "竞安" not in b.masked_text
+    assert "中国" not in b.masked_text  # red-line：遮蔽后不得残留 home 词"中国"
+    c = gate.detect("JING CHENG revenue")
+    assert c.external_entity == "Jingcheng"
+
+
+def test_screen_resists_internal_whitespace_evasion():
+    """screen 同样免疫空格绕过：内部加空白的竞品名仍判越权拒答。"""
+    verdict = _default_gate().screen(
+        raw_question="竞 安去年REVENUE多少", metric="REVENUE"
+    )
+    assert verdict.decision == SECURITY_REFUSE_OUT_OF_SCOPE
+    assert verdict.external_entity == "竞安(Jingan)"
+
+
 # --------------------------------------------------------------------------
 # 2) 拒答决策（screen）
 # --------------------------------------------------------------------------

@@ -46,27 +46,51 @@ class SecurityGate:
     def __init__(self, external_entities: dict[str, str], home_company_name: str):
         self._external = dict(external_entities)
         self._home_company_name = home_company_name
-        # 别名按长度降序预排：保证"中国竞安"整体先于"竞安"命中（最长匹配）。
-        self._aliases = sorted((a for a in self._external if a), key=len, reverse=True)
+        # 别名按【去空白后】长度降序预排：保证"中国竞安"整体先于"竞安"命中（最长匹配），
+        # 且与下方空格免疫匹配同口径（按实际字符数比长短，不被别名里的空格干扰）。
+        self._aliases = sorted(
+            (a for a in self._external if self._strip_ws(a)),
+            key=lambda a: len(self._strip_ws(a.lower())),
+            reverse=True,
+        )
 
     @staticmethod
     def _clean(text: str) -> str:
         """统一小写、去首尾空白、压缩连续空白（与 intent/glossary 归一化一致）。"""
         return re.sub(r"\s+", " ", text.strip().lower())
 
+    @staticmethod
+    def _strip_ws(text: str) -> str:
+        """删除全部空白，用于空格绕过免疫匹配（"竞 安"→"竞安"）。"""
+        return re.sub(r"\s+", "", text)
+
     def detect(self, text: str) -> SecurityScreen:
-        """最长匹配外部主体并整体遮蔽为等长空格。
+        """最长匹配外部主体并整体遮蔽为等长空格（空白绕过免疫）。
 
         命中：返回 (展示名, 遮蔽后文本)——遮蔽保持后续 home 实体匹配的位置语义，
         且让残留文本不再含可泄露成 home 实体的子串（防"中国"碰撞）。
         未命中：返回 (None, 归一后文本)。
+
+        在【去空白视图】上做子串匹配，使在竞品名内部插空白（"竞 安"/"JING CHENG"）
+        无法绕过；命中后用「去空白下标 → clean 下标」映射，按原跨度（含内部空白）
+        整体抹为等长空格——既堵绕过，又保持等长遮蔽与位置语义不变。
         """
         clean = self._clean(text)
+        # 去空白视图 + 位置映射（stripped 下标 → clean 下标）。
+        stripped_chars: list[str] = []
+        index_map: list[int] = []
+        for i, ch in enumerate(clean):
+            if not ch.isspace():
+                stripped_chars.append(ch)
+                index_map.append(i)
+        stripped = "".join(stripped_chars)
         for alias in self._aliases:
-            pos = clean.find(alias.lower())
+            needle = self._strip_ws(alias.lower())
+            pos = stripped.find(needle)
             if pos >= 0:
-                end = pos + len(alias)
-                masked = clean[:pos] + " " * len(alias) + clean[end:]
+                start = index_map[pos]
+                end = index_map[pos + len(needle) - 1] + 1
+                masked = clean[:start] + " " * (end - start) + clean[end:]
                 return SecurityScreen(self._external[alias], masked)
         return SecurityScreen(None, clean)
 
