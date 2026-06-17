@@ -113,6 +113,45 @@ _DEFAULT_SENSITIVITY = SensitivityPolicy()
 
 
 @dataclass(frozen=True)
+class DimensionSpec:
+    """一个声明维度的规格（ADR 0004）：名称 + 词表 + 行为旗标。不可变；集合字段
+    一律 default_factory，避免裸 {} 在类定义期报错、或模块级共享 dict 跨实例串味。
+
+    字段（最小正交集，每个都有真实消费者）：
+        name / label:      维度受控名 + 展示名。
+        kind:              'categorical' | 'temporal' | 'measure'（temporal 关联反编造
+                           白名单；measure 才有 units）。
+        synonyms:          {别名 → 受控值}（归一化）。
+        units:             {受控值 → 单位}（仅 measure 维有意义）。
+        labels:            {受控值 → 展示名}（澄清文案 / 示例派生）。
+        default:           槽位缺失时的默认受控值（如 channel='TOTAL'）。
+        required:          是否必填（缺失触发澄清）。
+        clarify:           缺失时澄清策略 'ask_first' | 'assume' | 'none'。
+        identity:          是否参与事实自然键（dim_key）；派生维（如 geography）为 False。
+        expand:            是否参与多值笛卡尔展开（composite 子任务）。
+        derived_from:      若本维由另一维派生，给出源维名（如 geography ← entity）。
+        derivation:        {源受控值 → 本维受控值}（派生映射）。
+        whitelist_in_fabrication_check: 反编造检查是否把本维 token 当合法期间剥离
+                           （仅 temporal 维为 True）。
+    """
+
+    name: str
+    label: str
+    kind: str = "categorical"
+    synonyms: dict[str, str] = field(default_factory=dict)
+    units: dict[str, str] = field(default_factory=dict)
+    labels: dict[str, str] = field(default_factory=dict)
+    default: str | None = None
+    required: bool = False
+    clarify: str = "assume"
+    identity: bool = True
+    expand: bool = True
+    derived_from: str | None = None
+    derivation: dict[str, str] = field(default_factory=dict)
+    whitelist_in_fabrication_check: bool = False
+
+
+@dataclass(frozen=True)
 class CompanyProfile:
     """所属公司 profile（不可变）：home 身份 + 同义词 + 地理 + 外部实体清单。
 
