@@ -1,10 +1,14 @@
-"""所属公司（home company）身份的配置化载入。
+"""领域 profile（DomainProfile）的配置化载入。
 
-项目是【通用】管理 copilot，不专属任何一家公司：home 公司的身份、实体同义词、
-默认实体、地理口径以及外部/竞品实体清单全部来自一个 TOML 配置文件
-（config/company.toml），代码里不再硬编码 "ACME"。
+项目是【通用】管理 copilot，不专属任何一家公司，也不专属金融领域：home 身份、实体
+同义词、默认实体、地理口径、外部/竞品实体清单，以及【声明维度】（DimensionSpec，
+如 metric / entity / period / channel / geography 的词表与行为旗标，ADR 0004）全部
+来自一个 TOML 配置文件（config/company.toml），代码里不再硬编码 "ACME" 或金融词表。
 
-文件缺失时静默回退内置默认 profile（值 = 现有 ACME 值），保证 import 期零副作用、
+历史名 CompanyProfile 仍作为模块级别名指向同一个 DomainProfile 类对象（构造 / isinstance
+均不变），便于既有调用平滑过渡。
+
+文件缺失时静默回退内置默认 profile（值 = 现有 ACME 金融值），保证 import 期零副作用、
 既有行为字节级不变（glossary 模块导入时即调用本模块构建词典）。
 
 TOML 读取：Python>=3.11 用 stdlib tomllib；3.10 用第三方 tomli（pyproject 条件依赖）。
@@ -73,6 +77,45 @@ _DEFAULT_HOME_ENTITY_LABELS: dict[str, str] = {
     "ACME_GROUP": "ACME Group",
     "ACME_HK": "ACME Hong Kong",
     "ACME_CN": "ACME China",
+}
+# 默认指标维词表（= 现有 glossary.METRIC_SYNONYMS 字节级副本，含混合大小写键）。
+# 缩写 / 英文全称 / 中文 → metric_code。下游 glossary 的小写缓存逐字依赖此键集。
+_DEFAULT_METRIC_SYNONYMS: dict[str, str] = {
+    "revenue": "REVENUE",
+    "营收": "REVENUE",
+    "newsales": "NEWSALES",
+    "new sales": "NEWSALES",
+    "新签金额": "NEWSALES",
+    "profit": "PROFIT",
+    "operating profit": "PROFIT",
+    "营运利润": "PROFIT",
+    "roe": "ROE",
+    "return on equity": "ROE",
+    "净资产收益率": "ROE",
+    "股本回报率": "ROE",
+}
+# 默认指标单位（= 现有 glossary.METRIC_UNITS 字节级副本）：metric_code → 单位。
+_DEFAULT_METRIC_UNITS: dict[str, str] = {
+    "REVENUE": "USD_M",
+    "NEWSALES": "USD_M",
+    "PROFIT": "USD_M",
+    "ROE": "PCT",
+}
+# 默认指标展示名：metric_code → 展示名。codes-as-display，保证 tool schema 示例字节不变。
+_DEFAULT_METRIC_LABELS: dict[str, str] = {
+    "REVENUE": "REVENUE",
+    "NEWSALES": "NEWSALES",
+    "PROFIT": "PROFIT",
+    "ROE": "ROE",
+}
+# 默认渠道维词表（= 现有 intent._CHANNEL_SYNONYMS 字节级副本）：别名 → channel_code。
+_DEFAULT_CHANNEL_SYNONYMS: dict[str, str] = {
+    "代理": "AGENCY",
+    "代理人": "AGENCY",
+    "agency": "AGENCY",
+    "银保": "BANCA",
+    "bancassurance": "BANCA",
+    "banca": "BANCA",
 }
 # 外部/竞品实体清单（alias → 展示名）。
 # 以"中国"开头的竞品全称（中国竞安/中国竞寿/中国竞平）作为完整键存在，
@@ -152,8 +195,8 @@ class DimensionSpec:
 
 
 @dataclass(frozen=True)
-class CompanyProfile:
-    """所属公司 profile（不可变）：home 身份 + 同义词 + 地理 + 外部实体清单。
+class DomainProfile:
+    """领域 profile（不可变）：home 身份 + 同义词 + 地理 + 外部实体清单 + 声明维度。
 
     字段：
         home_company_name:     home 公司展示名（拒答提议改查时用于泛化文案）。
@@ -163,6 +206,14 @@ class CompanyProfile:
         external_entities:     外部/竞品实体 {别名 → 展示名}（命中即拒答）。
         home_entity_labels:    home 实体展示名 {entity_code → 用户可见名}（表现层文案派生用）。
         sensitivity:           敏感度分级策略（从 [sensitivity] 段读，缺省回退内置默认）。
+        dimensions:            声明维度元组（DimensionSpec，ADR 0004）：每维携带词表 +
+                               行为旗标（必填 / 澄清策略 / 单位 / 派生等）。默认空元组；
+                               内置默认 profile 携带金融 5 维（metric/entity/period/
+                               channel/geography）。当前无下游消费者读取本字段（DP-2 仅
+                               铺设数据，行为零变更）。
+
+    历史别名 ``CompanyProfile`` 在类定义后指向同一个类对象（见下方 ``CompanyProfile =
+    DomainProfile``），保证 ``isinstance`` 与 ``CompanyProfile(**kwargs)`` 构造继续有效。
     """
 
     home_company_name: str
@@ -172,11 +223,18 @@ class CompanyProfile:
     external_entities: dict[str, str] = field(default_factory=dict)
     home_entity_labels: dict[str, str] = field(default_factory=dict)
     sensitivity: SensitivityPolicy = field(default_factory=SensitivityPolicy)
+    dimensions: tuple[DimensionSpec, ...] = field(default_factory=tuple)
 
 
-def _default_profile() -> CompanyProfile:
-    """内置默认 profile（= 现有 ACME 值）。返回副本，避免外部改动污染默认常量。"""
-    return CompanyProfile(
+# 历史名别名：旧调用 / 测试以 CompanyProfile 构造并 isinstance 校验，指向同一类对象
+# （非子类），保证两种契约不破。
+CompanyProfile = DomainProfile
+
+
+def _default_profile() -> DomainProfile:
+    """内置默认 profile（= 现有 ACME 金融值）。返回副本，避免外部改动污染默认常量；
+    dimensions 的每个 DimensionSpec 集合字段都 dict(...) 复制冻结常量，防被改穿。"""
+    return DomainProfile(
         home_company_name=_DEFAULT_HOME_COMPANY_NAME,
         home_entity_code=_DEFAULT_HOME_ENTITY_CODE,
         home_entity_synonyms=dict(_DEFAULT_HOME_ENTITY_SYNONYMS),
@@ -184,6 +242,51 @@ def _default_profile() -> CompanyProfile:
         external_entities=dict(_DEFAULT_EXTERNAL_ENTITIES),
         home_entity_labels=dict(_DEFAULT_HOME_ENTITY_LABELS),
         sensitivity=_DEFAULT_SENSITIVITY,
+        dimensions=(
+            DimensionSpec(
+                "metric",
+                label="指标",
+                required=True,
+                clarify="ask_first",
+                synonyms=dict(_DEFAULT_METRIC_SYNONYMS),
+                units=dict(_DEFAULT_METRIC_UNITS),
+                labels=dict(_DEFAULT_METRIC_LABELS),
+                whitelist_in_fabrication_check=False,
+            ),
+            DimensionSpec(
+                "entity",
+                label="实体",
+                required=True,
+                clarify="assume",
+                synonyms=dict(_DEFAULT_HOME_ENTITY_SYNONYMS),
+                labels=dict(_DEFAULT_HOME_ENTITY_LABELS),
+            ),
+            DimensionSpec(
+                "period",
+                label="期间",
+                kind="temporal",
+                required=True,
+                clarify="assume",
+                whitelist_in_fabrication_check=True,
+            ),
+            DimensionSpec(
+                "channel",
+                label="渠道",
+                required=False,
+                clarify="none",
+                default="TOTAL",
+                expand=False,
+                synonyms=dict(_DEFAULT_CHANNEL_SYNONYMS),
+            ),
+            DimensionSpec(
+                "geography",
+                label="地理",
+                identity=False,
+                expand=False,
+                derived_from="entity",
+                derivation=dict(_DEFAULT_ENTITY_GEOGRAPHY),
+            ),
+        ),
     )
 
 
@@ -219,8 +322,8 @@ def _sensitivity_policy(data: dict) -> SensitivityPolicy:
     )
 
 
-def load_company_profile(path: str | Path | None = None) -> CompanyProfile:
-    """加载 home 公司 profile。
+def load_company_profile(path: str | Path | None = None) -> DomainProfile:
+    """加载 home 领域 profile。
 
     path 缺省时先读环境变量 RAGSPINE_COMPANY_CONFIG（运行期换公司不靠就地编辑文件）；
     未设时找 config/company.toml。显式传 path 时优先于 env-var。
@@ -241,7 +344,7 @@ def load_company_profile(path: str | Path | None = None) -> CompanyProfile:
     default = _default_profile()
     home = data.get("home", {}) if isinstance(data.get("home"), dict) else {}
 
-    return CompanyProfile(
+    return DomainProfile(
         home_company_name=str(home.get("company_name", default.home_company_name)),
         home_entity_code=str(home.get("entity_code", default.home_entity_code)),
         home_entity_synonyms=_str_map(home.get("synonyms")) or default.home_entity_synonyms,
@@ -250,4 +353,8 @@ def load_company_profile(path: str | Path | None = None) -> CompanyProfile:
         or default.external_entities,
         home_entity_labels=_str_map(home.get("labels")) or default.home_entity_labels,
         sensitivity=_sensitivity_policy(data),
+        # TODO(ADR 0004 fast-follow): 解析 [dimensions] 段。当前无 TOML 维度解析，所有
+        # 文件加载路径都继承默认金融 5 维（与缺失回退的 _default_profile() 维度等价），
+        # 是有意的临时态——避免出现"有标量字段却空维度"的不一致 profile。
+        dimensions=default.dimensions,
     )
