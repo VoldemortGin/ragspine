@@ -10,36 +10,20 @@ from datetime import date
 
 from ragspine.common.company_profile import load_company_profile
 
-# home 公司 profile（模块导入时载一次）：实体同义词 / 地理 / 外部实体清单皆由此构建，
-# 代码不再硬编码 "ACME"。文件缺失时静默回退内置默认（= 原硬编码 ACME 值），既有行为不变。
+# home 公司 profile（模块导入时载一次）：实体同义词 / 地理 / 外部实体清单 / 声明维度
+# 词表皆由此构建，代码不再硬编码 "ACME" 或金融词表。文件缺失时静默回退内置默认
+# （= 原硬编码 ACME 值），既有行为不变。
 _PROFILE = load_company_profile()
 
-# 指标同义词：缩写 / 英文全称 / 中文 → metric_code
-METRIC_SYNONYMS: dict[str, str] = {
-    # REVENUE 营收
-    "revenue": "REVENUE",
-    "revenue": "REVENUE",
-    "revenue": "REVENUE",
-    "营收": "REVENUE",
-    "营收": "REVENUE",
-    # NEWSALES 新签金额
-    "newsales": "NEWSALES",
-    "new sales": "NEWSALES",
-    "new sales": "NEWSALES",
-    "new sales": "NEWSALES",
-    "新签金额": "NEWSALES",
-    "新签金额": "NEWSALES",
-    # PROFIT 营运利润
-    "profit": "PROFIT",
-    "operating profit": "PROFIT",
-    "营运利润": "PROFIT",
-    "营运利润": "PROFIT",
-    # ROE 净资产收益率
-    "roe": "ROE",
-    "return on equity": "ROE",
-    "净资产收益率": "ROE",
-    "股本回报率": "ROE",
-}
+
+def _dim(profile, name):
+    """取 profile 中名为 name 的 DimensionSpec；缺失返回 None。"""
+    return next((d for d in profile.dimensions if d.name == name), None)
+
+
+# 指标同义词：缩写 / 英文全称 / 中文 → metric_code（来自 profile 的 metric 维，
+# 默认 = ACME 金融值；与原内联字面量字节级等价）。
+METRIC_SYNONYMS: dict[str, str] = dict(_dim(_PROFILE, "metric").synonyms)
 
 # 实体同义词：中文/英文/缩写 → entity_code（来自 home 公司 profile，默认= ACME 值）
 ENTITY_SYNONYMS: dict[str, str] = dict(_PROFILE.home_entity_synonyms)
@@ -51,13 +35,8 @@ ENTITY_GEOGRAPHY: dict[str, str] = dict(_PROFILE.entity_geography)
 # 命中即视为越权（系统无外部数据），由上层拒答并提议改查 home 等价口径。
 EXTERNAL_ENTITY_SYNONYMS: dict[str, str] = dict(_PROFILE.external_entities)
 
-# 指标默认单位
-METRIC_UNITS: dict[str, str] = {
-    "REVENUE": "USD_M",
-    "NEWSALES": "USD_M",
-    "PROFIT": "USD_M",
-    "ROE": "PCT",
-}
+# 指标默认单位（来自 profile 的 metric 维 units，默认= ACME 金融值；字节级等价）
+METRIC_UNITS: dict[str, str] = dict(_dim(_PROFILE, "metric").units)
 
 
 def _clean(text: str) -> str:
