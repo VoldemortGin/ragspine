@@ -32,11 +32,14 @@ loop, LLM provider abstraction.
 ## Invariants
 
 - **Anti-fabrication is per-path — do not unify the three:**
-  - *structured* — `_structured_answer`: on no `found` fact the model's text is
-    **discarded** and the answer is deterministically rewritten to "not found" /
-    "unrecognized". ⚠️ Known gap (audit): the `found` branch keeps model prose
-    verbatim + appends a source, so a live LLM could smuggle an extra fabricated
-    number; the deterministic guarantee only fully holds on the all-not-found path.
+  - *structured* — `_structured_answer`: the answer is **deterministically
+    synthesized on every path**. found facts are rendered from the fact value
+    (`实体 期间 指标（渠道）：值 单位（来源…）`, same format as `_multi_subtask_answer`);
+    no-found is rewritten to "not found" / "unrecognized". The model's prose is
+    **never** trusted for the number — a live LLM cannot smuggle an extra fabricated
+    figure on the found path (audit HIGH closed; regression:
+    `test_found_path_discards_fabricated_extra_number`). Don't reintroduce
+    `model_text` into the found branch.
   - *multi-subtask* — `_multi_subtask_answer` never calls the LLM at all.
   - *narrative* — `_run_narrative` trusts model prose but **forces source citation**;
     no found-fact rewrite here. That asymmetry is deliberate.

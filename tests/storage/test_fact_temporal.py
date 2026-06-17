@@ -312,10 +312,11 @@ def test_t6_structured_answer_byte_identical_when_no_valid_as_of():
     result_with_none["valid_as_of"] = None
     answer_none, _ = _structured_answer(model_text, [result_with_none])
 
-    # 现状文案：模型文本 + 追加来源行（无任何「截至」标注）。
+    # 现状文案：确定性合成行（实体 期间 指标：值 单位 + 来源），无任何「截至」标注。
+    # 注：found 路径已弃用模型散文（反幻觉确定性合成），model_text 仅证其被忽略。
     expected = (
-        f"{model_text}\n（来源：ACME_FY2025_Results.pptx · "
-        "slide=5,table=1,row=2,col=3）"
+        "ACME_HK FY2025 REVENUE：1702 USD_M"
+        "（来源：ACME_FY2025_Results.pptx · slide=5,table=1,row=2,col=3）"
     )
     assert answer_legacy == expected
     assert answer_none == expected

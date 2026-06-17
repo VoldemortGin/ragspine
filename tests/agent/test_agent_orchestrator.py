@@ -132,6 +132,21 @@ def test_found_answer_gets_lineage_appended_if_model_omits(store):
     assert "slide=5,table=1,row=2,col=3" in result.answer
 
 
+def test_found_path_discards_fabricated_extra_number(store):
+    """found 分支(确定性合成):模型散文夹带额外伪造数字 → 答案由 fact 值合成,
+    弃用模型文本,夹带的伪造数字绝不得出现(防 live-LLM 在 found 路径走私数字)。"""
+    provider = ScriptedProvider([
+        _tool_use_response({"metric": "REVENUE", "entity": "ACME_HK", "period": "FY2025"}),
+        # 对抗:真实值 1702 之外再夹带一个伪造的同比增幅
+        _text_response("香港 FY2025 REVENUE 为 1702 百万美元；另据测算同比大增 8888%。"),
+    ])
+    result = answer_question("香港2025年REVENUE多少", store, provider, reference_date=REF)
+    assert result.tool_results[0]["status"] == "found"
+    assert "1702" in result.answer                       # 真实 fact 值仍在
+    assert "8888" not in result.answer                   # 夹带的伪造数字被剔除
+    assert "ACME_FY2025_Results.pptx" in result.answer   # 血缘仍在
+
+
 def test_tool_executor_resolves_relative_period(store):
     """真实模型可能直接把"去年"塞进 period 参数：执行器按 reference_date 解析。"""
     provider = ScriptedProvider([

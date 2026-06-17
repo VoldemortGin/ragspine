@@ -259,10 +259,15 @@ def test_ask_trace_does_not_leak_sensitive(base_config, caplog):
     assert records  # 确有 trace 产生
     forbidden = ["香港去年REVENUE多少", "1702", "ACME_FY2025_Results.pptx",
                  "slide=5,table=1,row=2,col=3"]
+    # 只扫我们自己经 extra= 附加的 payload（隐私面）；stdlib LogRecord 内建字段
+    # （created/msecs 等墙钟时间戳属允许的 timing 元数据）排除——否则 epoch 数字会
+    # 与四位数 fact 值（如 1702）巧合撞串，造成与时间相关的假阳性 flake。
+    builtin_attrs = set(logging.makeLogRecord({}).__dict__)
     for rec in records:
         # message 固定为 "trace"
         assert rec.getMessage() == "trace"
-        blob = " ".join(str(v) for v in rec.__dict__.values())
+        payload = {k: v for k, v in rec.__dict__.items() if k not in builtin_attrs}
+        blob = " ".join(str(v) for v in payload.values())
         for secret in forbidden:
             assert secret not in blob, f"trace leaked {secret!r}"
 

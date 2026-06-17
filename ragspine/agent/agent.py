@@ -207,20 +207,29 @@ def _structured_answer(
     """结构化回答的硬约束后处理：防编造 + 血缘补全。返回 (answer, sources)。"""
     found = [r for r in tool_results if r.get("status") == "found"]
     if found:
+        # 确定性合成（反幻觉，审计 HIGH 修复）：found 路径的数字一律取自 fact 值，
+        # 彻底弃用模型散文——否则 live-LLM 可在散文里夹带额外伪造数字（结构化通道命中
+        # 时模型仍自由作答，MockProvider 测不到这种走私）。逐条 found 确定性列
+        # 「实体 期间 指标（渠道）：值 单位（来源…）」，与 _multi_subtask_answer 同格式。
         sources = [_source_of(r) for r in found]
-        answer = model_text or ""
+        lines: list[str] = []
         for r in found:
             source = _source_of(r)
-            doc = str(source.get("doc", ""))
-            locator = str(source.get("locator", ""))
-            # valid_as_of 存在时附「截至」业务时点；为 None 时文案字节级不变。
+            label = (
+                f"{r['entity']} "
+                f"{_period_label(str(r['period_type']), str(r['period']))} "
+                f"{r['metric_code']}"
+            )
+            if r.get("channel") and r["channel"] != "TOTAL":
+                label += f"（渠道 {r['channel']}）"
+            # valid_as_of 存在时附「截至」业务时点。
             valid_as_of = r.get("valid_as_of")
             asof = f" · 截至 {valid_as_of}" if valid_as_of else ""
-            if doc and doc not in answer:
-                answer = f"{answer}\n（来源：{doc} · {locator}{asof}）".strip()
-            elif locator and locator not in answer:
-                answer = f"{answer}\n（定位：{locator}{asof}）".strip()
-        return answer, sources
+            lines.append(
+                f"{label}：{r['value']:g} {r['unit']}"
+                f"（来源：{source.get('doc')} · {source.get('locator')}{asof}）"
+            )
+        return "\n".join(lines), sources
 
     not_found = [r for r in tool_results if r.get("status") == "not_found"]
     if not_found:
