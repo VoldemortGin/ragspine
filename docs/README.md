@@ -10,6 +10,7 @@ no `covers`, so it is exempt from drift tracking.
 |---|---|---|---|
 | 0 · index | root `CLAUDE.md` | routing table only, never content | every session |
 | 1 · contract | `ragspine/<domain>/CLAUDE.md` | terse per-domain invariants & gotchas | working in that subtree |
+| 1 · package | `ragspine/**/__init__.py` docstring | what this level does + a `Submodules:` index of its direct children | `help()` / opening the package; enforced by `check_docstring_refs.py` |
 | 1 · deep dive | `ragspine/<domain>/docs/*.md` | long reference for one subsystem | grep / explicit read |
 | 2 · cross-cut | `docs/*.md`, `docs/adr/*.md` | architecture, invariants, glossary, decisions | grep / explicit read |
 | — · generated | `docs/generated/` | API ref, symbol/dependency indexes — script-produced | git-ignored, never hand-edited |
@@ -48,6 +49,12 @@ doc, bump `verified-against` to the current HEAD:
 .venv/bin/python scripts/check_doc_drift.py          # report all, exit 1 if any stale
 .venv/bin/python scripts/check_doc_drift.py --quiet  # only stale / errored
 ```
+
+That tracks **content** staleness of the curated `.md` docs. A sibling gate,
+`scripts/check_docstring_refs.py` (CI step [1/3]), tracks **reference integrity**
+of inline docstrings/comments: it flags dead `src/`/`docs/` links and verifies
+every package's `Submodules:` index matches its real members. No `verified-against`
+metadata — the references are checked directly against the tree.
 
 ### Exempt from drift (omit `covers`)
 
