@@ -28,6 +28,9 @@ data/*
 docs/generated/*
 !docs/generated/.gitkeep
 
+# Built static doc site (make docs → pdoc API reference); regenerable, nginx-served.
+docs/site/
+
 # OS / editor
 .DS_Store
 .idea/

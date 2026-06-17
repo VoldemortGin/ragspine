@@ -93,8 +93,9 @@ fixtures: ## Regenerate the synthetic demo fixtures (deterministic)
 	$(PYTHON) scripts/make_fixtures_pdf.py
 
 .PHONY: docs
-docs: ## Build the static doc site
-	$(PYTHON) scripts/build_docs.py
+docs: ## Build the static API-reference site from docstrings (pdoc → docs/site, nginx-ready)
+	$(PYTHON) -m pdoc ragspine -o docs/site
+	@echo "API docs → docs/site/  (deploy: point nginx 'root' at $(abspath docs/site))"
 
 .PHONY: clean
 clean: ## Remove caches (pyc, pytest/ruff/mypy)

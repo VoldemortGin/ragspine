@@ -21,6 +21,8 @@ dev = [
     "reportlab>=4.0",
     # 文档站构建（scripts/build_docs.py，md→HTML，BSD）。
     "markdown>=3.5",
+    # API 参考站构建（make docs，pdoc 从 docstring + 类型注解生成静态 HTML，MIT/Unlicense）。
+    "pdoc>=14",
     # 可选 lint / type-check（scripts/lint.sh，目前为非阻塞信息性步骤）。
     "ruff>=0.6",
     "mypy>=1.11",
