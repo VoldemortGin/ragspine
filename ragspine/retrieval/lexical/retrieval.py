@@ -52,6 +52,7 @@ class EmbeddingBackend(Protocol):
         ...
 
 
+@runtime_checkable
 class QueryRewriter(Protocol):
     """multi-query 改写协议：rewrite(query) -> list[str]，须含原 query。"""
 
@@ -301,6 +302,29 @@ class HybridRetriever:
             )
             for cid, score in ordered[:limit]
         ]
+
+
+@runtime_checkable
+class RetrievableIndex(Protocol):
+    """检索接口（结构化）：任何带 retrieve(query, …) -> list[RetrievalResult] 的索引。
+
+    NarrativeIndexRetriever 适配器只依赖这个结构（面向接口），不绑死具体 NarrativeIndex
+    ——这正是测试能用轻量替身的原因，也让运行时 beartype 检查放行任何 retrieve-兼容实现。
+    """
+
+    def retrieve(
+        self,
+        query: str,
+        *,
+        topic: str | None = None,
+        entity: str | None = None,
+        geography: str | None = None,
+        period: str | None = None,
+        language: str | None = None,
+        top_k: int | None = None,
+        rerank: bool = True,
+        top_n: int | None = None,
+    ) -> list[RetrievalResult]: ...
 
 
 class NarrativeIndex:

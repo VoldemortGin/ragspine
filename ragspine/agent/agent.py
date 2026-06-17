@@ -13,7 +13,7 @@ import json
 import time
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Protocol, cast
+from typing import Protocol, cast, runtime_checkable
 
 from ragspine.agent.intent import (
     CLARIFY_ANSWER_WITH_ASSUMPTIONS,
@@ -63,11 +63,12 @@ _NARRATIVE_SYSTEM_PROMPT_TEMPLATE = (
 )
 
 
+@runtime_checkable
 class NarrativeRetriever(Protocol):
     """叙事检索协议（duck-typed）：另一条线的实现按此签名注入。"""
 
     def retrieve(
-        self, query: str, *, filters: dict[str, object] | None = None, top_k: int = 50
+        self, query: str, *, filters: dict[str, str] | None = None, top_k: int = 50
     ) -> list[dict[str, object]]: ...
 
 
@@ -349,7 +350,7 @@ def _run_narrative(
             "数字类问题可直接提问。", [],
         )
 
-    filters: dict[str, object] = {}
+    filters: dict[str, str] = {}
     if intent.entity:
         filters["entity"] = intent.entity
     if intent.period:

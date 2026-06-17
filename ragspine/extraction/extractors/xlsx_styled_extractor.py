@@ -15,7 +15,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
-from openpyxl.cell.cell import Cell
+from openpyxl.cell.cell import Cell, MergedCell
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.cell import range_boundaries
 from openpyxl.worksheet.worksheet import Worksheet
@@ -94,7 +94,7 @@ def _normalize_rgb(argb: str) -> str:
     return argb
 
 
-def _resolve_fill_rgb(cell: Cell, theme_rgbs: list[str]) -> str | None:
+def _resolve_fill_rgb(cell: Cell | MergedCell, theme_rgbs: list[str]) -> str | None:
     """解析单元格填充色为真实 'RRGGBB'；无填充返回 None。"""
     fill = cell.fill
     if fill is None or fill.patternType != "solid":

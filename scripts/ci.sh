@@ -19,19 +19,25 @@ fi
 
 echo "==> using interpreter: $("$PY" -c 'import sys; print(sys.executable)')"
 
-echo "==> [1/5] docstring reference integrity (no dead src/ or docs/ links; package indexes match)"
+echo "==> [1/7] docstring reference integrity (no dead src/ or docs/ links; package indexes match)"
 "$PY" scripts/check_docstring_refs.py
 
-echo "==> [2/5] doc-drift (contracts re-verified against their covered code)"
+echo "==> [2/7] doc-drift (contracts re-verified against their covered code)"
 "$PY" scripts/check_doc_drift.py --quiet
 
-echo "==> [3/5] test suite (excludes gpu + docling — the bulk, no heavy 3rd-party models)"
+echo "==> [3/7] mypy --strict (static type contract — zero-warning gate, half 1 of 2)"
+"$PY" -m mypy
+
+echo "==> [4/7] ruff lint (style + import order + dead code)"
+"$PY" -m ruff check ragspine
+
+echo "==> [5/7] test suite (excludes gpu + docling — the bulk; filterwarnings=error + beartype runtime contracts active)"
 "$PY" -m pytest tests/ -q -m "not gpu and not docling"
 
-echo "==> [4/5] docling extractor tests (own process — isolates 3rd-party ML nondeterminism)"
+echo "==> [6/7] docling extractor tests (own process — isolates 3rd-party ML nondeterminism)"
 "$PY" -m pytest tests/ -q -m "docling"
 
-echo "==> [5/5] end-to-end demo smoke"
+echo "==> [7/7] end-to-end demo smoke"
 "$PY" scripts/run_demo.py | tail -1
 
 echo

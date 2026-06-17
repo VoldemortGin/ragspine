@@ -28,6 +28,7 @@ from ragspine.retrieval.lexical.retrieval import (
     EmbeddingBackend,
     GlossaryQueryRewriter,
     NarrativeIndex,
+    RetrievableIndex,
     RetrievalResult,
 )
 from ragspine.retrieval.rerank.listwise_rerank import (
@@ -71,7 +72,7 @@ class NarrativeIndexRetriever:
     叙事文档元数据覆盖不全时不应直接答"未检索到"）。
     """
 
-    def __init__(self, index: NarrativeIndex, *, retry_without_filters: bool = True):
+    def __init__(self, index: RetrievableIndex, *, retry_without_filters: bool = True):
         self.index = index
         self.retry_without_filters = retry_without_filters
 

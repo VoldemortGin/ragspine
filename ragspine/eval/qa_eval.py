@@ -37,7 +37,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import cast
 
-from ragspine.agent.agent import answer_question
+from ragspine.agent.agent import NarrativeRetriever, answer_question
 from ragspine.agent.intent import (
     CLARIFY_ANSWER_WITH_ASSUMPTIONS,
     CLARIFY_ASK_FIRST,
@@ -54,7 +54,6 @@ from ragspine.agent.query_tools import execute_query_metric
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
 from ragspine.retrieval.chunking.chunking import DocumentMeta, chunk_document
 from ragspine.retrieval.link.narrative_link import (
-    NarrativeIndexRetriever,
     build_narrative_retriever,
 )
 from ragspine.storage.fact_store import Fact, FactStore
@@ -335,7 +334,7 @@ def _snippet_source(snippet: dict[str, object]) -> dict[str, object]:
 
 
 def run_case_tool_direct(
-    case: GoldenCase, store: FactStore, retriever: NarrativeIndexRetriever
+    case: GoldenCase, store: FactStore, retriever: NarrativeRetriever
 ) -> CaseOutcome:
     """tool-direct 模式：intent 解析 → 澄清网关 → 工具/检索直接执行（零 LLM）。"""
     ref = case.reference_date
@@ -414,7 +413,7 @@ def run_case_tool_direct(
 
 
 def run_case_agent(
-    case: GoldenCase, store: FactStore, retriever: NarrativeIndexRetriever
+    case: GoldenCase, store: FactStore, retriever: NarrativeRetriever
 ) -> CaseOutcome:
     """agent 模式：answer_question + MockProvider（确定性脚本化 tool use 循环）。"""
     provider = MockProvider(reference_date=case.reference_date)

@@ -12,6 +12,10 @@ dependencies = [
     "pypdfium2>=5.0",
     # company profile TOML 读取：3.11+ 用 stdlib tomllib（无需此包），仅 3.10 需 tomli。
     "tomli>=2.0; python_version < '3.11'",
+    # 运行时类型契约（ADR 0004 质量门）：import 期对全包注解强制执行，与 mypy --strict
+    # 的静态半边互补。守护式 import（见 ragspine/__init__.py）使其缺失时仍可离线运行，
+    # 但列为核心依赖以保证零警告门默认开启。
+    "beartype>=0.18",
 ]
 
 [project.optional-dependencies]
@@ -71,6 +75,12 @@ packages = ["ragspine"]
 markers = [
     "gpu: 需要 Ubuntu+NVIDIA GPU 与真实 OCR 模型，本地默认跳过",
     "docling: 走 docling 重模型抽取的测试；ci.sh 放独立进程跑，避免全套并跑时的第三方不确定性",
+]
+# 零警告门：把警告升级为错误（我们的代码必须零警告），仅放行已知的第三方 deprecation。
+filterwarnings = [
+    "error",
+    "ignore:Using `httpx` with `starlette.testclient`",     # starlette TestClient（第三方）
+    "ignore:This field is deprecated. Use `generate_page_images",  # docling 管线（第三方）
 ]
 
 # Lint config exists so cleanup is incremental and consistent; the CI gate does NOT yet

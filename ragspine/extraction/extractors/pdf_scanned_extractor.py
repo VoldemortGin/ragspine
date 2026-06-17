@@ -36,7 +36,7 @@ import hashlib
 import io
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 import pypdfium2 as pdfium
 
@@ -100,6 +100,7 @@ class OcrPageResult:
     warnings: list[str] = field(default_factory=list)
 
 
+@runtime_checkable
 class _ReviewQueue(Protocol):
     """低置信入队所需的接口（与 review_queue.ReviewQueue.enqueue 对齐）。"""
 
@@ -112,6 +113,7 @@ class _ReviewQueue(Protocol):
     ) -> int: ...
 
 
+@runtime_checkable
 class OcrBackend(Protocol):
     """OCR/VLM 后端协议（依赖注入点）。
 

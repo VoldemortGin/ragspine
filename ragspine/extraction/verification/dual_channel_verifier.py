@@ -13,9 +13,10 @@
 """
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 
+@runtime_checkable
 class _ReviewQueue(Protocol):
     """双通道校验所需的入队接口（与 review_queue.ReviewQueue.enqueue 对齐）。"""
 

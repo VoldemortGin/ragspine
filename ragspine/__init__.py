@@ -13,3 +13,17 @@ Submodules:
     service/ — HTTP 服务层：ServiceConfig、FastAPI app、任务队列、FAQ 短路缓存。
     storage/ — sqlite 存储层：数值事实表（fact_metric），全程保留来源 lineage。
 """
+
+# 运行时类型契约（ADR 0004 质量门）：装了 beartype 就在【调用期】对整个包强制每条注解，
+# 与 mypy --strict（静态半边）互补。守护式 import：未装时精简离线核心照常 import。
+try:
+    from beartype import BeartypeConf
+    from beartype.claw import beartype_this_package
+except ImportError:  # 未装 beartype 时跳过运行时契约
+    pass
+else:
+    # is_pep484_tower=True：采用 PEP 484 隐式数值塔（float 注解亦接受 int、complex 接受
+    # float/int），与 mypy / Python 约定一致——否则 beartype 会把 rrf_fuse(k=60) 这类
+    # int-传-float 误判为违规。这是对齐标准语义，不是放宽。
+    beartype_this_package(conf=BeartypeConf(is_pep484_tower=True))
+

@@ -11,7 +11,7 @@
 import json
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Protocol, cast
+from typing import Protocol, cast, runtime_checkable
 
 from ragspine.agent.intent import parse_intent
 
@@ -54,6 +54,7 @@ class ProviderResponse:
     usage: dict[str, int | None] | None = None
 
 
+@runtime_checkable
 class LLMProvider(Protocol):
     """provider 协议：发送 system+messages+tools，拿回统一响应。"""
 

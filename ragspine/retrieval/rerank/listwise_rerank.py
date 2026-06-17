@@ -20,7 +20,7 @@ Restricted 不出域策略（方案 B，理由见模块尾注）：
 
 import re
 from collections.abc import Sequence
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 DEFAULT_TOP_N = 10
 RESTRICTED_SENSITIVITY = "RESTRICTED"
@@ -29,6 +29,7 @@ RESTRICTED_SENSITIVITY = "RESTRICTED"
 _INDEX_RE = re.compile(r"\d+")
 
 
+@runtime_checkable
 class ListwiseJudge(Protocol):
     """listwise 精排协议（依赖注入点）。
 
