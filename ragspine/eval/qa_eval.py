@@ -51,6 +51,7 @@ from ragspine.agent.intent import (
 )
 from ragspine.agent.llm_provider import MockProvider
 from ragspine.agent.query_tools import execute_query_metric
+from ragspine.common.company_profile import load_company_profile
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
 from ragspine.retrieval.chunking.chunking import DocumentMeta, chunk_document
 from ragspine.retrieval.link.narrative_link import (
@@ -81,11 +82,27 @@ _CLARIFICATION_MODES = (
 
 # 期间类数字（剥离后再查编造）：FY2024 / 2025H1 / 2025Q1 / 2030年 / 2024 年 上半年 等。
 # 年份限定 19xx/20xx：9999、1234 这类四位数不是合法期间，必须按编造数字上报。
+# 保留为 byte-pin 锚 + 向后兼容：detect_fabricated_numbers 不再直接用它（改读
+# _PROFILE 的 temporal 维 fabrication_whitelist_regex），但其 pattern 必须与该字面逐字节相同。
 _PERIOD_TOKEN_RE = re.compile(
     r"(?:FY\s*)?(?:19|20)\d{2}\s*年?\s*(?:H\s*[12]|Q\s*[1-4]|上半年|下半年)?",
     re.IGNORECASE,
 )
 _NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
+
+# 反编造检查的活跃 profile（call-time 读取：monkeypatch 本模块 _PROFILE 即生效，
+# 随 _activate_acme/lab profile 切换而切换期间白名单）。
+_PROFILE = load_company_profile()
+
+
+def _fabrication_whitelist_re() -> re.Pattern[str] | None:
+    """活跃 profile 的反编造白名单正则：取第一个 whitelist_in_fabrication_check 且
+    fabrication_whitelist_regex 非空的维（仅 temporal 维设此显式字面）。都不满足 → None
+    （无 temporal 维则不剥离任何数字，最严格）。call-time 读模块全局 _PROFILE。"""
+    for dim in _PROFILE.dimensions:
+        if dim.whitelist_in_fabrication_check and dim.fabrication_whitelist_regex:
+            return re.compile(dim.fabrication_whitelist_regex, re.IGNORECASE)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -453,8 +470,12 @@ def run_case_agent(
 # ---------------------------------------------------------------------------
 
 def detect_fabricated_numbers(answer: str) -> list[str]:
-    """拒答回答中的编造数字：剥离期间类数字后，余下的任何数字均视为编造。"""
-    residual = _PERIOD_TOKEN_RE.sub(" ", answer)
+    """拒答回答中的编造数字：剥离期间类数字后，余下的任何数字均视为编造。
+
+    期间白名单正则来自活跃 profile 的 temporal 维（call-time 读 _PROFILE）；无 temporal
+    维（如 lab 域）则不剥离任何数字——拒答答案里每个数字都被标记（最严格）。"""
+    whitelist = _fabrication_whitelist_re()
+    residual = whitelist.sub(" ", answer) if whitelist is not None else answer
     return _NUMBER_RE.findall(residual)
 
 

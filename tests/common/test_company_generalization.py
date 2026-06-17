@@ -34,6 +34,7 @@ ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpa
 import ragspine.agent.agent as agent_mod
 import ragspine.agent.intent as intent_mod
 import ragspine.agent.query_tools as query_tools_mod
+import ragspine.eval.qa_eval as qa_eval_mod
 from ragspine.common.company_profile import CompanyProfile, load_company_profile
 from ragspine.agent.intent import clarify_scope, parse_intent
 
@@ -48,8 +49,9 @@ REF = date(2026, 6, 12)
 # isinstance 检查失败（跨测试污染）。monkeypatch 复用同一 CompanyProfile 类、用例结束
 # 自动还原，零污染。契约 F 明确支持"monkeypatch 该 _PROFILE 或设 RAGSPINE_COMPANY_CONFIG"。
 
-# 承载 module-level _PROFILE、需随 profile 切换重绑的模块（表现层三处 + 默认实体）。
-_PROFILE_BOUND_MODULES = (intent_mod, query_tools_mod, agent_mod)
+# 承载 module-level _PROFILE、需随 profile 切换重绑的模块（表现层三处 + 默认实体 +
+# 反编造检查 eval.qa_eval，使期间白名单随 profile 切换——见 ADR 0004 STEP 11）。
+_PROFILE_BOUND_MODULES = (intent_mod, query_tools_mod, agent_mod, qa_eval_mod)
 
 
 def _acme_profile() -> CompanyProfile:

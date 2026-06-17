@@ -23,6 +23,8 @@ import rootutils
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
 from scripts.run_qa_eval import main as qa_eval_main
+import ragspine.eval.qa_eval as qa_eval_mod
+from ragspine.common.company_profile import DimensionSpec, DomainProfile
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
 from ragspine.storage.fact_store import FactStore
 from ragspine.eval.qa_eval import (
@@ -365,6 +367,48 @@ def test_fabrication_metric_flags_refusal_case_with_number():
 def test_fabrication_zero_when_clean():
     report = evaluate([_refusal_case()], {"r1": _ok_refusal_outcome()}, mode="tool")
     assert report.fabrication_count == 0
+
+
+# ---------------------------------------------------------------------------
+# 反编造白名单：字面 byte-pin + call-time 读 _PROFILE（ADR 0004 STEP 11 blocker）
+# ---------------------------------------------------------------------------
+
+# 期间白名单字面（年份锚 19xx/20xx 是 '9999' 能被判编造的唯一原因，绝不可丢）。
+_PERIOD_LITERAL = (
+    r"(?:FY\s*)?(?:19|20)\d{2}\s*年?\s*(?:H\s*[12]|Q\s*[1-4]|上半年|下半年)?"
+)
+
+
+def test_period_token_re_and_profile_regex_are_byte_identical():
+    """字面 byte-pin：qa_eval._PERIOD_TOKEN_RE 与默认 profile 的 period 维
+    fabrication_whitelist_regex 必须与该字面逐字节相等（绝不被重构/派生改动）。"""
+    assert qa_eval_mod._PERIOD_TOKEN_RE.pattern == _PERIOD_LITERAL
+    by_name = {d.name: d for d in qa_eval_mod._PROFILE.dimensions}
+    assert by_name["period"].fabrication_whitelist_regex == _PERIOD_LITERAL
+    # 两者 byte-for-byte 相等（同一字面源）。
+    assert (
+        by_name["period"].fabrication_whitelist_regex
+        == qa_eval_mod._PERIOD_TOKEN_RE.pattern
+    )
+
+
+def test_detect_reads_profile_at_call_time_no_temporal_dim_flags_period_digits(
+    monkeypatch,
+):
+    """call-time 契约回归：换上无 temporal 维的 profile 后，detect_fabricated_numbers
+    必须把期间形数字（如 '2024'）也标记为编造——证明 detect 调用期读 _PROFILE，
+    且无 temporal 维则不剥离任何数字（period 白名单从未被放宽的最强证明）。"""
+    no_temporal = DomainProfile(
+        home_company_name="Lab",
+        home_entity_code="LAB_SITE",
+        dimensions=(
+            DimensionSpec("measurement", "测量", kind="measure"),
+            DimensionSpec("batch", "批次", kind="categorical"),
+        ),
+    )
+    monkeypatch.setattr(qa_eval_mod, "_PROFILE", no_temporal, raising=False)
+    assert qa_eval_mod._fabrication_whitelist_re() is None
+    assert "2024" in detect_fabricated_numbers("查不到 2024 数据。")
 
 
 # ---------------------------------------------------------------------------

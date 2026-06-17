@@ -176,6 +176,8 @@ class DimensionSpec:
         derivation:        {源受控值 → 本维受控值}（派生映射）。
         whitelist_in_fabrication_check: 反编造检查是否把本维 token 当合法期间剥离
                            （仅 temporal 维为 True）。
+        fabrication_whitelist_regex: 反编造剥离用的【显式字面正则】（仅 temporal 维设此
+                           字面；绝不从 synonyms/grain 自动派生）。None 时该维不剥离任何数字。
     """
 
     name: str
@@ -192,6 +194,7 @@ class DimensionSpec:
     derived_from: str | None = None
     derivation: dict[str, str] = field(default_factory=dict)
     whitelist_in_fabrication_check: bool = False
+    fabrication_whitelist_regex: str | None = None
 
 
 @dataclass(frozen=True)
@@ -268,6 +271,12 @@ def _default_profile() -> DomainProfile:
                 required=True,
                 clarify="assume",
                 whitelist_in_fabrication_check=True,
+                # 与 qa_eval._PERIOD_TOKEN_RE 字面逐字节相同；(?:19|20) 年份锚是 '9999'
+                # 能被判编造的唯一原因，绝不可丢。显式字面，绝不从 synonyms/grain 派生。
+                fabrication_whitelist_regex=(
+                    r"(?:FY\s*)?(?:19|20)\d{2}\s*年?\s*"
+                    r"(?:H\s*[12]|Q\s*[1-4]|上半年|下半年)?"
+                ),
             ),
             DimensionSpec(
                 "channel",
