@@ -1,13 +1,14 @@
 ---
 covers:
   - ragspine/agent/
-verified-against: bcb7144
+verified-against: 3112e68
 ---
 
 # agent — agent contract
 
 Auto-loaded when working under `ragspine/agent/`. Keep terse; deep dives go in
-`ragspine/agent/docs/`.
+`ragspine/agent/docs/`. References below name **symbols** (not line numbers) so they
+survive refactors.
 
 ## What lives here
 
@@ -31,43 +32,45 @@ loop, LLM provider abstraction.
 ## Invariants
 
 - **Anti-fabrication is per-path — do not unify the three:**
-  - *structured* — on no `found` fact the model's text is **discarded** and the
-    answer is deterministically rewritten to "not found" / "unrecognized"
-    (`agent.py:192-219`). A model-invented number can never survive.
-  - *multi-subtask* — never calls the LLM at all (`agent.py:249-298`).
-  - *narrative* — trusts model prose but **forces source citation**
-    (`agent.py:365-369`); no found-fact rewrite here. That asymmetry is deliberate.
+  - *structured* — `_structured_answer`: on no `found` fact the model's text is
+    **discarded** and the answer is deterministically rewritten to "not found" /
+    "unrecognized". ⚠️ Known gap (audit): the `found` branch keeps model prose
+    verbatim + appends a source, so a live LLM could smuggle an extra fabricated
+    number; the deterministic guarantee only fully holds on the all-not-found path.
+  - *multi-subtask* — `_multi_subtask_answer` never calls the LLM at all.
+  - *narrative* — `_run_narrative` trusts model prose but **forces source citation**;
+    no found-fact rewrite here. That asymmetry is deliberate.
 - **Security is deterministic and never-pluggable.** Intent extraction is a swappable
   `IntentParser` Protocol; the `SecurityGate` is not. The gate re-derives external /
   competitor scope from the raw question and decides refusal independently of whatever
   the parser produced — swapping in an LLM parser cannot defeat it (ADR 0010).
 - **No hardcoded company** — home identity / entities / tool schema all derive from
-  `load_company_profile()` (`agent.py:51`, `query_tools.py:73-88`). Never backfill "ACME".
+  `load_company_profile()` (`agent.py` `_PROFILE`, `query_tools.py` builders).
+  Never backfill "ACME".
 - **Privacy-aware traces** — `_TraceCtx` records metadata only (tokens, timings,
-  chunk_id, scores), never answer / fact value / chunk text (`agent.py:86-95`).
+  chunk_id, scores), never answer / fact value / chunk text.
 
 ## Read before editing
 
-- **Out-of-scope entity must reject first.** `CLARIFY_OUT_OF_SCOPE_ENTITY` returns
-  before any tool / retrieval / LLM call (`agent.py:449`); a competitor/external
-  entity must never reach a channel. Don't reorder the early-returns.
-- **External-entity masking is an invariant, not a cleanup.** It now lives in
-  `SecurityGate.detect` (`security_gate.py:57`): matched aliases are replaced with
-  **equal-length spaces**, and home-entity matching runs on the masked text
-  (`intent.py:254`). "Simplifying" this leaks competitor data via substring
-  collisions (e.g. a masked competitor leaving `中国` → `ACME_CN`). Security.
-  The refusal decision is made by `SecurityGate.screen` on the **raw question**
-  (`intent.py:290`), not by trusting `intent.external_entity`.
-- **Clarification asymmetry is deliberate.** Missing *metric* → ask first
-  (`intent.py:302-308`); missing *entity/period* → answer with surfaced assumptions
-  (`intent.py:314-341`). Don't downgrade metric-missing to "assume and answer".
-- **`ProviderError` wraps only network / API / timeout errors** (`llm_provider.py:25-30`);
+- **Out-of-scope entity must reject first.** In `answer_question`,
+  `CLARIFY_OUT_OF_SCOPE_ENTITY` returns before any tool / retrieval / LLM call; a
+  competitor/external entity must never reach a channel. Don't reorder the early-returns.
+- **External-entity masking is an invariant, not a cleanup.** It lives in
+  `SecurityGate.detect`: matched aliases are replaced with **equal-length spaces**, and
+  home-entity matching runs on the masked text (used by `parse_intent`). "Simplifying"
+  this leaks competitor data via substring collisions (e.g. a masked competitor leaving
+  `中国` → `ACME_CN`). Security. The refusal decision is made by `SecurityGate.screen`
+  on the **raw question** (via `clarify_scope`), not by trusting `intent.external_entity`.
+- **Clarification asymmetry is deliberate.** In `clarify_scope`: missing *metric* → ask
+  first; missing *entity/period* → answer with surfaced assumptions. Don't downgrade
+  metric-missing to "assume and answer".
+- **`ProviderError` wraps only network / API / timeout errors** (`llm_provider.py`);
   program errors (KeyError/TypeError) must propagate. Never `except Exception` into a
   degrade path — it buries real bugs.
 - **provider & retriever are Protocols; `agent.py` imports no SDK and no retrieval impl**
-  (`llm_provider.py:57-78`, `agent.py:66-71`). The `anthropic` SDK is lazy-imported
-  inside `AnthropicProvider` only.
-- **Tool loop is capped** at `MAX_TOOL_ITERATIONS = 5` (`agent.py:44`); the SDK owns
+  (`LLMProvider` in `llm_provider.py`, `NarrativeRetriever` Protocol in `agent.py`). The
+  `anthropic` SDK is lazy-imported inside `AnthropicProvider` only.
+- **Tool loop is capped** at `MAX_TOOL_ITERATIONS = 5` (`agent.py`); the SDK owns
   retry/backoff — don't add your own.
 
 ## Deep dives
