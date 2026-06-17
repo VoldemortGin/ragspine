@@ -34,6 +34,10 @@ Docs describing code carry `covers:` + `verified-against:` frontmatter;
 
 ## Run (always from the project root)
 
+- **Make:** common commands are wrapped in the repo-root `Makefile` — `make help` lists them
+  (`make install` · `make ci` · `make test` · `make demo` · `make lint` · `make fmt` ·
+  `make drift` · `make hooks` · `make serve`/`make worker` · `make ask Q="…"`). Override the
+  interpreter with `make <t> PYTHON=python3.12`. The raw commands below remain the source of truth.
 - **Setup:** `uv venv .venv` then `VIRTUAL_ENV="$(pwd)/.venv" uv pip install -e ".[dev,service]"`
   (the `VIRTUAL_ENV=` prefix is required so `uv` targets this venv, not a system Python).
   Extras: `[pdf]` `[ocr]` `[llm]` `[embed]`.
@@ -51,6 +55,11 @@ Docs describing code carry `covers:` + `verified-against:` frontmatter;
   Never weaken a test to make it pass; if a frozen/regression test breaks, you broke behavior.
 - Python **3.10+** type hints. Import order: **stdlib > third-party > local**. Stay simple;
   match the surrounding style.
+- **Deep, domain-grouped layout** — organize by domain/feature, never by technical layer
+  (a *Screaming Architecture* / *package-by-feature* stance): the folder path should locate a
+  file before you read its name. Split a package as soon as it holds a second responsibility;
+  prefer pushing code into a deeper domain subtree over letting a flat module become a
+  catch-all. Depth tracks responsibility — go as deep as each level earns a distinct concern.
 - **Cross-platform** (`pathlib`, no OS-specific calls). Run scripts/tests from the repo root.
 - **Minimal diff** — change only what the task needs; don't refactor unrelated code or delete
   pre-existing dead code.
