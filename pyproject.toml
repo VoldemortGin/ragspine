@@ -1,5 +1,5 @@
 [project]
-name = "rag-spine"
+name = "ragspine"
 version = "0.1.0"
 description = "Framework-free backend RAG: deterministic dual-channel retrieval + agent orchestration with built-in anti-fabrication and source provenance."
 readme = "README.md"

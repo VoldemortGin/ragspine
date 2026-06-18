@@ -93,7 +93,7 @@ question
 ## Install
 
 ```bash
-pip install rag-spine      # distribution name is hyphenated; the import is:  import ragspine
+pip install ragspine       # distribution name == import name;  also reachable as: pip install rag-spine
 ```
 
 Optional extras:
