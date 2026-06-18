@@ -6,7 +6,7 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
-![Tests](https://img.shields.io/badge/tests-1095%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1103%20passing-brightgreen)
 [![Docs](https://img.shields.io/badge/docs-rag--spine.org-2dd4bf)](https://rag-spine.org)
 
 ---
@@ -118,6 +118,12 @@ VIRTUAL_ENV="$(pwd)/.venv" uv pip install -e ".[dev,service]"
 
 ## Quickstart
 
+**0. Fastest smoke test — the installed `ragspine` CLI, offline, no API key:**
+
+```bash
+ragspine quickstart    # one FOUND answer (with provenance) + one honest "not found" — proves anti-fabrication in seconds
+```
+
 **1. End-to-end demo on synthetic data — offline, no API key:**
 
 ```bash
@@ -208,7 +214,7 @@ adding a provider / vector store / reranker / OCR engine touches one new file.
 ## Testing
 
 ```bash
-.venv/bin/python -m pytest tests/ -q        # 1095 passed, 1 gpu-skipped
+.venv/bin/python -m pytest tests/ -q        # 1103 passed, 1 gpu-skipped
 ```
 
 The project is **test-driven**: tests are the spec. The `gpu` marker gates real-OCR
@@ -239,7 +245,7 @@ version-controlled evaluation sets live under `data/golden/`. Nothing here is re
 ## Status & roadmap
 
 **Solid:** structured channel, narrative hybrid retrieval, agent orchestration, office
-extraction (xlsx/pptx/pdf), FastAPI + RQ service, FAQ cache, evaluation harness, 1095 tests.
+extraction (xlsx/pptx/pdf), FastAPI + RQ service, FAQ cache, evaluation harness, 1103 tests.
 
 **Honest gaps (contributions welcome):** the vector channel ships as an *injectable*
 channel — the default is BM25-only, and real embedding models run behind the `[embed]`/GPU

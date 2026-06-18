@@ -50,6 +50,9 @@ Homepage = "https://github.com/VoldemortGin/ragspine"
 Repository = "https://github.com/VoldemortGin/ragspine"
 Issues = "https://github.com/VoldemortGin/ragspine/issues"
 
+[project.scripts]
+ragspine = "ragspine.cli:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",

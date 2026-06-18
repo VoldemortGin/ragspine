@@ -1,10 +1,11 @@
 """RAGSpine —— 无框架的后端 RAG 引擎，纯 Python 装配，反幻觉与来源溯源为代码级不变量。
 
 确定性双通道（结构化数值 + 叙事 RAG）+ agent 编排；所有外部依赖均为 Protocol，
-核心零 SDK、可离线运行。代码按领域分组为 9 个顶层域。
+核心零 SDK、可离线运行。代码按领域分组为 10 个顶层域。
 
 Submodules:
     agent/ — agent 编排：意图解析、安全门、tool-use 循环、LLM provider 抽象。
+    cli/ — 控制台 CLI 入口（ragspine 命令）：quickstart / ask / version 子命令。
     common/ — 跨域基础原语：company profile、敏感度、glossary、可观测性。
     eval/ — Q&A 与抽取评测 harness，含基线回归门禁。
     extraction/ — 文档 → 冻结的 StyledGrid IR：抽取器、PDF 分诊、颜色语义、双通道校验。

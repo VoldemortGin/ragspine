@@ -1,8 +1,8 @@
 """顶层包 API —— 惰性领域访问（PEP 562）。
 
 钉住三条不变量：
-1. `import ragspine` 后，9 个领域子包可经属性直达（`ragspine.agent` …）。
-2. `dir(ragspine)` / Tab 补全能发现这 9 个域。
+1. `import ragspine` 后，10 个领域子包可经属性直达（`ragspine.agent` …）。
+2. `dir(ragspine)` / Tab 补全能发现这 10 个域。
 3. **`import ragspine` 不急切加载任何域** —— 保住「核心零重依赖、离线可 import」
    这条用户硬约束（域仅在首次访问时才 import，故顶层 import 永不因缺可选 extra 而崩）。
 """
@@ -15,9 +15,10 @@ import pytest
 
 import ragspine
 
-# 9 个顶层领域（与包 docstring 的 Submodules 清单一致）。
+# 10 个顶层领域（与包 docstring 的 Submodules 清单一致）。
 DOMAINS = (
     "agent",
+    "cli",
     "common",
     "eval",
     "extraction",
