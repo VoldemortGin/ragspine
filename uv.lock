@@ -3856,8 +3856,8 @@ wheels = [
 ]
 
 [[package]]
-name = "ragspine"
-version = "0.1.0"
+name = "rag-spine"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "beartype" },
