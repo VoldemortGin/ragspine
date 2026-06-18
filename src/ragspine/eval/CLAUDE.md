@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/eval/
-verified-against: 795ed14
+verified-against: cab40fe
 ---
 
 # eval — agent contract

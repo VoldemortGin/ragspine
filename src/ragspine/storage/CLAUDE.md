@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/storage/
-verified-against: c78ab20
+verified-against: cab40fe
 ---
 
 # storage — agent contract
