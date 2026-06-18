@@ -43,6 +43,8 @@ _RESERVED_DIM_NAMES = frozenset(
         "confidence",
         "valid_as_of",
         "ingested_at",
+        "corrected_by",
+        "corrected_audit_seq",
     }
 )
 
@@ -73,6 +75,11 @@ class Fact:
     # ingested_at —— 写入时间戳（store 在 upsert 时统一盖 UTC ISO；此处仅读回填充）。
     valid_as_of: str | None = None
     ingested_at: str | None = None
+    # --- 人工更正血缘列（默认 None：既有构造处零改动、答案字节级不变）----------
+    # corrected_by —— 应用更正决议的处理人（SME），来自解析决议的审计 actor。
+    # corrected_audit_seq —— 解析决议的那条 reject 审计记录 seq，applier 据此幂等。
+    corrected_by: str | None = None
+    corrected_audit_seq: int | None = None
     # --- 任意维度袋（内存态，不入 DB）-----------------------------------
     # 空时由 __post_init__ 从身份列派生镜像；非空时校验不与保留名冲突。
     dimensions: dict[str, str] = field(default_factory=dict)
@@ -115,6 +122,9 @@ _V2_COLUMNS = [
     # provenance 时效列（与 v2 同款幂等 ALTER 补列，旧库平滑迁移）。
     "valid_as_of",
     "ingested_at",
+    # 人工更正血缘列（同款幂等 ALTER 补列）。
+    "corrected_by",
+    "corrected_audit_seq",
 ]
 # Fact 的全部 dataclass 字段名（含 dimensions）。仅供需要读 Fact 字段名处使用；
 # DB I/O 一律走显式列表（_DB_COLUMNS / _from_row 的字段名子集），不被此驱动。
@@ -199,6 +209,8 @@ class FactStore:
             "review_status": f"TEXT NOT NULL DEFAULT '{REVIEW_AUTO_APPROVED}'",
             "valid_as_of": "TEXT",
             "ingested_at": "TEXT",
+            "corrected_by": "TEXT",
+            "corrected_audit_seq": "INTEGER",
         }
         for col in _V2_COLUMNS:
             if col not in existing:
@@ -253,6 +265,8 @@ class FactStore:
             "review_status",
             "valid_as_of",
             "ingested_at",
+            "corrected_by",
+            "corrected_audit_seq",
         )
         updates = ", ".join(f"{c}=excluded.{c}" for c in update_cols)
         sql = (
@@ -318,6 +332,38 @@ class FactStore:
         self._conn.commit()
         return cur.rowcount
 
+    def set_review_status(self, dim_key: str, status: str) -> int:
+        """按 dim_key 改写某条事实的 review_status，返回受影响行数（0 或 1）。
+
+        人审写回用：approve→APPROVED 让事实可见，reject→REJECTED 让其不可见。
+        dim_key 唯一，命中至多一行；不存在则返回 0、不报错。
+        """
+        cur = self._conn.execute(
+            "UPDATE fact_metric SET review_status = ? WHERE dim_key = ?",
+            (status, dim_key),
+        )
+        self._conn.commit()
+        return cur.rowcount
+
+    @staticmethod
+    def dim_key_for(fact: "Fact") -> str:
+        """从类型化身份列算该 Fact 的 dim_key（storage-only 自然键的公开取值口）。
+
+        applier 需要 dim_key 才能 set_review_status / get_by_dim_key，但 dim_key
+        绝不入 Fact 字段，故经此处统一从身份列重算（与 upsert 写入口同源）。
+        """
+        return _compute_dim_key(fact)
+
+    def get_by_dim_key(self, dim_key: str) -> "Fact | None":
+        """按 dim_key 取事实（不论 review_status），不存在返回 None。
+
+        applier 据此读当前状态 / 校正血缘戳做幂等判断。
+        """
+        row = self._conn.execute(
+            "SELECT * FROM fact_metric WHERE dim_key = ?", (dim_key,)
+        ).fetchone()
+        return self._from_row(row) if row is not None else None
+
     def close(self) -> None:
         self._finalizer()  # 幂等：关连接并注销 finalizer，重复调用安全
 
@@ -343,7 +389,7 @@ class FactStore:
 
     @staticmethod
     def _from_row(row: sqlite3.Row) -> "Fact":
-        # 只用 Fact 的 18 个 dataclass 字段名（基础 + v2/时效）从 row 取值；
+        # 只用 Fact 的持久化字段名（基础 + v2/时效/更正血缘）从 row 取值；
         # dim_key 是 storage-only（喂进 Fact 会 TypeError），dimensions 由
         # __post_init__ 重新派生——二者都不回灌进构造。
         data = {}

@@ -61,6 +61,7 @@ class AuditRecord:
         at:         操作时间 ISO 串。
         note:       备注。
         detail:     附加细节（如更正值），dict。
+        seq:        审计自增主键（追加序）；人审写回 applier 据此做幂等键。
     """
 
     item_id: int
@@ -69,6 +70,7 @@ class AuditRecord:
     at: str | None = None
     note: str | None = None
     detail: dict[str, Any] = field(default_factory=dict)
+    seq: int | None = None
 
 
 class IllegalTransitionError(Exception):
@@ -160,6 +162,14 @@ class ReviewQueue:
         cur = self._conn.execute(
             "SELECT * FROM review_item WHERE status = ? ORDER BY priority ASC, id ASC",
             (STATUS_PENDING,),
+        )
+        return [self._row_to_item(row) for row in cur.fetchall()]
+
+    def list_resolved(self) -> list[ReviewItem]:
+        """列出全部已决议（approved / rejected）项，按 id 升序（确定性、供写回遍历）。"""
+        cur = self._conn.execute(
+            "SELECT * FROM review_item WHERE status IN (?, ?) ORDER BY id ASC",
+            (STATUS_APPROVED, STATUS_REJECTED),
         )
         return [self._row_to_item(row) for row in cur.fetchall()]
 
@@ -288,4 +298,5 @@ class ReviewQueue:
             at=row["at"],
             note=row["note"],
             detail=json.loads(row["detail"]) if row["detail"] else {},
+            seq=row["seq"],
         )

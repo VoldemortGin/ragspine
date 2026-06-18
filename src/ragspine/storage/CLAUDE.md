@@ -16,7 +16,9 @@ Fact store (numeric) + chunk store (narrative), sqlite-backed, full lineage.
 ## Invariants
 
 - **Provenance** — every stored fact/chunk carries `source_doc_id` + locator;
-  never drop lineage.
+  never drop lineage. Human corrections add `corrected_by` + `corrected_audit_seq` (the
+  resolving SME and the review-audit `seq` behind the value) so a corrected fact stays
+  traceable to who changed it and why; the applier keys idempotency on that `seq`.
 - **`dim_key` is the upsert conflict key** — a canonical sorted-JSON natural key over
   the *identity* dims only (`metric`, `entity`, `channel`, `period=period_type+period`;
   geography is `identity=False`, an overwritable non-key column). It is computed from the
