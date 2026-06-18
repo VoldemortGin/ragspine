@@ -6,3 +6,7 @@
 Submodules:
     faq_cache.py — SME 审核型 FAQ 短路缓存。
 """
+
+from ragspine import _lazy_submodules
+
+__getattr__, __dir__ = _lazy_submodules(__name__, __path__)

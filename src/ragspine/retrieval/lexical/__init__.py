@@ -5,3 +5,7 @@
 Submodules:
     retrieval.py — 叙事通路混合检索：BM25 + 向量（注入）+ RRF + 预过滤 + multi-query。
 """
+
+from ragspine import _lazy_submodules
+
+__getattr__, __dir__ = _lazy_submodules(__name__, __path__)

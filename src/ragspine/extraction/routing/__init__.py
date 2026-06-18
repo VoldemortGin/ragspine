@@ -5,3 +5,7 @@
 Submodules:
     pdf_router.py — PDF 分诊路由（二期 PDF 线）。
 """
+
+from ragspine import _lazy_submodules
+
+__getattr__, __dir__ = _lazy_submodules(__name__, __path__)

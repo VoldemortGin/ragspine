@@ -5,3 +5,7 @@
 Submodules:
     fact_store.py — 指标事实表 fact_metric 的存储层（stdlib sqlite3）。
 """
+
+from ragspine import _lazy_submodules
+
+__getattr__, __dir__ = _lazy_submodules(__name__, __path__)

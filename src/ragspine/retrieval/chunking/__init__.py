@@ -6,3 +6,7 @@ Submodules:
     chunk_store.py — 叙事块库（sqlite，显式 schema、参数化 SQL、execute_read 只读入口）。
     chunking.py — 叙事通路切块器：文档级纯文本 + 元数据 → Chunk 列表。
 """
+
+from ragspine import _lazy_submodules
+
+__getattr__, __dir__ = _lazy_submodules(__name__, __path__)

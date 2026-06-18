@@ -10,3 +10,7 @@ Submodules:
     query_tools.py — 参数化 query_metric 查询工具：found/not_found/unrecognized，绝不臆造。
     security_gate.py — 确定性安全门（ADR 0010）：越权/竞品拒答 + 命中遮蔽。
 """
+
+from ragspine import _lazy_submodules
+
+__getattr__, __dir__ = _lazy_submodules(__name__, __path__)

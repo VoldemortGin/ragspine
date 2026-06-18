@@ -7,3 +7,7 @@ Submodules:
     embedding_backends.py — embedding 后端实现（EmbeddingBackend 协议）+ 后端工厂。
     store.py — 可插拔 VectorStore 缝 + 零依赖确定性内存默认实现（InProcessVectorStore）。
 """
+
+from ragspine import _lazy_submodules
+
+__getattr__, __dir__ = _lazy_submodules(__name__, __path__)

@@ -7,3 +7,7 @@ Submodules:
     extraction_eval.py — 抽取评测：分通道指标 + 回归门禁。
     qa_eval.py — Q&A 评测闭环 harness：四命门指标 + 基线门禁。
 """
+
+from ragspine import _lazy_submodules
+
+__getattr__, __dir__ = _lazy_submodules(__name__, __path__)

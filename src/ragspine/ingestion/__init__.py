@@ -7,3 +7,7 @@ Submodules:
     review/ — SME 人工复核队列状态机。
     structured/ — 结构化事实入库 + 幂等批量 manifest 台账。
 """
+
+from ragspine import _lazy_submodules
+
+__getattr__, __dir__ = _lazy_submodules(__name__, __path__)

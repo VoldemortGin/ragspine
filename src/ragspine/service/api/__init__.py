@@ -9,3 +9,7 @@ Submodules:
     routes.py — HTTP 路由：薄适配层（schema/DI/装配/FAQ 短路/错误整形/trace）。
     schemas.py — HTTP 边界模型（Pydantic v2），与内部 dataclass 解耦。
 """
+
+from ragspine import _lazy_submodules
+
+__getattr__, __dir__ = _lazy_submodules(__name__, __path__)

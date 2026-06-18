@@ -11,3 +11,7 @@ Submodules:
     xlsx_extractor.py — XLSX 确定性抽取：5-yr summary 表按 schema 映射，零幻觉。
     xlsx_styled_extractor.py — XLSX 样式感知抽取器：每 sheet 产出一张 StyledGrid。
 """
+
+from ragspine import _lazy_submodules
+
+__getattr__, __dir__ = _lazy_submodules(__name__, __path__)

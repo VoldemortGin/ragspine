@@ -10,3 +10,7 @@ Submodules:
     verification/ — 双通道交叉校验（纯逻辑，不依赖 Docling）。
     ir.py — 样式感知网格中间表示（styled_grid IR），全项目最稳定的接口。
 """
+
+from ragspine import _lazy_submodules
+
+__getattr__, __dir__ = _lazy_submodules(__name__, __path__)

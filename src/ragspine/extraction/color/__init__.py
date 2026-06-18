@@ -5,3 +5,7 @@
 Submodules:
     color_semantics.py — 同色聚类、图例识别、版本化映射注册表、映射应用。
 """
+
+from ragspine import _lazy_submodules
+
+__getattr__, __dir__ = _lazy_submodules(__name__, __path__)

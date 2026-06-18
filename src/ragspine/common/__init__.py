@@ -10,3 +10,7 @@ Submodules:
     observability.py — 可观测性原语：request_id 生成 + 结构化 trace 发射。
     sensitivity.py — 叙事入库的确定性敏感度分级策略与纯函数分级器。
 """
+
+from ragspine import _lazy_submodules
+
+__getattr__, __dir__ = _lazy_submodules(__name__, __path__)

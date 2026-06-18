@@ -5,3 +5,7 @@
 Submodules:
     listwise_rerank.py — Claude listwise 二审（精排）：协议 + prompt + 解析 + 退化。
 """
+
+from ragspine import _lazy_submodules
+
+__getattr__, __dir__ = _lazy_submodules(__name__, __path__)

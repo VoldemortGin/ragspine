@@ -9,3 +9,7 @@ Submodules:
     tasks/ — 异步任务队列抽象 + worker 端 ingestion job。
     config.py — 服务层运行时配置（env RAGSPINE_*）与资源/provider 装配。
 """
+
+from ragspine import _lazy_submodules
+
+__getattr__, __dir__ = _lazy_submodules(__name__, __path__)

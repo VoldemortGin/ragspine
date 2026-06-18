@@ -10,3 +10,7 @@ Submodules:
     rerank/ — Claude listwise 精排，RRF 退化兜底。
     vector/ — 可注入的 embedding 后端（默认无 = 纯 BM25）。
 """
+
+from ragspine import _lazy_submodules
+
+__getattr__, __dir__ = _lazy_submodules(__name__, __path__)

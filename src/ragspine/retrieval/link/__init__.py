@@ -5,3 +5,7 @@ RESTRICTED 内容在此出口被剥离（与 rerank 共两道防线）。
 Submodules:
     narrative_link.py — A/B 两线集成适配层：B 线检索 → A 线 NarrativeRetriever 协议。
 """
+
+from ragspine import _lazy_submodules
+
+__getattr__, __dir__ = _lazy_submodules(__name__, __path__)
