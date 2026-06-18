@@ -2,20 +2,18 @@
 #
 # Trigger: publishing a GitHub Release. The `gate` job runs the exact same checks as
 # `scripts/ci.sh` across the support matrix; only if every leg is green does `publish`
-# build + upload BOTH distribution names — canonical `ragspine` + alias `rag-spine`.
+# build + upload the `ragspine` distribution.
 #
-# ── One-time PyPI setup (web UI, per project) ──────────────────────────────────────────
+# ── One-time PyPI setup (web UI) ───────────────────────────────────────────────────────
 # https://pypi.org/manage/account/publishing/  →  "Add a new pending publisher":
 #   Project name: ragspine    Owner: VoldemortGin   Repository: ragspine
 #   Workflow name: release.yml    Environment: (leave blank)
-#   …then repeat with Project name: rag-spine  (same Owner / Repository / Workflow).
-# "Pending publisher" is used because neither project exists yet; the first successful
-# run creates them. After that they show up as normal trusted publishers.
+# "Pending publisher" is used because the project does not exist yet; the first successful
+# run creates it.
 #
 # ── To cut a release ───────────────────────────────────────────────────────────────────
-# Bump `version` in pyproject.toml (and packaging/rag-spine-alias/pyproject.toml to match),
-# commit, then publish a GitHub Release tagged e.g. v0.1.0. The published version is taken
-# from pyproject, not the tag — keep them in sync.
+# Bump `version` in pyproject.toml, commit, then publish a GitHub Release tagged e.g.
+# v0.1.0. The published version is taken from pyproject, not the tag — keep them in sync.
 name: Release
 
 on:
@@ -53,18 +51,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - name: Build sdist + wheel (canonical + alias)
+      - name: Build sdist + wheel
         run: |
           python -m pip install -U build
-          python -m build --outdir dist-main .
-          python -m build --outdir dist-alias packaging/rag-spine-alias
-      # Two publish steps: Trusted Publishing mints a project-scoped token per call, so each
-      # distribution name is uploaded from its own directory against its own trusted publisher.
-      - name: Publish ragspine (canonical)
+          python -m build
+      - name: Publish to PyPI (Trusted Publishing / OIDC)
         uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: dist-main
-      - name: Publish rag-spine (alias)
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: dist-alias

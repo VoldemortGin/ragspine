@@ -93,7 +93,7 @@ question
 ## Install
 
 ```bash
-pip install ragspine       # distribution name == import name;  also reachable as: pip install rag-spine
+pip install ragspine       # distribution name == import name
 ```
 
 Optional extras:
