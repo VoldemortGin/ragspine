@@ -1,0 +1,23 @@
+[project]
+name = "rag-spine"
+version = "0.1.0"
+description = "Alias of `ragspine` — installs the real package. Use `pip install ragspine`."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [{ name = "lin han", email = "voldemort22@126.com" }]
+# 纯转发包：本身无任何代码，只声明对正主 ragspine 的依赖。
+# 不设版本上界，故 `pip install rag-spine` 永远拉取最新 ragspine，别名无需再发版。
+dependencies = ["ragspine"]
+
+[project.urls]
+Homepage = "https://github.com/VoldemortGin/ragspine"
+Repository = "https://github.com/VoldemortGin/ragspine"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# metadata-only 包（无模块）：让 hatchling 跳过文件选择，产出仅含元数据的 wheel。
+[tool.hatch.build.targets.wheel]
+bypass-selection = true
