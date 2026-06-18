@@ -98,9 +98,25 @@ docs: ## Build the static API-reference site from docstrings (pdoc → docs/site
 	@echo "API docs → docs/site/  (deploy: point nginx 'root' at $(abspath docs/site))"
 
 .PHONY: clean
-clean: ## Remove caches (pyc, pytest/ruff/mypy)
+clean: ## Remove caches (pyc, pytest/ruff/mypy) and build artifacts
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
-	rm -rf .pytest_cache .ruff_cache .mypy_cache
+	rm -rf .pytest_cache .ruff_cache .mypy_cache dist build *.egg-info
+
+# ---- release -------------------------------------------------------------------------
+
+.PHONY: build
+build: ## Build wheel + sdist into dist/ and validate with twine check
+	rm -rf dist
+	$(PYTHON) -m build
+	$(PYTHON) -m twine check dist/*
+
+.PHONY: publish-test
+publish-test: build ## Build, then upload to TestPyPI (rehearse a real release; needs a TestPyPI token)
+	$(PYTHON) -m twine upload --repository testpypi dist/*
+
+.PHONY: publish
+publish: build ## Build, then upload to PyPI (real release; needs a PyPI token)
+	$(PYTHON) -m twine upload dist/*
 
 # ---- meta ----------------------------------------------------------------------------
 
