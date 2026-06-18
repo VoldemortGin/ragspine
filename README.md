@@ -6,7 +6,7 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
-![Tests](https://img.shields.io/badge/tests-1084%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1086%20passing-brightgreen)
 [![Docs](https://img.shields.io/badge/docs-rag--spine.org-2dd4bf)](https://rag-spine.org)
 
 ---
@@ -208,7 +208,7 @@ adding a provider / vector store / reranker / OCR engine touches one new file.
 ## Testing
 
 ```bash
-.venv/bin/python -m pytest tests/ -q        # 1084 passed, 1 gpu-skipped
+.venv/bin/python -m pytest tests/ -q        # 1086 passed, 1 gpu-skipped
 ```
 
 The project is **test-driven**: tests are the spec. The `gpu` marker gates real-OCR
@@ -239,7 +239,7 @@ version-controlled evaluation sets live under `data/golden/`. Nothing here is re
 ## Status & roadmap
 
 **Solid:** structured channel, narrative hybrid retrieval, agent orchestration, office
-extraction (xlsx/pptx/pdf), FastAPI + RQ service, FAQ cache, evaluation harness, 1084 tests.
+extraction (xlsx/pptx/pdf), FastAPI + RQ service, FAQ cache, evaluation harness, 1086 tests.
 
 **Honest gaps (contributions welcome):** the vector channel ships as an *injectable*
 channel — the default is BM25-only, and real embedding models run behind the `[embed]`/GPU

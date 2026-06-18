@@ -17,7 +17,11 @@ QA + extraction evaluation harnesses with baseline gates. Golden sets live under
 ## Invariants
 
 - **Baseline gate ratchets up, never down** — a regression must fail the baseline gate,
-  not silently lower it; never weaken a golden / baseline to make a case pass.
+  not silently lower it; never weaken a golden / baseline to make a case pass. This is now
+  **machine-enforced**, not convention: `scripts/ci.sh` runs `run_qa_eval.py --mode tool`
+  **and** `--mode agent` (both baseline-gated against `data/golden/qa_baseline.json`), and
+  `tests/eval/test_ci_wires_eval_gate.py` pins that wiring so it can't be silently removed.
+  Escape hatch for an intentional, reviewed move: `run_qa_eval.py --mode <m> --update-baseline`.
 - **Anti-fabrication whitelist is profile-sourced** — `detect_fabricated_numbers` strips
   only the active profile's temporal-dim `fabrication_whitelist_regex` (read from
   `qa_eval._PROFILE` **at call time**) and strips **nothing** when no such dim exists, so a

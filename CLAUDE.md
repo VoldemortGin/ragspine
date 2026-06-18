@@ -41,8 +41,8 @@ Docs describing code carry `covers:` + `verified-against:` frontmatter;
 - **Setup:** `uv venv .venv` then `VIRTUAL_ENV="$(pwd)/.venv" uv pip install -e ".[dev,service]"`
   (the `VIRTUAL_ENV=` prefix is required so `uv` targets this venv, not a system Python).
   Extras: `[pdf]` `[ocr]` `[llm]` `[embed]`.
-- **Tests:** `.venv/bin/python -m pytest tests/ -q` → expect **1084 passed, 1 gpu-skipped**.
-- **CI (local):** `scripts/ci.sh` is the gate (tests + demo smoke); enable the pre-push hook
+- **Tests:** `.venv/bin/python -m pytest tests/ -q` → expect **1086 passed, 1 gpu-skipped**.
+- **CI (local):** `scripts/ci.sh` is the gate (tests + 4-gate QA eval ratchet + demo smoke); enable the pre-push hook
   once with `git config core.hooksPath .githooks`. GitHub Actions is dormant (manual-only) to
   avoid consuming quota — see README "Continuous integration (local)".
 - **Demo:** `.venv/bin/python scripts/run_demo.py` → expect `ALL CHECKS PASSED`.
