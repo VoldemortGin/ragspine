@@ -307,6 +307,92 @@ def test_d3_pdf_digital_no_failure(store, registry, queue, digital_pdf_path):
 
 
 # ===========================================================================
+# D3-seam — 数字管线可插拔：GridExtractor 协议 + 依赖注入（与 OcrBackend 同范式）
+# ===========================================================================
+class _FakeGridExtractor:
+    """测试用 GridExtractor：记录调用 + 返回预置 grids + 可控 version。
+
+    证明数字型表格解析可插拔——注入它即绕开 Docling，无需安装 [pdf] 即可跑通数字通路。
+    """
+
+    def __init__(self, *, version: str = "fake_grid_v0") -> None:
+        self.version = version
+        self.calls: list[str] = []
+
+    def extract_grids(self, path: object) -> list:
+        self.calls.append(str(path))
+        return []  # 空 grids：无需真造 StyledGrid，仍走完 digital 分支
+
+
+def test_d3_ingest_file_uses_injected_grid_extractor_offline(
+    store, registry, queue, digital_pdf_path
+):
+    """user story：作为接手方，我注入自定义 GridExtractor，ingest_file 应改用它解析数字型
+    PDF（绕开 Docling），从而【无需安装 Docling】即可跑通数字通路——证明数字管线可插拔。"""
+    from ragspine.ingestion.structured.ingestion import ingest_file
+
+    _init_three(store, registry, queue)
+    fake = _FakeGridExtractor()
+    report = ingest_file(digital_pdf_path, store, registry, queue, grid_extractor=fake)
+
+    assert fake.calls == [str(digital_pdf_path)]  # 注入的 extractor 被调用（而非 Docling）
+    assert report.status == "ok"
+    assert report.error is None
+
+
+def test_d3_injected_grid_extractor_version_is_stamped(
+    store, registry, queue, digital_pdf_path, monkeypatch
+):
+    """user story：作为审计者，我要血缘里的 extractor_version 随注入的解析器而变——
+    换解析器即换版本标识，溯源链天然支持多解析器并存。"""
+    from ragspine.ingestion.structured.ingestion import ingest_file
+    import ragspine.ingestion.structured.ingestion as ingestion_mod
+
+    _init_three(store, registry, queue)
+    captured: dict[str, object] = {}
+    real_ingest_grids = ingestion_mod._ingest_grids
+
+    def _spy(report, grids, *args, **kwargs):
+        captured["extractor_version"] = kwargs.get("extractor_version")
+        return real_ingest_grids(report, grids, *args, **kwargs)
+
+    monkeypatch.setattr(ingestion_mod, "_ingest_grids", _spy)
+    ingest_file(
+        digital_pdf_path, store, registry, queue,
+        grid_extractor=_FakeGridExtractor(version="fake_grid_v9"),
+    )
+    assert captured["extractor_version"] == "fake_grid_v9"
+
+
+def test_grid_extractor_protocol_is_runtime_checkable():
+    """user story：作为维护者，我要 GridExtractor 是 runtime_checkable 协议——默认 Docling
+    实现与任意 fake 都结构性满足；缺 version 或缺 extract_grids 的对象不满足
+    （version 是契约的一部分，让血缘随 extractor）。"""
+    from ragspine.extraction.extractors.pdf_digital_extractor import (
+        DoclingGridExtractor,
+        GridExtractor,
+    )
+
+    assert isinstance(DoclingGridExtractor(), GridExtractor)
+    assert isinstance(_FakeGridExtractor(), GridExtractor)
+    assert not isinstance(object(), GridExtractor)  # 既无 extract_grids 也无 version
+
+    class _NoVersion:
+        def extract_grids(self, path: object) -> list:
+            return []
+
+    assert not isinstance(_NoVersion(), GridExtractor)  # 缺 version → 不满足契约
+
+
+def test_docling_grid_extractor_version_byte_identical():
+    """user story：作为回归守护者，我要默认 DoclingGridExtractor 的 version 仍是
+    'pdf_digital@1'——保证未注入时数字型 PDF 入库的血缘字节不变（接缝 additive、不改默认）。"""
+    from ragspine.extraction.extractors.pdf_digital_extractor import DoclingGridExtractor
+
+    assert DoclingGridExtractor().version == "pdf_digital@1"
+
+
+# ===========================================================================
 # D4 — PDF 越界入队：scanned / ask_for_pptx 不抽数字事实，enqueue 带正确 reason
 # ===========================================================================
 def test_d4_scanned_pdf_enqueued_not_extracted(

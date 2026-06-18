@@ -448,6 +448,7 @@ def ingest_file(
     manifest: ManifestStore | None = None,
     batch_id: str | None = None,
     valid_as_of: str | None = None,
+    grid_extractor: pdf_digital_extractor.GridExtractor | None = None,
 ) -> IngestReport:
     """统一多格式分发入口：按后缀把文件路由到对应抽取器并复用共享入库逻辑。
 
@@ -481,6 +482,7 @@ def ingest_file(
         _ingest_pdf(
             report, path, store, registry, queue,
             dry_run=dry_run, valid_as_of=valid_as_of,
+            grid_extractor=grid_extractor,
         )
         if not dry_run:
             _record_manifest(
@@ -526,8 +528,14 @@ def _ingest_pdf(
     *,
     dry_run: bool,
     valid_as_of: str | None = None,
+    grid_extractor: pdf_digital_extractor.GridExtractor | None = None,
 ) -> None:
-    """PDF 分支：先分诊路由，再决定走数字抽取入库还是越界入复核。"""
+    """PDF 分支：先分诊路由，再决定走数字抽取入库还是越界入复核。
+
+    grid_extractor：数字型表格抽取器（依赖注入，缺省 = DoclingGridExtractor）。换 Docling
+    为别的解析器只需注入另一个 GridExtractor 实现；血缘里的 extractor_version 随之而变。
+    """
+    extractor = grid_extractor or pdf_digital_extractor.DoclingGridExtractor()
     decision = pdf_router.route(str(path))
     report.file_hash = decision.file_hash
 
@@ -553,14 +561,14 @@ def _ingest_pdf(
 
     if decision.verdict == pdf_router.VERDICT_DIGITAL:
         try:
-            grids = pdf_digital_extractor.extract_grids(path)
+            grids = extractor.extract_grids(path)
         except Exception as exc:  # noqa: BLE001
             report.status = "failed"
             report.error = f"{type(exc).__name__}: {exc}"
             return
         _ingest_grids(
             report, grids, store, registry, queue,
-            dry_run=dry_run, extractor_version="pdf_digital@1",
+            dry_run=dry_run, extractor_version=extractor.version,
             valid_as_of=valid_as_of,
         )
         return

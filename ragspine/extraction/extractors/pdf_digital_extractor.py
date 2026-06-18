@@ -26,7 +26,7 @@ StyledGrid，使 citation 能精确回指到「页 + 表 + 格」。与 xlsx_sty
 
 import hashlib
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 import pypdfium2 as pdfium
 import pypdfium2.raw as pdfium_raw
@@ -193,3 +193,36 @@ def extract_grids(path: str | Path) -> list[StyledGrid]:
             _build_grid(table, sheet, source_doc_id, source_file_hash)
         )
     return grids
+
+
+@runtime_checkable
+class GridExtractor(Protocol):
+    """数字型表格抽取器协议（依赖注入点）：path -> list[StyledGrid] + 版本血缘。
+
+    任何实现本协议的对象都可注入 ingest_file，把"数字型 PDF 表格解析"从 Docling
+    解耦——换 pdfplumber / camelot / unstructured 等只需另写一个实现并注入，调用点不变；
+    本地逻辑测试可用返回固定网格的 fake，无需安装 Docling（与 OcrBackend 同范式）。
+
+    version 写入每条事实的血缘（extractor_version），故多解析器可并存、可溯源区分。
+    """
+
+    version: str
+
+    def extract_grids(self, path: str | Path) -> list[StyledGrid]:
+        """抽取一个 PDF 的全部表格 -> list[StyledGrid]（每张表一个）。"""
+        ...
+
+
+class DoclingGridExtractor:
+    """默认 GridExtractor：薄封装本模块的 Docling 数字型抽取（行为字节不变）。
+
+    Docling 仍惰性 import（在模块级 extract_grids 函数体内），未装 [pdf] 时构造本类
+    不报错，仅在真正抽取时才需要 Docling。version 沿用既有入库 stamp 'pdf_digital@1'，
+    保证默认路径的血缘字节不变。
+    """
+
+    version = "pdf_digital@1"
+
+    def extract_grids(self, path: str | Path) -> list[StyledGrid]:
+        # 委托模块级 extract_grids（test 对该模块属性打补丁时仍生效——同一命名空间）。
+        return extract_grids(path)
