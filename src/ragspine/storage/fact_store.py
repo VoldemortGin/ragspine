@@ -11,6 +11,7 @@ review_status），schema 自动迁移补列；query() 默认只返回 review_st
 
 import json
 import sqlite3
+import weakref
 from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 from pathlib import Path
@@ -149,6 +150,9 @@ class FactStore:
         self.db_path = str(db_path)
         self._conn = sqlite3.connect(self.db_path)
         self._conn.row_factory = sqlite3.Row
+        # 确定性资源回收：对象被 GC 回收时（即便调用方忘了 close）也关连接，
+        # 免得裸 sqlite 连接在 __del__ 阶段抛 ResourceWarning（被零警告门升级为失败）。
+        self._finalizer = weakref.finalize(self, self._conn.close)
 
     def init_schema(self) -> None:
         """建表 + 唯一索引（同一指标×实体×期间×渠道只允许一条）+ v2 迁移补列。"""
@@ -315,7 +319,7 @@ class FactStore:
         return cur.rowcount
 
     def close(self) -> None:
-        self._conn.close()
+        self._finalizer()  # 幂等：关连接并注销 finalizer，重复调用安全
 
     # --- 行 <-> Fact 序列化（tags 走 JSON）--------------------------------
 

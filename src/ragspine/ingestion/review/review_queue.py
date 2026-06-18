@@ -7,6 +7,7 @@
 
 import json
 import sqlite3
+import weakref
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -85,6 +86,9 @@ class ReviewQueue:
         self.db_path = str(db_path)
         self._conn = sqlite3.connect(self.db_path)
         self._conn.row_factory = sqlite3.Row
+        # 确定性资源回收：对象被 GC 回收时（即便调用方忘了 close）也关连接，
+        # 免得裸 sqlite 连接在 __del__ 阶段抛 ResourceWarning（被零警告门升级为失败）。
+        self._finalizer = weakref.finalize(self, self._conn.close)
 
     def init_schema(self) -> None:
         """建队列表（review_item）+ 追加式审计表（review_audit）+ 索引。"""
@@ -191,7 +195,7 @@ class ReviewQueue:
         return [self._row_to_audit(row) for row in cur.fetchall()]
 
     def close(self) -> None:
-        self._conn.close()
+        self._finalizer()  # 幂等：关连接并注销 finalizer，重复调用安全
 
     # --- 内部实现 --------------------------------------------------------
 
