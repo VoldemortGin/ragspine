@@ -1,13 +1,13 @@
 ---
 covers:
-  - ragspine/eval/
+  - src/ragspine/eval/
 verified-against: f37cfd3
 ---
 
 # eval — agent contract
 
-Auto-loaded when working under `ragspine/eval/`. Keep terse; deep dives go in
-`ragspine/eval/docs/`.
+Auto-loaded when working under `src/ragspine/eval/`. Keep terse; deep dives go in
+`src/ragspine/eval/docs/`.
 
 ## What lives here
 

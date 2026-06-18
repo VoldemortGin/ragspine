@@ -5,7 +5,7 @@ A drift-tracked doc declares, in YAML frontmatter:
 
     ---
     covers:
-      - ragspine/retrieval/rerank/
+      - src/ragspine/retrieval/rerank/
     verified-against: 3c6bf0b
     ---
 

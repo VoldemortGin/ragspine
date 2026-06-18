@@ -1,6 +1,6 @@
 """叙事批量入库编排：文件夹 / 文件列表 -> 抽取 -> 切块 -> 块库（幂等、可 dry-run）。
 
-流程（仿 ragspine/ingestion/structured/ingestion.py 的编排与报告模式）：
+流程（仿 src/ragspine/ingestion/structured/ingestion.py 的编排与报告模式）：
     文件 hash -> 与登记台账比对（未变化即 skipped，幂等）
       -> narrative_extract 抽取（无文本 -> no_text；异常 -> failed，不中断整批）
       -> chunk_document 切块（元数据逐块继承）
@@ -15,7 +15,7 @@
 
 登记台账说明：chunk_store（B 线，只读）只有块级版本化、没有文件 hash 登记表，
 故本模块在**同一个 sqlite 库**内自建 narrative_doc 表（doc_id -> file_hash）做
-「未变化即跳过」的比对，不触碰 ragspine/retrieval/chunking/chunk_store.py 也不动 Excel 线的 manifest。
+「未变化即跳过」的比对，不触碰 src/ragspine/retrieval/chunking/chunk_store.py 也不动 Excel 线的 manifest。
 """
 
 import re

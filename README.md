@@ -53,7 +53,7 @@ reports) and ships that rigor as **first-class, code-enforced invariants**:
 A deep, domain-grouped package layout — find the file by folder before you read a name.
 
 ```
-ragspine/
+src/ragspine/
 ├── common/         cross-cutting: company profile, sensitivity, glossary, observability
 ├── extraction/     documents → a frozen StyledGrid intermediate representation (IR)
 │   ├── extractors/   xlsx / pptx / pdf (digital + scanned/OCR), style- & color-aware
@@ -243,7 +243,7 @@ extraction (xlsx/pptx/pdf), FastAPI + RQ service, FAQ cache, evaluation harness,
 **Honest gaps (contributions welcome):** the vector channel ships as an *injectable*
 channel — the default is BM25-only, and real embedding models run behind the `[embed]`/GPU
 extras; there is no persisted ANN index yet. Pipeline-topology export (`.topology()` →
-Mermaid/DOT/JSON, plus `scripts/topology.py`) now ships — see `ragspine/pipeline/`.
+Mermaid/DOT/JSON, plus `scripts/topology.py`) now ships — see `src/ragspine/pipeline/`.
 
 ## License
 

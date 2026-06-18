@@ -1,8 +1,8 @@
 ---
 covers:
-  - ragspine/agent/
-  - ragspine/retrieval/
-  - ragspine/service/faq/
+  - src/ragspine/agent/
+  - src/ragspine/retrieval/
+  - src/ragspine/service/faq/
 verified-against: d36da2e
 ---
 

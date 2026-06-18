@@ -1,13 +1,13 @@
 ---
 covers:
-  - ragspine/pipeline/
+  - src/ragspine/pipeline/
 verified-against: d36da2e
 ---
 
 # pipeline — agent contract
 
-Auto-loaded when working under `ragspine/pipeline/`. Keep terse; deep dives go in
-`ragspine/pipeline/docs/`.
+Auto-loaded when working under `src/ragspine/pipeline/`. Keep terse; deep dives go in
+`src/ragspine/pipeline/docs/`.
 
 ## What lives here
 
@@ -63,5 +63,5 @@ delegator to `retriever_topology`.
 
 ## Deep dives
 
-Planned (`ragspine/pipeline/docs/topology.md`, not written yet): the static-vs-runtime
+Planned (`src/ragspine/pipeline/docs/topology.md`, not written yet): the static-vs-runtime
 boundary, the drift-guard contract, and the PRD-vs-reality reconciliation notes.

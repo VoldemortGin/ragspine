@@ -1,13 +1,13 @@
 ---
 covers:
-  - ragspine/agent/
+  - src/ragspine/agent/
 verified-against: 7c50da6
 ---
 
 # agent — agent contract
 
-Auto-loaded when working under `ragspine/agent/`. Keep terse; deep dives go in
-`ragspine/agent/docs/`. References below name **symbols** (not line numbers) so they
+Auto-loaded when working under `src/ragspine/agent/`. Keep terse; deep dives go in
+`src/ragspine/agent/docs/`. References below name **symbols** (not line numbers) so they
 survive refactors.
 
 ## What lives here
@@ -78,7 +78,7 @@ loop, LLM provider abstraction.
 
 ## Deep dives
 
-Planned (`ragspine/agent/docs/`, not written yet):
+Planned (`src/ragspine/agent/docs/`, not written yet):
 
 - anti-fabrication — the three-path semantics + the `fabrication_guard_triggered` definition.
 - clarification decision tree — the four `CLARIFY_*` states × structured/narrative/composite routing.

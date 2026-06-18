@@ -1,13 +1,13 @@
 ---
 covers:
-  - ragspine/extraction/
+  - src/ragspine/extraction/
 verified-against: ea121ea
 ---
 
 # extraction — agent contract
 
-Auto-loaded when working under `ragspine/extraction/`. Keep terse; deep dives go
-in `ragspine/extraction/docs/`.
+Auto-loaded when working under `src/ragspine/extraction/`. Keep terse; deep dives go
+in `src/ragspine/extraction/docs/`.
 
 ## What lives here
 

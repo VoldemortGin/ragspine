@@ -1,13 +1,13 @@
 ---
 covers:
-  - ragspine/storage/
+  - src/ragspine/storage/
 verified-against: 6fc8267
 ---
 
 # storage — agent contract
 
-Auto-loaded when working under `ragspine/storage/`. Keep terse; deep dives go in
-`ragspine/storage/docs/`.
+Auto-loaded when working under `src/ragspine/storage/`. Keep terse; deep dives go in
+`src/ragspine/storage/docs/`.
 
 ## What lives here
 

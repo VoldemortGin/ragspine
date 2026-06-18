@@ -4,7 +4,7 @@
 （BM25+向量+RRF）、元数据预过滤（过滤在打分之前）、multi-query 改写；精排走 Claude
 listwise 二审（ragspine.retrieval.rerank.listwise_rerank，Restricted 不出域）。
 
-依赖注入（范式同 ragspine/extraction/extractors/pdf_scanned_extractor 的 OcrBackend）：
+依赖注入（范式同 src/ragspine/extraction/extractors/pdf_scanned_extractor 的 OcrBackend）：
     - EmbeddingBackend：embed_texts(list[str]) -> list[list[float]]，真实现（GenAI Hub
       网关等）由集成线提供，本模块零 SDK；测试用确定性 fake。
     - QueryRewriter：rewrite(query) -> list[str]（含原 query）；默认提供基于

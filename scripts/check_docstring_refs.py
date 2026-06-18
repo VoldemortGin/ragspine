@@ -16,8 +16,9 @@ documentation regions (docstrings via ``ast`` + ``#`` comments via ``tokenize``)
 never runtime string literals, so a real ``Path("src/...")`` in code is ignored.
 
 What it flags (a reference that resolves to nothing in the current repo):
-  - ``src/...``                      — the pre-reorg flat layout is gone.
-  - ``ragspine/...`` / ``ragspine/....py`` — must exist at that path.
+  - ``src/ragspine/...``             — the package lives under ``src/``; must exist.
+  - a bare ``ragspine/...`` or an old flat ``src/<mod>.py`` — gone after the move
+                                       under ``src/``; flagged as dead.
   - ``docs/...``                     — must exist (file or dir; ``docs/02`` also
                                        tries ``docs/02.md``).
   - ``scripts/...`` / ``tests/...`` / ``data/...`` paths — must exist.
@@ -46,7 +47,7 @@ import re
 import tokenize
 from pathlib import Path
 
-SCAN_ROOT = 'ragspine'  # only library code; tests/scripts docstrings are lower-stakes
+SCAN_ROOT = 'src/ragspine'  # only library code; tests/scripts docstrings are lower-stakes
 
 # Tokens that look like an intra-repo reference. Anchored to known top dirs (plus
 # the dead ``src/``) so prose like "see the agent" is not mistaken for a path.
@@ -96,12 +97,10 @@ def doc_regions(path: Path) -> list[tuple[int, str]]:
 
 def resolves(ref: str, root: Path) -> bool:
     """True if the reference points at something that exists in the current repo."""
-    if ref.startswith('src/'):
-        return False  # the pre-reorg flat layout was removed wholesale
     candidate = ref.split('§')[0].strip().rstrip('/.,;:)')
     if not candidate:
         return False
-    # Try the path as-is, then as a module ('ragspine/eval/extraction_eval' ->
+    # Try the path as-is, then as a module ('src/ragspine/eval/extraction_eval' ->
     # .py) or a doc citation that dropped its suffix ('docs/architecture' -> .md).
     return any((root / f'{candidate}{suffix}').exists() for suffix in ('', '.py', '.md'))
 
@@ -189,8 +188,7 @@ def main() -> int:
                     if resolves(ref, root):
                         continue
                     dead += 1
-                    why = 'pre-reorg src/ layout removed' if ref.startswith('src/') \
-                        else 'path/doc does not exist'
+                    why = 'path/doc does not exist'
                     print(f'DEAD  {rel}:{lineno + line_off}  {ref}  ({why})')
 
     issues = check_package_index(root)

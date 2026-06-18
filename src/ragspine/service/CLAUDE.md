@@ -1,13 +1,13 @@
 ---
 covers:
-  - ragspine/service/
+  - src/ragspine/service/
 verified-against: cce8730
 ---
 
 # service — agent contract
 
-Auto-loaded when working under `ragspine/service/`. Keep terse; deep dives go in
-`ragspine/service/docs/`.
+Auto-loaded when working under `src/ragspine/service/`. Keep terse; deep dives go in
+`src/ragspine/service/docs/`.
 
 ## What lives here
 

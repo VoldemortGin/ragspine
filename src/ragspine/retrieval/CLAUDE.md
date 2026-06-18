@@ -1,13 +1,13 @@
 ---
 covers:
-  - ragspine/retrieval/
+  - src/ragspine/retrieval/
 verified-against: d36da2e
 ---
 
 # retrieval — agent contract
 
-Auto-loaded when working under `ragspine/retrieval/`. Keep terse; deep dives go
-in `ragspine/retrieval/docs/`.
+Auto-loaded when working under `src/ragspine/retrieval/`. Keep terse; deep dives go
+in `src/ragspine/retrieval/docs/`.
 
 ## What lives here
 

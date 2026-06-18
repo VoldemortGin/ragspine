@@ -9,9 +9,9 @@ no `covers`, so it is exempt from drift tracking.
 | Tier | Location | What | Pulled in |
 |---|---|---|---|
 | 0 · index | root `CLAUDE.md` | routing table only, never content | every session |
-| 1 · contract | `ragspine/<domain>/CLAUDE.md` | terse per-domain invariants & gotchas | working in that subtree |
-| 1 · package | `ragspine/**/__init__.py` docstring | what this level does + a `Submodules:` index of its direct children | `help()` / opening the package; enforced by `check_docstring_refs.py` |
-| 1 · deep dive | `ragspine/<domain>/docs/*.md` | long reference for one subsystem | grep / explicit read |
+| 1 · contract | `src/ragspine/<domain>/CLAUDE.md` | terse per-domain invariants & gotchas | working in that subtree |
+| 1 · package | `src/ragspine/**/__init__.py` docstring | what this level does + a `Submodules:` index of its direct children | `help()` / opening the package; enforced by `check_docstring_refs.py` |
+| 1 · deep dive | `src/ragspine/<domain>/docs/*.md` | long reference for one subsystem | grep / explicit read |
 | 2 · cross-cut | `docs/*.md`, `docs/adr/*.md` | architecture, invariants, glossary, decisions | grep / explicit read |
 | — · generated | `docs/generated/` | API ref, symbol/dependency indexes — script-produced | git-ignored, never hand-edited |
 
@@ -33,7 +33,7 @@ Any doc that describes code carries:
 ```
 ---
 covers:
-  - ragspine/retrieval/rerank/
+  - src/ragspine/retrieval/rerank/
 verified-against: 3c6bf0b
 ---
 ```

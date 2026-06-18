@@ -1,13 +1,13 @@
 ---
 covers:
-  - ragspine/ingestion/
+  - src/ragspine/ingestion/
 verified-against: ea121ea
 ---
 
 # ingestion — agent contract
 
-Auto-loaded when working under `ragspine/ingestion/`. Keep terse; deep dives go
-in `ragspine/ingestion/docs/`.
+Auto-loaded when working under `src/ragspine/ingestion/`. Keep terse; deep dives go
+in `src/ragspine/ingestion/docs/`.
 
 ## What lives here
 

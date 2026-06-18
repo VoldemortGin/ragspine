@@ -48,8 +48,8 @@ lint: ## ruff + mypy (informational, non-blocking)
 
 .PHONY: fmt
 fmt: ## Auto-fix lint and format with ruff
-	$(PYTHON) -m ruff check --fix ragspine scripts tests
-	$(PYTHON) -m ruff format ragspine scripts tests
+	$(PYTHON) -m ruff check --fix src/ragspine scripts tests
+	$(PYTHON) -m ruff format src/ragspine scripts tests
 
 .PHONY: drift
 drift: ## Flag docs whose covered code changed since last verified

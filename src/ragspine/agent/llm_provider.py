@@ -5,7 +5,7 @@
 - base_url 可覆盖：适配企业网关（GenAI Hub）转发 Anthropic API。
 - 默认模型名集中在 DEFAULT_ANTHROPIC_MODEL 一处。
 - 为将来 OpenAIProvider 留口：Provider 协议只约定 create_message 一个方法，
-  query_metric 的 OpenAI schema 已在 ragspine/agent/query_tools.py 备好。
+  query_metric 的 OpenAI schema 已在 src/ragspine/agent/query_tools.py 备好。
 """
 
 import json

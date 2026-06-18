@@ -5,7 +5,7 @@
 > Realizes [ADR 0003](adr/0003-audience-oss-library.md) (general-purpose OSS library), operating within
 > [ADR 0005](adr/0005-lean-core-experimental-isolation.md) (lean core + extras) and
 > [ADR 0009](adr/0009-dependency-and-framework-policy.md) (no orchestration lock-in, permissive-license-only).
-> Once a seam ships, its contract doc lives at `ragspine/<domain>/docs/*.md` with `covers:`.
+> Once a seam ships, its contract doc lives at `src/ragspine/<domain>/docs/*.md` with `covers:`.
 
 ## Problem statement
 
@@ -67,7 +67,7 @@ class Reranker(Protocol):                       # 1. Protocol
 class IdentityReranker:                          # 2. offline default (deterministic, dep-free)
     def rerank(self, q, hits): return hits
 
-# ragspine/retrieval/rerank/adapters/cross_encoder.py   # 3. thin adapter, behind [rerank] extra
+# src/ragspine/retrieval/rerank/adapters/cross_encoder.py   # 3. thin adapter, behind [rerank] extra
 class CrossEncoderReranker:
     def __init__(self, model: str):
         from sentence_transformers import CrossEncoder   # lazy import

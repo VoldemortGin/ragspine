@@ -3,8 +3,8 @@
 > **status:** proposed · **created:** 2026-06-17 · **methodology:** TDD (red conformance tests first)
 > Forward-looking spec — describes code not yet built, so it carries no `covers:` frontmatter.
 > Lands the **P0 seam** of [`prd-breadth-via-adapters.md`](prd-breadth-via-adapters.md).
-> Code target: `ragspine/retrieval/vector/store.py` · Tests: `tests/conformance/`.
-> Once implemented, the deep-dive doc lives at `ragspine/retrieval/docs/vector-store.md` with `covers:`.
+> Code target: `src/ragspine/retrieval/vector/store.py` · Tests: `tests/conformance/`.
+> Once implemented, the deep-dive doc lives at `src/ragspine/retrieval/docs/vector-store.md` with `covers:`.
 
 ## Problem statement
 
@@ -45,7 +45,7 @@ top-k similarity query**. It does *not* own BM25, RRF fusion, or reranking — t
 ## Proposed API surface
 
 ```python
-# ragspine/retrieval/vector/store.py
+# src/ragspine/retrieval/vector/store.py
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable

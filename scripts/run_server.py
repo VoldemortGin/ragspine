@@ -5,7 +5,7 @@
     RAGSPINE_CHUNK_DB_PATH=data/narrative.db \\
     .venv/bin/python scripts/run_server.py --host 0.0.0.0 --port 8000
 
-配置全部走环境变量（见 ragspine/service/config.py 的 ServiceConfig.from_env）：
+配置全部走环境变量（见 src/ragspine/service/config.py 的 ServiceConfig.from_env）：
 RAGSPINE_DB_PATH / RAGSPINE_CHUNK_DB_PATH / RAGSPINE_PROVIDER(mock|anthropic) / RAGSPINE_MODEL / RAGSPINE_BASE_URL /
 RAGSPINE_FAQ_SOURCE / RAGSPINE_ALLOWED_UPLOAD_ROOT / RAGSPINE_REDIS_URL 等。
 依赖：pip install -e ".[service]"。

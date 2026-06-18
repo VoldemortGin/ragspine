@@ -1,9 +1,9 @@
 ---
 covers:
-  - ragspine/agent/agent.py
-  - ragspine/retrieval/link/
-  - ragspine/retrieval/rerank/
-  - ragspine/common/observability/
+  - src/ragspine/agent/agent.py
+  - src/ragspine/retrieval/link/
+  - src/ragspine/retrieval/rerank/
+  - src/ragspine/common/observability/
 verified-against: cce8730
 ---
 
@@ -15,7 +15,7 @@ freezes it.
 
 ## Anti-fabrication
 
-<!-- TODO: where the rewrite happens (ragspine/agent/agent.py) and the regression test. -->
+<!-- TODO: where the rewrite happens (src/ragspine/agent/agent.py) and the regression test. -->
 
 ## Provenance
 

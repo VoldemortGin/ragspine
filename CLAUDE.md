@@ -13,7 +13,7 @@ dependency is a `Protocol`, so the core imports zero SDKs and runs offline.
 ## Layout (deep, domain-grouped — find the file by folder first)
 
 ```
-ragspine/{common, extraction, ingestion, storage, retrieval, agent, eval, service}
+src/ragspine/{common, extraction, ingestion, storage, retrieval, agent, eval, service}
 ```
 
 See the "Architecture" tree in `README.md` for what lives where and the request flow.
@@ -24,8 +24,8 @@ Docs are a retrieval system, not a library — at scale no agent reads them whol
 Full convention in `docs/README.md`. Short version:
 
 - **This file** — the always-on routing table. Keep it small; no content lives here.
-- `ragspine/<domain>/CLAUDE.md` — per-domain contract, auto-loaded in that subtree.
-- `ragspine/<domain>/docs/*.md` — deep dives, pulled by grep / explicit read.
+- `src/ragspine/<domain>/CLAUDE.md` — per-domain contract, auto-loaded in that subtree.
+- `src/ragspine/<domain>/docs/*.md` — deep dives, pulled by grep / explicit read.
 - `docs/` — cross-cutting: `architecture.md`, `invariants.md`, `glossary.md`, `adr/`.
 - `docs/generated/` — script-produced (API ref, indexes); git-ignored, never hand-edited.
 

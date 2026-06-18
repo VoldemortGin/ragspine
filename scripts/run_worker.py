@@ -3,7 +3,7 @@
 用法（从项目根目录，需 Redis 可达）：
     RAGSPINE_REDIS_URL=redis://localhost:6379/0 .venv/bin/python scripts/run_worker.py
 
-worker 自行打开/关闭每个 job 的 store/registry/queue（见 ragspine/service/tasks/jobs.py），
+worker 自行打开/关闭每个 job 的 store/registry/queue（见 src/ragspine/service/tasks/jobs.py），
 不与 API 进程共享 sqlite 连接。队列名须与 RQQueue 默认一致（ragspine-ingest）。
 依赖：pip install -e ".[service]"。
 """

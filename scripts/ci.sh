@@ -29,7 +29,7 @@ echo "==> [3/7] mypy --strict (static type contract — zero-warning gate, half 
 "$PY" -m mypy
 
 echo "==> [4/7] ruff lint (style + import order + dead code)"
-"$PY" -m ruff check ragspine
+"$PY" -m ruff check src/ragspine
 
 echo "==> [5/7] test suite (excludes gpu + docling — the bulk; filterwarnings=error + beartype runtime contracts active)"
 "$PY" -m pytest tests/ -q -m "not gpu and not docling"

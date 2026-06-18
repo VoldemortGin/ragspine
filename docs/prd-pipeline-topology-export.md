@@ -1,10 +1,10 @@
 # PRD — Pipeline Topology Export
 
 > **status:** implemented (2026-06-18) · **created:** 2026-06-17 · **methodology:** TDD (red tests first)
-> Implemented in `ragspine/pipeline/` (`graph.py` + `topology.py`), `scripts/topology.py`, and
-> `HybridRetriever.topology()`. The live contract is `ragspine/pipeline/CLAUDE.md`; this PRD is
+> Implemented in `src/ragspine/pipeline/` (`graph.py` + `topology.py`), `scripts/topology.py`, and
+> `HybridRetriever.topology()`. The live contract is `src/ragspine/pipeline/CLAUDE.md`; this PRD is
 > retained as the originating spec and carries no `covers:` frontmatter. A deep-dive doc at
-> `ragspine/pipeline/docs/topology.md` (with `covers:`) is still TODO.
+> `src/ragspine/pipeline/docs/topology.md` (with `covers:`) is still TODO.
 
 ## Problem statement
 
@@ -66,11 +66,11 @@ embed a live, regenerable architecture diagram.
 
 ## Proposed API surface
 
-New domain package `ragspine/pipeline/` (screaming-architecture: the graph types are their own
+New domain package `src/ragspine/pipeline/` (screaming-architecture: the graph types are their own
 concern, orchestrators only delegate):
 
 ```python
-# ragspine/pipeline/graph.py
+# src/ragspine/pipeline/graph.py
 @dataclass(frozen=True)
 class Node:
     id: str

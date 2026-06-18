@@ -1,13 +1,13 @@
 ---
 covers:
-  - ragspine/common/
+  - src/ragspine/common/
 verified-against: 3bec8b8
 ---
 
 # common — agent contract
 
-Auto-loaded when working under `ragspine/common/`. Keep terse; deep dives go in
-`ragspine/common/docs/`.
+Auto-loaded when working under `src/ragspine/common/`. Keep terse; deep dives go in
+`src/ragspine/common/docs/`.
 
 ## What lives here
 
