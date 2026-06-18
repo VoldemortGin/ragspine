@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/
-verified-against: d36da2e
+verified-against: 795ed14
 ---
 
 # retrieval — agent contract

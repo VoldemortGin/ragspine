@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/ingestion/
-verified-against: ea121ea
+verified-against: 795ed14
 ---
 
 # ingestion — agent contract
