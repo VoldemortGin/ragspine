@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 from ragspine.common.glossary import ENTITY_SYNONYMS, METRIC_SYNONYMS
+from ragspine.pipeline.graph import PipelineGraph
 from ragspine.retrieval.chunking.chunk_store import ChunkStore, StoredChunk
 from ragspine.retrieval.chunking.chunking import (
     DEFAULT_CHUNK_CHARS,
@@ -302,6 +303,17 @@ class HybridRetriever:
             )
             for cid, score in ordered[:limit]
         ]
+
+    def topology(self) -> PipelineGraph:
+        """返回本检索器子管线的静态拓扑（反映向量/multi-query 是否接入）。
+
+        薄委托：构建逻辑在 ragspine.pipeline.retriever_topology（duck-typed，不反向依赖）；
+        惰性 import 该构建器（其经 pipeline 包 __init__ 拉入 topology 模块）避免 import 环——
+        值类型 PipelineGraph 走叶子模块 ragspine.pipeline.graph 顶层 import（无环）。
+        """
+        from ragspine.pipeline import retriever_topology
+
+        return retriever_topology(self)
 
 
 @runtime_checkable
