@@ -1,8 +1,10 @@
 # PRD — Pipeline Topology Export
 
-> **status:** proposed · **created:** 2026-06-17 · **methodology:** TDD (red tests first)
-> Forward-looking spec — describes code not yet built, so it carries no `covers:` frontmatter.
-> Once implemented, the deep-dive doc lives at `ragspine/pipeline/docs/topology.md` with `covers:`.
+> **status:** implemented (2026-06-18) · **created:** 2026-06-17 · **methodology:** TDD (red tests first)
+> Implemented in `ragspine/pipeline/` (`graph.py` + `topology.py`), `scripts/topology.py`, and
+> `HybridRetriever.topology()`. The live contract is `ragspine/pipeline/CLAUDE.md`; this PRD is
+> retained as the originating spec and carries no `covers:` frontmatter. A deep-dive doc at
+> `ragspine/pipeline/docs/topology.md` (with `covers:`) is still TODO.
 
 ## Problem statement
 

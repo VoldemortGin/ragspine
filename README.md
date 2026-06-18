@@ -243,7 +243,7 @@ extraction (xlsx/pptx/pdf), FastAPI + RQ service, FAQ cache, evaluation harness,
 **Honest gaps (contributions welcome):** the vector channel ships as an *injectable*
 channel — the default is BM25-only, and real embedding models run behind the `[embed]`/GPU
 extras; there is no persisted ANN index yet. Pipeline-topology export (`.topology()` →
-Mermaid/DOT) is on the roadmap.
+Mermaid/DOT/JSON, plus `scripts/topology.py`) now ships — see `ragspine/pipeline/`.
 
 ## License
 
