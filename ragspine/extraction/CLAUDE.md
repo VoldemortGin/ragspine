@@ -1,7 +1,7 @@
 ---
 covers:
   - ragspine/extraction/
-verified-against: 7256d34
+verified-against: ea121ea
 ---
 
 # extraction — agent contract
