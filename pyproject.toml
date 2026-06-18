@@ -85,8 +85,16 @@ llm = [
 # 通用 SentenceTransformer 向量后端（默认 Qwen3-Embedding-0.6B）。
 # 延迟 import：不装也能 import 模块、跑离线/纯 BM25 默认；transformers/torch 由其带入。
 # 真实模型加载/编码在 GPU 盒子上跑（pytest -m gpu），不在离线单测内。
+#
+# transformers 上界（仅 darwin）：embed 与 pdf（docling）共享 transformers 传递依赖。
+# docling-ibm-models 在 macOS 上要求 transformers<5.9.0（新版 rt_detr_v2 layout 模型在
+# Apple MPS 上用 float64，而 MPS 不支持 → docling 数字 PDF 抽取整列报错）。sentence-transformers
+# 自身放行到 <6.0，若【单独】安装 embed 会把 transformers 顶到 5.12.x，越过 docling 的上界、
+# 打断本机 docling 测试链。故在此镜像 docling 的 darwin 上界，保证两个 extra 任意安装顺序下共存；
+# 非 darwin（GPU 盒子）不加此限——docling 在 Linux 放行到 <6.0，真实编码可用最新 transformers。
 embed = [
     "sentence-transformers>=3.0",
+    "transformers<5.9.0; sys_platform == 'darwin'",
 ]
 # 服务层：FastAPI HTTP 层 + RQ/Redis 异步任务队列（docs/09 PRD）。
 # rq/redis 延迟 import（RQQueue 内），不装也能 import task_queue、用 FakeQueue 跑离线测试。
