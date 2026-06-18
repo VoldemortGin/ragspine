@@ -5,6 +5,33 @@ description = "Framework-free backend RAG: deterministic dual-channel retrieval 
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.10"
+authors = [{ name = "lin han", email = "voldemort22@126.com" }]
+keywords = [
+    "rag",
+    "retrieval-augmented-generation",
+    "llm",
+    "agent",
+    "retrieval",
+    "bm25",
+    "anti-fabrication",
+    "framework-free",
+    "rag-engine",
+]
+# 注：license 用 SPDX 表达式（PEP 639），故【不】再加 "License ::" 分类器（避免与 twine 冲突）。
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Text Processing :: Indexing",
+    "Typing :: Typed",
+]
 dependencies = [
     "python-pptx>=0.6.23",
     "openpyxl>=3.1.0",
@@ -18,6 +45,11 @@ dependencies = [
     "beartype>=0.18",
 ]
 
+[project.urls]
+Homepage = "https://github.com/VoldemortGin/ragspine"
+Repository = "https://github.com/VoldemortGin/ragspine"
+Issues = "https://github.com/VoldemortGin/ragspine/issues"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
@@ -30,6 +62,9 @@ dev = [
     # 可选 lint / type-check（scripts/lint.sh，目前为非阻塞信息性步骤）。
     "ruff>=0.6",
     "mypy>=1.11",
+    # 打包 / 发布工具（make build：python -m build；twine check/upload 到 PyPI）。
+    "build>=1.2",
+    "twine>=5.0",
 ]
 # 二期 PDF 线的重依赖（数字型 PDF 表格解析），绿色实现阶段才安装。
 pdf = [
