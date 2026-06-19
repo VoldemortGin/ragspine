@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/ingestion/
-verified-against: 2d93b88
+verified-against: 865236e14cc6602efebc9edcbf54b9fd07c8270a
 ---
 
 # ingestion — agent contract
@@ -11,12 +11,18 @@ in `src/ragspine/ingestion/docs/`.
 
 ## What lives here
 
-IR/text → stores. `structured/` (fact ingestion + idempotent batch manifest
-ledger), `narrative/` (document chunk ingestion + extraction), `review/` (SME
-human review-queue state machine).
+IR/text → stores. `source/` (the `SourceConnector` seam — *where* raw documents enter
+ingestion: a `Protocol` + frozen `RawDoc` + a dependency-free `FilesystemConnector` default +
+`make_source_connector` / `RAGSPINE_SOURCE_CONNECTOR` config selector with entry-point discovery),
+`structured/` (fact ingestion + idempotent batch manifest ledger), `narrative/` (document chunk
+ingestion + extraction), `review/` (SME human review-queue state machine).
 
 ## Invariants
 
+- **Provenance at the point of entry** — every `RawDoc` a `SourceConnector` yields carries a non-null
+  `source_doc_id` (= filename, the lineage root — same as `narrative_ingest`'s `doc_id = path.name`)
+  + `locator`. Bound for *every* registered connector by `tests/conformance/test_source_connector_provenance.py`
+  (with a lineage-dropping reverse-proof stub). A connector that drops lineage fails CI, not production.
 - **Idempotent structured ingestion** — re-running a batch must not double-write;
   the manifest ledger is the guard.
 - **Review write-back closes the loop** — `review/apply.py` `ResolvedReviewApplier`
@@ -36,4 +42,7 @@ human review-queue state machine).
 
 ## Deep dives
 
-<!-- none yet -->
+- [`docs/source-connector.md`](docs/source-connector.md) — the `SourceConnector` seam: the `Protocol`,
+  the frozen `RawDoc`, the `FilesystemConnector` offline default (deterministic walk, `source_doc_id =
+  path.name`), the `make_source_connector` factory + entry-point discovery, and the provenance
+  conformance pack bound at the point of entry. Shipped seam-first (not yet wired into narrative ingest).

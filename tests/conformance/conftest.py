@@ -93,6 +93,43 @@ def vector_store_capability(request) -> str:
     return VECTOR_STORE_IMPLS[request.node.callspec.params["vector_store"]]
 
 
+# ---------------------------------------------------------------------------
+# 注册表：受 conformance 约束的 SourceConnector 实现（名字）。第三方实现在此追加一行 +
+# 在 _build_source_connector 里补一行（或将来换成 entry-point 自动发现）即继承整套 provenance pack。
+# ---------------------------------------------------------------------------
+SOURCE_CONNECTOR_IMPLS = ("filesystem",)
+
+
+def _build_source_connector(name: str, root):
+    """名字 -> 建在 fixture 树根 root 上的 SourceConnector 实例（延迟 import，红色阶段在此抛 ModuleNotFoundError）。"""
+    if name == "filesystem":
+        from ragspine.ingestion.source.connector import FilesystemConnector
+
+        return FilesystemConnector(root)
+    raise KeyError(name)
+
+
+@pytest.fixture
+def source_tree(tmp_path):
+    """确定性夹具树：嵌套目录 + 多文件，外加一个隐藏文件与一个 Office 临时文件（后两者应被忽略）。
+
+    可见文件：a.pptx / sub/b.pdf / sub/c.txt（source_doc_id 即文件名 a.pptx / b.pdf / c.txt）。
+    """
+    (tmp_path / "a.pptx").write_bytes(b"alpha")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "b.pdf").write_bytes(b"%PDF-bravo")
+    (tmp_path / "sub" / "c.txt").write_bytes(b"charlie")
+    (tmp_path / ".hidden.pptx").write_bytes(b"nope")  # 隐藏文件，应被忽略
+    (tmp_path / "~$temp.pptx").write_bytes(b"nope")   # Office 临时文件，应被忽略
+    return tmp_path
+
+
+@pytest.fixture(params=list(SOURCE_CONNECTOR_IMPLS), ids=list(SOURCE_CONNECTOR_IMPLS))
+def source_connector(request, source_tree):
+    """每个注册 SourceConnector 各给一个建在 fixture 树上的实例；每条 provenance 用例对所有实现各跑一遍。"""
+    return _build_source_connector(request.param, source_tree)
+
+
 @pytest.fixture
 def make_record():
     """构造 VectorRecord 的工厂夹具：默认带齐血缘 + 过滤元数据，可逐项覆盖。

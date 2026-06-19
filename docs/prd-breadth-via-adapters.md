@@ -1,6 +1,6 @@
 # PRD — Breadth via Adapters: the extension contract & capability matrix
 
-> **status:** in progress (P0 `VectorStore` seam wired; P0 pipeline-topology shipped) · **created:** 2026-06-17 · **methodology:** TDD (conformance tests first)
+> **status:** in progress (P0 `VectorStore` seam wired; P1 `SourceConnector` seam shipped; P0 pipeline-topology shipped) · **created:** 2026-06-17 · **methodology:** TDD (conformance tests first)
 > Living backlog — the seams/adapters tracked here land incrementally; it carries no `covers:` frontmatter
 > (each seam's shipped contract doc lives under `src/ragspine/<domain>/docs/*.md`).
 > Realizes [ADR 0003](adr/0003-audience-oss-library.md) (general-purpose OSS library), operating within
@@ -105,9 +105,15 @@ Breadth grows; the spine cannot rot.
 Current state (8 Protocols exist): `LLMProvider`, `IntentParser`, `NarrativeRetriever`, `OcrBackend`,
 `EmbeddingBackend`, `QueryRewriter`, `ListwiseJudge` (reranker), `TaskQueue`. Gaps that block breadth:
 
-- **`SourceConnector` (NEW, 🔧)** — `iter_documents() -> Iterable[RawDoc]`. Today ingestion assumes local
-  files. Without this seam there is no path to S3/Drive/Notion/HTTP *and* no place to bind the provenance
-  conformance test at the point of entry. Offline default: local filesystem walker.
+- **`SourceConnector` (SEAM SHIPPED, 🔧)** — `iter_documents() -> Iterable[RawDoc]`. **Shipped seam-first**
+  (standalone, like `VectorStore` was): `Protocol` + frozen `RawDoc` (`source_doc_id` + `locator` + raw
+  `content` + `content_type`/`metadata`) + `FilesystemConnector` offline default (pathlib recursive walk,
+  deterministic relative-POSIX order, `source_doc_id = path.name` — byte-identical to how ingestion identifies
+  a file today) + `make_source_connector` / `RAGSPINE_SOURCE_CONNECTOR` config selector with entry-point
+  auto-discovery (`ragspine.source_connectors` group), and a **provenance conformance pack** bound at the
+  point of entry (every `RawDoc` carries non-null `source_doc_id` + locator, with a lineage-dropping stub
+  proving it non-vacuous). Not yet wired into the existing narrative ingest path (behavior-preserving). This
+  unlocks S3/Drive/Notion/HTTP later behind one Protocol. Remaining: the remote adapters (P1).
 - **`VectorStore` (DONE, 🔧)** — `upsert(...)`, `query(vector, k, where) -> list[Hit]`, `delete`, `count`.
   **Shipped, wired, and adapted:** `Protocol` + `InProcessVectorStore` offline default (brute-force cosine) +
   conformance kit, `HybridRetriever` delegates vector scoring to it byte-identically, config-selected
@@ -131,7 +137,7 @@ Legend: **kind** 🛡/⭐/🔧 (own/own/adapt) · **status** ✅ have · ◐ par
 
 | Pipeline seam | Protocol | Kind | Offline default | Adapter targets (extra) | Status | Phase |
 |---|---|---|---|---|---|---|
-| Source connector | `SourceConnector` *(new)* | 🔧 | local filesystem | S3·GCS·Drive·Notion·Confluence·HTTP | ✗ | P1 |
+| Source connector | `SourceConnector` | 🔧 | **local filesystem ✅** | S3·GCS·Drive·Notion·Confluence·HTTP | ◐ seam | P1 seam ✓ · adapters P1 |
 | Document extract | `Extractor` *(formalize)* | ⭐🔧 | PDF-digital·PPTX·XLSX | DOCX·HTML·MD·CSV via `unstructured`/`docling` `[pdf]` | ◐ | P0 reg · P1 fmts |
 | OCR | `OcrBackend` | 🔧 | mock | paddleocr `[ocr]` | ✅ | — |
 | Chunking | `Chunker` *(new)* | ⭐ | recursive/structural | semantic · contextual · parent-child | ◐ | P0 proto · P1 strat |
@@ -155,9 +161,11 @@ conformance kit + `HybridRetriever` delegation + `make_vector_store` config sele
 local mode)**, all conformance-bound behind `[vector]` (qdrant the first approximate-capability backend) — see
 [`prd-vector-store-seam.md`](prd-vector-store-seam.md) and the deep dive
 [`vector-store.md`](../src/ragspine/retrieval/docs/vector-store.md); what remains there is **more adapters**
-(Milvus/FAISS, P1). The remaining breadth gap is concentrated in
-**two commodity seams** — `SourceConnector` (P1) and filling out `Extractor` formats (P1) — exactly the
-surface that should be *adapted*, not authored.
+(Milvus/FAISS, P1). The `SourceConnector` **seam is now shipped** (Protocol + `FilesystemConnector` default +
+`make_source_connector` config selector + entry-point discovery + provenance conformance pack — see the deep
+dive [`source-connector.md`](../src/ragspine/ingestion/docs/source-connector.md)); the remaining breadth gap
+there is its **remote adapters** (S3/Drive/Notion/HTTP, P1). The other open commodity seam is filling out
+`Extractor` formats (P1) — exactly the surface that should be *adapted*, not authored.
 
 ## Phasing
 
@@ -166,15 +174,17 @@ surface that should be *adapted*, not authored.
     `[vector]` (the Qdrant/pgvector slot is now P1); plus sensitivity-gated persistence (`PersistencePolicy`).
   - `Extractor` registry + `Chunker` Protocol (formalize existing code; no behavior change). *(still open)*
   - ✅ The conformance kit for provenance + isolation + determinism, parametrized over registered backends
-    (`tests/conformance/`, now binding both `InProcessVectorStore` and `sqlite-vec`). Privacy-trace + cross-seam
-    provenance over SourceConnector/Extractor/Chunker remain open with those seams.
+    (`tests/conformance/`, now binding both `InProcessVectorStore` and `sqlite-vec`). **Cross-seam provenance
+    over `SourceConnector` now landed** (`test_source_connector_provenance.py`, parametrized over registered
+    connectors + a lineage-dropping reverse-proof stub); the `Extractor`/`Chunker` provenance + privacy-trace
+    packs remain open with those seams.
   - ✅ Registry + entry-point discovery so a backend is selectable by config string — config-string ✅
     (`make_vector_store` / `make_persistence_policy`) **and** entry-point auto-discovery ✅
     (`make_vector_store` falls back to the `ragspine.vector_stores` entry-point group, so a third-party
     `ragspine-foo` registers a backend by name with **no core PR** — user stories 1 & 4 land).
 - **P1 — the breadth that wins evaluations.** Format coverage (DOCX/HTML/MD/CSV via `unstructured`/`docling`),
   rerank adapters (cross-encoder/Cohere/BGE), query-transform strategies (multi-query/HyDE/self-query),
-  the first 2–3 `SourceConnector`s (filesystem ✓ → S3 → HTTP/crawl). *(Vector adapters pgvector and Qdrant
+  the first 2–3 `SourceConnector`s (**filesystem ✅ shipped** → S3 → HTTP/crawl). *(Vector adapters pgvector and Qdrant
   already shipped in P0/P1; the next vector adapter is Milvus, plus native ANN/KNN for the existing three —
   see [`prd-vector-store-seam.md`](prd-vector-store-seam.md).)*
 - **P2 — governance & ops depth.** `FactStore` Protocol (DuckDB/Postgres), `TraceSink` → OTel (privacy-gated),
