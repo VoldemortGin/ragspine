@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/extraction/
-verified-against: cab40fe
+verified-against: 8287547deb43bdd510edde62b4addf494331cb1f
 ---
 
 # extraction — agent contract
@@ -13,7 +13,10 @@ in `src/ragspine/extraction/docs/`.
 
 Documents → a frozen StyledGrid IR. `extractors/` (xlsx / pptx / pdf, style- &
 color-aware), `routing/` (per-page PDF triage), `color/` (color-semantics
-registry), `verification/` (dual-channel cross-check → review queue).
+registry), `verification/` (dual-channel cross-check → review queue), `registry.py`
+(the `mime → Extractor` dispatch seam: a `@runtime_checkable` `Extractor` Protocol —
+`extract(path) → list[StyledGrid]` — + `get_extractor(mime)` / `register_extractor`
+over the existing `extract_grids` impls).
 
 ## Invariants
 
@@ -30,7 +33,14 @@ registry), `verification/` (dual-channel cross-check → review queue).
 - **`GridExtractor.version` is part of the contract.** It is the `extractor_version` written
   to fact lineage; the default `DoclingGridExtractor.version` is `"pdf_digital@1"` (byte-identical
   to the pre-seam stamp). Bump it when the digital parser's output changes.
+- **The registry is a behavior-preserving thin wrap.** `registry.py` adds a `mime → Extractor`
+  dispatch over the existing `extract_grids` functions; it does **not** change extractor behavior, and
+  `routing/pdf_router.py` stays authoritative for the per-page digital/scanned PDF split. Add a new
+  format by `register_extractor(mime, extractor)` — **no router edit**; an unregistered mime →
+  a typed `UnsupportedFormatError` (a `LookupError`, not a bare `KeyError`).
 
 ## Deep dives
 
-<!-- none yet -->
+- [`docs/extractor-registry.md`](docs/extractor-registry.md) — the `Extractor` Protocol, the
+  `mime → Extractor` registry (lazy built-in loaders, `register_extractor` / `get_extractor`,
+  typed `UnsupportedFormatError`), and why it's a zero-behavior-change formalization.

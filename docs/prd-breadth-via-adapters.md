@@ -1,6 +1,6 @@
 # PRD — Breadth via Adapters: the extension contract & capability matrix
 
-> **status:** in progress (P0 `VectorStore` seam wired; P1 `SourceConnector` seam shipped; P0 pipeline-topology shipped) · **created:** 2026-06-17 · **methodology:** TDD (conformance tests first)
+> **status:** in progress (P0 `VectorStore` seam wired; P1 `SourceConnector` seam shipped; P0 `Extractor` registry + `Chunker` Protocol formalized; P0 pipeline-topology shipped) · **created:** 2026-06-17 · **methodology:** TDD (conformance tests first)
 > Living backlog — the seams/adapters tracked here land incrementally; it carries no `covers:` frontmatter
 > (each seam's shipped contract doc lives under `src/ragspine/<domain>/docs/*.md`).
 > Realizes [ADR 0003](adr/0003-audience-oss-library.md) (general-purpose OSS library), operating within
@@ -123,11 +123,21 @@ Current state (8 Protocols exist): `LLMProvider`, `IntentParser`, `NarrativeRetr
   carries an exact-vs-approximate flag). Metadata `where` pushdown carries isolation (third, optional
   enforcement point). Remaining: more adapters (Milvus/FAISS, P1). Was the single highest-leverage missing
   seam; it no longer is.
-- **`Extractor` registry (FORMALIZE, ⭐/🔧)** — extractors exist (PDF-digital, PPTX, XLSX, +styled) but
-  there is no `mime/type → Extractor` registry or shared `Protocol`. Formalizing it lets DOCX/HTML/MD/CSV be
-  added (or adapted from `unstructured`/`docling`) without touching routing, and binds provenance once.
-- **`Chunker` (NEW Protocol, ⭐)** — chunking exists as a concrete module; lifting it to a `Protocol` enables
-  semantic / contextual / parent-child strategies as swappable, quality-critical units.
+- **`Extractor` registry (FORMALIZED, ⭐/🔧)** — the extractors existed (PDF-digital, PPTX, XLSX, +styled)
+  but were dispatched ad-hoc with no shared seam. **Shipped (behavior-preserving):** a `@runtime_checkable`
+  `Extractor` `Protocol` (`extract(path) → list[StyledGrid]`) + a `mime/type → Extractor` registry
+  (`extraction/registry.py`) — built-ins registered by mime via lazy loaders (zero SDK at import; thin
+  `_FunctionExtractor` wraps the existing `extract_grids`), `register_extractor(mime, …)` to add a format with
+  **no router edit**, `get_extractor(mime)` dispatch, and a typed `UnsupportedFormatError` (a `LookupError`,
+  not a bare `KeyError`) for an unregistered mime. The per-page digital/scanned PDF triage stays in
+  `routing/pdf_router.py`, untouched. Remaining: the new formats themselves (DOCX/HTML/MD/CSV via
+  `unstructured`/`docling`, P1).
+- **`Chunker` (Protocol shipped, ⭐)** — chunking existed as a concrete `chunk_document` module. **Shipped
+  (behavior-preserving):** a `@runtime_checkable` `Chunker` `Protocol` + a `DefaultChunker` dependency-free
+  default that **delegates byte-identically** to `chunk_document` (the entry point + signature are preserved,
+  every caller untouched) + a `make_chunker(spec)` / `RAGSPINE_CHUNKER` config selector with entry-point
+  discovery (`ragspine.chunkers` group), so semantic / contextual / parent-child strategies become swappable,
+  quality-critical units. Remaining: those strategies (P1).
 - **`TraceSink` (NEW Protocol, 🛡)** — formalize the privacy-aware trace sink so observability can fan out to
   OTel/files *through the privacy conformance test*, never around it.
 
@@ -138,9 +148,9 @@ Legend: **kind** 🛡/⭐/🔧 (own/own/adapt) · **status** ✅ have · ◐ par
 | Pipeline seam | Protocol | Kind | Offline default | Adapter targets (extra) | Status | Phase |
 |---|---|---|---|---|---|---|
 | Source connector | `SourceConnector` | 🔧 | **local filesystem ✅** | S3·GCS·Drive·Notion·Confluence·HTTP | ◐ seam | P1 seam ✓ · adapters P1 |
-| Document extract | `Extractor` *(formalize)* | ⭐🔧 | PDF-digital·PPTX·XLSX | DOCX·HTML·MD·CSV via `unstructured`/`docling` `[pdf]` | ◐ | P0 reg · P1 fmts |
+| Document extract | `Extractor` *(formalized)* | ⭐🔧 | PDF-digital·PPTX·XLSX | DOCX·HTML·MD·CSV via `unstructured`/`docling` `[pdf]` | ✅ registry | P0 reg ✓ · P1 fmts |
 | OCR | `OcrBackend` | 🔧 | mock | paddleocr `[ocr]` | ✅ | — |
-| Chunking | `Chunker` *(new)* | ⭐ | recursive/structural | semantic · contextual · parent-child | ◐ | P0 proto · P1 strat |
+| Chunking | `Chunker` | ⭐ | recursive/structural | semantic · contextual · parent-child | ✅ proto | P0 proto ✓ · P1 strat |
 | Embedding | `EmbeddingBackend` | 🔧⭐ | lexical-hash (non-semantic) | sentence-transformers `[embed]` · OpenAI `[llm]` | ✅ | — |
 | Vector store | `VectorStore` | 🔧 | in-proc brute force | **sqlite-vec ✅ · pgvector ✅ · Qdrant ✅** · Milvus·FAISS·Chroma·LanceDB | ✅ seam + 3 adapters | P0 ✓ · more adapters P1 |
 | Lexical index | *(built-in)* | ⭐ | BM25 | — | ✅ | — |
@@ -164,20 +174,28 @@ local mode)**, all conformance-bound behind `[vector]` (qdrant the first approxi
 (Milvus/FAISS, P1). The `SourceConnector` **seam is now shipped** (Protocol + `FilesystemConnector` default +
 `make_source_connector` config selector + entry-point discovery + provenance conformance pack — see the deep
 dive [`source-connector.md`](../src/ragspine/ingestion/docs/source-connector.md)); the remaining breadth gap
-there is its **remote adapters** (S3/Drive/Notion/HTTP, P1). The other open commodity seam is filling out
-`Extractor` formats (P1) — exactly the surface that should be *adapted*, not authored.
+there is its **remote adapters** (S3/Drive/Notion/HTTP, P1). The **`Extractor` registry and `Chunker` Protocol
+are now formalized** (behavior-preserving lifts of existing code — a `mime → Extractor` registry +
+`get_extractor` dispatch, and a `Chunker` Protocol whose `DefaultChunker` delegates byte-identically to
+`chunk_document`; see the deep dives [`extractor-registry.md`](../src/ragspine/extraction/docs/extractor-registry.md)
+and [`chunker.md`](../src/ragspine/retrieval/docs/chunker.md)); the open commodity surface there is filling out
+`Extractor` **formats** (DOCX/HTML/MD/CSV, P1) and `Chunker` **strategies** (semantic/contextual/parent-child,
+P1) — exactly the surface that should be *adapted*, not authored.
 
 ## Phasing
 
 - **P0 — minimum credible breadth.** A user can run a *real* semantic stack end-to-end with mainstream tools.
   - ✅ `VectorStore` Protocol + in-proc default + **one** real adapter — shipped as **`sqlite-vec`** behind
     `[vector]` (the Qdrant/pgvector slot is now P1); plus sensitivity-gated persistence (`PersistencePolicy`).
-  - `Extractor` registry + `Chunker` Protocol (formalize existing code; no behavior change). *(still open)*
+  - ✅ `Extractor` registry + `Chunker` Protocol (formalized existing code; **zero behavior change** —
+    `chunk_document`'s entry point/signature preserved, the PDF router untouched, all prior extraction/chunking
+    tests stay green). See `extraction/registry.py` + `retrieval/chunking/chunker.py`.
   - ✅ The conformance kit for provenance + isolation + determinism, parametrized over registered backends
     (`tests/conformance/`, now binding both `InProcessVectorStore` and `sqlite-vec`). **Cross-seam provenance
     over `SourceConnector` now landed** (`test_source_connector_provenance.py`, parametrized over registered
-    connectors + a lineage-dropping reverse-proof stub); the `Extractor`/`Chunker` provenance + privacy-trace
-    packs remain open with those seams.
+    connectors + a lineage-dropping reverse-proof stub); the **`Chunker` provenance pack now landed too**
+    (`test_chunker_provenance.py`, parametrized over registered chunkers + a lineage-dropping reverse-proof
+    stub). The `Extractor` provenance pack (over real fixtures) + the privacy-trace pack remain open.
   - ✅ Registry + entry-point discovery so a backend is selectable by config string — config-string ✅
     (`make_vector_store` / `make_persistence_policy`) **and** entry-point auto-discovery ✅
     (`make_vector_store` falls back to the `ragspine.vector_stores` entry-point group, so a third-party

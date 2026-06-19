@@ -6,7 +6,7 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
-![Tests](https://img.shields.io/badge/tests-1275%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1291%20passing-brightgreen)
 [![Docs](https://img.shields.io/badge/docs-rag--spine.org-2dd4bf)](https://rag-spine.org)
 
 ---
@@ -225,7 +225,7 @@ is written at rest — its default **never persists a `RESTRICTED` chunk's vecto
 ## Testing
 
 ```bash
-.venv/bin/python -m pytest tests/ -q        # 1275 passed, 38 skipped (37 pgvector + 1 gpu)
+.venv/bin/python -m pytest tests/ -q        # 1291 passed, 38 skipped (37 pgvector + 1 gpu)
 ```
 
 The project is **test-driven**: tests are the spec. The `gpu` marker gates real-OCR

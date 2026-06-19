@@ -130,6 +130,28 @@ def source_connector(request, source_tree):
     return _build_source_connector(request.param, source_tree)
 
 
+# ---------------------------------------------------------------------------
+# 注册表：受 conformance 约束的 Chunker 实现（名字）。第三方实现在此追加一行 +
+# 在 _build_chunker 里补一行（或经 make_chunker 的 entry-point 自动发现）即继承整套 provenance pack。
+# ---------------------------------------------------------------------------
+CHUNKER_IMPLS = ("default",)
+
+
+def _build_chunker(name: str):
+    """名字 -> Chunker 实例（延迟 import，红色阶段在此抛 ModuleNotFoundError）。"""
+    if name == "default":
+        from ragspine.retrieval.chunking.chunker import DefaultChunker
+
+        return DefaultChunker()
+    raise KeyError(name)
+
+
+@pytest.fixture(params=list(CHUNKER_IMPLS), ids=list(CHUNKER_IMPLS))
+def chunker(request):
+    """每个注册 Chunker 各给一个实例；每条 provenance 用例对所有实现各跑一遍。"""
+    return _build_chunker(request.param)
+
+
 @pytest.fixture
 def make_record():
     """构造 VectorRecord 的工厂夹具：默认带齐血缘 + 过滤元数据，可逐项覆盖。

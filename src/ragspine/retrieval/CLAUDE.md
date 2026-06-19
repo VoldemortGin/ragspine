@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/
-verified-against: 4fd1f4801816ecc3325a61aee129e374653bc75b
+verified-against: 8287547deb43bdd510edde62b4addf494331cb1f
 ---
 
 # retrieval — agent contract
@@ -11,7 +11,12 @@ in `src/ragspine/retrieval/docs/`.
 
 ## What lives here
 
-Narrative RAG. `chunking/` (paragraph-granular chunker + versioned store),
+Narrative RAG. `chunking/` (paragraph-granular chunker + versioned store; the
+`Chunker` seam — `chunker.py`: a `@runtime_checkable` `Chunker` Protocol + a
+`DefaultChunker` that **delegates byte-identically** to `chunk_document` (entry
+point/signature preserved, all callers untouched) + `make_chunker` /
+`RAGSPINE_CHUNKER` config selector with `ragspine.chunkers` entry-point discovery,
+so semantic / contextual / parent-child strategies become swappable),
 `lexical/` (Okapi BM25, CJK uni+bigram, RRF fusion — `HybridRetriever` delegates
 its vector **scoring** to the `VectorStore` seam), `vector/` (injectable embedding
 backends, default none = pure BM25; + the pluggable `VectorStore` seam — `store.py`
@@ -56,3 +61,6 @@ listwise reranker, RRF-fallback), `link/` (adapter wiring retrieval into the age
   byte-identical wiring into `HybridRetriever`, the sqlite-vec / pgvector / qdrant adapters,
   the exact-vs-approximate capability flag, the isolation pushdown, and sensitivity-gated
   persistence (`PersistencePolicy` + embed-at-ingest).
+- [`docs/chunker.md`](docs/chunker.md) — the `Chunker` seam: the `Protocol`, the
+  `DefaultChunker` byte-identical delegation to `chunk_document`, the `make_chunker`
+  factory + entry-point discovery, and the provenance conformance pack.

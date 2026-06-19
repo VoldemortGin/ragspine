@@ -45,7 +45,7 @@ contract is [`vector-store.md`](../src/ragspine/retrieval/docs/vector-store.md).
    (`qdrant`) asserts the weaker PRD guarantees (stable ordering within one instance + a recall@k floor vs
    the exact default). Provenance / isolation / `where`-pushdown conformance bind **fully** to every tier
    regardless of the flag.
-6. **Tests:** **1275 passed** (default) / **1312 with a pgvector Postgres**, 1 gpu-skipped; conformance
+6. **Tests:** **1291 passed** (default) / **1328 with a pgvector Postgres**, 1 gpu-skipped; conformance
    runs over `in_process` + `sqlite_vec` + `qdrant` (+ `pgvector` when `RAGSPINE_PG_URL` is set).
 7. **Entry-point auto-discovery.** `make_vector_store` resolves built-in names through a **lazy-loader
    registry** (the if-ladder is gone) and **falls back to the `ragspine.vector_stores` entry-point group**
