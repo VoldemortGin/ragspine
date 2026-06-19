@@ -8,7 +8,9 @@ mock 模式离线确定性，不需要任何 API key。
 
 import argparse
 import os
+import sys
 from datetime import date
+from pathlib import Path
 
 import rootutils
 
@@ -58,6 +60,18 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+
+    # ADR 0012 rule 5：fact 库缺失且无叙事库可答时大声报错，绝不静默建空库再返回假「查不到」。
+    # 提供 --chunk-db 即「纯叙事」合法用法——此时空 fact 库无妨（答案来自叙事块库），放行。
+    if str(args.db) != ":memory:" and not Path(args.db).exists() and not args.chunk_db:
+        print(
+            f"error: fact 库不存在：{args.db}\n"
+            "请用 --db 指定有效的 fact_metric sqlite 路径，"
+            "或先跑 `python scripts/run_demo.py` 生成示例库，"
+            "或用 `ragspine quickstart` 体验离线演示。",
+            file=sys.stderr,
+        )
+        return 2
 
     reference_date = (
         date.fromisoformat(args.reference_date) if args.reference_date else None

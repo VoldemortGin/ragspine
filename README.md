@@ -6,7 +6,7 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
-![Tests](https://img.shields.io/badge/tests-1103%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1112%20passing-brightgreen)
 [![Docs](https://img.shields.io/badge/docs-rag--spine.org-2dd4bf)](https://rag-spine.org)
 
 ---
@@ -132,15 +132,19 @@ ragspine quickstart    # one FOUND answer (with provenance) + one honest "not fo
 
 **2. Ask a question (offline deterministic `MockProvider`):**
 
+> Needs the fact store from step 1 — `scripts/run_demo.py` populates the gitignored
+> `data/fact_metric.db`. `ragspine ask` errors honestly if the db is missing; it never
+> silently invents an empty one and returns a false "not found".
+
 ```bash
-.venv/bin/python scripts/ask.py --provider mock --db data/fact_metric.db "中国内地FY2024的REVENUE是多少"
+ragspine ask --db data/fact_metric.db "中国内地FY2024的REVENUE是多少"
 # → ACME_CN FY2024 REVENUE 为 1320 USD_M（来源：ACME_FY2024_Review.pptx · slide=2,table=1,row=REVENUE,col=FY2024）
 ```
 
 Ask for something the data doesn't have and you get an honest refusal, never a guess:
 
 ```bash
-.venv/bin/python scripts/ask.py --provider mock --db data/fact_metric.db "中国内地FY2025的REVENUE是多少"
+ragspine ask --db data/fact_metric.db "中国内地FY2025的REVENUE是多少"
 # → 查不到：REVENUE / ACME_CN / 2025 …未在事实表中找到。为避免误导，不提供任何推测数字。
 ```
 
@@ -214,7 +218,7 @@ adding a provider / vector store / reranker / OCR engine touches one new file.
 ## Testing
 
 ```bash
-.venv/bin/python -m pytest tests/ -q        # 1103 passed, 1 gpu-skipped
+.venv/bin/python -m pytest tests/ -q        # 1112 passed, 1 gpu-skipped
 ```
 
 The project is **test-driven**: tests are the spec. The `gpu` marker gates real-OCR
@@ -245,7 +249,7 @@ version-controlled evaluation sets live under `data/golden/`. Nothing here is re
 ## Status & roadmap
 
 **Solid:** structured channel, narrative hybrid retrieval, agent orchestration, office
-extraction (xlsx/pptx/pdf), FastAPI + RQ service, FAQ cache, evaluation harness, 1103 tests.
+extraction (xlsx/pptx/pdf), FastAPI + RQ service, FAQ cache, evaluation harness, 1112 tests.
 
 **Honest gaps (contributions welcome):** the vector channel ships as an *injectable*
 channel — the default is BM25-only, and real embedding models run behind the `[embed]`/GPU

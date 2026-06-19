@@ -66,5 +66,29 @@ def _lazy_submodules(
     return __getattr__, __dir__
 
 
-__getattr__, __dir__ = _lazy_submodules(__name__, __path__)
+_submodule_getattr, _submodule_dir = _lazy_submodules(__name__, __path__)
+
+# 上手宪法（ADR 0012 rule 3）：包根仅 curated 暴露这 4 个「最小可用 API」名字。
+# 仍走惰性解析——`import ragspine` 不急切 import 任何子模块，首次访问某名字时才拉起其源模块。
+_CURATED: dict[str, tuple[str, str]] = {
+    "FactStore": ("storage.fact_store", "FactStore"),
+    "Fact": ("storage.fact_store", "Fact"),
+    "MockProvider": ("agent.llm_provider", "MockProvider"),
+    "answer_question": ("agent.agent", "answer_question"),
+}
+
+__all__ = ("FactStore", "Fact", "MockProvider", "answer_question")
+
+
+def __getattr__(name: str) -> object:
+    target = _CURATED.get(name)
+    if target is not None:
+        module = importlib.import_module(f"{__name__}.{target[0]}")
+        symbol: object = getattr(module, target[1])
+        return symbol
+    return _submodule_getattr(name)
+
+
+def __dir__() -> list[str]:
+    return sorted({*__all__, *_submodule_dir()})
 
