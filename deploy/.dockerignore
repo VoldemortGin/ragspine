@@ -1,0 +1,29 @@
+# 构建上下文裁剪（上下文＝仓库根）。镜像只 COPY 明确子树（src/ scripts/ config/ data/），
+# 故测试/缓存/虚拟环境本就不会进镜像；此文件进一步给上下文瘦身、加速构建、避免把本地
+# 开发产物（venv、本地 sqlite 库、git 元数据）误传给 daemon。
+tests/
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.git/
+.github/
+.githooks/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.jbeval/
+build/
+dist/
+docs/site/
+docs/generated/
+.DS_Store
+.idea/
+.vscode/
+# 本地生成的 sqlite 库（演示/开发用，不入镜像；data/golden/ 等版本化数据保留）。
+data/*.db
+data/*.sqlite
+deploy/.env

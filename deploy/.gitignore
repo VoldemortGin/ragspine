@@ -1,0 +1,2 @@
+# deploy/.env 持有机密（API key、DB 密码），由 deploy/.env.example 拷贝而来——绝不入库。
+.env

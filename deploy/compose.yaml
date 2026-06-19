@@ -1,0 +1,132 @@
+# RAGSpine —— 一键自托管 Docker Compose 编排（落地 docs/prd-deployment-packaging.md）。
+#
+# 设计：RAGSPINE_* 环境变量注入到现成的 ServiceConfig（src/ragspine/service/config.py），
+# 不引入任何新配置系统。其中 16 个旋钮由 ServiceConfig.from_env 读取；两个 RAGSPINE_PG_* 例外
+# 【按设计】不进 ServiceConfig，各自就地标注：RAGSPINE_PG_URL 由 pgvector adapter 直接读环境
+# （config.py 不读），RAGSPINE_PG_PASSWORD 是 compose-only 插值变量（仅喂内置 postgres 容器密码）。
+# 默认 `docker compose up` 启【离线精简栈】（mock provider + sqlite_vec，
+# 无需任何 API key）；真实后端经 Compose profiles 选择性接入（postgres / qdrant）。
+#
+# app 与 worker 共用【同一个】镜像（deploy/Dockerfile），仅 command（角色）不同。
+#
+# 用法见 deploy/README.md。本机无 docker —— 静态校验（解析 YAML）：
+#   python -c "import yaml; yaml.safe_load(open('deploy/compose.yaml')); print('compose YAML OK')"
+# 真实启动的 boot-test 在远端 docker host 上单独完成。
+#
+# 需要 Docker Compose v2.24+（env_file 的 path/required 长式语法）。
+name: ragspine
+
+# 公共片段：app 与 worker 同镜像、同环境、同卷，仅 command 不同 —— 用 YAML 锚点复用。
+x-ragspine-common: &ragspine-common
+  build:
+    # 上下文＝仓库根（deploy/ 的上一级），COPY 才能取到 src/ scripts/ config/ data/ .project-root。
+    context: ..
+    dockerfile: deploy/Dockerfile
+  image: ragspine:local
+  restart: unless-stopped
+  # env_file 仅注入【机密】（ANTHROPIC_API_KEY / OPENAI_API_KEY 等），这些键【不】出现在下方
+  # environment 中，故不存在 environment 覆盖 env_file 的优先级陷阱。config 旋钮一律走 environment
+  # 的 ${VAR:-默认} 插值。required:false —— 未创建 deploy/.env 时离线默认仍可直接 `up`。
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    # ---- LLM provider（默认 mock，离线确定性，无需 key）----
+    RAGSPINE_PROVIDER: ${RAGSPINE_PROVIDER:-mock}
+    # ---- 向量存储后端（默认 sqlite_vec；profile 切 pgvector / qdrant，见 README）----
+    RAGSPINE_VECTOR_STORE: ${RAGSPINE_VECTOR_STORE:-sqlite_vec}
+    RAGSPINE_EMBEDDING: ${RAGSPINE_EMBEDDING:-none}
+    RAGSPINE_PERSISTENCE_POLICY: ${RAGSPINE_PERSISTENCE_POLICY:-default}
+    # pgvector 连接：默认指向内置 postgres 服务。【非 ServiceConfig 旋钮】——由 pgvector adapter
+    # 直接 os.environ.get('RAGSPINE_PG_URL') 读取（src/ragspine/retrieval/vector/adapters/pgvector.py），
+    # config.py 的 from_env 不读它。仅当 RAGSPINE_VECTOR_STORE=pgvector 时 adapter 才被实例化并读取，
+    # 离线/其它后端下设着也无害（adapter 不被实例化）。
+    RAGSPINE_PG_URL: ${RAGSPINE_PG_URL:-postgresql://ragspine:ragspine@postgres:5432/ragspine}
+    # ---- 基础设施：容器内固定路径，落在命名卷上，持久化 sqlite 库 + 上传目录 ----
+    RAGSPINE_REDIS_URL: ${RAGSPINE_REDIS_URL:-redis://redis:6379/0}
+    RAGSPINE_DB_PATH: /var/lib/ragspine/fact_metric.db
+    RAGSPINE_CHUNK_DB_PATH: /var/lib/ragspine/narrative.db
+    RAGSPINE_MAPPING_DB_PATH: /var/lib/ragspine/mapping.db
+    RAGSPINE_QUEUE_DB_PATH: /var/lib/ragspine/review_queue.db
+    RAGSPINE_MANIFEST_DB_PATH: /var/lib/ragspine/manifest.db
+    RAGSPINE_ALLOWED_UPLOAD_ROOT: /var/lib/ragspine/uploads
+  volumes:
+    - ragspine-data:/var/lib/ragspine     # 命名卷：sqlite 库 + 上传文件持久化
+  depends_on:
+    redis:
+      condition: service_healthy
+
+services:
+  # HTTP 服务（FastAPI + uvicorn）。--host 0.0.0.0 必须显式传 —— 脚本默认 127.0.0.1 在容器内不可达。
+  app:
+    <<: *ragspine-common
+    command: ["python", "scripts/run_server.py", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request,sys; sys.exit(0 if urllib.request.urlopen("http://127.0.0.1:8000/healthz").status==200 else 1)
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # 异步 ingestion worker（RQ）。同镜像，仅 command 不同；消费 redis 队列。
+  worker:
+    <<: *ragspine-common
+    command: ["python", "scripts/run_worker.py"]
+
+  # 任务队列后端（官方 redis 镜像 + healthcheck）。
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - ragspine-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ---- profile: postgres —— pgvector 后端 ----
+  # 开启：`--profile postgres up` + 把 RAGSPINE_VECTOR_STORE 设为 pgvector（RAGSPINE_PG_URL 已默认
+  # 指向本服务）。pgvector adapter 经 RAGSPINE_PG_URL 真正联网连此 Postgres——完整端到端、持久。
+  postgres:
+    image: pgvector/pgvector:pg17
+    profiles: ["postgres"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ragspine
+      # RAGSPINE_PG_PASSWORD 是【compose-only 插值变量】：仅在此喂内置 postgres 容器的 POSTGRES_PASSWORD，
+      # 从不进 app/ServiceConfig（config.py 不读），故不是应用旋钮。改它须同步 RAGSPINE_PG_URL 里的密码。
+      POSTGRES_PASSWORD: ${RAGSPINE_PG_PASSWORD:-ragspine}
+      POSTGRES_DB: ragspine
+    volumes:
+      - ragspine-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ragspine -d ragspine"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ---- profile: qdrant —— Qdrant 后端 ----
+  # 开启：`--profile qdrant up` + 把 RAGSPINE_VECTOR_STORE 设为 qdrant。
+  # 诚实说明：当前 ServiceConfig 的 make_vector_store("qdrant") 不接收服务 URL（config 不传 kwargs），
+  # 跑的是 Qdrant LOCAL 进程内模式（:memory:）；此 qdrant 服务为「网络化 qdrant 接线」这一后续步骤
+  # 预备（见 deploy/README.md「诚实边界」与 PRD）。pgvector profile 才是当前完整端到端的外部向量库。
+  qdrant:
+    image: qdrant/qdrant:latest
+    profiles: ["qdrant"]
+    restart: unless-stopped
+    volumes:
+      - ragspine-qdrant:/qdrant/storage
+
+volumes:
+  ragspine-data:
+  ragspine-redis:
+  ragspine-pg:
+  ragspine-qdrant:
