@@ -1,6 +1,6 @@
 # PRD — VectorStore seam: pluggable vector index + filtered ANN
 
-> **status:** implemented (seam + wiring + persistence + 2 adapters; more adapters open) · **created:** 2026-06-17 · **methodology:** TDD (red conformance tests first)
+> **status:** implemented (seam + wiring + persistence + 3 adapters + exact/approx capability flag; more adapters open) · **created:** 2026-06-17 · **methodology:** TDD (red conformance tests first)
 > Originating spec, retained for history — the live contract is now
 > [`src/ragspine/retrieval/docs/vector-store.md`](../src/ragspine/retrieval/docs/vector-store.md)
 > (with `covers:`), so this PRD carries none.
@@ -28,26 +28,39 @@ contract is [`vector-store.md`](../src/ragspine/retrieval/docs/vector-store.md).
    **`PersistencePolicy`** seam (one method, `persistable(chunk)`) gates what is written at rest — default
    `IsolationFirstPolicy` **never persists a `RESTRICTED` chunk's vector**; `PersistEverythingPolicy` is
    opt-in for a db classified RESTRICTED-tier (`docs/invariants.md`).
-4. **Two real adapters** (behind `[vector]`, each inheriting the whole conformance kit):
+4. **Three real adapters** (behind `[vector]`, each inheriting the whole conformance kit):
    - **#1 `SqliteVecVectorStore`** — embedded (sqlite-vec `vec0`), persistent; conformance gates
      **unconditionally** (sqlite-vec is in the dev install).
    - **#2 `PgVectorVectorStore`** — networked Postgres/pgvector via the **`pg8000` (BSD)** driver — *not*
      psycopg/LGPL, per ADR 0009's ≤ Apache-2.0 gate. Conformance binds against a `RAGSPINE_PG_URL`
      Postgres and **skips** in the default no-server CI (a server backend can't be required of every
      contributor); verified green against local Postgres 17 + pgvector 0.8.0.
-5. **Tests:** **1195 passed** (default) / **1232 with a pgvector Postgres**, 1 gpu-skipped; conformance
-   runs over `in_process` + `sqlite_vec` (+ `pgvector` when `RAGSPINE_PG_URL` is set).
+   - **#3 `QdrantVectorStore`** — Qdrant (HNSW) via the **`qdrant-client` (Apache-2.0)** driver, run in
+     **local mode** (`:memory:` / `path=`) so conformance is purely in-process with **no server** and gates
+     **unconditionally** (no env). The **first `approximate`-capability backend** — it is what lands the
+     exact-vs-approximate flag (below).
+5. **The exact-vs-approximate capability flag** — the conformance registry now carries a per-impl
+   capability (`exact` / `approximate`); the three determinism tests **branch** on it: `exact` stores
+   (`in_process` / `sqlite_vec` / `pgvector`) keep the full byte-identical assertions, while `approximate`
+   (`qdrant`) asserts the weaker PRD guarantees (stable ordering within one instance + a recall@k floor vs
+   the exact default). Provenance / isolation / `where`-pushdown conformance bind **fully** to every tier
+   regardless of the flag.
+6. **Tests:** **1234 passed** (default) / **1271 with a pgvector Postgres**, 1 gpu-skipped; conformance
+   runs over `in_process` + `sqlite_vec` + `qdrant` (+ `pgvector` when `RAGSPINE_PG_URL` is set).
 
 ### ⏳ Remaining (roadmap)
 
-- **More adapters** — **Qdrant** (next), then Milvus, FAISS (see the [adapter roadmap](#adapter-roadmap-approved-priority--license-tiering) table; each is one registration line + the inherited conformance kit).
-- **Native ANN / KNN** — both shipped adapters persist but currently **score exactly in Python**
-  (sqlite-vec full-scans; pgvector pushes the `where` to SQL but re-scores in Python). Native indexed KNN
-  (sqlite-vec `MATCH`; pgvector HNSW / IVFFlat) with an **exact re-rank** is the scale optimization,
-  deliberately out of the first adapters.
-- **The exact-vs-approximate capability flag** in the conformance kit — *not yet implemented* because all
-  shipped stores are **exact**; it lands with the first *approximate* (HNSW) backend so its weaker
-  determinism guarantee doesn't falsely fail (see [Further notes](#further-notes)).
+- **More adapters** — **Milvus** (next), then FAISS (see the [adapter roadmap](#adapter-roadmap-approved-priority--license-tiering) table; each is one registration line + the inherited conformance kit). Qdrant **shipped** (#3).
+- **Native ANN / KNN** — the three shipped adapters persist but currently **score exactly in Python**
+  (sqlite-vec full-scans; pgvector pushes the `where` to SQL but re-scores in Python; qdrant full-scrolls
+  and re-scores in Python). Native indexed KNN (sqlite-vec `MATCH`; pgvector HNSW / IVFFlat; Qdrant HNSW)
+  with an **exact re-rank** is the scale optimization, deliberately out of the first adapters — this is also
+  *why Qdrant declares the `approximate` capability* even though local mode is incidentally exact: the
+  honest production guarantee is approximate, so the conformance contract won't over-constrain that switch.
+- **The exact-vs-approximate capability flag** in the conformance kit — **✅ now implemented** with Qdrant
+  (the first *approximate* backend): the determinism tests branch on a per-impl capability so an HNSW
+  backend's weaker guarantee doesn't falsely fail, while exact stores keep full byte-determinism (see
+  [Further notes](#further-notes)).
 - **Entry-point auto-discovery** — backends are config-string-selectable today via `make_vector_store`;
   letting a third-party package register a backend by Python **entry point** (so `ragspine-qdrant` needs no
   core PR) is still open — tracked in the parent [breadth PRD](prd-breadth-via-adapters.md).
@@ -169,8 +182,8 @@ conformance suite before it ships**.
 | 0 | `InProcessVectorStore` | in-process | (core) | **default** | Python | exact | ✅ shipped |
 | 1 | **sqlite-vec** | embedded (sqlite ext) | Apache-2.0 / MIT | promote | Python `_matches` (full-scan) | exact | **✅ shipped** |
 | 2 | **pgvector** | Postgres ext (pg8000/BSD) | PostgreSQL (permissive) | promote | SQL JSONB `WHERE` | exact (Python re-score) | **✅ shipped** |
-| 3 | **Qdrant** | server (Rust) | Apache-2.0 | promote | native filter | approx (HNSW) | next |
-| 4 | **Milvus** | server | Apache-2.0 | promote | native expr | approx | later |
+| 3 | **Qdrant** | server (Rust) / local (in-proc) | Apache-2.0 | promote | Python `_matches` (full-scroll) | **approx (HNSW)** | **✅ shipped** |
+| 4 | **Milvus** | server | Apache-2.0 | promote | native expr | approx | next |
 | 5 | **FAISS / hnswlib** | in-process lib | MIT / Apache-2.0 | promote | none → wrap | flat=exact / HNSW=approx | later |
 
 - **Why sqlite-vec is #1** — RAGSpine is already sqlite-native (`ChunkStore`, `FactStore`). It is the natural
@@ -231,10 +244,11 @@ existing suite stays green (a sub-package conftest error is isolated to that sub
   Persisting into `ChunkStore` itself proved unnecessary — the seam already owns persistence.
 - ~~**Rewiring `HybridRetriever`** to delegate to the store~~ — **done** (see Scope guard).
 - ~~**The `[vector]` extra** and the **first real adapters**~~ — **done**: `[vector]` ships `sqlite-vec`
-  (embedded) and `pg8000` (for pgvector), and both `SqliteVecVectorStore` + `PgVectorVectorStore` pass the
-  whole conformance kit (pgvector against a `RAGSPINE_PG_URL` Postgres; it *skips* in the default no-server
-  CI). **Further adapters** (Qdrant/Milvus/FAISS) remain later, each inheriting the conformance
-  parametrization with one registration line.
+  (embedded), `pg8000` (for pgvector), and `qdrant-client` (for Qdrant), and all three
+  `SqliteVecVectorStore` + `PgVectorVectorStore` + `QdrantVectorStore` pass the whole conformance kit
+  (pgvector against a `RAGSPINE_PG_URL` Postgres, *skips* in the default no-server CI; qdrant runs
+  unconditionally in local mode). **Further adapters** (Milvus/FAISS) remain later, each inheriting the
+  conformance parametrization with one registration line.
 - **Embedding generation** (owned by `EmbeddingBackend`), **RRF fusion / rerank** (owned by the retriever),
   and **entry-point auto-discovery** of third-party stores (the conftest list is the registry for now).
 
@@ -244,14 +258,16 @@ existing suite stays green (a sub-package conftest error is isolated to that sub
   offline default + conformance, so breadth (Qdrant/pgvector/…) can be *adapted* without the spine rotting.
 - Complements [`prd-pipeline-topology-export.md`](prd-pipeline-topology-export.md): once the vector channel
   resolves to a named store, `.topology()` can render *which* store the assembled pipeline uses.
-- **Exact vs approximate (the one non-obvious caveat for config-swap):** the in-process default does *exact*
-  brute-force cosine, so byte-identical determinism holds. Real ANN backends (Milvus/Qdrant HNSW/IVF) are
-  *approximate* — they may not reproduce byte-identical tie-breaks. So the conformance suite must carry a
-  per-impl **capability flag** (`exact` vs `approximate`): the byte-determinism assertion runs only for
-  `exact` stores; `approximate` stores instead assert weaker guarantees (stable ordering within one instance
-  for identical calls; a recall@k floor against the exact default). pgvector with an exact scan is `exact`;
-  with an HNSW index it is `approximate`. The filter-pushdown, provenance, and isolation conformance still
-  apply to **all** backends regardless of this flag — those are the invariants that must never bend.
+- **Exact vs approximate (✅ implemented with Qdrant):** the in-process default does *exact* brute-force
+  cosine, so byte-identical determinism holds. Real ANN backends (Milvus/Qdrant HNSW/IVF) are *approximate*
+  — they may not reproduce byte-identical tie-breaks. So the conformance suite **carries a per-impl
+  capability flag** (`exact` vs `approximate`, in `conftest.VECTOR_STORE_IMPLS`): the byte-determinism
+  assertion runs only for `exact` stores; `approximate` stores instead assert weaker guarantees (stable
+  ordering within one instance for identical calls; a recall@k floor against the exact default). Qdrant is
+  registered `approximate` (its production guarantee is HNSW; local mode is only incidentally exact); pgvector
+  with an exact scan is `exact`; a future HNSW-indexed pgvector would flip to `approximate`. The
+  filter-pushdown, provenance, and isolation conformance still apply to **all** backends regardless of this
+  flag — those are the invariants that must never bend.
 - **Scope discipline for "configurable":** keep the `Protocol` at the lowest-common-denominator the
   invariants need (`upsert` / `query+where` / `delete` / `count`). Backend-specific knobs (Milvus index
   params, pgvector `lists`/`probes`, payload indexing, quantization) live in that backend's own config

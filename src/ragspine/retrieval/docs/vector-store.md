@@ -3,9 +3,10 @@ covers:
   - src/ragspine/retrieval/vector/store.py
   - src/ragspine/retrieval/vector/adapters/sqlite_vec.py
   - src/ragspine/retrieval/vector/adapters/pgvector.py
+  - src/ragspine/retrieval/vector/adapters/qdrant.py
   - src/ragspine/retrieval/vector/persistence_policy.py
   - src/ragspine/retrieval/lexical/retrieval.py
-verified-against: cab1d56
+verified-against: d5a8c1cf325443d078ccee75971b1e4a7ee3d6d5
 ---
 
 # VectorStore seam — the pluggable vector index, and how it wires into retrieval
@@ -111,9 +112,10 @@ re-implemented.
 Two deliberate, documented choices:
 - **Scoring is a full-scan + Python cosine**, not vec0's native KNN `MATCH`. vec0's `k` is capped at
   4096 and it returns a `NULL` distance for zero vectors; a full scan sidesteps both and keeps the
-  scoring byte-aligned with the default (so **no conformance "exact vs approximate" capability flag
-  is needed** — it's an exact, deterministic store). Native-KNN acceleration with exact float64
-  re-rank is a scale-time optimization, out of scope for the first adapter.
+  scoring byte-aligned with the default (so it registers as the **`exact` capability** in the
+  conformance kit — full byte-determinism, not `approximate`; see "Capability flag" below).
+  Native-KNN acceleration with exact float64 re-rank is a scale-time optimization, out of scope for
+  the first adapter.
 - **`upsert` is DELETE-then-INSERT** (vec0 rejects `INSERT OR REPLACE`), preserving id-replace
   semantics. Re-open recovers the dimension from a stored vector, or from the `float[N]` schema when
   the table is empty.
@@ -149,6 +151,56 @@ Postgres with pgvector; in the default no-server CI the `pgvector` params **skip
 a server backend can't be required of every contributor. It was verified green against a local
 Postgres 17 + pgvector 0.8.0. Select by config: `make_vector_store("pgvector", dsn=…)` /
 `RAGSPINE_VECTOR_STORE=pgvector`.
+
+## Adapter #3: Qdrant (`vector/adapters/qdrant.py`)
+
+The first **`approximate`-capability** backend — Qdrant (HNSW), behind `[vector]` via the
+**`qdrant-client` (Apache-2.0)** driver (permissive, passes ADR 0009's ≤ Apache-2.0 gate, same tier
+as sqlite-vec). It runs in Qdrant **local mode** so conformance is purely in-process with **no
+server**: `QdrantClient(location=":memory:")` for ephemeral isolated instances, `QdrantClient(path=)`
+for a durable named collection that survives across processes. Because local mode needs no server, the
+`qdrant` conformance params gate **unconditionally** (whenever `qdrant-client` is installed) — unlike
+pgvector's `RAGSPINE_PG_URL` gate.
+
+Three deliberate choices:
+- **Scoring is a full-scroll + Python cosine** (same posture as sqlite-vec/pgvector): every point is
+  scrolled back and the `where` filter, cosine, exact-`0.0` zero-vector rule, and id-ascending
+  tie-break are computed in Python via the shared `store._cosine` / `store._matches`. The collection
+  uses `Distance.DOT` (no normalization, raw store/fetch) precisely because Qdrant's own metric is
+  irrelevant here — re-scoring in Python guarantees the contract semantics regardless of Qdrant
+  internals (Qdrant's cosine normalizes vectors and is undefined on a zero vector). Native HNSW KNN is
+  the scale-time optimization, out of the first adapter.
+- **String `id` → deterministic UUID5 point id.** Qdrant point ids must be `uint`/`UUID`, but a
+  `chunk_id` is an arbitrary string. The adapter maps `chunk_id → uuid5(namespace, chunk_id)` (same
+  string ⇒ same point id ⇒ `upsert` replaces), and stores the **original** string id in the payload so
+  `VectorHit.id` round-trips the original. Metadata lives under a reserved `__meta__` payload key, so
+  provenance (`doc_id` / `source_locator`) survives intact.
+- **It is registered `approximate`, by design** even though local mode (with Python re-scoring) is
+  *incidentally exact*. The adapter's honest production guarantee is HNSW = approximate; declaring it
+  so means the conformance contract won't over-constrain a future switch to native indexed KNN. See
+  "Capability flag" below.
+
+Select by config: `make_vector_store("qdrant")` / `make_vector_store("qdrant", path=…, collection=…)`
+/ `RAGSPINE_VECTOR_STORE=qdrant`. `.topology()` names it (`向量通道 · QdrantVectorStore`).
+
+## Capability flag: exact vs approximate (the conformance kit's determinism tier)
+
+The conformance registry (`tests/conformance/conftest.py::VECTOR_STORE_IMPLS`) is a
+**name → capability** map (`exact` / `approximate`), exposed to tests via the `vector_store_capability`
+fixture. The **three determinism tests** in `test_vector_store_invariants.py` branch on it:
+
+- **`exact`** (`in_process`, `sqlite_vec`, `pgvector`) — the **full byte-identical** assertions,
+  unchanged in strength: repeated queries are `(id, score)`-identical, two independent instances agree
+  byte-for-byte, and ties resolve `id`-ascending stably.
+- **`approximate`** (`qdrant`) — the weaker PRD guarantees an HNSW backend can actually honor: stable
+  *ordering* within one instance across identical repeated calls, plus a **recall@k floor** against the
+  exact `InProcessVectorStore` default (for clearly-separated vectors the approximate top-k recovers the
+  same id set). The id-ascending tie-break and byte-identical scores are **not** required of it.
+
+Everything else binds **fully to every tier regardless of the flag** — `where` filter-pushdown,
+provenance round-trip, and RESTRICTED isolation are invariants that never bend, approximate or not.
+Adding the next approximate backend (Milvus, a future HNSW-indexed pgvector) is **one registry line**
+(`"milvus": "approximate"`) plus a `_resolve_impl` branch — the determinism tier follows automatically.
 
 ## Persistence, made real — and sensitivity-gated (`persistence_policy.py`)
 

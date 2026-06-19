@@ -181,7 +181,8 @@ def make_vector_store(spec: str | None = None, **kwargs: Any) -> VectorStore | N
     spec 取值（大小写 / 留白不敏感；缺省读环境变量 RAGSPINE_VECTOR_STORE）：
         - None / 'none'                          -> None（不注入具体 store；检索器用内置内存默认）
         - 'in_process' / 'in-process' / 'memory' -> InProcessVectorStore（零依赖确定性内存默认）
-        - 其他（'sqlite-vec' / 'qdrant' / …）    -> ValueError（真实后端待 [vector] extra 落地）
+        - 'sqlite_vec' / 'pgvector' / 'qdrant'   -> 对应 adapter（behind [vector] extra，延迟 import）
+        - 其他                                    -> ValueError（真实后端待后续 adapter 落地）
 
     返回 VectorStore 实例或 None（可直接喂给 HybridRetriever / NarrativeIndex /
     build_narrative_retriever 的 vector_store 参数）。None 与显式 InProcessVectorStore 在
@@ -203,7 +204,11 @@ def make_vector_store(spec: str | None = None, **kwargs: Any) -> VectorStore | N
         from ragspine.retrieval.vector.adapters.pgvector import PgVectorVectorStore
 
         return PgVectorVectorStore(**kwargs)
+    if normalized == "qdrant":
+        from ragspine.retrieval.vector.adapters.qdrant import QdrantVectorStore
+
+        return QdrantVectorStore(**kwargs)
     raise ValueError(
         f"未知 vector store spec：{spec!r}"
-        "（本期可选 none / in_process / sqlite_vec / pgvector；qdrant 等待后续 adapter 落地）"
+        "（本期可选 none / in_process / sqlite_vec / pgvector / qdrant；其余等待后续 adapter 落地）"
     )

@@ -100,13 +100,16 @@ embed = [
     "transformers<5.9.0; sys_platform == 'darwin'",
 ]
 # 可插拔向量存储后端（VectorStore 缝的真实 adapter）。延迟 import：不装也能 import 核心、
-# 跑零依赖 InProcessVectorStore 默认；装了即由 make_vector_store('sqlite_vec'|'pgvector') 选用。
+# 跑零依赖 InProcessVectorStore 默认；装了即由 make_vector_store('sqlite_vec'|'pgvector'|'qdrant') 选用。
 # sqlite-vec：嵌入式 sqlite 扩展（Apache-2.0/MIT，permissive，零服务，conformance 装了即跑）。
 # pg8000：pgvector 适配器的纯 Python Postgres 驱动（BSD，permissive）——刻意【不用】psycopg(LGPL)，
 #   ADR 0009 的 ≤Apache-2.0 许可门排除 LGPL。pgvector conformance 需外部 PG（RAGSPINE_PG_URL）故默认 skip。
+# qdrant-client：Qdrant 适配器驱动（Apache-2.0，permissive，过 ADR 0009 的 ≤Apache-2.0 许可门，同 sqlite-vec）。
+#   用 local 模式（:memory: / path=）纯进程内、零服务，故 qdrant conformance 装了即跑、无需 env 门。
 vector = [
     "sqlite-vec>=0.1.6",
     "pg8000>=1.30",
+    "qdrant-client>=1.7",
 ]
 # 服务层：FastAPI HTTP 层 + RQ/Redis 异步任务队列（docs/09 PRD）。
 # rq/redis 延迟 import（RQQueue 内），不装也能 import task_queue、用 FakeQueue 跑离线测试。
@@ -164,5 +167,6 @@ module = [
     "anthropic.*", "openai.*", "openpyxl.*", "paddleocr.*", "pypdfium2.*",
     "sentence_transformers.*", "tomli", "docling.*", "rq.*", "redis.*",
     "pptx.*", "markdown.*", "reportlab.*", "rootutils.*", "sqlite_vec.*", "pg8000.*",
+    "qdrant_client.*",
 ]
 ignore_missing_imports = true

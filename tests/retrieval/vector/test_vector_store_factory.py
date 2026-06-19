@@ -2,7 +2,8 @@
 
 范式同 ragspine.retrieval.vector.embedding_backends.make_embedding_backend：把「选哪个
 向量存储」从改代码降为一个 spec/env。默认 None＝不注入具体 store（检索器用内置内存默认）。
-真实后端（sqlite-vec / qdrant / pgvector）待 [vector] extra 落地，本期只认 none / in_process。
+本期可选 none / in_process + [vector] 真实后端 sqlite_vec / pgvector / qdrant；
+更后的后端（milvus / faiss 等）待落地，未知 spec -> ValueError。
 """
 
 import os
@@ -49,9 +50,9 @@ def test_explicit_spec_overrides_env(monkeypatch):
 
 
 def test_unknown_spec_raises_value_error():
-    """未知 spec -> ValueError（错误信息点向 [vector] extra 的真实后端）。"""
+    """未知 spec -> ValueError（错误信息点向真实后端；milvus 尚未落地，用作未知样例）。"""
     with pytest.raises(ValueError, match="vector store"):
-        make_vector_store("qdrant")
+        make_vector_store("milvus")
 
 
 def test_each_call_returns_fresh_instance():

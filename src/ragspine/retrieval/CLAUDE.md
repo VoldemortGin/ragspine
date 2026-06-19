@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/
-verified-against: cab1d56
+verified-against: d5a8c1cf325443d078ccee75971b1e4a7ee3d6d5
 ---
 
 # retrieval — agent contract
@@ -16,8 +16,9 @@ Narrative RAG. `chunking/` (paragraph-granular chunker + versioned store),
 its vector **scoring** to the `VectorStore` seam), `vector/` (injectable embedding
 backends, default none = pure BM25; + the pluggable `VectorStore` seam — `store.py`
 + `make_vector_store` — with an invariant-binding conformance kit in
-`tests/conformance/`, two real adapters behind `[vector]` —
-`adapters/sqlite_vec.py` (embedded) + `adapters/pgvector.py` (Postgres, pg8000/BSD)
+`tests/conformance/` carrying an **exact-vs-approximate capability flag**, three real adapters
+behind `[vector]` — `adapters/sqlite_vec.py` (embedded, exact) + `adapters/pgvector.py`
+(Postgres, pg8000/BSD, exact) + `adapters/qdrant.py` (HNSW, qdrant-client local mode, **approximate**)
 — and `persistence_policy.py` gating what is written at rest), `rerank/` (LLM
 listwise reranker, RRF-fallback), `link/` (adapter wiring retrieval into the agent).
 
@@ -50,5 +51,6 @@ listwise reranker, RRF-fallback), `link/` (adapter wiring retrieval into the age
 ## Deep dives
 
 - [`docs/vector-store.md`](docs/vector-store.md) — the `VectorStore` seam, its
-  byte-identical wiring into `HybridRetriever`, the sqlite-vec adapter, the isolation
-  pushdown, and sensitivity-gated persistence (`PersistencePolicy` + embed-at-ingest).
+  byte-identical wiring into `HybridRetriever`, the sqlite-vec / pgvector / qdrant adapters,
+  the exact-vs-approximate capability flag, the isolation pushdown, and sensitivity-gated
+  persistence (`PersistencePolicy` + embed-at-ingest).

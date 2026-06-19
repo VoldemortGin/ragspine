@@ -22,11 +22,20 @@ ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpa
 
 
 # ---------------------------------------------------------------------------
-# 注册表：受 conformance 约束的 VectorStore 实现（仅登记【名字】，类延迟解析）。
-# 第三方实现在此追加名字 + 在 _resolve_impl 里补一行即继承全套
+# 注册表：受 conformance 约束的 VectorStore 实现 -> 其【能力等级】（仅登记名字+能力，类延迟解析）。
+# 能力等级驱动确定性断言的强弱（见 test_vector_store_invariants.py 的 capability 分支）：
+#   - exact       —— 打分精确、可复现，断言【逐位 byte-identical + id 升序破平分】（全量强度）。
+#   - approximate —— 生产保证为近似（HNSW 等），只断言较弱的「同实例重复调用顺序稳定 + recall@k 下限」；
+#                    provenance / isolation / where 过滤下推三项不变量仍【全量绑定】，绝不松动。
+# 第三方实现在此追加 名字->能力 一行 + 在 _resolve_impl 里补一行即继承全套
 # （将来可换成 entry-point 自动发现）。
 # ---------------------------------------------------------------------------
-VECTOR_STORE_IMPLS = ["in_process", "sqlite_vec", "pgvector"]
+VECTOR_STORE_IMPLS = {
+    "in_process": "exact",
+    "sqlite_vec": "exact",
+    "pgvector": "exact",
+    "qdrant": "approximate",
+}
 
 
 def _resolve_impl(name: str):
@@ -43,10 +52,14 @@ def _resolve_impl(name: str):
         from ragspine.retrieval.vector.adapters.pgvector import PgVectorVectorStore
 
         return PgVectorVectorStore
+    if name == "qdrant":
+        from ragspine.retrieval.vector.adapters.qdrant import QdrantVectorStore
+
+        return QdrantVectorStore
     raise KeyError(name)
 
 
-@pytest.fixture(params=VECTOR_STORE_IMPLS, ids=VECTOR_STORE_IMPLS)
+@pytest.fixture(params=list(VECTOR_STORE_IMPLS), ids=list(VECTOR_STORE_IMPLS))
 def vector_store(request):
     """每个注册实现各给一个【全新空库】实例；每条用例对所有实现各跑一遍。
 
@@ -54,6 +67,7 @@ def vector_store(request):
         sqlite_vec —— 需 [vector]（嵌入式，装了即跑）。
         pgvector   —— 需 [vector] + 环境变量 RAGSPINE_PG_URL 指向带 pgvector 扩展的 Postgres
                       （服务型后端，默认本地 CI 无 PG 故 skip；配了 URL 即整套 gate，本地实测见 README）。
+        qdrant     —— 需 [vector]（local 模式纯进程内、零服务，装了即跑，无需 env 门）。
     """
     if request.param == "sqlite_vec":
         pytest.importorskip("sqlite_vec", reason="sqlite-vec 未装（pip install ragspine[vector]）")
@@ -61,11 +75,22 @@ def vector_store(request):
         pytest.importorskip("pg8000", reason="pg8000 未装（pip install ragspine[vector]）")
         if not os.environ.get("RAGSPINE_PG_URL"):
             pytest.skip("RAGSPINE_PG_URL 未设（pgvector conformance 需带 pgvector 扩展的 Postgres）")
+    if request.param == "qdrant":
+        pytest.importorskip("qdrant_client", reason="qdrant-client 未装（pip install ragspine[vector]）")
     store = _resolve_impl(request.param)()
     yield store
     close = getattr(store, "close", None)
     if callable(close):
-        close()  # sqlite_vec / pgvector 收尾关连接（pgvector 的 TEMP 表随之 drop）
+        close()  # sqlite_vec / pgvector / qdrant 收尾关连接（pgvector 的 TEMP 表随之 drop）
+
+
+@pytest.fixture
+def vector_store_capability(request) -> str:
+    """当前参数化 VectorStore 实现的能力等级（exact / approximate）——驱动确定性断言强弱分支。
+
+    从注册表按 vector_store 夹具的当前 param 名解析（registry-driven，一行登记即生效）。
+    """
+    return VECTOR_STORE_IMPLS[request.node.callspec.params["vector_store"]]
 
 
 @pytest.fixture
