@@ -2,6 +2,7 @@
 covers:
   - src/ragspine/retrieval/vector/store.py
   - src/ragspine/retrieval/vector/adapters/sqlite_vec.py
+  - src/ragspine/retrieval/vector/adapters/pgvector.py
   - src/ragspine/retrieval/vector/persistence_policy.py
   - src/ragspine/retrieval/lexical/retrieval.py
 verified-against: cab1d56
@@ -120,6 +121,34 @@ Two deliberate, documented choices:
 Selectable by config: `make_vector_store("sqlite_vec")` / `RAGSPINE_VECTOR_STORE=sqlite_vec`, and it
 flows through `build_narrative_retriever` / `ServiceConfig` exactly like the default. `.topology()`
 names it (`向量通道 · SqliteVecVectorStore`).
+
+## Adapter #2: pgvector (`vector/adapters/pgvector.py`)
+
+The first **networked / shared** backend — PostgreSQL + the pgvector extension, for when the vector
+index must be shared across processes/hosts. Two deliberate choices set it apart:
+
+- **Driver is `pg8000` (pure-Python, BSD), *not* psycopg.** psycopg is LGPL, which ADR 0009's
+  ≤ Apache-2.0 license gate excludes; pg8000 is permissive. The adapter speaks plain SQL, so it needs
+  no pgvector-specific Python package.
+- **`where` is pushed to SQL, but scoring stays in Python.** The filter becomes a JSONB
+  `meta->>'k' = v` AND-chain (the isolation-relevant pushdown, and it cuts rows transferred); the
+  cosine, the exact-`0.0` zero-vector rule, and the id-ascending tie-break are computed in Python via
+  the shared `store._cosine` — because pgvector's native `<=>` returns **NaN** for a zero vector and
+  its distance-ordering doesn't match "id-asc among equal similarity." Native HNSW/IVFFlat KNN is the
+  scale-time optimization, out of scope for the first adapter (same posture as sqlite-vec).
+
+Table lifecycle splits the two needs cleanly: **`table=None` → a session `TEMP` table** (auto-dropped
+on disconnect — every conformance instance is isolated with zero leftover), **a named `table=` → a
+persistent `CREATE TABLE IF NOT EXISTS`** that survives across connections (the real value; dimension
+is recovered from the `vector(N)` column's `atttypmod` on reopen). `upsert` is native `INSERT … ON
+CONFLICT (id) DO UPDATE`, wrapped in a transaction with rollback.
+
+Connection via `RAGSPINE_PG_URL` (`postgresql://user[:pass]@host:port/db`) or an explicit `dsn=`.
+**Conformance binding is conditional:** it runs (and gates) only when `RAGSPINE_PG_URL` points at a
+Postgres with pgvector; in the default no-server CI the `pgvector` params **skip** (yellow, not red) —
+a server backend can't be required of every contributor. It was verified green against a local
+Postgres 17 + pgvector 0.8.0. Select by config: `make_vector_store("pgvector", dsn=…)` /
+`RAGSPINE_VECTOR_STORE=pgvector`.
 
 ## Persistence, made real — and sensitivity-gated (`persistence_policy.py`)
 

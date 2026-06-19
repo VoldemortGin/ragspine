@@ -26,7 +26,7 @@ ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpa
 # 第三方实现在此追加名字 + 在 _resolve_impl 里补一行即继承全套
 # （将来可换成 entry-point 自动发现）。
 # ---------------------------------------------------------------------------
-VECTOR_STORE_IMPLS = ["in_process", "sqlite_vec"]
+VECTOR_STORE_IMPLS = ["in_process", "sqlite_vec", "pgvector"]
 
 
 def _resolve_impl(name: str):
@@ -39,6 +39,10 @@ def _resolve_impl(name: str):
         from ragspine.retrieval.vector.adapters.sqlite_vec import SqliteVecVectorStore
 
         return SqliteVecVectorStore
+    if name == "pgvector":
+        from ragspine.retrieval.vector.adapters.pgvector import PgVectorVectorStore
+
+        return PgVectorVectorStore
     raise KeyError(name)
 
 
@@ -46,11 +50,22 @@ def _resolve_impl(name: str):
 def vector_store(request):
     """每个注册实现各给一个【全新空库】实例；每条用例对所有实现各跑一遍。
 
-    真实后端（sqlite_vec 等）behind extra：未装时该参数 skip（黄，不红），装了即整套 gate。
+    真实后端 behind extra / 需外部服务：缺时该参数 skip（黄，不红），齐备即整套 gate。
+        sqlite_vec —— 需 [vector]（嵌入式，装了即跑）。
+        pgvector   —— 需 [vector] + 环境变量 RAGSPINE_PG_URL 指向带 pgvector 扩展的 Postgres
+                      （服务型后端，默认本地 CI 无 PG 故 skip；配了 URL 即整套 gate，本地实测见 README）。
     """
     if request.param == "sqlite_vec":
         pytest.importorskip("sqlite_vec", reason="sqlite-vec 未装（pip install ragspine[vector]）")
-    return _resolve_impl(request.param)()
+    if request.param == "pgvector":
+        pytest.importorskip("pg8000", reason="pg8000 未装（pip install ragspine[vector]）")
+        if not os.environ.get("RAGSPINE_PG_URL"):
+            pytest.skip("RAGSPINE_PG_URL 未设（pgvector conformance 需带 pgvector 扩展的 Postgres）")
+    store = _resolve_impl(request.param)()
+    yield store
+    close = getattr(store, "close", None)
+    if callable(close):
+        close()  # sqlite_vec / pgvector 收尾关连接（pgvector 的 TEMP 表随之 drop）
 
 
 @pytest.fixture

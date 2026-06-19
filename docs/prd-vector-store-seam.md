@@ -1,21 +1,56 @@
 # PRD — VectorStore seam: pluggable vector index + filtered ANN
 
-> **status:** implemented · **created:** 2026-06-17 · **methodology:** TDD (red conformance tests first)
+> **status:** implemented (seam + wiring + persistence + 2 adapters; more adapters open) · **created:** 2026-06-17 · **methodology:** TDD (red conformance tests first)
 > Originating spec, retained for history — the live contract is now
 > [`src/ragspine/retrieval/docs/vector-store.md`](../src/ragspine/retrieval/docs/vector-store.md)
 > (with `covers:`), so this PRD carries none.
 > Lands the **P0 seam** of [`prd-breadth-via-adapters.md`](prd-breadth-via-adapters.md).
-> **Shipped:** the `Protocol` + `InProcessVectorStore` default + conformance kit
-> (`src/ragspine/retrieval/vector/store.py`, `tests/conformance/`); the **wiring** —
-> `HybridRetriever` delegates vector scoring to the seam, byte-identically — plus the
-> `make_vector_store(spec)` / `RAGSPINE_VECTOR_STORE` config selector and `.topology()`
-> store-naming; **adapter #1, `SqliteVecVectorStore`** (`vector/adapters/sqlite_vec.py`,
-> behind `[vector]`), which passes the **entire** conformance kit by inheriting the parametrization;
-> and **sensitivity-gated persistence** — `NarrativeIndex` embeds-and-persists at ingest with
-> `doc_id`-scoped invalidation and store-managed retrieve (a fresh process re-uses persisted vectors,
-> zero chunk re-embedding), gated by a swappable `PersistencePolicy` whose default
-> (`IsolationFirstPolicy`) never writes a RESTRICTED chunk's vector at rest. Further adapters
-> (Qdrant/pgvector → …) follow per the roadmap below.
+> **What's done vs. what's next is consolidated in [Status — shipped & remaining](#status--shipped--remaining-updated-2026-06-19) below;** the sections after it are the originating spec, retained as written.
+
+## Status — shipped & remaining (updated 2026-06-19)
+
+This PRD's vision is now **substantially shipped, across four increments**; the live, drift-tracked
+contract is [`vector-store.md`](../src/ragspine/retrieval/docs/vector-store.md). What's done and what's next:
+
+### ✅ Shipped
+
+1. **The seam.** `VectorStore` Protocol (`upsert` / `query+where` / `delete` / `count`) +
+   `InProcessVectorStore` (zero-dependency deterministic default) + the invariant-binding **conformance
+   kit** (`tests/conformance/`), parametrized over *every* registered store — provenance / isolation /
+   determinism bound at the seam, so a backend that breaks the spine fails CI, not production.
+2. **Live wiring.** `HybridRetriever` delegates vector scoring to the seam **byte-identically** (a captured
+   golden pins the `(bm25, vector, fused)` triples); `make_vector_store(spec)` / `RAGSPINE_VECTOR_STORE`
+   config selector; threaded through `NarrativeIndex` / `build_narrative_retriever` / `ServiceConfig`; the
+   resolved store is **named in `.topology()`**.
+3. **Sensitivity-gated persistence.** `NarrativeIndex` **embeds-and-persists at ingest**, invalidates by
+   `doc_id` (not blast-all), and retrieves **store-managed** (`HybridRetriever(manage_vectors=False)`) so a
+   fresh process re-uses persisted vectors with **zero chunk re-embedding**. The swappable
+   **`PersistencePolicy`** seam (one method, `persistable(chunk)`) gates what is written at rest — default
+   `IsolationFirstPolicy` **never persists a `RESTRICTED` chunk's vector**; `PersistEverythingPolicy` is
+   opt-in for a db classified RESTRICTED-tier (`docs/invariants.md`).
+4. **Two real adapters** (behind `[vector]`, each inheriting the whole conformance kit):
+   - **#1 `SqliteVecVectorStore`** — embedded (sqlite-vec `vec0`), persistent; conformance gates
+     **unconditionally** (sqlite-vec is in the dev install).
+   - **#2 `PgVectorVectorStore`** — networked Postgres/pgvector via the **`pg8000` (BSD)** driver — *not*
+     psycopg/LGPL, per ADR 0009's ≤ Apache-2.0 gate. Conformance binds against a `RAGSPINE_PG_URL`
+     Postgres and **skips** in the default no-server CI (a server backend can't be required of every
+     contributor); verified green against local Postgres 17 + pgvector 0.8.0.
+5. **Tests:** **1195 passed** (default) / **1232 with a pgvector Postgres**, 1 gpu-skipped; conformance
+   runs over `in_process` + `sqlite_vec` (+ `pgvector` when `RAGSPINE_PG_URL` is set).
+
+### ⏳ Remaining (roadmap)
+
+- **More adapters** — **Qdrant** (next), then Milvus, FAISS (see the [adapter roadmap](#adapter-roadmap-approved-priority--license-tiering) table; each is one registration line + the inherited conformance kit).
+- **Native ANN / KNN** — both shipped adapters persist but currently **score exactly in Python**
+  (sqlite-vec full-scans; pgvector pushes the `where` to SQL but re-scores in Python). Native indexed KNN
+  (sqlite-vec `MATCH`; pgvector HNSW / IVFFlat) with an **exact re-rank** is the scale optimization,
+  deliberately out of the first adapters.
+- **The exact-vs-approximate capability flag** in the conformance kit — *not yet implemented* because all
+  shipped stores are **exact**; it lands with the first *approximate* (HNSW) backend so its weaker
+  determinism guarantee doesn't falsely fail (see [Further notes](#further-notes)).
+- **Entry-point auto-discovery** — backends are config-string-selectable today via `make_vector_store`;
+  letting a third-party package register a backend by Python **entry point** (so `ragspine-qdrant` needs no
+  core PR) is still open — tracked in the parent [breadth PRD](prd-breadth-via-adapters.md).
 
 ## Problem statement
 
@@ -133,10 +168,10 @@ conformance suite before it ships**.
 |---|---|---|---|---|---|---|---|
 | 0 | `InProcessVectorStore` | in-process | (core) | **default** | Python | exact | ✅ shipped |
 | 1 | **sqlite-vec** | embedded (sqlite ext) | Apache-2.0 / MIT | promote | Python `_matches` (full-scan) | exact | **✅ shipped** |
-| 2 | **pgvector** | Postgres ext | PostgreSQL (permissive) | promote | SQL `WHERE` | exact / approx (HNSW) | next |
-| 3 | **Qdrant** | server (Rust) | Apache-2.0 | promote | native filter | approx (HNSW) |
-| 4 | **Milvus** | server | Apache-2.0 | promote | native expr | approx |
-| 5 | **FAISS / hnswlib** | in-process lib | MIT / Apache-2.0 | promote | none → wrap | flat=exact / HNSW=approx |
+| 2 | **pgvector** | Postgres ext (pg8000/BSD) | PostgreSQL (permissive) | promote | SQL JSONB `WHERE` | exact (Python re-score) | **✅ shipped** |
+| 3 | **Qdrant** | server (Rust) | Apache-2.0 | promote | native filter | approx (HNSW) | next |
+| 4 | **Milvus** | server | Apache-2.0 | promote | native expr | approx | later |
+| 5 | **FAISS / hnswlib** | in-process lib | MIT / Apache-2.0 | promote | none → wrap | flat=exact / HNSW=approx | later |
 
 - **Why sqlite-vec is #1** — RAGSpine is already sqlite-native (`ChunkStore`, `FactStore`). It is the natural
   *in-process default → embedded persistence* step: same file-based, zero-server, permissive, cross-platform,
@@ -195,9 +230,11 @@ existing suite stays green (a sub-package conftest error is isolated to that sub
   rest; `PersistEverythingPolicy` is opt-in for a db classified RESTRICTED-tier per `docs/invariants.md`).
   Persisting into `ChunkStore` itself proved unnecessary — the seam already owns persistence.
 - ~~**Rewiring `HybridRetriever`** to delegate to the store~~ — **done** (see Scope guard).
-- ~~**The `[vector]` extra** and the **first real adapter**~~ — **done**: `[vector]` ships `sqlite-vec`,
-  and `SqliteVecVectorStore` passes the whole conformance kit. **Further adapters** (pgvector/Qdrant/FAISS)
-  remain later, each inheriting the conformance parametrization with one registration line.
+- ~~**The `[vector]` extra** and the **first real adapters**~~ — **done**: `[vector]` ships `sqlite-vec`
+  (embedded) and `pg8000` (for pgvector), and both `SqliteVecVectorStore` + `PgVectorVectorStore` pass the
+  whole conformance kit (pgvector against a `RAGSPINE_PG_URL` Postgres; it *skips* in the default no-server
+  CI). **Further adapters** (Qdrant/Milvus/FAISS) remain later, each inheriting the conformance
+  parametrization with one registration line.
 - **Embedding generation** (owned by `EmbeddingBackend`), **RRF fusion / rerank** (owned by the retriever),
   and **entry-point auto-discovery** of third-party stores (the conftest list is the registry for now).
 

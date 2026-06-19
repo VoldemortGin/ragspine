@@ -111,10 +111,10 @@ Current state (8 Protocols exist): `LLMProvider`, `IntentParser`, `NarrativeRetr
 - **`VectorStore` (DONE, 🔧)** — `upsert(...)`, `query(vector, k, where) -> list[Hit]`, `delete`, `count`.
   **Shipped, wired, and adapted:** `Protocol` + `InProcessVectorStore` offline default (brute-force cosine) +
   conformance kit, `HybridRetriever` delegates vector scoring to it byte-identically, config-selected
-  by `make_vector_store` / `RAGSPINE_VECTOR_STORE`, and the **first real adapter `sqlite-vec`** (behind
-  `[vector]`) inherits the whole conformance kit. Metadata `where` pushdown carries isolation (third,
-  optional enforcement point). Remaining: more adapters (pgvector/Qdrant, P1), and the deferred at-rest
-  persistence. Was the single highest-leverage missing seam; it no longer is.
+  by `make_vector_store` / `RAGSPINE_VECTOR_STORE`, and **two real adapters — `sqlite-vec` (embedded) and
+  `pgvector` (PostgreSQL, pg8000/BSD)** — behind `[vector]` each inherit the whole conformance kit. Metadata
+  `where` pushdown carries isolation (third, optional enforcement point). Remaining: more adapters
+  (Qdrant/Milvus, P1). Was the single highest-leverage missing seam; it no longer is.
 - **`Extractor` registry (FORMALIZE, ⭐/🔧)** — extractors exist (PDF-digital, PPTX, XLSX, +styled) but
   there is no `mime/type → Extractor` registry or shared `Protocol`. Formalizing it lets DOCX/HTML/MD/CSV be
   added (or adapted from `unstructured`/`docling`) without touching routing, and binds provenance once.
@@ -134,7 +134,7 @@ Legend: **kind** 🛡/⭐/🔧 (own/own/adapt) · **status** ✅ have · ◐ par
 | OCR | `OcrBackend` | 🔧 | mock | paddleocr `[ocr]` | ✅ | — |
 | Chunking | `Chunker` *(new)* | ⭐ | recursive/structural | semantic · contextual · parent-child | ◐ | P0 proto · P1 strat |
 | Embedding | `EmbeddingBackend` | 🔧⭐ | lexical-hash (non-semantic) | sentence-transformers `[embed]` · OpenAI `[llm]` | ✅ | — |
-| Vector store | `VectorStore` | 🔧 | in-proc brute force | **sqlite-vec ✅** · pgvector·Qdrant·FAISS·Chroma·LanceDB | ✅ seam + 1st adapter | P0 ✓ · more adapters P1 |
+| Vector store | `VectorStore` | 🔧 | in-proc brute force | **sqlite-vec ✅ · pgvector ✅** · Qdrant·FAISS·Chroma·LanceDB | ✅ seam + 2 adapters | P0 ✓ · more adapters P1 |
 | Lexical index | *(built-in)* | ⭐ | BM25 | — | ✅ | — |
 | Retrieve / fuse | `HybridRetriever` | ⭐ | BM25 + vector → RRF | — | ✅ | — |
 | Rerank | `ListwiseJudge` | ⭐ | identity | cross-encoder · Cohere · BGE `[rerank]` | ✅ proto / ✗ adapters | P1 |
@@ -149,10 +149,10 @@ Legend: **kind** 🛡/⭐/🔧 (own/own/adapt) · **status** ✅ have · ◐ par
 **Read of the matrix:** the spine (🛡) and the quality stages (⭐) are largely owned and present already. The
 **P0 `VectorStore` seam is wired live with its first real adapter** — `Protocol` + offline default +
 conformance kit + `HybridRetriever` delegation + `make_vector_store` config selector + `.topology()` naming +
-**`sqlite-vec` adapter** (conformance-bound, behind `[vector]`) — see
-[`prd-vector-store-seam.md`](prd-vector-store-seam.md) and the deep dive
+**two real adapters, `sqlite-vec` (embedded) and `pgvector` (PostgreSQL, pg8000/BSD)**, both conformance-bound
+behind `[vector]` — see [`prd-vector-store-seam.md`](prd-vector-store-seam.md) and the deep dive
 [`vector-store.md`](../src/ragspine/retrieval/docs/vector-store.md); what remains there is **more adapters**
-(pgvector/Qdrant, P1) and the deferred at-rest persistence. The remaining breadth gap is concentrated in
+(Qdrant/Milvus/FAISS, P1). The remaining breadth gap is concentrated in
 **two commodity seams** — `SourceConnector` (P1) and filling out `Extractor` formats (P1) — exactly the
 surface that should be *adapted*, not authored.
 
@@ -169,7 +169,9 @@ surface that should be *adapted*, not authored.
     (`make_vector_store` / `make_persistence_policy`); entry-point auto-discovery still open (conftest list for now).
 - **P1 — the breadth that wins evaluations.** Format coverage (DOCX/HTML/MD/CSV via `unstructured`/`docling`),
   rerank adapters (cross-encoder/Cohere/BGE), query-transform strategies (multi-query/HyDE/self-query),
-  the first 2–3 `SourceConnector`s (filesystem ✓ → S3 → HTTP/crawl), a second vector adapter.
+  the first 2–3 `SourceConnector`s (filesystem ✓ → S3 → HTTP/crawl). *(A second vector adapter — pgvector —
+  already shipped in P0; the next vector adapter is Qdrant, plus native ANN/KNN for the existing two — see
+  [`prd-vector-store-seam.md`](prd-vector-store-seam.md).)*
 - **P2 — governance & ops depth.** `FactStore` Protocol (DuckDB/Postgres), `TraceSink` → OTel (privacy-gated),
   incremental sync / deletion-propagation across stores (a 🛡 lineage concern), RAGAS-compatible eval export.
 

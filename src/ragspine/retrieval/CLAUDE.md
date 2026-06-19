@@ -16,10 +16,10 @@ Narrative RAG. `chunking/` (paragraph-granular chunker + versioned store),
 its vector **scoring** to the `VectorStore` seam), `vector/` (injectable embedding
 backends, default none = pure BM25; + the pluggable `VectorStore` seam — `store.py`
 + `make_vector_store` — with an invariant-binding conformance kit in
-`tests/conformance/`, `adapters/sqlite_vec.py` as the first real adapter behind
-`[vector]`, and `persistence_policy.py` gating what is written at rest),
-`rerank/` (LLM listwise reranker, RRF-fallback), `link/` (adapter wiring
-retrieval into the agent).
+`tests/conformance/`, two real adapters behind `[vector]` —
+`adapters/sqlite_vec.py` (embedded) + `adapters/pgvector.py` (Postgres, pg8000/BSD)
+— and `persistence_policy.py` gating what is written at rest), `rerank/` (LLM
+listwise reranker, RRF-fallback), `link/` (adapter wiring retrieval into the agent).
 
 ## Invariants
 

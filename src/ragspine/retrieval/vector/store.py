@@ -199,7 +199,11 @@ def make_vector_store(spec: str | None = None, **kwargs: Any) -> VectorStore | N
         from ragspine.retrieval.vector.adapters.sqlite_vec import SqliteVecVectorStore
 
         return SqliteVecVectorStore(**kwargs)
+    if normalized in ("pgvector", "pg_vector"):
+        from ragspine.retrieval.vector.adapters.pgvector import PgVectorVectorStore
+
+        return PgVectorVectorStore(**kwargs)
     raise ValueError(
         f"未知 vector store spec：{spec!r}"
-        "（本期可选 none / in_process / sqlite_vec；qdrant / pgvector 等待后续 adapter 落地）"
+        "（本期可选 none / in_process / sqlite_vec / pgvector；qdrant 等待后续 adapter 落地）"
     )

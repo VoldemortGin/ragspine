@@ -5,7 +5,8 @@
 ragspine.retrieval.vector.store.InProcessVectorStore。
 
 Submodules:
-    sqlite_vec.py — sqlite-vec（vec0 虚表）适配器：持久化 + conformance-bound 精确实现。
+    sqlite_vec.py — sqlite-vec（vec0 虚表）适配器：嵌入式持久化 + conformance-bound 精确实现。
+    pgvector.py — pgvector（PostgreSQL）适配器：网络化 / 共享持久化，pg8000(BSD) 驱动，conformance-bound。
 """
 
 from ragspine import _lazy_submodules

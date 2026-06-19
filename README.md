@@ -6,7 +6,7 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
-![Tests](https://img.shields.io/badge/tests-1193%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1195%20passing-brightgreen)
 [![Docs](https://img.shields.io/badge/docs-rag--spine.org-2dd4bf)](https://rag-spine.org)
 
 ---
@@ -106,7 +106,7 @@ Optional extras:
 | `[ocr]` | paddleocr | scanned-PDF OCR (Linux + NVIDIA GPU) |
 | `[llm]` | anthropic, openai | real LLM providers (lazy-imported) |
 | `[embed]` | sentence-transformers | real embedding models for the vector channel |
-| `[vector]` | sqlite-vec | persistent `VectorStore` backend (vec0); first real adapter |
+| `[vector]` | sqlite-vec, pg8000 | persistent `VectorStore` backends: sqlite-vec (embedded) + pgvector (Postgres, BSD driver) |
 | `[dev]` | pytest, reportlab, markdown | tests + fixture generation |
 
 **From source**
@@ -224,11 +224,14 @@ is written at rest — its default **never persists a `RESTRICTED` chunk's vecto
 ## Testing
 
 ```bash
-.venv/bin/python -m pytest tests/ -q        # 1193 passed, 1 gpu-skipped
+.venv/bin/python -m pytest tests/ -q        # 1195 passed, 38 skipped (37 pgvector + 1 gpu)
 ```
 
 The project is **test-driven**: tests are the spec. The `gpu` marker gates real-OCR
-integration tests to a Linux + NVIDIA GPU box; everything else runs anywhere.
+integration tests to a Linux + NVIDIA GPU box. The **`pgvector` conformance** skips unless
+`RAGSPINE_PG_URL` points at a Postgres with the pgvector extension — set it and the count
+rises to **1232 passed** (the pgvector adapter is conformance-bound, just not in the default
+server-less CI). Everything else runs anywhere.
 
 ## Continuous integration (local)
 
@@ -255,16 +258,16 @@ version-controlled evaluation sets live under `data/golden/`. Nothing here is re
 ## Status & roadmap
 
 **Solid:** structured channel, narrative hybrid retrieval, agent orchestration, office
-extraction (xlsx/pptx/pdf), FastAPI + RQ service, FAQ cache, evaluation harness, 1193 tests.
+extraction (xlsx/pptx/pdf), FastAPI + RQ service, FAQ cache, evaluation harness, 1195 tests.
 
-**Honest gaps (contributions welcome):** the `VectorStore` seam is **wired live with its first real
-adapter** — `HybridRetriever` delegates vector scoring to it (byte-identically), it's config-selectable
-(`make_vector_store` / `RAGSPINE_VECTOR_STORE`), named in `.topology()`, and **`sqlite-vec`** (behind
-`[vector]`) gives a persistent, conformance-bound backend. Still open: **more adapters (pgvector/Qdrant)
-and true ANN** — the sqlite-vec adapter persists but currently scores by full-scan, not native KNN — and
-the BM25-only default has no semantic signal until an embedding model is injected (behind `[embed]`/GPU).
-Pipeline-topology export (`.topology()` → Mermaid/DOT/JSON, plus `scripts/topology.py`) ships — see
-`src/ragspine/pipeline/`.
+**Honest gaps (contributions welcome):** the `VectorStore` seam is **wired live with two real
+adapters** — `HybridRetriever` delegates vector scoring to it (byte-identically), it's config-selectable
+(`make_vector_store` / `RAGSPINE_VECTOR_STORE`), named in `.topology()`, and behind `[vector]` ships
+**`sqlite-vec`** (embedded) + **`pgvector`** (Postgres, BSD `pg8000` driver) — both persistent and
+conformance-bound. Still open: **more adapters (Qdrant/Milvus) and true ANN** — both adapters persist
+but currently score exactly in Python, not via native HNSW/IVFFlat KNN — and the BM25-only default has no
+semantic signal until an embedding model is injected (behind `[embed]`/GPU). Pipeline-topology export
+(`.topology()` → Mermaid/DOT/JSON, plus `scripts/topology.py`) ships — see `src/ragspine/pipeline/`.
 
 ## License
 
