@@ -6,7 +6,7 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
-![Tests](https://img.shields.io/badge/tests-1234%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1255%20passing-brightgreen)
 [![Docs](https://img.shields.io/badge/docs-rag--spine.org-2dd4bf)](https://rag-spine.org)
 
 ---
@@ -205,7 +205,8 @@ Endpoints: `GET /healthz`, `GET /readyz`, `POST /v1/ask`,
 abstraction, never the SDK, so adding a provider / vector store / reranker / OCR engine touches one
 new file. `VectorStore` ships a conformance kit (`tests/conformance/`) that binds provenance /
 isolation / determinism for *any* implementation; select one by config (`make_vector_store` /
-`RAGSPINE_VECTOR_STORE`). With a persistent store, `NarrativeIndex` embeds-and-persists at ingest
+`RAGSPINE_VECTOR_STORE`), or let a third-party package register a backend by name via the
+`ragspine.vector_stores` entry-point group (no core PR). With a persistent store, `NarrativeIndex` embeds-and-persists at ingest
 (so a fresh process re-uses vectors, no re-embedding); the swappable `PersistencePolicy` gates what
 is written at rest — its default **never persists a `RESTRICTED` chunk's vector**.
 
@@ -224,13 +225,13 @@ is written at rest — its default **never persists a `RESTRICTED` chunk's vecto
 ## Testing
 
 ```bash
-.venv/bin/python -m pytest tests/ -q        # 1234 passed, 38 skipped (37 pgvector + 1 gpu)
+.venv/bin/python -m pytest tests/ -q        # 1255 passed, 38 skipped (37 pgvector + 1 gpu)
 ```
 
 The project is **test-driven**: tests are the spec. The `gpu` marker gates real-OCR
 integration tests to a Linux + NVIDIA GPU box. The **`pgvector` conformance** skips unless
 `RAGSPINE_PG_URL` points at a Postgres with the pgvector extension — set it and the count
-rises to **1271 passed** (the pgvector adapter is conformance-bound, just not in the default
+rises to **1292 passed** (the pgvector adapter is conformance-bound, just not in the default
 server-less CI). The **Qdrant** conformance runs unconditionally (local mode is purely
 in-process, no server). Everything else runs anywhere.
 
@@ -259,7 +260,7 @@ version-controlled evaluation sets live under `data/golden/`. Nothing here is re
 ## Status & roadmap
 
 **Solid:** structured channel, narrative hybrid retrieval, agent orchestration, office
-extraction (xlsx/pptx/pdf), FastAPI + RQ service, FAQ cache, evaluation harness, 1234 tests.
+extraction (xlsx/pptx/pdf), FastAPI + RQ service, FAQ cache, evaluation harness, 1255 tests.
 
 **Honest gaps (contributions welcome):** the `VectorStore` seam is **wired live with three real
 adapters** — `HybridRetriever` delegates vector scoring to it (byte-identically), it's config-selectable

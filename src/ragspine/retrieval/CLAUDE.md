@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/
-verified-against: d5a8c1cf325443d078ccee75971b1e4a7ee3d6d5
+verified-against: 4fd1f4801816ecc3325a61aee129e374653bc75b
 ---
 
 # retrieval — agent contract
@@ -15,7 +15,9 @@ Narrative RAG. `chunking/` (paragraph-granular chunker + versioned store),
 `lexical/` (Okapi BM25, CJK uni+bigram, RRF fusion — `HybridRetriever` delegates
 its vector **scoring** to the `VectorStore` seam), `vector/` (injectable embedding
 backends, default none = pure BM25; + the pluggable `VectorStore` seam — `store.py`
-+ `make_vector_store` — with an invariant-binding conformance kit in
++ `make_vector_store` (a lazy-loader **registry** over the built-ins, with an
+**entry-point auto-discovery** fallback on the `ragspine.vector_stores` group so a
+third-party backend is selectable by name with no core PR) — with an invariant-binding conformance kit in
 `tests/conformance/` carrying an **exact-vs-approximate capability flag**, three real adapters
 behind `[vector]` — `adapters/sqlite_vec.py` (embedded, exact) + `adapters/pgvector.py`
 (Postgres, pg8000/BSD, exact) + `adapters/qdrant.py` (HNSW, qdrant-client local mode, **approximate**)

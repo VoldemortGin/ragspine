@@ -6,7 +6,7 @@ covers:
   - src/ragspine/retrieval/vector/adapters/qdrant.py
   - src/ragspine/retrieval/vector/persistence_policy.py
   - src/ragspine/retrieval/lexical/retrieval.py
-verified-against: d5a8c1cf325443d078ccee75971b1e4a7ee3d6d5
+verified-against: 4fd1f4801816ecc3325a61aee129e374653bc75b
 ---
 
 # VectorStore seam — the pluggable vector index, and how it wires into retrieval
@@ -40,8 +40,23 @@ upsert or a wrong-dimension query raises `ValueError` — never a silently bad v
 
 `make_vector_store(spec)` is the config-string factory (mirrors `make_embedding_backend`):
 `none` → `None` (retriever self-builds the in-process default), `in_process` →
-`InProcessVectorStore`, anything else → `ValueError` pointing at the future `[vector]` extra. Env
+`InProcessVectorStore`, `sqlite_vec` / `pgvector` / `qdrant` → the adapter behind `[vector]`. Env
 override: `RAGSPINE_VECTOR_STORE`. Selectable end-to-end via `ServiceConfig.vector_store`.
+
+Built-in names resolve through a **lazy-loader registry** (`_BUILTIN_LOADERS`, plus aliases;
+case/whitespace-insensitive) — not an `if`-ladder — each loader importing only its (SDK-free) adapter
+*module*, so the SDK stays lazy until the returned class is instantiated (core imports zero SDKs even
+when a built-in adapter is *selected*). An **unknown** name then falls back to **entry-point
+auto-discovery**: `make_vector_store` looks it up in the `ragspine.vector_stores` entry-point group
+(`VECTOR_STORE_ENTRY_POINT_GROUP`) via `importlib.metadata.entry_points`, so a third-party package
+(`ragspine-foo`) registers a backend by name with **no core PR** — the last leg of the five-part
+extension contract (Protocol + default + adapter + registry/discovery + conformance). A built-in name
+**wins over** a same-named entry point (third parties can't hijack built-in semantics); a name that is
+neither raises a `ValueError` listing the built-in + discovered names; a selected-but-uninstalled
+backend keeps raising the actionable `pip install ragspine[vector]` message from the adapter's
+`__init__`. (The `tests/conformance/` conftest stays the **explicit** registry for the conformance
+parametrization — discovery selects a backend to *run*, the conftest list is what binds the
+invariants.)
 
 ## The wiring (byte-identical by construction)
 

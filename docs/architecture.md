@@ -3,7 +3,7 @@ covers:
   - src/ragspine/agent/
   - src/ragspine/retrieval/
   - src/ragspine/service/faq/
-verified-against: d5a8c1cf325443d078ccee75971b1e4a7ee3d6d5
+verified-against: 4fd1f4801816ecc3325a61aee129e374653bc75b
 ---
 
 # Architecture — request flow & dual channel

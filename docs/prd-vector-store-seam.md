@@ -1,6 +1,6 @@
 # PRD — VectorStore seam: pluggable vector index + filtered ANN
 
-> **status:** implemented (seam + wiring + persistence + 3 adapters + exact/approx capability flag; more adapters open) · **created:** 2026-06-17 · **methodology:** TDD (red conformance tests first)
+> **status:** implemented (seam + wiring + persistence + 3 adapters + exact/approx capability flag + entry-point auto-discovery; more adapters open) · **created:** 2026-06-17 · **methodology:** TDD (red conformance tests first)
 > Originating spec, retained for history — the live contract is now
 > [`src/ragspine/retrieval/docs/vector-store.md`](../src/ragspine/retrieval/docs/vector-store.md)
 > (with `covers:`), so this PRD carries none.
@@ -45,8 +45,15 @@ contract is [`vector-store.md`](../src/ragspine/retrieval/docs/vector-store.md).
    (`qdrant`) asserts the weaker PRD guarantees (stable ordering within one instance + a recall@k floor vs
    the exact default). Provenance / isolation / `where`-pushdown conformance bind **fully** to every tier
    regardless of the flag.
-6. **Tests:** **1234 passed** (default) / **1271 with a pgvector Postgres**, 1 gpu-skipped; conformance
+6. **Tests:** **1255 passed** (default) / **1292 with a pgvector Postgres**, 1 gpu-skipped; conformance
    runs over `in_process` + `sqlite_vec` + `qdrant` (+ `pgvector` when `RAGSPINE_PG_URL` is set).
+7. **Entry-point auto-discovery.** `make_vector_store` resolves built-in names through a **lazy-loader
+   registry** (the if-ladder is gone) and **falls back to the `ragspine.vector_stores` entry-point group**
+   for any unknown name — so a third-party `ragspine-foo` registers a backend by name with **no core PR**
+   (parent breadth PRD's user stories 1 & 4). Core still imports zero SDKs: resolving a built-in adapter by
+   name imports only its (SDK-free) adapter module; the SDK is lazy-imported in the adapter's `__init__` at
+   instantiation. An unknown name raises a `ValueError` listing the built-in + discovered names; a
+   selected-but-uninstalled backend keeps raising the actionable `pip install ragspine[vector]` message.
 
 ### ⏳ Remaining (roadmap)
 
@@ -61,9 +68,10 @@ contract is [`vector-store.md`](../src/ragspine/retrieval/docs/vector-store.md).
   (the first *approximate* backend): the determinism tests branch on a per-impl capability so an HNSW
   backend's weaker guarantee doesn't falsely fail, while exact stores keep full byte-determinism (see
   [Further notes](#further-notes)).
-- **Entry-point auto-discovery** — backends are config-string-selectable today via `make_vector_store`;
-  letting a third-party package register a backend by Python **entry point** (so `ragspine-qdrant` needs no
-  core PR) is still open — tracked in the parent [breadth PRD](prd-breadth-via-adapters.md).
+- ~~**Entry-point auto-discovery**~~ — **✅ shipped.** `make_vector_store` now resolves built-in names
+  through a lazy-loader registry and **falls back to the `ragspine.vector_stores` entry-point group** for an
+  unknown name, so a third-party package (e.g. `ragspine-qdrant`) registers a backend by name with **no core
+  PR** (parent breadth PRD's user stories 1 & 4). See [Shipped #7](#-shipped) above.
 
 ## Problem statement
 
@@ -249,8 +257,9 @@ existing suite stays green (a sub-package conftest error is isolated to that sub
   (pgvector against a `RAGSPINE_PG_URL` Postgres, *skips* in the default no-server CI; qdrant runs
   unconditionally in local mode). **Further adapters** (Milvus/FAISS) remain later, each inheriting the
   conformance parametrization with one registration line.
-- **Embedding generation** (owned by `EmbeddingBackend`), **RRF fusion / rerank** (owned by the retriever),
-  and **entry-point auto-discovery** of third-party stores (the conftest list is the registry for now).
+- **Embedding generation** (owned by `EmbeddingBackend`) and **RRF fusion / rerank** (owned by the
+  retriever). *(**entry-point auto-discovery** of third-party stores has since **shipped** — see
+  [Status #7](#-shipped); the conftest list remains the explicit **conformance** registry by design.)*
 
 ## Further notes
 

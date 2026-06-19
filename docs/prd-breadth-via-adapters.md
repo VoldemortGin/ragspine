@@ -168,8 +168,10 @@ surface that should be *adapted*, not authored.
   - ✅ The conformance kit for provenance + isolation + determinism, parametrized over registered backends
     (`tests/conformance/`, now binding both `InProcessVectorStore` and `sqlite-vec`). Privacy-trace + cross-seam
     provenance over SourceConnector/Extractor/Chunker remain open with those seams.
-  - Registry + entry-point discovery so a backend is selectable by config string — config-string ✅
-    (`make_vector_store` / `make_persistence_policy`); entry-point auto-discovery still open (conftest list for now).
+  - ✅ Registry + entry-point discovery so a backend is selectable by config string — config-string ✅
+    (`make_vector_store` / `make_persistence_policy`) **and** entry-point auto-discovery ✅
+    (`make_vector_store` falls back to the `ragspine.vector_stores` entry-point group, so a third-party
+    `ragspine-foo` registers a backend by name with **no core PR** — user stories 1 & 4 land).
 - **P1 — the breadth that wins evaluations.** Format coverage (DOCX/HTML/MD/CSV via `unstructured`/`docling`),
   rerank adapters (cross-encoder/Cohere/BGE), query-transform strategies (multi-query/HyDE/self-query),
   the first 2–3 `SourceConnector`s (filesystem ✓ → S3 → HTTP/crawl). *(Vector adapters pgvector and Qdrant
@@ -207,8 +209,11 @@ CI-tested path; until then it lives as a clearly-labeled experimental adapter.
 - **Lazy import inside the adapter, gated by an extra.** Core imports zero SDKs; importing `ragspine` never
   pulls a backend. Matches the existing `[pdf]/[ocr]/[llm]/[embed]/[service]` pattern; add `[vector]`,
   `[rerank]`.
-- **Config-string + entry-point discovery.** Backends are named; core resolves name→factory via a registry
-  populated by built-ins and third-party entry points. No `if backend == "...": import ...` ladders in core.
+- **Config-string + entry-point discovery (✅ shipped for `VectorStore`).** Backends are named; core resolves
+  name→factory via a registry populated by built-ins **and third-party entry points** (`make_vector_store`
+  resolves an unknown name through the `ragspine.vector_stores` entry-point group). No
+  `if backend == "...": import ...` ladder in core — the built-in if-ladder became a lazy-loader registry, so a
+  third-party package registers a backend by name with no core PR.
 - **Conformance pack is the adapter spec.** It is written red first and is the authoritative definition of
   "a valid backend." Invariants are asserted *per registered implementation*, not once globally.
 - **Offline defaults stay deterministic and dep-free**, preserving the BM25 + Mock default loop as the test

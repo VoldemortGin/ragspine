@@ -21,7 +21,7 @@ cosine 暴力扫（brute-force cosine + id 升序破平分），让 `pip install
 
 import math
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
@@ -30,6 +30,12 @@ DEFAULT_QUERY_K = 50
 
 # 工厂读取的环境变量名（缺省 spec 时生效；范式同 EMBEDDING_BACKEND_ENV）。
 VECTOR_STORE_ENV = "RAGSPINE_VECTOR_STORE"
+
+# 第三方后端自动发现的 entry-point group：一个包在此 group 下注册一行
+# （pyproject `[project.entry-points."ragspine.vector_stores"]`），make_vector_store
+# 就能按名字选中它——核心零改动、零 SDK import（落地 docs/prd-breadth-via-adapters.md
+# 「Registry + entry-point discovery」与 user stories 1 & 4）。
+VECTOR_STORE_ENTRY_POINT_GROUP = "ragspine.vector_stores"
 
 
 @dataclass(frozen=True)
@@ -175,6 +181,87 @@ class InProcessVectorStore:
         return len(self._records)
 
 
+# ---------------------------------------------------------------------------
+# 注册表：内置后端名字 -> 惰性 loader（返回 VectorStore【类】，尚不实例化）。
+# loader 仅在被调用时才 import 对应 adapter 模块（模块体零顶层 SDK import），SDK 留待
+# adapter.__init__ 在【实例化】时延迟 import——故 core import store.py 与构建本表均零 SDK。
+# 别名共指同一 loader（大小写 / 留白由 make_vector_store 归一化）。第三方后端【不】登记此表，
+# 而是经 entry-point 自动发现（见 _discover_entry_points），无需任何核心 PR。
+# ---------------------------------------------------------------------------
+def _load_in_process() -> type[VectorStore]:
+    return InProcessVectorStore
+
+
+def _load_sqlite_vec() -> type[VectorStore]:
+    from ragspine.retrieval.vector.adapters.sqlite_vec import SqliteVecVectorStore
+
+    return SqliteVecVectorStore
+
+
+def _load_pgvector() -> type[VectorStore]:
+    from ragspine.retrieval.vector.adapters.pgvector import PgVectorVectorStore
+
+    return PgVectorVectorStore
+
+
+def _load_qdrant() -> type[VectorStore]:
+    from ragspine.retrieval.vector.adapters.qdrant import QdrantVectorStore
+
+    return QdrantVectorStore
+
+
+_BUILTIN_LOADERS: dict[str, Callable[[], type[VectorStore]]] = {
+    "in_process": _load_in_process,
+    "in-process": _load_in_process,
+    "inprocess": _load_in_process,
+    "memory": _load_in_process,
+    "sqlite_vec": _load_sqlite_vec,
+    "sqlite-vec": _load_sqlite_vec,
+    "sqlitevec": _load_sqlite_vec,
+    "pgvector": _load_pgvector,
+    "pg_vector": _load_pgvector,
+    "qdrant": _load_qdrant,
+}
+
+# 错误信息中展示的内置规范名（别名不重复列出，保持可读）。
+_BUILTIN_DISPLAY_NAMES = ("none", "in_process", "sqlite_vec", "pgvector", "qdrant")
+
+
+def _discover_entry_points() -> Sequence[Any]:
+    """发现第三方在 VECTOR_STORE_ENTRY_POINT_GROUP 下注册的 VectorStore 后端。
+
+    返回若干 EntryPoint（各有 .name 与 .load()）。在函数内 import entry_points，使
+    monkeypatch importlib.metadata.entry_points 在测试中生效，也让发现成本只在真正回落时付出。
+    """
+    from importlib.metadata import entry_points
+
+    return list(entry_points(group=VECTOR_STORE_ENTRY_POINT_GROUP))
+
+
+def _resolve_factory(normalized: str) -> Callable[..., VectorStore]:
+    """归一化后的名字 -> 一个可 **kwargs 调用得到 VectorStore 的工厂（内置类或 entry-point 目标）。
+
+    先查内置注册表（内置名字优先于同名 entry point，第三方不能劫持内置语义）；未命中再回落到
+    entry-point 自动发现，按名字（同样大小写 / 留白不敏感）匹配后 .load()。两者皆不命中 ->
+    ValueError，列出内置 + 已发现的 entry-point 名字。注意此函数只【解析】不【实例化】，故对内置
+    adapter 不会触发其 SDK import——SDK 由返回类的 __init__ 在实例化时延迟 import。
+    """
+    loader = _BUILTIN_LOADERS.get(normalized)
+    if loader is not None:
+        return loader()
+    discovered = _discover_entry_points()
+    for entry_point in discovered:
+        if entry_point.name.strip().lower() == normalized:
+            return entry_point.load()
+    names = sorted({entry_point.name for entry_point in discovered})
+    raise ValueError(
+        f"未知 vector store spec：{normalized!r}"
+        f"（内置可选 {' / '.join(_BUILTIN_DISPLAY_NAMES)}；"
+        f"已发现的 entry-point 后端：{names or '无'}；"
+        f"第三方包可在 entry-point group {VECTOR_STORE_ENTRY_POINT_GROUP!r} 下注册一个后端）"
+    )
+
+
 def make_vector_store(spec: str | None = None, **kwargs: Any) -> VectorStore | None:
     """向量存储工厂：把「选哪个 store」从改代码降为一个 spec/env（范式同 make_embedding_backend）。
 
@@ -182,8 +269,11 @@ def make_vector_store(spec: str | None = None, **kwargs: Any) -> VectorStore | N
         - None / 'none'                          -> None（不注入具体 store；检索器用内置内存默认）
         - 'in_process' / 'in-process' / 'memory' -> InProcessVectorStore（零依赖确定性内存默认）
         - 'sqlite_vec' / 'pgvector' / 'qdrant'   -> 对应 adapter（behind [vector] extra，延迟 import）
-        - 其他                                    -> ValueError（真实后端待后续 adapter 落地）
+        - 其余                                    -> entry-point 自动发现（第三方包在
+          VECTOR_STORE_ENTRY_POINT_GROUP 下注册即可被选中）；都不命中 -> ValueError 列出可选名字
 
+    名字经注册表解析（内置 loader 或 entry point），再以 **kwargs 实例化；内置 adapter 的 SDK
+    在实例化时才延迟 import（缺 [vector] extra 时由 adapter.__init__ 抛可执行的 pip 提示）。
     返回 VectorStore 实例或 None（可直接喂给 HybridRetriever / NarrativeIndex /
     build_narrative_retriever 的 vector_store 参数）。None 与显式 InProcessVectorStore 在
     检索结果上等价——前者让检索器自建内置默认，后者把同一个 store 实例交由调用方持有/复用。
@@ -193,22 +283,5 @@ def make_vector_store(spec: str | None = None, **kwargs: Any) -> VectorStore | N
     normalized = (spec or "none").strip().lower()
     if normalized == "none":
         return None
-    if normalized in ("in_process", "in-process", "inprocess", "memory"):
-        return InProcessVectorStore(**kwargs)
-    if normalized in ("sqlite_vec", "sqlite-vec", "sqlitevec"):
-        # 延迟 import：仅选用时才拉适配器（其 __init__ 再延迟 import sqlite_vec SDK，behind [vector]）。
-        from ragspine.retrieval.vector.adapters.sqlite_vec import SqliteVecVectorStore
-
-        return SqliteVecVectorStore(**kwargs)
-    if normalized in ("pgvector", "pg_vector"):
-        from ragspine.retrieval.vector.adapters.pgvector import PgVectorVectorStore
-
-        return PgVectorVectorStore(**kwargs)
-    if normalized == "qdrant":
-        from ragspine.retrieval.vector.adapters.qdrant import QdrantVectorStore
-
-        return QdrantVectorStore(**kwargs)
-    raise ValueError(
-        f"未知 vector store spec：{spec!r}"
-        "（本期可选 none / in_process / sqlite_vec / pgvector / qdrant；其余等待后续 adapter 落地）"
-    )
+    factory = _resolve_factory(normalized)
+    return factory(**kwargs)
