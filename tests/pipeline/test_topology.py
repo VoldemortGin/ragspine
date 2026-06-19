@@ -155,6 +155,20 @@ def test_retriever_topology_vector_node_only_when_embedding_present():
     assert ("vector", "rrf") in {(e.src, e.dst) for e in g.edges}
 
 
+def test_retriever_topology_vector_node_names_resolved_store():
+    """作为用户，我要 .topology() 标注向量缝解析到的具体 store（label 含类名 + symbol 可解析）。
+
+    has_vector 时检索器的 vector_store 已解析为具体实现（默认 InProcessVectorStore）；
+    向量节点据此命名，让拓扑如实回答「这条管线用的是哪个向量后端」。
+    """
+    retriever = HybridRetriever([], embedding_backend=_FakeEmbedding())
+    g = retriever.topology()
+    vector = next(n for n in g.nodes if n.id == "vector")
+    assert "InProcessVectorStore" in vector.label
+    assert vector.symbol == "ragspine.retrieval.vector.store.InProcessVectorStore"
+    assert _resolve_symbol(vector.symbol) is not None  # 漂移守护：命名的 store 类可解析
+
+
 def test_retriever_topology_multi_query_node_only_when_rewriter_present():
     """作为用户，我要注入 query rewriter 后 multi-query 节点出现。"""
     retriever = HybridRetriever([], query_rewriter=GlossaryQueryRewriter())

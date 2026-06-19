@@ -36,6 +36,8 @@ def test_from_env_defaults_when_empty():
     assert cfg.model == DEFAULT_ANTHROPIC_MODEL
     assert cfg.base_url is None
     assert cfg.embedding == "none"
+    assert cfg.vector_store == "none"
+    assert cfg.persistence_policy == "default"
     assert cfg.reference_date is None
     assert cfg.faq_source is None
     assert cfg.allowed_upload_root is None
@@ -54,6 +56,8 @@ def test_from_env_parses_all_keys():
         "RAGSPINE_MODEL": "claude-test",
         "RAGSPINE_BASE_URL": "https://gateway.example/v1",
         "RAGSPINE_EMBEDDING": "deterministic",
+        "RAGSPINE_VECTOR_STORE": "in_process",
+        "RAGSPINE_PERSISTENCE_POLICY": "persist_everything",
         "RAGSPINE_REFERENCE_DATE": "2026-06-12",
         "RAGSPINE_FAQ_SOURCE": "/tmp/faq.json",
         "RAGSPINE_ALLOWED_UPLOAD_ROOT": "/tmp/uploads",
@@ -70,6 +74,8 @@ def test_from_env_parses_all_keys():
     assert cfg.model == "claude-test"
     assert cfg.base_url == "https://gateway.example/v1"
     assert cfg.embedding == "deterministic"
+    assert cfg.vector_store == "in_process"
+    assert cfg.persistence_policy == "persist_everything"
     assert cfg.reference_date == "2026-06-12"
     assert cfg.faq_source == "/tmp/faq.json"
     assert cfg.allowed_upload_root == "/tmp/uploads"

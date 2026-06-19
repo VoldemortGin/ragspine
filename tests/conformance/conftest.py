@@ -26,19 +26,30 @@ ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpa
 # 第三方实现在此追加名字 + 在 _resolve_impl 里补一行即继承全套
 # （将来可换成 entry-point 自动发现）。
 # ---------------------------------------------------------------------------
-VECTOR_STORE_IMPLS = ["in_process"]
+VECTOR_STORE_IMPLS = ["in_process", "sqlite_vec"]
 
 
 def _resolve_impl(name: str):
     """名字 -> VectorStore 实现类（延迟 import，红色阶段在此抛 ModuleNotFoundError）。"""
     from ragspine.retrieval.vector.store import InProcessVectorStore
 
-    return {"in_process": InProcessVectorStore}[name]
+    if name == "in_process":
+        return InProcessVectorStore
+    if name == "sqlite_vec":
+        from ragspine.retrieval.vector.adapters.sqlite_vec import SqliteVecVectorStore
+
+        return SqliteVecVectorStore
+    raise KeyError(name)
 
 
 @pytest.fixture(params=VECTOR_STORE_IMPLS, ids=VECTOR_STORE_IMPLS)
 def vector_store(request):
-    """每个注册实现各给一个【全新空库】实例；每条用例对所有实现各跑一遍。"""
+    """每个注册实现各给一个【全新空库】实例；每条用例对所有实现各跑一遍。
+
+    真实后端（sqlite_vec 等）behind extra：未装时该参数 skip（黄，不红），装了即整套 gate。
+    """
+    if request.param == "sqlite_vec":
+        pytest.importorskip("sqlite_vec", reason="sqlite-vec 未装（pip install ragspine[vector]）")
     return _resolve_impl(request.param)()
 
 

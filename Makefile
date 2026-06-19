@@ -16,12 +16,12 @@ venv: ## Create the project virtualenv (.venv) with uv
 	uv venv $(VENV)
 
 .PHONY: install
-install: ## Editable install with dev+service extras (the usual dev setup)
-	VIRTUAL_ENV="$(CURDIR)/$(VENV)" uv pip install -e ".[dev,service]"
+install: ## Editable install with dev+service+vector extras (the usual dev setup)
+	VIRTUAL_ENV="$(CURDIR)/$(VENV)" uv pip install -e ".[dev,service,vector]"
 
 .PHONY: install-all
-install-all: ## Editable install with all non-GPU extras (dev,service,llm,embed)
-	VIRTUAL_ENV="$(CURDIR)/$(VENV)" uv pip install -e ".[dev,service,llm,embed]"
+install-all: ## Editable install with all non-GPU extras (dev,service,vector,llm,embed)
+	VIRTUAL_ENV="$(CURDIR)/$(VENV)" uv pip install -e ".[dev,service,vector,llm,embed]"
 
 .PHONY: hooks
 hooks: ## Enable the pre-push CI gate (one-time, per clone)

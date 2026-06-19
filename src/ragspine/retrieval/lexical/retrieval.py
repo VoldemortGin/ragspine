@@ -33,6 +33,8 @@ from ragspine.retrieval.chunking.chunking import (
     chunk_document,
 )
 from ragspine.retrieval.rerank.listwise_rerank import DEFAULT_TOP_N, ListwiseJudge, listwise_rerank
+from ragspine.retrieval.vector.persistence_policy import IsolationFirstPolicy, PersistencePolicy
+from ragspine.retrieval.vector.store import InProcessVectorStore, VectorRecord, VectorStore
 
 DEFAULT_TOP_K = 50      # 拍板召回深度（docs/architecture.md）。
 DEFAULT_RRF_K = 60      # RRF 标准值。
@@ -184,12 +186,34 @@ class RetrievalResult:
     fused_score: float
 
 
+# 入 VectorStore 的过滤维度（与 search 的元数据预过滤、where 下推同一组键）。
+_FILTER_DIMS = ("topic", "entity", "geography", "period", "language")
+
+
+def _record_metadata(chunk: StoredChunk | Chunk) -> dict[str, str]:
+    """构造 VectorRecord.metadata：5 个过滤维度 + doc_id，str 归一（None -> ''），口径同预过滤。
+
+    5 维恒含（含空串）+ str 强制，确保 store 的 where 精确匹配 python 预过滤；额外带 doc_id
+    供【doc 粒度失效】（NarrativeIndex 重入时 delete(where={doc_id})，不全清）。doc_id 不进
+    检索 where（检索按 5 维过滤），故不影响打分/排序的逐位等价。None 防御性归一为 ''。
+    """
+    md = {
+        name: ("" if (val := getattr(chunk, name, "")) is None else str(val))
+        for name in _FILTER_DIMS
+    }
+    md["doc_id"] = str(getattr(chunk, "doc_id", "") or "")
+    return md
+
+
 class HybridRetriever:
     """混合检索器：元数据预过滤 -> (BM25 + 向量) x multi-query -> RRF -> top_k。
 
-    embedding_backend 缺省 None 时为纯 BM25 模式（向量通道关闭）；
-    块向量按 chunk_id 惰性计算并缓存，且只对通过预过滤的候选计算
-    （过滤严格发生在任何打分之前）。
+    embedding_backend 缺省 None 时为纯 BM25 模式（向量通道关闭）；块向量按 chunk_id 惰性
+    计算并缓存（_embedding_cache，预过滤严格先于任何 embedding），向量【打分】则委托给
+    可插拔的 VectorStore 缝（默认零依赖内存实现 InProcessVectorStore，行为等价于原内联
+    cosine 暴力扫；注入则复用调用方持有的 store——未来 sqlite-vec / Qdrant adapter 即由此接入）。
+
+    前置约定：候选 chunk_id 唯一（与 search 内 by_id={c.chunk_id:c} 的既有假设一致）。
     """
 
     def __init__(
@@ -203,6 +227,8 @@ class HybridRetriever:
         rrf_k: float = DEFAULT_RRF_K,
         top_k: int = DEFAULT_TOP_K,
         embedding_cache: dict[str, list[float]] | None = None,
+        vector_store: VectorStore | None = None,
+        manage_vectors: bool = True,
     ):
         self.chunks = list(chunks)
         self.embedding_backend = embedding_backend
@@ -211,10 +237,22 @@ class HybridRetriever:
         self.b = b
         self.rrf_k = rrf_k
         self.top_k = top_k
+        # 块向量归谁管：True（默认）= 检索器惰性 embed 候选并 upsert（直连用法，逐位等价原内联）；
+        # False = store-managed，块向量已由上层（NarrativeIndex 入库即嵌入落盘）灌好，检索只嵌 query
+        # 并查 store，绝不重嵌块——持久化（sqlite-vec）由此「重启不重算」真正生效。
+        self.manage_vectors = manage_vectors
         # 块向量缓存（chunk_id -> 向量），可由外层（NarrativeIndex）注入共享。
         self._embedding_cache: dict[str, list[float]] = (
             embedding_cache if embedding_cache is not None else {}
         )
+        # 向量打分缝：有 embedding 后端时解析有效 store（注入优先，否则自建零依赖内存默认）；
+        # 纯 BM25 时保持 None（无向量通道，拓扑亦据此判定）。
+        if embedding_backend is not None:
+            self.vector_store: VectorStore | None = (
+                vector_store if vector_store is not None else InProcessVectorStore()
+            )
+        else:
+            self.vector_store = vector_store
 
     def search(
         self,
@@ -257,14 +295,35 @@ class HybridRetriever:
 
         # 3) 各通道打分与排名（仅对通过预过滤的候选）。
         docs_tokens = [tokenize(c.text) for c in candidates]
-        chunk_vectors: list[list[float]] | None = None
-        if self.embedding_backend is not None:
-            missing = [c for c in candidates if c.chunk_id not in self._embedding_cache]
-            if missing:
-                vectors = self.embedding_backend.embed_texts([c.text for c in missing])
-                for c, vec in zip(missing, vectors, strict=False):
-                    self._embedding_cache[c.chunk_id] = vec
-            chunk_vectors = [self._embedding_cache[c.chunk_id] for c in candidates]
+        use_vector = self.embedding_backend is not None and self.vector_store is not None
+        if use_vector:
+            assert self.embedding_backend is not None and self.vector_store is not None
+            if self.manage_vectors:
+                # 检索器自管块向量：惰性入缓存（embed 仅对未缓存候选——严格守「预过滤先于打分」），
+                # 再灌入 VectorStore 缝；打分/排名由 store.query 负责（替代原内联 cosine 暴力扫）。
+                missing = [c for c in candidates if c.chunk_id not in self._embedding_cache]
+                if missing:
+                    vectors = self.embedding_backend.embed_texts([c.text for c in missing])
+                    for c, vec in zip(missing, vectors, strict=False):
+                        self._embedding_cache[c.chunk_id] = vec
+                self.vector_store.upsert(
+                    [
+                        VectorRecord(
+                            id=c.chunk_id,
+                            vector=tuple(self._embedding_cache[c.chunk_id]),
+                            metadata=_record_metadata(c),
+                        )
+                        for c in candidates
+                    ]
+                )
+            # store-managed（manage_vectors=False）：块向量已由上层落盘，跳过 embed/upsert，
+            # 只嵌 query 查 store；未落盘的候选（如 RESTRICTED）store 不返回 -> 向量分 0（仍走 BM25）。
+            # where 下推与 python 预过滤同口径（`if val is not None`，故 '' 是真实过滤值）；
+            # 值 str 归一与 _record_metadata 对称——两侧绝不因类型不一致而错配（今值皆 str，为防御）。
+            # 候选已预过滤，where 对每检索器私有默认 store 冗余但无害，对共享/超集 store 则保正确。
+            vector_where = {
+                name: str(val) for name, val in filters.items() if val is not None
+            }
 
         rankings: list[list[str]] = []
         best_bm25: dict[str, float] = {}
@@ -279,17 +338,19 @@ class HybridRetriever:
             for s, cid in hit:
                 best_bm25[cid] = max(best_bm25.get(cid, 0.0), s)
 
-            if chunk_vectors is not None:
-                assert self.embedding_backend is not None  # chunk_vectors 非空即此处已注入后端
+            if use_vector:
+                assert self.embedding_backend is not None and self.vector_store is not None
                 query_vec = self.embedding_backend.embed_texts([q])[0]
-                sims = [cosine_similarity(query_vec, vec) for vec in chunk_vectors]
-                ranked = sorted(
-                    zip(sims, (c.chunk_id for c in candidates), strict=False),
-                    key=lambda pair: (-pair[0], pair[1]),
-                )
-                rankings.append([cid for _, cid in ranked])
-                for s, c in zip(sims, candidates, strict=False):
-                    best_vector[c.chunk_id] = max(best_vector.get(c.chunk_id, 0.0), s)
+                # k=len(candidates)（非 store 默认 50）：拿回全部候选的向量排名，含 cosine=0 者，
+                # 故 best_vector 对每个候选都有显式分（与原内联 zip(sims,candidates) 逐位等价）。
+                vector_hits = [
+                    h
+                    for h in self.vector_store.query(query_vec, k=len(candidates), where=vector_where)
+                    if h.id in by_id  # 兜底：只取当前候选（共享/超集 store 下安全）
+                ]
+                rankings.append([h.id for h in vector_hits])
+                for h in vector_hits:
+                    best_vector[h.id] = max(best_vector.get(h.id, 0.0), h.score)
 
         # 4) RRF 融合 -> top_k（确定性平分破除）。
         fused = rrf_fuse(rankings, self.rrf_k)
@@ -357,6 +418,8 @@ class NarrativeIndex:
         overlap_chars: int = DEFAULT_OVERLAP_CHARS,
         top_k: int = DEFAULT_TOP_K,
         rerank_top_n: int = DEFAULT_TOP_N,
+        vector_store: VectorStore | None = None,
+        persistence_policy: PersistencePolicy | None = None,
     ):
         self.store = store
         self.embedding_backend = embedding_backend
@@ -366,16 +429,38 @@ class NarrativeIndex:
         self.overlap_chars = overlap_chars
         self.top_k = top_k
         self.rerank_top_n = rerank_top_n
-        # 跨 retrieve 调用共享的块向量缓存；入库会改写活跃块集，须随之清空。
-        self._embedding_cache: dict[str, list[float]] = {}
+        # 跨 retrieve 共享的向量打分缝（注入优先，否则有 embedding 后端时自建内存默认）；
+        # 块向量在【入库时】嵌入并写进此 store（store-managed），retrieve 复用、不重嵌。
+        if embedding_backend is not None:
+            self.vector_store: VectorStore | None = (
+                vector_store if vector_store is not None else InProcessVectorStore()
+            )
+        else:
+            self.vector_store = vector_store
+        # 持久化门控（可插拔缝）：决定哪些块的向量可写盘。默认隔离优先——绝不落盘 RESTRICTED。
+        self.persistence_policy = persistence_policy or IsolationFirstPolicy()
 
     def ingest(self, text: str, meta: DocumentMeta, valid_as_of: str = "") -> int:
-        """切块 + 幂等入库（同 doc 重入旧版本失效），返回入库块数。"""
+        """切块 + 幂等入库 + 入库即嵌入落盘（policy 门控、doc 粒度失效），返回入库块数。"""
         chunks = chunk_document(
             text, meta, max_chars=self.max_chars, overlap_chars=self.overlap_chars
         )
         self.store.replace_doc_chunks(meta.doc_id, chunks, valid_as_of=valid_as_of)
-        self._embedding_cache.clear()
+        if self.vector_store is not None:
+            # doc 粒度失效：只撤下本 doc 的旧向量，其它 doc 的持久向量存活（非 delete-all）。
+            self.vector_store.delete(where={"doc_id": meta.doc_id})
+            if self.embedding_backend is not None:
+                # 入库即嵌入落盘（policy 门控）：可落盘块的向量写进持久库，重启/换实例不重算。
+                # RESTRICTED 块默认被 IsolationFirstPolicy 挡下——其衍生向量绝不写盘。
+                persistable = [c for c in chunks if self.persistence_policy.persistable(c)]
+                if persistable:
+                    vectors = self.embedding_backend.embed_texts([c.text for c in persistable])
+                    self.vector_store.upsert(
+                        [
+                            VectorRecord(id=c.chunk_id, vector=tuple(vec), metadata=_record_metadata(c))
+                            for c, vec in zip(persistable, vectors, strict=False)
+                        ]
+                    )
         return len(chunks)
 
     def retrieve(
@@ -409,7 +494,8 @@ class NarrativeIndex:
             embedding_backend=self.embedding_backend,
             query_rewriter=self.query_rewriter,
             top_k=self.top_k,
-            embedding_cache=self._embedding_cache,
+            vector_store=self.vector_store,
+            manage_vectors=False,  # 块向量已在入库时落盘——检索只嵌 query、查 store，绝不重嵌块。
         )
         results = retriever.search(query, top_k=top_k)
         if not rerank or self.judge is None:

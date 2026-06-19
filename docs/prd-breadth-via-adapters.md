@@ -1,7 +1,8 @@
 # PRD — Breadth via Adapters: the extension contract & capability matrix
 
-> **status:** proposed · **created:** 2026-06-17 · **methodology:** TDD (conformance tests first)
-> Forward-looking spec — describes seams/adapters not yet built, so it carries no `covers:` frontmatter.
+> **status:** in progress (P0 `VectorStore` seam wired; P0 pipeline-topology shipped) · **created:** 2026-06-17 · **methodology:** TDD (conformance tests first)
+> Living backlog — the seams/adapters tracked here land incrementally; it carries no `covers:` frontmatter
+> (each seam's shipped contract doc lives under `src/ragspine/<domain>/docs/*.md`).
 > Realizes [ADR 0003](adr/0003-audience-oss-library.md) (general-purpose OSS library), operating within
 > [ADR 0005](adr/0005-lean-core-experimental-isolation.md) (lean core + extras) and
 > [ADR 0009](adr/0009-dependency-and-framework-policy.md) (no orchestration lock-in, permissive-license-only).
@@ -107,10 +108,13 @@ Current state (8 Protocols exist): `LLMProvider`, `IntentParser`, `NarrativeRetr
 - **`SourceConnector` (NEW, 🔧)** — `iter_documents() -> Iterable[RawDoc]`. Today ingestion assumes local
   files. Without this seam there is no path to S3/Drive/Notion/HTTP *and* no place to bind the provenance
   conformance test at the point of entry. Offline default: local filesystem walker.
-- **`VectorStore` (NEW, 🔧)** — `upsert(...)`, `query(vector, k, filter) -> list[Hit]`. Today the only vector
-  path is an offline lexical-hash backend; the **index/store itself is not pluggable**, so there is no clean
-  Qdrant/pgvector/FAISS path. This is the single highest-leverage missing seam. Offline default: in-process
-  brute-force numpy/array search. Metadata-filter support is part of the contract (carries isolation).
+- **`VectorStore` (DONE, 🔧)** — `upsert(...)`, `query(vector, k, where) -> list[Hit]`, `delete`, `count`.
+  **Shipped, wired, and adapted:** `Protocol` + `InProcessVectorStore` offline default (brute-force cosine) +
+  conformance kit, `HybridRetriever` delegates vector scoring to it byte-identically, config-selected
+  by `make_vector_store` / `RAGSPINE_VECTOR_STORE`, and the **first real adapter `sqlite-vec`** (behind
+  `[vector]`) inherits the whole conformance kit. Metadata `where` pushdown carries isolation (third,
+  optional enforcement point). Remaining: more adapters (pgvector/Qdrant, P1), and the deferred at-rest
+  persistence. Was the single highest-leverage missing seam; it no longer is.
 - **`Extractor` registry (FORMALIZE, ⭐/🔧)** — extractors exist (PDF-digital, PPTX, XLSX, +styled) but
   there is no `mime/type → Extractor` registry or shared `Protocol`. Formalizing it lets DOCX/HTML/MD/CSV be
   added (or adapted from `unstructured`/`docling`) without touching routing, and binds provenance once.
@@ -130,7 +134,7 @@ Legend: **kind** 🛡/⭐/🔧 (own/own/adapt) · **status** ✅ have · ◐ par
 | OCR | `OcrBackend` | 🔧 | mock | paddleocr `[ocr]` | ✅ | — |
 | Chunking | `Chunker` *(new)* | ⭐ | recursive/structural | semantic · contextual · parent-child | ◐ | P0 proto · P1 strat |
 | Embedding | `EmbeddingBackend` | 🔧⭐ | lexical-hash (non-semantic) | sentence-transformers `[embed]` · OpenAI `[llm]` | ✅ | — |
-| Vector store | `VectorStore` *(new)* | 🔧 | in-proc brute force | Qdrant·pgvector·FAISS·Chroma·LanceDB | ✗ | **P0** |
+| Vector store | `VectorStore` | 🔧 | in-proc brute force | **sqlite-vec ✅** · pgvector·Qdrant·FAISS·Chroma·LanceDB | ✅ seam + 1st adapter | P0 ✓ · more adapters P1 |
 | Lexical index | *(built-in)* | ⭐ | BM25 | — | ✅ | — |
 | Retrieve / fuse | `HybridRetriever` | ⭐ | BM25 + vector → RRF | — | ✅ | — |
 | Rerank | `ListwiseJudge` | ⭐ | identity | cross-encoder · Cohere · BGE `[rerank]` | ✅ proto / ✗ adapters | P1 |
@@ -143,17 +147,26 @@ Legend: **kind** 🛡/⭐/🔧 (own/own/adapt) · **status** ✅ have · ◐ par
 | Eval | *(golden sets)* | 🛡 | offline golden | RAGAS-compatible metrics | ✅ | P2 |
 
 **Read of the matrix:** the spine (🛡) and the quality stages (⭐) are largely owned and present already. The
-breadth gap is concentrated in **three commodity seams** — `VectorStore` (P0), `SourceConnector` (P1), and
-filling out `Extractor` formats (P1) — exactly the surface that should be *adapted*, not authored.
+**P0 `VectorStore` seam is wired live with its first real adapter** — `Protocol` + offline default +
+conformance kit + `HybridRetriever` delegation + `make_vector_store` config selector + `.topology()` naming +
+**`sqlite-vec` adapter** (conformance-bound, behind `[vector]`) — see
+[`prd-vector-store-seam.md`](prd-vector-store-seam.md) and the deep dive
+[`vector-store.md`](../src/ragspine/retrieval/docs/vector-store.md); what remains there is **more adapters**
+(pgvector/Qdrant, P1) and the deferred at-rest persistence. The remaining breadth gap is concentrated in
+**two commodity seams** — `SourceConnector` (P1) and filling out `Extractor` formats (P1) — exactly the
+surface that should be *adapted*, not authored.
 
 ## Phasing
 
 - **P0 — minimum credible breadth.** A user can run a *real* semantic stack end-to-end with mainstream tools.
-  - `VectorStore` Protocol + in-proc default + **one** real adapter (Qdrant *or* pgvector) behind `[vector]`.
-  - `Extractor` registry + `Chunker` Protocol (formalize existing code; no behavior change).
-  - The conformance kit for provenance + isolation + privacy + determinism, parametrized over all registered
-    backends. **Written red first** (TDD) — they are the spec for "what an adapter must satisfy."
-  - Registry + entry-point discovery so a backend is selectable by config string.
+  - ✅ `VectorStore` Protocol + in-proc default + **one** real adapter — shipped as **`sqlite-vec`** behind
+    `[vector]` (the Qdrant/pgvector slot is now P1); plus sensitivity-gated persistence (`PersistencePolicy`).
+  - `Extractor` registry + `Chunker` Protocol (formalize existing code; no behavior change). *(still open)*
+  - ✅ The conformance kit for provenance + isolation + determinism, parametrized over registered backends
+    (`tests/conformance/`, now binding both `InProcessVectorStore` and `sqlite-vec`). Privacy-trace + cross-seam
+    provenance over SourceConnector/Extractor/Chunker remain open with those seams.
+  - Registry + entry-point discovery so a backend is selectable by config string — config-string ✅
+    (`make_vector_store` / `make_persistence_policy`); entry-point auto-discovery still open (conftest list for now).
 - **P1 — the breadth that wins evaluations.** Format coverage (DOCX/HTML/MD/CSV via `unstructured`/`docling`),
   rerank adapters (cross-encoder/Cohere/BGE), query-transform strategies (multi-query/HyDE/self-query),
   the first 2–3 `SourceConnector`s (filesystem ✓ → S3 → HTTP/crawl), a second vector adapter.

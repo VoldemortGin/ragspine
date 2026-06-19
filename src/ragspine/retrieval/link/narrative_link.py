@@ -36,6 +36,8 @@ from ragspine.retrieval.rerank.listwise_rerank import (
     build_listwise_prompt,
     parse_listwise_response,
 )
+from ragspine.retrieval.vector.persistence_policy import PersistencePolicy
+from ragspine.retrieval.vector.store import VectorStore
 
 # A 线 filters dict 中允许透传给 NarrativeIndex.retrieve 的元数据键。
 _FILTER_KEYS = ("topic", "entity", "geography", "period", "language")
@@ -125,6 +127,8 @@ def build_narrative_retriever(
     provider: LLMProvider | None = None,
     *,
     embedding_backend: EmbeddingBackend | None = None,
+    vector_store: VectorStore | None = None,
+    persistence_policy: PersistencePolicy | None = None,
 ) -> tuple[NarrativeIndexRetriever, ChunkStore]:
     """开块库并组装默认叙事检索链（CLI/服务接线入口）。
 
@@ -133,6 +137,10 @@ def build_narrative_retriever(
     store 由调用方负责 close。
     embedding_backend：可选向量通道后端（如 ragspine.retrieval.vector.embedding_backends 的
     OpenAIEmbeddingBackend），默认 None＝纯 BM25 现状，既有调用零影响。
+    vector_store：可选向量打分缝（make_vector_store 选型）；默认 None＝有 embedding 后端时
+    NarrativeIndex 自建零依赖内存默认，未来 sqlite-vec / Qdrant adapter 即由此注入。
+    persistence_policy：可选持久化门控（make_persistence_policy 选型）；默认 None＝隔离优先
+    （IsolationFirstPolicy，绝不落盘 RESTRICTED 块向量）。
     """
     store = ChunkStore(chunk_db)
     store.init_schema()
@@ -141,5 +149,7 @@ def build_narrative_retriever(
         embedding_backend=embedding_backend,
         query_rewriter=GlossaryQueryRewriter(),
         judge=ProviderListwiseJudge(provider) if provider is not None else None,
+        vector_store=vector_store,
+        persistence_policy=persistence_policy,
     )
     return NarrativeIndexRetriever(index), store

@@ -21,6 +21,8 @@ from ragspine.agent.llm_provider import (
 )
 from ragspine.retrieval.link.narrative_link import build_narrative_retriever
 from ragspine.retrieval.vector.embedding_backends import make_embedding_backend
+from ragspine.retrieval.vector.persistence_policy import make_persistence_policy
+from ragspine.retrieval.vector.store import make_vector_store
 from ragspine.storage.fact_store import FactStore
 
 
@@ -36,6 +38,8 @@ class ServiceConfig:
     model: str = DEFAULT_ANTHROPIC_MODEL
     base_url: str | None = None
     embedding: str = "none"                 # "none" | "deterministic" | "openai"
+    vector_store: str = "none"              # "none" | "in_process" | "sqlite_vec"（后者需 [vector]）
+    persistence_policy: str = "default"     # "default"(隔离优先) | "persist_everything"
     reference_date: str | None = None       # ISO "YYYY-MM-DD" or None
     faq_source: str | None = None           # FAQ JSON 文件路径；None -> 空缓存
     allowed_upload_root: str | None = None  # ingestion 路径必须落在此根内
@@ -55,6 +59,8 @@ class ServiceConfig:
             model=env.get("RAGSPINE_MODEL", DEFAULT_ANTHROPIC_MODEL),
             base_url=env.get("RAGSPINE_BASE_URL"),
             embedding=env.get("RAGSPINE_EMBEDDING", "none"),
+            vector_store=env.get("RAGSPINE_VECTOR_STORE", "none"),
+            persistence_policy=env.get("RAGSPINE_PERSISTENCE_POLICY", "default"),
             reference_date=env.get("RAGSPINE_REFERENCE_DATE"),
             faq_source=env.get("RAGSPINE_FAQ_SOURCE"),
             allowed_upload_root=env.get("RAGSPINE_ALLOWED_UPLOAD_ROOT"),
@@ -96,6 +102,8 @@ def open_narrative_retriever(
         config.chunk_db_path,
         provider=provider,
         embedding_backend=make_embedding_backend(config.embedding),
+        vector_store=make_vector_store(config.vector_store),
+        persistence_policy=make_persistence_policy(config.persistence_policy),
     )
     try:
         yield retriever

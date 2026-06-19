@@ -6,7 +6,7 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
-![Tests](https://img.shields.io/badge/tests-1112%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1193%20passing-brightgreen)
 [![Docs](https://img.shields.io/badge/docs-rag--spine.org-2dd4bf)](https://rag-spine.org)
 
 ---
@@ -106,6 +106,7 @@ Optional extras:
 | `[ocr]` | paddleocr | scanned-PDF OCR (Linux + NVIDIA GPU) |
 | `[llm]` | anthropic, openai | real LLM providers (lazy-imported) |
 | `[embed]` | sentence-transformers | real embedding models for the vector channel |
+| `[vector]` | sqlite-vec | persistent `VectorStore` backend (vec0); first real adapter |
 | `[dev]` | pytest, reportlab, markdown | tests + fixture generation |
 
 **From source**
@@ -113,7 +114,7 @@ Optional extras:
 ```bash
 git clone https://github.com/VoldemortGin/ragspine.git && cd ragspine
 uv venv .venv
-VIRTUAL_ENV="$(pwd)/.venv" uv pip install -e ".[dev,service]"
+VIRTUAL_ENV="$(pwd)/.venv" uv pip install -e ".[dev,service,vector]"
 ```
 
 ## Quickstart
@@ -199,9 +200,14 @@ Endpoints: `GET /healthz`, `GET /readyz`, `POST /v1/ask`,
 
 ## Extension points (just implement a Protocol)
 
-`LLMProvider` · `EmbeddingBackend` · `ListwiseJudge` · `OcrBackend` · `NarrativeRetriever` ·
-`TaskQueue` — implement and inject. The core depends on the abstraction, never the SDK, so
-adding a provider / vector store / reranker / OCR engine touches one new file.
+`LLMProvider` · `EmbeddingBackend` · `VectorStore` · `PersistencePolicy` · `ListwiseJudge` ·
+`OcrBackend` · `NarrativeRetriever` · `TaskQueue` — implement and inject. The core depends on the
+abstraction, never the SDK, so adding a provider / vector store / reranker / OCR engine touches one
+new file. `VectorStore` ships a conformance kit (`tests/conformance/`) that binds provenance /
+isolation / determinism for *any* implementation; select one by config (`make_vector_store` /
+`RAGSPINE_VECTOR_STORE`). With a persistent store, `NarrativeIndex` embeds-and-persists at ingest
+(so a fresh process re-uses vectors, no re-embedding); the swappable `PersistencePolicy` gates what
+is written at rest — its default **never persists a `RESTRICTED` chunk's vector**.
 
 ## Configuration
 
@@ -218,7 +224,7 @@ adding a provider / vector store / reranker / OCR engine touches one new file.
 ## Testing
 
 ```bash
-.venv/bin/python -m pytest tests/ -q        # 1112 passed, 1 gpu-skipped
+.venv/bin/python -m pytest tests/ -q        # 1193 passed, 1 gpu-skipped
 ```
 
 The project is **test-driven**: tests are the spec. The `gpu` marker gates real-OCR
@@ -249,12 +255,16 @@ version-controlled evaluation sets live under `data/golden/`. Nothing here is re
 ## Status & roadmap
 
 **Solid:** structured channel, narrative hybrid retrieval, agent orchestration, office
-extraction (xlsx/pptx/pdf), FastAPI + RQ service, FAQ cache, evaluation harness, 1112 tests.
+extraction (xlsx/pptx/pdf), FastAPI + RQ service, FAQ cache, evaluation harness, 1193 tests.
 
-**Honest gaps (contributions welcome):** the vector channel ships as an *injectable*
-channel — the default is BM25-only, and real embedding models run behind the `[embed]`/GPU
-extras; there is no persisted ANN index yet. Pipeline-topology export (`.topology()` →
-Mermaid/DOT/JSON, plus `scripts/topology.py`) now ships — see `src/ragspine/pipeline/`.
+**Honest gaps (contributions welcome):** the `VectorStore` seam is **wired live with its first real
+adapter** — `HybridRetriever` delegates vector scoring to it (byte-identically), it's config-selectable
+(`make_vector_store` / `RAGSPINE_VECTOR_STORE`), named in `.topology()`, and **`sqlite-vec`** (behind
+`[vector]`) gives a persistent, conformance-bound backend. Still open: **more adapters (pgvector/Qdrant)
+and true ANN** — the sqlite-vec adapter persists but currently scores by full-scan, not native KNN — and
+the BM25-only default has no semantic signal until an embedding model is injected (behind `[embed]`/GPU).
+Pipeline-topology export (`.topology()` → Mermaid/DOT/JSON, plus `scripts/topology.py`) ships — see
+`src/ragspine/pipeline/`.
 
 ## License
 

@@ -20,12 +20,16 @@ cosine 暴力扫（brute-force cosine + id 升序破平分），让 `pip install
 """
 
 import math
+import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 # 默认召回深度，与 retrieval.DEFAULT_TOP_K 对齐（单一出处）。
 DEFAULT_QUERY_K = 50
+
+# 工厂读取的环境变量名（缺省 spec 时生效；范式同 EMBEDDING_BACKEND_ENV）。
+VECTOR_STORE_ENV = "RAGSPINE_VECTOR_STORE"
 
 
 @dataclass(frozen=True)
@@ -169,3 +173,33 @@ class InProcessVectorStore:
     def count(self) -> int:
         """库内记录数（upsert / delete 的净效果）。"""
         return len(self._records)
+
+
+def make_vector_store(spec: str | None = None, **kwargs: Any) -> VectorStore | None:
+    """向量存储工厂：把「选哪个 store」从改代码降为一个 spec/env（范式同 make_embedding_backend）。
+
+    spec 取值（大小写 / 留白不敏感；缺省读环境变量 RAGSPINE_VECTOR_STORE）：
+        - None / 'none'                          -> None（不注入具体 store；检索器用内置内存默认）
+        - 'in_process' / 'in-process' / 'memory' -> InProcessVectorStore（零依赖确定性内存默认）
+        - 其他（'sqlite-vec' / 'qdrant' / …）    -> ValueError（真实后端待 [vector] extra 落地）
+
+    返回 VectorStore 实例或 None（可直接喂给 HybridRetriever / NarrativeIndex /
+    build_narrative_retriever 的 vector_store 参数）。None 与显式 InProcessVectorStore 在
+    检索结果上等价——前者让检索器自建内置默认，后者把同一个 store 实例交由调用方持有/复用。
+    """
+    if spec is None:
+        spec = os.environ.get(VECTOR_STORE_ENV)
+    normalized = (spec or "none").strip().lower()
+    if normalized == "none":
+        return None
+    if normalized in ("in_process", "in-process", "inprocess", "memory"):
+        return InProcessVectorStore(**kwargs)
+    if normalized in ("sqlite_vec", "sqlite-vec", "sqlitevec"):
+        # 延迟 import：仅选用时才拉适配器（其 __init__ 再延迟 import sqlite_vec SDK，behind [vector]）。
+        from ragspine.retrieval.vector.adapters.sqlite_vec import SqliteVecVectorStore
+
+        return SqliteVecVectorStore(**kwargs)
+    raise ValueError(
+        f"未知 vector store spec：{spec!r}"
+        "（本期可选 none / in_process / sqlite_vec；qdrant / pgvector 等待后续 adapter 落地）"
+    )

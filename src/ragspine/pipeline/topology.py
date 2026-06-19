@@ -121,6 +121,9 @@ def retriever_topology(retriever: object) -> PipelineGraph:
     """
     has_vector = getattr(retriever, "embedding_backend", None) is not None
     has_multi_query = getattr(retriever, "query_rewriter", None) is not None
+    # 向量缝解析到的具体 store（默认 InProcessVectorStore）——用于给向量节点命名/挂 symbol，
+    # 让拓扑如实回答「这条管线的向量后端是谁」。duck-typed，不 import store 类。
+    vector_store = getattr(retriever, "vector_store", None) if has_vector else None
 
     nodes: list[Node] = [
         Node(id="prefilter", label="元数据预过滤", kind="stage", domain="retrieval"),
@@ -140,8 +143,15 @@ def retriever_topology(retriever: object) -> PipelineGraph:
     nodes.append(Node(id="bm25", label="BM25", kind="stage", domain="retrieval", symbol=_SYM_BM25))
     edges.append(Edge(src=scoring_src, dst="bm25"))
     if has_vector:
+        # 向量节点命名解析到的 store：label 含类名、symbol 取其 dotted path（漂移守护逐个解析）；
+        # 无 store（duck-typed 对象只有 embedding_backend）时退回概念节点（symbol=None）。
+        label, symbol = "向量通道", None
+        if vector_store is not None:
+            cls = type(vector_store)
+            label = f"向量通道 · {cls.__name__}"
+            symbol = f"{cls.__module__}.{cls.__qualname__}"
         nodes.append(
-            Node(id="vector", label="向量通道", kind="channel", domain="retrieval")
+            Node(id="vector", label=label, kind="channel", domain="retrieval", symbol=symbol)
         )
         edges.append(Edge(src=scoring_src, dst="vector"))
 

@@ -99,6 +99,12 @@ embed = [
     "sentence-transformers>=3.0",
     "transformers<5.9.0; sys_platform == 'darwin'",
 ]
+# 可插拔向量存储后端（VectorStore 缝的真实 adapter）。延迟 import：不装也能 import 核心、
+# 跑零依赖 InProcessVectorStore 默认；装了即由 make_vector_store('sqlite_vec') 选用并 gate
+# tests/conformance。sqlite-vec 是嵌入式 sqlite 扩展（Apache-2.0/MIT，permissive，跨平台、零服务）。
+vector = [
+    "sqlite-vec>=0.1.6",
+]
 # 服务层：FastAPI HTTP 层 + RQ/Redis 异步任务队列（docs/09 PRD）。
 # rq/redis 延迟 import（RQQueue 内），不装也能 import task_queue、用 FakeQueue 跑离线测试。
 # httpx 供 fastapi.testclient 的 TestClient 使用（服务层测试必需）。
@@ -154,6 +160,6 @@ strict = true
 module = [
     "anthropic.*", "openai.*", "openpyxl.*", "paddleocr.*", "pypdfium2.*",
     "sentence_transformers.*", "tomli", "docling.*", "rq.*", "redis.*",
-    "pptx.*", "markdown.*", "reportlab.*", "rootutils.*",
+    "pptx.*", "markdown.*", "reportlab.*", "rootutils.*", "sqlite_vec.*",
 ]
 ignore_missing_imports = true

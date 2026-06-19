@@ -1,10 +1,21 @@
 # PRD — VectorStore seam: pluggable vector index + filtered ANN
 
-> **status:** proposed · **created:** 2026-06-17 · **methodology:** TDD (red conformance tests first)
-> Forward-looking spec — describes code not yet built, so it carries no `covers:` frontmatter.
+> **status:** implemented · **created:** 2026-06-17 · **methodology:** TDD (red conformance tests first)
+> Originating spec, retained for history — the live contract is now
+> [`src/ragspine/retrieval/docs/vector-store.md`](../src/ragspine/retrieval/docs/vector-store.md)
+> (with `covers:`), so this PRD carries none.
 > Lands the **P0 seam** of [`prd-breadth-via-adapters.md`](prd-breadth-via-adapters.md).
-> Code target: `src/ragspine/retrieval/vector/store.py` · Tests: `tests/conformance/`.
-> Once implemented, the deep-dive doc lives at `src/ragspine/retrieval/docs/vector-store.md` with `covers:`.
+> **Shipped:** the `Protocol` + `InProcessVectorStore` default + conformance kit
+> (`src/ragspine/retrieval/vector/store.py`, `tests/conformance/`); the **wiring** —
+> `HybridRetriever` delegates vector scoring to the seam, byte-identically — plus the
+> `make_vector_store(spec)` / `RAGSPINE_VECTOR_STORE` config selector and `.topology()`
+> store-naming; **adapter #1, `SqliteVecVectorStore`** (`vector/adapters/sqlite_vec.py`,
+> behind `[vector]`), which passes the **entire** conformance kit by inheriting the parametrization;
+> and **sensitivity-gated persistence** — `NarrativeIndex` embeds-and-persists at ingest with
+> `doc_id`-scoped invalidation and store-managed retrieve (a fresh process re-uses persisted vectors,
+> zero chunk re-embedding), gated by a swappable `PersistencePolicy` whose default
+> (`IsolationFirstPolicy`) never writes a RESTRICTED chunk's vector at rest. Further adapters
+> (Qdrant/pgvector → …) follow per the roadmap below.
 
 ## Problem statement
 
@@ -105,10 +116,12 @@ class InProcessVectorStore:                  # the dep-free, deterministic defau
 `VectorStore.query(...)` call, BM25 stays as-is, RRF fuses the two rankings as today. The metadata
 pre-filter (today on `ChunkStore.iter_chunks`) becomes the `where` argument pushed into the store.
 
-**Scope guard (minimal diff):** v1 ships the **standalone `VectorStore` component + its conformance suite**.
-Rewiring `HybridRetriever` to delegate to it (and persisting vectors alongside `ChunkStore`) is a **separate,
-follow-up step** so the existing 943-green retrieval tests stay green and this change is reviewable in
-isolation. This mirrors how `EmbeddingBackend` was added as a seam first, then wired.
+**Scope guard (minimal diff):** v1 shipped the **standalone `VectorStore` component + its conformance
+suite**; the **wiring follow-up has since landed** — `HybridRetriever` now delegates vector scoring to
+the seam *byte-identically* (a captured golden pins the triples), config-selectable via
+`make_vector_store` and reflected in `.topology()`. **Persisting vectors alongside `ChunkStore`
+remains a separate, still-deferred step** (isolation reasons — see "Out of scope"). This mirrors how
+`EmbeddingBackend` was added as a seam first, then wired.
 
 ## Adapter roadmap (approved priority + license tiering)
 
@@ -116,11 +129,11 @@ Adapters land in **this order** (decided 2026-06-17). Each is **config-selected*
 (`vector_store.backend = "..."`), lazy-imported behind a `[vector]` extra, and **must pass the full
 conformance suite before it ships**.
 
-| # | Backend | Form | License | Tier | Filter pushdown | exact/approx |
-|---|---|---|---|---|---|---|
-| 0 | `InProcessVectorStore` | in-process | (core) | **default** | Python | exact |
-| 1 | **sqlite-vec** | embedded (sqlite ext) | Apache-2.0 / MIT | promote | SQL `WHERE` | exact |
-| 2 | **pgvector** | Postgres ext | PostgreSQL (permissive) | promote | SQL `WHERE` | exact / approx (HNSW) |
+| # | Backend | Form | License | Tier | Filter pushdown | exact/approx | Status |
+|---|---|---|---|---|---|---|---|
+| 0 | `InProcessVectorStore` | in-process | (core) | **default** | Python | exact | ✅ shipped |
+| 1 | **sqlite-vec** | embedded (sqlite ext) | Apache-2.0 / MIT | promote | Python `_matches` (full-scan) | exact | **✅ shipped** |
+| 2 | **pgvector** | Postgres ext | PostgreSQL (permissive) | promote | SQL `WHERE` | exact / approx (HNSW) | next |
 | 3 | **Qdrant** | server (Rust) | Apache-2.0 | promote | native filter | approx (HNSW) |
 | 4 | **Milvus** | server | Apache-2.0 | promote | native expr | approx |
 | 5 | **FAISS / hnswlib** | in-process lib | MIT / Apache-2.0 | promote | none → wrap | flat=exact / HNSW=approx |
@@ -174,10 +187,17 @@ existing suite stays green (a sub-package conftest error is isolated to that sub
 ## Out of scope (v1)
 
 - **Real ANN / HNSW / IVF indexing.** The default is brute-force cosine; ANN is an adapter concern.
-- **A persistence backend for the default.** `InProcessVectorStore` is in-memory; persistence arrives with
-  the wiring step / real adapters.
-- **Rewiring `HybridRetriever`** to delegate to the store (separate follow-up, see Scope guard).
-- **Real adapters** (Qdrant/pgvector/FAISS) and the `[vector]` extra — later, each + a conformance entry.
+- **A persistence backend for the default.** `InProcessVectorStore` stays in-memory by design; durable
+  persistence is the `SqliteVecVectorStore` adapter's job, **now made real end-to-end** —
+  `NarrativeIndex` embeds-and-persists at ingest, invalidates by `doc_id`, and retrieves store-managed
+  (no chunk re-embedding on a fresh process). The sensitivity guardrail shipped as the swappable
+  **`PersistencePolicy`** seam (default `IsolationFirstPolicy` never persists a RESTRICTED vector at
+  rest; `PersistEverythingPolicy` is opt-in for a db classified RESTRICTED-tier per `docs/invariants.md`).
+  Persisting into `ChunkStore` itself proved unnecessary — the seam already owns persistence.
+- ~~**Rewiring `HybridRetriever`** to delegate to the store~~ — **done** (see Scope guard).
+- ~~**The `[vector]` extra** and the **first real adapter**~~ — **done**: `[vector]` ships `sqlite-vec`,
+  and `SqliteVecVectorStore` passes the whole conformance kit. **Further adapters** (pgvector/Qdrant/FAISS)
+  remain later, each inheriting the conformance parametrization with one registration line.
 - **Embedding generation** (owned by `EmbeddingBackend`), **RRF fusion / rerank** (owned by the retriever),
   and **entry-point auto-discovery** of third-party stores (the conftest list is the registry for now).
 

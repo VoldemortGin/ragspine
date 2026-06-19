@@ -1,0 +1,13 @@
+"""adapters —— 第三方 VectorStore 适配器（vec0 等），延迟 import，behind [vector] extra。
+
+每个适配器都跑同一套 tests/conformance（参数化），把 provenance / isolation / determinism
+绑死在缝上——不通过 conformance 的适配器直接 CI 红，而非生产事故。零依赖默认仍是
+ragspine.retrieval.vector.store.InProcessVectorStore。
+
+Submodules:
+    sqlite_vec.py — sqlite-vec（vec0 虚表）适配器：持久化 + conformance-bound 精确实现。
+"""
+
+from ragspine import _lazy_submodules
+
+__getattr__, __dir__ = _lazy_submodules(__name__, __path__)
