@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/pipeline/
-verified-against: 795ed14
+verified-against: cab1d56
 ---
 
 # pipeline — agent contract
@@ -40,7 +40,9 @@ delegator to `retriever_topology`.
   cycles); `HybridRetriever.topology()` delegates *into* here, never the reverse.
 - **Wiring-faithful.** A node appears only when its component is wired: vector node
   iff `embedding_backend`, multi-query iff `query_rewriter`, narrative branch iff a
-  narrative retriever. The diagram tells the truth about *this* pipeline.
+  narrative retriever. The diagram tells the truth about *this* pipeline. The vector
+  node is also **named for the resolved store** — label `向量通道 · <StoreClass>` with
+  the store class's dotted path as its `symbol` (so the drift guard resolves it).
 - **rerank is NOT in the retriever subgraph.** `HybridRetriever` ends at RRF/top_k;
   the listwise judge is a downstream `link`-layer stage, so it rides a `data` edge off
   the narrative-retriever node in the agent topology (deliberate PRD-vs-reality

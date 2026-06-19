@@ -4,7 +4,7 @@ covers:
   - src/ragspine/retrieval/vector/adapters/sqlite_vec.py
   - src/ragspine/retrieval/vector/persistence_policy.py
   - src/ragspine/retrieval/lexical/retrieval.py
-verified-against: b81b223
+verified-against: cab1d56
 ---
 
 # VectorStore seam — the pluggable vector index, and how it wires into retrieval
