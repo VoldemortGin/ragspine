@@ -21,7 +21,7 @@ cosine 暴力扫（brute-force cosine + id 升序破平分），让 `pip install
 
 import math
 import os
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
@@ -101,6 +101,40 @@ def _matches(metadata: Mapping[str, str], where: Mapping[str, str] | None) -> bo
         if metadata.get(key) != value:
             return False
     return True
+
+
+def _pool_size(k: int, ef_search: int, count: int, ceiling: int) -> int:
+    """native ANN 候选池大小：max(k, ef_search) 但至少 min(count, ceiling)。
+
+    供 sqlite-vec / pgvector / qdrant 三适配器共享的「native ANN 收窄候选池 -> 精确重排定 top-k」
+    设计：小库（count <= ceiling）下池 >= count，候选覆盖全部行 -> 精确重排逐位复现暴力扫，故
+    exact 能力旗标不松动；大库则收窄到 ANN 候选（规模化）。ceiling / ef_search 是各 adapter 自有
+    旋钮（默认值见各 __init__），刻意【不进】核心 VectorStore Protocol——避免抽象泄漏后端参数。
+    """
+    return max(k, ef_search, min(count, ceiling))
+
+
+def _rerank(
+    candidates: Iterable[tuple[str, Sequence[float], Mapping[str, str]]],
+    query: Sequence[float],
+    *,
+    k: int,
+    where: Mapping[str, str] | None,
+) -> list[VectorHit]:
+    """native ANN 候选池的【精确 cosine 重排】——缝层共享，三适配器复用，打分口径逐字段一致。
+
+    对候选 (id, 向量, metadata)：施 where 过滤（_matches，权威隔离出口）、按精确 _cosine 打分、
+    (-score, id) 排序、取 top-k 装回 VectorHit。这是「native ANN 收窄 -> 精确重排」的重排半边：
+    复用与 InProcessVectorStore 同一对 helper（_cosine / _matches），故零向量一律 0.0、平分按 id
+    升序、where「缺键即排除」AND 语义完全对齐——小库下候选池覆盖全部行即逐位复现暴力扫。
+    """
+    scored = [
+        (_cosine(query, vector), rid, metadata)
+        for rid, vector, metadata in candidates
+        if _matches(metadata, where)
+    ]
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [VectorHit(id=rid, score=score, metadata=md) for score, rid, md in scored[:k]]
 
 
 class InProcessVectorStore:

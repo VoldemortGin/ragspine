@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/
-verified-against: 443885a09c4377f83dcd1394d77a64962da5f0fe
+verified-against: b56e4668dce8fad0479246c25894f3dd8c1abae1
 ---
 
 # retrieval — agent contract
@@ -25,7 +25,10 @@ backends, default none = pure BM25; + the pluggable `VectorStore` seam — `stor
 third-party backend is selectable by name with no core PR) — with an invariant-binding conformance kit in
 `tests/conformance/` carrying an **exact-vs-approximate capability flag**, three real adapters
 behind `[vector]` — `adapters/sqlite_vec.py` (embedded, exact) + `adapters/pgvector.py`
-(Postgres, pg8000/BSD, exact) + `adapters/qdrant.py` (HNSW, qdrant-client local mode, **approximate**)
+(Postgres, pg8000/BSD, exact) + `adapters/qdrant.py` (HNSW, qdrant-client local mode, **approximate**),
+all three now scaling via **native ANN/KNN** (vec0 `MATCH` / pgvector HNSW / Qdrant HNSW) that narrows a
+candidate pool then an **exact `_cosine` re-rank** finalizes top-k (`store._pool_size` + `store._rerank`;
+the pool covers the true top-k for the conformance datasets so `sqlite_vec`/`pgvector` stay exact)
 — and `persistence_policy.py` gating what is written at rest), `rerank/` (LLM
 listwise reranker, RRF-fallback), `link/` (adapter wiring retrieval into the agent).
 

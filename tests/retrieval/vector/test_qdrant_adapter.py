@@ -5,6 +5,7 @@ Qdrant 特有面：协议满足、工厂解析、未装驱动的友好报错、p
 需 qdrant-client（[vector]）。
 """
 
+import math
 import os
 import sys
 
@@ -16,13 +17,26 @@ ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpa
 pytest.importorskip("qdrant_client", reason="qdrant-client 未装（pip install ragspine[vector]）")
 
 from ragspine.retrieval.vector.adapters.qdrant import QdrantVectorStore, _point_id
-from ragspine.retrieval.vector.store import VectorRecord, VectorStore, make_vector_store
+from ragspine.retrieval.vector.store import (
+    InProcessVectorStore,
+    VectorRecord,
+    VectorStore,
+    make_vector_store,
+)
 
 
 def _rec(rid: str, vec, **md) -> VectorRecord:
     base = dict(doc_id=rid.split("#")[0], source_locator=f"{rid}!para1", topic="FIN")
     base.update({k: str(v) for k, v in md.items()})
     return VectorRecord(id=rid, vector=tuple(float(x) for x in vec), metadata=base)
+
+
+def _separated_records(n: int) -> list[VectorRecord]:
+    """n 条角度清晰可分的单位向量（Distance.DOT 下点积≡cosine，收窄按 cosine 对齐，top-k 无歧义）。"""
+    return [
+        _rec(f"r{i:03d}#0", [math.cos((i + 1) * 0.03), math.sin((i + 1) * 0.03), 0.0])
+        for i in range(n)
+    ]
 
 
 def test_missing_driver_raises_friendly(monkeypatch):
@@ -90,3 +104,46 @@ def test_factory_resolves_qdrant():
         assert isinstance(s, QdrantVectorStore)
     finally:
         s.close()
+
+
+# ===========================================================================
+# Native ANN/KNN：native HNSW search 收窄候选池 + 精确重排（大库满足 recall@k 下限）
+# ===========================================================================
+
+def test_native_search_pool_narrows_with_recall_floor():
+    """大库（count > pool_ceiling）触发 native HNSW search 收窄候选池（limit=pool），精确重排后满足 recall@k 下限。
+
+    pool_ceiling 小于库 -> pool < count -> 走 native query_points(limit=pool) 收窄（而非全量 scroll）；
+    对清晰可分的单位向量（DOT≡cosine），收窄按 cosine 对齐，精确重排后召回与 exact 默认实现
+    InProcessVectorStore 相同的 top-k id 集合（recall@k 下限——这里 well-separated 故 recall == 1.0）。
+    Qdrant 仍是 approximate 后端：这里断言的是【下限】而非逐位一致。
+    """
+    records = _separated_records(40)
+    store = QdrantVectorStore(pool_ceiling=8)  # pool=8 < 40 -> 触发 native search 收窄
+    reference = InProcessVectorStore()
+    try:
+        store.upsert(records)
+        reference.upsert(records)
+        assert store.count() == 40  # 库远大于 pool（8），确认收窄路径被触发
+
+        q = [1.0, 0.05, 0.0]
+        approx_ids = {h.id for h in store.query(q, k=5)}
+        exact_ids = {h.id for h in reference.query(q, k=5)}
+        recall = len(approx_ids & exact_ids) / len(exact_ids)
+        assert recall >= 0.8  # recall@5 下限（well-separated 单位向量下实测为 1.0）
+    finally:
+        store.close()
+
+
+def test_native_search_respects_where_isolation_under_narrowing():
+    """native search 收窄下 where 下推为 payload 过滤、隔离不漏：RESTRICTED 最近邻被排除，绝不出现在结果里。"""
+    records = _separated_records(40)
+    records[0] = _rec("r000#0", [1.0, 0.0, 0.0], sensitivity="RESTRICTED")  # 最近邻，应被挡
+    store = QdrantVectorStore(pool_ceiling=8)
+    try:
+        store.upsert(records)
+        hits = store.query([1.0, 0.0, 0.0], k=5, where={"sensitivity": "INTERNAL"})
+        assert "r000#0" not in {h.id for h in hits}  # RESTRICTED 最近邻被挡
+        assert all(h.metadata.get("sensitivity") == "INTERNAL" for h in hits)
+    finally:
+        store.close()

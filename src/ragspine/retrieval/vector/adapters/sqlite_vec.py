@@ -9,13 +9,18 @@
 AND 语义、provenance metadata 原样回传、确定性（float32 存储，每实现可复现）。
 
 存储：vec0 虚表 `id TEXT PK, embedding float[N] distance_metric=cosine, +meta TEXT(JSON)`，
-默认 :memory:（conformance / 默认零副作用），可传 db_path 落盘持久化。
+默认 :memory:（conformance / 默认零副作用），可传 db_path 落盘持久化。vec0 虚表自身即向量索引。
 
-打分走【全表扫 + Python cosine】而非 vec0 原生 KNN MATCH，是刻意取舍：
-  - vec0 的 `k` 上限 4096，且对零向量返回 NULL 距离——全表扫两者皆规避；
-  - 全表扫让打分/排序/where 过滤口径与 InProcessVectorStore 完全对齐（复用同一对 helper），
-    从而无需 conformance「exact vs approximate」能力旗标即整套通过。
-vec0 原生 KNN 索引加速（带精确 float64 重排）属规模化后续优化，不在首个适配器范围。
+打分走【native vec0 KNN MATCH 收窄候选池 + Python 精确重排】（落地 PRD 的 Native ANN/KNN）：
+  - 候选池 pool = max(k, ef_search) 但至少 min(count, pool_ceiling)（见 store._pool_size），
+    再 clamp 到 vec0 的 `k` 上限 4096；用 `WHERE embedding MATCH ? AND k = ?` 经索引取候选池，
+    再用 store._rerank 在 Python 以精确 float64 cosine 重排（复用 _cosine / _matches）定 top-k。
+  - 小库（count <= pool_ceiling，含全部 conformance 库）下 pool >= count，KNN 候选覆盖【全部行】
+    （含零向量行——k>=count 时 vec0 连 NULL 距离的零向量也回，已验证），故精确重排逐位复现暴力扫，
+    exact 能力旗标不松动；大库则由 KNN 索引收窄到 pool 候选（规模化），再精确重排定 top-k。
+  - where 过滤在精确重排里施加（vec0 不能在 KNN 内过滤 +meta 的 JSON 辅助列）：小库候选池覆盖全部行
+    故 where 输出正确、隔离不漏（RESTRICTED 最近邻被重排排除、绝不出现在结果里）。
+ef_search / pool_ceiling 是本 adapter 自有旋钮（默认值见 __init__），不进核心 VectorStore Protocol。
 
 诚实边界（持久化 + 隔离）：把 store 指向文件即把向量（含 RESTRICTED 块的衍生向量）落盘——
 与「RESTRICTED 不出域」是不同关注点（向量在自有 db、不进 prompt），但仍是 at-rest 衍生面；
@@ -33,12 +38,15 @@ from ragspine.retrieval.vector.store import (
     DEFAULT_QUERY_K,
     VectorHit,
     VectorRecord,
-    _cosine,
     _matches,
+    _pool_size,
+    _rerank,
 )
 
 _TABLE = "vec_items"
 _DIM_RE = re.compile(r"float\[(\d+)\]")
+# vec0 的 KNN MATCH 对 `k` 的硬上限（超过即报错）；候选池大小一律 clamp 到此值。
+_VEC0_MAX_K = 4096
 
 
 class SqliteVecVectorStore:
@@ -48,7 +56,13 @@ class SqliteVecVectorStore:
     长度不符的向量（同批 / 跨批）或维度不符的查询向量抛 ValueError。空库查询返回 []。
     """
 
-    def __init__(self, db_path: str = ":memory:") -> None:
+    def __init__(
+        self,
+        db_path: str = ":memory:",
+        *,
+        ef_search: int = 0,
+        pool_ceiling: int = _VEC0_MAX_K,
+    ) -> None:
         try:
             import sqlite_vec
         except ImportError as exc:  # pragma: no cover - 仅未装 [vector] 时触发
@@ -57,6 +71,10 @@ class SqliteVecVectorStore:
                 "离线/纯内存场景用默认 InProcessVectorStore 即可，无需安装。"
             ) from exc
 
+        # native KNN 候选池旋钮（本 adapter 自有，不进核心 Protocol）：ef_search 放大候选广度，
+        # pool_ceiling 封顶大库的池大小（默认贴 vec0 的 4096 上限；小于库则触发 KNN 收窄、再精确重排）。
+        self._ef_search = ef_search
+        self._pool_ceiling = pool_ceiling
         self.db_path = str(db_path)
         self._conn = sqlite3.connect(self.db_path)
         self._conn.enable_load_extension(True)
@@ -133,10 +151,11 @@ class SqliteVecVectorStore:
         k: int = DEFAULT_QUERY_K,
         where: Mapping[str, str] | None = None,
     ) -> list[VectorHit]:
-        """返回 cosine 降序的 top-k；平分按 id 升序；where 在打分前过滤（缺键即排除）。
+        """native vec0 KNN MATCH 收窄候选池 + Python 精确重排：返回 cosine 降序 top-k、平分按 id 升序。
 
-        口径与 InProcessVectorStore 完全一致（复用 _cosine / _matches）：空库 -> []；非空库查询
-        向量维度须与库内一致否则 ValueError；零向量 cosine 处处 0，不崩。
+        口径与 InProcessVectorStore 完全一致（重排复用 _cosine / _matches）：空库 -> []；非空库查询
+        向量维度须与库内一致否则 ValueError；零向量 cosine 处处 0，不崩（k>=count 时 vec0 连零向量也回）。
+        where 在精确重排里过滤（缺键即排除）：小库候选池覆盖全部行故输出正确、隔离不漏。
         """
         if self._dim is None:
             return []
@@ -145,17 +164,20 @@ class SqliteVecVectorStore:
             raise ValueError(
                 f"查询向量维度 {len(vector)} 与库内维度 {self._dim} 不一致"
             )
-        scored = []
-        for rid, blob, meta_json in self._conn.execute(
-            f"SELECT id, embedding, meta FROM {_TABLE}"
-        ).fetchall():
-            metadata = json.loads(meta_json)
-            if not _matches(metadata, where):
-                continue
-            stored = struct.unpack(f"{self._dim}f", blob)
-            scored.append((_cosine(vector, stored), rid, metadata))
-        scored.sort(key=lambda item: (-item[0], item[1]))
-        return [VectorHit(id=rid, score=score, metadata=md) for score, rid, md in scored[:k]]
+        n = self.count()
+        if n == 0:
+            return []
+        pool = min(_pool_size(k, self._ef_search, n, self._pool_ceiling), _VEC0_MAX_K)
+        query_blob = struct.pack(f"{self._dim}f", *vector)
+        candidates = [
+            (rid, struct.unpack(f"{self._dim}f", blob), json.loads(meta_json))
+            for rid, blob, meta_json in self._conn.execute(
+                f"SELECT id, embedding, meta FROM {_TABLE} "
+                "WHERE embedding MATCH ? AND k = ? ORDER BY distance",
+                (query_blob, pool),
+            ).fetchall()
+        ]
+        return _rerank(candidates, vector, k=k, where=where)
 
     def delete(self, *, where: Mapping[str, str]) -> int:
         """删除所有匹配 where 的记录（语义同 query 的过滤）；返回删除条数。"""

@@ -1,6 +1,6 @@
 # PRD — VectorStore seam: pluggable vector index + filtered ANN
 
-> **status:** implemented (seam + wiring + persistence + 3 adapters + exact/approx capability flag + entry-point auto-discovery; more adapters open) · **created:** 2026-06-17 · **methodology:** TDD (red conformance tests first)
+> **status:** implemented (seam + wiring + persistence + 3 adapters + exact/approx capability flag + entry-point auto-discovery + native ANN/KNN with exact re-rank; more adapters open) · **created:** 2026-06-17 · **methodology:** TDD (red conformance tests first)
 > Originating spec, retained for history — the live contract is now
 > [`src/ragspine/retrieval/docs/vector-store.md`](../src/ragspine/retrieval/docs/vector-store.md)
 > (with `covers:`), so this PRD carries none.
@@ -45,7 +45,7 @@ contract is [`vector-store.md`](../src/ragspine/retrieval/docs/vector-store.md).
    (`qdrant`) asserts the weaker PRD guarantees (stable ordering within one instance + a recall@k floor vs
    the exact default). Provenance / isolation / `where`-pushdown conformance bind **fully** to every tier
    regardless of the flag.
-6. **Tests:** **1291 passed** (default) / **1328 with a pgvector Postgres**, 1 gpu-skipped; conformance
+6. **Tests:** **1295 passed** (default) / **1334 with a pgvector Postgres**, 1 gpu-skipped; conformance
    runs over `in_process` + `sqlite_vec` + `qdrant` (+ `pgvector` when `RAGSPINE_PG_URL` is set).
 7. **Entry-point auto-discovery.** `make_vector_store` resolves built-in names through a **lazy-loader
    registry** (the if-ladder is gone) and **falls back to the `ragspine.vector_stores` entry-point group**
@@ -54,16 +54,25 @@ contract is [`vector-store.md`](../src/ragspine/retrieval/docs/vector-store.md).
    name imports only its (SDK-free) adapter module; the SDK is lazy-imported in the adapter's `__init__` at
    instantiation. An unknown name raises a `ValueError` listing the built-in + discovered names; a
    selected-but-uninstalled backend keeps raising the actionable `pip install ragspine[vector]` message.
+8. **Native ANN / KNN + exact re-rank.** All three adapters now **scale via their native index** instead
+   of a full scan/scroll, without losing the contract: a shared `_pool_size` narrows to a candidate pool
+   (`max(k, ef_search, min(count, ceiling))`) via the native KNN — **sqlite-vec `MATCH`**, **pgvector
+   HNSW (`vector_cosine_ops`) `ORDER BY <=> LIMIT pool`**, **Qdrant HNSW `query_points(limit=pool)`** with
+   the `where` pushed into the native query where the backend allows — and a shared `_rerank` does an
+   **exact `_cosine` re-rank** (id-ascending tie-break, zero-vector → `0.0`) over the pool. Because the
+   pool is always ≥ `min(count, ceiling)`, for any store at/under `pool_ceiling` (every conformance store)
+   the pool covers **all** matching rows, so the exact re-rank reproduces brute force **byte-for-byte** —
+   `sqlite_vec` + `pgvector` **stay `exact`**, Qdrant stays `approximate` (native search narrows by dot
+   product, the re-rank scores by cosine). Adapter-private index kwargs (`ef_search` / `pool_ceiling` /
+   pgvector `m` / `ef_construction`) keep the core `Protocol` at the invariant lowest-common-denominator.
 
 ### ⏳ Remaining (roadmap)
 
 - **More adapters** — **Milvus** (next), then FAISS (see the [adapter roadmap](#adapter-roadmap-approved-priority--license-tiering) table; each is one registration line + the inherited conformance kit). Qdrant **shipped** (#3).
-- **Native ANN / KNN** — the three shipped adapters persist but currently **score exactly in Python**
-  (sqlite-vec full-scans; pgvector pushes the `where` to SQL but re-scores in Python; qdrant full-scrolls
-  and re-scores in Python). Native indexed KNN (sqlite-vec `MATCH`; pgvector HNSW / IVFFlat; Qdrant HNSW)
-  with an **exact re-rank** is the scale optimization, deliberately out of the first adapters — this is also
-  *why Qdrant declares the `approximate` capability* even though local mode is incidentally exact: the
-  honest production guarantee is approximate, so the conformance contract won't over-constrain that switch.
+- ~~**Native ANN / KNN**~~ — **✅ shipped** (see [Shipped #8](#-shipped) above): native indexed KNN
+  (sqlite-vec `MATCH`; pgvector HNSW; Qdrant HNSW) narrows a candidate pool, then an **exact re-rank**
+  finalizes top-k — `sqlite_vec` + `pgvector` stay `exact` (the pool covers the true top-k for the
+  conformance datasets), while Qdrant uses native HNSW search and stays `approximate`.
 - **The exact-vs-approximate capability flag** in the conformance kit — **✅ now implemented** with Qdrant
   (the first *approximate* backend): the determinism tests branch on a per-impl capability so an HNSW
   backend's weaker guarantee doesn't falsely fail, while exact stores keep full byte-determinism (see
@@ -188,9 +197,9 @@ conformance suite before it ships**.
 | # | Backend | Form | License | Tier | Filter pushdown | exact/approx | Status |
 |---|---|---|---|---|---|---|---|
 | 0 | `InProcessVectorStore` | in-process | (core) | **default** | Python | exact | ✅ shipped |
-| 1 | **sqlite-vec** | embedded (sqlite ext) | Apache-2.0 / MIT | promote | Python `_matches` (full-scan) | exact | **✅ shipped** |
-| 2 | **pgvector** | Postgres ext (pg8000/BSD) | PostgreSQL (permissive) | promote | SQL JSONB `WHERE` | exact (Python re-score) | **✅ shipped** |
-| 3 | **Qdrant** | server (Rust) / local (in-proc) | Apache-2.0 | promote | Python `_matches` (full-scroll) | **approx (HNSW)** | **✅ shipped** |
+| 1 | **sqlite-vec** | embedded (sqlite ext) | Apache-2.0 / MIT | promote | vec0 KNN pool + `_matches` re-rank | exact | **✅ shipped** |
+| 2 | **pgvector** | Postgres ext (pg8000/BSD) | PostgreSQL (permissive) | promote | SQL JSONB `WHERE` + HNSW pool | exact (Python re-rank) | **✅ shipped** |
+| 3 | **Qdrant** | server (Rust) / local (in-proc) | Apache-2.0 | promote | payload filter + HNSW pool | **approx (HNSW)** | **✅ shipped** |
 | 4 | **Milvus** | server | Apache-2.0 | promote | native expr | approx | next |
 | 5 | **FAISS / hnswlib** | in-process lib | MIT / Apache-2.0 | promote | none → wrap | flat=exact / HNSW=approx | later |
 
@@ -273,8 +282,10 @@ existing suite stays green (a sub-package conftest error is isolated to that sub
   capability flag** (`exact` vs `approximate`, in `conftest.VECTOR_STORE_IMPLS`): the byte-determinism
   assertion runs only for `exact` stores; `approximate` stores instead assert weaker guarantees (stable
   ordering within one instance for identical calls; a recall@k floor against the exact default). Qdrant is
-  registered `approximate` (its production guarantee is HNSW; local mode is only incidentally exact); pgvector
-  with an exact scan is `exact`; a future HNSW-indexed pgvector would flip to `approximate`. The
+  registered `approximate` (its production guarantee is HNSW; native search narrows by dot product while the
+  re-rank scores by cosine); pgvector is `exact` **even with its HNSW index** — its **exact re-rank** over a
+  candidate pool that covers the true top-k for the conformance datasets keeps the byte-determinism (see
+  [Shipped #8](#-shipped) / [`vector-store.md`](../src/ragspine/retrieval/docs/vector-store.md)). The
   filter-pushdown, provenance, and isolation conformance still apply to **all** backends regardless of this
   flag — those are the invariants that must never bend.
 - **Scope discipline for "configurable":** keep the `Protocol` at the lowest-common-denominator the

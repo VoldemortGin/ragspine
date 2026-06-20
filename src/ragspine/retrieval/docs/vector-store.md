@@ -6,7 +6,7 @@ covers:
   - src/ragspine/retrieval/vector/adapters/qdrant.py
   - src/ragspine/retrieval/vector/persistence_policy.py
   - src/ragspine/retrieval/lexical/retrieval.py
-verified-against: 443885a09c4377f83dcd1394d77a64962da5f0fe
+verified-against: b56e4668dce8fad0479246c25894f3dd8c1abae1
 ---
 
 # VectorStore seam — the pluggable vector index, and how it wires into retrieval
@@ -125,12 +125,16 @@ directly — so scoring, the exact-`0.0` zero-vector rule, the id-ascending tie-
 re-implemented.
 
 Two deliberate, documented choices:
-- **Scoring is a full-scan + Python cosine**, not vec0's native KNN `MATCH`. vec0's `k` is capped at
-  4096 and it returns a `NULL` distance for zero vectors; a full scan sidesteps both and keeps the
-  scoring byte-aligned with the default (so it registers as the **`exact` capability** in the
-  conformance kit — full byte-determinism, not `approximate`; see "Capability flag" below).
-  Native-KNN acceleration with exact float64 re-rank is a scale-time optimization, out of scope for
-  the first adapter.
+- **Scoring is native vec0 KNN `MATCH` (candidate pool) + an exact Python re-rank** — see
+  [Native ANN/KNN + exact re-rank](#native-annknn--exact-re-rank-shipped) below. The pool is
+  `max(k, ef_search, min(count, pool_ceiling))` (capped at vec0's `k`-limit 4096); for a store at/under
+  `pool_ceiling` (every conformance store) the pool covers **all** rows — vec0 returns even the
+  `NULL`-distance zero vectors when `k ≥ count` — so the exact re-rank reproduces brute-force
+  byte-for-byte and it stays the **`exact` capability** (full byte-determinism, not `approximate`). The
+  `where` filter is applied in the re-rank (vec0 can't filter the JSON `+meta` aux column inside KNN);
+  because the pool covers all rows for conformance, the filter output is correct and isolation never
+  leaks (a RESTRICTED nearest neighbor is dropped by the re-rank, never surfaced). `ef_search` /
+  `pool_ceiling` are this adapter's own kwargs, **not** the core Protocol.
 - **`upsert` is DELETE-then-INSERT** (vec0 rejects `INSERT OR REPLACE`), preserving id-replace
   semantics. Re-open recovers the dimension from a stored vector, or from the `float[N]` schema when
   the table is empty.
@@ -147,12 +151,19 @@ index must be shared across processes/hosts. Two deliberate choices set it apart
 - **Driver is `pg8000` (pure-Python, BSD), *not* psycopg.** psycopg is LGPL, which ADR 0009's
   ≤ Apache-2.0 license gate excludes; pg8000 is permissive. The adapter speaks plain SQL, so it needs
   no pgvector-specific Python package.
-- **`where` is pushed to SQL, but scoring stays in Python.** The filter becomes a JSONB
-  `meta->>'k' = v` AND-chain (the isolation-relevant pushdown, and it cuts rows transferred); the
-  cosine, the exact-`0.0` zero-vector rule, and the id-ascending tie-break are computed in Python via
-  the shared `store._cosine` — because pgvector's native `<=>` returns **NaN** for a zero vector and
-  its distance-ordering doesn't match "id-asc among equal similarity." Native HNSW/IVFFlat KNN is the
-  scale-time optimization, out of scope for the first adapter (same posture as sqlite-vec).
+- **Native HNSW KNN (candidate pool) + an exact Python re-rank, with `where` always pushed to SQL.**
+  The table carries an **HNSW (`vector_cosine_ops`) index** on `embedding`; the filter becomes a JSONB
+  `meta->>'k' = v` AND-chain (the isolation-relevant pushdown, and it cuts rows transferred). Pool size
+  is `max(k, ef_search, min(count, pool_ceiling))`. For a store at/under `pool_ceiling` (every
+  conformance store) the query is a **plain `SELECT … WHERE <where>` full scan** (no `ORDER BY <=>`),
+  returning **all** matching rows including zero vectors — this sidesteps pgvector's `<=>` returning
+  **NaN** for a zero vector (which the HNSW index drops from a `NULL`/NaN-ordered result); the exact
+  Python re-rank then reproduces brute force byte-for-byte (the **`exact` capability** holds). Above
+  `pool_ceiling` it switches to `SET hnsw.ef_search` + `… WHERE <where> ORDER BY embedding <=> q LIMIT
+  pool` — the native index narrows, then the same exact re-rank finalizes (Python sidesteps the `<=>`
+  NaN + the id-asc tie-break). Index params (`m` / `ef_construction` / `ef_search` / `pool_ceiling`)
+  are this adapter's own kwargs, **not** the core Protocol. See
+  [Native ANN/KNN + exact re-rank](#native-annknn--exact-re-rank-shipped).
 
 Table lifecycle splits the two needs cleanly: **`table=None` → a session `TEMP` table** (auto-dropped
 on disconnect — every conformance instance is isolated with zero leftover), **a named `table=` → a
@@ -178,25 +189,60 @@ for a durable named collection that survives across processes. Because local mod
 pgvector's `RAGSPINE_PG_URL` gate.
 
 Three deliberate choices:
-- **Scoring is a full-scroll + Python cosine** (same posture as sqlite-vec/pgvector): every point is
-  scrolled back and the `where` filter, cosine, exact-`0.0` zero-vector rule, and id-ascending
-  tie-break are computed in Python via the shared `store._cosine` / `store._matches`. The collection
-  uses `Distance.DOT` (no normalization, raw store/fetch) precisely because Qdrant's own metric is
-  irrelevant here — re-scoring in Python guarantees the contract semantics regardless of Qdrant
-  internals (Qdrant's cosine normalizes vectors and is undefined on a zero vector). Native HNSW KNN is
-  the scale-time optimization, out of the first adapter.
+- **Native HNSW `query_points` (candidate pool) + an exact Python re-rank, with `where` pushed as a
+  payload filter.** The search narrows to `limit = max(k, ef_search, min(count, pool_ceiling))` points
+  (the `where` becomes a nested `__meta__.<key>` `FieldCondition` AND-filter — the isolation pushdown,
+  and it cuts points transferred); the cosine, exact-`0.0` zero-vector rule, and id-ascending tie-break
+  are computed in Python via the shared `store._cosine` / `store._matches`. The collection still uses
+  `Distance.DOT` (no normalization, raw store/fetch) — so the **native search narrows by dot product
+  while the re-rank scores by cosine**, which is exactly why Qdrant is **`approximate`**: dot-nearest
+  ≠ cosine-nearest in general. For a store at/under `pool_ceiling` (every conformance store) the pool
+  covers all rows, so it is *incidentally* exact, but the contract only holds it to the weaker
+  approximate guarantees. `delete` still full-scrolls (not a hot path). `ef_search` / `pool_ceiling`
+  are this adapter's own kwargs, **not** the core Protocol. See
+  [Native ANN/KNN + exact re-rank](#native-annknn--exact-re-rank-shipped).
 - **String `id` → deterministic UUID5 point id.** Qdrant point ids must be `uint`/`UUID`, but a
   `chunk_id` is an arbitrary string. The adapter maps `chunk_id → uuid5(namespace, chunk_id)` (same
   string ⇒ same point id ⇒ `upsert` replaces), and stores the **original** string id in the payload so
   `VectorHit.id` round-trips the original. Metadata lives under a reserved `__meta__` payload key, so
   provenance (`doc_id` / `source_locator`) survives intact.
-- **It is registered `approximate`, by design** even though local mode (with Python re-scoring) is
-  *incidentally exact*. The adapter's honest production guarantee is HNSW = approximate; declaring it
-  so means the conformance contract won't over-constrain a future switch to native indexed KNN. See
-  "Capability flag" below.
+- **It is registered `approximate`, by design** even though local mode (with the exact Python re-rank)
+  is *incidentally exact*. The adapter's honest production guarantee is HNSW = approximate; declaring it
+  so is exactly what lets it now narrow with **native HNSW search** (dot-product candidate pool) without
+  the conformance contract over-constraining it. See "Capability flag" below.
 
 Select by config: `make_vector_store("qdrant")` / `make_vector_store("qdrant", path=…, collection=…)`
 / `RAGSPINE_VECTOR_STORE=qdrant`. `.topology()` names it (`向量通道 · QdrantVectorStore`).
+
+## Native ANN/KNN + exact re-rank (shipped)
+
+All three adapters now **scale via their native index**, not a full scan/scroll — without losing the
+contract. The shape is identical across them (two shared helpers in `store.py`, reused like
+`_cosine` / `_matches` so the scoring口径 stays byte-aligned with the in-process default):
+
+1. **Candidate pool via the native index.** `_pool_size(k, ef_search, count, ceiling) =
+   max(k, ef_search, min(count, ceiling))`. sqlite-vec uses vec0 `MATCH … AND k = pool`; pgvector uses
+   `ORDER BY embedding <=> q LIMIT pool` over the **HNSW (`vector_cosine_ops`) index**; Qdrant uses
+   `query_points(limit=pool)` over its HNSW. The `where` filter is **pushed into the native query**
+   where the backend allows it (pgvector SQL `WHERE`, Qdrant payload `FieldCondition`) so a RESTRICTED
+   row is excluded *within* the ANN; sqlite-vec can't filter its JSON `+meta` aux column inside KNN, so
+   it filters in the re-rank instead (still correct + isolation-safe).
+2. **Exact re-rank.** `_rerank(candidates, query, k, where)` re-scores the pool with the exact
+   `_cosine`, applies `where` via `_matches` (the authoritative filter — zero-vector → `0.0`,
+   "absent key excludes"), sorts by `(-score, id)`, and returns top-k. This is the **exact re-rank**
+   that finalizes top-k.
+
+**Why this preserves exactness for the `exact` tier.** The pool is *always* at least
+`min(count, pool_ceiling)`, so for a store at/under `pool_ceiling` — **every conformance store** — the
+pool covers **all** matching rows, and the exact re-rank reproduces brute-force cosine **byte-for-byte**
+(`sqlite_vec` and `pgvector` stay `exact`). Above the ceiling the native index narrows first, then the
+exact re-rank still finalizes top-k from that pool — the scale win. pgvector additionally **falls back
+to a plain full-scan when `pool ≥ count`** (no `ORDER BY <=>`), because its `<=>` returns NaN for a zero
+vector and the HNSW result drops NaN-ordered rows; sqlite-vec's vec0 and Qdrant's `Distance.DOT` both
+return zero-vector rows from the native query, so they query natively throughout. `ef_search` /
+`pool_ceiling` / pgvector's `m` / `ef_construction` are each **adapter-private kwargs**, never the core
+`Protocol` (keeping the seam at the invariant lowest-common-denominator). Qdrant stays **`approximate`**
+because its native search narrows by dot product while the re-rank scores by cosine.
 
 ## Capability flag: exact vs approximate (the conformance kit's determinism tier)
 

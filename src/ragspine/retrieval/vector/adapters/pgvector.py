@@ -8,14 +8,19 @@
 tests/conformance 全过：cosine 零向量一律 0.0、平分按 id 升序、where「缺键即排除」AND 语义、
 provenance metadata 原样回传、确定性（pgvector float4 存储，每实现可复现）。
 
-存储：一张 `(id TEXT PK, embedding vector(N), meta JSONB)` 表。`table=None` 时建【会话级 TEMP 表】
-（断连即自动 drop —— conformance 各实例天然隔离、零残留）；给了 table 名则建持久命名表
-（CREATE TABLE IF NOT EXISTS，跨连接 / 跨进程持久，这正是网络化后端的价值）。
+存储：一张 `(id TEXT PK, embedding vector(N), meta JSONB)` 表 + 一个 embedding 列上的 **HNSW
+（vector_cosine_ops）索引**。`table=None` 时建【会话级 TEMP 表】（断连即自动 drop —— conformance
+各实例天然隔离、零残留）；给了 table 名则建持久命名表（CREATE TABLE IF NOT EXISTS，跨连接 / 跨进程持久）。
 
-打分取舍同 sqlite-vec：where 过滤【下推到 SQL】（`meta->>'k' = v` 的 AND，缺键即排除），
-但 cosine 打分 + 排序 + top-k 在 Python（pgvector 的 `<=>` 对零向量返回 NaN、且同分 NaN 排序
-与「按 id 升序」口径不一致——Python 重算规避两者，并与 InProcessVectorStore 逐位对齐）。
-pgvector 原生 KNN（HNSW/IVFFlat + `<=>`）加速属规模化后续优化，不在首个 adapter 范围。
+打分走【native HNSW KNN 收窄候选池 + Python 精确重排】（落地 PRD 的 Native ANN/KNN），where 始终
+【下推到 SQL】（`meta->>'k' = v` 的 AND，缺键即排除，隔离下推 + 减传输）：
+  - 候选池 pool = max(k, ef_search) 但至少 min(count, pool_ceiling)（见 store._pool_size）。
+  - pool >= count（含全部 conformance 库）：走全表扫 `SELECT ... WHERE <where>`（不带 ORDER BY <=>），
+    取回【全部】匹配行（含零向量行）——规避 pgvector `<=>` 对零向量返回 NaN、HNSW 索引把 NaN 距离行
+    丢弃的坑；再用 store._rerank 在 Python 以精确 cosine 重排，逐位复现暴力扫，exact 能力旗标不松动。
+  - pool < count（大库）：`SET hnsw.ef_search` 后 `... WHERE <where> ORDER BY embedding <=> q LIMIT pool`
+    经 HNSW 索引收窄到 pool 候选（规模化），再精确重排定 top-k（Python 重算规避 `<=>` 的 NaN/破平分口径）。
+索引参数（m / ef_construction / ef_search / pool_ceiling）是本 adapter 自有旋钮，不进核心 VectorStore Protocol。
 
 连接：RAGSPINE_PG_URL（postgresql://user[:pass]@host:port/db）或显式 dsn；未装 pg8000 /
 未配 URL 时抛友好错。conformance 需 RAGSPINE_PG_URL 指向带 pgvector 扩展的 PG，否则该参数 skip。
@@ -38,10 +43,14 @@ from ragspine.retrieval.vector.store import (
     DEFAULT_QUERY_K,
     VectorHit,
     VectorRecord,
-    _cosine,
+    _pool_size,
+    _rerank,
 )
 
 PG_URL_ENV = "RAGSPINE_PG_URL"
+
+# pgvector 的 hnsw.ef_search 取值上界（会话级 GUC）；SET 前一律 clamp 到此值。
+_HNSW_EF_SEARCH_MAX = 1000
 
 # 表名只能是合法 SQL 标识符：SQL 标识符不能走绑定参数，故表名以 f-string 拼入 SQL；
 # 强约束为 [A-Za-z_][A-Za-z0-9_]* 杜绝注入（默认 uuid 表名天然满足；用户传名亦须满足）。
@@ -69,7 +78,16 @@ class PgVectorVectorStore:
     此后任何长度不符的向量（同批 / 跨批）或维度不符的查询向量抛 ValueError。空库查询返回 []。
     """
 
-    def __init__(self, dsn: str | None = None, table: str | None = None) -> None:
+    def __init__(
+        self,
+        dsn: str | None = None,
+        table: str | None = None,
+        *,
+        m: int = 16,
+        ef_construction: int = 64,
+        ef_search: int = 100,
+        pool_ceiling: int = 4096,
+    ) -> None:
         try:
             import pg8000.native as pg
         except ImportError as exc:  # pragma: no cover - 仅未装 [vector] 时触发
@@ -78,6 +96,12 @@ class PgVectorVectorStore:
                 "离线/纯内存场景用默认 InProcessVectorStore 即可，无需安装。"
             ) from exc
 
+        # HNSW 索引 + native KNN 候选池旋钮（本 adapter 自有，不进核心 Protocol）：
+        # m / ef_construction 建索引用，ef_search / pool_ceiling 查询收窄用（int，f-string 拼入故强校验）。
+        self._m = int(m)
+        self._ef_construction = int(ef_construction)
+        self._ef_search = int(ef_search)
+        self._pool_ceiling = int(pool_ceiling)
         dsn = dsn or os.environ.get(PG_URL_ENV)
         if not dsn:
             raise ValueError(
@@ -119,6 +143,14 @@ class PgVectorVectorStore:
             self._conn.run(
                 f"CREATE {kind} IF NOT EXISTS {self._table} "
                 f"(id TEXT PRIMARY KEY, embedding vector({dim}), meta JSONB)"
+            )
+            # embedding 列上的 HNSW（cosine）索引：加速大库的 `ORDER BY <=> LIMIT pool` 候选收窄。
+            # HNSW 支持空表增量建（不像 IVFFlat 需先有数据训练），故建表即建索引。m / ef_construction
+            # 为 int（强校验后 f-string 拼入，非值绑定位，安全）。TEMP 表的索引随表 drop。
+            self._conn.run(
+                f"CREATE INDEX IF NOT EXISTS {self._table}_emb_hnsw ON {self._table} "
+                f"USING hnsw (embedding vector_cosine_ops) "
+                f"WITH (m = {self._m}, ef_construction = {self._ef_construction})"
             )
             self._dim = dim
 
@@ -181,10 +213,12 @@ class PgVectorVectorStore:
         k: int = DEFAULT_QUERY_K,
         where: Mapping[str, str] | None = None,
     ) -> list[VectorHit]:
-        """返回 cosine 降序的 top-k；平分按 id 升序；where 在打分前【下推到 SQL】过滤。
+        """native HNSW KNN 收窄候选池 + Python 精确重排：返回 cosine 降序 top-k、平分按 id 升序。
 
-        口径与 InProcessVectorStore 完全一致：空库 -> []；非空库查询向量维度须与库内一致否则
-        ValueError；零向量 cosine 处处 0，不崩（Python _cosine，规避 pgvector `<=>` 的 NaN）。
+        where 始终【下推到 SQL】过滤；打分/排序在 Python 精确重算（复用 _cosine / _matches，规避
+        pgvector `<=>` 的 NaN 与破平分口径差异）。空库 -> []；非空库查询向量维度须与库内一致否则
+        ValueError；零向量 cosine 处处 0，不崩。pool >= count 走全表扫（含零向量行、逐位复现暴力扫），
+        pool < count 经 HNSW 索引收窄到 pool 候选。
         """
         if self._dim is None:
             return []
@@ -193,15 +227,29 @@ class PgVectorVectorStore:
             raise ValueError(
                 f"查询向量维度 {len(vector)} 与库内维度 {self._dim} 不一致"
             )
+        n = self.count()
+        if n == 0:
+            return []
+        pool = _pool_size(k, self._ef_search, n, self._pool_ceiling)
         where_sql, params = self._where_sql(where)
-        scored = []
-        for rid, emb, meta in self._conn.run(
-            f"SELECT id, embedding, meta FROM {self._table}{where_sql}", **params
-        ):
-            stored = tuple(float(x) for x in emb.strip("[]").split(","))
-            scored.append((_cosine(vector, stored), rid, meta))
-        scored.sort(key=lambda item: (-item[0], item[1]))
-        return [VectorHit(id=rid, score=score, metadata=md) for score, rid, md in scored[:k]]
+        if pool >= n:
+            # 小库：全表扫取回全部匹配行（含 `<=>` 会判 NaN 的零向量行），精确重排逐位复现暴力扫。
+            sql = f"SELECT id, embedding, meta FROM {self._table}{where_sql}"
+        else:
+            # 大库：经 HNSW 索引按 cosine 距离收窄到 pool 候选（ef_search 放大候选广度），再精确重排。
+            ef = max(1, min(max(self._ef_search, pool), _HNSW_EF_SEARCH_MAX))
+            self._conn.run(f"SET hnsw.ef_search = {ef}")
+            params["q"] = self._vec_literal(vector)
+            params["pool"] = pool
+            sql = (
+                f"SELECT id, embedding, meta FROM {self._table}{where_sql} "
+                "ORDER BY embedding <=> CAST(:q AS vector) LIMIT :pool"
+            )
+        candidates = [
+            (rid, tuple(float(x) for x in emb.strip("[]").split(",")), meta)
+            for rid, emb, meta in self._conn.run(sql, **params)
+        ]
+        return _rerank(candidates, vector, k=k, where=where)
 
     def delete(self, *, where: Mapping[str, str]) -> int:
         """删除所有匹配 where 的记录（语义同 query 的过滤）；返回删除条数。"""

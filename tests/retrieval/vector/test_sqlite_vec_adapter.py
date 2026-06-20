@@ -4,6 +4,7 @@
 共用同一套）；这里只测 :memory: 覆盖不到的 sqlite-vec 特有面。
 """
 
+import math
 import os
 import sys
 
@@ -15,13 +16,26 @@ ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpa
 pytest.importorskip("sqlite_vec", reason="sqlite-vec 未装（pip install ragspine[vector]）")
 
 from ragspine.retrieval.vector.adapters.sqlite_vec import SqliteVecVectorStore
-from ragspine.retrieval.vector.store import VectorRecord, VectorStore, make_vector_store
+from ragspine.retrieval.vector.store import (
+    InProcessVectorStore,
+    VectorRecord,
+    VectorStore,
+    make_vector_store,
+)
 
 
 def _rec(rid: str, vec, **md) -> VectorRecord:
     base = dict(doc_id=rid.split("#")[0], source_locator=f"{rid}!para1", topic="FIN")
     base.update({k: str(v) for k, v in md.items()})
     return VectorRecord(id=rid, vector=tuple(float(x) for x in vec), metadata=base)
+
+
+def _separated_records(n: int) -> list[VectorRecord]:
+    """n 条角度清晰可分的单位向量（cosine 到 [1,0,0] 严格单调递减，top-k 无歧义）。"""
+    return [
+        _rec(f"r{i:03d}#0", [math.cos((i + 1) * 0.03), math.sin((i + 1) * 0.03), 0.0])
+        for i in range(n)
+    ]
 
 
 def test_satisfies_protocol():
@@ -78,3 +92,47 @@ def test_missing_sdk_raises_friendly_error(monkeypatch):
     monkeypatch.setitem(sys.modules, "sqlite_vec", None)  # 模拟未安装
     with pytest.raises(ImportError, match=r"\[vector\]"):
         SqliteVecVectorStore()
+
+
+# ===========================================================================
+# Native ANN/KNN：vec0 KNN MATCH 收窄候选池 + 精确重排（大库仍回精确 top-k）
+# ===========================================================================
+
+def test_native_knn_pool_narrows_yet_returns_exact_topk():
+    """大库（count > pool_ceiling）触发 vec0 KNN 收窄候选池，精确重排后 top-k 与全量覆盖逐位一致。
+
+    pool_ceiling 小于库 -> pool < count -> 走 native KNN MATCH 收窄（而非覆盖全部行）；其结果须与
+    同实现、pool_ceiling 够大（候选池覆盖全部行 = 暴力扫）的兄弟实例【逐位一致】，证明 KNN 收窄
+    无损召回真·top-k。同时与 exact 默认实现 InProcessVectorStore 的 id 排序一致（分值因 float32 近似）。
+    """
+    records = _separated_records(40)
+
+    narrow = SqliteVecVectorStore(":memory:", pool_ceiling=8)  # pool=8 < 40 -> 触发 KNN 收窄
+    full = SqliteVecVectorStore(":memory:")  # pool_ceiling 默认 4096 -> 覆盖全部行 = 暴力扫
+    reference = InProcessVectorStore()
+    for store in (narrow, full, reference):
+        store.upsert(records)
+    assert narrow.count() == 40  # 库远大于 pool（8），确认收窄路径被触发
+
+    q = [1.0, 0.0, 0.0]
+    narrow_hits = narrow.query(q, k=5)
+    full_hits = full.query(q, k=5)
+    # KNN 收窄 == 全量覆盖，逐位一致（同 float32 实现）：证明候选池无损覆盖真·top-k。
+    assert [(h.id, h.score) for h in narrow_hits] == [(h.id, h.score) for h in full_hits]
+    # 与暴力扫 exact 默认实现的 id 排序一致（分值因 float32 vs float64 仅近似）。
+    assert [h.id for h in narrow_hits] == [h.id for h in reference.query(q, k=5)]
+    narrow.close()
+    full.close()
+
+
+def test_native_knn_respects_where_isolation_under_narrowing():
+    """KNN 收窄下 where 过滤仍正确、隔离不漏：RESTRICTED 最近邻被精确重排排除，绝不出现在结果里。"""
+    records = _separated_records(40)
+    # 把与查询最近的那条标成 RESTRICTED（最近邻，最该被过滤挡住的诚实反例）。
+    records[0] = _rec("r000#0", [1.0, 0.0, 0.0], sensitivity="RESTRICTED")
+    store = SqliteVecVectorStore(":memory:", pool_ceiling=8)
+    store.upsert(records)
+    hits = store.query([1.0, 0.0, 0.0], k=5, where={"sensitivity": "INTERNAL"})
+    assert "r000#0" not in {h.id for h in hits}  # RESTRICTED 最近邻被挡
+    assert all(h.metadata.get("sensitivity") == "INTERNAL" for h in hits)
+    store.close()

@@ -41,7 +41,7 @@ Docs describing code carry `covers:` + `verified-against:` frontmatter;
 - **Setup:** `uv venv .venv` then `VIRTUAL_ENV="$(pwd)/.venv" uv pip install -e ".[dev,service,vector]"`
   (the `VIRTUAL_ENV=` prefix is required so `uv` targets this venv, not a system Python).
   Extras: `[pdf]` `[ocr]` `[llm]` `[embed]`.
-- **Tests:** `.venv/bin/python -m pytest tests/ -q` → expect **1291 passed, 38 skipped** (37 pgvector need RAGSPINE_PG_URL + 1 gpu; 1328 with a Postgres).
+- **Tests:** `.venv/bin/python -m pytest tests/ -q` → expect **1295 passed, 40 skipped** (39 pgvector need RAGSPINE_PG_URL + 1 gpu; 1334 with a Postgres).
 - **CI (local):** `scripts/ci.sh` is the gate (tests + 4-gate QA eval ratchet + demo smoke); enable the pre-push hook
   once with `git config core.hooksPath .githooks`. GitHub Actions is dormant (manual-only) to
   avoid consuming quota — see README "Continuous integration (local)".
