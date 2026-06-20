@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/ingestion/source/connector.py
-verified-against: 865236e14cc6602efebc9edcbf54b9fd07c8270a
+verified-against: 443885a09c4377f83dcd1394d77a64962da5f0fe
 ---
 
 # SourceConnector seam — where raw documents enter ingestion
