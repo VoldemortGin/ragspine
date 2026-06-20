@@ -1,0 +1,46 @@
+# 异步 ingestion worker（RQ）——对应 compose 的 worker。同镜像，仅 command 不同；
+# 无端口、无健康探针；消费 redis 队列。与 server 共挂同一数据 PVC（/var/lib/ragspine）。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ragspine.fullname" . }}-worker
+  labels:
+    {{- include "ragspine.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "ragspine.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        {{- include "ragspine.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+    spec:
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: worker
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # worker 角色：消费 RQ 队列，无 --host/--port。
+          command: ["python", "scripts/run_worker.py"]
+          envFrom:
+            {{- include "ragspine.envFrom" . | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/ragspine
+          {{- with .Values.worker.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "ragspine.fullname" . }}-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}

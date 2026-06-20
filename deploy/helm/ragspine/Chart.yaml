@@ -1,0 +1,25 @@
+# RAGSpine —— Kubernetes Helm chart（落地 docs/prd-deployment-packaging.md 的 Helm「后续步骤」）。
+#
+# 与 deploy/compose.yaml 同源同设计：【一个镜像 ragspine:local，两种角色】（server / worker），
+# 默认【离线精简栈】（mock provider + sqlite_vec，无需任何 API key），真实后端（pgvector /
+# qdrant / 真实 LLM）经 values.yaml 旋钮选择性接入；配置纯走 RAGSPINE_* 环境变量注入到现成的
+# ServiceConfig（src/ragspine/service/config.py），不引入任何新配置系统。
+#
+# appVersion 跟随 pyproject.toml 的项目版本；version 是 chart 自身的 SemVer。
+apiVersion: v2
+name: ragspine
+description: RAGSpine —— framework-free 后端 RAG 引擎（一个镜像两种角色，离线默认 + 真实后端可选）
+type: application
+# chart 自身版本（与应用版本解耦）。
+version: 0.1.0
+# 应用版本 = 当前 pyproject.toml 的 version。
+appVersion: "0.1.2"
+keywords:
+  - rag
+  - retrieval
+  - fastapi
+home: https://github.com/lin-han/ragspine
+sources:
+  - https://github.com/lin-han/ragspine
+maintainers:
+  - name: lin han

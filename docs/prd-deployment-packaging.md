@@ -1,6 +1,6 @@
 # PRD — Deployment Packaging: one-click self-host via Docker Compose
 
-> **status:** implemented (Compose v1: offline-default stack + opt-in backend profiles; Helm next) · **created:** 2026-06-19 · **methodology:** static validation (no docker on the dev host — real boot-test runs on a remote docker host)
+> **status:** implemented (Compose v1: offline-default stack + opt-in backend profiles; **Helm chart shipped** under `deploy/helm/ragspine/`) · **created:** 2026-06-19 · **methodology:** static validation (no docker/helm on the dev host — real boot-test runs on a remote docker / kind host)
 > Lands under `deploy/`. Operator-facing quickstart is [`deploy/README.md`](../deploy/README.md);
 > this PRD is the originating spec and carries no `covers:` frontmatter (it describes ops config,
 > not library code). Built **ADDITIVELY** — only new files under `deploy/` + this PRD — so it never
@@ -112,3 +112,28 @@ Compose `app` / `worker` / `redis` services map to Deployments, the named volume
 backend profiles to `values.yaml` toggles (`vectorStore: sqlite_vec | pgvector | qdrant`), and the
 `env_file` secrets to a `Secret`. Landing Compose first makes the env surface and the
 offline-default contract concrete, so the chart is a translation rather than a redesign.
+
+### Shipped: Helm chart (`deploy/helm/ragspine/`)
+
+**Status: done** — the translation above is now a real chart under
+[`deploy/helm/ragspine/`](../deploy/helm/ragspine/) (quickstart:
+[`deploy/helm/README.md`](../deploy/helm/README.md)), built **ADDITIVELY** (only new files
+under `deploy/helm/` plus this note + a Helm pointer in `deploy/README.md`). It maps the Compose
+design 1:1: `app`/`worker` → two Deployments sharing **one** image (`ragspine:local`, server
+command hard-codes `--host 0.0.0.0`); the named volume → a shared data PVC at `/var/lib/ragspine`;
+the profiles → `values.yaml` toggles (`vectorStore`, `postgres.enabled`, `qdrant.enabled`,
+`redis.enabled` for an in-cluster Redis Deployment+Service+PVC); the `env_file` secrets → a
+`Secret` rendered **only when an API key is set**; non-secret knobs → a ConfigMap consumed via
+`envFrom`. The default `helm install` is the **offline lean stack** (mock + sqlite_vec, no key).
+The Qdrant honesty boundary carries over verbatim: the `qdrant` Deployment is provisioned but the
+current `make_vector_store("qdrant")` runs in-process `:memory:` (no networked URL through
+`ServiceConfig` yet) — pgvector is the fully end-to-end external store. Validated **statically**
+(no helm/kubectl/docker on the dev host): `Chart.yaml`/`values.yaml` parse under PyYAML, the
+server template carries `--host 0.0.0.0`, every `RAGSPINE_*` referenced in templates exists in
+`ServiceConfig.from_env` (except the adapter-read `RAGSPINE_PG_URL`). On a remote docker host,
+`helm lint` passed (0 failures) and `helm template` rendered correctly in **both** the offline-default
+and the `postgres`/`pgvector` profile. A live `helm install` was **not** completed: that box's kind
+control-plane fails to come up (kubeadm `wait-control-plane` timeout; kubelet↔apiserver `EOF`) — a
+host-infrastructure issue unrelated to the chart. The chart's app behavior is covered by the
+**equivalent Docker Compose stack, live-tested end-to-end on the same host** (build + `/healthz` +
+anti-fabrication refusal + the pgvector profile's isolation invariant).

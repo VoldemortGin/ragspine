@@ -1,0 +1,92 @@
+{{- if .Values.postgres.enabled }}
+# 集群内 Postgres / pgvector（完整端到端外部向量库）——对应 compose 的 postgres profile。
+# Deployment + Service + PVC。RAGSPINE_PG_URL 在 configmap-env 里指向此 Service；
+# pgvector adapter 经它真正联网（仅当 vectorStore=pgvector 时被实例化）。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "ragspine.postgresFullname" . }}
+  labels:
+    {{- include "ragspine.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  accessModes:
+    - {{ .Values.postgres.persistence.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.postgres.persistence.size }}
+  {{- if .Values.postgres.persistence.storageClass }}
+  storageClassName: {{ .Values.postgres.persistence.storageClass | quote }}
+  {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ragspine.postgresFullname" . }}
+  labels:
+    {{- include "ragspine.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "ragspine.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: postgres
+  template:
+    metadata:
+      labels:
+        {{- include "ragspine.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.postgres.image | quote }}
+          ports:
+            - name: postgres
+              containerPort: {{ .Values.postgres.port }}
+              protocol: TCP
+          env:
+            - name: POSTGRES_USER
+              value: {{ .Values.postgres.auth.username | quote }}
+            - name: POSTGRES_PASSWORD
+              value: {{ .Values.postgres.auth.password | quote }}
+            - name: POSTGRES_DB
+              value: {{ .Values.postgres.auth.database | quote }}
+            # PVC 挂在 /var/lib/postgresql/data 时让 initdb 落在子目录，避免 lost+found 冲突。
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", {{ .Values.postgres.auth.username | quote }}, "-d", {{ .Values.postgres.auth.database | quote }}]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          {{- with .Values.postgres.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "ragspine.postgresFullname" . }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ragspine.postgresFullname" . }}
+  labels:
+    {{- include "ragspine.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  type: ClusterIP
+  ports:
+    - name: postgres
+      port: {{ .Values.postgres.port }}
+      targetPort: postgres
+      protocol: TCP
+  selector:
+    {{- include "ragspine.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+{{- end }}

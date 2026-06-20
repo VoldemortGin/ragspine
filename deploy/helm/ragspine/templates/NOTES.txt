@@ -1,0 +1,32 @@
+RAGSpine 已安装：release "{{ .Release.Name }}"（namespace "{{ .Release.Namespace }}"）。
+
+配置概览：
+  provider       = {{ .Values.llm.provider }}（mock=离线确定性，无需 key）
+  vector store   = {{ .Values.vectorStore }}
+  embedding      = {{ .Values.embedding }}
+  redis(集群内)  = {{ .Values.redis.enabled }}
+  postgres       = {{ .Values.postgres.enabled }}
+  qdrant         = {{ .Values.qdrant.enabled }}{{ if .Values.qdrant.enabled }}（注意：当前为进程内 :memory: 模式，app 不经网络连此服务）{{ end }}
+
+1) 端口转发到 server，并探活 /healthz：
+
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "ragspine.fullname" . }} 8000:{{ .Values.server.service.port }}
+
+  # 另开一个终端：
+  curl -s localhost:8000/healthz
+
+2) 问一个问题（离线确定性 MockProvider；空库时诚实返回「查不到」——反编造不变量）：
+
+  curl -s localhost:8000/v1/ask -H 'content-type: application/json' \
+       -d '{"question":"中国内地FY2024的REVENUE是多少"}'
+
+{{- if not .Values.persistence.enabled }}
+
+提示：persistence.enabled=false —— sqlite 库与上传落在临时 emptyDir，pod 重建即丢。
+{{- end }}
+{{- if eq .Values.llm.provider "anthropic" }}
+{{- if not .Values.secrets.anthropicApiKey }}
+
+警告：llm.provider=anthropic 但未设 secrets.anthropicApiKey —— anthropic SDK 将因缺 key 报错。
+{{- end }}
+{{- end }}
