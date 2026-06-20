@@ -9,6 +9,7 @@ Submodules:
     routing/ — 逐页 PDF 分诊路由。
     verification/ — 双通道交叉校验（纯逻辑，不依赖 Docling）。
     ir.py — 样式感知网格中间表示（styled_grid IR），全项目最稳定的接口。
+    registry.py — Extractor 注册表缝：mime/格式 → Extractor 的查表分发（行为不变的薄壳）。
 """
 
 from ragspine import _lazy_submodules
