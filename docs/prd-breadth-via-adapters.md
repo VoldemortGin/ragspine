@@ -186,7 +186,7 @@ P1) — exactly the surface that should be *adapted*, not authored.
 
 - **P0 — minimum credible breadth.** A user can run a *real* semantic stack end-to-end with mainstream tools.
   - ✅ `VectorStore` Protocol + in-proc default + **one** real adapter — shipped as **`sqlite-vec`** behind
-    `[vector]` (the Qdrant/pgvector slot is now P1); plus sensitivity-gated persistence (`PersistencePolicy`).
+    `[vector]` (pgvector + Qdrant have since shipped too, behind `[vector]`); plus sensitivity-gated persistence (`PersistencePolicy`).
   - ✅ `Extractor` registry + `Chunker` Protocol (formalized existing code; **zero behavior change** —
     `chunk_document`'s entry point/signature preserved, the PDF router untouched, all prior extraction/chunking
     tests stay green). See `extraction/registry.py` + `retrieval/chunking/chunker.py`.
@@ -203,8 +203,8 @@ P1) — exactly the surface that should be *adapted*, not authored.
 - **P1 — the breadth that wins evaluations.** Format coverage (DOCX/HTML/MD/CSV via `unstructured`/`docling`),
   rerank adapters (cross-encoder/Cohere/BGE), query-transform strategies (multi-query/HyDE/self-query),
   the first 2–3 `SourceConnector`s (**filesystem ✅ shipped** → S3 → HTTP/crawl). *(Vector adapters pgvector and Qdrant
-  already shipped in P0/P1; the next vector adapter is Milvus, plus native ANN/KNN for the existing three —
-  see [`prd-vector-store-seam.md`](prd-vector-store-seam.md).)*
+  already shipped in P0/P1, and **native ANN/KNN with exact re-rank for all three has since shipped too**; the next
+  vector adapter is Milvus — see [`prd-vector-store-seam.md`](prd-vector-store-seam.md).)*
 - **P2 — governance & ops depth.** `FactStore` Protocol (DuckDB/Postgres), `TraceSink` → OTel (privacy-gated),
   incremental sync / deletion-propagation across stores (a 🛡 lineage concern), RAGAS-compatible eval export.
 
