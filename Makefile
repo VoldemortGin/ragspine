@@ -94,7 +94,10 @@ fixtures: ## Regenerate the synthetic demo fixtures (deterministic)
 
 .PHONY: docs
 docs: ## Build the static API-reference site from docstrings (pdoc → docs/site, nginx-ready)
-	$(PYTHON) -m pdoc ragspine -o docs/site
+	@# Enumerate every submodule explicitly: the package uses lazy PEP 562 submodule
+	@# access, so a bare `pdoc ragspine` only emits the top page — feed pdoc the full list.
+	find src/ragspine -name '*.py' | sed 's|^src/||; s|/__init__\.py$$||; s|\.py$$||; s|/|.|g' \
+		| sort -u | tr '\n' '\0' | xargs -0 $(PYTHON) -m pdoc -o docs/site
 	@echo "API docs → docs/site/  (deploy: point nginx 'root' at $(abspath docs/site))"
 
 .PHONY: clean

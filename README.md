@@ -231,8 +231,8 @@ is written at rest — its default **never persists a `RESTRICTED` chunk's vecto
 The project is **test-driven**: tests are the spec. The `gpu` marker gates real-OCR
 integration tests to a Linux + NVIDIA GPU box. The **`pgvector` conformance** skips unless
 `RAGSPINE_PG_URL` points at a Postgres with the pgvector extension — set it and the count
-rises to **1292 passed** (the pgvector adapter is conformance-bound, just not in the default
-server-less CI). The **Qdrant** conformance runs unconditionally (local mode is purely
+rises to **1334 passed, 1 skipped** (the pgvector adapter is conformance-bound, just not in the
+default server-less CI). The **Qdrant** conformance runs unconditionally (local mode is purely
 in-process, no server). Everything else runs anywhere.
 
 ## Continuous integration (local)
