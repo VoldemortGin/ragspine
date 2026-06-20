@@ -174,4 +174,5 @@ def make_source_connector(spec: str | None = None, **kwargs: Any) -> SourceConne
     if normalized == "none":
         return None
     factory = _resolve_factory(normalized)
-    return factory(**kwargs)
+    connector: SourceConnector = factory(**kwargs)
+    return connector

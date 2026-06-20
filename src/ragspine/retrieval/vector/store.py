@@ -252,7 +252,8 @@ def _resolve_factory(normalized: str) -> Callable[..., VectorStore]:
     discovered = _discover_entry_points()
     for entry_point in discovered:
         if entry_point.name.strip().lower() == normalized:
-            return entry_point.load()
+            factory: Callable[..., VectorStore] = entry_point.load()
+            return factory
     names = sorted({entry_point.name for entry_point in discovered})
     raise ValueError(
         f"未知 vector store spec：{normalized!r}"

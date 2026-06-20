@@ -113,7 +113,8 @@ def _resolve_factory(normalized: str) -> Callable[..., Chunker]:
     discovered = _discover_entry_points()
     for entry_point in discovered:
         if entry_point.name.strip().lower() == normalized:
-            return entry_point.load()
+            factory: Callable[..., Chunker] = entry_point.load()
+            return factory
     names = sorted({entry_point.name for entry_point in discovered})
     raise ValueError(
         f"未知 chunker spec：{normalized!r}"
