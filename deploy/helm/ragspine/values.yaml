@@ -1,0 +1,142 @@
+# ============================================================================
+# RAGSpine Helm chart 默认值 —— 镜像 deploy/compose.yaml 的旋钮，纯 RAGSPINE_* 注入。
+#
+# 默认即【离线精简栈】：mock provider + sqlite_vec + embedding=none（纯 BM25），无需任何
+# API key、无需任何外部数据库。真实后端（pgvector / qdrant / 真实 LLM）逐项 opt-in。
+#
+# 每个旋钮的真实消费者见 src/ragspine/service/config.py 的 ServiceConfig.from_env；
+# RAGSPINE_PG_URL 例外，由 pgvector adapter 直接读环境（非 ServiceConfig 旋钮）。
+# ============================================================================
+
+# 部分名称覆盖（一般留空，用 release 名 + chart 名自动拼装 fullname）。
+nameOverride: ""
+fullnameOverride: ""
+
+# ---- 镜像：server 与 worker 共用同一镜像，仅 command（角色）不同 ----------------
+image:
+  # 镜像仓库与 tag。本地 kind 验证时先 build 出 ragspine:local，再
+  #   kind load docker-image ragspine:local
+  # 把它灌进 kind 节点（否则 IfNotPresent 在节点上找不到镜像）。
+  repository: ragspine
+  tag: local
+  # 本地镜像用 IfNotPresent：避免 k8s 去远端 registry 拉一个本地构建的 tag。
+  pullPolicy: IfNotPresent
+
+# ---- HTTP 服务（FastAPI + uvicorn）——对应 compose 的 app 服务 ------------------
+server:
+  replicaCount: 1
+  # 启动命令在模板里硬编码 --host 0.0.0.0（容器内必须对外可达；脚本默认 127.0.0.1 不可达）。
+  service:
+    # ClusterIP Service 暴露的端口（容器固定监听 8000）。
+    port: 8000
+  # 资源请求/限制（留空＝不设；按需填 requests/limits）。
+  resources: {}
+
+# ---- 异步 ingestion worker（RQ）——对应 compose 的 worker 服务 ------------------
+worker:
+  replicaCount: 1
+  # worker 无端口、无健康探针；消费 redis 队列。
+  resources: {}
+
+# ---- 向量存储后端 -> RAGSPINE_VECTOR_STORE -------------------------------------
+# 取值：in_process | sqlite_vec | pgvector | qdrant（默认 sqlite_vec，进程内、纯 BM25）。
+# 设 pgvector 时请同时 postgres.enabled=true；设 qdrant 见下方 qdrant 的「诚实说明」。
+vectorStore: sqlite_vec
+
+# ---- LLM provider -> RAGSPINE_PROVIDER / MODEL / BASE_URL ----------------------
+llm:
+  # mock（离线确定性，无需 key）| anthropic（需 secrets.anthropicApiKey）。
+  provider: mock
+  # 仅 anthropic 生效；留空＝用代码内置默认模型（不注入 RAGSPINE_MODEL，避免空串覆盖默认）。
+  model: ""
+  # 企业网关/代理（仅 anthropic）；留空＝不注入 RAGSPINE_BASE_URL。
+  baseUrl: ""
+
+# ---- 向量化 -> RAGSPINE_EMBEDDING ---------------------------------------------
+# none（默认，纯 BM25，无语义向量）| deterministic | openai（openai 需 secrets.openaiApiKey）。
+embedding: none
+
+# ---- 持久化策略 -> RAGSPINE_PERSISTENCE_POLICY --------------------------------
+# default（隔离优先，RESTRICTED 不落盘）| persist_everything。
+persistencePolicy: default
+
+# ---- Redis（任务队列后端）——集群内 Deployment + Service + PVC -----------------
+redis:
+  # 默认在集群内起一个 redis；RAGSPINE_REDIS_URL 自动指向它。
+  enabled: true
+  image: redis:7-alpine
+  port: 6379
+  # 外部 redis 地址：仅当 redis.enabled=false 时用作 RAGSPINE_REDIS_URL。
+  url: ""
+  resources: {}
+  persistence:
+    # redis AOF 持久化卷（appendonly yes）。
+    size: 1Gi
+    # accessMode 留空＝用集群 StorageClass 默认；通常 ReadWriteOnce。
+    accessMode: ReadWriteOnce
+    storageClass: ""
+
+# ---- Postgres / pgvector（完整端到端的外部向量库）-----------------------------
+# enabled=true 时起一个 pgvector/pgvector 服务，并把 RAGSPINE_PG_URL 指向它。
+# pgvector adapter 经 RAGSPINE_PG_URL 真正联网连此 Postgres（仅当 vectorStore=pgvector 时被实例化）。
+postgres:
+  enabled: false
+  image: pgvector/pgvector:pg17
+  port: 5432
+  auth:
+    # 这些值同时喂 postgres 容器（POSTGRES_*）与拼装 RAGSPINE_PG_URL。
+    username: ragspine
+    password: ragspine
+    database: ragspine
+  resources: {}
+  persistence:
+    size: 8Gi
+    accessMode: ReadWriteOnce
+    storageClass: ""
+
+# ---- Qdrant（前瞻性接线，见诚实说明）-----------------------------------------
+# 诚实说明：当前 ServiceConfig 的 make_vector_store("qdrant") 不接收服务 URL（config 不传 kwargs），
+# 跑的是 Qdrant LOCAL 进程内模式（:memory:）。故 enabled=true 会起 qdrant 服务（Deployment+Service+PVC）
+# 但 app 当前【不会经网络连它】——此服务为「把 Qdrant URL 接进 ServiceConfig」这一后续步骤预备。
+# 今天要外部、联网、共享的向量库，请用 postgres（pgvector）。
+qdrant:
+  enabled: false
+  image: qdrant/qdrant:latest
+  # HTTP 端口（6333）；gRPC 6334 此处不暴露。
+  port: 6333
+  resources: {}
+  persistence:
+    size: 8Gi
+    accessMode: ReadWriteOnce
+    storageClass: ""
+
+# ---- 共享数据 PVC：挂在 server + worker 的 /var/lib/ragspine -------------------
+# 持久化 sqlite 库 + 上传目录（对应 compose 的命名卷 ragspine-data）。
+# 注意：accessMode=ReadWriteOnce 时 server 与 worker 两个 pod 须调度到【同一节点】才能共挂
+# （kind 默认单节点，满足）；多节点请用 ReadWriteMany 的 StorageClass，或改用外部后端（pgvector）。
+persistence:
+  enabled: true
+  size: 8Gi
+  accessMode: ReadWriteOnce
+  storageClass: ""
+
+# ---- 机密 -> 仅当填值时才渲染一个 Secret，并作为 env 注入（SDK 自行读取）---------
+# 这些是 *_API_KEY（非 RAGSPINE_* 旋钮）：anthropic / openai SDK 直接从环境读取。
+secrets:
+  # provider=anthropic 时必填。
+  anthropicApiKey: ""
+  # embedding=openai 时必填。
+  openaiApiKey: ""
+
+# ---- 容器安全上下文 -----------------------------------------------------------
+# 镜像内以 uid 10001（ragspine 用户）运行；fsGroup=10001 让 kubelet 把挂载卷改为该组可写，
+# 否则新建 PVC 默认 root 属主、uid 10001 进程无法写入 /var/lib/ragspine。
+podSecurityContext:
+  fsGroup: 10001
+
+# ---- Ingress（默认关闭）------------------------------------------------------
+ingress:
+  enabled: false
+  className: ""
+  host: ragspine.local
+  annotations: {}

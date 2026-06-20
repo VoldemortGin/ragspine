@@ -120,8 +120,10 @@ URL 接进 ServiceConfig」这一**后续步骤**预备（属本次部署层的 
 `COPY`（`src/` `scripts/` `config/` `data/`）拼装，绝不 `COPY . .`，故无论 `.dockerignore` 是否
 被某次构建上下文采用，测试与缓存都不会进镜像。
 
-## 下一步：Helm
+## Kubernetes：Helm chart（已落地）
 
-Kubernetes 的 Helm chart 是**明确的后续步骤**，本次不做（见 PRD）。Compose 先把
-「一条命令起离线栈、profile 接真实后端」的 env 契约钉死，Helm 复用同一镜像与同一套
-`RAGSPINE_*` 注入即可。
+Kubernetes 的 Helm chart 已落地，见 [`deploy/helm/ragspine/`](helm/ragspine/)（快速开始：
+[`deploy/helm/README.md`](helm/README.md)）。它复用**同一个镜像**（`ragspine:local`）与**同一套
+`RAGSPINE_*` 注入**：Compose 的 `app`/`worker`/`redis` 映射为 Deployment，命名卷映射为共享数据
+PVC（`/var/lib/ragspine`），`postgres`/`qdrant` profile 映射为 `values.yaml` 旋钮，`env_file`
+机密映射为按需渲染的 `Secret`。默认 `helm install` 即离线精简栈（mock + sqlite_vec，无需 key）。

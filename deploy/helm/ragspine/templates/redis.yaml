@@ -1,0 +1,83 @@
+{{- if .Values.redis.enabled }}
+# 集群内 Redis（任务队列后端）——对应 compose 的 redis 服务。Deployment + Service + PVC。
+# RAGSPINE_REDIS_URL 在 configmap-env 里自动指向此 Service。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "ragspine.redisFullname" . }}
+  labels:
+    {{- include "ragspine.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+spec:
+  accessModes:
+    - {{ .Values.redis.persistence.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.redis.persistence.size }}
+  {{- if .Values.redis.persistence.storageClass }}
+  storageClassName: {{ .Values.redis.persistence.storageClass | quote }}
+  {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ragspine.redisFullname" . }}
+  labels:
+    {{- include "ragspine.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "ragspine.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: redis
+  template:
+    metadata:
+      labels:
+        {{- include "ragspine.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: redis
+    spec:
+      containers:
+        - name: redis
+          image: {{ .Values.redis.image | quote }}
+          # appendonly yes：AOF 持久化到 PVC（对应 compose 同款命令）。
+          args: ["redis-server", "--appendonly", "yes"]
+          ports:
+            - name: redis
+              containerPort: {{ .Values.redis.port }}
+              protocol: TCP
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          {{- with .Values.redis.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "ragspine.redisFullname" . }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ragspine.redisFullname" . }}
+  labels:
+    {{- include "ragspine.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+spec:
+  type: ClusterIP
+  ports:
+    - name: redis
+      port: {{ .Values.redis.port }}
+      targetPort: redis
+      protocol: TCP
+  selector:
+    {{- include "ragspine.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+{{- end }}

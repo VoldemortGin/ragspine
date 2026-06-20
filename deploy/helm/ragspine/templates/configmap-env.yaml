@@ -1,0 +1,44 @@
+# 非机密 RAGSPINE_* 环境变量（由 values 渲染）。server 与 worker 经 envFrom 共享。
+# 每个键的真实消费者见 src/ragspine/service/config.py 的 ServiceConfig.from_env；
+# RAGSPINE_PG_URL 例外——由 pgvector adapter 直接读环境（非 ServiceConfig 旋钮）。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "ragspine.envConfigMapName" . }}
+  labels:
+    {{- include "ragspine.labels" . | nindent 4 }}
+data:
+  # ---- LLM provider（默认 mock，离线确定性，无需 key）----
+  RAGSPINE_PROVIDER: {{ .Values.llm.provider | quote }}
+  {{- if .Values.llm.model }}
+  RAGSPINE_MODEL: {{ .Values.llm.model | quote }}
+  {{- end }}
+  {{- if .Values.llm.baseUrl }}
+  RAGSPINE_BASE_URL: {{ .Values.llm.baseUrl | quote }}
+  {{- end }}
+  # ---- 向量存储 / 向量化 / 持久化策略 ----
+  RAGSPINE_VECTOR_STORE: {{ .Values.vectorStore | quote }}
+  RAGSPINE_EMBEDDING: {{ .Values.embedding | quote }}
+  RAGSPINE_PERSISTENCE_POLICY: {{ .Values.persistencePolicy | quote }}
+  # ---- 任务队列（worker 必需）----
+  {{- if .Values.redis.enabled }}
+  RAGSPINE_REDIS_URL: {{ printf "redis://%s:%v/0" (include "ragspine.redisFullname" .) .Values.redis.port | quote }}
+  {{- else if .Values.redis.url }}
+  RAGSPINE_REDIS_URL: {{ .Values.redis.url | quote }}
+  {{- end }}
+  {{- if .Values.postgres.enabled }}
+  # pgvector 连接：指向集群内 postgres 服务。【非 ServiceConfig 旋钮】——由 pgvector adapter
+  # 直接 os.environ.get('RAGSPINE_PG_URL') 读取，仅当 vectorStore=pgvector 时 adapter 才被实例化。
+  RAGSPINE_PG_URL: {{ printf "postgresql://%s:%s@%s:%v/%s" .Values.postgres.auth.username .Values.postgres.auth.password (include "ragspine.postgresFullname" .) .Values.postgres.port .Values.postgres.auth.database | quote }}
+  {{- end }}
+  {{- if .Values.qdrant.enabled }}
+  # 诚实说明：当前 make_vector_store("qdrant") 跑进程内 :memory: 模式，ServiceConfig 尚无 Qdrant-URL env，
+  # 故此处【不】注入任何 qdrant 连接变量——qdrant 服务为后续「把 URL 接进 ServiceConfig」预备（见 values.yaml）。
+  {{- end }}
+  # ---- 持久化路径：落在共享数据卷 /var/lib/ragspine（PVC 挂载）----
+  RAGSPINE_DB_PATH: /var/lib/ragspine/fact_metric.db
+  RAGSPINE_CHUNK_DB_PATH: /var/lib/ragspine/narrative.db
+  RAGSPINE_MAPPING_DB_PATH: /var/lib/ragspine/mapping.db
+  RAGSPINE_QUEUE_DB_PATH: /var/lib/ragspine/review_queue.db
+  RAGSPINE_MANIFEST_DB_PATH: /var/lib/ragspine/manifest.db
+  RAGSPINE_ALLOWED_UPLOAD_ROOT: /var/lib/ragspine/uploads

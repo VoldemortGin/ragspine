@@ -1,0 +1,78 @@
+{{- if .Values.qdrant.enabled }}
+# 集群内 Qdrant——对应 compose 的 qdrant profile。Deployment + Service + PVC。
+# 诚实说明：当前 make_vector_store("qdrant") 跑进程内 :memory: 模式，ServiceConfig 尚无 Qdrant-URL env，
+# 故 app 当前【不会经网络连此服务】——它为「把 Qdrant URL 接进 ServiceConfig」这一后续步骤预备
+# （网络化接线，见 values.yaml）。今天要外部联网向量库请用 postgres（pgvector）。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "ragspine.qdrantFullname" . }}
+  labels:
+    {{- include "ragspine.labels" . | nindent 4 }}
+    app.kubernetes.io/component: qdrant
+spec:
+  accessModes:
+    - {{ .Values.qdrant.persistence.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.qdrant.persistence.size }}
+  {{- if .Values.qdrant.persistence.storageClass }}
+  storageClassName: {{ .Values.qdrant.persistence.storageClass | quote }}
+  {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ragspine.qdrantFullname" . }}
+  labels:
+    {{- include "ragspine.labels" . | nindent 4 }}
+    app.kubernetes.io/component: qdrant
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "ragspine.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: qdrant
+  template:
+    metadata:
+      labels:
+        {{- include "ragspine.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: qdrant
+    spec:
+      containers:
+        - name: qdrant
+          image: {{ .Values.qdrant.image | quote }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.qdrant.port }}
+              protocol: TCP
+          volumeMounts:
+            - name: data
+              mountPath: /qdrant/storage
+          {{- with .Values.qdrant.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "ragspine.qdrantFullname" . }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ragspine.qdrantFullname" . }}
+  labels:
+    {{- include "ragspine.labels" . | nindent 4 }}
+    app.kubernetes.io/component: qdrant
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ .Values.qdrant.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "ragspine.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: qdrant
+{{- end }}
