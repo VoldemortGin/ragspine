@@ -1,4 +1,4 @@
-# RAGSpine —— 一键自托管 Docker Compose 编排（落地 docs/prd-deployment-packaging.md）。
+# RAGSpine —— 一键自托管 Docker Compose 编排（落地 deploy/README.md）。
 #
 # 设计：RAGSPINE_* 环境变量注入到现成的 ServiceConfig（src/ragspine/service/config.py），
 # 不引入任何新配置系统。其中 16 个旋钮由 ServiceConfig.from_env 读取；两个 RAGSPINE_PG_* 例外

@@ -1,6 +1,6 @@
 """Qdrant 适配器：把 VectorStore 缝落到 Qdrant（HNSW 向量库）的 LOCAL 模式（进程内 / 零服务）。
 
-第三个真实 VectorStore adapter（落地 docs/prd-vector-store-seam.md 的 adapter roadmap #3），
+第三个真实 VectorStore adapter（见 src/ragspine/retrieval/docs/vector-store.md 的 adapter #3），
 也是【第一个 approximate 后端】——它带来 conformance 的「exact vs approximate」能力旗标。
 驱动用 **qdrant-client**（Apache-2.0，permissive，过 ADR 0009 的 ≤Apache-2.0 许可门，同 sqlite-vec）。
 延迟 import，behind `[vector]` extra；零依赖默认仍是 InProcessVectorStore。
@@ -33,7 +33,7 @@ VectorHit.id 原样回传【原始字符串】。metadata 存进 payload 的 __m
 
 诚实边界（持久化）：path= 落盘即把向量（含 RESTRICTED 块的衍生向量）写入本地 Qdrant 存储——
 与 sqlite-vec 落盘同属 at-rest 衍生面（向量在自有库、不进 prompt）；默认 :memory: 无此问题，
-落盘护栏见 docs/prd-vector-store-seam.md 的持久化增量。
+落盘护栏见 src/ragspine/retrieval/docs/vector-store.md 的持久化增量。
 """
 
 import uuid

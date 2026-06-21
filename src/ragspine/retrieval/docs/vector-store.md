@@ -6,13 +6,12 @@ covers:
   - src/ragspine/retrieval/vector/adapters/qdrant.py
   - src/ragspine/retrieval/vector/persistence_policy.py
   - src/ragspine/retrieval/lexical/retrieval.py
-verified-against: b56e4668dce8fad0479246c25894f3dd8c1abae1
+verified-against: b81320e1b9604a0be3d5f24fdaf3ce651f4832a5
 ---
 
 # VectorStore seam — the pluggable vector index, and how it wires into retrieval
 
-Deep dive behind [`docs/prd-vector-store-seam.md`](../../../../docs/prd-vector-store-seam.md).
-The PRD is the originating spec; this is the live contract. Two halves:
+本文件是 VectorStore 缝的权威 live 契约（原始 PRD 已退役，历史见 git）。Two halves:
 
 1. **The seam** (`vector/store.py`) — a `Protocol` + a zero-dependency offline default, with the
    three invariants (provenance / isolation / determinism) bound by `tests/conformance/`.

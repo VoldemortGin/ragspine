@@ -1,6 +1,6 @@
 """VectorStore 不变量绑定测试（conformance·TDD 红色阶段）。
 
-落地 docs/prd-vector-store-seam.md「Invariant binding」与 docs/prd-breadth-via-adapters.md
+见 src/ragspine/retrieval/docs/vector-store.md「Invariant binding」与 docs/prd-breadth-via-adapters.md
 「Invariant-binding conformance kit」：把 RAGSpine 的代码级不变量【绑死在 VectorStore
 这条缝上】，对【每一个注册实现】参数化断言。任何 adapter（含第三方）只要登记进
 conftest.VECTOR_STORE_FACTORIES 就必须通过——破坏脊柱的实现直接 CI 红，而非生产事故。

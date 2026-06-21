@@ -1,6 +1,6 @@
 """pgvector 适配器：把 VectorStore 缝落到 PostgreSQL 的 pgvector 扩展（网络化 / 共享持久化）。
 
-第二个真实 VectorStore adapter（落地 docs/prd-vector-store-seam.md 的 adapter roadmap #2）。
+第二个真实 VectorStore adapter（见 src/ragspine/retrieval/docs/vector-store.md 的 adapter #2）。
 驱动用 **pg8000**（纯 Python、**BSD**，permissive）——【不用】psycopg（LGPL，被 ADR 0009
 的 ≤Apache-2.0 许可门排除）。延迟 import，behind `[vector]` extra；零依赖默认仍是 InProcessVectorStore。
 

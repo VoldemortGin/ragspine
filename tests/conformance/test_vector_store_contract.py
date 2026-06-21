@@ -1,4 +1,4 @@
-"""VectorStore 合约测试（conformance·TDD 红色阶段，落地 docs/prd-vector-store-seam.md）。
+"""VectorStore 合约测试（conformance·TDD 红色阶段，见 src/ragspine/retrieval/docs/vector-store.md）。
 
 参数化到 conftest.VECTOR_STORE_FACTORIES 的每个实现——内存默认实现现在，
 Qdrant/pgvector/FAISS 适配器将来——共用这一套行为合约。只验证外部可观测行为，

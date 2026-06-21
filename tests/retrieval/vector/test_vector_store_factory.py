@@ -1,4 +1,4 @@
-"""make_vector_store 工厂测试（落地 docs/prd-vector-store-seam.md 的 config-string 选择）。
+"""make_vector_store 工厂测试（见 src/ragspine/retrieval/docs/vector-store.md 的 config-string 选择）。
 
 范式同 ragspine.retrieval.vector.embedding_backends.make_embedding_backend：把「选哪个
 向量存储」从改代码降为一个 spec/env。默认 None＝不注入具体 store（检索器用内置内存默认）。

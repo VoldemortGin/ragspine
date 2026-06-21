@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# RAGSpine 部署镜像（落地 docs/prd-deployment-packaging.md）。
+# RAGSpine 部署镜像（落地 deploy/README.md）。
 #
 # 多阶段、uv 驱动：builder 在隔离层里把 ragspine[service,vector] 装进 /opt/venv，runtime
 # 只拷该 venv + 脚本运行所需的运行时文件，得到一个精简、不可变的镜像。

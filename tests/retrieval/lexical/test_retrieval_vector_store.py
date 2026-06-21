@@ -1,4 +1,4 @@
-"""HybridRetriever 接入 VectorStore 缝（落地 docs/prd-vector-store-seam.md 的「wiring」步）。
+"""HybridRetriever 接入 VectorStore 缝（见 src/ragspine/retrieval/docs/vector-store.md 的「wiring」步）。
 
 把向量打分从内联 cosine 暴力扫委托给可注入的 VectorStore（默认 InProcessVectorStore）。
 核心断言：委托后结果与原内联实现【逐位等价】——store.query 按 (-score, id) 排序、cosine

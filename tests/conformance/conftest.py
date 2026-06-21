@@ -1,6 +1,6 @@
 """Conformance 测试夹共享夹具：把每条用例参数化到【每一个注册的 VectorStore 实现】。
 
-设计意图（落地 docs/prd-vector-store-seam.md 与 docs/prd-breadth-via-adapters.md）：
+设计意图（见 src/ragspine/retrieval/docs/vector-store.md 与 docs/prd-breadth-via-adapters.md）：
     一个 Protocol -> 一套共享测试。任何 VectorStore 实现（现在只有内存默认实现
     InProcessVectorStore，将来的 Qdrant / pgvector / FAISS 适配器）只要登记到
     VECTOR_STORE_IMPLS，就【自动继承】全部合约测试与不变量绑定测试——这正是

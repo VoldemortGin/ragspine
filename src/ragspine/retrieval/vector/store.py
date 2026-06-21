@@ -1,4 +1,4 @@
-"""VectorStore 缝：可插拔向量索引 + 带过滤的 top-k 相似度查询（落地 docs/prd-vector-store-seam.md）。
+"""VectorStore 缝：可插拔向量索引 + 带过滤的 top-k 相似度查询（live 契约见 src/ragspine/retrieval/docs/vector-store.md）。
 
 这条缝只担一件事：**存向量 + 回答一次带 where 过滤的 top-k 相似度查询**。它【不】管
 BM25 / RRF 融合 / rerank——那些留在 HybridRetriever。任何实现（内存默认实现现在，

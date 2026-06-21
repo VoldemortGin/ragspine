@@ -169,7 +169,7 @@ Legend: **kind** 🛡/⭐/🔧 (own/own/adapt) · **status** ✅ have · ◐ par
 conformance kit + `HybridRetriever` delegation + `make_vector_store` config selector + `.topology()` naming +
 **three real adapters, `sqlite-vec` (embedded), `pgvector` (PostgreSQL, pg8000/BSD), and `qdrant` (HNSW,
 local mode)**, all conformance-bound behind `[vector]` (qdrant the first approximate-capability backend) — see
-[`prd-vector-store-seam.md`](prd-vector-store-seam.md) and the deep dive
+the live contract / deep dive
 [`vector-store.md`](../src/ragspine/retrieval/docs/vector-store.md); what remains there is **more adapters**
 (Milvus/FAISS, P1). The `SourceConnector` **seam is now shipped** (Protocol + `FilesystemConnector` default +
 `make_source_connector` config selector + entry-point discovery + provenance conformance pack — see the deep
@@ -181,6 +181,17 @@ are now formalized** (behavior-preserving lifts of existing code — a `mime →
 and [`chunker.md`](../src/ragspine/retrieval/docs/chunker.md)); the open commodity surface there is filling out
 `Extractor` **formats** (DOCX/HTML/MD/CSV, P1) and `Chunker` **strategies** (semantic/contextual/parent-child,
 P1) — exactly the surface that should be *adapted*, not authored.
+
+### 已完成并退役的 PRD（live 契约见下）
+
+These three originating PRDs shipped in full and were retired; their history lives in git. The work they
+tracked now lives as live contracts / docs, and any remaining slices fold into the matrix above:
+
+- **VectorStore seam** — complete; live contract `src/ragspine/retrieval/docs/vector-store.md` (Milvus/FAISS
+  remain as **more adapters** in the matrix above).
+- **Deployment / Helm** — shipped (Compose + Helm); live docs `deploy/README.md` + `deploy/helm/README.md`.
+- **Pipeline topology** — shipped; live mechanism `HybridRetriever.topology()` + the git-ignored
+  `docs/generated/` renders.
 
 ## Phasing
 
@@ -204,7 +215,7 @@ P1) — exactly the surface that should be *adapted*, not authored.
   rerank adapters (cross-encoder/Cohere/BGE), query-transform strategies (multi-query/HyDE/self-query),
   the first 2–3 `SourceConnector`s (**filesystem ✅ shipped** → S3 → HTTP/crawl). *(Vector adapters pgvector and Qdrant
   already shipped in P0/P1, and **native ANN/KNN with exact re-rank for all three has since shipped too**; the next
-  vector adapter is Milvus — see [`prd-vector-store-seam.md`](prd-vector-store-seam.md).)*
+  vector adapter is Milvus — see the live contract [`vector-store.md`](../src/ragspine/retrieval/docs/vector-store.md).)*
 - **P2 — governance & ops depth.** `FactStore` Protocol (DuckDB/Postgres), `TraceSink` → OTel (privacy-gated),
   incremental sync / deletion-propagation across stores (a 🛡 lineage concern), RAGAS-compatible eval export.
 
@@ -292,6 +303,6 @@ CI-tested path; until then it lives as a clearly-labeled experimental adapter.
 - The capability matrix is the canonical breadth backlog. Keep it current: a seam moves ✗→◐→✅ as its
   Protocol, default, adapter, and conformance land. When all seams are ✅, "general-purpose" is *demonstrated*
   (ADR 0003), not asserted.
-- Complements [`prd-pipeline-topology-export.md`](prd-pipeline-topology-export.md): once backends are
-  registry-selected, `.topology()` can render *which* backend each seam resolved to — the diagram tells the
-  truth about the assembled stack, adapters included.
+- Pairs with the shipped pipeline-topology export (`HybridRetriever.topology()` + the git-ignored
+  `docs/generated/topology*` renders): once backends are registry-selected, `.topology()` renders *which*
+  backend each seam resolved to — the diagram tells the truth about the assembled stack, adapters included.

@@ -6,7 +6,7 @@ Kubernetes。与 [`deploy/compose.yaml`](../compose.yaml) **同源同设计**：
 sqlite_vec，无需任何 API key），真实后端经 `values.yaml` 旋钮选择性接入；配置纯走 `RAGSPINE_*`
 环境变量注入到现成的 `ServiceConfig`（`src/ragspine/service/config.py`），不引入任何新配置系统。
 
-> 设计与取舍见 [`docs/prd-deployment-packaging.md`](../../docs/prd-deployment-packaging.md)。
+> 设计与取舍见 [`deploy/README.md`](../README.md)。
 > Compose 已把 env 契约钉死，本 chart 是**翻译**而非重设计。
 
 ## 组成

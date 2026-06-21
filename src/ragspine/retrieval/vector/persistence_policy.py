@@ -1,6 +1,6 @@
 """持久化策略缝：决定某个块的向量是否可写盘（at-rest）。一条缝、一项决策、零编排。
 
-落地 docs/prd-vector-store-seam.md 的「敏感度门控持久化」增量。范式同其它缝（Protocol +
+落地 src/ragspine/retrieval/docs/vector-store.md 的「敏感度门控持久化」增量。范式同其它缝（Protocol +
 离线默认 + 工厂选择 + 不变量绑定）；【刻意保持单方法】最低公约面——只回答「这个块的向量
 能不能落盘」，不带任何 god-interface 的生命周期钩子 / 配置对象，免得滑向重型框架的过度抽象。
 

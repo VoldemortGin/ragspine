@@ -5,7 +5,7 @@
 环境变量【选择性接入】——不改一行代码、不引入任何新配置系统，纯注入到现成的
 `ServiceConfig`（`src/ragspine/service/config.py`）。
 
-> 设计与取舍见 [`docs/prd-deployment-packaging.md`](../docs/prd-deployment-packaging.md)。
+> 本文件即部署层的设计与取舍说明（原始 PRD 已退役，历史见 git）。
 
 ## 组成
 
