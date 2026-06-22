@@ -4,14 +4,37 @@
 - 与既有的 ReviewQueue（SME 业务复核队列）彻底区分——此处是 worker/job 队列。
 - v1 落地 RQ+Redis，但保留 TaskQueue 协议，未来可平替为 Celery。
 - rq/redis 在 RQQueue 内部延迟 import，不装也能 import 本模块、用 FakeQueue 跑离线测试。
-- job payload 必须是纯可序列化 dict；func_path 是点路径，末段为可调用对象，签名 fn(payload)->dict。
+- job payload 必须是纯可序列化 dict；func 是点路径或可调用对象，末段签名 fn(payload)->dict。
+
+与 corespine 的关系（queue 缝）：
+- JobStatus（id/status/result/error 状态快照）直接复用 corespine 中性核，全家族同一形状。
+- 本模块 TaskQueue 协议在概念上扩展 corespine.TaskQueue（enqueue/get）：额外约定 RQ 专属
+  kwargs（timeout/max_retries/result_ttl/failure_ttl）与点路径 / 可调用 func，供 RQQueue 落地。
+- RQ 专属（Retry 映射、map_rq_status、ping、JobError.stage/retryable）留在 ragspine，不外迁；
+  JobStatus.error 的 {type,message,stage,retryable} 形状契约亦在本地维护（经 error_to_dict 归一）。
 """
 
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
 from importlib import import_module
 from typing import Any, Protocol, cast, runtime_checkable
+
+from corespine import CorespineError, JobStatus, error_to_dict
+from corespine import TaskQueue as _CoreTaskQueue
+from corespine.queue.task_queue import JobFunc
+
+__all__ = [
+    "JOB_QUEUED",
+    "JOB_STARTED",
+    "JOB_FINISHED",
+    "JOB_FAILED",
+    "JobStatus",
+    "JobError",
+    "TaskQueue",
+    "FakeQueue",
+    "RQQueue",
+    "map_rq_status",
+]
 
 # job 状态常量（与 RQ 语义对齐后的统一口径）
 JOB_QUEUED = "queued"
@@ -20,29 +43,32 @@ JOB_FINISHED = "finished"
 JOB_FAILED = "failed"
 
 
-@dataclass
-class JobStatus:
-    id: str
-    status: str
-    result: dict[str, Any] | None = None
-    error: dict[str, Any] | None = None
-    # 失败时 error 形如：{"type": str, "message": str, "stage": str, "retryable": bool}
+class JobError(CorespineError):
+    """job 执行内部抛出的受控错误：携带失败阶段与是否可重试。
 
+    继承家族统一异常基类，稳定 code 为 "job.error"（ADR errors 缝）：retryable 作实例级
+    覆盖，stage 进 context；stage/retryable 仍作实例属性暴露，保持既有调用方读取方式不变。
+    """
 
-class JobError(Exception):
-    """job 执行内部抛出的受控错误：携带失败阶段与是否可重试。"""
+    code = "job.error"
 
     def __init__(self, message: str, *, stage: str = "execution", retryable: bool = False) -> None:
-        super().__init__(message)
+        super().__init__(message, retryable=retryable, stage=stage)
         self.stage = stage
-        self.retryable = retryable
 
 
 @runtime_checkable
-class TaskQueue(Protocol):
+class TaskQueue(_CoreTaskQueue, Protocol):
+    """ragspine 的任务队列协议：扩展 corespine.TaskQueue（enqueue/get）。
+
+    在中性核的基础上，enqueue 额外约定 RQ 专属 kwargs（timeout/max_retries/result_ttl/
+    failure_ttl）；func 沿用中性核的 JobFunc | str（点路径或可调用对象），ragspine 落地
+    时主用点路径字符串。任一本协议实现都满足 corespine.TaskQueue 的结构契约。
+    """
+
     def enqueue(
         self,
-        func_path: str,
+        func: JobFunc | str,
         payload: dict[str, Any],
         *,
         job_id: str | None = None,
@@ -68,26 +94,30 @@ def map_rq_status(rq_status: str | None) -> str:
     return JOB_QUEUED
 
 
-def _resolve_callable(func_path: str) -> Callable[..., Any]:
-    """点路径 -> 可调用对象（末段为属性名）。"""
-    module_path, _, attr = func_path.rpartition(".")
+def _resolve_callable(func: JobFunc | str) -> Callable[..., Any]:
+    """可调用对象原样；点路径字符串 -> 可调用对象（末段为属性名）。"""
+    if callable(func):
+        return func
+    module_path, _, attr = func.rpartition(".")
     if not module_path:
-        raise ValueError(f"func_path must be a dotted path: {func_path!r}")
+        raise ValueError(f"func must be a callable or dotted path: {func!r}")
     mod = import_module(module_path)
     # getattr on a dynamically imported module yields Any; the contract is fn(payload)->dict.
     return cast("Callable[..., Any]", getattr(mod, attr))
 
 
 def _error_dict_from_exc(exc: BaseException) -> dict[str, Any]:
-    if isinstance(exc, JobError):
-        stage, retryable = exc.stage, exc.retryable
-    else:
-        stage, retryable = "execution", False
+    # 经 corespine.error_to_dict 归一后，再适配回 JobStatus.error 的对外契约
+    # {type, message, stage, retryable}：stage 由 context 承载（JobError 写入），
+    # 非受控异常 context 为空 -> stage 回退 "execution"。
+    normalized = error_to_dict(exc)
+    context = cast("dict[str, Any]", normalized.get("context", {}))
+    stage = context.get("stage", "execution")
     return {
-        "type": type(exc).__name__,
-        "message": str(exc),
+        "type": normalized["type"],
+        "message": normalized["message"],
         "stage": stage,
-        "retryable": retryable,
+        "retryable": normalized["retryable"],
     }
 
 
@@ -99,7 +129,7 @@ class FakeQueue:
 
     def enqueue(
         self,
-        func_path: str,
+        func: JobFunc | str,
         payload: dict[str, Any],
         *,
         job_id: str | None = None,
@@ -114,7 +144,7 @@ class FakeQueue:
 
         jid = job_id or uuid.uuid4().hex[:12]
         try:
-            fn = _resolve_callable(func_path)
+            fn = _resolve_callable(func)
             result = fn(payload)
             self._jobs[jid] = JobStatus(id=jid, status=JOB_FINISHED, result=result)
         except Exception as exc:  # 内联失败不外抛，记进 JobStatus
@@ -144,7 +174,7 @@ class RQQueue:
 
     def enqueue(
         self,
-        func_path: str,
+        func: JobFunc | str,
         payload: dict[str, Any],
         *,
         job_id: str | None = None,
@@ -159,7 +189,7 @@ class RQQueue:
         queue = self._queue(connection)
         retry = rq.Retry(max=max_retries) if max_retries else None
         job = queue.enqueue(
-            func_path,
+            func,
             payload,
             job_id=job_id,
             job_timeout=timeout,
