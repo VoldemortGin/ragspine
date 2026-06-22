@@ -6,7 +6,7 @@ covers:
   - src/ragspine/retrieval/vector/adapters/qdrant.py
   - src/ragspine/retrieval/vector/persistence_policy.py
   - src/ragspine/retrieval/lexical/retrieval.py
-verified-against: b81320e1b9604a0be3d5f24fdaf3ce651f4832a5
+verified-against: 3c6bf0b
 ---
 
 # VectorStore seam — the pluggable vector index, and how it wires into retrieval

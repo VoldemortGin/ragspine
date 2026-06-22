@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/extraction/registry.py
-verified-against: 8287547deb43bdd510edde62b4addf494331cb1f
+verified-against: 3c6bf0b
 ---
 
 # Extractor registry — mime → Extractor dispatch
