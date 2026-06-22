@@ -4,6 +4,8 @@
 > and agent orchestration, with **anti-fabrication** and **source provenance** built in —
 > no Dify, no LangGraph, no DSL. Just composable Python.
 
+> **🤖 给 AI / LLM:** 用本库前先读 [`llms.txt`](llms.txt)（精简索引）与 [`docs/llms/`](docs/llms/)（完整 API / recipes / 陷阱）；`pip install` 后这些文档随包位于 `site-packages/ragspine/_llms/`。
+
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Tests](https://img.shields.io/badge/tests-1295%20passing-brightgreen)

@@ -139,6 +139,12 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/ragspine"]
 
+# 面向 AI 消费者的使用文档随 wheel 出货，装后在 site-packages/ragspine/_llms/ 可读
+# （llms.txt 索引 + docs/llms/*.md）。映射到包内 _llms/，不污染 ragspine 命名空间的导入面。
+[tool.hatch.build.targets.wheel.force-include]
+"llms.txt" = "ragspine/_llms/llms.txt"
+"docs/llms" = "ragspine/_llms/docs"
+
 # 本地开发把 corespine 指向同家族目录里的源码（可编辑）；发布层面二者各自独立发版。
 [tool.uv.sources]
 corespine = { path = "../corespine", editable = true }

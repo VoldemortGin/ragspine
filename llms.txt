@@ -1,0 +1,75 @@
+# ragspine
+
+> Framework-free backend RAG engine（无框架的后端 RAG），纯 Python 装配 —— 不是要你臣服的框架。
+> 确定性**双通道检索**（结构化数值 + 叙事 RAG，由 agent 路由统一）+ **反捏造**（数据不在就确定性
+> 拒答，不靠 prompt 自觉）+ **来源溯源**（每条答案带文档 + locator）。所有外部依赖（LLM / embedding /
+> reranker / OCR / vector store / task queue）都是注入式 `Protocol`，核心 import 零 SDK、可全离线跑
+> 确定性 `MockProvider`。本文件为 AI/LLM 消费者写，所有 API、签名、示例输出均经真实运行核对。
+
+- pip 安装名：**`rag-spine`**（带连字符！`pip install rag-spine`）
+- import 名：**`import ragspine`**（无连字符）
+- Python：>= 3.10 · 版本：0.1.2 · 许可：Apache-2.0
+- 依赖 **corespine**（Spine 家族薄共享核）：6 缝（config / registry / trace / queue / errors /
+  conformance）接入它 —— 统一异常 `CorespineError`、隐私 trace 强制拒正文、`Registry` 选实现、
+  `load_from_env` 配置、`JobStatus` + `error_to_dict` 队列、`ConformanceSuite` 不变量基座。
+
+## extras 速览（按需装；GPU/CPU 运行时自适应，无需选版）
+
+| extra | 装什么 | 用于 |
+|---|---|---|
+| `[service]` | fastapi, uvicorn, rq, redis, httpx | HTTP + 异步队列层 |
+| `[pdf]` | docling | 数字 PDF 表格抽取 |
+| `[ocr]` | paddleocr | 扫描 PDF OCR（Linux + NVIDIA GPU） |
+| `[llm]` | anthropic, openai | 真实 LLM / OpenAI embedding provider（延迟 import） |
+| `[embed]` | sentence-transformers | 向量通道的真实 embedding 模型 |
+| `[vector]` | sqlite-vec, pg8000, qdrant-client | 持久化 `VectorStore`：sqlite-vec / pgvector / qdrant |
+| `[all]` | 上述全部（自引用聚合） | 一键装齐功能依赖（不含 dev） |
+| `[dev]` | pytest, ruff, mypy, build, twine … | 测试 + 构建 |
+
+装法：`pip install "rag-spine[service,vector]"`（注意 pip 名带连字符）。
+
+## 文档地图（docs/llms/）
+
+- [overview.md](docs/llms/overview.md) —— 是什么、解决什么；核心概念（双通道 BM25+向量+RRF、
+  chunking、provenance / 反捏造、VectorStore 缝）、与 corespine 的关系、架构主线。**先读这篇建立心智。**
+- [api.md](docs/llms/api.md) —— 使用者主要入口的**真实签名 + 契约**，按子系统分节
+  （retrieval / ingestion / extraction / service）。**写代码时查这篇。**
+- [recipes.md](docs/llms/recipes.md) —— 可运行最小示例（**全部离线、零网络、不下模型**，
+  deterministic embedding + InProcessVectorStore + FakeQueue，逐个实跑过并附真实输出）。**照抄改写用这篇。**
+- [gotchas.md](docs/llms/gotchas.md) —— 易错点：pip 名 `rag-spine` 但 import `ragspine`、
+  各能力装对应 extra、GPU 自适应、向量后端别名、消费 corespine（隐私 trace 拒正文、统一异常）。**别踩坑读这篇。**
+
+## 30 秒离线 hello-world（确定性 embedding + InProcessVectorStore，可直接运行）
+
+```python
+from ragspine.retrieval.chunking.chunking import chunk_document, DocumentMeta
+from ragspine.retrieval.lexical.retrieval import HybridRetriever
+from ragspine.retrieval.vector.embedding_backends import make_embedding_backend
+from ragspine.retrieval.vector.store import InProcessVectorStore
+
+# 1) 一段文本 -> 切块（段落粒度，确定性 chunk_id）。小 max_chars 仅为演示出多个块。
+text = (
+    "中国内地FY2024的REVENUE营收同比增长强劲，两位数上升。\n\n"
+    "本期运营成本下降，效率与利润率显著改善。\n\n"
+    "市场份额稳步扩大，新签客户数量创历史新高。"
+)
+meta = DocumentMeta(doc_id="ACME_FY2024.pptx", title="业绩回顾", topic="finance", entity="ACME_CN")
+chunks = chunk_document(text, meta, max_chars=40, overlap_chars=0)
+
+# 2) 注入【确定性词法散列】embedding 后端（离线、零网络、跨进程可复现）+ 零依赖内存向量库。
+#    不注入 embedding_backend 即纯 BM25 模式；注入后即开双通道（BM25 + 向量 + RRF 融合）。
+eb = make_embedding_backend("deterministic", dim=64)
+retriever = HybridRetriever(chunks, embedding_backend=eb, vector_store=InProcessVectorStore())
+
+# 3) 跑一次检索：返回 RRF 融合序的 RetrievalResult（带各通道得分，可解释）。
+for hit in retriever.search("REVENUE 营收 增长"):
+    print(f"{hit.chunk.chunk_id}  bm25={hit.bm25_score:.3f} vec={hit.vector_score:.3f} fused={hit.fused_score:.4f}")
+# ACME_FY2024.pptx#c0  bm25=6.410 vec=0.566 fused=0.0328   <- REVENUE 那一块排第一
+# ACME_FY2024.pptx#c1  bm25=0.474 vec=0.206 fused=0.0320
+# ACME_FY2024.pptx#c2  bm25=0.000 vec=0.354 fused=0.0161
+```
+
+诚实声明：`deterministic` 后端是**非语义**的词法散列后端（与 BM25 高度相关），用于离线 / 测试 /
+打通管线，**绝不**代表真语义召回增益 —— 真语义需 `[embed]` 的真实模型（如 Qwen3，待 GPU）。
+
+更多：完整端到端反捏造演示见 `import ragspine` 后的 `examples/minimal_rag.py`，或 `ragspine quickstart` CLI。
