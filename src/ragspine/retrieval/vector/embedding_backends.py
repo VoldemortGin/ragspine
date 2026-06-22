@@ -26,6 +26,8 @@ import os
 import re
 from typing import Any
 
+from corespine import Registry, lazy_extra_import
+
 from ragspine.agent.llm_provider import ProviderError
 from ragspine.retrieval.lexical.retrieval import EmbeddingBackend
 
@@ -109,13 +111,9 @@ class OpenAIEmbeddingBackend:
         timeout: float = 30.0,
         max_retries: int = 2,
     ):
-        try:
-            import openai
-        except ImportError as exc:
-            raise ImportError(
-                "未安装 openai SDK：pip install 'ragspine[llm]' 或 "
-                "pip install openai；离线/纯 BM25 场景无需安装。"
-            ) from exc
+        # SDK 延迟 import：缺失时由 corespine.lazy_extra_import 翻译成
+        # `pip install ragspine[llm]` 友好提示（离线/纯 BM25 场景无需安装）。
+        openai = lazy_extra_import("openai", pkg="ragspine", extra="llm")
 
         if batch_size < 1:
             raise ValueError(f"batch_size 必须 >= 1，得到 {batch_size}")
@@ -242,15 +240,10 @@ class SentenceTransformerEmbeddingBackend:
     def _load_model(self) -> Any:
         """首次调用时延迟 import sentence_transformers 并加载模型（之后复用缓存）。"""
         if self._model is None:
-            try:
-                from sentence_transformers import SentenceTransformer
-            except ImportError as exc:
-                raise ImportError(
-                    "未安装 sentence-transformers：pip install "
-                    "'ragspine[embed]' 或 pip install sentence-transformers；"
-                    "离线/纯 BM25 场景无需安装。"
-                ) from exc
-            self._model = SentenceTransformer(self.model_name, device=self.device)
+            # 重依赖延迟 import：缺失时由 corespine.lazy_extra_import 翻译成
+            # `pip install ragspine[embed]` 友好提示（离线/纯 BM25 场景无需安装）。
+            st = lazy_extra_import("sentence_transformers", pkg="ragspine", extra="embed")
+            self._model = st.SentenceTransformer(self.model_name, device=self.device)
         return self._model
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
@@ -276,10 +269,28 @@ class SentenceTransformerEmbeddingBackend:
         return vectors
 
 
+# embedding 后端缝注册表（corespine.Registry 泛化 make_*：名字->工厂 + spec 归一）。
+# 各内置后端在此登记；qwen3 / sentence-transformers / st 是同一 ST 后端的别名，
+# 三个名字都指向同一工厂（Registry 内部对名字做大小写/留白/连字符归一）。
+EMBEDDING_BACKENDS: Registry[EmbeddingBackend] = Registry("embedding_backend")
+EMBEDDING_BACKENDS.register("deterministic", DeterministicEmbeddingBackend)
+EMBEDDING_BACKENDS.register("openai", OpenAIEmbeddingBackend)
+EMBEDDING_BACKENDS.register("qwen3", SentenceTransformerEmbeddingBackend)
+EMBEDDING_BACKENDS.register("sentence-transformers", SentenceTransformerEmbeddingBackend)
+EMBEDDING_BACKENDS.register("st", SentenceTransformerEmbeddingBackend)
+
+# ST 后端的别名集合（归一后；缺省读 RAGSPINE_EMBEDDING_MODEL 仅对这些 spec 生效）。
+_ST_SPECS = frozenset({"qwen3", "sentence_transformers", "st"})
+
+
 def make_embedding_backend(spec: str | None = None, **kwargs: Any) -> EmbeddingBackend | None:
     """后端工厂：把「接通向量通道」从改代码降为一个 flag/env，默认仍为 None＝纯 BM25。
 
-    spec 取值（大小写不敏感；缺省读环境变量 RAGSPINE_EMBEDDING_BACKEND）：
+    薄封装 corespine.Registry（EMBEDDING_BACKENDS）：归一 spec 后交由 Registry 分派；
+    保留 None＝纯 BM25 默认、env RAGSPINE_EMBEDDING_BACKEND 缺省、ST 别名的 model_name
+    env 注入与 kwargs 透传。
+
+    spec 取值（大小写/留白/连字符不敏感；缺省读环境变量 RAGSPINE_EMBEDDING_BACKEND）：
         - None / 'none'                       -> None（纯 BM25+RRF，保持现状默认）
         - 'deterministic'                     -> DeterministicEmbeddingBackend（dim 等经 kwargs 透传）
         - 'openai'                            -> OpenAIEmbeddingBackend（延迟 import，缺 SDK 抛友好错）
@@ -288,27 +299,19 @@ def make_embedding_backend(spec: str | None = None, **kwargs: Any) -> EmbeddingB
                                                  （缺省 Qwen3-Embedding-0.6B；model_name 可经
                                                  kwargs 或 RAGSPINE_EMBEDDING_MODEL 覆盖；device 经
                                                  kwargs / RAGSPINE_EMBEDDING_DEVICE / 自动探测）
-        - 其他                                -> ValueError
+        - 其他                                -> ValueError（Registry 列清当前可用名）
 
     返回 EmbeddingBackend 实例或 None（可直接喂给 NarrativeIndex /
     build_narrative_retriever 的 embedding_backend 参数）。
     """
     if spec is None:
         spec = os.environ.get(EMBEDDING_BACKEND_ENV)
-    normalized = (spec or "none").strip().lower()
+    # 与 Registry._normalize 同口径地归一，用于 none 短路与 ST 别名判定。
+    normalized = (spec or "none").strip().lower().replace("-", "_").replace(" ", "_")
     if normalized == "none":
         return None
-    if normalized == "deterministic":
-        return DeterministicEmbeddingBackend(**kwargs)
-    if normalized == "openai":
-        return OpenAIEmbeddingBackend(**kwargs)
-    if normalized in ("qwen3", "sentence-transformers", "st"):
-        if "model_name" not in kwargs:
-            env_model = os.environ.get(EMBEDDING_MODEL_ENV)
-            if env_model:
-                kwargs["model_name"] = env_model
-        return SentenceTransformerEmbeddingBackend(**kwargs)
-    raise ValueError(
-        f"未知 embedding 后端 spec：{spec!r}"
-        "（可选 none / deterministic / openai / qwen3 / sentence-transformers / st）"
-    )
+    if normalized in _ST_SPECS and "model_name" not in kwargs:
+        env_model = os.environ.get(EMBEDDING_MODEL_ENV)
+        if env_model:
+            kwargs["model_name"] = env_model
+    return EMBEDDING_BACKENDS.make(normalized, **kwargs)
