@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/agent/
-verified-against: 0dae07e
+verified-against: 18a866e
 ---
 
 # agent — agent contract
