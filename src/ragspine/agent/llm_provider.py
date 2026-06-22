@@ -1,19 +1,32 @@
-"""LLM provider 抽象：AnthropicProvider（真实调用）+ MockProvider（离线确定性）。
+"""LLM provider 适配:AnthropicProvider（真实调用）+ MockProvider（离线确定性脚本）。
+
+迁到 corespine 的 chat 缝（OpenAI chat-completions 规范）：provider 实现 corespine 的
+`LLMProvider.chat(messages, *, tools=None) -> ChatCompletion`（OpenAI 形状）。AnthropicProvider
+把 OpenAI 形状 messages/tools 在内部转成 Anthropic Messages API、再把响应转回 OpenAI ChatCompletion
+（与 spineagent 同一适配模式）。MockProvider 是离线确定性脚本：零网络、零 key，按规则模拟
+query_metric 的 tool-use 循环与三态最终回答，绝不编造数字。
 
 设计约束：
 - anthropic SDK 延迟 import：不装 SDK 也能 import 本模块、跑 mock 全链路。
 - base_url 可覆盖：适配企业网关（GenAI Hub）转发 Anthropic API。
-- 默认模型名集中在 DEFAULT_ANTHROPIC_MODEL 一处。
-- 为将来 OpenAIProvider 留口：Provider 协议只约定 create_message 一个方法，
-  query_metric 的 OpenAI schema 已在 src/ragspine/agent/query_tools.py 备好。
+- SDK 自带 max_retries（撞 429 被动退避）做兜底；主动 TPM 限流由 corespine RateLimitedProvider
+  在 build_provider 处包装（见 service/config.py），两层互补。
 """
 
 import json
-from dataclasses import dataclass, field
 from datetime import date
-from typing import Protocol, cast, runtime_checkable
+from typing import Any
 
-from corespine import CorespineError
+from corespine import (
+    ChatCompletion,
+    Choice,
+    CorespineError,
+    FunctionCall,
+    LLMProvider,
+    ResponseMessage,
+    ToolCall,
+    Usage,
+)
 
 from ragspine.agent.intent import parse_intent
 
@@ -22,6 +35,14 @@ DEFAULT_ANTHROPIC_MODEL = "claude-opus-4-8"
 
 # 叙事合成提示的固定前缀：编排层与 MockProvider 共同约定
 NARRATIVE_PROMPT_PREFIX = "请仅基于以下检索片段回答问题，不得引入片段之外的信息"
+
+# Anthropic stop_reason → OpenAI finish_reason。
+_ANTHROPIC_FINISH = {
+    "end_turn": "stop",
+    "stop_sequence": "stop",
+    "max_tokens": "length",
+    "tool_use": "tool_calls",
+}
 
 
 class ProviderError(CorespineError):
@@ -35,45 +56,68 @@ class ProviderError(CorespineError):
     code = "provider.error"
 
 
-@dataclass
-class ToolCall:
-    """模型发起的一次工具调用。"""
-
-    id: str
-    name: str
-    input: dict[str, object]
+# re-export corespine 的 LLMProvider 协议（OpenAI chat 规范）；ragspine 不再自定义。
+__all__ = ["LLMProvider", "AnthropicProvider", "MockProvider", "ProviderError",
+           "DEFAULT_ANTHROPIC_MODEL", "NARRATIVE_PROMPT_PREFIX"]
 
 
-@dataclass
-class ProviderResponse:
-    """统一的响应载体：文本 + 工具调用 + 停止原因 + 原始内容（回传下一轮）。
+def _openai_tool_to_anthropic(tool: dict[str, Any]) -> dict[str, Any]:
+    """OpenAI function-tool 形状 → Anthropic 工具形状（name/description/input_schema）。"""
+    fn = tool.get("function", tool)
+    return {
+        "name": fn["name"],
+        "description": fn.get("description", ""),
+        "input_schema": fn.get("parameters", {"type": "object", "properties": {}}),
+    }
 
-    usage：本次调用的 token 用量 {"input_tokens", "output_tokens"}（用于成本/容量
-    可观测）；provider 未回传时为 None（MockProvider 即 None）。
+
+def _openai_messages_to_anthropic(
+    messages: list[dict[str, Any]],
+) -> tuple[str, list[dict[str, Any]]]:
+    """OpenAI messages → (system 字符串, Anthropic messages)。
+
+    system 角色合并进 system 参数；tool 角色转 tool_result block；assistant 的 tool_calls 转
+    tool_use block——让多轮 function-calling 的工具结果原样喂回 Anthropic。
     """
-
-    text: str
-    tool_calls: list[ToolCall] = field(default_factory=list)
-    stop_reason: str = "end_turn"
-    raw_content: list[object] = field(default_factory=list)
-    usage: dict[str, int | None] | None = None
-
-
-@runtime_checkable
-class LLMProvider(Protocol):
-    """provider 协议：发送 system+messages+tools，拿回统一响应。"""
-
-    def create_message(
-        self,
-        *,
-        system: str,
-        messages: list[dict[str, object]],
-        tools: list[dict[str, object]],
-    ) -> ProviderResponse: ...
+    system_parts: list[str] = []
+    convo: list[dict[str, Any]] = []
+    for m in messages:
+        role = m.get("role")
+        content = m.get("content")
+        if role == "system":
+            system_parts.append(str(content or ""))
+        elif role == "tool":
+            convo.append({
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": m.get("tool_call_id", ""),
+                    "content": str(content or ""),
+                }],
+            })
+        elif role == "assistant" and m.get("tool_calls"):
+            blocks: list[dict[str, Any]] = []
+            if content:
+                blocks.append({"type": "text", "text": str(content)})
+            for tc in m["tool_calls"]:
+                fn = tc["function"]
+                blocks.append({
+                    "type": "tool_use",
+                    "id": tc["id"],
+                    "name": fn["name"],
+                    "input": json.loads(fn.get("arguments") or "{}"),
+                })
+            convo.append({"role": "assistant", "content": blocks})
+        else:
+            convo.append({
+                "role": "assistant" if role == "assistant" else "user",
+                "content": str(content or ""),
+            })
+    return "\n".join(system_parts), convo
 
 
 class AnthropicProvider:
-    """真实 Claude 调用（Messages API + tool use）。SDK 延迟 import。"""
+    """真实 Claude 调用（Messages API + tool use），实现 corespine LLMProvider.chat。SDK 延迟 import。"""
 
     def __init__(
         self,
@@ -83,7 +127,7 @@ class AnthropicProvider:
         max_tokens: int = 16000,
         timeout: float = 30.0,
         max_retries: int = 2,
-    ):
+    ) -> None:
         try:
             import anthropic
         except ImportError as exc:
@@ -92,11 +136,9 @@ class AnthropicProvider:
                 "pip install anthropic；离线场景请用 --provider mock。"
             ) from exc
 
-        # 超时/重试透传给 SDK：429/5xx/超时由 SDK 原生指数退避处理，不自造退避。
-        client_kwargs: dict[str, object] = {
-            "timeout": timeout,
-            "max_retries": max_retries,
-        }
+        # 超时/重试透传给 SDK：429/5xx/超时由 SDK 原生指数退避处理（被动兜底，与
+        # corespine RateLimitedProvider 的主动 TPM 限流互补）。
+        client_kwargs: dict[str, object] = {"timeout": timeout, "max_retries": max_retries}
         if api_key is not None:
             client_kwargs["api_key"] = api_key
         if base_url is not None:
@@ -105,53 +147,58 @@ class AnthropicProvider:
         self.model = model
         self.max_tokens = max_tokens
 
-    def create_message(
-        self,
-        *,
-        system: str,
-        messages: list[dict[str, object]],
-        tools: list[dict[str, object]],
-    ) -> ProviderResponse:
+    def chat(
+        self, messages: list[dict[str, Any]], *, tools: list[dict[str, Any]] | None = None
+    ) -> ChatCompletion:
+        system, convo = _openai_messages_to_anthropic(messages)
+        kwargs: dict[str, Any] = {}
+        if tools:
+            kwargs["tools"] = [_openai_tool_to_anthropic(t) for t in tools]
         try:
             resp = self._client.messages.create(
                 model=self.model,
                 max_tokens=self.max_tokens,
                 system=system,
-                tools=tools,
-                messages=messages,
+                messages=convo,
+                **kwargs,
             )
         except Exception as exc:  # noqa: BLE001 — SDK 网络/API 异常归一到 ProviderError
-            # SDK 抛出的网络/超时/API 错误（重试耗尽后）统一边界为 ProviderError，
-            # 保留 __cause__ 便于排障；程序错误不在此路径（resp 解析阶段才可能抛）。
             raise ProviderError(f"Anthropic 调用失败：{exc}") from exc
 
-        texts: list[str] = []
-        tool_calls: list[ToolCall] = []
-        for block in resp.content:
-            if block.type == "text":
-                texts.append(block.text)
-            elif block.type == "tool_use":
-                tool_calls.append(
-                    ToolCall(id=block.id, name=block.name, input=dict(block.input))
-                )
-        return ProviderResponse(
-            text="".join(texts),
-            tool_calls=tool_calls,
-            stop_reason=resp.stop_reason,
-            raw_content=resp.content,
-            usage=_map_usage(getattr(resp, "usage", None)),
+        text = "".join(
+            b.text for b in resp.content if getattr(b, "type", None) == "text"
+        )
+        tool_calls = tuple(
+            ToolCall(id=b.id, function=FunctionCall(name=b.name, arguments=json.dumps(dict(b.input))))
+            for b in resp.content
+            if getattr(b, "type", None) == "tool_use"
+        )
+        message = ResponseMessage(
+            role="assistant", content=(text or None), tool_calls=(tool_calls or None)
+        )
+        choice = Choice(
+            index=0,
+            message=message,
+            finish_reason=_ANTHROPIC_FINISH.get(resp.stop_reason, "stop"),
+        )
+        usage: Usage | None = None
+        u = getattr(resp, "usage", None)
+        if u is not None:
+            it = getattr(u, "input_tokens", 0) or 0
+            ot = getattr(u, "output_tokens", 0) or 0
+            usage = Usage(prompt_tokens=it, completion_tokens=ot, total_tokens=it + ot)
+        return ChatCompletion(
+            choices=(choice,),
+            usage=usage,
+            model=getattr(resp, "model", self.model),
+            id=getattr(resp, "id", ""),
         )
 
 
-def _map_usage(usage: object) -> dict[str, int | None] | None:
-    """SDK resp.usage → {"input_tokens", "output_tokens"}；属性缺失则 None（防御式）。"""
-    if usage is None:
-        return None
-    input_tokens: int | None = getattr(usage, "input_tokens", None)
-    output_tokens: int | None = getattr(usage, "output_tokens", None)
-    if input_tokens is None and output_tokens is None:
-        return None
-    return {"input_tokens": input_tokens, "output_tokens": output_tokens}
+def _completion_text(text: str) -> ChatCompletion:
+    """把一段纯文本包成 OpenAI ChatCompletion（无 tool_calls，finish_reason=stop）。"""
+    msg = ResponseMessage(role="assistant", content=text)
+    return ChatCompletion(choices=(Choice(index=0, message=msg, finish_reason="stop"),))
 
 
 def _period_param(period: tuple[str, str]) -> str:
@@ -160,59 +207,51 @@ def _period_param(period: tuple[str, str]) -> str:
     return f"FY{value}" if period_type == "FY" else value
 
 
-def _last_tool_result(messages: list[dict[str, object]]) -> dict[str, object] | None:
-    """从消息序列尾部找最近一条 tool_result，解析其 JSON 内容。"""
+def _last_tool_result(messages: list[dict[str, Any]]) -> dict[str, object] | None:
+    """从消息序列尾部找最近一条 tool 角色消息（OpenAI 形状），解析其 JSON 内容。"""
     for msg in reversed(messages):
-        content = msg.get("content")
-        if not isinstance(content, list):
-            continue
-        for item in reversed(content):
-            if isinstance(item, dict) and item.get("type") == "tool_result":
-                try:
-                    return cast("dict[str, object]", json.loads(item["content"]))
-                except (TypeError, ValueError, KeyError):
-                    return None
+        if msg.get("role") == "tool":
+            content = msg.get("content")
+            try:
+                return json.loads(content) if isinstance(content, str) else None
+            except (TypeError, ValueError):
+                return None
     return None
 
 
-def _last_user_text(messages: list[dict[str, object]]) -> str:
+def _last_user_text(messages: list[dict[str, Any]]) -> str:
+    """取最近一条 user 角色消息的文本内容（OpenAI 形状）。"""
     for msg in reversed(messages):
-        content = msg.get("content")
-        if msg.get("role") == "user" and isinstance(content, str):
-            return content
+        if msg.get("role") == "user":
+            content = msg.get("content")
+            if isinstance(content, str):
+                return content
     return ""
 
 
 class MockProvider:
-    """确定性脚本化 provider：零网络、零 key，按规则模拟 tool use 循环。
+    """确定性脚本化 provider：零网络、零 key，实现 corespine chat，模拟 tool use 循环。
 
-    第一轮（无 tool_result）：用意图解析从用户话语产出 query_metric 调用；
-    第二轮（有 tool_result）：按 found / not_found / unrecognized 三态生成最终回答，
-    found 时回答必带数值与血缘，not_found 时明确说查不到，绝不编造。
+    第一轮（无 tool 结果）：用意图解析从用户话语产出 query_metric 的 tool_call（OpenAI 形状）；
+    第二轮（有 tool 结果）：按 found / not_found / unrecognized 三态生成最终回答，found 时回答必带
+    数值与血缘，not_found 时明确说查不到，绝不编造。
     """
 
-    def __init__(self, reference_date: date | None = None):
+    def __init__(self, reference_date: date | None = None) -> None:
         self.reference_date = reference_date
 
-    def create_message(
-        self,
-        *,
-        system: str,
-        messages: list[dict[str, object]],
-        tools: list[dict[str, object]],
-    ) -> ProviderResponse:
+    def chat(
+        self, messages: list[dict[str, Any]], *, tools: list[dict[str, Any]] | None = None
+    ) -> ChatCompletion:
         result = _last_tool_result(messages)
         if result is not None:
-            return self._final_answer(result)
+            return _completion_text(self._final_answer_text(result))
 
         text = _last_user_text(messages)
         if text.startswith(NARRATIVE_PROMPT_PREFIX):
             # 叙事合成：确定性地回显检索片段正文
             body = text[len(NARRATIVE_PROMPT_PREFIX):].strip()
-            answer = f"基于检索到的资料：\n{body}"
-            return ProviderResponse(
-                text=answer, raw_content=[{"type": "text", "text": answer}]
-            )
+            return _completion_text(f"基于检索到的资料：\n{body}")
 
         intent = parse_intent(text, reference_date=self.reference_date)
         if intent.metric and intent.entity and intent.period:
@@ -222,24 +261,21 @@ class MockProvider:
                 "period": _period_param(intent.period),
                 "channel": intent.channel,
             }
-            return ProviderResponse(
-                text="",
-                stop_reason="tool_use",
-                tool_calls=[ToolCall(id="toolu_mock_1", name="query_metric",
-                                     input=call_input)],
-                raw_content=[{
-                    "type": "tool_use", "id": "toolu_mock_1",
-                    "name": "query_metric", "input": call_input,
-                }],
+            tc = ToolCall(
+                id="toolu_mock_1",
+                function=FunctionCall(
+                    name="query_metric", arguments=json.dumps(call_input, ensure_ascii=False)
+                ),
+            )
+            msg = ResponseMessage(role="assistant", content=None, tool_calls=(tc,))
+            return ChatCompletion(
+                choices=(Choice(index=0, message=msg, finish_reason="tool_calls"),)
             )
 
-        fallback = "请补充想查询的指标/实体/期间，例如：香港去年REVENUE多少。"
-        return ProviderResponse(
-            text=fallback, raw_content=[{"type": "text", "text": fallback}]
-        )
+        return _completion_text("请补充想查询的指标/实体/期间，例如：香港去年REVENUE多少。")
 
     @staticmethod
-    def _final_answer(result: dict[str, object]) -> ProviderResponse:
+    def _final_answer_text(result: dict[str, object]) -> str:
         status = result.get("status")
         if status == "found":
             raw_source = result.get("source", {})
@@ -247,24 +283,22 @@ class MockProvider:
             # valid_as_of 存在时附「截至」业务时点；为 None 时文案字节级不变。
             valid_as_of = result.get("valid_as_of")
             asof = f" · 截至 {valid_as_of}" if valid_as_of else ""
-            text = (
+            return (
                 f"{result['entity']} {result['period_type']}{result['period']} "
                 f"{result['metric_code']} 为 {result['value']:g} {result['unit']}"
                 f"（来源：{source.get('doc')} · {source.get('locator')}{asof}）"
             )
-        elif status == "not_found":
+        if status == "not_found":
             raw_norm = result.get("normalized", {})
             norm = raw_norm if isinstance(raw_norm, dict) else {}
-            text = (
+            return (
                 f"查不到：{norm.get('metric_code')} / {norm.get('entity')} / "
                 f"{norm.get('period')}（{norm.get('channel')}）未在事实表中找到，"
                 "不提供推测数字。"
             )
-        elif status == "unrecognized_param":
-            text = (
+        if status == "unrecognized_param":
+            return (
                 f"无法识别参数 {result.get('param')}：'{result.get('raw')}'，"
                 "请换一个说法或确认指标名称。"
             )
-        else:
-            text = "工具返回了未知状态，无法作答。"
-        return ProviderResponse(text=text, raw_content=[{"type": "text", "text": text}])
+        return "工具返回了未知状态，无法作答。"

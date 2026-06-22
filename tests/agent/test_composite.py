@@ -67,7 +67,7 @@ def store(tmp_db_path):
 class SentinelProvider:
     """一旦被调用即失败：断言多子任务数字通路不触发 LLM。"""
 
-    def create_message(self, *, system, messages, tools):
+    def chat(self, messages, *, tools=None):
         raise AssertionError("provider 不应被调用")
 
 

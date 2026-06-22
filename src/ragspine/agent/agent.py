@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Protocol, cast, runtime_checkable
 
+from corespine import Usage
+
 from ragspine.agent.intent import (
     CLARIFY_ANSWER_WITH_ASSUMPTIONS,
     CLARIFY_ASK_FIRST,
@@ -33,15 +35,22 @@ from ragspine.agent.llm_provider import (
     NARRATIVE_PROMPT_PREFIX,
     LLMProvider,
     ProviderError,
-    ProviderResponse,
 )
-from ragspine.agent.query_tools import build_query_metric_tool_anthropic, execute_query_metric
+from ragspine.agent.query_tools import QUERY_METRIC_TOOL_OPENAI, execute_query_metric
 from ragspine.common.company_profile import load_company_profile
 from ragspine.common.glossary import normalize_period, resolve_relative_period
 from ragspine.common.observability import emit_trace, new_request_id
 from ragspine.storage.fact_store import FactStore
 
 MAX_TOOL_ITERATIONS = 5
+
+
+def _usage_dict(usage: Usage | None) -> dict[str, int | None] | None:
+    """corespine ChatCompletion.usage(prompt/completion)→ record_provider 期望的
+    {input_tokens, output_tokens}（OpenAI prompt=input、completion=output）。"""
+    if usage is None:
+        return None
+    return {"input_tokens": usage.prompt_tokens, "output_tokens": usage.completion_tokens}
 
 # provider 失败时的诚实降级文案（结构化/叙事两路）：绝不含数字、绝不编造。
 _DEGRADE_STRUCTURED = "AI 服务暂时不可用，未能完成本次查询，请稍后再试。"
@@ -145,37 +154,48 @@ def _run_tool_loop(
     绝不编造数字；其他异常（逻辑 bug）照常抛出，不被吞掉。
     """
     system = _system_prompt(reference_date)
-    tools = [build_query_metric_tool_anthropic()]
-    messages: list[dict[str, object]] = [{"role": "user", "content": question}]
+    tools = [QUERY_METRIC_TOOL_OPENAI]
+    messages: list[dict[str, object]] = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": question},
+    ]
     tool_results: list[dict[str, object]] = []
 
-    resp: ProviderResponse | None = None
+    final_text = ""
     for _ in range(MAX_TOOL_ITERATIONS):
         started = time.perf_counter()
         try:
-            resp = provider.create_message(
-                system=system, messages=messages, tools=tools
-            )
+            resp = provider.chat(messages, tools=tools)
         except ProviderError:
             ctx.provider_error = True
             ctx.record_provider(time.perf_counter() - started, None)
             return _DEGRADE_STRUCTURED, []
-        ctx.record_provider(time.perf_counter() - started, resp.usage)
-        if not resp.tool_calls:
+        ctx.record_provider(time.perf_counter() - started, _usage_dict(resp.usage))
+        message = resp.choices[0].message
+        final_text = message.content or ""
+        if not message.tool_calls:
             break
-        messages.append({"role": "assistant", "content": resp.raw_content})
-        result_blocks = []
-        for call in resp.tool_calls:
-            result = _execute_tool(store, call.input, reference_date)
+        # 回传 assistant 的 tool_calls（OpenAI 形状），携工具结果继续下一轮。
+        messages.append({
+            "role": "assistant",
+            "content": message.content,
+            "tool_calls": [
+                {"id": tc.id, "type": "function",
+                 "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+                for tc in message.tool_calls
+            ],
+        })
+        for tc in message.tool_calls:
+            args = cast("dict[str, object]", json.loads(tc.function.arguments))
+            result = _execute_tool(store, args, reference_date)
             tool_results.append(result)
-            result_blocks.append({
-                "type": "tool_result",
-                "tool_use_id": call.id,
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc.id,
                 "content": json.dumps(result, ensure_ascii=False),
             })
-        messages.append({"role": "user", "content": result_blocks})
 
-    return (resp.text if resp else ""), tool_results
+    return final_text, tool_results
 
 
 def _not_found_answer(result: dict[str, object]) -> str:
@@ -380,19 +400,18 @@ def _run_narrative(
     prompt = f"{NARRATIVE_PROMPT_PREFIX}。\n问题：{question}\n检索片段：\n{body}"
     started = time.perf_counter()
     try:
-        resp = provider.create_message(
-            system=_NARRATIVE_SYSTEM_PROMPT_TEMPLATE.format(
-                company=_PROFILE.home_company_name
-            ),
-            messages=[{"role": "user", "content": prompt}],
-            tools=[],
-        )
+        resp = provider.chat([
+            {"role": "system",
+             "content": _NARRATIVE_SYSTEM_PROMPT_TEMPLATE.format(
+                 company=_PROFILE.home_company_name)},
+            {"role": "user", "content": prompt},
+        ])
     except ProviderError:
         ctx.provider_error = True
         ctx.record_provider(time.perf_counter() - started, None)
         return _DEGRADE_NARRATIVE, []
-    ctx.record_provider(time.perf_counter() - started, resp.usage)
-    answer = resp.text
+    ctx.record_provider(time.perf_counter() - started, _usage_dict(resp.usage))
+    answer = resp.choices[0].message.content or ""
     # 血缘兜底：来源文件名必须出现在回答里
     missing = [s for s in sources if s["doc"] and str(s["doc"]) not in answer]
     if missing:

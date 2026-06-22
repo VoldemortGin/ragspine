@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
-from corespine import CorespineError, env_key, load_from_env
+from corespine import CorespineError, RateLimitedProvider, env_key, load_from_env
 
 from ragspine.agent.agent import NarrativeRetriever
 from ragspine.agent.llm_provider import (
@@ -46,6 +46,7 @@ class ServiceConfig:
     faq_source: str | None = None           # FAQ JSON 文件路径；None -> 空缓存
     allowed_upload_root: str | None = None  # ingestion 路径必须落在此根内
     company_profile_path: str | None = None
+    tokens_per_minute: int = 0               # >0 时用 corespine RateLimitedProvider 主动 TPM 限流;0=不限
 
     # 历史 env 键别名 -> 字段名。corespine load_from_env 默认按 PREFIX_FIELDNAME
     # 推导键名，与这三个不规则旧键冲突；构造时把旧键改写到规范键以保持向后兼容。
@@ -82,11 +83,18 @@ class ServiceConfig:
 
 
 def build_provider(config: ServiceConfig) -> LLMProvider:
+    provider: LLMProvider
     if config.provider_type == "mock":
-        return MockProvider(reference_date=config.reference_date_obj())
-    if config.provider_type == "anthropic":
-        return AnthropicProvider(model=config.model, base_url=config.base_url)
-    raise ValueError(f"未知 provider_type: {config.provider_type!r}")
+        provider = MockProvider(reference_date=config.reference_date_obj())
+    elif config.provider_type == "anthropic":
+        provider = AnthropicProvider(model=config.model, base_url=config.base_url)
+    else:
+        raise ValueError(f"未知 provider_type: {config.provider_type!r}")
+    # 主动 TPM 限流(可选):tokens_per_minute>0 时用 corespine RateLimitedProvider 包装,
+    # 与 SDK 自带 max_retries 的被动退避互补(两层)。
+    if config.tokens_per_minute > 0:
+        return RateLimitedProvider(provider, tokens_per_minute=config.tokens_per_minute)
+    return provider
 
 
 @contextmanager

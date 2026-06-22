@@ -35,7 +35,7 @@ REF = date(2026, 6, 12)
 class _SentinelProvider:
     """任何对 LLM 的调用都判为越权前门失守——直接炸测试。"""
 
-    def create_message(self, *, system, messages, tools):  # noqa: D401
+    def chat(self, messages, *, tools=None):  # noqa: D401
         raise AssertionError("LLM 不应被调用：越权应在任何 LLM/工具调用前拒答")
 
 

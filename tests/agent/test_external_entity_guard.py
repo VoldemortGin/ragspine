@@ -24,7 +24,6 @@ ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpa
 
 from ragspine.agent.agent import AgentResult, answer_question
 from ragspine.storage.fact_store import Fact, FactStore
-from ragspine.agent.llm_provider import ProviderResponse
 
 REF = date(2026, 6, 12)
 
@@ -54,7 +53,7 @@ def store(tmp_db_path):
 class SentinelProvider:
     """一旦被调用即失败：用于断言外部实体拒答路径绝不触发 LLM / tool use。"""
 
-    def create_message(self, *, system, messages, tools) -> ProviderResponse:
+    def chat(self, messages, *, tools=None):
         raise AssertionError("外部实体拒答不应调用 provider（不调 tool/检索/LLM）")
 
 

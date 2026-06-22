@@ -343,8 +343,8 @@ def test_t6_mock_provider_final_answer_annotates_valid_as_of():
             "locator": "slide=5,table=1,row=2,col=3",
         },
     }
-    resp = MockProvider._final_answer(result)
-    assert "截至 2025-12-31" in resp.text
+    answer = MockProvider._final_answer_text(result)
+    assert "截至 2025-12-31" in answer
 
 
 def test_t6_mock_provider_final_answer_byte_identical_when_no_valid_as_of():
@@ -369,9 +369,9 @@ def test_t6_mock_provider_final_answer_byte_identical_when_no_valid_as_of():
         "ACME_HK FY2025 REVENUE 为 1702 USD_M"
         "（来源：ACME_FY2025_Results.pptx · slide=5,table=1,row=2,col=3）"
     )
-    resp = MockProvider._final_answer(result)
-    assert resp.text == expected
-    assert "截至" not in resp.text
+    answer = MockProvider._final_answer_text(result)
+    assert answer == expected
+    assert "截至" not in answer
 
 
 # ===========================================================================

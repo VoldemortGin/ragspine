@@ -27,7 +27,8 @@ from ragspine.agent.agent import answer_question
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
 from ragspine.retrieval.chunking.chunking import DocumentMeta
 from ragspine.storage.fact_store import Fact, FactStore
-from ragspine.agent.llm_provider import MockProvider, ProviderResponse
+from ragspine.agent.llm_provider import MockProvider
+from corespine import ChatCompletion, Choice, ResponseMessage
 from ragspine.retrieval.link.narrative_link import (
     NarrativeIndexRetriever,
     ProviderListwiseJudge,
@@ -61,16 +62,17 @@ class ScriptedProvider:
         self._texts = list(texts)
         self.calls: list[dict] = []
 
-    def create_message(self, *, system, messages, tools):
-        self.calls.append({"system": system, "messages": messages, "tools": tools})
+    def chat(self, messages, *, tools=None):
+        self.calls.append({"messages": messages, "tools": tools})
         text = self._texts.pop(0)
-        return ProviderResponse(text=text, raw_content=[{"type": "text", "text": text}])
+        msg = ResponseMessage(role="assistant", content=text)
+        return ChatCompletion(choices=(Choice(index=0, message=msg),))
 
 
 class RaisingProvider:
     """一调用就抛错的 LLMProvider 替身（模拟网络/网关故障）。"""
 
-    def create_message(self, *, system, messages, tools):
+    def chat(self, messages, *, tools=None):
         raise RuntimeError("provider down")
 
 
@@ -81,9 +83,9 @@ class RecordingProvider:
         self.inner = inner
         self.seen: list[str] = []
 
-    def create_message(self, *, system, messages, tools):
-        self.seen.append(json.dumps([system, messages], ensure_ascii=False, default=str))
-        return self.inner.create_message(system=system, messages=messages, tools=tools)
+    def chat(self, messages, *, tools=None):
+        self.seen.append(json.dumps(messages, ensure_ascii=False, default=str))
+        return self.inner.chat(messages, tools=tools)
 
 
 class SpyIndex:
@@ -232,8 +234,8 @@ def test_judge_builds_prompt_and_parses_order():
     order = judge.judge("查询X", ["候选A", "候选B", "候选C"])
     assert order == [2, 0, 1]
     call = provider.calls[0]
-    assert call["tools"] == []  # 精排不带工具
-    prompt = call["messages"][0]["content"]
+    assert call["tools"] is None  # 精排不带工具
+    prompt = call["messages"][-1]["content"]  # 取 user 消息内容
     assert "查询X" in prompt
     assert "[0] 候选A" in prompt and "[2] 候选C" in prompt
 

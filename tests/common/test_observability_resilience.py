@@ -8,6 +8,7 @@
 约束：只写测试不改实现。防编造硬约束（not_found 一律改写"查不到"）不得被韧性兜底破坏。
 """
 
+import json
 import logging
 import os
 from datetime import date
@@ -17,9 +18,18 @@ import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
+from corespine import (
+    ChatCompletion,
+    Choice,
+    FunctionCall,
+    ResponseMessage,
+    ToolCall,
+    Usage,
+)
+
 from ragspine.agent.agent import AgentResult, answer_question
 from ragspine.storage.fact_store import Fact, FactStore
-from ragspine.agent.llm_provider import MockProvider, ProviderResponse, ToolCall
+from ragspine.agent.llm_provider import MockProvider
 
 REF = date(2026, 6, 12)
 
@@ -46,18 +56,22 @@ def store(tmp_db_path):
     fs.close()
 
 
-def _tool_use_response(input_: dict) -> ProviderResponse:
-    return ProviderResponse(
-        text="", stop_reason="tool_use",
-        tool_calls=[ToolCall(id="toolu_1", name="query_metric", input=input_)],
-        raw_content=[{"type": "tool_use", "id": "toolu_1",
-                      "name": "query_metric", "input": input_}],
+def _tool_use_response(input_: dict) -> ChatCompletion:
+    tc = ToolCall(
+        id="toolu_1",
+        function=FunctionCall(
+            name="query_metric", arguments=json.dumps(input_, ensure_ascii=False)
+        ),
+    )
+    msg = ResponseMessage(role="assistant", content=None, tool_calls=(tc,))
+    return ChatCompletion(
+        choices=(Choice(index=0, message=msg, finish_reason="tool_calls"),)
     )
 
 
-def _text_response(text: str) -> ProviderResponse:
-    return ProviderResponse(text=text, stop_reason="end_turn", tool_calls=[],
-                            raw_content=[{"type": "text", "text": text}])
+def _text_response(text: str) -> ChatCompletion:
+    msg = ResponseMessage(role="assistant", content=text)
+    return ChatCompletion(choices=(Choice(index=0, message=msg, finish_reason="stop"),))
 
 
 class FakeRetriever:
@@ -90,7 +104,7 @@ def test_provider_error_degrades_structured_route(store):
     from ragspine.agent.llm_provider import ProviderError
 
     class ErroringProvider:
-        def create_message(self, *, system, messages, tools):
+        def chat(self, messages, *, tools=None):
             raise ProviderError("模拟网关 503")
 
     result = answer_question(
@@ -116,7 +130,7 @@ def test_provider_error_degrades_narrative_route(store):
     from ragspine.agent.llm_provider import ProviderError
 
     class ErroringProvider:
-        def create_message(self, *, system, messages, tools):
+        def chat(self, messages, *, tools=None):
             raise ProviderError("模拟超时")
 
     retriever = FakeRetriever()
@@ -137,7 +151,7 @@ def test_provider_error_degrades_narrative_route(store):
 
 def test_logic_bug_not_swallowed_by_resilience(store):
     class BuggyProvider:
-        def create_message(self, *, system, messages, tools):
+        def chat(self, messages, *, tools=None):
             raise KeyError("内部逻辑 bug，不该被韧性吞掉")
 
     with pytest.raises(KeyError):
@@ -177,8 +191,7 @@ def test_anthropic_timeout_and_retries_passed_to_client(monkeypatch):
 # ===========================================================================
 
 def test_provider_response_has_usage_field():
-    resp = ProviderResponse(text="hi")
-    assert hasattr(resp, "usage")
+    resp = ChatCompletion(choices=(Choice(index=0, message=ResponseMessage(content="hi")),))
     assert resp.usage is None  # 默认 None
 
 
@@ -216,8 +229,8 @@ def test_anthropic_maps_token_usage(monkeypatch):
     provider = llm_provider.AnthropicProvider()
     provider._client = FakeClient()  # 假 client，不联网
 
-    out = provider.create_message(system="s", messages=[], tools=[])
-    assert out.usage == {"input_tokens": 123, "output_tokens": 45}
+    out = provider.chat([{"role": "system", "content": "s"}])
+    assert out.usage == Usage(prompt_tokens=123, completion_tokens=45, total_tokens=168)
 
 
 # ===========================================================================
@@ -254,13 +267,11 @@ def test_trace_emitted_with_fields(store, caplog):
 def test_trace_fabrication_guard_flag_true_on_not_found(store, caplog):
     """user story：not_found 触发防编造强制改写时，trace 的 fabrication_guard_triggered=True，
     便于统计有多少次模型试图越界、被编排层拦下。"""
-    from ragspine.agent.llm_provider import ProviderResponse, ToolCall
-
     class ScriptedProvider:
         def __init__(self, responses):
             self._responses = list(responses)
 
-        def create_message(self, *, system, messages, tools):
+        def chat(self, messages, *, tools=None):
             return self._responses.pop(0)
 
     provider = ScriptedProvider([

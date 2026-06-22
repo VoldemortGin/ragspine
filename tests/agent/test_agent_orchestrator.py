@@ -3,6 +3,7 @@
 NarrativeRetriever 用 fake 注入（duck-typed Protocol），不依赖另一条线的检索实现。
 """
 
+import json
 import os
 from datetime import date
 
@@ -11,10 +12,12 @@ import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
+from corespine import ChatCompletion, Choice, FunctionCall, ResponseMessage, ToolCall
+
 from ragspine.agent.agent import AgentResult, answer_question
 from ragspine.storage.fact_store import Fact, FactStore
 from ragspine.agent.intent import CLARIFY_ANSWER_WITH_ASSUMPTIONS, CLARIFY_ASK_FIRST
-from ragspine.agent.llm_provider import MockProvider, ProviderResponse, ToolCall
+from ragspine.agent.llm_provider import MockProvider
 
 REF = date(2026, 6, 12)
 
@@ -37,11 +40,11 @@ def store(tmp_db_path):
 class ScriptedProvider:
     """按脚本依次吐响应的测试 provider（含试图编造数字的对抗脚本）。"""
 
-    def __init__(self, responses: list[ProviderResponse]):
+    def __init__(self, responses: list[ChatCompletion]):
         self._responses = list(responses)
         self.calls = 0
 
-    def create_message(self, *, system, messages, tools):
+    def chat(self, messages, *, tools=None):
         self.calls += 1
         return self._responses.pop(0)
 
@@ -49,7 +52,7 @@ class ScriptedProvider:
 class SentinelProvider:
     """一旦被调用即失败：用于断言某些路径不触发 LLM。"""
 
-    def create_message(self, *, system, messages, tools):
+    def chat(self, messages, *, tools=None):
         raise AssertionError("provider 不应被调用")
 
 
@@ -69,18 +72,22 @@ class FakeRetriever:
         return self.snippets
 
 
-def _tool_use_response(input_: dict) -> ProviderResponse:
-    return ProviderResponse(
-        text="", stop_reason="tool_use",
-        tool_calls=[ToolCall(id="toolu_1", name="query_metric", input=input_)],
-        raw_content=[{"type": "tool_use", "id": "toolu_1",
-                      "name": "query_metric", "input": input_}],
+def _tool_use_response(input_: dict) -> ChatCompletion:
+    tc = ToolCall(
+        id="toolu_1",
+        function=FunctionCall(
+            name="query_metric", arguments=json.dumps(input_, ensure_ascii=False)
+        ),
+    )
+    msg = ResponseMessage(role="assistant", content=None, tool_calls=(tc,))
+    return ChatCompletion(
+        choices=(Choice(index=0, message=msg, finish_reason="tool_calls"),)
     )
 
 
-def _text_response(text: str) -> ProviderResponse:
-    return ProviderResponse(text=text, stop_reason="end_turn", tool_calls=[],
-                            raw_content=[{"type": "text", "text": text}])
+def _text_response(text: str) -> ChatCompletion:
+    msg = ResponseMessage(role="assistant", content=text)
+    return ChatCompletion(choices=(Choice(index=0, message=msg, finish_reason="stop"),))
 
 
 # ---------------------------------------------------------------------------

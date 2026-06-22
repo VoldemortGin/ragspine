@@ -66,11 +66,11 @@ class SpyProvider:
         self.calls = 0
         self.raise_provider_error = raise_provider_error
 
-    def create_message(self, *, system, messages, tools):
+    def chat(self, messages, *, tools=None):
         self.calls += 1
         if self.raise_provider_error:
             raise ProviderError("gateway down")
-        raise AssertionError("SpyProvider.create_message should not be called")
+        raise AssertionError("SpyProvider.chat should not be called")
 
 
 # ---------------------------------------------------------------------------

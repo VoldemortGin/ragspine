@@ -58,12 +58,11 @@ class ProviderListwiseJudge:
     def judge(self, query: str, candidates: list[str]) -> list[int]:
         """构造 listwise prompt → provider 单轮调用 → 鲁棒解析为下标排列。"""
         prompt = build_listwise_prompt(query, candidates)
-        resp = self.provider.create_message(
-            system=_JUDGE_SYSTEM,
-            messages=[{"role": "user", "content": prompt}],
-            tools=[],
-        )
-        return parse_listwise_response(resp.text, len(candidates))
+        resp = self.provider.chat([
+            {"role": "system", "content": _JUDGE_SYSTEM},
+            {"role": "user", "content": prompt},
+        ])
+        return parse_listwise_response(resp.choices[0].message.content or "", len(candidates))
 
 
 class NarrativeIndexRetriever:
