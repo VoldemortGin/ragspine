@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Protocol, cast, runtime_checkable
 
+from corespine import CorespineError
+
 from ragspine.agent.intent import parse_intent
 
 # 默认模型名（唯一出处，改这里即全局生效）
@@ -22,12 +24,15 @@ DEFAULT_ANTHROPIC_MODEL = "claude-opus-4-8"
 NARRATIVE_PROMPT_PREFIX = "请仅基于以下检索片段回答问题，不得引入片段之外的信息"
 
 
-class ProviderError(Exception):
+class ProviderError(CorespineError):
     """provider 调用失败的统一边界异常（网络/超时/API 错误归一到此）。
 
     只包裹 SDK 抛出的网络/API 异常；程序错误（KeyError/TypeError 等）不归此类，
-    照常向上抛出，避免韧性兜底掩盖逻辑 bug。
+    照常向上抛出，避免韧性兜底掩盖逻辑 bug。继承家族统一异常基类，稳定 code 为
+    "provider.error"（ADR errors 缝）。
     """
+
+    code = "provider.error"
 
 
 @dataclass
