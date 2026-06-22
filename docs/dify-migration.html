@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAGSpine 用法 & Dify 流程迁移手册</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#161a22; --ink:#e7ebf0; --muted:#9aa6b2;
+    --line:#262c38; --accent:#2dd4bf; --accent2:#7aa2ff;
+    --warn-bg:#2a1f12; --warn-line:#c9851f; --warn-ink:#f4d39a;
+    --ok-bg:#13241c; --ok-line:#2f9e6f; --ok-ink:#a5e8c8;
+    --code-bg:#0b0d11;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  }
+  .wrap{max-width:980px;margin:0 auto;padding:48px 24px 120px}
+  header.hero{border-bottom:1px solid var(--line);padding-bottom:28px;margin-bottom:8px}
+  h1{font-size:30px;margin:0 0 8px;letter-spacing:.3px}
+  .sub{color:var(--muted);font-size:15px;margin:0}
+  .pill{display:inline-block;font-size:12px;color:var(--accent);border:1px solid var(--line);
+    border-radius:999px;padding:2px 10px;margin-right:8px;margin-top:10px;background:#0c1714}
+  h2{font-size:22px;margin:48px 0 14px;padding-top:8px;border-top:1px solid var(--line)}
+  h2 .n{color:var(--accent);font-weight:700;margin-right:10px}
+  h3{font-size:17px;margin:28px 0 10px;color:#cfe0ff}
+  p{margin:12px 0}
+  a{color:var(--accent2);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:13.5px;
+    background:#1c2230;border:1px solid var(--line);border-radius:5px;padding:1px 6px;color:#e9d9b0}
+  .toc{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 22px;margin:24px 0}
+  .toc h4{margin:0 0 10px;font-size:13px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
+  .toc ol{margin:0;padding-left:20px;columns:2;column-gap:32px}
+  .toc li{margin:5px 0}
+  .toc a{color:var(--ink)}
+  .codecard{position:relative;margin:16px 0}
+  .codecard pre{background:var(--code-bg);border:1px solid var(--line);border-radius:10px;
+    padding:18px 18px;overflow:auto;margin:0}
+  .codecard code{background:none;border:none;padding:0;color:#d7e2ee;font-size:13px;line-height:1.65}
+  .copy{position:absolute;top:10px;right:10px;background:#1c2230;color:var(--muted);
+    border:1px solid var(--line);border-radius:7px;font-size:12px;padding:4px 10px;cursor:pointer}
+  .copy:hover{color:var(--accent);border-color:var(--accent)}
+  .copy.done{color:var(--ok-ink);border-color:var(--ok-line)}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14px}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:#1a2030;color:#cfe0ff;font-weight:600}
+  td code{font-size:12.5px}
+  .box{border-radius:10px;padding:14px 18px;margin:18px 0;border:1px solid}
+  .box .t{font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:8px}
+  .warn{background:var(--warn-bg);border-color:var(--warn-line)}
+  .warn .t{color:var(--warn-ink)}
+  .ok{background:var(--ok-bg);border-color:var(--ok-line)}
+  .ok .t{color:var(--ok-ink)}
+  .info{background:#101a26;border-color:#2b5a8c}
+  .info .t{color:#9cc6f0}
+  .lead{font-size:17px;color:#cdd6e0}
+  .kbd{font-size:12px;color:var(--muted)}
+  ul.tight li,ol.tight li{margin:5px 0}
+  .step{display:flex;gap:14px;align-items:flex-start;margin:14px 0}
+  .step .num{flex:0 0 30px;height:30px;width:30px;border-radius:50%;background:#0c1714;
+    border:1px solid var(--accent);color:var(--accent);display:flex;align-items:center;
+    justify-content:center;font-weight:700;font-size:14px}
+  .step .body{flex:1}
+  .muted{color:var(--muted)}
+  hr{border:none;border-top:1px solid var(--line);margin:32px 0}
+  footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
+  .tag{font-size:11px;padding:1px 7px;border-radius:5px;font-weight:600}
+  .tag.s{background:#13241c;color:#7fd9a8;border:1px solid #2f9e6f}
+  .tag.n{background:#1a1430;color:#b89cf0;border:1px solid #6b4fb0}
+  .tag.c{background:#241a12;color:#e8b87f;border:1px solid #b07a3a}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>RAGSpine 用法 &amp; Dify 流程迁移手册</h1>
+  <p class="sub">把可视化工作流改成纯 Python · 重点路线:数字 + 归因混合(composite)· 代码均经实跑验证</p>
+  <div>
+    <span class="pill">framework-free</span>
+    <span class="pill">反幻觉 / 拒答</span>
+    <span class="pill">来源血缘强制</span>
+    <span class="pill">离线可验证</span>
+  </div>
+</header>
+
+<div class="toc">
+  <h4>目录</h4>
+  <ol>
+    <li><a href="#p0">30 秒认知</a></li>
+    <li><a href="#p1">主要用法(三层级)</a></li>
+    <li><a href="#mind">心智模型:三路分流</a></li>
+    <li><a href="#dify">Dify → 代码:概念对照</a></li>
+    <li><a href="#agent">"有状态多 agent" 与边界</a></li>
+    <li><a href="#map">节点映射表</a></li>
+    <li><a href="#composite">实操:composite 迁移</a></li>
+    <li><a href="#script">完整脚本(可复制)</a></li>
+    <li><a href="#provider">Mock vs 真实模型</a></li>
+    <li><a href="#checklist">迁移 4 步 &amp; 上线清单</a></li>
+  </ol>
+</div>
+
+<!-- ============ P0 ============ -->
+<h2 id="p0"><span class="n">0</span>30 秒认知</h2>
+<p class="lead">RAGSpine 不是一个你"提交给它"的框架,而是一个你用普通 Python <b>把零件拼起来</b>的后端 RAG 引擎。</p>
+<p>它有两条<b>被代码强制</b>(不是写在提示词里求模型听话)的铁律:</p>
+<ul class="tight">
+  <li><b>查不到就拒答</b>——结构化通道没返回事实,编排层强制把答案改写成"查不到",哪怕模型编了个数字也会被拦掉。</li>
+  <li><b>答案必带来源</b>——每个事实/答案都带 <code>source_doc_id</code> + 定位符,<code>result.sources</code> 是不变量。</li>
+</ul>
+<div class="box info">
+  <div class="t">适用边界(先对号入座)</div>
+  它是<b>窄领域</b>工具:带拒答和引用的"数字 + 叙事"问答。<b>不是</b>通用 agent 编排器。你的流程若是单轮问答(查数字 / 查归因 / 两者都要)——正中靶心;若是多步、多 agent、靠模型临场决定走向的复杂图——见 <a href="#agent">第 4 节</a>的边界说明。
+</div>
+
+<!-- ============ P1 ============ -->
+<h2 id="p1"><span class="n">1</span>主要用法(三层级,从浅到深)</h2>
+
+<h3>层级 1 · 命令行(最快验证,离线无需 key)</h3>
+<div class="codecard"><pre><code>ragspine quickstart                 # 10 秒离线演示:一个命中(带来源) + 一个诚实"查不到"
+ragspine ask --db data/fact_metric.db "中国内地FY2024的REVENUE是多少"</code></pre></div>
+<p class="muted"><span class="kbd">mock 模式完全离线、确定性,不需要任何 API key。先跑 <code>scripts/run_demo.py</code> 生成示例库。</span></p>
+
+<h3>层级 2 · Python API(核心 — 记住 4 个名字就够)</h3>
+<p>整个最小可用 API 就是这四个名字:<code>Fact</code> / <code>FactStore</code> / <code>MockProvider</code> / <code>answer_question</code>。</p>
+<div class="codecard"><pre><code>from ragspine.storage.fact_store import Fact, FactStore
+from ragspine.agent.llm_provider import MockProvider
+from ragspine.agent.agent import answer_question
+
+# 1. 事实库(:memory: 临时;传路径就是真 sqlite)
+store = FactStore(":memory:"); store.init_schema()
+
+# 2. 一条事实 —— 最后两个字段是它的"血缘"(来自哪个文档、文档里哪个位置)
+store.upsert_facts([Fact(
+    metric_code="REVENUE", entity="ACME_CN", geography="CN", channel="TOTAL",
+    period_type="FY", period="2024", value=1320.0, unit="USD_M",
+    source_doc_id="ACME_FY2024_Results.pptx", source_locator="slide=6,table=1,row=2,col=3",
+    tags={}, dimensions={},
+)])
+
+# 3. 离线确定性 provider(无 key、无网络);上线换 AnthropicProvider 即可
+provider = MockProvider()
+
+# 4. 提问。命中 → 带来源回答;缺失 → 诚实拒答,绝不编造
+result = answer_question("中国内地FY2024的REVENUE是多少", store, provider)
+print(result.answer)    # 确定值 + 来源,或诚实的"查不到"
+print(result.sources)   # [{'doc':..., 'locator':...}]</code></pre></div>
+<p><code>answer_question(question, store, provider)</code> 就是整个编排入口——意图解析 → 安全门 → 澄清 → 三路分流 → 工具循环 → 反幻觉兜底,<b>全部藏在这一个函数里</b>,你不需要画任何图。</p>
+
+<h3>层级 3 · HTTP 服务(异步摄取)</h3>
+<div class="codecard"><pre><code>RAGSPINE_DB_PATH=data/fact_metric.db python scripts/run_server.py --port 8000   # FastAPI
+python scripts/run_worker.py                                                     # RQ worker(需 Redis)</code></pre></div>
+<p class="muted"><span class="kbd">端点:<code>POST /v1/ask</code> · <code>POST /v1/ingest/structured/jobs</code> · <code>POST /v1/ingest/narrative/jobs</code> · <code>GET /v1/jobs/{id}</code></span></p>
+
+<!-- ============ MIND ============ -->
+<h2 id="mind"><span class="n">2</span>心智模型:三路分流</h2>
+<p><code>answer_question</code> 内部对每个问题<b>确定性地</b>(规则,不是模型决定)选一条路:</p>
+<table>
+  <tr><th>路由</th><th>问什么</th><th>怎么答</th></tr>
+  <tr><td><span class="tag s">structured</span></td><td>"数字是多少"(营收/利润/ROE…)</td><td>查 <code>fact_metric</code> 表 → found / not_found / unrecognized。数字<b>只取自事实值</b>,模型散文不被信任。</td></tr>
+  <tr><td><span class="tag n">narrative</span></td><td>"为什么 / 发生了什么"</td><td>混合检索(BM25 + 向量 + RRF)→ 重排 → 带引用合成。</td></tr>
+  <tr><td><span class="tag c">composite</span></td><td>既要数字又要归因 <b>← 你的场景</b></td><td>两路并行跑,合并:数字段确定性合成 + 归因段带引用。</td></tr>
+</table>
+
+<!-- ============ DIFY ============ -->
+<h2 id="dify"><span class="n">3</span>Dify → 代码:先建立关键认知</h2>
+<p>Dify 和 RAGSpine 不是一类东西,这决定了"迁移"到底是在做什么:</p>
+<ul class="tight">
+  <li><b>Dify</b> 是一个<b>自托管平台</b>:多容器集群(Postgres + Redis + 向量库 + 沙箱 + 插件守护进程 + API/worker/web/nginx)。你的"应用"是一段存在 Postgres 里的<b>可视化 DSL</b>——没有能拎出来的 Python 产物。</li>
+  <li><b>RAGSpine</b> 是一个你 <code>import</code> 的库:编排是普通函数,核心不 import 任何 SDK,离线就能跑。</li>
+</ul>
+<p>所以"把 Dify 流程改成代码" = <b>把可视化 DSL 翻译成 <code>answer_question</code> 调用 + 必要时你自己写的几行 Python 串联</b>。</p>
+
+<!-- ============ AGENT ============ -->
+<h2 id="agent"><span class="n">4</span>"有状态的多 agent" 是什么 &amp; 什么时候<b>不要</b>硬搬</h2>
+<p>这是判断你的流程能否直接用 RAGSpine 的关键术语,拆成几个词理解:</p>
+<table>
+  <tr><th>词</th><th>含义</th></tr>
+  <tr><td><b>agent</b></td><td>一个能<b>自己决定下一步干什么</b>的 LLM 循环:感知 → 决策 → 调工具 → 看结果 → 再决策,走向由模型临场判断。</td></tr>
+  <tr><td><b>多 agent</b></td><td>多个这样的 agent 协作:一个"规划者"把任务拆给几个"执行者",或 agent 之间互相对话、移交任务(handoff)。</td></tr>
+  <tr><td><b>有状态</b></td><td>流程在多步/多轮间要<b>记住中间状态</b>(对话历史、累积结果、轮到谁)。状态在节点间流转、被不断更新,还能中途暂停等人工(human-in-the-loop)、回溯、断点续跑。</td></tr>
+  <tr><td><b>图</b></td><td>这些步骤被组织成有向图(节点=步骤,边=跳转,条件边=按状态分流),由框架(如 LangGraph)驱动。</td></tr>
+</table>
+<p><b>对照 RAGSpine</b>:它是<b>无状态的单次问答</b>——进一个问题、出一个答案。路由是确定性规则(不是模型决定跳哪条边),不保留跨请求记忆,不能中途停下等人。它<b>故意不做</b>多 agent 图——一旦把路由交给模型决定,就破坏了"可证明的确定性拒答"这个核心卖点。</p>
+
+<div class="box warn">
+  <div class="t">⚠️ 什么时候不要硬搬到 RAGSpine</div>
+  如果你的 Dify 流程是这样——"LLM 分类 → 按判断走不同分支 → 各分支调不同工具 → 汇总 → 反问用户 → 带着前几轮记忆继续",走向靠模型临场决定、还要记住前面发生过什么——那它<b>属于有状态多 agent 图</b>,RAGSpine 做不了通用编排;你得用普通 Python 写编排骨架,RAGSpine 只负责其中"RAG 问答"那一段。
+</div>
+<div class="box ok">
+  <div class="t">✅ 你的场景(数字 + 归因)不属于排除项</div>
+  它是单轮、规则路由、无需记忆——正好对应 RAGSpine 的 <span class="tag c">composite</span> 路由,可以放心直接迁。下面是完整步骤。
+</div>
+
+<!-- ============ MAP ============ -->
+<h2 id="map"><span class="n">5</span>节点映射表</h2>
+<table>
+  <tr><th>Dify 节点</th><th>RAGSpine 对应</th><th>说明</th></tr>
+  <tr><td>知识检索 / Knowledge Retrieval</td><td><code>build_narrative_retriever</code></td><td>混合检索内置,你不用配。</td></tr>
+  <tr><td>LLM 节点 + 系统提示</td><td><code>provider</code> + 内置 prompt</td><td>系统 prompt 由公司 profile 派生,不硬编码。</td></tr>
+  <tr><td>工具 / 函数调用(查数字)</td><td>内置 <code>query_metric</code></td><td>开箱即用,无需自己 bind。</td></tr>
+  <tr><td>问题分类器 / 条件分支</td><td>内置三路分流</td><td><code>answer_question</code> 自动做,无需画分支。</td></tr>
+  <tr><td>变量聚合 / 引用拼接</td><td><code>result.sources</code></td><td>引用是代码强制的不变量。</td></tr>
+  <tr><td>"找不到就说不知道"的提示词</td><td>反幻觉硬约束(控制流)</td><td>Dify 里靠提示词祈求,这里靠代码兜底。</td></tr>
+  <tr><td>应用配置存在 Postgres</td><td>一段 <code>.py</code> 文件</td><td>可读、可版本控制、可 diff。</td></tr>
+</table>
+
+<!-- ============ COMPOSITE ============ -->
+<h2 id="composite"><span class="n">6</span>实操:composite(数字 + 归因)迁移</h2>
+
+<h3>6.1 什么样的问题会走到 composite</h3>
+<p>路由判定就三行(<code>agent/intent.py</code>),composite 要<b>同时满足两个条件</b>:</p>
+<ul class="tight">
+  <li><b>问题里有指标词</b>(REVENUE/营收、PROFIT/利润、ROE…)→ 解析出 metric</li>
+  <li><b>同时有叙事线索词</b>:为什么 / 原因 / 归因 / 影响 / 趋势 / 下降 / 上升 / 监管 / 政策 / 进展 / why / driver…</li>
+</ul>
+<div class="codecard"><pre><code>中国内地FY2024的REVENUE是多少，为什么会有这样的变化   → composite ✅
+中国内地FY2024的营收是多少                          → structured(只有指标,没叙事词)
+中国内地业绩为什么下滑                               → narrative(只有叙事词,没指标)</code></pre></div>
+<div class="box warn">
+  <div class="t">⚠️ 最容易踩的坑</div>
+  用户改个措辞少了"为什么 / 原因",问题就退回单路了。如果你希望<b>无论措辞都跑两路</b>,在你自己的入口层固定追加归因诉求,或直接分别调结构化与叙事两段再自行拼接。
+</div>
+
+<h3>6.2 灌叙事数据的最小 API(3 步)</h3>
+<p><code>build_narrative_retriever</code> <b>只读不写</b>,写入要先走 chunking:</p>
+<div class="codecard"><pre><code>from ragspine.retrieval.chunking.chunking import DocumentMeta, chunk_document
+from ragspine.retrieval.chunking.chunk_store import ChunkStore
+
+meta = DocumentMeta(doc_id=..., title=..., entity=..., geography=..., period=...,
+                    language="zh", sensitivity="INTERNAL",   # 切勿用 RESTRICTED,会被检索出口剔除
+                    source_locator_prefix=...)
+chunks = chunk_document(text, meta)          # 段落贪心切块,每块自带 source_locator
+ChunkStore(db).replace_doc_chunks(doc_id, chunks, valid_as_of="2025-03-31")  # 幂等版本化写入</code></pre></div>
+
+<!-- ============ SCRIPT ============ -->
+<h2 id="script"><span class="n">7</span>完整脚本(已实跑通过,直接复制运行)</h2>
+<p class="muted"><span class="kbd">从仓库根目录用 <code>.venv/bin/python 这个脚本.py</code> 运行。完全离线、无 key。</span></p>
+<div class="codecard"><pre><code>"""RAGSpine composite 路由端到端最小示例(纯 Python,离线,无 key)。"""
+import tempfile
+from datetime import date
+from pathlib import Path
+
+from ragspine.agent.agent import answer_question
+from ragspine.agent.llm_provider import MockProvider
+from ragspine.retrieval.chunking.chunking import DocumentMeta, chunk_document
+from ragspine.retrieval.chunking.chunk_store import ChunkStore
+from ragspine.retrieval.link.narrative_link import build_narrative_retriever
+from ragspine.storage.fact_store import Fact, FactStore
+
+tmp = Path(tempfile.mkdtemp(prefix="ragspine_demo_"))
+fact_db, chunk_db = tmp / "facts.db", tmp / "chunks.db"
+
+# a. 数字侧:写一条事实。注意 Fact 字段全部必填(tags/dimensions 也要显式传 {})
+fact_store = FactStore(fact_db); fact_store.init_schema()
+fact_store.upsert_facts([Fact(
+    metric_code="REVENUE", entity="ACME_CN", geography="CN", channel="TOTAL",
+    period_type="FY", period="2024",            # 注意是 "2024" 不是 "FY2024"
+    value=128.6, unit="亿元",
+    source_doc_id="FY2024_annual_report.pptx", source_locator="p.12",
+    tags={}, dimensions={},
+)])
+
+# b. 叙事侧:切块灌入归因文本(带来源)
+doc_id = "FY2024_mdna.pptx"
+meta = DocumentMeta(doc_id=doc_id, title="FY2024 中国内地业务经营回顾",
+                    entity="ACME_CN", geography="CN", period="2024", language="zh",
+                    sensitivity="INTERNAL", source_locator_prefix=doc_id)
+text = ("FY2024 中国内地营收同比增长主要由三方面驱动:\n"
+        "一是代理人渠道产能提升,活动率与人均件数双升;\n"
+        "二是银保渠道与头部银行的独家合作贡献了新增长极;\n"
+        "三是续期业务因前期高质量新单而保持高留存。")
+cs = ChunkStore(chunk_db); cs.init_schema()
+cs.replace_doc_chunks(doc_id, chunk_document(text, meta), valid_as_of="2025-03-31")
+cs.close()                                      # 写完即关,检索时重开同一个库
+
+# c. 构造检索器(默认纯 BM25+RRF;传 provider 才挂 LLM 二审)
+retriever, ret_store = build_narrative_retriever(chunk_db, provider=None)
+
+# d. 提一个 composite 问题(既问数字又问归因)
+provider = MockProvider(reference_date=date(2026, 6, 22))
+result = answer_question(
+    "中国内地FY2024的REVENUE是多少,为什么会有这样的变化",
+    fact_store, provider,
+    reference_date=date(2026, 6, 22),
+    narrative_retriever=retriever,
+)
+
+print("route   :", result.route)
+print("answer  :\n" + result.answer)
+print("sources :", result.sources)
+ret_store.close(); fact_store.close()</code></pre></div>
+
+<h3>真实运行输出</h3>
+<div class="codecard"><pre><code>route   : composite
+answer  :
+ACME_CN FY2024 REVENUE：128.6 亿元(来源：FY2024_annual_report.pptx · p.12)
+
+归因分析:
+基于检索到的资料: …(检索到的归因片段,带来源)
+sources : [{'doc':'FY2024_annual_report.pptx','locator':'p.12'},
+           {'doc':'FY2024_mdna.pptx','locator':'FY2024_mdna.pptx#para1-4'}]</code></pre></div>
+<p>composite 把两路结果<b>拼接</b>:数字段是确定性合成的"实体 期间 指标:值 单位(来源…)",归因段以"归因分析:"起头;<code>result.sources</code> 是两路来源之和。</p>
+
+<div class="box warn">
+  <div class="t">⚠️ <code>Fact</code> 字段坑(实测踩过)</div>
+  <ul class="tight" style="margin:6px 0 0">
+    <li><code>Fact</code> 字段<b>全部必填、无默认值</b>:<code>tags={}</code> 和 <code>dimensions={}</code> 也要显式传,否则 <code>TypeError</code>。</li>
+    <li>期间是 <code>period_type="FY"</code> + <code>period="2024"</code>,<b>不是</b> <code>"FY2024"</code>。</li>
+    <li><code>sensitivity</code> <b>不能用 <code>RESTRICTED</code></b>——叙事检索出口会把它剔除(隔离不出域硬约束),归因段会变成"未检索到相关资料"。</li>
+    <li>写库和检索是<b>两步</b>:先 <code>ChunkStore.replace_doc_chunks</code> 灌完、close,再 <code>build_narrative_retriever</code> 重开同一个 sqlite 文件。</li>
+    <li>别用 <code>ingest_narrative</code> 喂纯字符串——那个高层函数要真实 pptx/pdf 文件 + 文件 hash 登记;纯文本演示走 <code>chunk_document</code> + <code>replace_doc_chunks</code> 这条短路。</li>
+  </ul>
+</div>
+
+<!-- ============ PROVIDER ============ -->
+<h2 id="provider"><span class="n">8</span>MockProvider vs 真实 Claude(关键差异)</h2>
+<table>
+  <tr><th>侧</th><th>MockProvider(离线)</th><th>AnthropicProvider(真实 Claude)</th></tr>
+  <tr><td><b>数字段</b></td><td colspan="2" style="text-align:center">两者<b>完全一致</b>——数字永远取自 fact 值,模型散文不参与(反幻觉硬约束)。</td></tr>
+  <tr><td><b>归因段</b></td><td>离线占位:把检索到的片段<b>原样回显</b>(证明检索链通了、来源带上了),<b>不会</b>真总结。</td><td>基于检索片段输出<b>真正的归因散文</b>,并强制带来源引用。</td></tr>
+</table>
+<div class="box info">
+  <div class="t">推荐迁移姿势</div>
+  先用 <code>MockProvider</code> 跑通管线、写测试(离线无 key、确定性),确认行为对了;上线再换 <code>AnthropicProvider</code>(装 <code>[llm]</code> extra + API key)出真归因。叙事路径反幻觉策略与结构化不同:<b>信任模型散文但强制来源引用</b>(来源没出现在回答里就自动补"(资料来源:…)")。
+</div>
+<div class="codecard"><pre><code>from ragspine.agent.llm_provider import AnthropicProvider
+provider = AnthropicProvider(model="claude-...", base_url="https://你的企业网关")  # 需装 [llm] extra
+# 其余代码不变:answer_question(question, fact_store, provider, narrative_retriever=retriever)</code></pre></div>
+
+<!-- ============ CHECKLIST ============ -->
+<h2 id="checklist"><span class="n">9</span>迁移 4 步 &amp; 上线清单</h2>
+<div class="step"><div class="num">1</div><div class="body"><b>数字 → <code>FactStore</code></b>(带血缘)。Dify 里"数据库/知识库查询"节点的结构化数据搬这里;可手写 <code>upsert_facts</code>,也可用 RAGSpine 的 extraction 层从 xlsx/pptx/pdf 自动抽。</div></div>
+<div class="step"><div class="num">2</div><div class="body"><b>归因文档 → <code>ChunkStore</code></b>(<code>chunk_document</code> + <code>replace_doc_chunks</code>)。Dify 里"知识检索"节点的文档进这里。</div></div>
+<div class="step"><div class="num">3</div><div class="body"><b>整张图 → 一行 <code>answer_question(...)</code></b>。Dify 里"分类器 → 分支 → 检索 → LLM → 变量聚合"全部由这一个函数内部完成。</div></div>
+<div class="step"><div class="num">4</div><div class="body"><b>先 Mock 跑通+写测试,再换 Anthropic</b> 出真归因。</div></div>
+
+<h3>上线前自检</h3>
+<ul class="tight">
+  <li>☐ composite 问题确实走到了 <code>route == "composite"</code>(打印 <code>result.route</code> 验证)。</li>
+  <li>☐ 缺失数据时返回的是"查不到"而非编造数字(故意问一个库里没有的期间验证)。</li>
+  <li>☐ <code>result.sources</code> 同时含数字侧 + 叙事侧来源。</li>
+  <li>☐ 没有把敏感文档标成 <code>RESTRICTED</code> 还指望它被检索到。</li>
+  <li>☐ 真实 provider 的 <code>base_url</code> / API key / 模型名按企业网关配好。</li>
+</ul>
+
+<footer>
+  生成于本机 · 代码示例均在 RAGSpine 仓库内用 <code>.venv</code> 实跑验证 · 数据为虚构公司 ACME 的合成示例,非真实数据。<br>
+  迁移你的真实 Dify 流程时,把 metric/entity/period 换成你的口径,把归因文本换成你的文档即可。
+</footer>
+
+</div>
+
+<script>
+document.querySelectorAll('.codecard').forEach(card=>{
+  const btn=document.createElement('button');
+  btn.className='copy'; btn.textContent='复制';
+  btn.onclick=()=>{
+    const code=card.querySelector('code').innerText;
+    navigator.clipboard.writeText(code).then(()=>{
+      btn.textContent='已复制'; btn.classList.add('done');
+      setTimeout(()=>{btn.textContent='复制';btn.classList.remove('done');},1500);
+    });
+  };
+  card.appendChild(btn);
+});
+</script>
+</body>
+</html>
