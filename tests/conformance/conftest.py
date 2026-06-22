@@ -20,6 +20,8 @@ import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
+from corespine import ConformanceSuite, InvariantPack, Registry
+
 
 # ---------------------------------------------------------------------------
 # 注册表：受 conformance 约束的 VectorStore 实现 -> 其【能力等级】（仅登记名字+能力，类延迟解析）。
@@ -152,28 +154,106 @@ def chunker(request):
     return _build_chunker(request.param)
 
 
+def _record(record_id: str, vector, **metadata):
+    """构造 VectorRecord：默认带齐血缘 + 过滤元数据，可逐项覆盖（延迟 import 以保持惰性红色）。
+
+    默认 metadata 含 doc_id / source_locator（provenance 锚点）与
+    topic/entity/geography/period/language/sensitivity（过滤维度），口径同 StoredChunk。
+    vector 接受任意可迭代数，统一转 float 元组。供 make_record 夹具与 InvariantPack 共用。
+    """
+    from ragspine.retrieval.vector.store import VectorRecord
+
+    md = dict(
+        doc_id=record_id.split("#")[0],
+        source_locator=f"{record_id}!para1",
+        topic="FIN",
+        entity="ACME_HK",
+        geography="HK",
+        period="2025H1",
+        language="zh",
+        sensitivity="INTERNAL",
+    )
+    md.update({k: str(v) for k, v in metadata.items()})
+    return VectorRecord(id=record_id, vector=tuple(float(x) for x in vector), metadata=md)
+
+
 @pytest.fixture
 def make_record():
     """构造 VectorRecord 的工厂夹具：默认带齐血缘 + 过滤元数据，可逐项覆盖。
 
-    默认 metadata 含 doc_id / source_locator（provenance 锚点）与
-    topic/entity/geography/period/language/sensitivity（过滤维度），口径同 StoredChunk。
-    vector 接受任意可迭代数，统一转 float 元组。延迟 import VectorRecord 以保持惰性红色。
+    薄封装 _record（与下方 InvariantPack 共用同一构造口径）；延迟 import VectorRecord
+    以保持惰性红色。
     """
-    from ragspine.retrieval.vector.store import VectorRecord
+    return _record
 
-    def _make(record_id: str, vector, **metadata) -> "VectorRecord":
-        md = dict(
-            doc_id=record_id.split("#")[0],
-            source_locator=f"{record_id}!para1",
-            topic="FIN",
-            entity="ACME_HK",
-            geography="HK",
-            period="2025H1",
-            language="zh",
-            sensitivity="INTERNAL",
-        )
-        md.update({k: str(v) for k, v in metadata.items()})
-        return VectorRecord(id=record_id, vector=tuple(float(x) for x in vector), metadata=md)
 
-    return _make
+# ===========================================================================
+# corespine 机制层 conformance 骨架（与上文 fixture-形态参数化两层互补，领域断言不外迁）。
+#
+# 「哪些实现受机制级不变量约束」这件【机制】交给 corespine：用 corespine.Registry 持有
+# 名字->工厂 的单一出处，再用 corespine.ConformanceSuite 把 实现 × InvariantPack 绑成
+# 笛卡尔积，由 test_vector_store_suite.py 的 parametrize_kwargs() 两行消费。
+#
+# 范围刻意收敛在【离线零依赖、零服务】的 in_process 默认实现上——它无 importorskip / env 门，
+# 故 corespine 套件每格都能确定性执行；sqlite_vec / pgvector / qdrant 的可用性门与能力分支
+# 仍由上文 vector_store / vector_store_capability 夹具承载，二者职责不重叠。
+#
+# 红色策略：工厂与不变量都【延迟 import】store，未落地时在调用 thunk 时报 ERROR（逐格隔离），
+# 绝不中断整轮收集。领域语义（cosine 排序 / where 下推 / 血缘回传）仍全部留在
+# test_vector_store_contract.py / test_vector_store_invariants.py，本处只组织机制。
+# ===========================================================================
+def _make_in_process():
+    """构造内存默认实现（延迟 import，红色阶段在此抛 ModuleNotFoundError）。"""
+    from ragspine.retrieval.vector.store import InProcessVectorStore
+
+    return InProcessVectorStore()
+
+
+VECTOR_STORE_REGISTRY: "Registry" = Registry("vector_store")
+VECTOR_STORE_REGISTRY.register("in_process", _make_in_process)
+
+
+def _determinism_repeated_query_stable(store) -> None:
+    """同库同查询两次：命中 (id, score) 序列逐位一致（确定性·机制）。"""
+    store.upsert([_record(f"d{i}#0", [1.0, float(i) * 0.1, 0.0]) for i in range(8)])
+    first = [(h.id, h.score) for h in store.query([1.0, 0.05, 0.0], k=8)]
+    second = [(h.id, h.score) for h in store.query([1.0, 0.05, 0.0], k=8)]
+    assert first == second
+
+
+def _provenance_id_and_locator_round_trip(store) -> None:
+    """血缘锚点 id / doc_id / source_locator 经 upsert->query 原样回传（不臆造·机制）。"""
+    store.upsert([
+        _record("HK_FIN.pptx#3", [1.0, 0.0, 0.0],
+                doc_id="HK_FIN.pptx", source_locator="HK_FIN.pptx!slide3#para2"),
+    ])
+    [hit] = store.query([1.0, 0.0, 0.0], k=1)
+    assert hit.id == "HK_FIN.pptx#3"
+    assert hit.metadata["doc_id"] == "HK_FIN.pptx"
+    assert hit.metadata["source_locator"] == "HK_FIN.pptx!slide3#para2"
+
+
+def _isolation_filter_excludes_nearest(store) -> None:
+    """where 下推：被过滤记录即便是最近邻也不出现（敏感度隔离下推·机制）。"""
+    store.upsert([
+        _record("secret#0", [1.0, 0.0, 0.0], sensitivity="RESTRICTED"),  # 最近邻
+        _record("pub#0", [0.0, 1.0, 0.0], sensitivity="INTERNAL"),
+    ])
+    out_ids = {h.id for h in store.query([1.0, 0.0, 0.0], k=5, where={"sensitivity": "INTERNAL"})}
+    assert "secret#0" not in out_ids
+    assert "pub#0" in out_ids
+
+
+VECTOR_STORE_INVARIANTS: "InvariantPack" = (
+    InvariantPack("vector_store")
+    .add("determinism_repeated_query_stable", _determinism_repeated_query_stable)
+    .add("provenance_id_and_locator_round_trip", _provenance_id_and_locator_round_trip)
+    .add("isolation_filter_excludes_nearest", _isolation_filter_excludes_nearest)
+)
+
+# 实现 × 不变量 的笛卡尔积套件：corespine 负责「跑全套 + 定位坏格子」。
+# 工厂取自 Registry（单一出处）；每格新建实例，杜绝实现间状态串味。
+VECTOR_STORE_SUITE: "ConformanceSuite" = ConformanceSuite(
+    {name: (lambda n=name: VECTOR_STORE_REGISTRY.make(n)) for name in VECTOR_STORE_REGISTRY.names()},
+    VECTOR_STORE_INVARIANTS,
+)
