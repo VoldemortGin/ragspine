@@ -343,6 +343,21 @@ def test_emit_trace_logs_info_with_fields(caplog):
     assert getattr(rec, "metric", None) == "REVENUE"
 
 
+def test_emit_trace_rejects_forbidden_content_keys(caplog):
+    """user story：隐私由机制强制——载荷含正文字段（answer/text/content/...）时 emit_trace
+    直接抛 TraceError 且【绝不落盘】，而不是悄悄把受限正文写进 INFO 日志。"""
+    from corespine import CorespineError
+    from ragspine.common import observability
+
+    for forbidden_key in ("answer", "text", "content"):
+        with caplog.at_level(logging.INFO, logger="ragspine.trace"):
+            with pytest.raises(CorespineError):
+                observability.emit_trace(request_id="abc123", **{forbidden_key: "机密正文"})
+    # 抛错路径不得有任何 trace 落盘，受限正文不进日志面
+    traces = [r for r in caplog.records if r.name == "ragspine.trace"]
+    assert traces == []
+
+
 # ===========================================================================
 # R9 — 回归守护：MockProvider 正常路径行为不变
 # user story：加了观测/韧性后，既有正常路径（找数 / not_found）的对外行为必须逐字节不变。
