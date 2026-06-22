@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/common/
-verified-against: cab40fe
+verified-against: 0dae07e
 ---
 
 # common — agent contract
@@ -17,7 +17,10 @@ global constants (`core` — data dir + default sqlite paths; single source of t
 ## Invariants
 
 - **Privacy-aware traces** — `observability` records codes / counts / timings
-  only, never answer / fact value / chunk text.
+  only, never answer / fact value / chunk text. **Mechanically enforced**: `emit_trace`
+  runs every payload through a corespine `InProcessPrivacyTraceSink` first — a forbidden
+  content key (answer/value/text/content/prompt/completion/chunk/chunk_text/body) raises
+  `TraceError` before anything is logged. Privacy by construction, not by convention.
 - **Config-driven** — identity / metrics / competitors come from `CompanyProfile`;
   never hardcode a company.
 

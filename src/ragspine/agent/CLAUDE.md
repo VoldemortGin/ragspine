@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/agent/
-verified-against: cab40fe
+verified-against: 0dae07e
 ---
 
 # agent — agent contract
@@ -69,7 +69,8 @@ loop, LLM provider abstraction.
   metric-missing to "assume and answer".
 - **`ProviderError` wraps only network / API / timeout errors** (`llm_provider.py`);
   program errors (KeyError/TypeError) must propagate. Never `except Exception` into a
-  degrade path — it buries real bugs.
+  degrade path — it buries real bugs. It now inherits the family base `corespine.CorespineError`
+  (stable `code="provider.error"`); the network-only wrapping contract is unchanged.
 - **provider & retriever are Protocols; `agent.py` imports no SDK and no retrieval impl**
   (`LLMProvider` in `llm_provider.py`, `NarrativeRetriever` Protocol in `agent.py`). The
   `anthropic` SDK is lazy-imported inside `AnthropicProvider` only.
