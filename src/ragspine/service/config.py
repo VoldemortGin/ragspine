@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
+from corespine import CorespineError, env_key, load_from_env
+
 from ragspine.agent.agent import NarrativeRetriever
 from ragspine.agent.llm_provider import (
     DEFAULT_ANTHROPIC_MODEL,
@@ -45,27 +47,33 @@ class ServiceConfig:
     allowed_upload_root: str | None = None  # ingestion 路径必须落在此根内
     company_profile_path: str | None = None
 
+    # 历史 env 键别名 -> 字段名。corespine load_from_env 默认按 PREFIX_FIELDNAME
+    # 推导键名，与这三个不规则旧键冲突；构造时把旧键改写到规范键以保持向后兼容。
+    _ENV_PREFIX = "RAGSPINE"
+    _LEGACY_ENV_ALIASES = {
+        "RAGSPINE_PROVIDER": "provider_type",
+        "RAGSPINE_COMPANY_PROFILE": "company_profile_path",
+        "RAGSPINE_FAQ_SOURCE": "faq_source",
+    }
+    # db_path 字段无 dataclass 默认值，from_env 历史上在此层兜底为该路径。
+    _DB_PATH_FALLBACK = "data/fact_metric.db"
+
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "ServiceConfig":
+        """从 RAGSPINE_* 环境变量装配配置。
+
+        规则字段交由 corespine load_from_env（PREFIX_FIELDNAME）；三个不规则旧键
+        先改写到规范键名再交给它，旧键名仍向后兼容。规范键存在时优先于旧别名。
+        db_path 字段无 dataclass 默认值，缺失时在此层兜底为历史默认路径。
+        """
         env = os.environ if env is None else env
-        return cls(
-            db_path=env.get("RAGSPINE_DB_PATH", "data/fact_metric.db"),
-            chunk_db_path=env.get("RAGSPINE_CHUNK_DB_PATH"),
-            mapping_db_path=env.get("RAGSPINE_MAPPING_DB_PATH"),
-            queue_db_path=env.get("RAGSPINE_QUEUE_DB_PATH"),
-            manifest_db_path=env.get("RAGSPINE_MANIFEST_DB_PATH"),
-            redis_url=env.get("RAGSPINE_REDIS_URL", "redis://localhost:6379/0"),
-            provider_type=env.get("RAGSPINE_PROVIDER", "mock"),
-            model=env.get("RAGSPINE_MODEL", DEFAULT_ANTHROPIC_MODEL),
-            base_url=env.get("RAGSPINE_BASE_URL"),
-            embedding=env.get("RAGSPINE_EMBEDDING", "none"),
-            vector_store=env.get("RAGSPINE_VECTOR_STORE", "none"),
-            persistence_policy=env.get("RAGSPINE_PERSISTENCE_POLICY", "default"),
-            reference_date=env.get("RAGSPINE_REFERENCE_DATE"),
-            faq_source=env.get("RAGSPINE_FAQ_SOURCE"),
-            allowed_upload_root=env.get("RAGSPINE_ALLOWED_UPLOAD_ROOT"),
-            company_profile_path=env.get("RAGSPINE_COMPANY_PROFILE"),
-        )
+        normalized = dict(env)
+        for legacy_key, field_name in cls._LEGACY_ENV_ALIASES.items():
+            canonical_key = env_key(cls._ENV_PREFIX, field_name)
+            if legacy_key in normalized and canonical_key not in normalized:
+                normalized[canonical_key] = normalized[legacy_key]
+        normalized.setdefault(env_key(cls._ENV_PREFIX, "db_path"), cls._DB_PATH_FALLBACK)
+        return load_from_env(cls, prefix=cls._ENV_PREFIX, env=normalized)
 
     def reference_date_obj(self) -> date | None:
         if self.reference_date is None:
@@ -111,8 +119,13 @@ def open_narrative_retriever(
         store.close()
 
 
-class PathNotAllowedError(ValueError):
-    """ingestion 路径越界或后缀不支持。"""
+class PathNotAllowedError(CorespineError):
+    """ingestion 路径越界或后缀不支持。
+
+    继承家族统一异常基类，稳定 code 为 "config.path_not_allowed"（ADR errors 缝）。
+    """
+
+    code = "config.path_not_allowed"
 
 
 def validate_ingest_path(
