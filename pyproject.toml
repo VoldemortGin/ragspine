@@ -121,6 +121,12 @@ service = [
     "rq>=1.16",
     "redis>=5.0",
 ]
+# 一键装齐全部功能依赖（不含开发用 dev）。自引用聚合：改子 extra 无需同步维护此处。
+# GPU 与否无需在此区分——torch/transformers/paddleocr 装的是自适应版，运行时探测到
+# CUDA 即用 GPU、否则回落 CPU；embed 的 transformers 上限已按 darwin 平台标记处理。
+all = [
+    "rag-spine[pdf,ocr,llm,embed,vector,service]",
+]
 
 [build-system]
 requires = ["hatchling"]
