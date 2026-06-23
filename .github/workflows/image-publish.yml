@@ -1,0 +1,93 @@
+# Container image → GHCR (build + push) on a GitHub Release.
+#
+# 与 release.yml（PyPI 发布）同源同模型：发布 GitHub Release 时触发，构建 deploy/Dockerfile
+# （构建上下文＝仓库根），推到 ghcr.io/voldemortgin/ragspine。这把 deploy/compose.yaml 与
+# deploy/helm 里本地构建用的 `ragspine:local` 升级成一个【生产可拉】的 GHCR 镜像——同一个
+# Dockerfile、同一个「一个镜像两种角色」（server / worker 仅 command 不同）的设计。
+#
+# 打的 tag：
+#   - 版本号（取自 pyproject.toml 的 version，与 release.yml「版本以 pyproject 为准」一致；
+#     例如 0.3.0），外加规范化的 v 前缀变体（v0.3.0）。
+#   - latest（仅在非预发布的正式 Release 上打；prerelease 不动 latest）。
+#
+# 镜像 owner 小写化为 `voldemortgin`（GHCR 仓库名必须全小写；仓库 owner 是 VoldemortGin）。
+#
+# ── 一次性前置（仓库设置，无需任何 stored token）─────────────────────────────────────
+# 用内置 GITHUB_TOKEN + packages:write 权限登录 GHCR，无需 PAT。首次推送会自动建
+# package；建后到 GitHub → Packages → ragspine → Package settings 把可见性按需设为
+# public（生产服务器免登录 `docker pull`）或保持 private（拉取需 `docker login ghcr.io`）。
+#
+# ── 手动构建（不发版也想出一个镜像，比如验证）────────────────────────────────────────
+# Actions → "image-publish" → Run workflow：用 workflow_dispatch，按 pyproject 版本打 tag，
+# 但【不】动 latest（仅正式 Release 才动 latest）。
+name: image-publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # 推 GHCR 所需（用内置 GITHUB_TOKEN，无 PAT）。
+    steps:
+      - uses: actions/checkout@v4
+
+      # 镜像 owner 必须小写：仓库 owner 是 VoldemortGin，GHCR 仓库名为 voldemortgin/ragspine。
+      - name: Resolve lowercase image name
+        id: img
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ragspine" >> "$GITHUB_OUTPUT"
+
+      # 版本以 pyproject.toml 为准（与 release.yml 同一约定，避免与 tag 漂移）。
+      - name: Read version from pyproject
+        id: ver
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import re, pathlib
+          text = pathlib.Path("pyproject.toml").read_text(encoding="utf-8")
+          m = re.search(r'(?m)^\s*version\s*=\s*"([^"]+)"', text)
+          assert m, "version not found in pyproject.toml"
+          print(f"version={m.group(1)}")
+          PY
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # tag 策略：恒打版本号（X.Y.Z 与 vX.Y.Z 两种写法都覆盖）；latest 仅在「正式 Release
+      # 发布」事件且非 prerelease 时追加——workflow_dispatch 与 prerelease 都不动 latest。
+      - name: Compute image tags
+        id: tags
+        run: |
+          NAME='${{ steps.img.outputs.name }}'
+          VER='${{ steps.ver.outputs.version }}'
+          TAGS="${NAME}:${VER},${NAME}:v${VER}"
+          if [ "${{ github.event_name }}" = "release" ] && [ "${{ github.event.release.prerelease }}" != "true" ]; then
+            TAGS="${TAGS},${NAME}:latest"
+          fi
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          # 构建上下文＝仓库根（deploy/Dockerfile 的 COPY 取 src/ scripts/ config/ data/）。
+          context: .
+          file: deploy/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.ver.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

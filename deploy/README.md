@@ -127,3 +127,36 @@ Kubernetes 的 Helm chart 已落地，见 [`deploy/helm/ragspine/`](helm/ragspin
 `RAGSPINE_*` 注入**：Compose 的 `app`/`worker`/`redis` 映射为 Deployment，命名卷映射为共享数据
 PVC（`/var/lib/ragspine`），`postgres`/`qdrant` profile 映射为 `values.yaml` 旋钮，`env_file`
 机密映射为按需渲染的 `Secret`。默认 `helm install` 即离线精简栈（mock + sqlite_vec，无需 key）。
+
+## 生产镜像：GHCR（自动 build / push）
+
+`ragspine:local` 是**本地构建**的 tag——compose 的 `build:` 与 helm `values.yaml` 的
+`image.repository: ragspine / tag: local` 默认走它，适合开发 / kind 验证。**生产**则从
+`ghcr.io/voldemortgin/ragspine` 拉一个不可变镜像，由
+[`.github/workflows/image-publish.yml`](../.github/workflows/image-publish.yml) 在**发布
+GitHub Release** 时用**同一个 `deploy/Dockerfile`** 自动 build + push：
+
+- tag：版本号（取自 `pyproject.toml`，如 `0.3.0` 与 `v0.3.0`）＋ `latest`（仅正式 Release，
+  prerelease 不动 latest）。与 PyPI 的 `release.yml` 同源、同版本号约定。
+- 登录用仓库内置 `GITHUB_TOKEN`（`packages: write`），**无需 PAT**；首次推送自动建 package，
+  之后在 GitHub → Packages 把可见性设为 public（生产免登录 `docker pull`）或留 private。
+- 也可在 Actions 里手动 `Run workflow`（`workflow_dispatch`）出一个按 pyproject 版本号打 tag
+  的镜像（不动 `latest`），用于验证。
+
+生产环境改用 GHCR 镜像（不本地 build）：
+
+```bash
+# compose：覆盖 image，并去掉 build（或直接在生产 compose 里写死 image）
+RAGSPINE_TAG=0.3.0 docker compose -f deploy/compose.yaml up   # 若已把 image 指向 GHCR
+
+# helm：把 chart 的镜像指到 GHCR
+helm install ragspine deploy/helm/ragspine \
+  --set image.repository=ghcr.io/voldemortgin/ragspine \
+  --set image.tag=0.3.0 \
+  --set image.pullPolicy=IfNotPresent
+```
+
+> compose 的 `app`/`worker` 仍写着 `image: ragspine:local` + `build:`（开发默认）；生产用
+> GHCR 时以一个不含 `build:`、`image:` 指向 `ghcr.io/voldemortgin/ragspine:<版本>` 的
+> override compose 覆盖即可（`docker compose -f compose.yaml -f compose.prod.yaml up`），
+> 此处不预置该 override 文件以免与开发默认相互干扰。
