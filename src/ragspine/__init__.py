@@ -7,6 +7,7 @@ Submodules:
     agent/ — agent 编排：意图解析、安全门、tool-use 循环、LLM provider 抽象。
     cli/ — 控制台 CLI 入口（ragspine 命令）：quickstart / ask / version 子命令。
     common/ — 跨域基础原语：company profile、敏感度、glossary、可观测性。
+    dify/ — Dify 工作流 YAML → 纯 Python 编译器 + 静态优化建议器（parse/IR/codegen/optimize）。
     eval/ — Q&A 与抽取评测 harness，含基线回归门禁。
     extraction/ — 文档 → 冻结的 StyledGrid IR：抽取器、PDF 分诊、颜色语义、双通道校验。
     fixtures/ — 合成 fixture / ground-truth 生成器（确定性、硬编码），tests 与 scripts 共用。
