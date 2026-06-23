@@ -1,0 +1,54 @@
+"""由 ragspine.dify 从 Dify 工作流 YAML 自动生成的纯 Python 脚本。
+
+无框架、命令式、可离线运行：LLM 节点走 corespine.LLMProvider.chat（默认
+ragspine.MockProvider()），并行用 concurrent.futures.ThreadPoolExecutor（全同步，无 async）。
+编辑提示：本文件可直接 exec / 入库；不支持的节点处留有 _hook_* 骨架待补全。"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+from corespine import LLMProvider
+from ragspine import MockProvider
+
+
+def _as_num(value: Any) -> float:
+    """把任意值容错转 float（条件比较用；非数返回 0.0）。"""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+@dataclass
+class Inputs:
+    """工作流输入（对应 Dify start 节点变量）。"""
+    question: Any = None
+
+def run_workflow(
+    inputs: Inputs,
+    *,
+    provider: LLMProvider | None = None,
+) -> dict[str, Any]:
+    """编译自 Dify 工作流：拓扑展平、命令式执行、provider.chat 走 LLM 缝。"""
+    provider = provider if provider is not None else MockProvider()
+    _ctx: dict[tuple[str, str], Any] = {}
+    _result: dict[str, Any] = {}
+
+    def _var(node: str, field: str) -> Any:
+        """取某节点输出字段（闭合 _ctx）；缺失返回空串，不因取值缺失整体崩。"""
+        return _ctx.get((node, field), '')
+
+    # start: start_1
+    _ctx[('start_1', 'question')] = getattr(inputs, 'question', None)
+    # llm: llm_1
+    _messages_llm_1 = [
+        {'role': 'system', 'content': '你是一个有帮助的助手。'},
+        {'role': 'user', 'content': str(_var('start_1', 'question'))},
+    ]
+    _resp_llm_1 = provider.chat(_messages_llm_1)
+    _ctx[('llm_1', 'text')] = (_resp_llm_1.choices[0].message.content or '')
+    # template-transform: tt_1
+    _ctx[('tt_1', 'output')] = '回答：' + str(_var('llm_1', 'text'))
+    # end: end_1
+    _result['result'] = _var('tt_1', 'output')
+    return _result

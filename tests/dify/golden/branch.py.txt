@@ -1,0 +1,62 @@
+"""由 ragspine.dify 从 Dify 工作流 YAML 自动生成的纯 Python 脚本。
+
+无框架、命令式、可离线运行：LLM 节点走 corespine.LLMProvider.chat（默认
+ragspine.MockProvider()），并行用 concurrent.futures.ThreadPoolExecutor（全同步，无 async）。
+编辑提示：本文件可直接 exec / 入库；不支持的节点处留有 _hook_* 骨架待补全。"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+from corespine import LLMProvider
+from ragspine import MockProvider
+
+
+def _as_num(value: Any) -> float:
+    """把任意值容错转 float（条件比较用；非数返回 0.0）。"""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+@dataclass
+class Inputs:
+    """工作流输入（对应 Dify start 节点变量）。"""
+    score: Any = None
+
+def run_workflow(
+    inputs: Inputs,
+    *,
+    provider: LLMProvider | None = None,
+) -> dict[str, Any]:
+    """编译自 Dify 工作流：拓扑展平、命令式执行、provider.chat 走 LLM 缝。"""
+    provider = provider if provider is not None else MockProvider()
+    _ctx: dict[tuple[str, str], Any] = {}
+    _result: dict[str, Any] = {}
+
+    def _var(node: str, field: str) -> Any:
+        """取某节点输出字段（闭合 _ctx）；缺失返回空串，不因取值缺失整体崩。"""
+        return _ctx.get((node, field), '')
+
+    # start: start_1
+    _ctx[('start_1', 'score')] = getattr(inputs, 'score', None)
+    # if-else: ifelse_1
+    if _as_num(_var('start_1', 'score')) > _as_num('60'):
+        # llm: llm_yes
+        _messages_llm_yes = [
+            {'role': 'user', 'content': '恭喜通过，分数 ' + str(_var('start_1', 'score'))},
+        ]
+        _resp_llm_yes = provider.chat(_messages_llm_yes)
+        _ctx[('llm_yes', 'text')] = (_resp_llm_yes.choices[0].message.content or '')
+    else:
+        # llm: llm_no
+        _messages_llm_no = [
+            {'role': 'user', 'content': '未通过，分数 ' + str(_var('start_1', 'score'))},
+        ]
+        _resp_llm_no = provider.chat(_messages_llm_no)
+        _ctx[('llm_no', 'text')] = (_resp_llm_no.choices[0].message.content or '')
+    # answer: answer_1
+    _answer = str(_var('llm_yes', 'text')) + str(_var('llm_no', 'text'))
+    _ctx[('answer_1', 'answer')] = _answer
+    _result['answer'] = _answer
+    return _result
