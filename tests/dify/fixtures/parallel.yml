@@ -1,0 +1,84 @@
+# 并行型 workflow：start →┬→ llm_a →┐
+#                          └→ llm_b →┴→ tt_join → end。
+# llm_a 与 llm_b 互不依赖、同处一个 parallel_layer（≥2 重节点）→ 触发 ThreadPoolExecutor
+# 生成 + PARALLEL_001 优化建议。
+app:
+  mode: workflow
+  name: parallel-demo
+kind: app
+version: "0.1.5"
+workflow:
+  graph:
+    nodes:
+      - id: start_1
+        data:
+          type: start
+          title: 开始
+          variables:
+            - variable: topic
+              label: 主题
+              type: text-input
+              required: true
+      - id: llm_a
+        data:
+          type: llm
+          title: 视角A
+          model:
+            provider: anthropic
+            name: claude-opus-4-8
+            completion_params:
+              max_tokens: 1024
+          prompt_template:
+            - role: user
+              text: "从正面分析：{{#start_1.topic#}}"
+      - id: llm_b
+        data:
+          type: llm
+          title: 视角B
+          model:
+            provider: anthropic
+            name: claude-opus-4-8
+            completion_params:
+              max_tokens: 1024
+          prompt_template:
+            - role: user
+              text: "从反面分析：{{#start_1.topic#}}"
+      - id: tt_join
+        data:
+          type: template-transform
+          title: 合并
+          template: "正面：{{ a }}\n反面：{{ b }}"
+          variables:
+            - variable: a
+              value_selector:
+                - llm_a
+                - text
+            - variable: b
+              value_selector:
+                - llm_b
+                - text
+      - id: end_1
+        data:
+          type: end
+          title: 结束
+          outputs:
+            - variable: result
+              value_selector:
+                - tt_join
+                - output
+    edges:
+      - source: start_1
+        target: llm_a
+        sourceHandle: source
+      - source: start_1
+        target: llm_b
+        sourceHandle: source
+      - source: llm_a
+        target: tt_join
+        sourceHandle: source
+      - source: llm_b
+        target: tt_join
+        sourceHandle: source
+      - source: tt_join
+        target: end_1
+        sourceHandle: source

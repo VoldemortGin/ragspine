@@ -115,12 +115,16 @@ vector = [
     "pg8000>=1.30",
     "qdrant-client>=1.7",
 ]
-# Dify 工作流编译器（ragspine.dify）的边界依赖：仅在 parse 段把 .yml 文本读成 dict。
-# PyYAML（MIT，permissive，过 ADR 0009 的 ≤Apache-2.0 许可门）经 yaml.safe_load 解析；
-# 延迟 import（loader.py 内），不装也能 import ragspine 与多数核心，只有真正调用
-# compile_dify_yaml / parse_dify_yaml 那条链才需要它。codegen/optimize 段纯 stdlib。
+# Dify 工作流编译器（ragspine.dify）的边界依赖：
+# - PyYAML（MIT，permissive，过 ADR 0009 的 ≤Apache-2.0 许可门）：parse 段经 yaml.safe_load
+#   把 .yml 文本读成 dict；延迟 import（loader.py 内）。
+# - pydantic（MIT，permissive）：parse 段边界校验（schema.py），符合「pydantic at boundaries」。
+#   [service] 经 fastapi 传递带入 pydantic，但 [dify] 不经 fastapi，故在此显式声明。
+# 三者只在 parse 段需要；codegen/optimize 段纯 stdlib。不装 [dify] 也能 import ragspine 与多数
+# 核心，只有真正调用 compile_dify_yaml / parse_dify_yaml 那条链才需要它们。
 dify = [
     "PyYAML>=6.0",
+    "pydantic>=2.0",
 ]
 # 服务层：FastAPI HTTP 层 + RQ/Redis 异步任务队列（docs/09 PRD）。
 # rq/redis 延迟 import（RQQueue 内），不装也能 import task_queue、用 FakeQueue 跑离线测试。

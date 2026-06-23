@@ -1,0 +1,78 @@
+# 分支型 advanced-chat：start → if-else →(true)→ llm_yes →┐
+#                                        └(false)→ llm_no  →┴→ answer。
+# 用于验证 if-else 节点 → if/elif/else、sourceHandle(true/false) 分支边、answer 节点。
+app:
+  mode: advanced-chat
+  name: branch-demo
+kind: app
+version: "0.1.5"
+workflow:
+  graph:
+    nodes:
+      - id: start_1
+        data:
+          type: start
+          title: 开始
+          variables:
+            - variable: score
+              label: 分数
+              type: number
+              required: true
+      - id: ifelse_1
+        data:
+          type: if-else
+          title: 阈值判断
+          cases:
+            - case_id: "true"
+              logical_operator: and
+              conditions:
+                - variable_selector:
+                    - start_1
+                    - score
+                  comparison_operator: ">"
+                  value: "60"
+      - id: llm_yes
+        data:
+          type: llm
+          title: 通过应答
+          model:
+            provider: anthropic
+            name: claude-opus-4-8
+            completion_params:
+              max_tokens: 512
+          prompt_template:
+            - role: user
+              text: "恭喜通过，分数 {{#start_1.score#}}"
+      - id: llm_no
+        data:
+          type: llm
+          title: 未过应答
+          model:
+            provider: anthropic
+            name: claude-opus-4-8
+            completion_params:
+              max_tokens: 512
+          prompt_template:
+            - role: user
+              text: "未通过，分数 {{#start_1.score#}}"
+      - id: answer_1
+        data:
+          type: answer
+          title: 回复
+          answer: "{{#llm_yes.text#}}{{#llm_no.text#}}"
+    edges:
+      - source: start_1
+        target: ifelse_1
+        sourceHandle: source
+      - source: ifelse_1
+        target: llm_yes
+        sourceHandle: "true"
+      - source: ifelse_1
+        target: llm_no
+        sourceHandle: "false"
+      - source: llm_yes
+        target: answer_1
+        sourceHandle: source
+      - source: llm_no
+        target: answer_1
+        sourceHandle: source

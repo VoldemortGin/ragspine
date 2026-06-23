@@ -1,0 +1,62 @@
+# 顺序型 workflow：start → llm → template-transform → end。
+# 用于验证最基础的拓扑展平、变量引用归一、LLM 节点 → provider.chat 映射。
+app:
+  mode: workflow
+  name: seq-demo
+kind: app
+version: "0.1.5"
+workflow:
+  graph:
+    nodes:
+      - id: start_1
+        data:
+          type: start
+          title: 开始
+          variables:
+            - variable: question
+              label: 问题
+              type: text-input
+              required: true
+      - id: llm_1
+        data:
+          type: llm
+          title: 应答模型
+          model:
+            provider: anthropic
+            name: claude-opus-4-8
+            completion_params:
+              max_tokens: 1024
+          prompt_template:
+            - role: system
+              text: 你是一个有帮助的助手。
+            - role: user
+              text: "{{#start_1.question#}}"
+      - id: tt_1
+        data:
+          type: template-transform
+          title: 包装输出
+          template: "回答：{{ text }}"
+          variables:
+            - variable: text
+              value_selector:
+                - llm_1
+                - text
+      - id: end_1
+        data:
+          type: end
+          title: 结束
+          outputs:
+            - variable: result
+              value_selector:
+                - tt_1
+                - output
+    edges:
+      - source: start_1
+        target: llm_1
+        sourceHandle: source
+      - source: llm_1
+        target: tt_1
+        sourceHandle: source
+      - source: tt_1
+        target: end_1
+        sourceHandle: source

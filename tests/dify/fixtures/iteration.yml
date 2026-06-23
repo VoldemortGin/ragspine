@@ -1,0 +1,64 @@
+# 迭代型 workflow：start → iteration(对数组逐项跑内层 llm) → end。
+# iteration 节点带子图：内层节点用 iteration_id 指回父迭代节点；is_parallel + parallel_nums
+# 控制并行。用于验证 iteration 子图归一、串行 for / 并行 ThreadPoolExecutor 生成、
+# PARALLEL_002 / RESOURCE_* 优化建议。
+app:
+  mode: workflow
+  name: iteration-demo
+kind: app
+version: "0.1.5"
+workflow:
+  graph:
+    nodes:
+      - id: start_1
+        data:
+          type: start
+          title: 开始
+          variables:
+            - variable: items
+              label: 条目列表
+              type: array
+              required: true
+      - id: iter_1
+        data:
+          type: iteration
+          title: 逐项处理
+          iterator_selector:
+            - start_1
+            - items
+          output_selector:
+            - iter_llm
+            - text
+          output_type: array[string]
+          is_parallel: true
+          parallel_nums: 5
+          start_node_id: iter_llm
+      - id: iter_llm
+        data:
+          type: llm
+          title: 处理单项
+          iteration_id: iter_1
+          model:
+            provider: anthropic
+            name: claude-opus-4-8
+            completion_params:
+              max_tokens: 512
+          prompt_template:
+            - role: user
+              text: "翻译这一项：{{#iter_1.item#}}"
+      - id: end_1
+        data:
+          type: end
+          title: 结束
+          outputs:
+            - variable: results
+              value_selector:
+                - iter_1
+                - output
+    edges:
+      - source: start_1
+        target: iter_1
+        sourceHandle: source
+      - source: iter_1
+        target: end_1
+        sourceHandle: source
