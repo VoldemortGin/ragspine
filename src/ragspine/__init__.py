@@ -9,6 +9,7 @@ Submodules:
     common/ — 跨域基础原语：company profile、敏感度、glossary、可观测性。
     eval/ — Q&A 与抽取评测 harness，含基线回归门禁。
     extraction/ — 文档 → 冻结的 StyledGrid IR：抽取器、PDF 分诊、颜色语义、双通道校验。
+    fixtures/ — 合成 fixture / ground-truth 生成器（确定性、硬编码），tests 与 scripts 共用。
     ingestion/ — IR/文本 → 各类存储：结构化事实、叙事块、人工复核队列。
     pipeline/ — 管线拓扑导出：从真实装配派生静态 PipelineGraph（Mermaid/DOT/JSON）。
     retrieval/ — 叙事 RAG：切块、BM25 词法、向量、listwise 精排、agent 接入。
