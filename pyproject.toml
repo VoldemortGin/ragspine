@@ -190,3 +190,21 @@ module = [
     "qdrant_client.*",
 ]
 ignore_missing_imports = true
+
+# 这些是从 scripts/ 平移进来的生成器 / CLI 入口，按现状字节保留（最小改动），未补全严格注解；
+# 故对这几个模块放宽 strict 子规则，其它 src 仍全量 strict。
+[[tool.mypy.overrides]]
+module = [
+    "ragspine.fixtures.*",
+    "ragspine.cli.ask",
+    "ragspine.cli.ingest",
+    "ragspine.cli.ingest_narrative",
+    "ragspine.cli.topology",
+    "ragspine.cli.eval_retrieval_ab",
+    "ragspine.cli.run_qa_eval",
+]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
+disallow_any_generics = false
+warn_return_any = false
