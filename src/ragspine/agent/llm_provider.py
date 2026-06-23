@@ -20,9 +20,9 @@ from typing import Any
 from corespine import (
     ChatCompletion,
     Choice,
-    CorespineError,
     FunctionCall,
     LLMProvider,
+    ProviderError,
     ResponseMessage,
     ToolCall,
     Usage,
@@ -45,18 +45,7 @@ _ANTHROPIC_FINISH = {
 }
 
 
-class ProviderError(CorespineError):
-    """provider 调用失败的统一边界异常（网络/超时/API 错误归一到此）。
-
-    只包裹 SDK 抛出的网络/API 异常；程序错误（KeyError/TypeError 等）不归此类，
-    照常向上抛出，避免韧性兜底掩盖逻辑 bug。继承家族统一异常基类，稳定 code 为
-    "provider.error"（ADR errors 缝）。
-    """
-
-    code = "provider.error"
-
-
-# re-export corespine 的 LLMProvider 协议（OpenAI chat 规范）；ragspine 不再自定义。
+# re-export corespine 的 LLMProvider 协议与 ProviderError 异常；ragspine 不再自定义。
 __all__ = ["LLMProvider", "AnthropicProvider", "MockProvider", "ProviderError",
            "DEFAULT_ANTHROPIC_MODEL", "NARRATIVE_PROMPT_PREFIX"]
 

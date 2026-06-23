@@ -36,7 +36,7 @@ dependencies = [
     # Spine 家族薄共享核（ADR 0001 D3/D5）：domain-neutral 底层原语（缝注册表 / 隐私
     # trace 形状 / conformance 基座 / 配置加载 / 统一异常）。corespine 自身 dependencies
     # 恒为空，不引入任何重依赖；本地开发经下方 [tool.uv.sources] 指向同家族目录里的源码。
-    "corespine>=0.1.0",
+    "corespine>=0.1.1",
     "python-pptx>=0.6.23",
     "openpyxl>=3.1.0",
     "rootutils>=1.0.7",
