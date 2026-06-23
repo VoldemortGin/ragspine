@@ -1,0 +1,68 @@
+"""由 ragspine.dify 从 Dify 工作流 YAML 自动生成的纯 Python 脚本。
+
+无框架、命令式、可离线运行：LLM 节点走 corespine.LLMProvider.chat（默认
+ragspine.MockProvider()），并行用 concurrent.futures.ThreadPoolExecutor（全同步，无 async）。
+编辑提示：本文件可直接 exec / 入库；不支持的节点处留有 _hook_* 骨架待补全。"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+from corespine import LLMProvider
+from ragspine import MockProvider
+
+from concurrent.futures import ThreadPoolExecutor
+
+
+def _as_num(value: Any) -> float:
+    """把任意值容错转 float（条件比较用；非数返回 0.0）。"""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+@dataclass
+class Inputs:
+    """工作流输入（对应 Dify start 节点变量）。"""
+    topic: Any = None
+
+def run_workflow(
+    inputs: Inputs,
+    *,
+    provider: LLMProvider | None = None,
+) -> dict[str, Any]:
+    """编译自 Dify 工作流：拓扑展平、命令式执行、provider.chat 走 LLM 缝。"""
+    provider = provider if provider is not None else MockProvider()
+    _ctx: dict[tuple[str, str], Any] = {}
+    _result: dict[str, Any] = {}
+
+    def _var(node: str, field: str) -> Any:
+        """取某节点输出字段（闭合 _ctx）；缺失返回空串，不因取值缺失整体崩。"""
+        return _ctx.get((node, field), '')
+
+    # start: start_1
+    _ctx[('start_1', 'topic')] = getattr(inputs, 'topic', None)
+    # parallel layer: llm_a, llm_b（同层独立，线程并发）
+    def _task_llm_a() -> None:
+        # llm: llm_a
+        _messages_llm_a = [
+            {'role': 'user', 'content': '从正面分析：' + str(_var('start_1', 'topic'))},
+        ]
+        _resp_llm_a = provider.chat(_messages_llm_a)
+        _ctx[('llm_a', 'text')] = (_resp_llm_a.choices[0].message.content or '')
+    def _task_llm_b() -> None:
+        # llm: llm_b
+        _messages_llm_b = [
+            {'role': 'user', 'content': '从反面分析：' + str(_var('start_1', 'topic'))},
+        ]
+        _resp_llm_b = provider.chat(_messages_llm_b)
+        _ctx[('llm_b', 'text')] = (_resp_llm_b.choices[0].message.content or '')
+    with ThreadPoolExecutor(max_workers=2) as _ex:
+        _futs = [_ex.submit(_t) for _t in (_task_llm_a, _task_llm_b,)]
+        for _f in _futs:
+            _f.result()
+    # template-transform: tt_join
+    _ctx[('tt_join', 'output')] = '正面：' + str(_var('llm_a', 'text')) + '\n反面：' + str(_var('llm_b', 'text'))
+    # end: end_1
+    _result['result'] = _var('tt_join', 'output')
+    return _result

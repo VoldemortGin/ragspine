@@ -17,7 +17,6 @@ from ragspine.dify.ir.model import (
     CodeNode,
     EndNode,
     IRNode,
-    IterationNode,
     Literal,
     LLMNode,
     StartNode,
@@ -77,11 +76,9 @@ def emit_node(node: IRNode, names: NameTable) -> list[str]:
         return _emit_code(node, names)
     if isinstance(node, TemplateTransformNode):
         return _emit_template_transform(node)
-    if isinstance(node, IterationNode):
-        return _emit_iteration_serial(node, names)
     if isinstance(node, UnsupportedNode):
         return _emit_unsupported(node, names)
-    # if-else 由 emitter 在控制流层处理（需图结构）；其余兜底注释。
+    # if-else / iteration 由 emitter 在控制流层处理（需图结构/子图递归）；其余兜底注释。
     return [f"# 节点 {node.id}（{node.kind}）由控制流层处理。"]
 
 
@@ -164,18 +161,6 @@ def _emit_template_transform(node: TemplateTransformNode) -> list[str]:
     return [
         f"# template-transform: {node.id}",
         f"_ctx[({node.id!r}, 'output')] = {value_expr(node.template)}",
-    ]
-
-
-def _emit_iteration_serial(node: IterationNode, names: NameTable) -> list[str]:
-    """iteration 的占位串行实现（P4 接管并行/真子图展开）。
-
-    P3 阶段先产一个安全的串行骨架：对 iterator 数组逐项收集 item 本身（恒等），保证
-    生成代码可 exec 跑通；真正的子图逐项执行由 P4 实现。
-    """
-    return [
-        f"# iteration: {node.id}（P3 串行占位；P4 接管子图/并行）",
-        f"_ctx[({node.id!r}, 'output')] = list({value_expr(node.iterator)} or [])",
     ]
 
 

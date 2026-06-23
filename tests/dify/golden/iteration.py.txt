@@ -1,0 +1,66 @@
+"""由 ragspine.dify 从 Dify 工作流 YAML 自动生成的纯 Python 脚本。
+
+无框架、命令式、可离线运行：LLM 节点走 corespine.LLMProvider.chat（默认
+ragspine.MockProvider()），并行用 concurrent.futures.ThreadPoolExecutor（全同步，无 async）。
+编辑提示：本文件可直接 exec / 入库；不支持的节点处留有 _hook_* 骨架待补全。"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+from corespine import LLMProvider
+from ragspine import MockProvider
+
+from concurrent.futures import ThreadPoolExecutor
+
+
+def _as_num(value: Any) -> float:
+    """把任意值容错转 float（条件比较用；非数返回 0.0）。"""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+@dataclass
+class Inputs:
+    """工作流输入（对应 Dify start 节点变量）。"""
+    items: Any = None
+
+def run_workflow(
+    inputs: Inputs,
+    *,
+    provider: LLMProvider | None = None,
+) -> dict[str, Any]:
+    """编译自 Dify 工作流：拓扑展平、命令式执行、provider.chat 走 LLM 缝。"""
+    provider = provider if provider is not None else MockProvider()
+    _ctx: dict[tuple[str, str], Any] = {}
+    _result: dict[str, Any] = {}
+
+    def _var(node: str, field: str) -> Any:
+        """取某节点输出字段（闭合 _ctx）；缺失返回空串，不因取值缺失整体崩。"""
+        return _ctx.get((node, field), '')
+
+    # start: start_1
+    _ctx[('start_1', 'items')] = getattr(inputs, 'items', None)
+    # iteration: iter_1
+    def _iter_body_iter_1(_item: Any) -> Any:
+        _ctx = dict(_ctx_outer)
+        _ctx[('iter_1', 'item')] = _item
+
+        def _var(node: str, field: str) -> Any:
+            return _ctx.get((node, field), '')
+
+        # llm: iter_llm
+        _messages_iter_llm = [
+            {'role': 'user', 'content': '翻译这一项：' + str(_var('iter_1', 'item'))},
+        ]
+        _resp_iter_llm = provider.chat(_messages_iter_llm)
+        _ctx[('iter_llm', 'text')] = (_resp_iter_llm.choices[0].message.content or '')
+        return _var('iter_llm', 'text')
+    _ctx_outer = _ctx
+    _iter_items_iter_1 = list(_var('start_1', 'items') or [])
+    with ThreadPoolExecutor(max_workers=5) as _ex_iter_1:
+        _ctx[('iter_1', 'output')] = list(_ex_iter_1.map(_iter_body_iter_1, _iter_items_iter_1))
+    # end: end_1
+    _result['results'] = _var('iter_1', 'output')
+    return _result
