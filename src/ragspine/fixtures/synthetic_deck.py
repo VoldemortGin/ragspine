@@ -5,12 +5,14 @@
 
 import json
 from pathlib import Path
+from typing import Any
 
 import rootutils
 from openpyxl import Workbook
 from pptx import Presentation
 from pptx.chart.data import CategoryChartData
 from pptx.enum.chart import XL_CHART_TYPE
+from pptx.presentation import Presentation as PresentationDoc
 from pptx.util import Inches
 
 ROOT_DIR = rootutils.find_root(Path(__file__), indicator=".project-root")
@@ -59,7 +61,12 @@ _PERIOD_MAP = {
 _UNIT = {"REVENUE": "USD_M", "NEWSALES": "USD_M", "PROFIT": "USD_M", "ROE": "PCT"}
 
 
-def _add_table_slide(prs, title_text, data, periods):
+def _add_table_slide(
+    prs: PresentationDoc,
+    title_text: str,
+    data: dict[str, dict[str, float]],
+    periods: list[str],
+) -> None:
     """添加一张"指标×期间"表格页。"""
     slide = prs.slides.add_slide(prs.slide_layouts[5])
     slide.shapes.title.text = title_text
@@ -80,13 +87,18 @@ def _add_table_slide(prs, title_text, data, periods):
             table.cell(i, j).text = f"{data[metric][period]:,.1f}"
 
 
-def _add_chart_slide(prs, title_text, series_name, chart_data):
+def _add_chart_slide(
+    prs: PresentationDoc,
+    title_text: str,
+    series_name: str,
+    chart_data: dict[str, float],
+) -> None:
     """添加一张原生柱状图页（CategoryChartData，数值内嵌进图表 XML）。"""
     slide = prs.slides.add_slide(prs.slide_layouts[5])
     slide.shapes.title.text = title_text
 
     cats = list(chart_data.keys())
-    cd = CategoryChartData()
+    cd: Any = CategoryChartData()  # type: ignore[no-untyped-call]
     cd.categories = cats
     cd.add_series(series_name, [chart_data[c] for c in cats])
     slide.shapes.add_chart(
@@ -129,11 +141,17 @@ def make_xlsx() -> None:
     wb.save(str(XLSX_PATH))
 
 
-def make_ground_truth() -> list[dict]:
+def make_ground_truth() -> list[dict[str, object]]:
     """把所有写入数值平铺成真值清单。"""
-    gt: list[dict] = []
+    gt: list[dict[str, object]] = []
 
-    def add(metric, entity, period_label, value, source):
+    def add(
+        metric: str,
+        entity: str,
+        period_label: str,
+        value: float,
+        source: str,
+    ) -> None:
         ptype, period = _PERIOD_MAP[period_label]
         gt.append({
             "metric": metric,

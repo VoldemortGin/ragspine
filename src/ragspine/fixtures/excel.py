@@ -19,7 +19,9 @@
 
 import colorsys
 import json
+from collections.abc import Sized
 from pathlib import Path
+from typing import cast
 
 import rootutils
 from openpyxl import Workbook, load_workbook
@@ -78,10 +80,10 @@ def _theme_fill(theme_index: int, tint: float) -> PatternFill:
 
 
 # 逐格真值累积器：cell_ref -> {期望字段}
-_cell_truth: dict[str, dict] = {}
+_cell_truth: dict[str, dict[str, object]] = {}
 
 
-def _truth(sheet: str, ref: str, **kw) -> None:
+def _truth(sheet: str, ref: str, **kw: object) -> None:
     _cell_truth[f"{sheet}!{ref}"] = {"sheet": sheet, "cell_ref": ref, **kw}
 
 
@@ -89,7 +91,7 @@ def _truth(sheet: str, ref: str, **kw) -> None:
 # Sheet 1: 正常指标×期间数据区 + 语义色 + 图例 + theme/tint 填充 + 各类数字格式
 # ---------------------------------------------------------------------------
 
-def _build_data_sheet(wb: Workbook) -> tuple[str, dict]:
+def _build_data_sheet(wb: Workbook) -> tuple[str, dict[str, object]]:
     sheet = "HK_Performance"
     ws = wb.create_sheet(sheet)
 
@@ -174,7 +176,7 @@ def _build_data_sheet(wb: Workbook) -> tuple[str, dict]:
     }
 
 
-def _expected_clusters(sheet: str) -> list[dict]:
+def _expected_clusters(sheet: str) -> list[dict[str, object]]:
     """从已记录的逐格真值里推导该 sheet 的同色簇期望（跳过 cf_affected / None）。"""
     by_rgb: dict[str, list[str]] = {}
     for _key, t in _cell_truth.items():
@@ -183,7 +185,7 @@ def _expected_clusters(sheet: str) -> list[dict]:
         rgb = t.get("resolved_rgb")
         if rgb is None or t.get("cf_affected"):
             continue
-        by_rgb.setdefault(rgb, []).append(t["cell_ref"])
+        by_rgb.setdefault(cast(str, rgb), []).append(cast(str, t["cell_ref"]))
     ordered = sorted(by_rgb.items(), key=lambda item: (-len(item[1]), item[0]))
     return [{"rgb": rgb, "cell_refs": sorted(refs), "count": len(refs)}
             for rgb, refs in ordered]
@@ -193,7 +195,7 @@ def _expected_clusters(sheet: str) -> list[dict]:
 # Sheet 2: 三级合并表头
 # ---------------------------------------------------------------------------
 
-def _build_merged_header_sheet(wb: Workbook) -> tuple[str, dict]:
+def _build_merged_header_sheet(wb: Workbook) -> tuple[str, dict[str, object]]:
     sheet = "MergedHeader"
     ws = wb.create_sheet(sheet)
 
@@ -248,7 +250,7 @@ def _build_merged_header_sheet(wb: Workbook) -> tuple[str, dict]:
 # Sheet 3: 转置表（指标在列、期间在行）
 # ---------------------------------------------------------------------------
 
-def _build_transposed_sheet(wb: Workbook) -> tuple[str, dict]:
+def _build_transposed_sheet(wb: Workbook) -> tuple[str, dict[str, object]]:
     sheet = "Transposed"
     ws = wb.create_sheet(sheet)
 
@@ -284,7 +286,7 @@ def _build_transposed_sheet(wb: Workbook) -> tuple[str, dict]:
 # Sheet 4: 条件格式区域（色阶）—— 受影响格须打 cf_affected 并产 grid 告警
 # ---------------------------------------------------------------------------
 
-def _build_cf_sheet(wb: Workbook) -> tuple[str, dict]:
+def _build_cf_sheet(wb: Workbook) -> tuple[str, dict[str, object]]:
     sheet = "CondFormat"
     ws = wb.create_sheet(sheet)
 
@@ -324,7 +326,7 @@ def _build_cf_sheet(wb: Workbook) -> tuple[str, dict]:
 # 组装 + 真值落盘 + 自校验
 # ---------------------------------------------------------------------------
 
-def build_workbook() -> dict:
+def build_workbook() -> dict[str, object]:
     wb = Workbook()
     # 删掉默认空 sheet
     default = wb.active
@@ -410,9 +412,9 @@ def self_verify() -> None:
 def main() -> None:
     gt = build_workbook()
     self_verify()
-    n_cells = len(gt["cells"])
+    n_cells = len(cast(Sized, gt["cells"]))
     print(f"fixture 已生成于 {OUT_DIR}")
-    print(f"  xlsx: {XLSX_PATH.name}（{len(gt['sheets'])} sheets）")
+    print(f"  xlsx: {XLSX_PATH.name}（{len(cast(Sized, gt['sheets']))} sheets）")
     print(f"  ground_truth: {GT_PATH.name}（{n_cells} 逐格真值）")
     print(f"  theme accent1+tint{THEME_TINT} -> {THEME_ACCENT1_RESOLVED}")
 

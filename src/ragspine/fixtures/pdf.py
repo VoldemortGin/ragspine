@@ -25,7 +25,7 @@ from __future__ import annotations
 import io
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pypdfium2 as pdfium
 import pypdfium2.raw as pdfium_raw
@@ -88,7 +88,7 @@ def _y(y_top: float) -> float:
     return PAGE_H - y_top
 
 
-def _new_canvas(path) -> Canvas:
+def _new_canvas(path: Path) -> Canvas:
     """新建固定页面尺寸的 Canvas（invariant=1：固定日期 / ID，产物可复现）。"""
     from reportlab.pdfgen.canvas import Canvas
 
@@ -179,7 +179,7 @@ def _draw_scanned_page(c: Canvas, png_bytes: bytes,
     c.showPage()
 
 
-def _render_page_to_png(path, page_no: int) -> bytes:
+def _render_page_to_png(path: Path, page_no: int) -> bytes:
     """用 pypdfium2 把已有 PDF 的某页（0-based）渲染为 PNG 字节（合成扫描底图用）。"""
     doc = pdfium.PdfDocument(str(path))
     try:
@@ -256,7 +256,7 @@ def _make_ppt_export() -> None:
 # ground truth
 # ---------------------------------------------------------------------------
 
-def _digital_table_truth() -> dict:
+def _digital_table_truth() -> dict[str, object]:
     """digital.pdf 第 1 页表格逐格真值（'R{行}C{列}' 1-based，含行列名 + 数值）。
 
     表格布局（R1 为表头行、C1 为行标签列）：
@@ -283,7 +283,7 @@ def _digital_table_truth() -> dict:
     }
 
 
-def _dual_channel_vectors() -> dict:
+def _dual_channel_vectors() -> dict[str, object]:
     """双通道校验测试向量：两组 ChannelFact 输入 + 期望划分。
 
     设计（基于 digital.pdf 表格真值）：
@@ -294,7 +294,8 @@ def _dual_channel_vectors() -> dict:
            PROFIT        -> only_in_a
            ROE         -> only_in_b
     """
-    def _fact(metric, value, locator, channel_name):
+    def _fact(metric: str, value: int, locator: str,
+              channel_name: str) -> dict[str, object]:
         return {
             "metric_code": metric,
             "entity": "ACME_HK",
@@ -331,7 +332,7 @@ def _dual_channel_vectors() -> dict:
     }
 
 
-def _build_ground_truth() -> dict:
+def _build_ground_truth() -> dict[str, object]:
     return {
         "files": {
             "digital.pdf": {
@@ -377,19 +378,20 @@ def _build_ground_truth() -> dict:
 # 自校验（pypdfium2 读回，度量口径与 src/ragspine/extraction/routing/pdf_router.py 一致）
 # ---------------------------------------------------------------------------
 
-def _page_text(page) -> str:
+def _page_text(page: pdfium.PdfPage) -> str:
     textpage = page.get_textpage()
     try:
-        return textpage.get_text_range()
+        text: str = textpage.get_text_range()
+        return text
     finally:
         textpage.close()
 
 
-def _page_chars(page) -> int:
+def _page_chars(page: pdfium.PdfPage) -> int:
     return len(_page_text(page).strip())
 
 
-def _page_cover(page) -> float:
+def _page_cover(page: pdfium.PdfPage) -> float:
     width, height = page.get_size()
     page_area = (width * height) or 1.0
     cover = 0.0
@@ -404,7 +406,7 @@ def _page_cover(page) -> float:
     return min(cover, 1.0)
 
 
-def self_verify(gt: dict) -> None:
+def self_verify(gt: dict[str, object]) -> None:
     """读回各 fixture，断言页数 / 文本量 / 图片覆盖 / metadata 符合设计。"""
     # digital.pdf：2 页、均有实质文本、低图片覆盖、表格数值与标题可读出
     d = pdfium.PdfDocument(str(DIGITAL_PATH))
@@ -455,10 +457,11 @@ def self_verify(gt: dict) -> None:
     pe.close()
 
     # ground truth 自洽性
-    assert set(gt["files"]) == {
+    assert set(cast("dict[str, object]", gt["files"])) == {
         "digital.pdf", "scanned.pdf", "ocr_scan.pdf", "mixed.pdf", "ppt_export.pdf"
     }
-    dc = gt["dual_channel"]["expect"]
+    dual_channel = cast("dict[str, object]", gt["dual_channel"])
+    dc = cast("dict[str, object]", dual_channel["expect"])
     assert dc["n_auto_passed"] == 1 and dc["n_enqueued"] == 3
 
     print("self-verify: 5 个 PDF fixture 页数/文本/覆盖/metadata + ground truth 全部通过")

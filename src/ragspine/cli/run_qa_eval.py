@@ -19,6 +19,7 @@ import rootutils
 from ragspine.eval.qa_eval import (
     EVAL_MODES,
     FABRICATION,
+    QAEvalReport,
     compare_to_baseline,
     make_baseline_entry,
     run_qa_eval,
@@ -30,7 +31,7 @@ DEFAULT_GOLDEN = ROOT_DIR / "data" / "golden" / "qa_golden_set.jsonl"
 DEFAULT_BASELINE = ROOT_DIR / "data" / "golden" / "qa_baseline.json"
 
 
-def _print_report(report) -> None:
+def _print_report(report: QAEvalReport) -> None:
     print(f"=== QA 评测报告（mode={report.mode}，{report.n_cases} cases）===")
     for name, metric in report.metrics.items():
         print(f"  {name}: {metric.passed}/{metric.total} "
@@ -70,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"报告已写入：{report_path}")
 
     baseline_path = Path(args.baseline)
-    baselines: dict = {}
+    baselines: dict[str, dict[str, object]] = {}
     if baseline_path.exists():
         baselines = json.loads(baseline_path.read_text(encoding="utf-8"))
 

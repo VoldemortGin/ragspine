@@ -25,7 +25,7 @@ from ragspine.common.core import (
 )
 from ragspine.extraction.color.color_semantics import MappingRegistry
 from ragspine.ingestion.review.review_queue import ReviewQueue
-from ragspine.ingestion.structured.ingestion import ingest_file
+from ragspine.ingestion.structured.ingestion import IngestReport, ingest_file
 from ragspine.ingestion.structured.ingestion_manifest import ManifestStore
 from ragspine.storage.fact_store import FactStore
 
@@ -71,7 +71,7 @@ def _ensure_parent(db_path: str) -> None:
         parent.mkdir(parents=True, exist_ok=True)
 
 
-def _print_report(report) -> None:
+def _print_report(report: IngestReport) -> None:
     """打印 IngestReport 摘要（终端一眼看到本批结果）。"""
     prefix = "[dry-run] " if report.dry_run else ""
     print(

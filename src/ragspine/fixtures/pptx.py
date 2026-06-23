@@ -28,11 +28,14 @@
 import json
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from typing import Any
 
 import rootutils
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.dml import MSO_COLOR_TYPE, MSO_THEME_COLOR
+from pptx.presentation import Presentation as PresentationDoc
+from pptx.table import _Cell
 from pptx.util import Inches
 
 ROOT_DIR = rootutils.find_root(Path(__file__), indicator=".project-root")
@@ -89,7 +92,7 @@ ACCENT1_FALLBACK = "4F81BD"
 # 主题色解析（从 ppt/theme1.xml 读 accent1，确保 ground truth 与实际写入一致）
 # ---------------------------------------------------------------------------
 
-def _resolve_accent1_rgb(prs) -> str:
+def _resolve_accent1_rgb(prs: PresentationDoc) -> str:
     """从 slide master 关联的 theme1.xml 解析 accent1 的真实 'RRGGBB'。"""
     master = prs.slide_masters[0]
     for rel in master.part.rels.values():
@@ -114,17 +117,17 @@ def _resolve_accent1_rgb(prs) -> str:
 # 构建幻灯片
 # ---------------------------------------------------------------------------
 
-def _set_cell_rgb(cell, rgb_hex: str) -> None:
-    cell.fill.solid()
-    cell.fill.fore_color.rgb = RGBColor.from_string(rgb_hex)
+def _set_cell_rgb(cell: _Cell, rgb_hex: str) -> None:
+    cell.fill.solid()  # type: ignore[no-untyped-call]
+    cell.fill.fore_color.rgb = RGBColor.from_string(rgb_hex)  # type: ignore[no-untyped-call]
 
 
-def _set_cell_theme(cell) -> None:
-    cell.fill.solid()
+def _set_cell_theme(cell: _Cell) -> None:
+    cell.fill.solid()  # type: ignore[no-untyped-call]
     cell.fill.fore_color.theme_color = MSO_THEME_COLOR.ACCENT_1
 
 
-def _build_slide1(prs, accent1_rgb: str) -> dict:
+def _build_slide1(prs: PresentationDoc, accent1_rgb: str) -> dict[str, object]:
     """slide1：标题 + 带填充色表格 + 含数字文本框。返回该页 ground truth。"""
     slide = prs.slides.add_slide(prs.slide_layouts[6])  # blank
 
@@ -140,9 +143,9 @@ def _build_slide1(prs, accent1_rgb: str) -> dict:
     ).table
 
     # 逐格真值累积（cell_ref 'R{r}C{c}' 1-based）。
-    cells_truth: dict[str, dict] = {}
+    cells_truth: dict[str, dict[str, object]] = {}
 
-    def _truth(r: int, c: int, value, rgb):
+    def _truth(r: int, c: int, value: object, rgb: object) -> None:
         ref = f"R{r}C{c}"
         cells_truth[ref] = {"cell_ref": ref, "value": value, "resolved_rgb": rgb}
 
@@ -195,7 +198,7 @@ def _build_slide1(prs, accent1_rgb: str) -> dict:
     }
 
 
-def _build_slide2(prs) -> dict:
+def _build_slide2(prs: PresentationDoc) -> dict[str, object]:
     """slide2：转置表（期间在行、指标在列）+ 含数字备注 + 无数字文本框。"""
     slide = prs.slides.add_slide(prs.slide_layouts[6])
 
@@ -210,9 +213,9 @@ def _build_slide2(prs) -> dict:
         n_rows, n_cols, Inches(0.5), Inches(1.1), Inches(9), Inches(2.5)
     ).table
 
-    cells_truth: dict[str, dict] = {}
+    cells_truth: dict[str, dict[str, object]] = {}
 
-    def _truth(r: int, c: int, value):
+    def _truth(r: int, c: int, value: object) -> None:
         ref = f"R{r}C{c}"
         cells_truth[ref] = {"cell_ref": ref, "value": value, "resolved_rgb": None}
 
@@ -244,7 +247,7 @@ def _build_slide2(prs) -> dict:
 # note fragments 期望（含数字句段 + glossary 命中）
 # ---------------------------------------------------------------------------
 
-def _note_fragments_truth() -> list[dict]:
+def _note_fragments_truth() -> list[dict[str, object]]:
     """叙述层含数字句段期望（确定性规则：含 digit；glossary_hits 经词典命中）。
 
     slide1 文本框 'FY2024 REVENUE reached US$2,680m, up 14% YoY' -> 命中 REVENUE。
@@ -286,7 +289,7 @@ _OCR_LOW_CONF = 0.40
 _OCR_MIN_CONFIDENCE = 0.85
 
 
-def _ocr_page_result(page_no: int) -> dict:
+def _ocr_page_result(page_no: int) -> dict[str, object]:
     """单页 FakeBackend 应返回的 OcrPageResult 数据（一张 4×4 表 + 2 低置信格）。"""
     cells = []
     for ref, text in _OCR_TABLE_LAYOUT.items():
@@ -301,7 +304,7 @@ def _ocr_page_result(page_no: int) -> dict:
     }
 
 
-def _ocr_fake_vectors() -> dict:
+def _ocr_fake_vectors() -> dict[str, object]:
     """OCR fake 测试向量：3 页输入 + 期望的网格 / 入队结果。
 
     scanned.pdf 有 3 页（二期 fixture 设计），每页一张 4×4 表、各混 2 个低置信格。
@@ -341,7 +344,7 @@ def _ocr_fake_vectors() -> dict:
 # 组装 + 落盘 + 自校验
 # ---------------------------------------------------------------------------
 
-def build_deck() -> dict:
+def build_deck() -> dict[str, Any]:
     prs = Presentation()
     accent1_rgb = _resolve_accent1_rgb(prs)
 
@@ -367,7 +370,7 @@ def build_deck() -> dict:
     return ground_truth
 
 
-def self_verify(gt: dict) -> None:
+def self_verify(gt: dict[str, Any]) -> None:
     """用 python-pptx 读回，断言值 / 填充 / 备注写入成功（fixture 可靠性自校验）。"""
     prs = Presentation(str(PPTX_PATH))
     slides = list(prs.slides)
