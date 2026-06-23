@@ -22,6 +22,7 @@ Submodules:
     ir/       — 去 Dify 化中间表示 + 拓扑（model.py / lower.py / topo.py）。
     codegen/  — IR → 纯 Python 代码（naming.py / emitter.py / nodes.py）。
     optimize/ — 静态优化建议器（suggestion.py / rules.py / analyzer.py）。
+    api.py    — 门面：compile_dify_yaml / analyze / CompileResult / 低层入口。
     errors.py — 域统一异常（DifyCompileError 及子类）。
 """
 
@@ -33,8 +34,14 @@ _submodule_getattr, _submodule_dir = _lazy_submodules(__name__, __path__)
 
 # 门面 API curated 暴露：`from ragspine.dify import compile_dify_yaml`。仍走惰性解析——
 # `import ragspine.dify` 不急切 import api.py（也就不急切拉起 parse 段的 PyYAML）。
-# 注：随 P0→P6 分阶段落地，编译器门面（api 模块）在 P6 接入，此处随之扩充；P0 先暴露域异常。
 _CURATED: dict[str, str] = {
+    "compile_dify_yaml": "api",
+    "analyze": "api",
+    "CompileResult": "api",
+    "GeneratedCode": "api",
+    "parse_dify_yaml": "api",
+    "lower_to_ir": "api",
+    "generate_code": "api",
     "DifyCompileError": "errors",
     "UnsupportedAppMode": "errors",
     "UnsupportedNodeType": "errors",

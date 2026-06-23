@@ -8,6 +8,9 @@
   （默认 mock 离线确定性；anthropic 仅在装了 [llm] extra + 有 key 时延迟接入），
   跑 answer_question 并打印答案 + 来源。库路径不存在时诚实报错、非零退出。
 - version —— 打印分发版本号。
+- dify —— Dify 工作流 YAML 编译器（需 [dify] extra）：`dify compile <path>` 把 .yml 编译成
+  纯 Python 脚本并打印（默认附静态优化建议到 stderr）；`dify analyze <path>` 只跑零-API
+  静态优化分析、打印建议列表。延迟 import（不装 [dify] 时其它子命令照常可用）。
 
 # TODO: serve / worker / demo / topology 子命令暂不提供——它们需要 [service] extra
 # 或随仓库分发的 scripts/，与"零-SDK 离线核心自包含"的设计相悖；待服务层入 wheel 后再补。
@@ -107,6 +110,56 @@ def _cmd_version(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_dify_compile(args: argparse.Namespace) -> int:
+    """编译一个 Dify 工作流 YAML 为纯 Python，打印代码（+ 默认附静态优化建议）。"""
+    from ragspine.dify.api import compile_dify_yaml
+    from ragspine.dify.errors import DifyCompileError
+
+    path = Path(args.path)
+    if not path.exists():
+        print(f"error: 文件不存在：{path}", file=sys.stderr)
+        return 2
+    try:
+        result = compile_dify_yaml(path, analyze=not args.no_analyze)
+    except DifyCompileError as exc:
+        print(f"error: 编译失败（{exc.code}）：{exc}", file=sys.stderr)
+        return 1
+
+    print(result.code.source)
+    if result.code.warnings:
+        print("\n# 警告（不支持的节点已生成骨架钩子，请补全）：", file=sys.stderr)
+        for w in result.code.warnings:
+            print(f"#   - {w}", file=sys.stderr)
+    if not args.no_analyze:
+        print("\n# 静态优化建议：", file=sys.stderr)
+        for s in result.suggestions:
+            print(f"#   [{s.severity.value}] {s.rule_id} {s.title}", file=sys.stderr)
+    return 0
+
+
+def _cmd_dify_analyze(args: argparse.Namespace) -> int:
+    """只对一个 Dify 工作流 YAML 跑静态优化分析，打印建议列表（零代码生成、零 API）。"""
+    from ragspine.dify.api import analyze as dify_analyze
+    from ragspine.dify.errors import DifyCompileError
+
+    path = Path(args.path)
+    if not path.exists():
+        print(f"error: 文件不存在：{path}", file=sys.stderr)
+        return 2
+    try:
+        suggestions = dify_analyze(path)
+    except DifyCompileError as exc:
+        print(f"error: 分析失败（{exc.code}）：{exc}", file=sys.stderr)
+        return 1
+    if not suggestions:
+        print("（无静态优化建议）")
+    for s in suggestions:
+        print(f"  [{s.severity.value:6s}] {s.rule_id:12s} {s.title}")
+        if s.node_ids:
+            print(f"            节点：{', '.join(s.node_ids)}")
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ragspine",
@@ -135,6 +188,26 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_ver = sub.add_parser("version", help="打印分发版本号")
     p_ver.set_defaults(func=_cmd_version)
+
+    # dify：Dify 工作流 YAML → 纯 Python 编译器 + 静态优化建议器（需 [dify] extra）。
+    p_dify = sub.add_parser("dify", help="Dify 工作流编译器（compile / analyze）")
+    dify_sub = p_dify.add_subparsers(dest="dify_command", metavar="<subcommand>")
+    dify_sub.required = True
+
+    p_compile = dify_sub.add_parser(
+        "compile", help="编译 .yml 为纯 Python（默认附静态优化建议到 stderr）"
+    )
+    p_compile.add_argument("path", help="Dify 工作流 YAML 文件路径")
+    p_compile.add_argument(
+        "--no-analyze", action="store_true", help="跳过静态优化分析（只出代码）"
+    )
+    p_compile.set_defaults(func=_cmd_dify_compile)
+
+    p_analyze = dify_sub.add_parser(
+        "analyze", help="只跑静态优化分析，打印建议列表（零代码生成、零 API）"
+    )
+    p_analyze.add_argument("path", help="Dify 工作流 YAML 文件路径")
+    p_analyze.set_defaults(func=_cmd_dify_analyze)
 
     return parser
 
