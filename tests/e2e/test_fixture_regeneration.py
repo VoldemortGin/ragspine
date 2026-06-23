@@ -27,7 +27,7 @@ ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpa
 
 from openpyxl import load_workbook
 
-from scripts.make_fixtures_excel import (
+from ragspine.fixtures.excel import (
     GT_PATH,
     XLSX_PATH,
     main as make_excel_fixtures,

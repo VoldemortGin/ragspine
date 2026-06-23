@@ -11,7 +11,7 @@ import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
-from scripts.make_synthetic_deck import GT_PATH, PPTX_PATH, XLSX_PATH, main as make_synthetic
+from ragspine.fixtures.synthetic_deck import GT_PATH, PPTX_PATH, XLSX_PATH, main as make_synthetic
 from ragspine.extraction.extractors import pptx_extractor, xlsx_extractor
 from ragspine.storage.fact_store import FactStore
 from ragspine.common.glossary import normalize_entity, normalize_metric, normalize_period

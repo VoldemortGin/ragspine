@@ -37,7 +37,7 @@ from ragspine.retrieval.chunking.chunking import DocumentMeta
 from ragspine.retrieval.vector.embedding_backends import DeterministicEmbeddingBackend
 from ragspine.retrieval.lexical.retrieval import NarrativeIndex
 
-from scripts.eval_retrieval_ab import (
+from ragspine.cli.eval_retrieval_ab import (
     AB_GOLD_PATH,
     AbGoldCase,
     _build_corpus_chunk_db,

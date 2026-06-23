@@ -22,7 +22,7 @@ import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
-from scripts.run_qa_eval import main as qa_eval_main
+from ragspine.cli.run_qa_eval import main as qa_eval_main
 import ragspine.eval.qa_eval as qa_eval_mod
 from ragspine.common.company_profile import DimensionSpec, DomainProfile
 from ragspine.retrieval.chunking.chunk_store import ChunkStore

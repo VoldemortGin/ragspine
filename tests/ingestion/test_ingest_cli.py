@@ -28,7 +28,7 @@ import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
-from scripts.make_fixtures_excel import (
+from ragspine.fixtures.excel import (
     GT_PATH,
     XLSX_PATH,
     main as make_excel_fixtures,
@@ -155,7 +155,7 @@ def test_t7_cli_creates_db_when_missing(tmp_path):
 def test_t7_cli_main_callable_in_process(tmp_path):
     """user story：CLI 提供可在进程内调用的 main(argv)->int 入口（与
     ingest_narrative.py 同款），便于自动化与测试；成功返回 0。"""
-    from scripts.ingest import main as ingest_main
+    from ragspine.cli.ingest import main as ingest_main
 
     db = tmp_path / "x.db"
     mdb = tmp_path / "m.db"

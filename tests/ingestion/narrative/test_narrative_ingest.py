@@ -21,7 +21,7 @@ from pptx import Presentation
 from pptx.util import Inches
 from reportlab.pdfgen.canvas import Canvas
 
-from scripts.ingest_narrative import main as ingest_cli_main
+from ragspine.cli.ingest_narrative import main as ingest_cli_main
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
 from ragspine.ingestion.narrative.narrative_ingest import (
     STATUS_FAILED,

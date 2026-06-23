@@ -14,7 +14,7 @@ import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
-from scripts.make_fixtures_excel import GT_PATH, XLSX_PATH, main as make_excel_fixtures
+from ragspine.fixtures.excel import GT_PATH, XLSX_PATH, main as make_excel_fixtures
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -71,7 +71,7 @@ def tmp_sqlite_factory(tmp_path):
 # 仿照上方 Excel 的写法，纯追加，不改动既有内容。
 # ===========================================================================
 
-from scripts.make_fixtures_pdf import (
+from ragspine.fixtures.pdf import (
     DIGITAL_PATH,
     GT_PATH as PDF_GT_PATH,
     MIXED_PATH,
@@ -140,7 +140,7 @@ def ppt_export_pdf_path():
 # OCR fake 测试向量内嵌在 pptx ground truth 里（引用二期已生成的 scanned.pdf）。
 # ===========================================================================
 
-from scripts.make_fixtures_pptx import (
+from ragspine.fixtures.pptx import (
     GT_PATH as PPTX_GT_PATH,
     PPTX_PATH,
     main as make_pptx_fixtures,

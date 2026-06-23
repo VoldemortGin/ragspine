@@ -12,7 +12,7 @@ import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
-from scripts.make_synthetic_deck import (
+from ragspine.fixtures.synthetic_deck import (
     GT_PATH,
     PPTX_PATH,
     XLSX_PATH,

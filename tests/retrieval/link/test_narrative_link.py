@@ -22,7 +22,7 @@ import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
-from scripts.ask import main as ask_main
+from ragspine.cli.ask import main as ask_main
 from ragspine.agent.agent import answer_question
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
 from ragspine.retrieval.chunking.chunking import DocumentMeta

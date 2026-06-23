@@ -18,7 +18,7 @@ import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
-from scripts.topology import main as topology_main
+from ragspine.cli.topology import main as topology_main
 
 PY = sys.executable
 TOPOLOGY_CLI = str(ROOT_DIR / "scripts" / "topology.py")

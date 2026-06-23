@@ -290,7 +290,7 @@ def test_ask_cli_embedding_flag_injects_backend(tmp_path, monkeypatch):
 
     spy build_narrative_retriever 捕获传入的 embedding_backend，避免依赖真实检索结果。
     """
-    import scripts.ask as ask_mod
+    import ragspine.cli.ask as ask_mod
 
     captured: dict = {}
     real = ask_mod.build_narrative_retriever
@@ -322,7 +322,7 @@ def test_ask_cli_embedding_flag_injects_backend(tmp_path, monkeypatch):
 
 def test_ask_cli_embedding_default_is_none(tmp_path, monkeypatch):
     """默认（不传 --embedding）：build_narrative_retriever 收到 None（纯 BM25 现状）。"""
-    import scripts.ask as ask_mod
+    import ragspine.cli.ask as ask_mod
 
     captured: dict = {"set": False}
     real = ask_mod.build_narrative_retriever

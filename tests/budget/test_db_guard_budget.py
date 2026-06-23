@@ -13,7 +13,7 @@ import rootutils
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
 from ragspine.cli.main import main as cli_main
-from scripts.ask import main as ask_main
+from ragspine.cli.ask import main as ask_main
 
 
 def _ask_py(db: object) -> int:
