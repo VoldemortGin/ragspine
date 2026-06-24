@@ -36,7 +36,20 @@ curl -s localhost:8000/healthz
 # 问一个问题（离线确定性 MockProvider；空库时诚实返回「查不到」——反编造不变量）
 curl -s localhost:8000/v1/ask -H 'content-type: application/json' \
      -d '{"question":"中国内地FY2024的REVENUE是多少"}'
+
+# Dify 工作流服务化（ADR 0014）。analyze/compile 始终可用、绝对安全（不执行）；
+# run 是信任边界，默认关（RAGSPINE_DIFY_RUN_ENABLED=true 才放行），经安全三层执行。
+Y='{"yaml":"app:\n  mode: workflow\nkind: app\nversion: \"0.1.5\"\nworkflow:\n  graph:\n    nodes:\n      - {id: s, data: {type: start, variables: []}}\n      - {id: e, data: {type: end, outputs: []}}\n    edges:\n      - {source: s, target: e}"}'
+curl -s localhost:8000/v1/dify/analyze -H 'content-type: application/json' -d "$Y"   # 优化建议
+curl -s localhost:8000/v1/dify/compile -H 'content-type: application/json' -d "$Y"   # 纯 Python 代码字符串
+# run 需先开启（默认 403）：RAGSPINE_DIFY_RUN_ENABLED=true 重启后
+curl -s localhost:8000/v1/dify/run -H 'content-type: application/json' \
+     -d '{"yaml":"...","inputs":{"question":"你好"}}'
 ```
+
+> ⚠️ **开启 `/v1/dify/run` = 对外开放「受限代码执行」能力。** MVP 无鉴权（与 `/v1/ask` 一致）。
+> 公网暴露前务必在前置反代 / ingress 加鉴权或网络白名单。执行经三层安全（L0 静态闸 + L1 受限
+> builtins 沙箱 + L2 子进程隔离 + SIGKILL 超时 +(Linux)setrlimit），但安全默认仍是**关闭**。
 
 默认栈：`RAGSPINE_PROVIDER=mock` + `RAGSPINE_VECTOR_STORE=sqlite_vec` +
 `RAGSPINE_EMBEDDING=none`（纯 BM25）。sqlite 库与上传文件持久化在命名卷 `ragspine-data`
