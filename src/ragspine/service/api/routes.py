@@ -56,6 +56,7 @@ from ragspine.service.tasks.task_queue import TaskQueue
 # 与 worker 侧 jobs 模块约定的 func_path（此处只用字面量，不 import jobs）。
 STRUCTURED_INGEST_JOB = "ragspine.service.tasks.jobs.run_structured_ingest_job"
 NARRATIVE_INGEST_JOB = "ragspine.service.tasks.jobs.run_narrative_ingest_job"
+DIFY_WORKFLOW_JOB = "ragspine.service.tasks.jobs.run_dify_workflow_job"
 
 # ingestion 路径允许后缀
 _STRUCTURED_SUFFIXES = (".xlsx", ".xlsm", ".pptx", ".pdf")
@@ -426,3 +427,59 @@ def dify_run(
     return DifyRunResponse(
         request_id=request_id, result=result, warnings=list(code.warnings)
     )
+
+
+@router.post("/v1/dify/run/jobs", response_model=None)
+def dify_run_async(
+    req: DifyRunRequest,
+    config: ConfigDep,
+    queue: QueueDep,
+) -> JobSubmitResponse | JSONResponse:
+    """异步执行：编译 + L0 闸同步先行（快速失败），再入队执行；状态经 GET /v1/jobs/{id} 取。
+
+    同步段：未开启 -> 403；编译失败 -> 400；L0 静态闸不过 -> 422（均在入队前）。
+    入队 payload 纯可序列化（已编译 source/warnings + inputs + provider 配置），worker 自建
+    provider 并防御式再过一遍 L0 闸。provider 配置由服务端 config 决定，客户端不可注入。
+    """
+    request_id = new_request_id()
+    if not config.dify_run_enabled:
+        return _error_response(
+            403, type_="dify.run_disabled",
+            message="dify 工作流执行未开启（设 RAGSPINE_DIFY_RUN_ENABLED=true 开启）",
+            request_id=request_id,
+        )
+
+    from ragspine.dify.api import compile_dify_yaml
+    from ragspine.dify.errors import DifyCompileError
+    from ragspine.service.dify.safety import DifyUnsafeError, assert_runnable
+
+    try:
+        compiled = compile_dify_yaml(
+            req.yaml, fold_answer_question=req.fold_answer_question
+        )
+    except DifyCompileError as exc:
+        return _error_response(400, type_=exc.code, message=str(exc), request_id=request_id)
+
+    code = compiled.code
+    try:
+        assert_runnable(code)  # L0 闸同步先行，快速失败（worker 仍会防御式再过一遍）。
+    except DifyUnsafeError as exc:
+        return _error_response(422, type_=exc.code, message=str(exc), request_id=request_id)
+
+    payload = {
+        "source": code.source,
+        "entrypoint": code.entrypoint,
+        "imports": list(code.imports),
+        "warnings": list(code.warnings),
+        "inputs": req.inputs,
+        "timeout_s": config.dify_run_timeout_s,
+        "isolation": config.dify_run_isolation,
+        # provider 配置（worker 用 build_provider 自建；绝不传 provider 实例 / provider_expr）。
+        "provider_type": config.provider_type,
+        "model": config.model,
+        "base_url": config.base_url,
+        "reference_date": config.reference_date,
+        "tokens_per_minute": config.tokens_per_minute,
+    }
+    job_id = queue.enqueue(DIFY_WORKFLOW_JOB, payload)
+    return JobSubmitResponse(job_id=job_id)

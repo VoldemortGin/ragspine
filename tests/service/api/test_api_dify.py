@@ -222,3 +222,53 @@ def test_dify_run_provider_from_config_not_client(tmp_path):
               "provider_expr": "__import__('os')"},
     )
     assert resp2.status_code == 200  # 多余字段被忽略，未注入
+
+
+# ---------------------------------------------------------------------------
+# RUN ASYNC — 入队执行，状态经 GET /v1/jobs/{id}（复用既有 job 端点）
+# ---------------------------------------------------------------------------
+def test_dify_run_async_enqueue_and_poll(tmp_path):
+    # FakeQueue 内联执行：enqueue 即跑完，立刻可取 finished 结果。
+    client = _make_client(tmp_path, run_enabled=True)
+    resp = client.post(
+        "/v1/dify/run/jobs",
+        json={"yaml": _fixture("seq.yml"), "inputs": {"question": "hi"}},
+    )
+    assert resp.status_code == 200
+    job_id = resp.json()["job_id"]
+    assert job_id
+
+    status = client.get(f"/v1/jobs/{job_id}")
+    assert status.status_code == 200
+    body = status.json()
+    assert body["id"] == job_id
+    assert body["status"] == "finished"
+    assert "result" in body["result"]
+    assert "result" in body["result"]["result"]  # job 包了一层 {"result": {...}}
+
+
+def test_dify_run_async_disabled_by_default(tmp_path):
+    client = _make_client(tmp_path, run_enabled=False)
+    resp = client.post(
+        "/v1/dify/run/jobs",
+        json={"yaml": _fixture("seq.yml"), "inputs": {"question": "hi"}},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["error"]["type"] == "dify.run_disabled"
+
+
+def test_dify_run_async_static_gate_rejects_before_enqueue(tmp_path):
+    client = _make_client(tmp_path, run_enabled=True)
+    resp = client.post(
+        "/v1/dify/run/jobs", json={"yaml": _fixture("agent_tool.yml"), "inputs": {}}
+    )
+    # 入队前 L0 闸拒 -> 422（绝不入队、绝不执行）
+    assert resp.status_code == 422
+    assert resp.json()["error"]["type"] == "dify.unsafe"
+
+
+def test_dify_run_async_compile_error_before_enqueue(tmp_path):
+    client = _make_client(tmp_path, run_enabled=True)
+    resp = client.post("/v1/dify/run/jobs", json={"yaml": ": : bad : [", "inputs": {}})
+    assert resp.status_code == 400
+    assert resp.json()["error"]["type"] == "dify.compile"

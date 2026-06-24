@@ -25,6 +25,7 @@ from ragspine.retrieval.chunking.chunk_store import ChunkStore
 from ragspine.service.config import (
     PathNotAllowedError,
     ServiceConfig,
+    build_provider,
     validate_ingest_path,
 )
 from ragspine.service.tasks.task_queue import JobError
@@ -32,6 +33,7 @@ from ragspine.storage.fact_store import FactStore
 
 STRUCTURED_INGEST_JOB = "ragspine.service.tasks.jobs.run_structured_ingest_job"
 NARRATIVE_INGEST_JOB = "ragspine.service.tasks.jobs.run_narrative_ingest_job"
+DIFY_WORKFLOW_JOB = "ragspine.service.tasks.jobs.run_dify_workflow_job"
 
 _STRUCTURED_SUFFIXES = (".xlsx", ".xlsm", ".pptx", ".pdf")
 _NARRATIVE_SUFFIXES = (".pptx", ".pdf")
@@ -171,3 +173,52 @@ def run_narrative_ingest_job(payload: dict[str, Any]) -> dict[str, Any]:
         return narrative_report_to_dict(report)
     finally:
         store.close()
+
+
+def run_dify_workflow_job(payload: dict[str, Any]) -> dict[str, Any]:
+    """worker 端 Dify 工作流执行 job：自建 provider（不传连接对象），受限执行，返回 JSON 结果。
+
+    payload（纯可序列化）：已编译的 source/warnings/imports（入队方编译并已过 L0 闸，worker
+    防御式再过一遍 L0 闸，不信任入队方）+ inputs + provider 配置（worker 用 build_provider 自建，
+    绝不接受 provider_expr / provider 实例）+ timeout_s / isolation。返回 {"result": {...}}。
+    出错抛 JobError（stage=validation L0 闸不过 / execution 执行失败），由队列归一进 JobStatus.error。
+    """
+    # 延迟 import：dify runner / 编译器经 [service]+[dify] extra，worker 才需要。
+    from ragspine.dify.codegen.emitter import GeneratedCode
+    from ragspine.service.dify.runner import (
+        DifyRunError,
+        DifyTimeoutError,
+        run_workflow_isolated,
+    )
+    from ragspine.service.dify.safety import DifyUnsafeError, assert_runnable
+
+    code = GeneratedCode(
+        source=payload["source"],
+        entrypoint=payload.get("entrypoint", "run_workflow"),
+        imports=tuple(payload.get("imports", ())),
+        warnings=tuple(payload.get("warnings", ())),
+    )
+    # 防御式 L0 闸：worker 不信任入队方，执行前自己再过一遍静态闸。
+    try:
+        assert_runnable(code)
+    except DifyUnsafeError as exc:
+        raise JobError(str(exc), stage="validation", retryable=False) from exc
+
+    config = ServiceConfig(
+        db_path=payload.get("db_path", ":memory:"),
+        provider_type=payload.get("provider_type", "mock"),
+        model=payload.get("model", ServiceConfig.model),
+        base_url=payload.get("base_url"),
+        reference_date=payload.get("reference_date"),
+        tokens_per_minute=payload.get("tokens_per_minute", 0),
+    )
+    provider = build_provider(config)
+    try:
+        result = run_workflow_isolated(
+            code, payload.get("inputs", {}), provider,
+            timeout_s=payload.get("timeout_s", 10.0),
+            isolation=payload.get("isolation", "inprocess"),
+        )
+    except (DifyRunError, DifyTimeoutError) as exc:
+        raise JobError(str(exc), stage="execution", retryable=False) from exc
+    return {"result": result, "warnings": list(code.warnings)}
