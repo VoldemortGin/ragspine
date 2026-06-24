@@ -13,7 +13,7 @@ import json
 import sqlite3
 import weakref
 from dataclasses import dataclass, field, fields
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 # review_status 取值：默认确定性抽取自动通过；进复核 / 被拦截 / 被驳回不可见。
@@ -248,7 +248,7 @@ class FactStore:
         缺省（None）时盖当下 UTC ISO；显式传入时以传入值为准（可测）。
         Fact 上即便自带 ingested_at 也被此戳覆盖（写入以 store 为准）。
         """
-        stamp = ingested_at or datetime.now(timezone.utc).isoformat()
+        stamp = ingested_at or datetime.now(UTC).isoformat()
         cols = ", ".join(_DB_COLUMNS)
         placeholders = ", ".join(["?"] * len(_DB_COLUMNS))
         update_cols = (

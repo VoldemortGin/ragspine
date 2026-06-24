@@ -21,7 +21,7 @@ jobs:
       matrix:
         # Expand to [ubuntu-latest, macos-latest, windows-latest] once enabled, if desired.
         os: [ubuntu-latest]
-        python: ["3.10", "3.11", "3.12", "3.13"]
+        python: ["3.11", "3.12", "3.13"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

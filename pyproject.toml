@@ -4,7 +4,7 @@ version = "0.5.0"
 description = "Framework-free backend RAG: deterministic dual-channel retrieval + agent orchestration with built-in anti-fabrication and source provenance."
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [{ name = "lin han", email = "voldemort22@126.com" }]
 keywords = [
     "rag",
@@ -24,7 +24,6 @@ classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
@@ -41,8 +40,7 @@ dependencies = [
     "openpyxl>=3.1.0",
     "rootutils>=1.0.7",
     "pypdfium2>=5.0",
-    # company profile TOML 读取：3.11+ 用 stdlib tomllib（无需此包），仅 3.10 需 tomli。
-    "tomli>=2.0; python_version < '3.11'",
+    # company profile TOML 读取：requires-python >= 3.11，用 stdlib tomllib，无需第三方 tomli。
     # 运行时类型契约（ADR 0004 质量门）：import 期对全包注解强制执行，与 mypy --strict
     # 的静态半边互补。守护式 import（见 src/ragspine/__init__.py）使其缺失时仍可离线运行，
     # 但列为核心依赖以保证零警告门默认开启。
@@ -73,9 +71,20 @@ dev = [
     "build>=1.2",
     "twine>=5.0",
 ]
-# 二期 PDF 线的重依赖（数字型 PDF 表格解析），绿色实现阶段才安装。
+# 二期 PDF 线的默认引擎（数字型 PDF 表格解析）：pdfspine —— 纯 Rust、确定性、
+# abi3-py311 预编译 wheel，无 torch 重依赖（体积 30-50M，对比 docling 链 ~600M）。
+# 延迟 import（pdf_spine_extractor 函数体内），不装 [pdf] 也能 import 核心、跑离线默认。
 pdf = [
+    "pdfspine>=0.0.4",
+]
+# 可选 docling 兜底引擎（历史默认，现降级）。仅当需要 docling 的版面/表格模型（重依赖
+# torch/transformers，~600M）时安装，注入 DoclingGridExtractor 即走旧路径。
+# transformers 上界（仅 darwin）：docling-ibm-models 在 macOS 上要求 transformers<5.9.0
+# （新版 rt_detr_v2 layout 模型在 Apple MPS 上用 float64，而 MPS 不支持 → docling 数字 PDF
+# 抽取整列报错）。此上界纯为 docling 服务，故随引擎一并放在本 extra；[embed] 自身放行到最新。
+pdf-docling = [
     "docling>=2.0.0",
+    "transformers<5.9.0; sys_platform == 'darwin'",
 ]
 # 三期扫描线的重依赖（扫描型 PDF OCR/VLM 抽取），仅在 Ubuntu+NVIDIA GPU 上的
 # 真实集成测试阶段安装。注意：paddlepaddle-gpu 需按官方指引在 Ubuntu 上单独装
@@ -92,16 +101,10 @@ llm = [
 # 通用 SentenceTransformer 向量后端（默认 Qwen3-Embedding-0.6B）。
 # 延迟 import：不装也能 import 模块、跑离线/纯 BM25 默认；transformers/torch 由其带入。
 # 真实模型加载/编码在 GPU 盒子上跑（pytest -m gpu），不在离线单测内。
-#
-# transformers 上界（仅 darwin）：embed 与 pdf（docling）共享 transformers 传递依赖。
-# docling-ibm-models 在 macOS 上要求 transformers<5.9.0（新版 rt_detr_v2 layout 模型在
-# Apple MPS 上用 float64，而 MPS 不支持 → docling 数字 PDF 抽取整列报错）。sentence-transformers
-# 自身放行到 <6.0，若【单独】安装 embed 会把 transformers 顶到 5.12.x，越过 docling 的上界、
-# 打断本机 docling 测试链。故在此镜像 docling 的 darwin 上界，保证两个 extra 任意安装顺序下共存；
-# 非 darwin（GPU 盒子）不加此限——docling 在 Linux 放行到 <6.0，真实编码可用最新 transformers。
+# 默认 PDF 引擎已切到 pdfspine（无 transformers），故 embed 不再需要镜像 docling 的
+# transformers 上界；该上界已随 docling 迁入 [pdf-docling]，仅在显式安装 docling 兜底时生效。
 embed = [
     "sentence-transformers>=3.0",
-    "transformers<5.9.0; sys_platform == 'darwin'",
 ]
 # 可插拔向量存储后端（VectorStore 缝的真实 adapter）。延迟 import：不装也能 import 核心、
 # 跑零依赖 InProcessVectorStore 默认；装了即由 make_vector_store('sqlite_vec'|'pgvector'|'qdrant') 选用。
@@ -179,18 +182,21 @@ filterwarnings = [
 # block on ruff (the extracted codebase predates linting — see scripts/lint.sh).
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 # src 布局：把 src/ 标为第一方根，isort（I 规则）才能正确把 `import ragspine` 归到一方分组。
 src = ["src"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP", "B"]
-ignore = ["E501"]  # long lines are abundant in the inherited code; don't gate on them yet
+# E501: long lines are abundant in the inherited code; don't gate on them yet.
+# UP042: `class X(str, Enum)` is intentional (stable, explicit str-mixin); the StrEnum
+#   migration changes str()/format semantics, so we keep the existing pattern as-is.
+ignore = ["E501", "UP042"]
 
 # Strict static typing on the library (ADR 0004 quality bar: "no warnings = qualified").
 # Gate: `mypy ragspine` (ci.sh). tests/ + scripts/ are intentionally out of scope.
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 files = ["src/ragspine"]
 strict = true
 
@@ -199,7 +205,7 @@ strict = true
 [[tool.mypy.overrides]]
 module = [
     "anthropic.*", "openai.*", "openpyxl.*", "paddleocr.*", "pypdfium2.*",
-    "sentence_transformers.*", "tomli", "docling.*", "rq.*", "redis.*",
+    "sentence_transformers.*", "docling.*", "pdfspine.*", "rq.*", "redis.*",
     "pptx.*", "markdown.*", "reportlab.*", "rootutils.*", "sqlite_vec.*", "pg8000.*",
     "qdrant_client.*", "yaml",
 ]

@@ -9,7 +9,7 @@ import json
 import sqlite3
 import weakref
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -268,7 +268,7 @@ class ReviewQueue:
                 item_id,
                 action,
                 actor,
-                datetime.now(timezone.utc).isoformat(),
+                datetime.now(UTC).isoformat(),
                 note,
                 json.dumps(detail or {}, ensure_ascii=False),
             ),

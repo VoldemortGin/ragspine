@@ -10,7 +10,7 @@ import json
 import sqlite3
 import weakref
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from openpyxl.utils import coordinate_to_tuple, get_column_letter
@@ -288,7 +288,7 @@ class MappingRegistry:
 
 def _now_iso() -> str:
     """当前 UTC 时间 ISO 串（确认 / 驳回留痕用）。"""
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _dump_entries(entries: list[LegendEntry]) -> str:

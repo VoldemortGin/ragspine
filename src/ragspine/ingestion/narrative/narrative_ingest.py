@@ -21,7 +21,7 @@
 import re
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -279,6 +279,6 @@ def _register_doc(
             ingested_at = excluded.ingested_at
         """,
         (doc_id, file_hash, source_path, n_chunks,
-         datetime.now(timezone.utc).isoformat()),
+         datetime.now(UTC).isoformat()),
     )
     conn.commit()

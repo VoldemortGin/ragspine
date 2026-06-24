@@ -8,7 +8,7 @@
 import sqlite3
 import weakref
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -110,7 +110,7 @@ class ChunkStore:
             (doc_id,),
         ).fetchone()
         version = int(row[0]) + 1
-        ingested_at = datetime.now(timezone.utc).isoformat()
+        ingested_at = datetime.now(UTC).isoformat()
 
         self._conn.execute(
             "UPDATE narrative_chunk SET active = 0 WHERE doc_id = ? AND active = 1",

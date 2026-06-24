@@ -17,7 +17,7 @@ import sqlite3
 import uuid
 import weakref
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -309,7 +309,7 @@ def list_versions(store: FactStore, registry: MappingRegistry) -> dict[str, Any]
 
 def _now_iso() -> str:
     """当前 UTC 时间 ISO 串。"""
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _parse_iso(value: str) -> float:

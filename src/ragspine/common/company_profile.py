@@ -11,17 +11,13 @@
 文件缺失时静默回退内置默认 profile（值 = 现有 ACME 金融值），保证 import 期零副作用、
 既有行为字节级不变（glossary 模块导入时即调用本模块构建词典）。
 
-TOML 读取：Python>=3.11 用 stdlib tomllib；3.10 用第三方 tomli（pyproject 条件依赖）。
+TOML 读取：用 stdlib tomllib（requires-python >= 3.11，故无需第三方 tomli）。
 """
 
 import os
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-
-try:  # Python >= 3.11
-    import tomllib  # type: ignore[import-not-found]
-except ModuleNotFoundError:  # Python 3.10
-    import tomli as tomllib
 
 from ragspine.common.sensitivity import SensitivityPolicy
 
