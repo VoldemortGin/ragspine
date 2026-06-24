@@ -27,6 +27,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # doc-drift 门用 git diff 查 verified-against 旧 SHA,需全历史(非 shallow)
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
