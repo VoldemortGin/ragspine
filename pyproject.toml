@@ -207,6 +207,6 @@ module = [
     "anthropic.*", "openai.*", "openpyxl.*", "paddleocr.*", "pypdfium2.*",
     "sentence_transformers.*", "docling.*", "pdfspine.*", "rq.*", "redis.*",
     "pptx.*", "markdown.*", "reportlab.*", "rootutils.*", "sqlite_vec.*", "pg8000.*",
-    "qdrant_client.*", "yaml",
+    "qdrant_client.*", "yaml", "numpy.*", "torch.*",
 ]
 ignore_missing_imports = true
