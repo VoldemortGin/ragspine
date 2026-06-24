@@ -13,4 +13,14 @@ Submodules:
 
 from ragspine import _lazy_submodules
 
-__getattr__, __dir__ = _lazy_submodules(__name__, __path__)
+_submodule_getattr, __dir__ = _lazy_submodules(__name__, __path__)
+
+
+def __getattr__(name: str) -> object:
+    # 显式 re-export ProviderError：lazy __getattr__ 只解析子模块、不解析属性，故
+    # `ragspine.agent.ProviderError` 本不可达——这里补一条使其可达（不急切 import llm_provider）。
+    if name == "ProviderError":
+        import importlib
+
+        return importlib.import_module(f"{__name__}.llm_provider").ProviderError
+    return _submodule_getattr(name)
