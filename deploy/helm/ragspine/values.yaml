@@ -60,6 +60,21 @@ embedding: none
 # default（隔离优先，RESTRICTED 不落盘）| persist_everything。
 persistencePolicy: default
 
+# ---- Dify 工作流执行 -> RAGSPINE_DIFY_RUN_* -----------------------------------
+# analyze / compile 端点始终可用（只建议 / 只出代码字符串）；只有 run 受 enabled 开关。
+# ⚠️ enabled=true 等于对外开放"受限代码执行"。MVP 无鉴权——公网暴露务必先在 ingress / 网关
+#    加鉴权或网络白名单。执行经三层安全：L0 静态闸 / L1 受限 builtins 沙箱 / L2 子进程隔离
+#    + SIGKILL 超时 +(Linux)setrlimit。
+dify:
+  run:
+    enabled: false          # true 开启 /v1/dify/run[/jobs]（默认 false=403）
+    timeoutSeconds: 10       # 单次执行超时上限（秒）
+    isolation: subprocess    # subprocess（L2）| inprocess（L1）
+
+# ---- LLM 主动 TPM 限流 -> RAGSPINE_TOKENS_PER_MINUTE ---------------------------
+# >0 启用 corespine RateLimitedProvider 主动限流（默认 0=不限）。
+tokensPerMinute: 0
+
 # ---- Redis（任务队列后端）——集群内 Deployment + Service + PVC -----------------
 redis:
   # 默认在集群内起一个 redis；RAGSPINE_REDIS_URL 自动指向它。

@@ -20,6 +20,13 @@ data:
   RAGSPINE_VECTOR_STORE: {{ .Values.vectorStore | quote }}
   RAGSPINE_EMBEDDING: {{ .Values.embedding | quote }}
   RAGSPINE_PERSISTENCE_POLICY: {{ .Values.persistencePolicy | quote }}
+  # ---- Dify 工作流执行（默认安全：run 关闭）。analyze/compile 始终可用、不受此开关 ----
+  # ⚠️ run.enabled=true = 对外开放受限代码执行；MVP 无鉴权，公网暴露务必先加鉴权（见 values.yaml）。
+  RAGSPINE_DIFY_RUN_ENABLED: {{ .Values.dify.run.enabled | quote }}
+  RAGSPINE_DIFY_RUN_TIMEOUT_S: {{ .Values.dify.run.timeoutSeconds | quote }}
+  RAGSPINE_DIFY_RUN_ISOLATION: {{ .Values.dify.run.isolation | quote }}
+  # ---- LLM 主动 TPM 限流（>0 启用，默认 0=不限）----
+  RAGSPINE_TOKENS_PER_MINUTE: {{ .Values.tokensPerMinute | quote }}
   # ---- 任务队列（worker 必需）----
   {{- if .Values.redis.enabled }}
   RAGSPINE_REDIS_URL: {{ printf "redis://%s:%v/0" (include "ragspine.redisFullname" .) .Values.redis.port | quote }}

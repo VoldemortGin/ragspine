@@ -14,7 +14,7 @@
 # 构建上下文为【仓库根】（deploy/ 的上一级），故下面的 COPY 路径都相对仓库根。
 
 # ---------------------------------------------------------------------------
-# builder：用官方 uv 二进制把项目（含 [service,vector] extra）装进独立 venv。
+# builder：用官方 uv 二进制把项目（含 [service,vector,dify] extra）装进独立 venv。
 # builder 与 runtime 同一基础镜像（python:3.12-slim-bookworm），保证 /opt/venv 里的
 # 解释器符号链接（/usr/local/bin/python3.12）在 runtime 阶段依然存在、venv 可直接用。
 # ---------------------------------------------------------------------------
@@ -35,7 +35,7 @@ COPY src/ ./src/
 
 # 独立 venv + 非可编辑安装（不可变镜像，源码已烘进 wheel）。
 RUN uv venv /opt/venv --python /usr/local/bin/python3.12 \
- && VIRTUAL_ENV=/opt/venv uv pip install --no-cache ".[service,vector]"
+ && VIRTUAL_ENV=/opt/venv uv pip install --no-cache ".[service,vector,dify]"
 
 # ---------------------------------------------------------------------------
 # runtime：拷 venv + 脚本运行所需的运行时文件，配置全走 RAGSPINE_* 环境变量。
@@ -52,6 +52,11 @@ ENV PYTHONUNBUFFERED=1 \
     RAGSPINE_EMBEDDING=none \
     RAGSPINE_PERSISTENCE_POLICY=default \
     RAGSPINE_REDIS_URL=redis://redis:6379/0 \
+    # ---- Dify 工作流执行（默认安全：/run 关闭；compose 可经 ${VAR} 显式开启）----
+    # 公网暴露时默认无鉴权——开启 /run 等于把受限代码执行能力对外开放，务必先加鉴权（见 deploy/README.md）。
+    RAGSPINE_DIFY_RUN_ENABLED=false \
+    RAGSPINE_DIFY_RUN_TIMEOUT_S=10 \
+    RAGSPINE_DIFY_RUN_ISOLATION=subprocess \
     # ---- 持久化路径：落在命名卷 /var/lib/ragspine（compose 挂载）----
     RAGSPINE_DB_PATH=/var/lib/ragspine/fact_metric.db \
     RAGSPINE_CHUNK_DB_PATH=/var/lib/ragspine/narrative.db \

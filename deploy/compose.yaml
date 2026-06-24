@@ -37,6 +37,14 @@ x-ragspine-common: &ragspine-common
     RAGSPINE_VECTOR_STORE: ${RAGSPINE_VECTOR_STORE:-sqlite_vec}
     RAGSPINE_EMBEDDING: ${RAGSPINE_EMBEDDING:-none}
     RAGSPINE_PERSISTENCE_POLICY: ${RAGSPINE_PERSISTENCE_POLICY:-default}
+    # ---- Dify 工作流执行（默认安全：/run 关闭）。analyze/compile 始终可用、不受此开关 ----
+    # ⚠️ 开启 run = 对外开放受限代码执行；MVP 无鉴权，公网暴露务必先加鉴权（见 README）。
+    # 经三层安全：L0 静态闸 / L1 受限 builtins 沙箱 / L2 子进程隔离 + SIGKILL +(Linux)setrlimit。
+    RAGSPINE_DIFY_RUN_ENABLED: ${RAGSPINE_DIFY_RUN_ENABLED:-false}
+    RAGSPINE_DIFY_RUN_TIMEOUT_S: ${RAGSPINE_DIFY_RUN_TIMEOUT_S:-10}
+    RAGSPINE_DIFY_RUN_ISOLATION: ${RAGSPINE_DIFY_RUN_ISOLATION:-subprocess}
+    # ---- LLM 主动 TPM 限流（可选；>0 启用 corespine RateLimitedProvider，默认 0=不限）----
+    RAGSPINE_TOKENS_PER_MINUTE: ${RAGSPINE_TOKENS_PER_MINUTE:-0}
     # pgvector 连接：默认指向内置 postgres 服务。【非 ServiceConfig 旋钮】——由 pgvector adapter
     # 直接 os.environ.get('RAGSPINE_PG_URL') 读取（src/ragspine/retrieval/vector/adapters/pgvector.py），
     # config.py 的 from_env 不读它。仅当 RAGSPINE_VECTOR_STORE=pgvector 时 adapter 才被实例化并读取，
