@@ -21,7 +21,10 @@ What it flags (a reference that resolves to nothing in the current repo):
                                        under ``src/``; flagged as dead.
   - ``docs/...``                     — must exist (file or dir; ``docs/02`` also
                                        tries ``docs/02.md``).
-  - ``scripts/...`` / ``tests/...`` / ``data/...`` paths — must exist.
+  - ``scripts/...`` / ``tests/...`` paths — must exist.
+  - ``data/...`` paths are EXEMPT — that dir holds runtime data (gitignored DB /
+    generated fixtures) absent in a fresh checkout; naming it in a docstring means
+    "where I/O data lands", not a moved-code dead link (see ``resolves``).
 
 It does NOT (yet) check backtick symbol references — prose mentions too many
 names that are not meant as live links; that would be a noisier opt-in mode.
@@ -100,6 +103,11 @@ def resolves(ref: str, root: Path) -> bool:
     candidate = ref.split('§')[0].strip().rstrip('/.,;:)')
     if not candidate:
         return False
+    # data/ 是【运行时数据】目录(gitignored:运行时生成的 DB / fixtures),全新 checkout(CI)
+    # 永远没有;docstring 引用它是说明"输入/输出数据落在哪",并非代码移动后的死链。门管的是
+    # 代码引用完整性(src/docs/scripts/tests 等 committed 路径),运行时数据不在此列 → 豁免。
+    if candidate.startswith('data/'):
+        return True
     # Try the path as-is, then as a module ('src/ragspine/eval/extraction_eval' ->
     # .py) or a doc citation that dropped its suffix ('docs/architecture' -> .md).
     return any((root / f'{candidate}{suffix}').exists() for suffix in ('', '.py', '.md'))
