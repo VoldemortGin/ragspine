@@ -4,7 +4,8 @@
 扫描型 PDF 走 OCR/VLM 两层策略。
 
 Submodules:
-    pdf_digital_extractor.py — 数字型 PDF 表格抽取器（Docling 封装契约）。
+    pdf_digital_extractor.py — 数字型 PDF 表格抽取器（Docling 封装契约，可选兜底）。
+    pdf_spine_extractor.py — 数字型 PDF 表格抽取器（pdfspine 封装，默认实现）。
     pdf_scanned_extractor.py — 扫描型 PDF OCR/VLM 抽取契约（两层策略）。
     pptx_extractor.py — PPTX 确定性抽取：原生表格与图表读数，零 OCR、零 LLM。
     pptx_styled_extractor.py — PPT 增强抽取契约，与旧 pptx_extractor 并存。

@@ -1,36 +1,27 @@
-"""数字型 PDF 抽取器测试（二期 PDF 线，TDD 红色阶段）。
+"""数字型 PDF 抽取器测试（二期 PDF 线，pdfspine 默认实现）。
 
 只验证外部行为：给定合成 PDF fixture 与逐格 ground truth，断言
-ragspine.extraction.extractors.pdf_digital_extractor.extract_grids 的对外输出 —— 表格逐格值、
+ragspine.extraction.extractors.pdf_spine_extractor.extract_grids 的对外输出 —— 表格逐格值、
 sheet/cell_ref 命名、血缘、resolved_rgb、空白归一化，以及扫描/不可读 PDF 的
 返回约定。不断言 bbox 坐标等实现细节。
+
+与 test_pdf_digital_extractor.py 同套断言（同一 pdf_ground_truth、同一 IR 契约），
+但【无需 @pytest.mark.docling】：pdfspine 是纯 Rust、确定性解析，无第三方 ML 全局状态
+不确定性，故可在默认测试门内直接连跑（不必隔离进程）。
 
 覆盖 PRD user stories：
     #9  数字型 PDF 的表格解析为带单元格级定位锚点的 StyledGrid（页 + 表 + 格）。
     #27 source_doc_id / source_file_hash 血缘写入每张 grid（版本/审计依据）。
-
-红色预期：所有用例因 stub raise NotImplementedError 而 FAIL（收集成功、无 PASS）。
 """
 
 import os
 
-import pytest
 import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
-from ragspine.extraction.extractors.pdf_digital_extractor import extract_grids
+from ragspine.extraction.extractors.pdf_spine_extractor import extract_grids
 from ragspine.extraction.ir import StyledGrid
-
-# docling 现为可选兜底引擎（默认 PDF 引擎已切到 pdfspine，见 test_pdf_spine_extractor）。
-# 未安装 docling（精简默认安装 [pdf]=pdfspine，不含 docling）时整模块跳过——这条是
-# [pdf-docling] 可选路径的回归测试，只在显式装了 docling 兜底时才有意义。
-docling = pytest.importorskip("docling", reason="docling 兜底未安装（[pdf-docling]）")
-
-# docling 的重模型表格抽取在【全套并跑】时偶发返回空表（第三方/torch 全局状态不确定性；
-# 本文件单独连跑全绿）。打 docling marker，由 ci.sh 放到独立进程跑，杜绝跨测试污染。
-# 这是进程隔离，不弱化任何断言。
-pytestmark = pytest.mark.docling
 
 
 # ---------------------------------------------------------------------------
@@ -45,6 +36,11 @@ def _grids_by_sheet(path) -> dict[str, StyledGrid]:
 def _digital_table_truth(pdf_ground_truth) -> dict:
     """digital.pdf 第 1 页表格逐格真值（含 sheet/n_rows/n_cols/cells）。"""
     return pdf_ground_truth["files"]["digital.pdf"]["table"]
+
+
+def _norm(text) -> str:
+    """空白归一化：首尾 strip + 内部连续空白折叠为单空格（与抽取器约定一致）。"""
+    return " ".join(str(text).split())
 
 
 # ===========================================================================
@@ -97,11 +93,6 @@ def test_header_cell_refs_use_R_C_notation(digital_pdf_path, pdf_ground_truth):
         cell = grid.get(ref)
         assert cell is not None, f"{ref} 缺失"
         assert cell.cell_ref == ref
-
-
-def _norm(text) -> str:
-    """空白归一化：首尾 strip + 内部连续空白折叠为单空格（与抽取器约定一致）。"""
-    return " ".join(str(text).split())
 
 
 def test_row_and_col_headers_values_match(digital_pdf_path, pdf_ground_truth):
@@ -263,3 +254,33 @@ def test_narrative_text_not_emitted_as_table(digital_pdf_path):
     """
     sheets = {g.sheet for g in extract_grids(digital_pdf_path)}
     assert not any(s.startswith("page2_table") for s in sheets)
+
+
+# ===========================================================================
+# GridExtractor 协议 —— PdfSpineGridExtractor 结构性满足 + version 血缘
+# ===========================================================================
+
+def test_pdf_spine_grid_extractor_satisfies_protocol():
+    """story #9 —— PdfSpineGridExtractor 结构性满足 GridExtractor 协议（version + extract_grids），
+    与 DoclingGridExtractor 可互换注入 ingest_file。"""
+    from ragspine.extraction.extractors.pdf_digital_extractor import GridExtractor
+    from ragspine.extraction.extractors.pdf_spine_extractor import PdfSpineGridExtractor
+
+    assert isinstance(PdfSpineGridExtractor(), GridExtractor)
+
+
+def test_pdf_spine_grid_extractor_version():
+    """story #27 —— PdfSpineGridExtractor 的 version 为 'pdf_spine@1'，与 Docling 路径
+    （'pdf_digital@1'）在血缘上可溯源区分。"""
+    from ragspine.extraction.extractors.pdf_spine_extractor import PdfSpineGridExtractor
+
+    assert PdfSpineGridExtractor().version == "pdf_spine@1"
+
+
+def test_pdf_spine_grid_extractor_extract_grids_matches_module(digital_pdf_path):
+    """story #9 —— 类方法 extract_grids 委托模块级函数，产出一致的 sheet 集合。"""
+    from ragspine.extraction.extractors.pdf_spine_extractor import PdfSpineGridExtractor
+
+    by_class = {g.sheet for g in PdfSpineGridExtractor().extract_grids(digital_pdf_path)}
+    by_module = {g.sheet for g in extract_grids(digital_pdf_path)}
+    assert by_class == by_module

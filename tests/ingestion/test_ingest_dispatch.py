@@ -257,15 +257,14 @@ def test_d2_pptx_extractor_version_distinct(store, registry, queue, tmp_path):
 
 
 # ===========================================================================
-# D3 — pdf(digital) 入库：pdf_router 判 digital -> 走 pdf_digital_extractor
+# D3 — pdf(digital) 入库：pdf_router 判 digital -> 走默认 pdfspine 数字抽取
 # ===========================================================================
-@pytest.mark.docling  # 唯一真跑 docling 抽取的 dispatch 用例：隔离进程跑（见 test_pdf_digital_extractor）。
 def test_d3_pdf_digital_routed_to_digital_extractor(
     store, registry, queue, digital_pdf_path, monkeypatch
 ):
     """user story：作为接手方，我把数字型 PDF 交给 ingest_file，它应先经 pdf_router
-    判定为 digital，再把抽取分发给 pdf_digital_extractor.extract_grids（而非扫描线），
-    确保数字型 PDF 走确定性表格解析。"""
+    判定为 digital，再把抽取分发给默认的 pdf_spine_extractor.extract_grids（而非扫描线），
+    确保数字型 PDF 走确定性表格解析。pdfspine 纯 Rust 确定性，无需 docling 隔离进程。"""
     from ragspine.ingestion.structured.ingestion import ingest_file
     import ragspine.ingestion.structured.ingestion as ingestion_mod
     from ragspine.extraction.routing.pdf_router import route, VERDICT_DIGITAL
@@ -275,22 +274,20 @@ def test_d3_pdf_digital_routed_to_digital_extractor(
 
     _init_three(store, registry, queue)
 
-    # spy：分发应调用 pdf_digital_extractor.extract_grids（ingestion 模块内引用）。
-    called = {"digital": 0}
-    real = None
-    if hasattr(ingestion_mod, "pdf_digital_extractor"):
-        real = ingestion_mod.pdf_digital_extractor.extract_grids
+    # spy：默认分发应调用 pdf_spine_extractor.extract_grids（ingestion 模块内引用）。
+    called = {"spine": 0}
+    real = ingestion_mod.pdf_spine_extractor.extract_grids
 
-        def _spy(path):
-            called["digital"] += 1
-            return real(path)
+    def _spy(path):
+        called["spine"] += 1
+        return real(path)
 
-        monkeypatch.setattr(
-            ingestion_mod.pdf_digital_extractor, "extract_grids", _spy
-        )
+    monkeypatch.setattr(
+        ingestion_mod.pdf_spine_extractor, "extract_grids", _spy
+    )
 
     ingest_file(digital_pdf_path, store, registry, queue)
-    assert called["digital"] >= 1
+    assert called["spine"] >= 1
 
 
 def test_d3_pdf_digital_no_failure(store, registry, queue, digital_pdf_path):
@@ -385,11 +382,32 @@ def test_grid_extractor_protocol_is_runtime_checkable():
 
 
 def test_docling_grid_extractor_version_byte_identical():
-    """user story：作为回归守护者，我要默认 DoclingGridExtractor 的 version 仍是
-    'pdf_digital@1'——保证未注入时数字型 PDF 入库的血缘字节不变（接缝 additive、不改默认）。"""
+    """user story：作为回归守护者，我要 DoclingGridExtractor 的 version 仍是
+    'pdf_digital@1'——它降为可选兜底，但血缘标识不变（注入它即走旧 docling 路径）。"""
     from ragspine.extraction.extractors.pdf_digital_extractor import DoclingGridExtractor
 
     assert DoclingGridExtractor().version == "pdf_digital@1"
+
+
+def test_d3_default_grid_extractor_stamps_pdf_spine(
+    store, registry, queue, digital_pdf_path, monkeypatch
+):
+    """user story：作为审计者，我要未注入 grid_extractor 时默认走 pdfspine——血缘里的
+    extractor_version 为 'pdf_spine@1'（默认解析引擎从 docling 切到 pdfspine 的可溯源标志）。"""
+    from ragspine.ingestion.structured.ingestion import ingest_file
+    import ragspine.ingestion.structured.ingestion as ingestion_mod
+
+    _init_three(store, registry, queue)
+    captured: dict[str, object] = {}
+    real_ingest_grids = ingestion_mod._ingest_grids
+
+    def _spy(report, grids, *args, **kwargs):
+        captured["extractor_version"] = kwargs.get("extractor_version")
+        return real_ingest_grids(report, grids, *args, **kwargs)
+
+    monkeypatch.setattr(ingestion_mod, "_ingest_grids", _spy)
+    ingest_file(digital_pdf_path, store, registry, queue)  # 不注入 -> 默认 pdfspine
+    assert captured["extractor_version"] == "pdf_spine@1"
 
 
 # ===========================================================================

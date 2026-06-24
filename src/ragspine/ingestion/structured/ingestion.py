@@ -40,7 +40,11 @@ from ragspine.common.glossary import (
     unit_for_metric,
 )
 from ragspine.extraction.color.color_semantics import MappingRegistry, apply_mapping
-from ragspine.extraction.extractors import pdf_digital_extractor, pptx_styled_extractor
+from ragspine.extraction.extractors import (
+    pdf_digital_extractor,
+    pdf_spine_extractor,
+    pptx_styled_extractor,
+)
 from ragspine.extraction.extractors.xlsx_styled_extractor import extract_grids
 from ragspine.extraction.ir import StyledGrid
 from ragspine.extraction.routing import pdf_router
@@ -532,10 +536,11 @@ def _ingest_pdf(
 ) -> None:
     """PDF 分支：先分诊路由，再决定走数字抽取入库还是越界入复核。
 
-    grid_extractor：数字型表格抽取器（依赖注入，缺省 = DoclingGridExtractor）。换 Docling
-    为别的解析器只需注入另一个 GridExtractor 实现；血缘里的 extractor_version 随之而变。
+    grid_extractor：数字型表格抽取器（依赖注入，缺省 = PdfSpineGridExtractor）。默认走
+    pdfspine（纯 Rust、确定性、无 torch 重依赖）；换别的解析器（如 DoclingGridExtractor 兜底）
+    只需注入另一个 GridExtractor 实现，血缘里的 extractor_version 随之而变。
     """
-    extractor = grid_extractor or pdf_digital_extractor.DoclingGridExtractor()
+    extractor = grid_extractor or pdf_spine_extractor.PdfSpineGridExtractor()
     decision = pdf_router.route(str(path))
     report.file_hash = decision.file_hash
 
