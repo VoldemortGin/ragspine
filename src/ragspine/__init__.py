@@ -23,6 +23,8 @@ Submodules:
 import importlib
 import pkgutil
 from collections.abc import Callable
+from importlib.metadata import PackageNotFoundError as _PkgNotFound
+from importlib.metadata import version as _pkg_version
 from types import ModuleType
 
 # 运行时类型契约（ADR 0004 质量门）：装了 beartype 就在【调用期】对整个包强制每条注解，
@@ -80,6 +82,13 @@ _CURATED: dict[str, tuple[str, str]] = {
 }
 
 __all__ = ("FactStore", "Fact", "MockProvider", "answer_question")
+
+# 包版本(对齐 corespine / spineagent;PyPI 分发名 rag-spine,源码/未装时回落)。
+# module 级赋值 → ragspine.__version__ 直接命中 __dict__,不走下面的惰性 __getattr__。
+try:
+    __version__ = _pkg_version("rag-spine")
+except _PkgNotFound:  # 纯源码 / 未安装(无包元数据)场景
+    __version__ = "0.0.0+unknown"
 
 
 def __getattr__(name: str) -> object:
