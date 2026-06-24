@@ -26,11 +26,21 @@ def _fixture(name: str) -> str:
     return (FIXTURES / name).read_text(encoding="utf-8")
 
 
+def _make_client(tmp_path, *, run_enabled=False, timeout_s=10.0, provider=None):
+    config = ServiceConfig(
+        db_path=str(tmp_path / "fact.db"),
+        dify_run_enabled=run_enabled,
+        dify_run_timeout_s=timeout_s,
+    )
+    app = create_app(
+        config, provider=provider or MockProvider(), queue=FakeQueue()
+    )
+    return TestClient(app)
+
+
 @pytest.fixture
 def client(tmp_path):
-    config = ServiceConfig(db_path=str(tmp_path / "fact.db"))
-    app = create_app(config, provider=MockProvider(), queue=FakeQueue())
-    return TestClient(app)
+    return _make_client(tmp_path)
 
 
 # ---------------------------------------------------------------------------
@@ -106,3 +116,109 @@ def test_dify_compile_bad_target_is_400(client):
     )
     assert resp.status_code == 400
     assert resp.json()["error"]["type"] == "dify.unsupported_target"
+
+
+# ---------------------------------------------------------------------------
+# RUN — 编译 + 受限执行（信任边界，默认关）
+# ---------------------------------------------------------------------------
+def test_dify_run_disabled_by_default(tmp_path):
+    client = _make_client(tmp_path, run_enabled=False)
+    resp = client.post(
+        "/v1/dify/run", json={"yaml": _fixture("seq.yml"), "inputs": {"question": "hi"}}
+    )
+    assert resp.status_code == 403
+    assert resp.json()["error"]["type"] == "dify.run_disabled"
+
+
+def test_dify_run_mock_when_enabled(tmp_path):
+    client = _make_client(tmp_path, run_enabled=True)
+    resp = client.post(
+        "/v1/dify/run", json={"yaml": _fixture("seq.yml"), "inputs": {"question": "hi"}}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["request_id"]
+    assert "result" in body["result"]
+    assert isinstance(body["result"]["result"], str)
+    assert body["warnings"] == []
+
+
+def test_dify_run_static_gate_rejects_unsupported_node_without_exec(tmp_path):
+    # agent_tool.yml 含 tool 占位 -> L0 闸拒（warnings 非空）-> 422，且绝不 exec。
+    client = _make_client(tmp_path, run_enabled=True)
+    resp = client.post(
+        "/v1/dify/run", json={"yaml": _fixture("agent_tool.yml"), "inputs": {}}
+    )
+    assert resp.status_code == 422
+    err = resp.json()["error"]
+    assert err["type"] == "dify.unsafe"
+    # 断言确实没执行：骨架钩子若被 exec 会抛 NotImplementedError（dify.run_error/500），
+    # 这里拿到的是 422 的 dify.unsafe，证明拒在 exec 之前。
+    assert "NotImplementedError" in err["message"] or "骨架" in err["message"]
+
+
+def test_dify_run_import_allowlist_via_unsupported_http_node(tmp_path):
+    # http-request 节点同样生成 NotImplementedError 骨架 + warning -> L0 闸 422（未执行）。
+    # 这条间接验证「越权能力的节点不会被跑」——与单元层的 import 白名单互补。
+    http_yaml = (
+        "app:\n  mode: workflow\n  name: x\nkind: app\nversion: \"0.1.5\"\n"
+        "workflow:\n  graph:\n    nodes:\n"
+        "      - id: start_1\n        data: {type: start, title: s, variables: []}\n"
+        "      - id: http_1\n        data: {type: http-request, title: h}\n"
+        "      - id: end_1\n        data: {type: end, title: e, outputs: []}\n"
+        "    edges:\n"
+        "      - {source: start_1, target: http_1, sourceHandle: source}\n"
+        "      - {source: http_1, target: end_1, sourceHandle: source}\n"
+    )
+    client = _make_client(tmp_path, run_enabled=True)
+    resp = client.post("/v1/dify/run", json={"yaml": http_yaml, "inputs": {}})
+    assert resp.status_code == 422
+    assert resp.json()["error"]["type"] == "dify.unsafe"
+
+
+def test_dify_run_timeout(tmp_path):
+    # 用极小超时 + 一个会循环的 iteration（MockProvider 极快，故构造长循环不易）；
+    # 改用 compile 出 seq 后无法人为拖时——直接用极小 timeout 跑含 LLM 节点的 qa_fold，
+    # 实际更稳的做法：用 0 附近超时让线程 join 立即超时（生成代码首次 import 即 >timeout）。
+    client = _make_client(tmp_path, run_enabled=True, timeout_s=0.0001)
+    resp = client.post(
+        "/v1/dify/run", json={"yaml": _fixture("qa_fold.yml"), "inputs": {"question": "q"}}
+    )
+    # 极小超时下，exec/调用几乎必然超时 -> 400 dify.timeout
+    assert resp.status_code == 400
+    assert resp.json()["error"]["type"] == "dify.timeout"
+
+
+def test_dify_run_compile_error_is_400(tmp_path):
+    client = _make_client(tmp_path, run_enabled=True)
+    resp = client.post("/v1/dify/run", json={"yaml": ": : bad : [", "inputs": {}})
+    assert resp.status_code == 400
+    assert resp.json()["error"]["type"] == "dify.compile"
+
+
+def test_dify_run_provider_from_config_not_client(tmp_path):
+    # provider 由服务端注入：客户端 body 里【没有】provider 字段也能跑（且无法注入 provider_expr）。
+    # 用一个记录调用次数的 spy provider 证明服务端 provider 被用上。
+    class SpyProvider:
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, messages, *, tools=None):
+            self.calls += 1
+            return MockProvider().chat(messages, tools=tools)
+
+    spy = SpyProvider()
+    client = _make_client(tmp_path, run_enabled=True, provider=spy)
+    resp = client.post(
+        "/v1/dify/run", json={"yaml": _fixture("seq.yml"), "inputs": {"question": "hi"}}
+    )
+    assert resp.status_code == 200
+    # seq.yml 有一个 llm 节点 -> 服务端 provider 被调用一次
+    assert spy.calls == 1
+    # 请求体里不接受 provider_expr：即便塞了也被 pydantic 忽略（schema 无此字段）
+    resp2 = client.post(
+        "/v1/dify/run",
+        json={"yaml": _fixture("seq.yml"), "inputs": {"question": "hi"},
+              "provider_expr": "__import__('os')"},
+    )
+    assert resp2.status_code == 200  # 多余字段被忽略，未注入

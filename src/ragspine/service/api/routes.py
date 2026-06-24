@@ -33,6 +33,8 @@ from ragspine.service.api.schemas import (
     DifyAnalyzeResponse,
     DifyCompileRequest,
     DifyCompileResponse,
+    DifyRunRequest,
+    DifyRunResponse,
     DifySuggestionInfo,
     ErrorResponse,
     IngestNarrativeJobRequest,
@@ -363,4 +365,64 @@ def dify_compile(req: DifyCompileRequest) -> DifyCompileResponse | JSONResponse:
         imports=list(code.imports),
         warnings=list(code.warnings),
         suggestions=[_dify_suggestion_info(s) for s in compiled.suggestions],
+    )
+
+
+@router.post("/v1/dify/run", response_model=None)
+def dify_run(
+    req: DifyRunRequest,
+    config: ConfigDep,
+    provider: ProviderDep,
+) -> DifyRunResponse | JSONResponse:
+    """编译 + 受限执行（信任边界）。默认关（dify_run_enabled=False）；provider 由服务端注入。
+
+    错误分级整形：未开启 -> 403；编译失败（DifyCompileError，code dify.*）-> 400；
+    L0 静态闸不过（DifyUnsafeError，如不支持节点 / 越权 import）-> 422；
+    执行失败 / 超时（DifyRunError / DifyTimeoutError）-> 400。
+    """
+    request_id = new_request_id()
+
+    # 信任边界开关：默认关，env 显式开（RAGSPINE_DIFY_RUN_ENABLED=true）才放行。
+    if not config.dify_run_enabled:
+        return _error_response(
+            403, type_="dify.run_disabled",
+            message="dify 工作流执行未开启（设 RAGSPINE_DIFY_RUN_ENABLED=true 开启）",
+            request_id=request_id,
+        )
+
+    from ragspine.dify.api import compile_dify_yaml
+    from ragspine.dify.errors import DifyCompileError
+    from ragspine.service.dify.runner import (
+        DifyRunError,
+        DifyTimeoutError,
+        run_workflow_isolated,
+    )
+    from ragspine.service.dify.safety import DifyUnsafeError
+
+    try:
+        compiled = compile_dify_yaml(
+            req.yaml, fold_answer_question=req.fold_answer_question
+        )
+    except DifyCompileError as exc:
+        return _error_response(400, type_=exc.code, message=str(exc), request_id=request_id)
+
+    code = compiled.code
+    try:
+        result = run_workflow_isolated(
+            code, req.inputs, provider,
+            timeout_s=config.dify_run_timeout_s,
+            isolation=config.dify_run_isolation,
+        )
+    except DifyUnsafeError as exc:
+        # L0 静态闸：含 NotImplementedError 骨架 / 不支持节点 / 越权 import -> 422（未执行）。
+        return _error_response(422, type_=exc.code, message=str(exc), request_id=request_id)
+    except (DifyRunError, DifyTimeoutError) as exc:
+        return _error_response(400, type_=exc.code, message=str(exc), request_id=request_id)
+
+    emit_trace(
+        request_id=request_id, op="dify.run",
+        isolation=config.dify_run_isolation, n_result_keys=len(result),
+    )
+    return DifyRunResponse(
+        request_id=request_id, result=result, warnings=list(code.warnings)
     )

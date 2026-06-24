@@ -179,3 +179,34 @@ def run_generated(
             raise exc
         raise DifyRunError(f"工作流执行失败：{type(exc).__name__}: {exc}") from exc
     return result
+
+
+def run_workflow_isolated(
+    code: GeneratedCode,
+    inputs: dict[str, Any],
+    provider: LLMProvider,
+    *,
+    timeout_s: float = DEFAULT_TIMEOUT_S,
+    isolation: str = "inprocess",
+) -> dict[str, Any]:
+    """按隔离级别执行 GeneratedCode：'inprocess'(L1) 或 'subprocess'(L2)。
+
+    'subprocess'（L2，S6）：子进程隔离 + SIGKILL 硬超时 +（Linux）resource.setrlimit；
+    在不支持的平台（macOS / Windows）自动回落 L1 in-process。'inprocess' 直接走 L1。
+    无论哪条路径，L0 静态闸都在执行前先跑（run_generated / subprocess 入口各自调用）。
+    """
+    if isolation == "subprocess":
+        return _run_subprocess(code, inputs, provider, timeout_s=timeout_s)
+    return run_generated(code, inputs, provider, timeout_s=timeout_s)
+
+
+def _run_subprocess(
+    code: GeneratedCode,
+    inputs: dict[str, Any],
+    provider: LLMProvider,
+    *,
+    timeout_s: float,
+) -> dict[str, Any]:
+    """L2 子进程隔离（S6 落地）。当前阶段：回落 L1 in-process。"""
+    # S6 将在此接入 scripts/run_dify_workflow.py 子进程 + SIGKILL + Linux setrlimit。
+    return run_generated(code, inputs, provider, timeout_s=timeout_s)
