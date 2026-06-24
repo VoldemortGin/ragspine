@@ -5,6 +5,7 @@ RESTRICTED 内容一律不短路。
 
 Submodules:
     api/ — FastAPI app（app factory + 依赖注入 + 路由 + 边界 schema）。
+    dify/ — Dify 编译产物的服务端安全执行层（L0 静态闸 + 受限 runner）。
     faq/ — SME 审核型 FAQ 短路缓存。
     tasks/ — 异步任务队列抽象 + worker 端 ingestion job。
     config.py — 服务层运行时配置（env RAGSPINE_*）与资源/provider 装配。
