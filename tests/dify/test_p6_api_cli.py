@@ -65,7 +65,7 @@ def test_compile_provider_expr_propagates(fixtures_dir: Path) -> None:
 
 def test_compile_rejects_unknown_target(fixtures_dir: Path) -> None:
     with pytest.raises(DifyCompileError) as ei:
-        compile_dify_yaml(fixtures_dir / "seq.yml", target="spineagent")
+        compile_dify_yaml(fixtures_dir / "seq.yml", target="nonexistent")
     assert ei.value.code == "dify.unsupported_target"
 
 

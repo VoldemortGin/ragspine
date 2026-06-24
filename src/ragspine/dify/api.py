@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ragspine.dify.codegen.emitter import GeneratedCode, generate_code
+from ragspine.dify.codegen.spineagent import generate_spineagent_code
 from ragspine.dify.errors import DifyCompileError
 from ragspine.dify.ir.lower import lower_to_ir
 from ragspine.dify.ir.model import WorkflowIR
@@ -23,8 +24,8 @@ from ragspine.dify.optimize.rules import OptimizeEnv
 from ragspine.dify.optimize.suggestion import Suggestion
 from ragspine.dify.parse.loader import parse_dify_yaml
 
-# 当前支持的编译目标（保留口子，spineagent 等后续目标走 P7）。
-_SUPPORTED_TARGETS: frozenset[str] = frozenset({"ragspine"})
+# 支持的编译目标：'ragspine'（命令式纯 Python，默认）、'spineagent'（agent/tool-use 编排，P7）。
+_SUPPORTED_TARGETS: frozenset[str] = frozenset({"ragspine", "spineagent"})
 
 __all__ = [
     "CompileResult",
@@ -53,15 +54,20 @@ def compile_dify_yaml(
     provider_expr: str = "MockProvider()",
     emit_trace: bool = False,
     analyze: bool = True,
+    fold_answer_question: bool = True,
 ) -> CompileResult:
     """把一个 Dify 工作流 YAML 编译成纯 Python（+ 可选静态优化建议）。
 
     参数：
         source: Dify DSL 的 YAML 文本，或指向 `.yml` 文件的路径（str/Path）。
-        target: 编译目标，当前仅 'ragspine'（命令式纯 Python 脚本）。
+        target: 编译目标，'ragspine'（命令式纯 Python 脚本，默认）或 'spineagent'（含 agent/tool-use
+            结构时映射到 spineagent Coordinator/agent 编排，生成代码 import spineagent）。
         provider_expr: 生成代码内 provider 默认值表达式（默认 'MockProvider()'，离线可跑）。
         emit_trace: 预留——未来在生成代码插入隐私 trace 钩子（暂未实现，传 True 仅记录意图）。
         analyze: 是否一并跑静态优化分析（默认 True）。
+        fold_answer_question: 是否把「问答骨架」（start→knowledge-retrieval→llm(context 指向该检索)
+            →answer/end）折叠成一次 ragspine.answer_question（自带反幻觉/provenance）。默认 True；
+            仅对 target='ragspine' 生效。
 
     返回 CompileResult(code, suggestions, ir)。任何阶段失败抛 DifyCompileError 系。
     """
@@ -74,7 +80,12 @@ def compile_dify_yaml(
         )
     doc = parse_dify_yaml(source)
     ir = lower_to_ir(doc)
-    code = generate_code(ir, provider_expr=provider_expr)
+    if target == "spineagent":
+        code = generate_spineagent_code(ir, provider_expr=provider_expr)
+    else:
+        code = generate_code(
+            ir, provider_expr=provider_expr, fold_answer_question=fold_answer_question
+        )
     suggestions = tuple(analyze_ir(ir)) if analyze else ()
     return CompileResult(code=code, suggestions=suggestions, ir=ir)
 

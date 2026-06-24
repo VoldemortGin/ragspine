@@ -18,18 +18,22 @@ from ragspine.dify.ir.model import (
     AnswerNode,
     CodeNode,
     EndNode,
+    ExtractParam,
     IfBranch,
     IfElseNode,
     IREdge,
     IRGraph,
     IRNode,
     IterationNode,
+    KnowledgeRetrievalNode,
     Literal,
     LLMMessage,
     LLMNode,
+    ParameterExtractorNode,
     StartNode,
     TemplateTransformNode,
     TemplateValue,
+    ToolNode,
     UnsupportedNode,
     Value,
     VarRef,
@@ -39,9 +43,11 @@ from ragspine.dify.ir.topo import parallel_layers, topo_order
 from ragspine.dify.parse.schema import DifyDoc, DifyEdge, DifyNode
 
 # 已建模、走真实代码生成的节点类型（其余落 UnsupportedNode 留钩子，不抛异常）。
+# P7 新增 knowledge-retrieval / parameter-extractor / tool 三类真实生成。
 _MODELED_TYPES: frozenset[str] = frozenset({
     "start", "end", "answer", "llm", "code", "if-else",
     "question-classifier", "iteration", "template-transform",
+    "knowledge-retrieval", "parameter-extractor", "tool",
 })
 
 # 模板里的变量引用：{{#nodeId.field#}}（field 可含点，如 {{#sys.query#}}）。
@@ -125,6 +131,12 @@ def _lower_node(
         return _lower_template_transform(node.id, title, data)
     if node_type == "iteration":
         return _lower_iteration(node.id, title, data, body, all_edges)
+    if node_type == "knowledge-retrieval":
+        return _lower_knowledge_retrieval(node.id, title, data)
+    if node_type == "parameter-extractor":
+        return _lower_parameter_extractor(node.id, title, data)
+    if node_type == "tool":
+        return _lower_tool(node.id, title, data)
     # 已知但留钩子，或完全未知：统一落 UnsupportedNode（生成骨架 + warning）。
     return UnsupportedNode(
         id=node.id,
@@ -172,10 +184,106 @@ def _lower_llm(node_id: str, title: str, data: dict[str, Any]) -> LLMNode:
     model = data.get("model", {}) or {}
     model_name = str(model.get("name", "") or "") if isinstance(model, dict) else ""
     max_tokens = _extract_max_tokens(model)
+    # context（Dify advanced-chat 把上游检索结果作为外部知识喂给 LLM）：context.variable_selector。
+    context_ref = _extract_context_ref(data.get("context"))
     return LLMNode(
         id=node_id, title=title, messages=tuple(messages),
-        model_name=model_name, max_tokens=max_tokens,
+        model_name=model_name, max_tokens=max_tokens, context_ref=context_ref,
     )
+
+
+def _extract_context_ref(context: Any) -> VarRef | None:
+    """从 llm 节点 context 配置取 variable_selector → VarRef（缺失/非引用 → None）。"""
+    if not isinstance(context, dict):
+        return None
+    if not context.get("enabled", True):
+        return None
+    sel = context.get("variable_selector")
+    ref = _selector_to_value(sel)
+    return ref if isinstance(ref, VarRef) else None
+
+
+def _lower_knowledge_retrieval(
+    node_id: str, title: str, data: dict[str, Any]
+) -> KnowledgeRetrievalNode:
+    """knowledge-retrieval：query_variable_selector → query，dataset_ids/top_k 归一。"""
+    query = _selector_to_value(data.get("query_variable_selector"))
+    datasets = data.get("dataset_ids")
+    if datasets is None:
+        single = data.get("dataset_id")
+        datasets = [single] if single is not None else []
+    dataset_ids = tuple(str(d) for d in datasets) if isinstance(datasets, (list, tuple)) else ()
+    # top_k 藏在 multiple_retrieval_config / single_retrieval_config / 顶层 top_k 之一。
+    top_k = _extract_top_k(data)
+    return KnowledgeRetrievalNode(
+        id=node_id, title=title, query=query,
+        dataset_ids=dataset_ids, top_k=top_k, output_field="result",
+    )
+
+
+def _extract_top_k(data: dict[str, Any]) -> int:
+    """从 knowledge-retrieval 的若干可能位置取 top_k（缺失 → 4）。"""
+    for cfg_key in ("multiple_retrieval_config", "single_retrieval_config"):
+        cfg = data.get(cfg_key)
+        if isinstance(cfg, dict) and "top_k" in cfg:
+            return _coerce_int(cfg.get("top_k"), default=4) or 4
+    if "top_k" in data:
+        return _coerce_int(data.get("top_k"), default=4) or 4
+    return 4
+
+
+def _lower_parameter_extractor(
+    node_id: str, title: str, data: dict[str, Any]
+) -> ParameterExtractorNode:
+    """parameter-extractor：query 选择器 + parameters 列表（name/type/description/required）归一。"""
+    query = _selector_to_value(data.get("query"))
+    params: list[ExtractParam] = []
+    for p in data.get("parameters", []) or []:
+        if not isinstance(p, dict):
+            continue
+        name = str(p.get("name") or "")
+        if not name:
+            continue
+        params.append(ExtractParam(
+            name=name,
+            type=str(p.get("type", "string") or "string"),
+            description=str(p.get("description", "") or ""),
+            required=bool(p.get("required", False)),
+        ))
+    instruction = str(data.get("instruction", "") or "")
+    model = data.get("model", {}) or {}
+    model_name = str(model.get("name", "") or "") if isinstance(model, dict) else ""
+    return ParameterExtractorNode(
+        id=node_id, title=title, query=query,
+        parameters=tuple(params), instruction=instruction, model_name=model_name,
+    )
+
+
+def _lower_tool(node_id: str, title: str, data: dict[str, Any]) -> ToolNode:
+    """tool：tool_name + 入参表（tool_parameters / tool_configurations 的 value_selector）归一。"""
+    tool_name = str(
+        data.get("tool_name") or data.get("provider_id") or data.get("provider_name") or "tool"
+    )
+    inputs_map: list[tuple[str, Value]] = []
+    params = data.get("tool_parameters")
+    if isinstance(params, dict):
+        for name, spec in params.items():
+            inputs_map.append((str(name), _tool_param_value(spec)))
+    return ToolNode(
+        id=node_id, title=title, tool_name=tool_name,
+        inputs_map=tuple(inputs_map), output_field="text",
+    )
+
+
+def _tool_param_value(spec: Any) -> Value:
+    """tool 入参取值：{type:'variable', value:[...]} → VarRef；{type:'constant', value:x} → Literal。"""
+    if isinstance(spec, dict):
+        kind = str(spec.get("type", "") or "")
+        value = spec.get("value")
+        if kind in ("variable", "mixed") and isinstance(value, (list, tuple)):
+            return _selector_to_value(value)
+        return Literal(value=value)
+    return Literal(value=spec)
 
 
 def _lower_code(node_id: str, title: str, data: dict[str, Any]) -> CodeNode:

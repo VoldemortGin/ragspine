@@ -22,6 +22,8 @@ LLM 节点走家族 `corespine.LLMProvider.chat(messages)` 缝，默认 `ragspin
 parse/    .yml → DifyDoc（pydantic v2 边界，extra='allow'；PyYAML 延迟 import）
 ir/       DifyDoc → WorkflowIR（IRNode 图 + VarRef 数据流 + topo_order + parallel_layers）
 codegen/  WorkflowIR → GeneratedCode（拓扑展平 + import 收集）  ← 纯 stdlib
+          fold.py        answer_question 折叠 pass（默认开，结构匹配问答骨架）
+          spineagent.py  target='spineagent' 映射（Coordinator / FunctionCallingAgent）
 optimize/ WorkflowIR → list[Suggestion]（8 条静态规则纯函数）   ← 纯 stdlib
 ```
 
@@ -40,7 +42,19 @@ IR 及以下层零 pydantic、零 Dify 概念泄漏。
 | iteration | `for`（串行）或 `ThreadPoolExecutor`（is_parallel，max_workers=parallel_nums） |
 | template-transform | Jinja2 或 `string.Template` |
 | 变量 `value_selector` / `{{#nodeId.field#}}` | `VarRef` → Python 变量 |
-| http-request / tool / knowledge-retrieval / parameter-extractor / 插件 | **留钩子**：生成带 `raise NotImplementedError` + 详细 docstring 的函数 + warning（产可运行骨架，不整体失败） |
+| knowledge-retrieval | `build_narrative_retriever + retrieve`（ragspine 叙事检索原语；`KNOWLEDGE_CHUNK_DB` 默认 `':memory:'` 离线空库） |
+| parameter-extractor | `provider.chat(tools=[function-tool schema])` function-calling，解析 tool_calls arguments → 写 `_ctx` |
+| tool | spineagent `@function_tool` 占位（生成代码 import spineagent，编译器不新增依赖）+ invoke 调用点；函数体留 `NotImplementedError` 待补全 |
+| http-request / 插件 等真正需外部副作用的 | **留钩子**（残余钩子集）：生成带 `raise NotImplementedError` + 详细 docstring 的函数 + warning（编译器无法凭空生成外部副作用，产可运行骨架，不整体失败） |
+
+## P7 高层编译
+
+- **answer_question 折叠**（默认开，`fold_answer_question` 开关）：IR 结构匹配
+  `start → knowledge-retrieval → llm(context 指向该检索) → answer/end` 问答骨架 → 折叠成一次
+  `ragspine.answer_question(...)`（自带反幻觉「未找到」改写 + provenance），比手接 retrieve+chat 更短更正确。
+- **`target='spineagent'`**：Dify workflow 含 tool-use 结构（≥1 tool 节点）时 → 映射到 spineagent
+  `Coordinator` / `FunctionCallingAgent`（每个 tool 节点 → `@function_tool`；入口 `run_agent`；生成代码
+  import spineagent，编译器不新增依赖）。无 tool 节点则 `DifyCompileError(code='dify.no_agent_structure')`。
 
 ## 铁律
 

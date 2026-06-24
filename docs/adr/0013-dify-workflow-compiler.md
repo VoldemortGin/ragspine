@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-06-24
 ---
 
@@ -74,3 +74,25 @@ analyze=True) -> CompileResult(code, suggestions, ir)`；`analyze(source, *, env
 - 不支持的节点产**可运行骨架 + warning**，用户得到可直接补全的脚手架，而非编译失败。
 - IR 层为后续目标（spineagent 编排、真实 token 估算、动态优化）预留了扩展点。
 - 本 ADR 为 **Proposed**：上述 6 默认待 review；任何改动按 supersede-don't-edit 另立/改状态。
+
+## P7 落地（2026-06-24）：accepted
+
+> 不改上文历史决策正文（supersede-don't-edit）。本节将 §7 默认 **#1 / #4** 由 proposed 收敛为
+> **accepted**，并记录 P7 新增能力。前置元数据 `status` 随之 `proposed → accepted`。
+
+- **默认 #1（目标运行时）→ accepted & 推进**：`target='spineagent'` 口子已实现（MVP，可离线运行的
+  最小路径）。含 tool-use 结构（≥1 tool 节点）时 → 映射 spineagent `Coordinator` /
+  `FunctionCallingAgent`，入口 `run_agent(inputs, *, provider=None) -> AgentResult`；无 tool 节点则
+  `DifyCompileError(code='dify.no_agent_structure')` 建议改用 `target='ragspine'`。
+- **默认 #4（不支持节点）→ refined & accepted**：knowledge-retrieval / parameter-extractor / tool
+  三类由 NotImplementedError 钩子转为**真实代码生成**——knowledge-retrieval →
+  `build_narrative_retriever + retrieve`（`KNOWLEDGE_CHUNK_DB` 默认 `':memory:'` 离线空库）；
+  parameter-extractor → `provider.chat(tools=[function-tool schema])` 解析 tool_calls；tool →
+  spineagent `@function_tool` 占位 + invoke 调用点。**仅真正需外部副作用的节点**（http-request 等）
+  保留为钩子（编译器无法凭空生成外部副作用，留可补全骨架是诚实行为）。
+- **新增：answer_question 折叠 pass**（`codegen/fold.py`，默认开，`fold_answer_question` 开关）：
+  IR 结构匹配 `start → knowledge-retrieval → llm(context 指向该检索) → answer/end` 问答骨架时，折叠为
+  一次 `ragspine.answer_question(...)`（自带反幻觉「未找到」改写 + provenance），比手接 retrieve+chat
+  更短更正确。
+- **重申**：编译器自身**不新增任何运行时依赖**——生成代码 import ragspine 检索原语 / spineagent，但
+  `ragspine.dify` 自身 import 仍 clean；mypy `--strict` / ruff / `filterwarnings=error` 全绿。

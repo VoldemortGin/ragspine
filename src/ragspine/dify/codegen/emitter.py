@@ -13,12 +13,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ragspine.dify.codegen import nodes as node_emit
+from ragspine.dify.codegen.fold import FoldPlan, detect_answer_question_folds
 from ragspine.dify.codegen.naming import NameTable
 from ragspine.dify.ir.model import (
     IfElseNode,
     IRNode,
     IterationNode,
+    KnowledgeRetrievalNode,
+    ParameterExtractorNode,
     StartNode,
+    ToolNode,
     UnsupportedNode,
     WorkflowIR,
 )
@@ -37,22 +41,36 @@ class GeneratedCode:
 
 
 def generate_code(
-    ir: WorkflowIR, *, provider_expr: str = "MockProvider()"
+    ir: WorkflowIR,
+    *,
+    provider_expr: str = "MockProvider()",
+    fold_answer_question: bool = True,
 ) -> GeneratedCode:
-    """WorkflowIR → GeneratedCode。provider_expr 为 run_workflow 内 provider 默认值表达式。"""
-    builder = _Emitter(ir, provider_expr=provider_expr)
+    """WorkflowIR → GeneratedCode。provider_expr 为 run_workflow 内 provider 默认值表达式。
+
+    fold_answer_question（默认 True）：识别「问答骨架」（start→knowledge-retrieval→llm(context
+    指向该检索)→answer/end）并整体折叠成一次 ragspine.answer_question（自带反幻觉/provenance，
+    比手拼 retrieve+chat 更短更对）。置 False 关闭折叠，逐节点生成。
+    """
+    builder = _Emitter(ir, provider_expr=provider_expr, fold_answer_question=fold_answer_question)
     return builder.build()
 
 
 class _Emitter:
-    """一次编译的可变状态（名表 / 警告 / 钩子函数 / import）。"""
+    """一次编译的可变状态（名表 / 警告 / 钩子函数 / import / 折叠计划）。"""
 
-    def __init__(self, ir: WorkflowIR, *, provider_expr: str) -> None:
+    def __init__(
+        self, ir: WorkflowIR, *, provider_expr: str, fold_answer_question: bool = True
+    ) -> None:
         self.ir = ir
         self.provider_expr = provider_expr
         self.names = NameTable(n.id for n in ir.graph.nodes)
         self.warnings: list[str] = []
         self.imports: set[str] = set()
+        plans = detect_answer_question_folds(ir) if fold_answer_question else ()
+        # llm_id -> 折叠计划（在该 llm 节点处发折叠调用）；kr_id 集合在折叠中被吞并、跳过逐节点生成。
+        self.folds_by_llm: dict[str, FoldPlan] = {p.llm_id: p for p in plans}
+        self.folded_kr: set[str] = {p.kr_id for p in plans}
 
     # -- 组装 ---------------------------------------------------------------
 
@@ -60,10 +78,11 @@ class _Emitter:
         # 先展平 body（这一步会把按需 import 如 ThreadPoolExecutor 收进 self.imports）。
         body = self._emit_body()
         hooks = self._emit_hooks()
+        constants = self._emit_module_constants()
         inputs_cls = self._emit_inputs_class()
         prelude = self._emit_prelude()
         source = "\n".join(
-            [*prelude, "", *inputs_cls, "", *hooks, *self._emit_run_workflow(body)]
+            [*prelude, "", *constants, *inputs_cls, "", *hooks, *self._emit_run_workflow(body)]
         )
         source = source.rstrip("\n") + "\n"
         return GeneratedCode(
@@ -72,6 +91,28 @@ class _Emitter:
             imports=tuple(sorted(self.imports)),
             warnings=tuple(self.warnings),
         )
+
+    def _emit_module_constants(self) -> list[str]:
+        """按需的可改模块常量：knowledge-retrieval / 问答折叠用到的库路径（默认离线空库）。"""
+        has_kr = any(
+            isinstance(n, KnowledgeRetrievalNode) for n in self.ir.graph.nodes
+        )
+        lines: list[str] = []
+        if has_kr or self.folds_by_llm:
+            lines += [
+                "# 检索 chunk 库路径：默认 ':memory:'（离线空库可跑，无文件副作用）；",
+                "# 指向你用 ragspine 灌好 chunk 的 sqlite 文件即接通真实检索。",
+                'KNOWLEDGE_CHUNK_DB = ":memory:"',
+                "",
+            ]
+        if self.folds_by_llm:
+            lines += [
+                "# answer_question 结构化通路的 FactStore 库路径：默认 ':memory:'（空库，反幻觉照常生效）；",
+                "# 指向你用 ragspine 灌好数值事实的 sqlite 即接通结构化问答。",
+                'ANSWER_QUESTION_FACT_DB = ":memory:"',
+                "",
+            ]
+        return lines
 
     def _emit_prelude(self) -> list[str]:
         """模块头：docstring + import（含按需收集的 import）+ 运行期 helper。"""
@@ -125,6 +166,9 @@ class _Emitter:
         for node_id in self.ir.topo_order:
             if node_id in emitted:
                 continue
+            if node_id in self.folded_kr:
+                # 已折叠进某 llm 的 knowledge-retrieval：折叠调用在 llm 处统一产出，这里整体跳过。
+                continue
             if node_id in gated:
                 # 该节点属于某 if-else 分支，由 if-else 的展开统一产出，跳过这里的独立产出。
                 continue
@@ -151,7 +195,11 @@ class _Emitter:
         """
         out: dict[str, list[str]] = {}
         for layer in self.ir.parallel_layers:
-            members = [nid for nid in layer if nid not in gated]
+            # 折叠掉的 knowledge-retrieval 不参与并行分组（其产出由 llm 处的折叠调用统一负责）。
+            members = [
+                nid for nid in layer
+                if nid not in gated and nid not in self.folded_kr
+            ]
             if len(members) < 2:
                 continue
             heavy = [m for m in members if self._is_heavy(m)]
@@ -189,9 +237,31 @@ class _Emitter:
         return lines
 
     def _emit_one(self, node: IRNode) -> list[str]:
-        """单节点产出（含不支持节点 warning 记录；iteration 走子图递归展开）。"""
+        """单节点产出（含不支持节点 warning 记录；iteration 走子图递归展开；问答骨架折叠）。"""
+        if node.id in self.folded_kr:
+            # 该 knowledge-retrieval 已被折叠进某 llm 节点，逐节点产出在此跳过。
+            return []
+        plan = self.folds_by_llm.get(node.id)
+        if plan is not None:
+            self.imports.add(
+                "from ragspine.retrieval.link.narrative_link import build_narrative_retriever"
+            )
+            self.imports.add("from ragspine import FactStore, answer_question")
+            return node_emit.emit_answer_question_fold(plan, self.names)
         if isinstance(node, IterationNode):
             return self._emit_iteration(node)
+        if isinstance(node, KnowledgeRetrievalNode):
+            self.imports.add(
+                "from ragspine.retrieval.link.narrative_link import build_narrative_retriever"
+            )
+        if isinstance(node, ParameterExtractorNode):
+            self.imports.add("import json")
+        if isinstance(node, ToolNode):
+            self.imports.add("from spineagent import function_tool")
+            self.warnings.append(
+                f"节点 {node.id}（tool {node.tool_name}）：已生成 spineagent @function_tool "
+                f"占位 _tool_{self.names.var(node.id)}（带 NotImplementedError），请补全工具逻辑。"
+            )
         if isinstance(node, UnsupportedNode):
             self.warnings.append(
                 f"节点 {node.id}（类型 {node.node_type}）未支持：已生成带 "
@@ -356,10 +426,14 @@ class _Emitter:
     # -- 钩子函数 -----------------------------------------------------------
 
     def _emit_hooks(self) -> list[str]:
+        """模块级钩子/工具函数：UnsupportedNode 的 _hook_*，与 ToolNode 的 spineagent @function_tool。"""
         lines: list[str] = []
         for node in self.ir.graph.nodes:
             if isinstance(node, UnsupportedNode):
                 lines.extend(node_emit.emit_hook_function(node, self.names))
+                lines.append("")
+            elif isinstance(node, ToolNode):
+                lines.extend(node_emit.emit_tool_function(node, self.names))
                 lines.append("")
         return lines
 

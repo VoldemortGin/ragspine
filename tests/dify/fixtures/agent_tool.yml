@@ -1,0 +1,34 @@
+# tool-use 型 workflow：start → tool → end。
+# 用于验证 P7 target='spineagent'：含 tool 节点 → 映射到 spineagent Coordinator/FunctionCallingAgent；
+# 同时验证 target='ragspine' 默认下 tool 节点 → spineagent @function_tool 占位 + invoke 调用点。
+app:
+  mode: workflow
+  name: agent-tool-demo
+kind: app
+version: "0.1.5"
+workflow:
+  graph:
+    nodes:
+      - id: start_1
+        data:
+          type: start
+          title: 开始
+          variables:
+            - {variable: city, label: 城市, type: text-input, required: true}
+      - id: tool_1
+        data:
+          type: tool
+          title: 天气工具
+          tool_name: get_weather
+          tool_parameters:
+            location: {type: variable, value: [start_1, city]}
+            unit: {type: constant, value: celsius}
+      - id: end_1
+        data:
+          type: end
+          title: 结束
+          outputs:
+            - {variable: weather, value_selector: [tool_1, text]}
+    edges:
+      - {source: start_1, target: tool_1, sourceHandle: source}
+      - {source: tool_1, target: end_1, sourceHandle: source}

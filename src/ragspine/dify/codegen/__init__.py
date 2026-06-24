@@ -5,9 +5,11 @@
 `concurrent.futures.ThreadPoolExecutor`（家族全同步，不生成 async）。纯 stdlib。
 
 Submodules:
-    naming.py  — node_id → 稳定确定性的 Python 变量名（去重、合法标识符）。
-    emitter.py — IR → GeneratedCode：拓扑展平、并行分层、import 收集、组装脚本。
-    nodes.py   — 每类 IRNode → 代码片段的 dispatch（start/end/answer/llm/code/...）。
+    naming.py     — node_id → 稳定确定性的 Python 变量名（去重、合法标识符）。
+    emitter.py    — IR → GeneratedCode：拓扑展平、并行分层、import 收集、组装脚本。
+    nodes.py      — 每类 IRNode → 代码片段的 dispatch（start/end/answer/llm/code/检索/抽参/tool/...）。
+    fold.py       — answer_question 折叠：识别问答骨架并折叠成一次 ragspine.answer_question。
+    spineagent.py — target='spineagent' 口子：含 tool-use 的图 → Coordinator/FunctionCallingAgent。
 """
 
 from ragspine import _lazy_submodules

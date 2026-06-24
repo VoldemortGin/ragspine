@@ -1,0 +1,57 @@
+# 检索 + 参数抽取型 advanced-chat：start → knowledge-retrieval → parameter-extractor → llm → answer。
+# 用于验证 P7 真实生成：knowledge-retrieval → ragspine 叙事检索原语；parameter-extractor →
+# corespine function-calling（provider.chat(tools=[...])）。llm 不挂 context（故不触发 answer_question
+# 折叠——折叠由 fold.yml 单独覆盖），逐节点生成 retrieve + tools + chat。
+app:
+  mode: advanced-chat
+  name: knowledge-demo
+kind: app
+version: "0.1.5"
+workflow:
+  graph:
+    nodes:
+      - id: start_1
+        data:
+          type: start
+          title: 开始
+          variables:
+            - {variable: question, label: 问题, type: text-input, required: true}
+      - id: kr_1
+        data:
+          type: knowledge-retrieval
+          title: 知识检索
+          query_variable_selector: [start_1, question]
+          dataset_ids: [ds_hk]
+          multiple_retrieval_config: {top_k: 3}
+      - id: pe_1
+        data:
+          type: parameter-extractor
+          title: 参数抽取
+          query: [start_1, question]
+          instruction: 从问题中抽取地区与指标
+          parameters:
+            - {name: region, type: string, description: 地区, required: true}
+            - {name: metric, type: string, description: 指标}
+      - id: llm_1
+        data:
+          type: llm
+          title: 应答模型
+          model:
+            provider: anthropic
+            name: claude-opus-4-8
+            completion_params: {max_tokens: 512}
+          prompt_template:
+            - role: system
+              text: 你是一个有帮助的助手。
+            - role: user
+              text: "根据资料回答：{{#start_1.question#}}（资料：{{#kr_1.text#}}）"
+      - id: answer_1
+        data:
+          type: answer
+          title: 回复
+          answer: "{{#llm_1.text#}}"
+    edges:
+      - {source: start_1, target: kr_1, sourceHandle: source}
+      - {source: kr_1, target: pe_1, sourceHandle: source}
+      - {source: pe_1, target: llm_1, sourceHandle: source}
+      - {source: llm_1, target: answer_1, sourceHandle: source}

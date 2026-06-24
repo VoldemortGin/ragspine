@@ -11,11 +11,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
 
 from ragspine.dify.ir.model import (
     IRNode,
     IterationNode,
+    KnowledgeRetrievalNode,
     LLMNode,
     UnsupportedNode,
     WorkflowIR,
@@ -23,9 +23,8 @@ from ragspine.dify.ir.model import (
 from ragspine.dify.optimize.suggestion import Category, Severity, Suggestion
 
 # I/O 重型的 UnsupportedNode 种类（每项一次外部调用，是并行/缓存的主要对象）。
-_IO_UNSUPPORTED: frozenset[str] = frozenset({
-    "http-request", "knowledge-retrieval", "tool",
-})
+# P7 后 knowledge-retrieval / tool 已是真实 IR 节点，这里只剩仍留钩子的 http-request。
+_IO_UNSUPPORTED: frozenset[str] = frozenset({"http-request"})
 
 
 @dataclass(frozen=True)
@@ -42,15 +41,18 @@ class OptimizeEnv:
 
 
 def _is_heavy(node: IRNode) -> bool:
-    """重型节点：llm / code / iteration，或 I/O 型 UnsupportedNode（http/检索/工具）。"""
-    if node.kind in ("llm", "code", "iteration"):
+    """重型节点：llm / code / iteration / 检索 / 工具 / 参数抽取，或 I/O 型 UnsupportedNode。"""
+    if node.kind in (
+        "llm", "code", "iteration",
+        "knowledge-retrieval", "tool", "parameter-extractor",
+    ):
         return True
     return isinstance(node, UnsupportedNode) and node.node_type in _IO_UNSUPPORTED
 
 
 def _is_io_heavy(node: IRNode) -> bool:
-    """I/O 重型节点：llm，或 I/O 型 UnsupportedNode（用于迭代体内是否值得并行的判定）。"""
-    if node.kind == "llm":
+    """I/O 重型节点：llm / 检索 / 工具，或 I/O 型 UnsupportedNode（迭代体内是否值得并行的判定）。"""
+    if node.kind in ("llm", "knowledge-retrieval", "tool", "parameter-extractor"):
         return True
     return isinstance(node, UnsupportedNode) and node.node_type in _IO_UNSUPPORTED
 
@@ -58,15 +60,6 @@ def _is_io_heavy(node: IRNode) -> bool:
 def _body_nodes(node: IterationNode) -> tuple[IRNode, ...]:
     """取一个迭代节点子图的全部内层节点（无子图则空）。"""
     return node.body.graph.nodes if node.body is not None else ()
-
-
-def _raw_get(node: UnsupportedNode, *keys: str) -> Any:
-    """从 UnsupportedNode.raw（(key, value) 元组）按候选键名取第一个命中的值。"""
-    table = dict(node.raw)
-    for k in keys:
-        if k in table:
-            return table[k]
-    return None
 
 
 def _branch_gate(ir: WorkflowIR, node_id: str) -> tuple[str, str] | None:
@@ -234,17 +227,16 @@ def rule_bottle_002(ir: WorkflowIR, env: OptimizeEnv) -> list[Suggestion]:
 
 
 def rule_cache_001(ir: WorkflowIR, env: OptimizeEnv) -> list[Suggestion]:
-    """≥2 个 knowledge-retrieval 节点引用同一数据集（raw 里 dataset_ids/dataset_id 相同）：
+    """≥2 个 knowledge-retrieval 节点引用同一数据集（dataset_ids 相同）：
     重复检索同一数据集可加缓存。按数据集分组，每组（≥2 个）一条建议。"""
     groups: dict[str, list[str]] = {}
     for node in ir.graph.nodes:
-        if not (isinstance(node, UnsupportedNode) and node.node_type == "knowledge-retrieval"):
+        if not isinstance(node, KnowledgeRetrievalNode):
             continue
-        dataset = _raw_get(node, "dataset_ids", "dataset_id")
-        if dataset is None:
+        if not node.dataset_ids:
             continue
-        # 列表 / 标量统一成可哈希的稳定 key。
-        key = ",".join(str(x) for x in dataset) if isinstance(dataset, (list, tuple)) else str(dataset)
+        # 数据集 id 集合统一成稳定 key（顺序无关）。
+        key = ",".join(sorted(node.dataset_ids))
         groups.setdefault(key, []).append(node.id)
 
     out: list[Suggestion] = []

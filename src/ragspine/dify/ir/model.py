@@ -141,14 +141,108 @@ class LLMNode(IRNode):
 
     生成代码：把 messages 渲染成 OpenAI 形状 list[dict]，调 provider.chat(messages)，
     取 choices[0].message.content。
+
+    context_ref（P7）：advanced-chat 的 LLM 节点可挂一个 context 变量（Dify `context.variable_selector`），
+    把上游 knowledge-retrieval 的检索结果作为外部知识喂给提示。其存在是 answer_question 折叠
+    （codegen/fold.py）识别「问答骨架」的关键信号——非 None 且上游为 KnowledgeRetrievalNode 即可折叠。
     """
 
     messages: tuple[LLMMessage, ...] = ()
     model_name: str = ""
     max_tokens: int | None = None
+    context_ref: VarRef | None = None
 
     def inputs(self) -> tuple[Value, ...]:
-        return tuple(m.text for m in self.messages)
+        base = tuple(m.text for m in self.messages)
+        return (*base, self.context_ref) if self.context_ref is not None else base
+
+
+@dataclass(frozen=True)
+class KnowledgeRetrievalNode(IRNode):
+    """knowledge-retrieval 节点（P7 真实生成）：把一个查询打到 ragspine 叙事检索原语。
+
+    query: 查询文本来源（VarRef，通常指向 start 的 question 或 sys.query）。
+    dataset_ids: Dify 数据集 id（生成代码里作为 chunk_db 路径的占位/提示；离线默认空库）。
+    top_k: 召回条数（Dify retrieval_mode 配置；缺省 4）。
+    output_field: 本节点输出字段名（下游引用 {{#id.result#}} 取检索片段，默认 'result'）。
+
+    生成代码：`build_narrative_retriever(chunk_db, provider=provider)` → `.retrieve(query, top_k=k)`，
+    产出片段列表写回 _ctx（ragspine.retrieval.link.narrative_link 原语，离线 BM25+RRF 可跑）。
+    """
+
+    query: Value = field(default_factory=lambda: Literal(""))
+    dataset_ids: tuple[str, ...] = ()
+    top_k: int = 4
+    output_field: str = "result"
+
+    @property
+    def kind(self) -> str:
+        return "knowledge-retrieval"
+
+    def inputs(self) -> tuple[Value, ...]:
+        return (self.query,)
+
+
+@dataclass(frozen=True)
+class ExtractParam:
+    """parameter-extractor 的一个待抽取参数：name + JSON-schema 类型 + 描述 + 是否必填。"""
+
+    name: str
+    type: str = "string"
+    description: str = ""
+    required: bool = False
+
+
+@dataclass(frozen=True)
+class ParameterExtractorNode(IRNode):
+    """parameter-extractor 节点（P7 真实生成）：用 LLM function-calling 从文本抽取结构化参数。
+
+    query: 待抽取的文本来源（VarRef）。
+    parameters: 要抽取的参数 (name, type, description, required) 列表（→ JSON-schema function tool）。
+    instruction: 抽取指令（拼进提示）。
+    model_name: 模型名（透传，离线 MockProvider 不依赖）。
+
+    生成代码：拼一个 OpenAI function-tool schema（corespine provider.chat(tools=[...]) 形状）→
+    `provider.chat(messages, tools=[schema])` → 取 choices[0].message.tool_calls[0].function.arguments
+    （JSON）解析成 dict 写回 _ctx，每个参数一个输出字段。
+    """
+
+    query: Value = field(default_factory=lambda: Literal(""))
+    parameters: tuple[ExtractParam, ...] = ()
+    instruction: str = ""
+    model_name: str = ""
+
+    @property
+    def kind(self) -> str:
+        return "parameter-extractor"
+
+    def inputs(self) -> tuple[Value, ...]:
+        return (self.query,)
+
+
+@dataclass(frozen=True)
+class ToolNode(IRNode):
+    """tool 节点（P7）：调用一个工具。生成代码映射到 spineagent `@function_tool` 形状。
+
+    tool_name: 工具名（Dify provider_id/tool_name）。
+    inputs_map: 工具入参名 → 取值。
+    output_field: 输出字段名（默认 'text'）。
+
+    生成代码：发出一个 spineagent `@function_tool` 装饰的占位函数（生成代码 import spineagent，
+    编译器本身不新增依赖）+ 调用点；函数体留 NotImplementedError 待用户补全真实工具逻辑——
+    工具的【副作用】无法由编译器凭空生成，但把它落成家族标准 FunctionTool 形状，便于接 spineagent 编排。
+    """
+
+    tool_name: str = ""
+    inputs_map: tuple[tuple[str, Value], ...] = ()
+    output_field: str = "text"
+
+    @property
+    def kind(self) -> str:
+        return "tool"
+
+    def inputs(self) -> tuple[Value, ...]:
+        return tuple(v for _, v in self.inputs_map)
 
 
 @dataclass(frozen=True)
