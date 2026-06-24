@@ -29,6 +29,11 @@ from ragspine.service.api.schemas import (
     AskResponse,
     CacheInfo,
     ClarificationInfo,
+    DifyAnalyzeRequest,
+    DifyAnalyzeResponse,
+    DifyCompileRequest,
+    DifyCompileResponse,
+    DifySuggestionInfo,
     ErrorResponse,
     IngestNarrativeJobRequest,
     IngestStructuredJobRequest,
@@ -288,4 +293,74 @@ def get_job(
         return _error_response(404, type_="JobNotFound", message="job not found")
     return JobStatusResponse(
         id=st.id, status=st.status, result=st.result, error=st.error
+    )
+
+
+# ---------------------------------------------------------------------------
+# Dify 工作流编译 / 运行
+#
+# 三个端点信任级别递增：analyze（只建议，安全）→ compile（代码字符串，安全）→
+# run（编译+受限执行，信任边界，默认关闭）。dify 编译器经 [dify] extra 延迟 import，
+# DifyCompileError（code dify.*）整形为 400。provider 由服务端 env 决定，客户端不可注入。
+# ---------------------------------------------------------------------------
+def _dify_suggestion_info(s: Any) -> DifySuggestionInfo:
+    """内部 Suggestion dataclass -> 对外 DifySuggestionInfo（enum 取 .value）。"""
+    return DifySuggestionInfo(
+        rule_id=s.rule_id,
+        severity=s.severity.value,
+        category=s.category.value,
+        title=s.title,
+        detail=s.detail,
+        node_ids=list(s.node_ids),
+    )
+
+
+@router.post("/v1/dify/analyze", response_model=None)
+def dify_analyze(req: DifyAnalyzeRequest) -> DifyAnalyzeResponse | JSONResponse:
+    request_id = new_request_id()
+    # 延迟 import：[dify] extra 未装时只这条链报错，不影响其余服务。
+    from ragspine.dify.api import analyze as analyze_dify
+    from ragspine.dify.errors import DifyCompileError
+
+    try:
+        suggestions = analyze_dify(req.yaml)
+    except DifyCompileError as exc:
+        return _error_response(400, type_=exc.code, message=str(exc), request_id=request_id)
+
+    emit_trace(request_id=request_id, op="dify.analyze", n_suggestions=len(suggestions))
+    return DifyAnalyzeResponse(
+        request_id=request_id,
+        suggestions=[_dify_suggestion_info(s) for s in suggestions],
+    )
+
+
+@router.post("/v1/dify/compile", response_model=None)
+def dify_compile(req: DifyCompileRequest) -> DifyCompileResponse | JSONResponse:
+    request_id = new_request_id()
+    from ragspine.dify.api import compile_dify_yaml
+    from ragspine.dify.errors import DifyCompileError
+
+    try:
+        # provider_expr 固定为离线默认；客户端不可注入（防代码注入），运行期再由
+        # run_workflow(provider=...) 用服务端 provider 覆盖。
+        compiled = compile_dify_yaml(
+            req.yaml,
+            target=req.target,
+            fold_answer_question=req.fold_answer_question,
+        )
+    except DifyCompileError as exc:
+        return _error_response(400, type_=exc.code, message=str(exc), request_id=request_id)
+
+    code = compiled.code
+    emit_trace(
+        request_id=request_id, op="dify.compile", target=req.target,
+        n_warnings=len(code.warnings), n_suggestions=len(compiled.suggestions),
+    )
+    return DifyCompileResponse(
+        request_id=request_id,
+        code=code.source,
+        entrypoint=code.entrypoint,
+        imports=list(code.imports),
+        warnings=list(code.warnings),
+        suggestions=[_dify_suggestion_info(s) for s in compiled.suggestions],
     )

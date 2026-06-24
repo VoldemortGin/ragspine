@@ -129,12 +129,15 @@ dify = [
 # 服务层：FastAPI HTTP 层 + RQ/Redis 异步任务队列（docs/09 PRD）。
 # rq/redis 延迟 import（RQQueue 内），不装也能 import task_queue、用 FakeQueue 跑离线测试。
 # httpx 供 fastapi.testclient 的 TestClient 使用（服务层测试必需）。
+# PyYAML：/v1/dify/* 端点延迟 import ragspine.dify 编译器（parse 段 yaml.safe_load）所需；
+#   pydantic 已由 fastapi 传递带入，故 [service] 装齐即可调 dify 三端点，无需另装 [dify]。
 service = [
     "fastapi>=0.110",
     "uvicorn>=0.27",
     "httpx>=0.27",
     "rq>=1.16",
     "redis>=5.0",
+    "PyYAML>=6.0",
 ]
 # 一键装齐全部功能依赖（不含开发用 dev）。自引用聚合：改子 extra 无需同步维护此处。
 # GPU 与否无需在此区分——torch/transformers/paddleocr 装的是自适应版，运行时探测到

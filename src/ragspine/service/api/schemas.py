@@ -76,3 +76,62 @@ class JobStatusResponse(BaseModel):
 
 class ErrorResponse(BaseModel):
     error: dict[str, Any]  # {type, message, request_id}
+
+
+# ---------------------------------------------------------------------------
+# Dify 工作流编译 / 运行（service/dify）
+#
+# 安全约束：客户端【不可】传 provider_expr（防代码注入）——生成代码内的 provider
+# 由服务端 env 决定（build_provider），运行时以 run_workflow(provider=...) 注入。
+# ---------------------------------------------------------------------------
+class DifySuggestionInfo(BaseModel):
+    """一条静态优化建议的对外形状（与内部 Suggestion dataclass 解耦）。"""
+
+    rule_id: str
+    severity: str
+    category: str
+    title: str
+    detail: str = ""
+    node_ids: list[str] = Field(default_factory=list)
+
+
+class DifyAnalyzeRequest(BaseModel):
+    """analyze：只跑静态优化分析（零代码生成、零 API、绝对安全）。"""
+
+    yaml: str
+
+
+class DifyAnalyzeResponse(BaseModel):
+    request_id: str
+    suggestions: list[DifySuggestionInfo] = Field(default_factory=list)
+
+
+class DifyCompileRequest(BaseModel):
+    """compile：把 Dify YAML 编译成纯 Python 代码字符串（不执行，安全）。"""
+
+    yaml: str
+    target: str = "ragspine"            # "ragspine" | "spineagent"
+    fold_answer_question: bool = True
+
+
+class DifyCompileResponse(BaseModel):
+    request_id: str
+    code: str
+    entrypoint: str
+    imports: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    suggestions: list[DifySuggestionInfo] = Field(default_factory=list)
+
+
+class DifyRunRequest(BaseModel):
+    """run：编译 + 受限执行（信任边界——默认关闭，env 显式开启才放行）。"""
+
+    yaml: str
+    inputs: dict[str, Any] = Field(default_factory=dict)
+    fold_answer_question: bool = True
+
+
+class DifyRunResponse(BaseModel):
+    request_id: str
+    result: dict[str, Any] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
