@@ -47,6 +47,9 @@ class ServiceConfig:
     allowed_upload_root: str | None = None  # ingestion 路径必须落在此根内
     company_profile_path: str | None = None
     tokens_per_minute: int = 0               # >0 时用 corespine RateLimitedProvider 主动 TPM 限流;0=不限
+    dify_run_enabled: bool = False           # /v1/dify/run 执行开关（信任边界）；默认关，env 显式开
+    dify_run_timeout_s: float = 10.0         # /v1/dify/run 单次执行超时上限（秒）
+    dify_run_isolation: str = "inprocess"    # "inprocess"(L1) | "subprocess"(L2，Linux setrlimit，跨平台回落 L1)
 
     # 历史 env 键别名 -> 字段名。corespine load_from_env 默认按 PREFIX_FIELDNAME
     # 推导键名，与这三个不规则旧键冲突；构造时把旧键改写到规范键以保持向后兼容。
