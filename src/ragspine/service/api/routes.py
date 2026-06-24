@@ -48,6 +48,7 @@ from ragspine.service.config import (
     ServiceConfig,
     open_fact_store,
     open_narrative_retriever,
+    provider_config_dict,
     validate_ingest_path,
 )
 from ragspine.service.faq.faq_cache import FAQCache
@@ -413,6 +414,7 @@ def dify_run(
             code, req.inputs, provider,
             timeout_s=config.dify_run_timeout_s,
             isolation=config.dify_run_isolation,
+            provider_config=provider_config_dict(config),
         )
     except DifyUnsafeError as exc:
         # L0 静态闸：含 NotImplementedError 骨架 / 不支持节点 / 越权 import -> 422（未执行）。

@@ -26,11 +26,13 @@ def _fixture(name: str) -> str:
     return (FIXTURES / name).read_text(encoding="utf-8")
 
 
-def _make_client(tmp_path, *, run_enabled=False, timeout_s=10.0, provider=None):
+def _make_client(tmp_path, *, run_enabled=False, timeout_s=10.0, provider=None,
+                 isolation="inprocess"):
     config = ServiceConfig(
         db_path=str(tmp_path / "fact.db"),
         dify_run_enabled=run_enabled,
         dify_run_timeout_s=timeout_s,
+        dify_run_isolation=isolation,
     )
     app = create_app(
         config, provider=provider or MockProvider(), queue=FakeQueue()
@@ -272,3 +274,16 @@ def test_dify_run_async_compile_error_before_enqueue(tmp_path):
     resp = client.post("/v1/dify/run/jobs", json={"yaml": ": : bad : [", "inputs": {}})
     assert resp.status_code == 400
     assert resp.json()["error"]["type"] == "dify.compile"
+
+
+# ---------------------------------------------------------------------------
+# ISOLATION — subprocess 隔离端到端（Linux 真子进程；macOS/Windows 回落 L1）
+# ---------------------------------------------------------------------------
+def test_dify_run_subprocess_isolation_end_to_end(tmp_path):
+    client = _make_client(tmp_path, run_enabled=True, isolation="subprocess")
+    resp = client.post(
+        "/v1/dify/run", json={"yaml": _fixture("seq.yml"), "inputs": {"question": "hi"}}
+    )
+    assert resp.status_code == 200
+    # 无论真子进程还是回落 L1，结果一致：provider 仍由服务端 config 决定
+    assert "result" in resp.json()["result"]

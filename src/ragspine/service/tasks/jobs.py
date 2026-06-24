@@ -26,6 +26,7 @@ from ragspine.service.config import (
     PathNotAllowedError,
     ServiceConfig,
     build_provider,
+    provider_config_dict,
     validate_ingest_path,
 )
 from ragspine.service.tasks.task_queue import JobError
@@ -218,6 +219,7 @@ def run_dify_workflow_job(payload: dict[str, Any]) -> dict[str, Any]:
             code, payload.get("inputs", {}), provider,
             timeout_s=payload.get("timeout_s", 10.0),
             isolation=payload.get("isolation", "inprocess"),
+            provider_config=provider_config_dict(config),
         )
     except (DifyRunError, DifyTimeoutError) as exc:
         raise JobError(str(exc), stage="execution", retryable=False) from exc

@@ -100,6 +100,21 @@ def build_provider(config: ServiceConfig) -> LLMProvider:
     return provider
 
 
+def provider_config_dict(config: ServiceConfig) -> dict[str, object]:
+    """抽出 provider 重建所需的纯可序列化字段（供 dify 子进程 / worker 自建 provider）。
+
+    刻意只含 provider 配置，绝不含 provider 实例 / provider_expr——隔离进程 / worker 用
+    build_provider 从这些字段重建，确保 provider 始终由服务端 env 决定、客户端不可注入。
+    """
+    return {
+        "provider_type": config.provider_type,
+        "model": config.model,
+        "base_url": config.base_url,
+        "reference_date": config.reference_date,
+        "tokens_per_minute": config.tokens_per_minute,
+    }
+
+
 @contextmanager
 def open_fact_store(config: ServiceConfig) -> Iterator[FactStore]:
     store = FactStore(config.db_path)

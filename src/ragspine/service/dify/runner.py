@@ -21,7 +21,6 @@ provider 由服务端注入（run_workflow(provider=...)），客户端不可控
 from __future__ import annotations
 
 import builtins
-import os
 import sys
 import tempfile
 import types
@@ -112,19 +111,24 @@ def _exec_in_sandbox(
     code: GeneratedCode,
     inputs: dict[str, Any],
     provider: LLMProvider,
-    workdir: Path,
 ) -> dict[str, Any]:
-    """在受限命名空间 + chdir(tmp) 里 exec 生成模块并调用 run_workflow。返回 _result dict。"""
+    """在受限命名空间里 exec 生成模块并调用 run_workflow。返回 _result dict。
+
+    刻意【不】os.chdir：os.chdir 是进程级全局副作用，而 L1 在工作线程跑 + 线程软超时杀不掉
+    失控线程——一个超时线程若 chdir 进随后被清理的 tmp 目录，会把【整个进程】的 cwd 留在已删
+    目录，污染后续一切（含子进程 spawn）。L1 受限沙箱里 open / pathlib / os 本就不可达（受限
+    builtins + 受限 __import__），相对路径写盘无从发生，故 chdir 在 L1 近乎零收益、却有进程级
+    风险——一律不做。chdir(tmp) 的「在临时目录里跑」语义改由 L2 子进程承担（进程私有 cwd，
+    见 _run_subprocess 的 Popen(cwd=...)），不影响父进程。
+    """
     module_name = "__ragspine_dify_workflow__"
     module = types.ModuleType(module_name)
     module.__dict__["__builtins__"] = _build_safe_builtins()
 
-    prev_cwd = Path.cwd()
-    # 同名残留（理论上不会有）先清掉，避免污染；执行后恢复。
+    # 同名残留（理论上不会有）先存下，执行后恢复。
     saved = sys.modules.get(module_name)
     sys.modules[module_name] = module
     try:
-        os.chdir(workdir)
         compiled = compile(code.source, "<dify-workflow>", "exec")
         exec(compiled, module.__dict__)  # noqa: S102 — 受限 builtins + L0 闸 + 隔离
         run_workflow = module.__dict__.get("run_workflow")
@@ -134,7 +138,6 @@ def _exec_in_sandbox(
         result = run_workflow(_make_inputs(inputs_cls, inputs), provider=provider)
         return cast("dict[str, Any]", result)
     finally:
-        os.chdir(prev_cwd)
         if saved is not None:
             sys.modules[module_name] = saved
         else:
@@ -148,11 +151,12 @@ def run_generated(
     *,
     timeout_s: float = DEFAULT_TIMEOUT_S,
 ) -> dict[str, Any]:
-    """L1 受限 in-process 执行：L0 闸 -> 受限 builtins + chdir(tmp) exec -> 线程软超时。
+    """L1 受限 in-process 执行：L0 闸 -> 受限 builtins exec -> 线程软超时。
 
     先过 L0 静态闸（safety.assert_runnable），不过即 DifyUnsafeError（调用方整形 422）。
     在工作线程跑 _exec_in_sandbox，主线程 join(timeout_s)；超时抛 DifyTimeoutError。
-    线程软超时不强杀失控线程（CPython 限制）——硬隔离由 L2 子进程隔离负责（S6）。
+    线程软超时不强杀失控线程（CPython 限制）——硬隔离由 L2 子进程隔离负责。L1 不 os.chdir
+    （进程级副作用，超时线程会污染整进程 cwd；且受限沙箱里 open/os/pathlib 本不可达）。
     """
     assert_runnable(code)  # L0：不过即抛 DifyUnsafeError（在任何 exec 之前）
 
@@ -160,11 +164,10 @@ def run_generated(
     error: list[BaseException] = []
 
     def _worker() -> None:
-        with tempfile.TemporaryDirectory(prefix="dify-wf-") as tmp:
-            try:
-                result.update(_exec_in_sandbox(code, inputs, provider, Path(tmp)))
-            except BaseException as exc:  # noqa: BLE001 — 跨线程回传，主线程统一整形
-                error.append(exc)
+        try:
+            result.update(_exec_in_sandbox(code, inputs, provider))
+        except BaseException as exc:  # noqa: BLE001 — 跨线程回传，主线程统一整形
+            error.append(exc)
 
     thread = Thread(target=_worker, daemon=True)
     thread.start()
@@ -188,25 +191,93 @@ def run_workflow_isolated(
     *,
     timeout_s: float = DEFAULT_TIMEOUT_S,
     isolation: str = "inprocess",
+    provider_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """按隔离级别执行 GeneratedCode：'inprocess'(L1) 或 'subprocess'(L2)。
 
-    'subprocess'（L2，S6）：子进程隔离 + SIGKILL 硬超时 +（Linux）resource.setrlimit；
-    在不支持的平台（macOS / Windows）自动回落 L1 in-process。'inprocess' 直接走 L1。
-    无论哪条路径，L0 静态闸都在执行前先跑（run_generated / subprocess 入口各自调用）。
+    'subprocess'（L2）：子进程隔离 + SIGKILL 硬超时 +（Linux）resource.setrlimit；子进程内
+    自建 provider，故需 provider_config（无则回落 L1，用传入的 live provider）。在非 Linux
+    平台（macOS / Windows）自动回落 L1 in-process（这些平台 rlimit 不可靠，硬隔离价值有限）。
+    'inprocess' 直接走 L1。无论哪条路径，L0 静态闸都在执行前先跑（受限沙箱叠加，不二选一）。
     """
-    if isolation == "subprocess":
-        return _run_subprocess(code, inputs, provider, timeout_s=timeout_s)
+    if isolation == "subprocess" and sys.platform.startswith("linux") \
+            and provider_config is not None:
+        return _run_subprocess(code, inputs, provider_config, timeout_s=timeout_s)
+    # 非 Linux / 无 provider_config / inprocess：回落 L1 in-process（受限 builtins 沙箱）。
     return run_generated(code, inputs, provider, timeout_s=timeout_s)
+
+
+# 子进程内存上限（地址空间，字节）：默认 1 GiB，封顶失控分配（仅 Linux 经 RLIMIT_AS 生效）。
+_SUBPROCESS_RLIMIT_AS_BYTES = 1024 * 1024 * 1024
 
 
 def _run_subprocess(
     code: GeneratedCode,
     inputs: dict[str, Any],
-    provider: LLMProvider,
+    provider_config: dict[str, Any],
     *,
     timeout_s: float,
 ) -> dict[str, Any]:
-    """L2 子进程隔离（S6 落地）。当前阶段：回落 L1 in-process。"""
-    # S6 将在此接入 scripts/run_dify_workflow.py 子进程 + SIGKILL + Linux setrlimit。
-    return run_generated(code, inputs, provider, timeout_s=timeout_s)
+    """L2 子进程隔离：spawn scripts/run_dify_workflow.py，stdin 喂 spec，硬超时 SIGKILL。
+
+    子进程内自建 provider（provider_config）、施加 Linux rlimit、走 L1 受限沙箱执行。父进程
+    用 communicate(timeout) 等待；超时 -> kill()（POSIX 即 SIGKILL）-> DifyTimeoutError。
+    子进程回 JSON {"ok":bool, ...}；非零退出 / 解析失败均整形为 DifyRunError。
+    """
+    import json
+    import subprocess
+
+    # L0 闸在父进程先跑一遍（快速失败，且不白启子进程）；子进程内 run_generated 会再过一遍。
+    assert_runnable(code)
+
+    spec = {
+        "source": code.source,
+        "entrypoint": code.entrypoint,
+        "imports": list(code.imports),
+        "warnings": list(code.warnings),
+        "inputs": inputs,
+        # 子进程内 L1 软超时设为父进程硬超时的一半，让子进程多半能自行优雅超时回 JSON；
+        # 真失控时父进程的 communicate(timeout) + SIGKILL 兜底。
+        "timeout_s": max(0.05, timeout_s / 2),
+        "rlimit_cpu_s": max(1, int(timeout_s) + 1),
+        "rlimit_as_bytes": _SUBPROCESS_RLIMIT_AS_BYTES,
+        **provider_config,
+    }
+    script = Path(__file__).resolve().parents[3] / "scripts" / "run_dify_workflow.py"
+    # 子进程 cwd 设为进程私有 tmp：honor「在临时目录里跑」的 L1 chdir(tmp) 语义，但隔离在
+    # 子进程内、不污染父进程 cwd。脚本经自身 __file__ 锚定项目根，不依赖 cwd，故安全。
+    with tempfile.TemporaryDirectory(prefix="dify-wf-") as tmp:
+        proc = subprocess.Popen(
+            [sys.executable, str(script)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=tmp,
+        )
+        try:
+            out, _err = proc.communicate(json.dumps(spec), timeout=timeout_s)
+        except subprocess.TimeoutExpired as exc:
+            proc.kill()  # POSIX: SIGKILL，硬杀失控子进程
+            proc.communicate()
+            raise DifyTimeoutError(
+                f"工作流执行超过 {timeout_s}s 超时上限（子进程已 SIGKILL）",
+                timeout_s=timeout_s,
+            ) from exc
+
+    if proc.returncode != 0:
+        # 子进程被内核杀（rlimit 越界 -> SIGKILL/SIGXCPU）或异常退出。
+        raise DifyRunError(
+            f"工作流子进程异常退出（returncode={proc.returncode}）"
+        )
+    try:
+        parsed = json.loads(out)
+    except json.JSONDecodeError as exc:
+        raise DifyRunError("工作流子进程输出无法解析为 JSON") from exc
+
+    if not parsed.get("ok"):
+        err = parsed.get("error", {})
+        raise DifyRunError(
+            f"工作流子进程执行失败：{err.get('type', '?')}: {err.get('message', '')}"
+        )
+    return cast("dict[str, Any]", parsed.get("result", {}))
