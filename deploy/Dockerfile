@@ -29,8 +29,11 @@ ENV UV_LINK_MODE=copy \
 
 WORKDIR /build
 
-# 构建 wheel 所需的最小集合：pyproject（含 readme=README.md、SPDX license）+ 包源码。
-COPY pyproject.toml uv.lock README.md LICENSE NOTICE ./
+# 构建 wheel 所需的最小集合：pyproject（含 readme、SPDX license）+ 包源码 + force-include 的
+# AI 文档（llms.txt + docs/llms → 包内 _llms/，见 pyproject [tool.hatch...force-include]），
+# 缺则 hatchling build wheel 报 "Forced include not found: docs/llms"。
+COPY pyproject.toml uv.lock README.md LICENSE NOTICE llms.txt ./
+COPY docs/llms ./docs/llms
 COPY src/ ./src/
 
 # 独立 venv + 非可编辑安装（不可变镜像，源码已烘进 wheel）。
