@@ -34,8 +34,11 @@ COPY pyproject.toml uv.lock README.md LICENSE NOTICE ./
 COPY src/ ./src/
 
 # 独立 venv + 非可编辑安装（不可变镜像，源码已烘进 wheel）。
+# --no-sources：忽略 pyproject 的 [tool.uv.sources]（开发用的本地 path/editable，如
+# corespine 指向工作区同级目录），容器内改从 PyPI 装 corespine（已发 >=0.1.1）——否则
+# uv 会去找容器里不存在的 file:///corespine 而 build 失败。
 RUN uv venv /opt/venv --python /usr/local/bin/python3.12 \
- && VIRTUAL_ENV=/opt/venv uv pip install --no-cache ".[service,vector,dify]"
+ && VIRTUAL_ENV=/opt/venv uv pip install --no-cache --no-sources ".[service,vector,dify]"
 
 # ---------------------------------------------------------------------------
 # runtime：拷 venv + 脚本运行所需的运行时文件，配置全走 RAGSPINE_* 环境变量。
