@@ -62,6 +62,17 @@ wrapped base retriever's already-RESTRICTED-stripped output and never reads chun
 home context into an out-of-scope question or remembers a refused turn (frozen by
 `tests/service/test_conversation.py`). None can leak RESTRICTED / bypass competitor refusal by construction.
 
+**Inherited by the W7 GraphRAG paths (graph traversal is a new exit).** Graph traversal is a new path that could
+reach a prompt, so the `GraphStore` (`src/ragspine/graph/store.py`) screens it like the two exits: a
+`sensitivity == RESTRICTED` node never surfaces in `get_node` / `neighbors` / `subgraph` / `traverse`, and never
+acts as a multi-hop stepping-stone (edges touching it never appear); doc nodes inherit `sensitivity` from their
+source chunk (most-restrictive wins). The W7a multi-hop `GraphQuery` (`graph/query.py`) additionally screens every
+requested entity through the deterministic `SecurityGate` **first**, so a competitor/external entity is refused
+with zero data — graph queries cannot smuggle competitor data or RESTRICTED content. **Frozen by**
+`tests/conformance/test_graph_store.py` (provenance / RESTRICTED-never-surfaces / determinism, each with an honest
+reverse-proof stub — `_LeakyGraphStore` / `_LineageDroppingGraphStore` — that must FAIL) and the W7a/W7b tests
+under `tests/graph/`. The authoritative per-domain contract is `src/ragspine/graph/CLAUDE.md`.
+
 ## Privacy-aware traces
 
 <!-- TODO: common/observability records codes / counts / timings only. -->

@@ -152,6 +152,13 @@ vector = [
     "pg8000>=1.30",
     "qdrant-client>=1.7",
 ]
+# 可插拔图存储后端（GraphStore 缝 W7c 的真实 adapter）。延迟 import：不装也能 import 核心、
+# 跑零依赖 InProcessGraphStore 默认；装了即由 make_graph_store('networkx'|'nx') 选用。
+# networkx：成熟图库（BSD-3，permissive，过 ADR 0009 的 ≤Apache-2.0 许可门），纯进程内、零服务，
+#   故 graph conformance 装了即跑、无需 env 门（NetworkxGraphStore 落在 MultiDiGraph 之上）。
+graph = [
+    "networkx>=3.0",
+]
 # Dify 工作流编译器（ragspine.dify）的边界依赖：
 # - PyYAML（MIT，permissive，过 ADR 0009 的 ≤Apache-2.0 许可门）：parse 段经 yaml.safe_load
 #   把 .yml 文本读成 dict；延迟 import（loader.py 内）。
@@ -180,7 +187,7 @@ service = [
 # GPU 与否无需在此区分——torch/transformers/paddleocr 装的是自适应版，运行时探测到
 # CUDA 即用 GPU、否则回落 CPU；embed 的 transformers 上限已按 darwin 平台标记处理。
 all = [
-    "rag-spine[pdf,ocr,doc,llm,embed,embed-onnx,rerank,vector,service,dify]",
+    "rag-spine[pdf,ocr,doc,llm,embed,embed-onnx,rerank,vector,graph,service,dify]",
 ]
 
 [build-system]

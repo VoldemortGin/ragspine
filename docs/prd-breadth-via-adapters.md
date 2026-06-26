@@ -157,6 +157,7 @@ Legend: **kind** 🛡/⭐/🔧 (own/own/adapt) · **status** ✅ have · ◐ par
 | Chunking | `Chunker` | ⭐ | recursive/structural | semantic · contextual · parent-child | ✅ proto | P0 proto ✓ · P1 strat |
 | Embedding | `EmbeddingBackend` | 🔧⭐ | lexical-hash (non-semantic) | sentence-transformers `[embed]` · OpenAI `[llm]` | ✅ | — |
 | Vector store | `VectorStore` | 🔧 | in-proc brute force | **sqlite-vec ✅ · pgvector ✅ · Qdrant ✅** · Milvus·FAISS·Chroma·LanceDB | ✅ seam + 3 adapters | P0 ✓ · more adapters P1 |
+| Graph store | `GraphStore` | 🔧 | **in-proc adjacency ✅** | **networkx ✅** · kuzu·neo4j | **✅ W7 landed** (see [quality-depth PRD](prd-quality-depth.md) W7c) | done · more adapters follow-up |
 | Lexical index | *(built-in)* | ⭐ | BM25 | — | ✅ | — |
 | Retrieve / fuse | `HybridRetriever` | ⭐ | BM25 + vector → RRF | — | ✅ | — |
 | Rerank | `ListwiseJudge` | ⭐ | identity | cross-encoder · Cohere · BGE `[rerank]` | ✅ proto / ✗ adapters | P1 |
@@ -292,9 +293,12 @@ CI-tested path; until then it lives as a clearly-labeled experimental adapter.
   reference adapters per seam*, not parity with LangChain's integration count. The rest is community/3rd-party.
 - **A plugin marketplace / registry website.** Discovery is Python entry points + a docs table, not a hosted index.
 - **Runtime auto-selection / cost-based routing across backends.** Backends are chosen by config, not inferred.
-- **GraphRAG / knowledge-graph store.** A distinct quality-depth (⭐) effort — **now specified in its own PRD:
-  [`prd-quality-depth.md`](prd-quality-depth.md) (workstream W7)**, with a charter-native deterministic structured
-  relation graph (W7a) + an opt-in, provenance-bound narrative GraphRAG (W7b) behind a `GraphStore` seam (W7c).
+- **GraphRAG / knowledge-graph store.** A distinct quality-depth (⭐) effort — specified in its own PRD:
+  [`prd-quality-depth.md`](prd-quality-depth.md) (workstream W7), and now **W7 landed** (see that PRD's W7 SHIPPED
+  note and the `Graph store` row in the capability matrix above): a charter-native deterministic structured
+  relation graph (W7a ✅) + an opt-in, provenance-bound narrative GraphRAG skeleton (W7b ◐) behind a `GraphStore`
+  seam (W7c ✅, `Protocol` + in-proc default + `networkx` adapter + provenance/isolation conformance pack). The
+  seam follows this PRD's five-段式 contract; the remaining breadth slice is **more graph adapters** (kuzu/neo4j).
 - **Incremental sync / deletion-propagation engine** beyond the P2 seam stub — the lineage-correct delete is a
   meaty 🛡 design and gets its own PRD.
 - **Migrating existing concrete backends to a worse abstraction.** Formalizing `Extractor`/`Chunker` is a

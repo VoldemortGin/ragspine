@@ -261,3 +261,140 @@ VECTOR_STORE_SUITE: "ConformanceSuite" = ConformanceSuite(
     {name: (lambda n=name: VECTOR_STORE_REGISTRY.make(n)) for name in VECTOR_STORE_REGISTRY.names()},
     VECTOR_STORE_INVARIANTS,
 )
+
+
+# ---------------------------------------------------------------------------
+# 注册表：受 conformance 约束的 GraphStore 实现（W7c GraphStore 缝）。第三方实现在此追加一行
+# + 在 _build_graph_store 里补一行（或将来换成 entry-point 自动发现）即继承整套 provenance /
+# isolation / determinism pack——同 VectorStore 缝的范式。in_process 是零依赖确定性默认；
+# networkx 是 behind [graph] extra 的薄 adapter（NetworkxGraphStore），由 fixture 的
+# importorskip 门控（缺则该参数 skip，黄不红）。
+# ---------------------------------------------------------------------------
+GRAPH_STORE_IMPLS = ("in_process", "networkx")
+
+
+def _build_graph_store(name: str):
+    """名字 -> GraphStore 实例（延迟 import，红色阶段在此抛 ModuleNotFoundError）。"""
+    from ragspine.graph.store import InProcessGraphStore
+
+    if name == "in_process":
+        return InProcessGraphStore()
+    if name == "networkx":
+        from ragspine.graph.adapters.networkx_store import NetworkxGraphStore
+
+        return NetworkxGraphStore()
+    raise KeyError(name)
+
+
+@pytest.fixture(params=list(GRAPH_STORE_IMPLS), ids=list(GRAPH_STORE_IMPLS))
+def graph_store(request):
+    """每个注册 GraphStore 各给一个【全新空库】实例；每条用例对所有实现各跑一遍。
+
+    networkx behind [graph] extra：缺时该参数 skip（黄，不红），装了即整套 gate（本 venv 已装）。
+    """
+    if request.param == "networkx":
+        pytest.importorskip("networkx", reason="networkx 未装（pip install ragspine[graph]）")
+    return _build_graph_store(request.param)
+
+
+# ===========================================================================
+# corespine 机制层 conformance 骨架（GraphStore 缝）——与上文 graph_store fixture-形态参数化
+# 两层互补，领域断言不外迁。范围刻意收敛在【离线零依赖、零服务】的 in_process 默认实现上
+# （无 importorskip / env 门，故 corespine 套件每格都能确定性执行）；networkx 的可用性门由
+# 上文 graph_store fixture 承载，二者职责不重叠（范式同 VECTOR_STORE_SUITE）。
+# ===========================================================================
+def _make_in_process_graph():
+    """构造内存默认 GraphStore（延迟 import，红色阶段在此抛 ModuleNotFoundError）。"""
+    from ragspine.graph.store import InProcessGraphStore
+
+    return InProcessGraphStore()
+
+
+GRAPH_STORE_REGISTRY: "Registry" = Registry("graph_store")
+GRAPH_STORE_REGISTRY.register("in_process", _make_in_process_graph)
+
+
+def _graph_node(node_id: str, ntype: str = "entity", *, sensitivity: str = "INTERNAL", **md):
+    """构造带齐血缘的 GraphNode：默认 source_doc_id / source_locator / sensitivity，可逐项覆盖。
+
+    延迟 import GraphNode 以保持惰性红色；供 InvariantPack 与领域断言共用同一构造口径。
+    """
+    from ragspine.graph.store import GraphNode
+
+    meta = {
+        "source_doc_id": md.pop("source_doc_id", "profile"),
+        "source_locator": md.pop("source_locator", f"config#{node_id}"),
+        "sensitivity": sensitivity,
+    }
+    meta.update({k: str(v) for k, v in md.items()})
+    return GraphNode(id=node_id, type=ntype, label=node_id, metadata=meta)
+
+
+def _graph_edge(src: str, dst: str, etype: str, **md):
+    """构造带齐血缘的 GraphEdge：默认 source_doc_id / source_locator，可逐项覆盖（延迟 import）。"""
+    from ragspine.graph.store import GraphEdge
+
+    meta = {
+        "source_doc_id": md.pop("source_doc_id", "profile"),
+        "source_locator": md.pop("source_locator", f"config#{src}->{dst}"),
+    }
+    meta.update({k: str(v) for k, v in md.items()})
+    return GraphEdge(src=src, dst=dst, type=etype, metadata=meta)
+
+
+def _graph_determinism_repeated_traverse_stable(store) -> None:
+    """同库同遍历两次：可达节点 id 序列逐位一致（确定性·机制）。"""
+    store.upsert_nodes([_graph_node(f"n{i}") for i in range(8)])
+    store.upsert_edges([_graph_edge("n0", f"n{i}", "rel") for i in range(1, 8)])
+    first = [n.id for n in store.traverse("n0", max_depth=2)]
+    second = [n.id for n in store.traverse("n0", max_depth=2)]
+    assert first == second
+
+
+def _graph_provenance_node_and_edge_round_trip(store) -> None:
+    """节点/边血缘锚点 source_doc_id / source_locator 经 upsert->遍历原样回传（不臆造·机制）。"""
+    store.upsert_nodes([
+        _graph_node("GROUP"),
+        _graph_node("HK", source_doc_id="HK_FIN.pptx", source_locator="HK_FIN.pptx!slide3"),
+    ])
+    store.upsert_edges([
+        _graph_edge("GROUP", "HK", "parent_of",
+                    source_doc_id="company.toml", source_locator="company.toml#home"),
+    ])
+    [hk] = store.neighbors("GROUP")
+    assert hk.metadata["source_doc_id"] == "HK_FIN.pptx"
+    assert hk.metadata["source_locator"] == "HK_FIN.pptx!slide3"
+    [edge] = store.subgraph(["GROUP"], depth=1).edges
+    assert edge.metadata["source_doc_id"] == "company.toml"
+    assert edge.metadata["source_locator"] == "company.toml#home"
+
+
+def _graph_isolation_restricted_never_surfaces(store) -> None:
+    """RESTRICTED 来源节点绝不出现在 neighbors/traverse/subgraph，也不作跳板（隔离·机制）。"""
+    store.upsert_nodes([
+        _graph_node("A"), _graph_node("B"),
+        _graph_node("SECRET", sensitivity="RESTRICTED"), _graph_node("C"),
+    ])
+    store.upsert_edges([
+        _graph_edge("A", "B", "rel"), _graph_edge("B", "C", "rel"),
+        _graph_edge("A", "SECRET", "rel"), _graph_edge("SECRET", "C", "rel"),
+    ])
+    assert "SECRET" not in {n.id for n in store.neighbors("A")}
+    assert "SECRET" not in {n.id for n in store.traverse("A", max_depth=3)}
+    sub = store.subgraph(["A"], depth=3)
+    assert "SECRET" not in {n.id for n in sub.nodes}
+    assert all("SECRET" not in (e.src, e.dst) for e in sub.edges)
+
+
+GRAPH_STORE_INVARIANTS: "InvariantPack" = (
+    InvariantPack("graph_store")
+    .add("determinism_repeated_traverse_stable", _graph_determinism_repeated_traverse_stable)
+    .add("provenance_node_and_edge_round_trip", _graph_provenance_node_and_edge_round_trip)
+    .add("isolation_restricted_never_surfaces", _graph_isolation_restricted_never_surfaces)
+)
+
+# 实现 × 不变量 的笛卡尔积套件：corespine 负责「跑全套 + 定位坏格子」。每格新建实例，杜绝串味。
+GRAPH_STORE_SUITE: "ConformanceSuite" = ConformanceSuite(
+    {name: (lambda n=name: GRAPH_STORE_REGISTRY.make(n)) for name in GRAPH_STORE_REGISTRY.names()},
+    GRAPH_STORE_INVARIANTS,
+)

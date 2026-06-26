@@ -406,6 +406,37 @@ first and the fabrication-risky layer stays opt-in.
   surfaces in a traversal result). This is how W7 opens to graph backends without the spine rotting — the same
   mechanism the breadth PRD uses for `VectorStore`.
 
+> **W7 SHIPPED (W7a ✅ · W7c ✅ · W7b ◐ skeleton).** A new `graph/` domain (`src/ragspine/graph/`), all
+> opt-in/default-off — the default `answer_question`/retrieval/eval path is **byte-identical** (4-gate + W5
+> groundedness ratchet green both modes, **0 fabrication**; demo `ALL CHECKS PASSED`).
+> - **W7c `GraphStore` seam (✅).** `store.py`: a `@runtime_checkable GraphStore` Protocol (`upsert_nodes/edges`,
+>   `get_node`, `neighbors`, `subgraph`, `traverse`, `count_*`) + the zero-dep deterministic default
+>   `InProcessGraphStore` + `make_graph_store` / `RAGSPINE_GRAPH_STORE` registry (built-ins `in_process` +
+>   `networkx`; third-party via the `ragspine.graph_stores` entry-point group). One real adapter shipped —
+>   `adapters/networkx_store.py` (BSD-3, `[graph]`, lazy-imported, conformance-bound); `kuzu`/`neo4j` are reserved
+>   seams (the entry-point group is live today; first-party adapters = follow-up). The **provenance + isolation
+>   conformance pack** (`tests/conformance/test_graph_store.py` + the registry in `conftest.py`) binds every impl:
+>   provenance round-trip, RESTRICTED-never-surfaces, determinism — each with an **honest reverse-proof stub that
+>   must FAIL** (`_LeakyGraphStore`, `_LineageDroppingGraphStore`). Five-段式 = the `make_vector_store` paradigm.
+> - **W7a structured relation graph (✅).** `relation.py` `build_relation_graph(profile, *, facts, chunks)` builds a
+>   typed graph **deterministically over the controlled dimensions** — `parent_of` (home→subsidiaries),
+>   `derives` (any dim's `derived_from`/`derivation`, so entity→geography *and* metric→derived-metric),
+>   `competes_with` (home→external entities), `mentions` (doc→entity/metric co-occurrence from facts + chunks).
+>   Zero LLM, zero fabrication, every node/edge lineage-carrying. `query.py` `GraphQuery` is the **opt-in multi-hop
+>   entry** (standalone — never touches `answer_question`): `subsidiary_rollup` (walk `parent_of` → N exact
+>   `FactStore.query` → summed total with each contributing `Fact` cited), `peer_comparison` (per-entity cited
+>   facts), `derivation_trace` (walk `derives` edges with per-edge provenance) — the multi-hop a flat top-k +
+>   exact SQL can't do, **fully cited**. Inherits the `SecurityGate` (competitor entity → refused, zero data) and
+>   the store's RESTRICTED isolation (doc nodes carry chunk `sensitivity`; RESTRICTED docs never surface).
+> - **W7b narrative GraphRAG (◐ skeleton + seam + follow-up).** `narrative.py`: `GraphExtractor` /
+>   `LLMGraphExtractor` (provider→JSON, **every relation stamped with `source_doc_id`+`source_locator`**, bounded,
+>   deterministic degrade — same idiom as `agent/decompose.py`), **deterministic** `detect_communities`
+>   (connected-components), `CommunitySummarizer` / `LLMCommunitySummarizer` (summaries are **`is_synthesis=True`,
+>   never citable facts**; numbers stay in the structured channel), `make_narrative_graph` /
+>   `RAGSPINE_NARRATIVE_GRAPH` (default `None` = off, behind `[graph]`+`[llm]`). Fake-LLM tested. *Follow-up:*
+>   Leiden/Louvain hierarchical communities, incremental extraction, claim-anchoring, global map-reduce query
+>   orchestration — deliberately not built to avoid leaking non-determinism into the default path.
+
 ## Gap matrix (depth)
 
 Legend: **kind** 🛡/⭐/🔧 · **status** ✅ have · ◐ partial · ✗ gap.
@@ -424,9 +455,9 @@ Legend: **kind** 🛡/⭐/🔧 · **status** ✅ have · ◐ partial · ✗ gap.
 | Multi-hop / decomposition | deterministic Cartesian only | LLM decomposition (opt-in) | ⭐ | ✅ (opt-in fan-out; per-sub-q guard+gate; det. synthesis, LLM-synth = follow-up) | W6a · P2 |
 | Corrective retrieval | one filter-drop retry | CRAG grade→act loop (opt-in) | ⭐ | ✅ (bounded ≤2 det. grade→act; lexical grader default, CE/LLM grader = seam) | W6b · P2 |
 | Conversational memory | stateless single-shot | multi-turn (opt-in) | ⭐ | ◐ (bounded memory + det. carry-forward + per-turn gate; LLM coref / endpoint = follow-up) | W6c · P2 |
-| Structured relation graph | none (substrate exists) | deterministic typed graph + multi-hop | ⭐ | ✗ | W7a · P2 |
-| Narrative GraphRAG | none | entity/community (opt-in, provenance-bound) | ⭐ | ✗ | W7b · P2 |
-| Graph store seam | none | `GraphStore` Protocol + in-proc default + adapters | 🔧 | ✗ | W7c · P2 |
+| Structured relation graph | none (substrate exists) | deterministic typed graph + multi-hop | ⭐ | ✅ | W7a · P2 |
+| Narrative GraphRAG | none | entity/community (opt-in, provenance-bound) | ⭐ | ◐ (extract→community→summary skeleton, fake-LLM-tested; Leiden/incremental/global-query = follow-up) | W7b · P2 |
+| Graph store seam | none | `GraphStore` Protocol + in-proc default + adapters | 🔧 | ✅ | W7c · P2 |
 
 ## Phasing
 

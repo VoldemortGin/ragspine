@@ -15,13 +15,14 @@ import pytest
 
 import ragspine
 
-# 10 个顶层领域（与包 docstring 的 Submodules 清单一致）。
+# 顶层领域（curated 子集，与包 docstring 的 Submodules 清单一致）。
 DOMAINS = (
     "agent",
     "cli",
     "common",
     "eval",
     "extraction",
+    "graph",
     "ingestion",
     "pipeline",
     "retrieval",
