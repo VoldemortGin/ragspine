@@ -141,3 +141,26 @@ def test_docx_facts_ingested_real_docspine(store, registry, queue, make_docx, tm
     assert "docspine" in (rows[0].extractor_version or "")
     assert rows[0].source_locator.startswith("sheet=table1!")
     assert rows[0].review_status in VISIBLE_REVIEW_STATUSES
+
+
+def test_colored_docx_triggers_sme_gated_color_review(
+    store, registry, queue, make_docx, tmp_path
+):
+    """W3d：着色 .docx 单元格的 resolved_rgb 真正流进既有 SME-gated color 通路 —— 文件含
+    颜色编码但无 active 映射时入复核（绝不静默把未确认颜色翻成 tag），证明颜色不止步抽取层。"""
+    pytest.importorskip("docspine", reason="docspine 未安装（[doc]）")
+    from ragspine.ingestion.structured.ingestion import ingest_file
+
+    _init_three(store, registry, queue)
+    p = tmp_path / "colored.docx"
+    make_docx(p, [
+        ("table", [
+            [RESOLVABLE_ENTITY_TITLE, "FY2024"],
+            ["REVENUE", {"text": "2680", "fill": "FFFF00"}],
+        ]),
+    ])
+    report = ingest_file(p, store, registry, queue)
+    assert report.status == "ok"
+    # 含颜色编码但映射未确认 -> 报告告警 + 入复核（SME 确认图例前不翻译颜色 tag）。
+    assert any("颜色映射未确认" in w for w in report.warnings)
+    assert report.n_enqueued_review >= 1

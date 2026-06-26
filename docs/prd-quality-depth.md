@@ -215,6 +215,28 @@ and OCR-internally consistent. Wiring them turns a rented surface into a moat.
 - **W3d — preserve table richness into the IR (⭐, P1).** Extend `StyledGrid`/`StyledCell` so merges/nested/fills
   from pptspine/docspine survive (today pdfspine tables set `resolved_rgb=None` and ppt/doc richness is unreached),
   so cell-level citations and color/structure semantics resolve to page→table→cell across all three formats.
+  > **✅ SHIPPED — no IR schema change (the existing `StyledGrid`/`StyledCell` fields were enough).** The
+  > family extractors already carry the richness; W3d just *fills the existing IR fields* instead of
+  > hardcoding `None`/warning. Two gaps closed (merges already landed best-effort in W3b/W3c):
+  > **(1) Cell fills → `resolved_rgb`.** docspine's `cell['fill']` (`<w:shd w:fill>`) and pptspine's
+  > `cell['fill']` (`a:tcPr` solidFill/srgbClr) are both already resolved `'RRGGBB'` upper-hex (or
+  > `None` for `auto`/no-fill / unresolved theme-scheme colours). A tiny shared `_normalize_fill`
+  > (None/`auto`/`none`→None, else upper) maps them straight into the **existing** `StyledCell.resolved_rgb`
+  > — so docx/pptx cell colour now flows the **existing SME-gated color-semantics path** (`extraction/color/`:
+  > `cells_by_rgb`/`cluster_colors`/`detect_legend`/`apply_mapping`) and the ingestion review on-ramp
+  > (`_grid_has_colored_cells` → "colour mapping unconfirmed → enqueue") **with zero ingestion change**
+  > (the color path is format-agnostic; it keys off `rgb_tag_key()`). pdfspine stays `resolved_rgb=None`
+  > by design (PDF has no colour semantics). **(2) Nested tables → independent `StyledGrid`s.** Only docspine
+  > has nested tables (DrawingML/pptx tables can't nest). `docspine_extractor` no longer warns-and-drops:
+  > each nested table (`cell['blocks']` `kind=='table'`) is emitted as its **own `StyledGrid`**, sheet-named
+  > to encode the parent→child locator chain (`table{M}.cell{r}_{c}.nested{k}`, recursive for deeper nesting,
+  > parent-grid breadcrumb warning preserved) — so a nested cell is fully citable and never silently lost.
+  > `extract_grids` returns the flat `[parent, *nested…]` list in reading order; downstream consumers are
+  > unchanged (dotted sheet names are just strings; an unattributable nested grid gracefully skips, never
+  > fabricates). TDD: `make_docx`/`make_pptx` conftest fixtures gained `fill`/`nested` synthesis; red tests
+  > (`resolved_rgb` non-None for filled cells; nested grid emitted + colour reaching `cluster_colors`) →
+  > green, plus a real-docspine ingest test proving a colored `.docx` fires the SME-gated colour-review
+  > enqueue. Contract: extractor docstrings + `extraction/CLAUDE.md`.
 
 ### W4 — Contextual retrieval + family-layout chunking ⭐  (P1, Chunker seam exists)
 
@@ -304,6 +326,7 @@ Legend: **kind** 🛡/⭐/🔧 · **status** ✅ have · ◐ partial · ✗ gap.
 | OCR default + scanned path | GPU PaddleOCR-VL; **scanned never OCR'd** | family OCR (pdfspine→ocrspine) default + scanned path wired | 🛡⭐ | ✅ | W3a · P0 |
 | `.docx` ingestion | **no path** | `docspine` Extractor (tables→facts + paragraphs→chunks) | ⭐ | ✅ | W3b · P1 |
 | PPTX richness | `python-pptx` (color/chart/note) | `pptspine` (richer merges) opt-in; default stays `python-pptx` | ⭐ | ✅ | W3c · P1 |
+| Table richness in IR | docx/ppt fills `→None`; nested tables warned-and-dropped | family `fill→resolved_rgb` (SME-gated color path); nested → independent `StyledGrid` (no IR schema change) | ⭐ | ✅ | W3d · P1 |
 | Contextual retrieval | bare paragraph; context sidecar-only | deterministic context header + LLM adapter | ⭐ | ✗ | W4a · P1 |
 | Chunking | fixed-char paragraph-greedy | family-layout + parent-child | ⭐ | ✗ (proto ✅) | W4b · P1 |
 | Faithfulness / groundedness eval | **unmeasured** (citation-match only) | claim-level NLI gate + free-text accuracy | 🛡 | ✗ | W5 · P1 |

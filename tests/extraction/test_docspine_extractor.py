@@ -145,3 +145,103 @@ def test_registry_dispatches_docx(make_docx, tmp_path):
         ext = get_extractor(key)
         grids = ext.extract(p)
         assert grids[0].get("R1C1").value == "ACME Hong Kong"
+
+
+# ===========================================================================
+# W3d（富表 IR）：单元格底纹色 -> resolved_rgb；嵌套表 -> 独立 StyledGrid。
+# ===========================================================================
+
+
+def test_cell_fill_resolved_into_rgb(make_docx, tmp_path):
+    """W3d user story 2：Word 表格单元格底纹色（<w:shd w:fill>）经 docspine 的 cell['fill']
+    解析进 StyledCell.resolved_rgb（'RRGGBB' 大写十六进制），无底纹为 None。"""
+    from ragspine.extraction.extractors.docspine_extractor import extract_grids
+
+    p = tmp_path / "filled.docx"
+    make_docx(p, [
+        ("table", [
+            [{"text": "NEW", "fill": "FFFF00"}, {"text": "MATURE", "fill": "92d050"}],
+            ["plain", "2680"],
+        ]),
+    ])
+    g = extract_grids(p)[0]
+    assert g.get("R1C1").resolved_rgb == "FFFF00"
+    # 小写源色归一为大写（IR 契约：resolved_rgb 恒大写 RRGGBB）。
+    assert g.get("R1C2").resolved_rgb == "92D050"
+    # 无底纹格仍 None（不臆造颜色）。
+    assert g.get("R2C1").resolved_rgb is None
+    assert g.get("R2C2").resolved_rgb is None
+
+
+def test_cell_fill_flows_into_color_semantics_path(make_docx, tmp_path):
+    """W3d：着色单元格经既有 cells_by_rgb()/cluster_colors() 同色聚类通路被消费 ——
+    证明 docx 颜色真正流进 color-semantics（SME-gated）通路，而非止步抽取层。"""
+    from ragspine.extraction.color.color_semantics import cluster_colors
+    from ragspine.extraction.extractors.docspine_extractor import extract_grids
+
+    p = tmp_path / "legend.docx"
+    make_docx(p, [
+        ("table", [
+            [{"text": "A", "fill": "FFFF00"}, {"text": "B", "fill": "FFFF00"}],
+            [{"text": "C", "fill": "92D050"}, "plain"],
+        ]),
+    ])
+    g = extract_grids(p)[0]
+    by_rgb = g.cells_by_rgb()
+    assert set(by_rgb) == {"FFFF00", "92D050"}
+    assert {c.cell_ref for c in by_rgb["FFFF00"]} == {"R1C1", "R1C2"}
+    clusters = cluster_colors(g)
+    # 最大簇（黄，2 格）排在前，证明聚类报告确实收到 docx 的 resolved_rgb。
+    assert clusters[0].rgb == "FFFF00" and clusters[0].count == 2
+
+
+def test_nested_table_emitted_as_independent_grid(make_docx, tmp_path):
+    """W3d：单元格内嵌套表不再只发 warning，而是作为独立 StyledGrid 产出，sheet 命名
+    体现父子（table{M}.cell{r}_{c}.nested{k}），locator 链可追溯，绝不静默丢。"""
+    from ragspine.extraction.extractors.docspine_extractor import extract_grids
+
+    p = tmp_path / "nested.docx"
+    make_docx(p, [
+        ("table", [
+            ["Region", "FY2024"],
+            [{"text": "OUTER", "nested": [
+                [["INNER-A", "INNER-B"], ["REVENUE", "2680"]],
+            ]}, "tail"],
+        ]),
+    ])
+    grids = extract_grids(p)
+    # 父表 + 一张嵌套表 = 2 张 StyledGrid。
+    sheets = [g.sheet for g in grids]
+    assert sheets == ["table1", "table1.cell2_1.nested1"]
+    parent, nested = grids
+    # 父格仍承载自身段落文本（嵌套富结构不污染父格值）。
+    assert parent.get("R2C1").value == "OUTER"
+    # 嵌套表作为独立网格被完整表示，血缘与父同源。
+    assert nested.source_doc_id == "nested.docx"
+    assert nested.source_file_hash == parent.source_file_hash
+    assert nested.get("R1C1").value == "INNER-A"
+    assert nested.get("R2C2").value == "2680"
+    # 父网格留 breadcrumb 告警指向独立子网格（provenance 可追溯，never silently dropped）。
+    assert any("table1.cell2_1.nested1" in w for w in parent.warnings)
+
+
+def test_deeply_nested_table_recurses(make_docx, tmp_path):
+    """W3d：嵌套表自身再含嵌套表时递归产出，sheet 名链式体现祖父->父->子层级。"""
+    from ragspine.extraction.extractors.docspine_extractor import extract_grids
+
+    p = tmp_path / "deep.docx"
+    make_docx(p, [
+        ("table", [
+            [{"text": "L0", "nested": [
+                [[{"text": "L1", "nested": [
+                    [["L2", "leaf"]],
+                ]}]],
+            ]}],
+        ]),
+    ])
+    sheets = [g.sheet for g in extract_grids(p)]
+    assert sheets == [
+        "table1",
+        "table1.cell1_1.nested1",
+        "table1.cell1_1.nested1.cell1_1.nested1",
+    ]

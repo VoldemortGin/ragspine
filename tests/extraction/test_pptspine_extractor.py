@@ -165,3 +165,44 @@ def test_registry_default_pptx_stays_python_pptx(make_pptx, tmp_path):
     for key in (".pptx", PPTX_MIME):
         ext = get_extractor(key)
         assert getattr(ext, "name", "") == "pptx_styled"
+
+
+# ===========================================================================
+# W3d（富表 IR）：pptspine 单元格底色 -> resolved_rgb（PPTX 表格无嵌套，故只富填充）。
+# ===========================================================================
+
+
+def test_cell_fill_resolved_into_rgb(make_pptx, tmp_path):
+    """W3d user story 2：PPT 表格单元格 solidFill/srgbClr 经 pptspine 的 cell['fill'] 解析
+    进 StyledCell.resolved_rgb（'RRGGBB' 大写十六进制），无底色为 None。"""
+    from ragspine.extraction.extractors.pptspine_extractor import extract_grids
+
+    p = tmp_path / "filled.pptx"
+    make_pptx(p, [[("table", [
+        [{"text": "NEW", "fill": "FFFF00"}, {"text": "MATURE", "fill": "92d050"}],
+        ["plain", "2680"],
+    ])]])
+    g = extract_grids(p)[0]
+    assert g.get("R1C1").resolved_rgb == "FFFF00"
+    assert g.get("R1C2").resolved_rgb == "92D050"  # 小写源色归一为大写
+    assert g.get("R2C1").resolved_rgb is None
+    assert g.get("R2C2").resolved_rgb is None
+
+
+def test_cell_fill_flows_into_color_semantics_path(make_pptx, tmp_path):
+    """W3d：着色单元格经既有 cells_by_rgb()/cluster_colors() 同色聚类通路被消费 ——
+    证明 pptspine 颜色真正流进 color-semantics（SME-gated）通路。"""
+    from ragspine.extraction.color.color_semantics import cluster_colors
+    from ragspine.extraction.extractors.pptspine_extractor import extract_grids
+
+    p = tmp_path / "legend.pptx"
+    make_pptx(p, [[("table", [
+        [{"text": "A", "fill": "FFFF00"}, {"text": "B", "fill": "FFFF00"}],
+        [{"text": "C", "fill": "92D050"}, "plain"],
+    ])]])
+    g = extract_grids(p)[0]
+    by_rgb = g.cells_by_rgb()
+    assert set(by_rgb) == {"FFFF00", "92D050"}
+    assert {c.cell_ref for c in by_rgb["FFFF00"]} == {"R1C1", "R1C2"}
+    clusters = cluster_colors(g)
+    assert clusters[0].rgb == "FFFF00" and clusters[0].count == 2

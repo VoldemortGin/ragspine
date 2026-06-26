@@ -213,21 +213,33 @@ def _docx_paragraph_xml(text: str) -> str:
 
 
 def _docx_cell_xml(cell) -> str:
-    """cell 为 str 或 {'text','gridspan','vmerge'} dict（vmerge∈{'restart','continue'}）。"""
+    """cell 为 str 或 {'text','gridspan','vmerge','fill','nested'} dict。
+
+    vmerge ∈ {'restart','continue'}；fill 为底纹色 'RRGGBB'（-> <w:shd w:fill=...>，
+    docspine 解析为 cell['fill']，W3d 喂 resolved_rgb）；nested 为嵌套表列表，每项是一张
+    嵌套表的 rows（list[list[cell]]），渲染为该格段落后的子 <w:tbl>（docspine 暴露为
+    cell['blocks'] 里的 kind=='table' 块，W3d 产出独立 StyledGrid）。
+    """
     if isinstance(cell, dict):
         text = cell.get("text", "")
         gridspan = cell.get("gridspan")
         vmerge = cell.get("vmerge")
+        fill = cell.get("fill")
+        nested = cell.get("nested") or []
     else:
-        text, gridspan, vmerge = cell, None, None
+        text, gridspan, vmerge, fill, nested = cell, None, None, None, []
+    # w:tcPr 子元素按 OOXML schema 次序：gridSpan -> vMerge -> shd。
     props = []
     if gridspan:
         props.append(f'<w:gridSpan w:val="{int(gridspan)}"/>')
     if vmerge in ("restart", "continue"):
         # docspine 把无 val 的裸 <w:vMerge/> 视作 restart，故续格必须显式 val="continue"。
         props.append(f'<w:vMerge w:val="{vmerge}"/>')
+    if fill:
+        props.append(f'<w:shd w:val="clear" w:color="auto" w:fill="{fill}"/>')
     tcpr = f"<w:tcPr>{''.join(props)}</w:tcPr>" if props else ""
-    return f"<w:tc>{tcpr}{_docx_paragraph_xml(text)}</w:tc>"
+    nested_xml = "".join(_docx_table_xml(rows) for rows in nested)
+    return f"<w:tc>{tcpr}{_docx_paragraph_xml(text)}{nested_xml}</w:tc>"
 
 
 def _docx_table_xml(rows) -> str:
@@ -257,7 +269,8 @@ def make_docx():
     """合成最小 .docx 的工厂（纯 zipfile，不依赖 python-docx）。
 
     body 为有序列表，每项 ('para', text) 或 ('table', rows)；rows 为 list[list[cell]]，
-    cell 为 str 或 {'text','gridspan','vmerge'} dict（造合并表用）。返回 build(path, body)。
+    cell 为 str 或 {'text','gridspan','vmerge','fill','nested'} dict（造合并 / 着色 /
+    嵌套表用，见 _docx_cell_xml）。返回 build(path, body)。
     """
 
     def _build(path, body):
@@ -298,9 +311,12 @@ _PPTX_ROOT_RELS = (
 
 
 def _pptx_tc_xml(cell) -> str:
-    """cell 为 str 或 {'text','gridspan','rowspan','hmerge','vmerge'} dict（造合并表用）。
+    """cell 为 str 或 {'text','gridspan','rowspan','hmerge','vmerge','fill'} dict（造合并 /
+    着色表用）。
 
-    gridSpan/rowSpan 标在合并锚点格上；hMerge/vMerge 标在被吞的延续格上（空文本）。
+    gridSpan/rowSpan 标在合并锚点格上；hMerge/vMerge 标在被吞的延续格上（空文本）；
+    fill 为单元格底色 'RRGGBB'（-> a:tcPr 里的 <a:solidFill><a:srgbClr val=...>，pptspine
+    解析为 cell['fill']，W3d 喂 resolved_rgb）。
     """
     if isinstance(cell, dict):
         text = cell.get("text", "")
@@ -308,8 +324,9 @@ def _pptx_tc_xml(cell) -> str:
         rowspan = cell.get("rowspan")
         hmerge = cell.get("hmerge")
         vmerge = cell.get("vmerge")
+        fill = cell.get("fill")
     else:
-        text, gridspan, rowspan, hmerge, vmerge = cell, None, None, None, None
+        text, gridspan, rowspan, hmerge, vmerge, fill = cell, None, None, None, None, None
     attrs = []
     if gridspan:
         attrs.append(f'gridSpan="{int(gridspan)}"')
@@ -323,7 +340,12 @@ def _pptx_tc_xml(cell) -> str:
     body = (
         f"<a:p><a:r><a:t>{_xml_escape(text)}</a:t></a:r></a:p>" if text else "<a:p/>"
     )
-    return f"<a:tc{attr_str}><a:txBody>{body}</a:txBody><a:tcPr/></a:tc>"
+    tcpr = (
+        f'<a:tcPr><a:solidFill><a:srgbClr val="{fill}"/></a:solidFill></a:tcPr>'
+        if fill
+        else "<a:tcPr/>"
+    )
+    return f"<a:tc{attr_str}><a:txBody>{body}</a:txBody>{tcpr}</a:tc>"
 
 
 def _pptx_table_xml(rows) -> str:
@@ -414,8 +436,8 @@ def make_pptx():
 
     slides 为有序列表，每项是该页的 shape 列表；shape 为 ('table', rows) 或
     ('text', str)。rows 为 list[list[cell]]，cell 为 str 或
-    {'text','gridspan','rowspan','hmerge','vmerge'} dict（造合并表用）。返回
-    build(path, slides)。
+    {'text','gridspan','rowspan','hmerge','vmerge','fill'} dict（造合并 / 着色表用，见
+    _pptx_tc_xml）。返回 build(path, slides)。
     """
 
     def _build(path, slides):

@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/extraction/
-verified-against: f6a075c
+verified-against: 236af0f
 ---
 
 # extraction — agent contract
@@ -40,11 +40,15 @@ over the existing `extract_grids` impls).
   fallback `DoclingGridExtractor.version` is `"pdf_digital@1"` (byte-identical to the pre-seam
   stamp); the `.docx` extractor `DocspineGridExtractor.version` is `"docspine@1"`. Bump it when the
   respective parser's output changes.
-- **`docspine_extractor` (W3b) is the family `.docx` extractor** — lazy-imported `docspine` (`[doc]`
-  extra, Apache-2.0). Each top-level table → a `StyledGrid` (`sheet="table{M}"`, `cell_ref="R{r}C{c}"`
-  on the true grid column via a gridSpan-advancing cursor; `resolved_rgb=None`); `gridSpan`/`vMerge`
-  merge spans best-effort into the existing IR (`is_merged_origin` + `merge_span`) — rich fills/nested
-  **into the IR** stays W3d (nested tables emit a grid warning, never silently dropped). Wired into
+- **`docspine_extractor` (W3b + W3d) is the family `.docx` extractor** — lazy-imported `docspine`
+  (`[doc]` extra, Apache-2.0). Each top-level table → a `StyledGrid` (`sheet="table{M}"`,
+  `cell_ref="R{r}C{c}"` on the true grid column via a gridSpan-advancing cursor); `gridSpan`/`vMerge`
+  merge spans best-effort into the existing IR (`is_merged_origin` + `merge_span`). **W3d (rich tables
+  into the IR, no schema change):** the cell shading colour `cell['fill']` (`<w:shd w:fill>`) populates
+  `resolved_rgb` (`_normalize_fill` → `'RRGGBB'` upper / None) so docx colour flows the existing
+  SME-gated color-semantics path (`color/`); **nested tables** (`cell['blocks']` `kind=='table'`) are
+  emitted as **independent `StyledGrid`s** (`sheet="table{M}.cell{r}_{c}.nested{k}"`, recursive,
+  parent-first; the parent grid keeps a breadcrumb warning) — never silently dropped. Wired into
   structured (`ingestion._EXTRACTOR_BY_SUFFIX[".docx"/".docm"]`) **and** narrative
   (`narrative_extract.extract_docx_narrative`); legacy binary `.doc` is intentionally not registered.
 - **`pptspine_extractor` (W3c) is the *opt-in, additive* family `.pptx` extractor** — lazy-imported
@@ -55,8 +59,11 @@ over the existing `extract_grids` impls).
   selectable two ways: registry selector `registry.PPTX_PPTSPINE_SELECTOR` (`"pptx+pptspine"` →
   pptspine, while `.pptx`/`PPTX_MIME` stay `pptx_styled`), or structured-dispatch injection
   `ingest_file(..., pptx_extractor=PptspineGridExtractor())`. Each table → `StyledGrid`
-  (`sheet="slide{N}_table{M}"`, `cell_ref="R{r}C{c}"`, `resolved_rgb=None`); merge spans from pptspine's
-  resolved `col_span`/`row_span` → `is_merged_origin`+`merge_span`; rich fills/nested **into the IR** is W3d.
+  (`sheet="slide{N}_table{M}"`, `cell_ref="R{r}C{c}"`); merge spans from pptspine's resolved
+  `col_span`/`row_span` → `is_merged_origin`+`merge_span`. **W3d:** the cell fill `cell['fill']`
+  (`a:tcPr` solidFill/srgbClr) populates `resolved_rgb` (same `_normalize_fill` → SME-gated color path);
+  theme/scheme colours pptspine 0.1.0 cannot resolve stay `None` (still python-pptx's job — another
+  reason pptspine is opt-in). PPTX tables don't nest, so W3d for pptx is fills-only.
   `version="pptspine@1"` stamps fact lineage when selected.
 - **The registry is a behavior-preserving thin wrap.** `registry.py` adds a `mime → Extractor`
   dispatch over the existing `extract_grids` functions; it does **not** change extractor behavior, and
