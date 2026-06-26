@@ -92,6 +92,13 @@ pdf-docling = [
 ocr = [
     "paddleocr>=3.0",
 ]
+# 家族 .docx 抽取引擎（W3b）：docspine —— 纯 Rust DOCX 解析器（强表 gridSpan/vMerge/嵌套
+# + 本地离线 OCR，内嵌 ocrspine PP-OCRv5）。Apache-2.0，过 ADR 0009 的 ≤Apache-2.0 许可门。
+# 延迟 import（docspine_extractor 函数体内），不装 [doc] 也能 import 核心、跑离线默认；装了之后
+# .docx 即接入结构化（表格→StyledGrid）与叙事（正文段落→NarrativeDoc）两条通路。
+doc = [
+    "docspine>=0.1.0",
+]
 # Agent 编排层接真实 Claude 时安装（mock 模式不需要，SDK 延迟 import）。
 # openai：OpenAIEmbeddingBackend（src/embedding_backends）用，同样延迟 import。
 llm = [
@@ -164,7 +171,7 @@ service = [
 # GPU 与否无需在此区分——torch/transformers/paddleocr 装的是自适应版，运行时探测到
 # CUDA 即用 GPU、否则回落 CPU；embed 的 transformers 上限已按 darwin 平台标记处理。
 all = [
-    "rag-spine[pdf,ocr,llm,embed,embed-onnx,rerank,vector,service,dify]",
+    "rag-spine[pdf,ocr,doc,llm,embed,embed-onnx,rerank,vector,service,dify]",
 ]
 
 [build-system]
@@ -224,7 +231,7 @@ strict = true
 [[tool.mypy.overrides]]
 module = [
     "anthropic.*", "openai.*", "openpyxl.*", "paddleocr.*", "pypdfium2.*",
-    "sentence_transformers.*", "fastembed.*", "docling.*", "pdfspine.*", "rq.*", "redis.*",
+    "sentence_transformers.*", "fastembed.*", "docling.*", "pdfspine.*", "docspine.*", "rq.*", "redis.*",
     "pptx.*", "markdown.*", "reportlab.*", "rootutils.*", "sqlite_vec.*", "pg8000.*",
     "qdrant_client.*", "yaml", "numpy.*", "torch.*",
 ]

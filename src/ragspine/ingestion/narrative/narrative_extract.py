@@ -8,6 +8,9 @@
       （M 只给产出非空文本的非表格文本框编号，1-based）/ 'slide={N},notes'。
     - PDF（数字型）：pypdfium2 textpage 逐页取文本，定位串 'page={N}'（真实页号）。
       扫描型页（无文本层）本期不做（OCR 线另有归属）：跳过、计数并告警。
+    - docx（W3b）：docspine 遍历正文按文档顺序取段落文本；表格内容跳过（表格数字归
+      结构化通路管，与 pptx 同口径）。定位串 'para={N}'（N 只给产出非空文本的段落编号，
+      1-based）。docspine 是可选 [doc] extra，惰性 import。
 
 统一返回 NarrativeDoc：segments 各段文本内部以 '\\n' 分行、to_text() 以空行
 （'\\n\\n'）连接各段，正好配合 chunking 的「非空行 = 段落」切分契约。
@@ -22,7 +25,7 @@ from pptx import Presentation
 from ragspine.extraction.extractors.pptx_styled_extractor import compute_file_hash
 
 # 本期支持的叙事来源后缀（扫描件 / 其它格式归别的线）。
-SUPPORTED_SUFFIXES = {".pptx", ".pdf"}
+SUPPORTED_SUFFIXES = {".pptx", ".pdf", ".docx", ".docm"}
 
 
 @dataclass
@@ -33,6 +36,7 @@ class NarrativeSegment:
         'slide={N},frame={M}'  pptx 第 N 页第 M 个产出文本的文本框（均 1-based）。
         'slide={N},notes'      pptx 第 N 页演讲者备注。
         'page={N}'             PDF 第 N 页（1-based，真实页号，跳过页不占用）。
+        'para={N}'             docx 第 N 个产出非空文本的段落（1-based，空段不占用）。
     """
 
     text: str
@@ -141,6 +145,35 @@ def extract_pdf_narrative(path: str | Path) -> NarrativeDoc:
     return doc
 
 
+def extract_docx_narrative(path: str | Path) -> NarrativeDoc:
+    """抽取一个 .docx 的叙事文本：正文段落按文档顺序聚合（W3b）。
+
+    - 表格 block 跳过（表格数字归结构化通路，与 pptx 同口径）。
+    - 仅产出非空文本的段落获得 para 序号；locator='para={N}'（N=非空段序，1-based）。
+
+    docspine 是可选 [doc] extra，惰性 import（未装 [doc] 也能 import 本模块、跑 pptx/pdf）。
+    """
+    path = Path(path)
+    doc = NarrativeDoc(doc_id=path.name, file_hash=compute_file_hash(path))
+
+    import docspine
+
+    parsed = docspine.open(str(path))
+    para_no = 0
+    for block in parsed.body():
+        if block["kind"] != "paragraph":
+            continue
+        text = _clean_block(block["text"])
+        if not text:
+            continue
+        para_no += 1
+        doc.segments.append(NarrativeSegment(
+            text=text,
+            source_locator=f"para={para_no}",
+        ))
+    return doc
+
+
 def extract_narrative(path: str | Path) -> NarrativeDoc:
     """按后缀分发到对应抽取器；不支持的后缀 ValueError。"""
     path = Path(path)
@@ -149,4 +182,6 @@ def extract_narrative(path: str | Path) -> NarrativeDoc:
         return extract_pptx_narrative(path)
     if suffix == ".pdf":
         return extract_pdf_narrative(path)
-    raise ValueError(f"不支持的叙事来源类型：{path.name}（仅 .pptx / .pdf）")
+    if suffix in (".docx", ".docm"):
+        return extract_docx_narrative(path)
+    raise ValueError(f"不支持的叙事来源类型：{path.name}（仅 .pptx / .pdf / .docx）")

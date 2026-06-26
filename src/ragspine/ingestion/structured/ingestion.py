@@ -41,6 +41,7 @@ from ragspine.common.glossary import (
 )
 from ragspine.extraction.color.color_semantics import MappingRegistry, apply_mapping
 from ragspine.extraction.extractors import (
+    docspine_extractor,
     pdf_digital_extractor,
     pdf_scanned_extractor,
     pdf_spine_extractor,
@@ -478,6 +479,10 @@ _EXTRACTOR_BY_SUFFIX = {
     ".xlsx": (extract_grids, "xlsx_styled@1", "xlsx"),
     ".xlsm": (extract_grids, "xlsx_styled@1", "xlsx"),
     ".pptx": (pptx_styled_extractor.extract_grids, "pptx_styled@1", "pptx"),
+    # W3b：.docx/.docm（OOXML Word）-> docspine（纯 Rust 强表 gridSpan/vMerge/嵌套）。
+    # 旧版二进制 .doc（OLE/CFB）docspine 不解析，故不登记 -> 命中「不支持的文件格式」。
+    ".docx": (docspine_extractor.extract_grids, docspine_extractor.EXTRACTOR_VERSION, "docx"),
+    ".docm": (docspine_extractor.extract_grids, docspine_extractor.EXTRACTOR_VERSION, "docx"),
 }
 
 
@@ -499,6 +504,8 @@ def ingest_file(
     分发约定：
         - .xlsx/.xlsm -> xlsx_styled_extractor（extractor_version=xlsx_styled@1）；
         - .pptx       -> pptx_styled_extractor（pptx_styled@1）；
+        - .docx/.docm -> docspine_extractor（docspine@1，纯 Rust 强表 gridSpan/vMerge/嵌套，
+          W3b）；正文段落归叙事通路（narrative_extract.extract_docx_narrative）；
         - .pdf        -> 先 pdf_router.route()：
             * digital   -> pdf_digital_extractor（pdf_digital@1）确定性入库；
             * scanned/ocr_scan/mixed -> 调家族 OCR（pdf_scanned_extractor.extract_grids，

@@ -176,6 +176,19 @@ and OCR-internally consistent. Wiring them turns a rented surface into a moat.
 - **W3b — `docspine` `.docx` Extractor (⭐, P1).** A new `Extractor` for Word: closes the missing format
   (the breadth matrix lists `DOCX … P1`), built on `docspine`'s first-class table model (gridSpan/vMerge/nested),
   emitting `StyledGrid` + narrative segments. Inherits the provenance + extractor conformance packs.
+  > **✅ SHIPPED.** `docspine` (PyPI 0.1.0, pure-Rust DOCX, Apache-2.0 → passes the ADR 0009 ≤Apache-2.0
+  > licence gate) added as the `[doc]` extra, lazy-imported. New `DocspineGridExtractor`
+  > (`extraction/extractors/docspine_extractor.py`, `version="docspine@1"`): each top-level table → a
+  > `StyledGrid` (`sheet="table{M}"`, `cell_ref="R{r}C{c}"` on the true grid column via a gridSpan-advancing
+  > cursor), with merge spans best-effort preserved into the existing IR (`is_merged_origin` + `merge_span`
+  > from `grid_span` / `vMerge` restart-continue) — *no IR change* (rich fills/nested-into-IR stays W3d;
+  > nested tables emit a grid warning, never silently dropped). Wired into **both** channels: structured
+  > dispatch (`_EXTRACTOR_BY_SUFFIX[".docx"/".docm"]` → facts, stamped `docspine@1`, locator
+  > `sheet=table{M}!R{r}C{c}`) and narrative (`extract_docx_narrative` → body paragraphs as segments,
+  > `para={N}`, tables skipped). Registered in the `mime → Extractor` registry (`DOCX_MIME` + `.docx`). Legacy
+  > binary `.doc` (OLE/CFB) is deliberately *not* registered → stays "unsupported format". Tested with a pure
+  > `zipfile`-synthesized minimal `.docx` (no binary fixture, no `python-docx`); wiring tested offline with a
+  > fake extractor, plus real-docspine parse/ingest tests (offline, pure-Rust).
 - **W3c — `pptspine` Extractor (⭐, P1).** Replace `python-pptx` with `pptspine` for the structured + narrative
   PPTX path (richer merges, autoshapes, notes, embedded-image OCR via the same `ocrspine`).
 - **W3d — preserve table richness into the IR (⭐, P1).** Extend `StyledGrid`/`StyledCell` so merges/nested/fills
@@ -268,7 +281,7 @@ Legend: **kind** 🛡/⭐/🔧 · **status** ✅ have · ◐ partial · ✗ gap.
 | Default embedding | lexical-hash (non-semantic), dense **off** | ONNX multilingual-MiniLM default (`[embed-onnx]`), dense **on** via `auto` | ⭐ | ✅ | W1 · P0 |
 | Rerank offline default | identity pass-through (LLM-only brain) | local cross-encoder (ONNX) | ⭐ | ✅ | W2 · P1 |
 | OCR default + scanned path | GPU PaddleOCR-VL; **scanned never OCR'd** | family OCR (pdfspine→ocrspine) default + scanned path wired | 🛡⭐ | ✅ | W3a · P0 |
-| `.docx` ingestion | **no path** | `docspine` Extractor | ⭐ | ✗ | W3b · P1 |
+| `.docx` ingestion | **no path** | `docspine` Extractor (tables→facts + paragraphs→chunks) | ⭐ | ✅ | W3b · P1 |
 | PPTX richness | `python-pptx` (lossy) | `pptspine` (merges/nested/notes) | ⭐ | ◐ | W3c · P1 |
 | Contextual retrieval | bare paragraph; context sidecar-only | deterministic context header + LLM adapter | ⭐ | ✗ | W4a · P1 |
 | Chunking | fixed-char paragraph-greedy | family-layout + parent-child | ⭐ | ✗ (proto ✅) | W4b · P1 |

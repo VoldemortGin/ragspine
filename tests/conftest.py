@@ -173,3 +173,98 @@ def styled_deck_path():
 def pptx_ground_truth() -> dict:
     """加载 PPT 线 ground truth（逐格值/填充、note fragments、OCR fake 向量）。"""
     return json.loads(PPTX_GT_PATH.read_text(encoding="utf-8"))
+
+
+# ===========================================================================
+# W3b（docspine .docx 线）fixture：纯 zipfile 合成最小 .docx 的工厂（不落二进制
+# fixture、不引入 python-docx）。仿照上方各期写法，纯追加，不改动既有内容。
+# docspine（纯 Rust DOCX 解析）只需最小 OOXML 包（[Content_Types].xml + _rels/.rels
+# + word/document.xml）即可解析，故按需手写这三段 XML 合成（docspine CLAUDE.md 约定）。
+# ===========================================================================
+
+import zipfile
+from xml.sax.saxutils import escape as _xml_escape
+
+_DOCX_CONTENT_TYPES = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+    '<Default Extension="rels" '
+    'ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+    '<Default Extension="xml" ContentType="application/xml"/>'
+    '<Override PartName="/word/document.xml" '
+    'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+    "</Types>"
+)
+_DOCX_ROOT_RELS = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+    '<Relationship Id="rId1" '
+    'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+    'Target="word/document.xml"/>'
+    "</Relationships>"
+)
+_DOCX_W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+
+def _docx_paragraph_xml(text: str) -> str:
+    if not text:
+        return "<w:p/>"
+    return f'<w:p><w:r><w:t xml:space="preserve">{_xml_escape(text)}</w:t></w:r></w:p>'
+
+
+def _docx_cell_xml(cell) -> str:
+    """cell 为 str 或 {'text','gridspan','vmerge'} dict（vmerge∈{'restart','continue'}）。"""
+    if isinstance(cell, dict):
+        text = cell.get("text", "")
+        gridspan = cell.get("gridspan")
+        vmerge = cell.get("vmerge")
+    else:
+        text, gridspan, vmerge = cell, None, None
+    props = []
+    if gridspan:
+        props.append(f'<w:gridSpan w:val="{int(gridspan)}"/>')
+    if vmerge in ("restart", "continue"):
+        # docspine 把无 val 的裸 <w:vMerge/> 视作 restart，故续格必须显式 val="continue"。
+        props.append(f'<w:vMerge w:val="{vmerge}"/>')
+    tcpr = f"<w:tcPr>{''.join(props)}</w:tcPr>" if props else ""
+    return f"<w:tc>{tcpr}{_docx_paragraph_xml(text)}</w:tc>"
+
+
+def _docx_table_xml(rows) -> str:
+    trs = "".join(
+        f"<w:tr>{''.join(_docx_cell_xml(c) for c in row)}</w:tr>" for row in rows
+    )
+    return f"<w:tbl>{trs}</w:tbl>"
+
+
+def _docx_document_xml(body) -> str:
+    parts = []
+    for kind, payload in body:
+        if kind == "para":
+            parts.append(_docx_paragraph_xml(payload))
+        elif kind == "table":
+            parts.append(_docx_table_xml(payload))
+        else:
+            raise ValueError(f"unknown docx body item kind: {kind!r}")
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        f'<w:document xmlns:w="{_DOCX_W_NS}"><w:body>{"".join(parts)}</w:body></w:document>'
+    )
+
+
+@pytest.fixture
+def make_docx():
+    """合成最小 .docx 的工厂（纯 zipfile，不依赖 python-docx）。
+
+    body 为有序列表，每项 ('para', text) 或 ('table', rows)；rows 为 list[list[cell]]，
+    cell 为 str 或 {'text','gridspan','vmerge'} dict（造合并表用）。返回 build(path, body)。
+    """
+
+    def _build(path, body):
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+            z.writestr("[Content_Types].xml", _DOCX_CONTENT_TYPES)
+            z.writestr("_rels/.rels", _DOCX_ROOT_RELS)
+            z.writestr("word/document.xml", _docx_document_xml(body))
+        return path
+
+    return _build

@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/extraction/
-verified-against: 2672119
+verified-against: 8b6b4d6
 ---
 
 # extraction — agent contract
@@ -12,7 +12,8 @@ in `src/ragspine/extraction/docs/`.
 ## What lives here
 
 Documents → a frozen StyledGrid IR. `extractors/` (xlsx / pptx / pdf, style- &
-color-aware), `routing/` (per-page PDF triage), `color/` (color-semantics
+color-aware; **`.docx` via pure-Rust `docspine`, `docspine_extractor`, W3b** — tables →
+`StyledGrid`, body paragraphs → narrative segments), `routing/` (per-page PDF triage), `color/` (color-semantics
 registry), `verification/` (dual-channel cross-check → review queue), `registry.py`
 (the `mime → Extractor` dispatch seam: a `@runtime_checkable` `Extractor` Protocol —
 `extract(path) → list[StyledGrid]` — + `get_extractor(mime)` / `register_extractor`
@@ -35,7 +36,15 @@ over the existing `extract_grids` impls).
 - **`GridExtractor.version` is part of the contract.** It is the `extractor_version` written
   to fact lineage; the default `PdfSpineGridExtractor.version` is `"pdf_spine@1"`; the optional
   fallback `DoclingGridExtractor.version` is `"pdf_digital@1"` (byte-identical to the pre-seam
-  stamp). Bump it when the respective parser's output changes.
+  stamp); the `.docx` extractor `DocspineGridExtractor.version` is `"docspine@1"`. Bump it when the
+  respective parser's output changes.
+- **`docspine_extractor` (W3b) is the family `.docx` extractor** — lazy-imported `docspine` (`[doc]`
+  extra, Apache-2.0). Each top-level table → a `StyledGrid` (`sheet="table{M}"`, `cell_ref="R{r}C{c}"`
+  on the true grid column via a gridSpan-advancing cursor; `resolved_rgb=None`); `gridSpan`/`vMerge`
+  merge spans best-effort into the existing IR (`is_merged_origin` + `merge_span`) — rich fills/nested
+  **into the IR** stays W3d (nested tables emit a grid warning, never silently dropped). Wired into
+  structured (`ingestion._EXTRACTOR_BY_SUFFIX[".docx"/".docm"]`) **and** narrative
+  (`narrative_extract.extract_docx_narrative`); legacy binary `.doc` is intentionally not registered.
 - **The registry is a behavior-preserving thin wrap.** `registry.py` adds a `mime → Extractor`
   dispatch over the existing `extract_grids` functions; it does **not** change extractor behavior, and
   `routing/pdf_router.py` stays authoritative for the per-page digital/scanned PDF split. Add a new

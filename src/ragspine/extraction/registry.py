@@ -21,6 +21,7 @@ from ragspine.extraction.ir import StyledGrid
 PDF_MIME = "application/pdf"
 PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
 class UnsupportedFormatError(LookupError):
@@ -85,6 +86,12 @@ def _load_xlsx_styled() -> Extractor:
     return _FunctionExtractor(extract_grids, name="xlsx_styled")
 
 
+def _load_docspine() -> Extractor:
+    from ragspine.extraction.extractors.docspine_extractor import extract_grids
+
+    return _FunctionExtractor(extract_grids, name="docspine")
+
+
 _BUILTIN_LOADERS: dict[str, Callable[[], Extractor]] = {
     PDF_MIME: _load_pdf_digital,
     ".pdf": _load_pdf_digital,
@@ -92,6 +99,8 @@ _BUILTIN_LOADERS: dict[str, Callable[[], Extractor]] = {
     ".pptx": _load_pptx_styled,
     XLSX_MIME: _load_xlsx_styled,
     ".xlsx": _load_xlsx_styled,
+    DOCX_MIME: _load_docspine,
+    ".docx": _load_docspine,
 }
 
 _REGISTERED: dict[str, Extractor] = {}

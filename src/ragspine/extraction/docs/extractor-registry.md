@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/extraction/registry.py
-verified-against: 18a866e
+verified-against: 8b6b4d6
 ---
 
 # Extractor registry — mime → Extractor dispatch
@@ -40,6 +40,7 @@ that format.
 | `application/pdf` · `.pdf` | `pdf_digital_extractor.extract_grids` |
 | `application/vnd.openxmlformats-officedocument.presentationml.presentation` · `.pptx` | `pptx_styled_extractor.extract_grids` |
 | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` · `.xlsx` | `xlsx_styled_extractor.extract_grids` |
+| `application/vnd.openxmlformats-officedocument.wordprocessingml.document` · `.docx` | `docspine_extractor.extract_grids` (W3b) |
 
 Keys are normalized case- and whitespace-insensitively (`"  Application/PDF "` resolves).
 
@@ -67,7 +68,10 @@ remains a P1 follow-up.
 
 ## What this is not
 
-Adding the **formats themselves** (DOCX/HTML/MD/CSV via `unstructured`/`docling`) is the open P1 work
-— exactly the commodity surface that should be *adapted*, not authored. The scanned-PDF extractor
-(`pdf_scanned_extractor.extract_grids`) is not a built-in registry entry because it requires an
-injected `OcrBackend`; it stays behind the `routing/pdf_router.py` per-page plan.
+`.docx` is now a first-class built-in (W3b) via the family `docspine` extractor — tables → `StyledGrid`
+(structured channel) and body paragraphs → narrative segments (the narrative channel handles `.docx`
+separately in `ingestion/narrative/narrative_extract.py`, not through this grid registry). Adding the
+**remaining formats** (HTML/MD/CSV via `unstructured`/`docling`) is the open follow-up — exactly the
+commodity surface that should be *adapted*, not authored. The scanned-PDF extractor
+(`pdf_scanned_extractor.extract_grids`) is not a built-in registry entry because it requires an injected
+`OcrBackend`; it stays behind the `routing/pdf_router.py` per-page plan.
