@@ -4,7 +4,7 @@ covers:
   - src/ragspine/retrieval/link/
   - src/ragspine/retrieval/rerank/
   - src/ragspine/common/observability/
-verified-against: 18a866e
+verified-against: 3eccc8d
 ---
 
 # Invariants (code-enforced)
@@ -27,6 +27,15 @@ freezes it.
 **Enforced** at two exits before any prompt: `retrieval/link/narrative_link.py` (the snippet
 adapter drops RESTRICTED chunks) and `retrieval/rerank/listwise_rerank.py` (RESTRICTED text never
 enters the listwise judge prompt). Both must stay; neither is sufficient alone.
+
+**Judge-agnostic (W2).** The rerank exit's protection lives in the `listwise_rerank` *orchestration*,
+not in any particular judge, so it covers **every** `ListwiseJudge` equally: the LLM listwise judge
+(`ProviderListwiseJudge`) and the offline local cross-encoder (`retrieval/rerank/cross_encoder.py`,
+`CrossEncoderReranker`) both receive only the non-RESTRICTED subset. Adding the cross-encoder seam
+therefore inherits — and cannot bypass — the two-exit rule. **Frozen by**
+`tests/retrieval/rerank/test_cross_encoder_isolation.py` (RESTRICTED never reaches the cross-encoder;
+a reverse-proof shows the assertion has teeth — the same reranker *does* score the text when handed
+it directly, bypassing the seam).
 
 **At-rest (third, persistence layer).** Persisting a chunk's embedding writes a *recoverable
 derivative* of its text next to its lineage (`doc_id`, `source_locator`) — a surface that bypasses

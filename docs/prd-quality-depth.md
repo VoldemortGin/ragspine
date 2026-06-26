@@ -125,6 +125,32 @@ seam cannot bypass the two-exit rule.
 > adapters, P1`. W2 is the **quality spec + first adapter** for that row — owned because rerank decides
 > correctness.
 
+> **✅ SHIPPED.** `CrossEncoderReranker` (`retrieval/rerank/cross_encoder.py`) is a real, lightweight,
+> deterministic, **offline** rerank brain behind a new **`[rerank]`** extra (**fastembed**, Apache-2.0 —
+> reuses its `TextCrossEncoder` + ONNX `onnxruntime`, the same runtime W1 uses, no torch). Default model
+> `Xenova/ms-marco-MiniLM-L-6-v2` (Apache-2.0, ~80 MB, CPU). It implements the **existing**
+> `ListwiseJudge` Protocol — scores each `(query, candidate)` pair and returns a descending-relevance
+> permutation of candidate indices, ties resolved by stable `sorted(reverse=True)` (→ same input, same
+> ranks). Registered as `cross_encoder`/`ce`/`ms_marco` in a new **`make_reranker`** factory (corespine
+> `Registry`, mirroring `make_embedding_backend`), plus an **`auto`** spec ("cross-encoder if `fastembed`
+> importable, else `None`"). **Default behavior unchanged**: `build_narrative_retriever` gained a
+> `reranker=` seam and `ServiceConfig.reranker` defaults to `"none"` → `make_reranker` returns `None` →
+> the existing judge selection (`ProviderListwiseJudge(provider)` if a provider is injected, else no
+> second pass) is byte-identical; the cross-encoder is **opt-in** (config string / `RAGSPINE_RERANKER`)
+> and, when selected, takes precedence over the LLM judge. **Isolation inherited, not re-implemented**:
+> the cross-encoder runs *inside* `listwise_rerank`, which already excludes RESTRICTED candidates from
+> any judge — so RESTRICTED text never reaches the cross-encoder (frozen by
+> `tests/retrieval/rerank/test_cross_encoder_isolation.py`, with a **reverse-proof** that the assertion
+> has teeth). Determinism + cross-encoder relevance frozen by `tests/retrieval/rerank/test_cross_encoder.py`
+> (real-model assertions `@pytest.mark.network`, skipped by `make ci`'s `-m "not network"`; the
+> fake-fastembed unit tests pin score→rank ordering + tie-stability with no network/install). Contract:
+> `retrieval/docs/rerank.md`.
+> *Follow-ups:* (1) same "first-pull-then-offline" weight-download honesty as W1 — a truly
+> first-run-offline rerank default needs the ONNX weights shipped as a data-pack (deferred, see
+> "Follow-ups"). (2) An A/B that **measures** the precision lift of the local cross-encoder vs
+> identity/RRF (the eval-delta the gap matrix asks for) is deferred to the W5 eval workstream — W2 ships
+> the reranker + wiring + determinism/isolation conformance.
+
 ### W3 — Tap the family document stack ⭐ (compound moat)  (P0 OCR-wiring · P1 formats)
 
 The reframe: pdf/ppt/doc/ocr extraction is marked 🔧 in the breadth matrix because for a generic library it *is*
@@ -240,7 +266,7 @@ Legend: **kind** 🛡/⭐/🔧 · **status** ✅ have · ◐ partial · ✗ gap.
 | Quality stage | Today | Target | Kind | Status | WS · Phase |
 |---|---|---|---|---|---|
 | Default embedding | lexical-hash (non-semantic), dense **off** | ONNX multilingual-MiniLM default (`[embed-onnx]`), dense **on** via `auto` | ⭐ | ✅ | W1 · P0 |
-| Rerank offline default | identity pass-through (LLM-only brain) | local cross-encoder (ONNX) | ⭐ | ✗ (proto ✅) | W2 · P1 |
+| Rerank offline default | identity pass-through (LLM-only brain) | local cross-encoder (ONNX) | ⭐ | ✅ | W2 · P1 |
 | OCR default + scanned path | GPU PaddleOCR-VL; **scanned never OCR'd** | family OCR (pdfspine→ocrspine) default + scanned path wired | 🛡⭐ | ✅ | W3a · P0 |
 | `.docx` ingestion | **no path** | `docspine` Extractor | ⭐ | ✗ | W3b · P1 |
 | PPTX richness | `python-pptx` (lossy) | `pptspine` (merges/nested/notes) | ⭐ | ◐ | W3c · P1 |
@@ -262,7 +288,8 @@ Legend: **kind** 🛡/⭐/🔧 · **status** ✅ have · ◐ partial · ✗ gap.
   - **W3a** `ocrspine` default OCR + **wire the scanned-PDF path** (pure plumbing, zero charter tension).
   - Re-baseline retrieval A/B with the real default; add it to the CI ratchet.
 - **P1 — the depth that wins evaluations.**
-  - **W2** local cross-encoder reranker; **W3b/W3c/W3d** docspine/pptspine extractors + richer IR;
+  - **W2** ✅ local cross-encoder reranker (shipped — see the W2 SHIPPED note above);
+    **W3b/W3c/W3d** docspine/pptspine extractors + richer IR;
     **W4** contextual retrieval + family-layout/parent-child chunking; **W5** the groundedness eval gate.
 - **P2 — reasoning depth & governance.**
   - **W7a** structured relation graph (charter-native multi-hop) → **W7c** `GraphStore` seam →
@@ -346,6 +373,12 @@ conformance-bound path, then "core/supported."
   `ocrspine-models` pattern) so a fresh, network-less install is semantic out of the box. Deferred —
   W1 ships the "first-pull-then-offline + deterministic" real-semantic default; the data-pack is a
   packaging follow-up, not a code-path change.
+- **First-run-offline + A/B measurement for the reranker (from W2).** `CrossEncoderReranker` (via
+  fastembed `TextCrossEncoder`) shares W1's "first-pull-then-offline" weight download — the same
+  data-pack follow-up applies. Separately, W2 ships the reranker + wiring + determinism/isolation
+  conformance but **not** a ratcheted A/B quantifying its precision lift over identity/RRF; that
+  eval-delta lands with the W5 groundedness/eval gate (a depth item isn't "done" until the eval
+  ratchet shows it improved the answer).
 
 ## Further notes
 

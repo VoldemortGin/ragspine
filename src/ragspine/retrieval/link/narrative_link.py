@@ -33,6 +33,7 @@ from ragspine.retrieval.lexical.retrieval import (
 )
 from ragspine.retrieval.rerank.listwise_rerank import (
     RESTRICTED_SENSITIVITY,
+    ListwiseJudge,
     build_listwise_prompt,
     parse_listwise_response,
 )
@@ -128,6 +129,7 @@ def build_narrative_retriever(
     embedding_backend: EmbeddingBackend | None = None,
     vector_store: VectorStore | None = None,
     persistence_policy: PersistencePolicy | None = None,
+    reranker: ListwiseJudge | None = None,
 ) -> tuple[NarrativeIndexRetriever, ChunkStore]:
     """开块库并组装默认叙事检索链（CLI/服务接线入口）。
 
@@ -140,14 +142,21 @@ def build_narrative_retriever(
     NarrativeIndex 自建零依赖内存默认，未来 sqlite-vec / Qdrant adapter 即由此注入。
     persistence_policy：可选持久化门控（make_persistence_policy 选型）；默认 None＝隔离优先
     （IsolationFirstPolicy，绝不落盘 RESTRICTED 块向量）。
+    reranker：可选离线重排大脑（任一 ListwiseJudge，如 make_reranker('cross_encoder') 给出的本地
+    cross-encoder，W2）。给了即作为 NarrativeIndex 的 judge，**优先于** provider 的 LLM listwise；
+    默认 None＝退回原行为（给了 provider 用 ProviderListwiseJudge、否则不二审）——默认 loop 字节不变，
+    cross-encoder 是 opt-in。无论哪种 judge 都走 listwise_rerank 编排，RESTRICTED 不出域一致守住。
     """
     store = ChunkStore(chunk_db)
     store.init_schema()
+    judge: ListwiseJudge | None = reranker
+    if judge is None and provider is not None:
+        judge = ProviderListwiseJudge(provider)
     index = NarrativeIndex(
         store,
         embedding_backend=embedding_backend,
         query_rewriter=GlossaryQueryRewriter(),
-        judge=ProviderListwiseJudge(provider) if provider is not None else None,
+        judge=judge,
         vector_store=vector_store,
         persistence_policy=persistence_policy,
     )

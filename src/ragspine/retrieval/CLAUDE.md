@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/
-verified-against: e634e99
+verified-against: 3eccc8d
 ---
 
 # retrieval — agent contract
@@ -29,8 +29,11 @@ behind `[vector]` — `adapters/sqlite_vec.py` (embedded, exact) + `adapters/pgv
 all three now scaling via **native ANN/KNN** (vec0 `MATCH` / pgvector HNSW / Qdrant HNSW) that narrows a
 candidate pool then an **exact `_cosine` re-rank** finalizes top-k (`store._pool_size` + `store._rerank`;
 the pool covers the true top-k for the conformance datasets so `sqlite_vec`/`pgvector` stay exact)
-— and `persistence_policy.py` gating what is written at rest), `rerank/` (LLM
-listwise reranker, RRF-fallback), `link/` (adapter wiring retrieval into the agent).
+— and `persistence_policy.py` gating what is written at rest), `rerank/` (the ⭐精排 exit:
+`listwise_rerank.py` orchestration + `ListwiseJudge` Protocol with RRF-fallback + RESTRICTED isolation;
+two judges — LLM listwise via `link/`, and the offline **local cross-encoder** `cross_encoder.py`
+(fastembed `TextCrossEncoder`, `[rerank]`, deterministic, opt-in via `make_reranker`)),
+`link/` (adapter wiring retrieval into the agent).
 
 ## Invariants
 
@@ -71,3 +74,7 @@ listwise reranker, RRF-fallback), `link/` (adapter wiring retrieval into the age
   real-semantic `OnnxEmbeddingBackend` default (W1, fastembed/`[embed-onnx]`), the `auto`
   default-on-dense mechanism that keeps the lean BM25 contract byte-identical, determinism +
   first-pull-then-offline honesty, and the re-baselined A/B semantic-gain numbers.
+- [`docs/rerank.md`](docs/rerank.md) — the reranker seam: the offline `CrossEncoderReranker`
+  (W2, fastembed `TextCrossEncoder`/`[rerank]`) as a swappable `ListwiseJudge`, the `make_reranker`
+  factory + `none`/`auto` opt-in mechanism that keeps the default loop byte-identical, the RESTRICTED
+  isolation inherited from `listwise_rerank` (+ its reverse-proof), and determinism honesty.

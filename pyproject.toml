@@ -116,6 +116,14 @@ embed = [
 embed-onnx = [
     "fastembed>=0.7,<0.9",
 ]
+# 本地 cross-encoder 重排后端（CrossEncoderReranker，W2 给离线 ⭐ 重排阶段一个真大脑）。
+# 复用 fastembed（Apache-2.0，过 ADR 0009 ≤Apache-2.0 许可门）的 TextCrossEncoder：内置 ONNX
+# 权重 + onnxruntime，纯 CPU、确定性，默认模型 Xenova/ms-marco-MiniLM-L-6-v2（Apache-2.0，约 80MB）。
+# 延迟 import：不装也能 import 核心、跑离线默认（不重排，identity/RRF 或注入的 LLM judge）；装了之后
+# config reranker='cross_encoder'（或 'auto'）即启用本地真重排。离线性诚实同 [embed-onnx]（"首拉后离线"）。
+rerank = [
+    "fastembed>=0.7,<0.9",
+]
 # 可插拔向量存储后端（VectorStore 缝的真实 adapter）。延迟 import：不装也能 import 核心、
 # 跑零依赖 InProcessVectorStore 默认；装了即由 make_vector_store('sqlite_vec'|'pgvector'|'qdrant') 选用。
 # sqlite-vec：嵌入式 sqlite 扩展（Apache-2.0/MIT，permissive，零服务，conformance 装了即跑）。
@@ -156,7 +164,7 @@ service = [
 # GPU 与否无需在此区分——torch/transformers/paddleocr 装的是自适应版，运行时探测到
 # CUDA 即用 GPU、否则回落 CPU；embed 的 transformers 上限已按 darwin 平台标记处理。
 all = [
-    "rag-spine[pdf,ocr,llm,embed,embed-onnx,vector,service,dify]",
+    "rag-spine[pdf,ocr,llm,embed,embed-onnx,rerank,vector,service,dify]",
 ]
 
 [build-system]

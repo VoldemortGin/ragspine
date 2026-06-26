@@ -22,6 +22,7 @@ from ragspine.agent.llm_provider import (
     MockProvider,
 )
 from ragspine.retrieval.link.narrative_link import build_narrative_retriever
+from ragspine.retrieval.rerank.cross_encoder import make_reranker
 from ragspine.retrieval.vector.embedding_backends import make_embedding_backend
 from ragspine.retrieval.vector.persistence_policy import make_persistence_policy
 from ragspine.retrieval.vector.store import make_vector_store
@@ -40,6 +41,7 @@ class ServiceConfig:
     model: str = DEFAULT_ANTHROPIC_MODEL
     base_url: str | None = None
     embedding: str = "auto"                 # "auto"(装[embed-onnx]→真语义ONNX,否则纯BM25) | "none" | "onnx" | "deterministic" | "openai"
+    reranker: str = "none"                  # "none"(不重排,默认行为不变) | "cross_encoder"(本地[rerank]) | "auto"(装[rerank]即用,否则不重排)
     vector_store: str = "none"              # "none" | "in_process" | "sqlite_vec"（后者需 [vector]）
     persistence_policy: str = "default"     # "default"(隔离优先) | "persist_everything"
     reference_date: str | None = None       # ISO "YYYY-MM-DD" or None
@@ -138,6 +140,7 @@ def open_narrative_retriever(
         embedding_backend=make_embedding_backend(config.embedding),
         vector_store=make_vector_store(config.vector_store),
         persistence_policy=make_persistence_policy(config.persistence_policy),
+        reranker=make_reranker(config.reranker),
     )
     try:
         yield retriever
