@@ -4,7 +4,9 @@
       "numeric_accuracy": 1.0,
       "citation_validity": 1.0,
       "refusal_appropriateness": 1.0,
-      "clarification_appropriateness": 1.0
+      "clarification_appropriateness": 1.0,
+      "faithfulness": 1.0,
+      "answer_accuracy": 1.0
     },
     "fabrication_count": 0,
     "n_cases": 41
@@ -14,7 +16,9 @@
       "numeric_accuracy": 1.0,
       "citation_validity": 1.0,
       "refusal_appropriateness": 1.0,
-      "clarification_appropriateness": 1.0
+      "clarification_appropriateness": 1.0,
+      "faithfulness": 1.0,
+      "answer_accuracy": 1.0
     },
     "fabrication_count": 0,
     "n_cases": 41

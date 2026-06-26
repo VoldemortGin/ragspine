@@ -37,8 +37,10 @@ echo "==> [5/8] test suite (excludes gpu + docling + network — the bulk; filte
 echo "==> [6/8] docling extractor tests (own process — isolates 3rd-party ML nondeterminism)"
 "$PY" -m pytest tests/ -q -m "docling"
 
-echo "==> [7/8] QA 4-gate eval + baseline ratchet (numeric / citation / refusal / clarification + fabrication; ratchets up, never down)"
+echo "==> [7/8] QA eval + baseline ratchet (4-gate: numeric / citation / refusal / clarification + fabrication; W5 groundedness: faithfulness / answer-accuracy; ratchets up, never down)"
 # tool = zero-LLM deterministic direct test; agent = answer_question + MockProvider.
+# W5 groundedness uses the offline deterministic default (lexical-overlap entailment) — no model
+# download, no network, runs in CI; the opt-in ONNX-NLI / LLM-judge adapters are follow-ups.
 # Each mode exits 1 on any gate regression or fabrication increase vs data/golden/qa_baseline.json.
 # Both modes already have a committed baseline → pure compare, no baseline file is written here.
 "$PY" scripts/run_qa_eval.py --mode tool

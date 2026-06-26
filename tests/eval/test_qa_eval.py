@@ -28,6 +28,7 @@ from ragspine.common.company_profile import DimensionSpec, DomainProfile
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
 from ragspine.storage.fact_store import FactStore
 from ragspine.eval.qa_eval import (
+    ALL_GATE_METRICS,
     CITATION_VALIDITY,
     CLARIFICATION_APPROPRIATENESS,
     FABRICATION,
@@ -434,7 +435,8 @@ def test_report_is_json_serializable():
     data = json.loads(json.dumps(report.to_dict(), ensure_ascii=False))
     assert data["mode"] == "tool"
     assert data["n_cases"] == 2
-    assert set(data["metrics"]) == set(GATE_METRICS)
+    # 报告含四命门 + W5 groundedness 全部 gate 指标（四命门语义不变，groundedness 为新增）。
+    assert set(data["metrics"]) == set(ALL_GATE_METRICS)
     assert data["fabrication"]["name"] == FABRICATION
     for m in data["metrics"].values():
         assert {"name", "total", "passed", "pass_rate", "failures", "by_tag"} <= set(m)

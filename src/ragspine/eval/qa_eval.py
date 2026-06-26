@@ -52,6 +52,11 @@ from ragspine.agent.intent import (
 from ragspine.agent.llm_provider import MockProvider
 from ragspine.agent.query_tools import execute_query_metric
 from ragspine.common.company_profile import load_company_profile
+from ragspine.eval.groundedness import (
+    ANSWER_ACCURACY_RECALL_THRESHOLD,
+    answer_accuracy,
+    faithfulness,
+)
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
 from ragspine.retrieval.chunking.chunking import DocumentMeta, chunk_document
 from ragspine.retrieval.link.narrative_link import (
@@ -72,6 +77,15 @@ GATE_METRICS = (
 )
 # 编造数字（单列，不在四命门 dict 里合并报告）。
 FABRICATION = "fabrication"
+
+# W5 叙事侧 groundedness 闸（新增，与四命门并列报告、并入同一 baseline ratchet；
+# 绝不改既有四命门语义）。faithfulness=答案每条 claim 被检索 context 蕴含；
+# answer_accuracy=叙事自由文本答案覆盖期望文档实质内容。度量在 eval/groundedness.py。
+FAITHFULNESS = "faithfulness"
+ANSWER_ACCURACY = "answer_accuracy"
+GROUNDEDNESS_METRICS = (FAITHFULNESS, ANSWER_ACCURACY)
+# 报告/基线里全部 gate 指标（四命门在前、groundedness 在后；GATE_METRICS 保持四命门不变）。
+ALL_GATE_METRICS = GATE_METRICS + GROUNDEDNESS_METRICS
 
 EVAL_MODES = ("tool", "agent")
 
@@ -302,6 +316,15 @@ def build_eval_kb(kb_dir: str | Path) -> tuple[Path, Path]:
     return fact_db, chunk_db
 
 
+def eval_narrative_reference_texts() -> dict[str, str]:
+    """期望叙事文档 doc_id → gold 正文（answer_accuracy 的参照）。
+
+    与 build_eval_kb 的叙事块库 _EVAL_NARRATIVE_DOCS 同源——叙事 case 的"内容正确性"
+    以其期望文档的原文为金标，答案需覆盖该文档的实质内容词。
+    """
+    return {meta.doc_id: text for meta, text in _EVAL_NARRATIVE_DOCS}
+
+
 # ---------------------------------------------------------------------------
 # 单 case 执行：tool-direct / agent 两种 runner，归一为 CaseOutcome
 # ---------------------------------------------------------------------------
@@ -318,6 +341,9 @@ class CaseOutcome:
         sources:            回答附带的全部来源 [{doc, locator}]。
         tool_statuses:      结构化工具调用的状态序列（诊断用）。
         route:              意图路由（诊断用）。
+        narrative_answer:   叙事通路产出的文本（faithfulness 的判定对象；结构化数字行不计入）。
+        retrieved_context:  叙事检索片段正文（faithfulness 检验答案是否被其蕴含的 context）。
+                            eval 侧可观测——不改 answer_question 的默认答案合成行为。
     """
 
     case_id: str
@@ -330,6 +356,8 @@ class CaseOutcome:
     sources: list[dict[str, object]] = field(default_factory=list)
     tool_statuses: list[str] = field(default_factory=list)
     route: str = ""
+    narrative_answer: str = ""
+    retrieved_context: list[str] = field(default_factory=list)
 
 
 def _period_param(period: tuple[str, str] | None) -> str:
@@ -411,19 +439,25 @@ def run_case_tool_direct(
         snippets = retriever.retrieve(
             case.question, filters=filters or None, top_k=50
         )
+        # 叙事子答案与检索 context 单独留痕（faithfulness 的判定面，不混入结构化数字行）。
+        narrative_parts: list[str] = []
         if snippets:
             for snippet in snippets:
                 source = _snippet_source(snippet)
                 out.sources.append(source)
-                parts.append(
-                    f"{snippet.get('text', '')}"
-                    f"（来源：{source['doc']} {source['locator']}）"
-                )
+                text = str(snippet.get("text", ""))
+                out.retrieved_context.append(text)
+                line = f"{text}（来源：{source['doc']} {source['locator']}）"
+                parts.append(line)
+                narrative_parts.append(line)
         elif intent.route == ROUTE_NARRATIVE:
             out.refused = True
-            parts.append("未检索到与该问题相关的资料，无法基于现有知识库作答。")
+            msg = "未检索到与该问题相关的资料，无法基于现有知识库作答。"
+            parts.append(msg)
+            narrative_parts.append(msg)
         else:
             parts.append("归因部分未检索到相关资料。")
+        out.narrative_answer = "\n".join(narrative_parts)
 
     out.answer = "\n".join(parts)
     return out
@@ -462,6 +496,25 @@ def run_case_agent(
                 out.refused = True
         if result.route == ROUTE_NARRATIVE and not result.sources:
             out.refused = True
+
+    # eval 侧可观测的 groundedness 输入：重放叙事检索拿到 context（确定性、与 answer_question
+    # 内部 _run_narrative 同一 query/filters），narrative 路的答案即检索叙事子答案本身。
+    # 不改 answer_question 行为——纯旁路观测。
+    if result.route in (ROUTE_NARRATIVE, ROUTE_COMPOSITE):
+        n_intent = parse_intent(case.question, reference_date=case.reference_date)
+        n_filters: dict[str, str] = {}
+        if n_intent.entity:
+            n_filters["entity"] = n_intent.entity
+        if n_intent.period:
+            n_filters["period"] = n_intent.period[1]
+        snippets = retriever.retrieve(
+            case.question, filters=n_filters or None, top_k=50
+        )
+        out.retrieved_context = [
+            str(s.get("text") or s.get("content") or "") for s in snippets
+        ]
+        if result.route == ROUTE_NARRATIVE:
+            out.narrative_answer = result.answer
     return out
 
 
@@ -561,10 +614,15 @@ def evaluate(
     cases: list[GoldenCase],
     outcomes: dict[str, CaseOutcome],
     mode: str = "tool",
+    reference_texts: dict[str, str] | None = None,
 ) -> QAEvalReport:
-    """按四命门规则比对期望与实际，产出分指标报告（绝不合并成单一 pass rate）。"""
+    """按四命门 + W5 groundedness 规则比对期望与实际，产出分指标报告（绝不合并成单一 pass rate）。
+
+    reference_texts：叙事文档 doc_id → gold 正文，供 answer_accuracy 作参照（缺省时该 gate
+    对叙事 case 以空参照评——视为无可评 pass，不退化）。
+    """
     report = QAEvalReport(mode=mode, n_cases=len(cases))
-    report.metrics = {name: GateMetric(name=name) for name in GATE_METRICS}
+    report.metrics = {name: GateMetric(name=name) for name in ALL_GATE_METRICS}
 
     for case in cases:
         out = outcomes[case.id]
@@ -627,6 +685,26 @@ def evaluate(
                 case, not fabricated,
                 expected="拒答回答不含任何数字（期间除外）",
                 actual=f"出现数字 {fabricated}" if fabricated else "无",
+            )
+
+        # ⑤ faithfulness + ⑥ answer_accuracy（W5，叙事侧 groundedness，新增 gate）：
+        # 仅对 narrative case 评——纯叙事自由文本最能暴露"答案夹带未被 context 蕴含的 claim"。
+        # composite 的叙事段 faithfulness 是 follow-up（见 PRD W5）。
+        if case.case_type == "narrative":
+            fres = faithfulness(out.narrative_answer, out.retrieved_context)
+            report.metrics[FAITHFULNESS].tally(
+                case, fres.ok,
+                expected="每条 claim 被检索片段蕴含",
+                actual=("全部蕴含" if fres.ok
+                        else f"未蕴含 claim：{fres.unsupported}"),
+            )
+            ref_doc = cast("str", exp.get("narrative_doc", ""))
+            ref_text = (reference_texts or {}).get(ref_doc, "")
+            acc = answer_accuracy(out.narrative_answer, ref_text)
+            report.metrics[ANSWER_ACCURACY].tally(
+                case, acc >= ANSWER_ACCURACY_RECALL_THRESHOLD,
+                expected=f"覆盖期望文档 {ref_doc} 内容 ≥ {ANSWER_ACCURACY_RECALL_THRESHOLD}",
+                actual=f"recall={acc:.3f}",
             )
 
     for metric in report.metrics.values():
@@ -714,4 +792,7 @@ def run_qa_eval(
         finally:
             store.close()
             chunk_store.close()
-    return evaluate(cases, outcomes, mode=mode)
+    return evaluate(
+        cases, outcomes, mode=mode,
+        reference_texts=eval_narrative_reference_texts(),
+    )

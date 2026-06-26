@@ -295,6 +295,27 @@ ratcheted gate** in `qa_eval.py` alongside the existing four, and run the retrie
 embedding so the harness measures real semantic gain. This is 🛡: it makes anti-fabrication a *measured*
 regression lock on the narrative channel, not just an asserted one.
 
+> **✅ SHIPPED (faithfulness + free-text answer-accuracy gates; ONNX-NLI / LLM-judge / context-precision-recall =
+> follow-ups).** `src/ragspine/eval/groundedness.py` adds two **new ratcheted gates** wired into `qa_eval.py`
+> beside the four命门: **faithfulness** (every claim in the *narrative* answer must be entailed by the retrieved
+> context) and **answer-accuracy** (the free-text narrative answer must cover the expected doc's substantive
+> content — narrative cases had no content-correctness score before, only citation/refusal/clarification).
+> `GATE_METRICS` (the four命门) keep their **exact semantics**; `GROUNDEDNESS_METRICS = (faithfulness,
+> answer_accuracy)` are **new keys in the same `report.metrics`**, so they fold into the **same baseline ratchet**
+> automatically (`data/golden/qa_baseline.json` re-baselined with both at 1.0, gated in both `--mode tool` and
+> `--mode agent`). The **default method is the offline deterministic lexical-overlap entailment** (`LexicalOverlapJudge`:
+> claim entailed iff its content-token coverage by the context ≥ threshold) — **no model, no network**, so `make ci`
+> gates it offline. **Honest limitation:** it is a *lexical proxy, not a real NLI* — blind to paraphrase / negation /
+> numeric reversal; it catches the most common fabrication shape (a claim that introduces tokens — new
+> entity/number/assertion — absent from the context). **Teeth (non-trivial):** unit tests show a synthetic answer
+> that adds an un-entailed claim **fails** the gate while the faithful echo **passes**, including a proof on the
+> **real eval KB + retriever** (fabrication appended to genuinely-retrieved context is caught). Context is observed
+> **eval-side only** (`CaseOutcome.narrative_answer`/`retrieved_context`, agent mode re-runs the retriever) — the
+> default `answer_question` loop is **byte-unchanged**. **Follow-ups:** the real ONNX-NLI judge (`[eval]`) and the
+> LLM-judge (`[llm]`) behind the `EntailmentJudge` seam (`make_entailment_judge`); context-precision / context-recall
+> / answer-relevance; composite-case narrative-segment faithfulness; and the W1/W2 real-embedding retrieval A/B
+> ratchet. Contract: `src/ragspine/eval/CLAUDE.md`.
+
 ### W6 — Agentic depth: multi-hop & corrective retrieval ⭐ (opt-in, determinism-preserving)  (P2)
 
 **Gap:** single-shot, rule-routed; decomposition is a deterministic Cartesian over explicitly-enumerated axes;
@@ -357,7 +378,7 @@ Legend: **kind** 🛡/⭐/🔧 · **status** ✅ have · ◐ partial · ✗ gap.
 | Table richness in IR | docx/ppt fills `→None`; nested tables warned-and-dropped | family `fill→resolved_rgb` (SME-gated color path); nested → independent `StyledGrid` (no IR schema change) | ⭐ | ✅ | W3d · P1 |
 | Contextual retrieval | bare paragraph; context sidecar-only | deterministic context header + LLM adapter | ⭐ | ✅ (LLM adapter = seam) | W4a · P1 |
 | Chunking | fixed-char paragraph-greedy | family-layout + parent-child | ⭐ | ◐ (layout+parent-child opt-in; richer family struct follow-up) | W4b · P1 |
-| Faithfulness / groundedness eval | **unmeasured** (citation-match only) | claim-level NLI gate + free-text accuracy | 🛡 | ✗ | W5 · P1 |
+| Faithfulness / groundedness eval | **unmeasured** (citation-match only) | claim-level entailment gate + free-text accuracy | 🛡 | ✅ (offline lexical-entailment default + free-text accuracy; ONNX-NLI / LLM-judge / context-precision-recall = follow-up) | W5 · P1 |
 | Multi-hop / decomposition | deterministic Cartesian only | LLM decomposition (opt-in) | ⭐ | ✗ | W6a · P2 |
 | Corrective retrieval | one filter-drop retry | CRAG grade→act loop (opt-in) | ⭐ | ✗ | W6b · P2 |
 | Conversational memory | stateless single-shot | multi-turn (opt-in) | ⭐ | ✗ | W6c · P2 |
@@ -376,7 +397,8 @@ Legend: **kind** 🛡/⭐/🔧 · **status** ✅ have · ◐ partial · ✗ gap.
   - **W2** ✅ local cross-encoder reranker (shipped — see the W2 SHIPPED note above);
     **W3b/W3c/W3d** docspine/pptspine extractors + richer IR;
     **W4** ✅ contextual retrieval (W4a) + ◐ family-layout/parent-child chunking (W4b, opt-in — see the W4 SHIPPED
-    notes above); **W5** the groundedness eval gate.
+    notes above); **W5** ✅ the groundedness eval gate (faithfulness + free-text answer-accuracy, offline
+    deterministic default — see the W5 SHIPPED note above).
 - **P2 — reasoning depth & governance.**
   - **W7a** structured relation graph (charter-native multi-hop) → **W7c** `GraphStore` seam →
     **W7b** opt-in narrative GraphRAG; **W6** agentic depth (decomposition / CRAG / multi-turn), all opt-in.
@@ -465,6 +487,13 @@ conformance-bound path, then "core/supported."
   conformance but **not** a ratcheted A/B quantifying its precision lift over identity/RRF; that
   eval-delta lands with the W5 groundedness/eval gate (a depth item isn't "done" until the eval
   ratchet shows it improved the answer).
+- **Real entailment model + the richer groundedness metrics (from W5).** W5 ships the **offline
+  deterministic** faithfulness + free-text answer-accuracy gates on a *lexical-overlap* entailment proxy
+  (default, CI-green). Deferred behind the `EntailmentJudge` seam (`make_entailment_judge`): the real
+  **ONNX-NLI judge** (`[eval]`, a small permissive MNLI / cross-encoder NLI — `@pytest.mark.network`
+  weight pull, the W1/W2 "first-pull-then-offline" pattern) and the **LLM-judge** (`[llm]`, opt-in
+  default-off). Also deferred: **context-precision / context-recall / answer-relevance**, **composite-case
+  narrative-segment faithfulness**, and the **W1/W2 real-embedding retrieval A/B** ratchet on this harness.
 
 ## Further notes
 
