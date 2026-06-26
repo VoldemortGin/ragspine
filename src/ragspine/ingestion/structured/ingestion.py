@@ -42,6 +42,7 @@ from ragspine.common.glossary import (
 from ragspine.extraction.color.color_semantics import MappingRegistry, apply_mapping
 from ragspine.extraction.extractors import (
     pdf_digital_extractor,
+    pdf_scanned_extractor,
     pdf_spine_extractor,
     pptx_styled_extractor,
 )
@@ -143,6 +144,17 @@ def _grid_value(grid: StyledGrid, col: int, row: int) -> object:
     return cell.value if cell is not None else None
 
 
+def _grid_cell_ref(grid: StyledGrid, col: int, row: int) -> str:
+    """取网格 (col, row) 处单元格的原生 cell_ref（血缘 locator 用）。
+
+    xlsx 用 'A1' 风格（cell_ref='B2'），pptx/pdf/扫描 OCR 表用 'R{行}C{列}' 风格
+    （cell_ref='R2C2'）。直接回传该格自带的 cell_ref，使血缘 locator 反映其真实坐标
+    （扫描 OCR 事实因此带 'page{N}_table{M}!R{r}C{c}'）；缺失时回退 A1 推导。
+    """
+    cell = grid.get(f"{get_column_letter(col)}{row}") or grid.get(f"R{row}C{col}")
+    return cell.cell_ref if cell is not None else f"{get_column_letter(col)}{row}"
+
+
 def _grid_has_candidate_data(grid: StyledGrid) -> bool:
     """该表是否含可抽取的「指标×期间×数值」候选数据（与抽取布局同套规则）。
 
@@ -228,6 +240,7 @@ def _extract_facts_from_grid(
             tags: dict[str, object] = dict(cell_tags.get(coord, {}))
             if tags:
                 n_tags_applied += 1
+            ref = _grid_cell_ref(grid, col, row)
             facts.append(
                 Fact(
                     metric_code=metric_code,
@@ -239,7 +252,7 @@ def _extract_facts_from_grid(
                     value=value,
                     unit=unit,
                     source_doc_id=grid.source_doc_id,
-                    source_locator=f"sheet={grid.sheet}!{coord}",
+                    source_locator=f"sheet={grid.sheet}!{ref}",
                     tags=tags,
                     source_file_hash=grid.source_file_hash,
                     extractor_version=extractor_version,
@@ -249,6 +262,23 @@ def _extract_facts_from_grid(
             )
 
     return facts, warnings, n_tags_applied, False
+
+
+def _dedup_first(facts: list[Fact]) -> list[Fact]:
+    """按事实身份键去重并保留首次出现（与 fact_store dim_key 同口径）。
+
+    身份键 = (metric_code, entity, channel, period_type, period)；geography 非身份维
+    （可被覆盖），不参与键。保持输入顺序，使「首页先于次页」时血缘锚定首页。
+    """
+    seen: set[tuple[str, str, str, str, str]] = set()
+    out: list[Fact] = []
+    for f in facts:
+        key = (f.metric_code, f.entity, f.channel, f.period_type, f.period)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(f)
+    return out
 
 
 def _grid_has_colored_cells(grid: StyledGrid) -> bool:
@@ -270,8 +300,14 @@ def _ingest_grids(
     dry_run: bool,
     extractor_version: str,
     valid_as_of: str | None = None,
+    dedup_identity: bool = False,
 ) -> None:
     """把一组已抽取的 StyledGrid 跑完归一 → 颜色 tag → 入库 / 入队，填充 report。
+
+    dedup_identity=True 时（扫描型多页 OCR 路径用）：入库前按事实身份键
+    （metric/entity/channel/period_type/period，与 fact_store dim_key 一致）去重并
+    **保留首次出现**，使同一事实跨多页时血缘锚定到首页（确定性 first-wins，而非
+    upsert 的 last-wins）。xlsx/pptx/pdf-digital 路径不传该参数 -> 行为字节级不变。
 
     ingest_excel 与 ingest_file 的 xlsx/pptx/pdf(digital) 分支共用此逻辑，保证
     Excel 既有行为不变（resolvable 实体 + 有 active 映射 -> 零 enqueue）。
@@ -355,11 +391,14 @@ def _ingest_grids(
         report.n_enqueued_review = 0
         return
 
+    # 扫描多页 OCR：按身份键去重保留首次出现（first-wins，血缘锚定首页）。
+    facts_to_write = _dedup_first(all_facts) if dedup_identity else all_facts
+
     # 本批生效日（CLI / 调用方提供）注入每条 fact 的 valid_as_of；None 时不改写。
     if valid_as_of is not None:
-        for f in all_facts:
+        for f in facts_to_write:
             f.valid_as_of = valid_as_of
-    n_written = store.upsert_facts(all_facts)
+    n_written = store.upsert_facts(facts_to_write)
     report.n_facts_ingested = n_written
 
     for reason, payload, locator in enqueues:
@@ -453,6 +492,7 @@ def ingest_file(
     batch_id: str | None = None,
     valid_as_of: str | None = None,
     grid_extractor: pdf_digital_extractor.GridExtractor | None = None,
+    ocr_backend: pdf_scanned_extractor.OcrBackend | None = None,
 ) -> IngestReport:
     """统一多格式分发入口：按后缀把文件路由到对应抽取器并复用共享入库逻辑。
 
@@ -461,7 +501,9 @@ def ingest_file(
         - .pptx       -> pptx_styled_extractor（pptx_styled@1）；
         - .pdf        -> 先 pdf_router.route()：
             * digital   -> pdf_digital_extractor（pdf_digital@1）确定性入库；
-            * scanned/ocr_scan/img_scan -> 不抽数字事实，enqueue 请 OCR / 人工复核；
+            * scanned/ocr_scan/mixed -> 调家族 OCR（pdf_scanned_extractor.extract_grids，
+              默认 PdfSpineOcrBackend，离线确定性 PP-OCRv5）抽表入结构化通路，低置信
+              格仍进复核（W3a）；OCR 未识别出表则告警 + enqueue（绝不静默丢弃）；
             * ask_for_pptx（PowerPoint/Keynote 导出）-> warning + enqueue 请求 pptx 源
               （PRD「原生优先」，不在退化 PDF 上做不可靠抽取）；
         - 其它后缀 -> status='failed' + error（不裸抛，不污染库）。
@@ -487,6 +529,7 @@ def ingest_file(
             report, path, store, registry, queue,
             dry_run=dry_run, valid_as_of=valid_as_of,
             grid_extractor=grid_extractor,
+            ocr_backend=ocr_backend,
         )
         if not dry_run:
             _record_manifest(
@@ -533,12 +576,18 @@ def _ingest_pdf(
     dry_run: bool,
     valid_as_of: str | None = None,
     grid_extractor: pdf_digital_extractor.GridExtractor | None = None,
+    ocr_backend: pdf_scanned_extractor.OcrBackend | None = None,
 ) -> None:
-    """PDF 分支：先分诊路由，再决定走数字抽取入库还是越界入复核。
+    """PDF 分支：先分诊路由，数字型走确定性表格抽取，扫描型走家族 OCR（W3a）。
 
     grid_extractor：数字型表格抽取器（依赖注入，缺省 = PdfSpineGridExtractor）。默认走
     pdfspine（纯 Rust、确定性、无 torch 重依赖）；换别的解析器（如 DoclingGridExtractor 兜底）
     只需注入另一个 GridExtractor 实现，血缘里的 extractor_version 随之而变。
+
+    ocr_backend：扫描型 OCR 后端（依赖注入，缺省 = PdfSpineOcrBackend，家族离线确定性
+    PP-OCRv5）。scanned/ocr_scan/mixed 判定不再只 enqueue，而是实际调用
+    pdf_scanned_extractor.extract_grids 抽表入结构化通路；血缘 extractor_version 随后端
+    version 而定（与 GridExtractor 同范式）。
     """
     extractor = grid_extractor or pdf_spine_extractor.PdfSpineGridExtractor()
     decision = pdf_router.route(str(path))
@@ -578,16 +627,39 @@ def _ingest_pdf(
         )
         return
 
-    # scanned / ocr_scan / mixed / 其它：不抽数字事实，入复核请 OCR / 人工。
-    report.warnings.append(
-        f"{report.source_doc_id} 分诊为 {decision.verdict}，非数字型不自动抽数字事实，入复核"
-    )
-    _enqueue_or_count(
-        report, queue, dry_run,
-        "扫描型PDF需OCR/人工复核",
-        {"source_doc_id": report.source_doc_id, "file_hash": report.file_hash,
-         "verdict": decision.verdict},
-        report.source_doc_id,
+    # scanned / ocr_scan / mixed：实际调用家族 OCR 抽表入结构化通路（W3a），不再只
+    # enqueue。低置信格由 extract_grids 在传入 queue 时按 'low_confidence_ocr' 入复核
+    # （dry_run 不传 queue -> 零写入）。
+    ocr = ocr_backend or pdf_scanned_extractor.PdfSpineOcrBackend()
+    try:
+        grids = pdf_scanned_extractor.extract_grids(
+            path, ocr, queue=None if dry_run else queue
+        )
+    except Exception as exc:  # noqa: BLE001 —— 失败不裸抛，落进报告
+        report.status = "failed"
+        report.error = f"{type(exc).__name__}: {exc}"
+        return
+
+    # OCR 未识别出任何表格：绝不静默丢弃，留告警 + 复核项让运营看到这份文件被挡下。
+    if not grids:
+        report.warnings.append(
+            f"{report.source_doc_id} 分诊为 {decision.verdict}，OCR 未识别出任何表格，入复核"
+        )
+        _enqueue_or_count(
+            report, queue, dry_run,
+            "扫描型PDF OCR未识别出表格，需人工复核",
+            {"source_doc_id": report.source_doc_id, "file_hash": report.file_hash,
+             "verdict": decision.verdict},
+            report.source_doc_id,
+        )
+        return
+
+    _ingest_grids(
+        report, grids, store, registry, queue,
+        dry_run=dry_run,
+        extractor_version=getattr(ocr, "version", pdf_scanned_extractor.EXTRACTOR_VERSION),
+        valid_as_of=valid_as_of,
+        dedup_identity=True,
     )
 
 

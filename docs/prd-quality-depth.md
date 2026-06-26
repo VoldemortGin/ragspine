@@ -116,6 +116,14 @@ and OCR-internally consistent. Wiring them turns a rented surface into a moat.
   low-confidence→review discipline already built (`pdf_scanned_extractor.py:204-217`). PaddleOCR-VL stays as the
   optional high-accuracy adapter behind `[ocr]`. **Highest-leverage, lowest-risk item: pure plumbing, zero
   charter tension, immediately verifiable.**
+  > **✅ SHIPPED.** Realized via pdfspine's `Page.find_image_tables` OCR API — pdfspine embeds ocrspine
+  > PP-OCRv5, and since ocrspine has **no Python binding**, the family OCR is reached *through pdfspine*
+  > (already a `[pdf]` dep). Default `OcrBackend = PdfSpineOcrBackend` (`pdf_spine_ocr@1`); `_ingest_pdf` now
+  > calls `pdf_scanned_extractor.extract_grids` on `scanned`/`ocr_scan`/`mixed` verdicts (was enqueue-only);
+  > low-confidence cells still route to review; PaddleOCR-VL stays the optional `[ocr]` adapter. Wiring tested
+  > with a deterministic fake backend (no-GPU CI); the real `find_image_tables` signature/return were verified
+  > against pdfspine 0.0.6. *Follow-up:* add `find_image_tables` to pdfspine's `.pyi` stub (a `# type: ignore`
+  > bridges the stub gap for now).
 - **W3b — `docspine` `.docx` Extractor (⭐, P1).** A new `Extractor` for Word: closes the missing format
   (the breadth matrix lists `DOCX … P1`), built on `docspine`'s first-class table model (gridSpan/vMerge/nested),
   emitting `StyledGrid` + narrative segments. Inherits the provenance + extractor conformance packs.
@@ -210,7 +218,7 @@ Legend: **kind** 🛡/⭐/🔧 · **status** ✅ have · ◐ partial · ✗ gap.
 |---|---|---|---|---|---|
 | Default embedding | lexical-hash (non-semantic), dense **off** | ONNX bge-small/MiniLM default, dense **on** | ⭐ | ✗ | W1 · P0 |
 | Rerank offline default | identity pass-through (LLM-only brain) | local cross-encoder (ONNX) | ⭐ | ✗ (proto ✅) | W2 · P1 |
-| OCR default + scanned path | GPU PaddleOCR-VL; **scanned never OCR'd** | `ocrspine` default + scanned path wired | 🛡⭐ | ✗ | W3a · P0 |
+| OCR default + scanned path | GPU PaddleOCR-VL; **scanned never OCR'd** | family OCR (pdfspine→ocrspine) default + scanned path wired | 🛡⭐ | ✅ | W3a · P0 |
 | `.docx` ingestion | **no path** | `docspine` Extractor | ⭐ | ✗ | W3b · P1 |
 | PPTX richness | `python-pptx` (lossy) | `pptspine` (merges/nested/notes) | ⭐ | ◐ | W3c · P1 |
 | Contextual retrieval | bare paragraph; context sidecar-only | deterministic context header + LLM adapter | ⭐ | ✗ | W4a · P1 |

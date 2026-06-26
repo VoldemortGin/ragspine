@@ -278,6 +278,104 @@ def extract_grids(
     return grids
 
 
+class PdfSpineOcrBackend:
+    """家族默认 OCR 后端（W3a）：pdfspine 的离线确定性 PP-OCRv5（纯 Rust via tract）。
+
+    实现 OcrBackend 协议，是扫描路径的**默认**后端（取代 GPU-gated PaddleOCR-VL）：
+    离线即用、确定性、无 torch/无 GPU——pdf/ppt/doc 家族内嵌的同一 ocrspine 引擎。
+    PaddleOcrVlBackend 保留为可选高精度适配器（`[ocr]`，非默认）。
+
+    依赖约定（ADR 0009）：pdfspine 是 `[pdf]` extra 的重依赖，**惰性 import**——
+    模块顶层与构造器都不 import pdfspine，仅在首次 recognize 时才 import，保证仅装
+    基础依赖时本模块仍可 import。
+
+    用到的 pdfspine API（python/pdfspine/document.py）：
+        - ``pdfspine.open(stream=png_bytes, filetype="png")``：把 extract_grids 渲染
+          出的单页 PNG 透明转成单页 Document。
+        - ``Page.find_image_tables(engine="paddle", dpi=..., min_confidence=0.0)``：
+          对栅格图做 PP-OCRv5 识别 + 几何重建，返回 ``ImageTable`` 列表（每格携带
+          text / bbox / 颜色 / OCR 置信度）。词级 ``min_confidence`` 取 0.0（不预筛），
+          低置信【格】的阈值分流交给 extract_grids/_build_grid（min_confidence=0.85）。
+        - ``ImageTable.row_count/col_count/cells``、``ImageTableCell.row/col/text/
+          confidence``：row/col 为 0-based -> 转 1-based；confidence 为 0..100 -> /100。
+
+    版本（血缘）：``version`` 写入每条 fact 的 extractor_version（与 GridExtractor.version
+    同范式）；底层 OCR 输出变化时 bump。
+    """
+
+    version = "pdf_spine_ocr@1"
+
+    def __init__(
+        self, *, dpi: int = 150, language: str = "eng", engine: str = "paddle"
+    ) -> None:
+        # 仅保存配置，不在此 import pdfspine（惰性，避免非 [pdf] 平台构造即失败）。
+        self._dpi = int(dpi)
+        self._language = language
+        self._engine = engine
+
+    def recognize(self, image_bytes: bytes, page_no: int) -> OcrPageResult:
+        """识别单页 PNG bytes -> OcrPageResult（逐格带置信度）。
+
+        把 PNG 经 pdfspine.open 转成单页 Document，对每页跑 find_image_tables，再把
+        每个 ImageTable 映射成 OcrTable（行列 0->1-based，置信度 0..100 -> 0..1）。
+        未检出表格时返回空表 + 一条 warning，不抛异常。
+        """
+        import pdfspine  # 惰性 import：归 [pdf] extra。
+
+        doc = pdfspine.open(stream=image_bytes, filetype="png")
+        try:
+            tables: list[OcrTable] = []
+            for page in doc:
+                # find_image_tables 是 pdfspine Page 的运行时公共方法（签名/返回已核验
+                # 吻合），但其 .pyi 类型存根尚未声明它 —— 第三方存根缺口，待 pdfspine
+                # 补 stub 后移除本 ignore。
+                for image_table in page.find_image_tables(  # type: ignore[attr-defined]
+                    engine=self._engine,
+                    dpi=self._dpi,
+                    language=self._language,
+                    min_confidence=0.0,
+                ):
+                    table = self._image_table_to_ocr_table(image_table)
+                    if table is not None:
+                        tables.append(table)
+        finally:
+            doc.close()
+
+        warnings: list[str] = []
+        if not tables:
+            warnings.append(f"page{page_no}: pdfspine find_image_tables 未检出任何表格")
+        return OcrPageResult(page_no=page_no, tables=tables, warnings=warnings)
+
+    @staticmethod
+    def _image_table_to_ocr_table(image_table: Any) -> OcrTable | None:
+        """把一个 pdfspine ImageTable 映射为中立 OcrTable（稀疏，只取有文本的格）。
+
+        row/col：pdfspine 为 0-based -> +1 转 1-based（与 OcrCell 约定一致）。
+        confidence：pdfspine 为 0.0..100.0 -> /100 归一到 0.0..1.0。
+        空文本格跳过（不入网格、不产生事实），与 PaddleOcrVlBackend 同语义。
+        """
+        cells: list[OcrCell] = []
+        for cell in image_table.cells:
+            value = _normalize_text(cell.text)
+            if not value:
+                continue
+            cells.append(
+                OcrCell(
+                    row=int(cell.row) + 1,
+                    col=int(cell.col) + 1,
+                    text=value,
+                    confidence=float(cell.confidence) / 100.0,
+                )
+            )
+        if not cells:
+            return None
+        return OcrTable(
+            n_rows=int(image_table.row_count),
+            n_cols=int(image_table.col_count),
+            cells=cells,
+        )
+
+
 class PaddleOcrVlBackend:
     """PaddleOCR-VL 真实后端（三期扫描线，目标环境 Ubuntu + NVIDIA GPU）。
 

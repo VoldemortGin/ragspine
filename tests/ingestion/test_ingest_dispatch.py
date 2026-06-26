@@ -413,30 +413,43 @@ def test_d3_default_grid_extractor_stamps_pdf_spine(
 # ===========================================================================
 # D4 — PDF 越界入队：scanned / ask_for_pptx 不抽数字事实，enqueue 带正确 reason
 # ===========================================================================
-def test_d4_scanned_pdf_enqueued_not_extracted(
-    store, registry, queue, scanned_pdf_path
+def test_d4_scanned_pdf_routed_to_ocr_extractor(
+    store, registry, queue, scanned_pdf_path, monkeypatch
 ):
-    """user story：作为接手方，我把扫描型 PDF（无文本层）交给 ingest_file，它绝不
-    凭空抽数字事实，而应入复核队列（reason 指明需 OCR / 人工复核），让扫描件被
-    显式接住而非静默丢弃。"""
-    from ragspine.ingestion.structured.ingestion import ingest_file
-    from ragspine.extraction.routing.pdf_router import route, VERDICT_SCANNED
+    """user story（W3a）：作为接手方，我把扫描型 PDF（无文本层）交给 ingest_file，它应先经
+    pdf_router 判定为 scanned，再把抽取分发给家族 OCR（pdf_scanned_extractor.extract_grids，
+    默认 PdfSpineOcrBackend）抽表入结构化通路——而非旧的「只入复核、零事实」桩。
 
+    （旧契约 test_d4_scanned_pdf_enqueued_not_extracted 已被 W3a 取代：扫描件不再只
+    enqueue，而是真正被 OCR 成可检索事实。完整入库/检索/低置信复核/血缘/幂等/dry_run
+    行为由 tests/ingestion/structured/test_scanned_pdf_ocr_wiring.py 穷尽覆盖；本用例只在
+    dispatch 层证明路由已切到 OCR 抽取器、默认走家族后端。）"""
+    from ragspine.ingestion.structured.ingestion import ingest_file
+    import ragspine.ingestion.structured.ingestion as ingestion_mod
+    from ragspine.extraction.routing.pdf_router import route, VERDICT_SCANNED
+    from ragspine.extraction.extractors.pdf_scanned_extractor import PdfSpineOcrBackend
+
+    # 该 fixture 必须被 router 判为 scanned（前置事实）。
     assert route(str(scanned_pdf_path)).verdict == VERDICT_SCANNED
 
     _init_three(store, registry, queue)
-    report = ingest_file(scanned_pdf_path, store, registry, queue)
-    # 不抽数字事实
-    assert report.n_facts_ingested == 0
-    assert store.count() == 0
-    # 入队且 reason 指向扫描/OCR/人工复核
-    assert report.n_enqueued_review > 0
-    pending = queue.list_pending()
-    assert len(pending) > 0
-    assert any(
-        ("扫描" in it.reason) or ("OCR" in it.reason.upper()) or ("复核" in it.reason)
-        for it in pending
+
+    # spy：扫描分发应调用 pdf_scanned_extractor.extract_grids（ingestion 模块内引用），
+    # 默认后端为家族 PdfSpineOcrBackend。短路返回 [] 以免真跑 OCR（确定性、快）。
+    captured: dict[str, object] = {}
+
+    def _spy(path, backend, *, min_confidence=0.85, queue=None):  # noqa: ARG001
+        captured["called"] = True
+        captured["backend"] = backend
+        return []
+
+    monkeypatch.setattr(
+        ingestion_mod.pdf_scanned_extractor, "extract_grids", _spy
     )
+
+    ingest_file(scanned_pdf_path, store, registry, queue)  # 不注入 -> 默认家族 OCR
+    assert captured.get("called") is True
+    assert isinstance(captured["backend"], PdfSpineOcrBackend)
 
 
 def test_d4_ppt_export_pdf_asks_for_pptx_and_enqueues(
