@@ -88,6 +88,29 @@ against the real default so "semantic gain" becomes a *measured*, ratcheted numb
   byte-identical embeddings across two runs.
 - Lean smoke stays green with **no** extra installed (lexical-hash path).
 
+> **✅ SHIPPED.** `OnnxEmbeddingBackend` (`retrieval/vector/embedding_backends.py`) is a real,
+> lightweight, deterministic semantic backend behind a new **`[embed-onnx]`** extra
+> (**fastembed**, Apache-2.0 — bundles ONNX weights + `onnxruntime`, no torch). Default model
+> `paraphrase-multilingual-MiniLM-L12-v2` (Apache-2.0, 384-dim, **multilingual symmetric** — zh/en
+> cross-lingual, fits the single `embed_texts` Protocol). Registered as `onnx`/`fastembed`/`minilm`
+> in `make_embedding_backend`, plus a new **`auto`** spec = "ONNX if the extra is importable, else
+> `None` (pure BM25)". **Dense-on-by-default** lands by flipping `ServiceConfig.embedding` to
+> `"auto"`: with `[embed-onnx]` installed the shipped loop is genuinely hybrid (BM25 + ONNX → RRF)
+> with **no config**; with no extra it resolves to `None` and the lean BM25 path is **byte-identical**
+> (ADR 0005 preserved — only the default config *string* changed). `None`/`"none"` still mean pure
+> BM25 literally. **Re-baselined A/B** (`cli/eval_retrieval_ab.py`, real `--embedding onnx` on the
+> cross-lingual/paraphrase golden set): **Recall@5 0.333 → 0.667 (+100%), MRR 0.292 → 0.542 (+86%)**
+> — the "proves harness correctness only, not semantic gain" disclaimer is replaced by measured
+> numbers (the harness `_eval_arm` was also fixed: it now drives `HybridRetriever` directly so the
+> vector channel actually scores; before, the eval arm's store had no persisted vectors and hybrid
+> always equalled BM25). Determinism + cross-lingual gain frozen by
+> `tests/retrieval/vector/test_embedding_onnx.py` (the real-model assertions are `@pytest.mark.network`,
+> skipped by `make ci`'s `-m "not network"` so CI never hits the network). Contract:
+> `retrieval/docs/embedding-backend.md`.
+> *Follow-up:* fastembed downloads weights from HF on first use then caches ("**first-pull-then-offline**"),
+> not first-run-offline. A truly first-run-offline default needs the ONNX weights shipped as a
+> data-pack (like `ocrspine-models`) — deferred (see "Out of scope / follow-ups").
+
 ### W2 — Local cross-encoder reranker ⭐  (P1, breadth PRD already lists the seam)
 
 **Gap:** rerank is LLM-only; offline default is identity.
@@ -216,7 +239,7 @@ Legend: **kind** 🛡/⭐/🔧 · **status** ✅ have · ◐ partial · ✗ gap.
 
 | Quality stage | Today | Target | Kind | Status | WS · Phase |
 |---|---|---|---|---|---|
-| Default embedding | lexical-hash (non-semantic), dense **off** | ONNX bge-small/MiniLM default, dense **on** | ⭐ | ✗ | W1 · P0 |
+| Default embedding | lexical-hash (non-semantic), dense **off** | ONNX multilingual-MiniLM default (`[embed-onnx]`), dense **on** via `auto` | ⭐ | ✅ | W1 · P0 |
 | Rerank offline default | identity pass-through (LLM-only brain) | local cross-encoder (ONNX) | ⭐ | ✗ (proto ✅) | W2 · P1 |
 | OCR default + scanned path | GPU PaddleOCR-VL; **scanned never OCR'd** | family OCR (pdfspine→ocrspine) default + scanned path wired | 🛡⭐ | ✅ | W3a · P0 |
 | `.docx` ingestion | **no path** | `docspine` Extractor | ⭐ | ✗ | W3b · P1 |
@@ -234,7 +257,8 @@ Legend: **kind** 🛡/⭐/🔧 · **status** ✅ have · ◐ partial · ✗ gap.
 ## Phasing
 
 - **P0 — make the default correct (no new model risk to the lean path).**
-  - **W1** real semantic embedding default + dense-on (lexical-hash stays the zero-dep fallback).
+  - **W1** ✅ real semantic embedding default + dense-on via `auto` (pure BM25 stays the zero-dep
+    fallback; lean path byte-identical). Shipped — see the W1 SHIPPED note above.
   - **W3a** `ocrspine` default OCR + **wire the scanned-PDF path** (pure plumbing, zero charter tension).
   - Re-baseline retrieval A/B with the real default; add it to the CI ratchet.
 - **P1 — the depth that wins evaluations.**
@@ -313,6 +337,15 @@ conformance-bound path, then "core/supported."
   open-ended agent framework (ADR 0009 forbids orchestration lock-in).
 - **Replacing the deterministic default with an LLM-first loop.** The deterministic, offline, anti-fabrication
   default is the product; every LLM-powered depth feature is an opt-in extension over it.
+
+### Follow-ups (carried out of shipped work)
+
+- **First-run-offline embedding weights (from W1).** `OnnxEmbeddingBackend` (via fastembed) is
+  "first-pull-then-offline": it downloads the ONNX weights from HuggingFace on first use, then caches.
+  A truly first-run-offline default would ship the pinned weights as a **data-pack** (the
+  `ocrspine-models` pattern) so a fresh, network-less install is semantic out of the box. Deferred —
+  W1 ships the "first-pull-then-offline + deterministic" real-semantic default; the data-pack is a
+  packaging follow-up, not a code-path change.
 
 ## Further notes
 

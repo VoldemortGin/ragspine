@@ -31,8 +31,8 @@ echo "==> [3/8] mypy --strict (static type contract — zero-warning gate, half 
 echo "==> [4/8] ruff lint (style + import order + dead code)"
 "$PY" -m ruff check src/ragspine
 
-echo "==> [5/8] test suite (excludes gpu + docling — the bulk; filterwarnings=error + beartype runtime contracts active)"
-"$PY" -m pytest tests/ -q -m "not gpu and not docling"
+echo "==> [5/8] test suite (excludes gpu + docling + network — the bulk; filterwarnings=error + beartype runtime contracts active)"
+"$PY" -m pytest tests/ -q -m "not gpu and not docling and not network"
 
 echo "==> [6/8] docling extractor tests (own process — isolates 3rd-party ML nondeterminism)"
 "$PY" -m pytest tests/ -q -m "docling"

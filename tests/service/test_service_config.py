@@ -35,7 +35,9 @@ def test_from_env_defaults_when_empty():
     assert cfg.provider_type == "mock"
     assert cfg.model == DEFAULT_ANTHROPIC_MODEL
     assert cfg.base_url is None
-    assert cfg.embedding == "none"
+    # W1：默认 'auto'＝装了 [embed-onnx] 走真语义 ONNX、否则回落纯 BM25。lean 运行时行为不变
+    # （extra 不在时 make_embedding_backend('auto') -> None，守 ADR 0005），仅默认配置字符串升级。
+    assert cfg.embedding == "auto"
     assert cfg.vector_store == "none"
     assert cfg.persistence_policy == "default"
     assert cfg.reference_date is None

@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/
-verified-against: 92022e0
+verified-against: e634e99
 ---
 
 # retrieval — agent contract
@@ -67,3 +67,7 @@ listwise reranker, RRF-fallback), `link/` (adapter wiring retrieval into the age
 - [`docs/chunker.md`](docs/chunker.md) — the `Chunker` seam: the `Protocol`, the
   `DefaultChunker` byte-identical delegation to `chunk_document`, the `make_chunker`
   factory + entry-point discovery, and the provenance conformance pack.
+- [`docs/embedding-backend.md`](docs/embedding-backend.md) — the `EmbeddingBackend` seam: the
+  real-semantic `OnnxEmbeddingBackend` default (W1, fastembed/`[embed-onnx]`), the `auto`
+  default-on-dense mechanism that keeps the lean BM25 contract byte-identical, determinism +
+  first-pull-then-offline honesty, and the re-baselined A/B semantic-gain numbers.

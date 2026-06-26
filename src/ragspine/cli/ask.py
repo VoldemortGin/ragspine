@@ -38,8 +38,10 @@ def _build_parser() -> argparse.ArgumentParser:
              "（纯 BM25+RRF + listwise 二审），不提供时保持坦白降级",
     )
     parser.add_argument(
-        "--embedding", choices=["none", "deterministic", "openai"], default="none",
+        "--embedding", choices=["none", "auto", "onnx", "deterministic", "openai"], default="none",
         help="叙事检索向量通道后端：none=纯 BM25（默认，现状不变）；"
+             "auto=装了 [embed-onnx] 走真语义 ONNX、否则回落纯 BM25；"
+             "onnx=真语义 ONNX 句向量（fastembed，需 [embed-onnx]）；"
              "deterministic=离线词法散列后端（非语义，打通管线用）；"
              "openai=OpenAI embeddings（需装 SDK 与配置）",
     )

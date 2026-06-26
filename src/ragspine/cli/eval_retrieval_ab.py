@@ -8,12 +8,17 @@ NarrativeIndex 检索，计算并对比 Recall@k / MRR，打印对照表。
     python scripts/eval_retrieval_ab.py
         # 默认对随附合成 gold（data/golden/retrieval_ab_sample.jsonl）跑，hybrid 用确定性后端
     python scripts/eval_retrieval_ab.py --chunk-db <path> --gold <jsonl> --k 10
-    python scripts/eval_retrieval_ab.py --embedding deterministic
+    # W1 真语义 A/B（跨语言/释义 gold，真 ONNX 后端 vs BM25-only）：
+    python scripts/eval_retrieval_ab.py --embedding onnx \
+        --corpus data/golden/retrieval_ab_corpus.jsonl --gold data/golden/retrieval_ab_real.jsonl --k 5
 
-**诚实边界（不可省略）**：随附的合成 gold 仅用于证明 **harness 本身算得对、跑得通**
-（指标公式、双臂构建、确定性复现），不代表任何真实检索质量；hybrid 默认用的
-DeterministicEmbeddingBackend 是【词法散列、非语义】后端，与 BM25 高度相关，**不应、
-也不被断言带来语义增益**。真实 recall 对比需真实样本标注 + 真模型（Qwen3 等，待 GPU infra）。
+两种跑法、两类诚实边界：
+- `--embedding deterministic`（默认）：DeterministicEmbeddingBackend 是【词法散列、非语义】后端，
+  与 BM25 高度相关，**不应、也不被断言带来语义增益**——随附合成 gold 只证明 harness 本身算得对、
+  跑得通（指标公式、双臂构建、确定性复现）。
+- `--embedding onnx` / `auto`：OnnxEmbeddingBackend 是【真语义】ONNX 句向量后端（W1，fastembed，
+  默认多语 MiniLM，需 [embed-onnx]）。在跨语言/释义 gold（retrieval_ab_real.jsonl，BM25 词面对不上）
+  上，hybrid 高于 bm25 即为向量通道的【真实语义召回增益】——这是被度量、可复现的数字，不再是免责。
 """
 
 import argparse
@@ -24,7 +29,7 @@ from pathlib import Path
 import rootutils
 
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
-from ragspine.retrieval.lexical.retrieval import EmbeddingBackend, NarrativeIndex
+from ragspine.retrieval.lexical.retrieval import EmbeddingBackend, HybridRetriever, NarrativeIndex
 from ragspine.retrieval.vector.embedding_backends import make_embedding_backend
 
 ROOT_DIR = rootutils.find_root(Path(__file__), indicator=".project-root")
@@ -86,12 +91,6 @@ def load_ab_gold(path: str | Path) -> list[AbGoldCase]:
     return cases
 
 
-def _retrieved_ids(index: NarrativeIndex, query: str, k: int) -> list[str]:
-    """对单查询跑检索（关闭 listwise 二审，纯检索序），返回前 k 个 chunk_id。"""
-    results = index.retrieve(query, rerank=False, top_k=k)
-    return [r.chunk.chunk_id for r in results]
-
-
 def _eval_arm(
     chunk_db: str | Path,
     cases: list[AbGoldCase],
@@ -99,15 +98,22 @@ def _eval_arm(
     embedding_backend: EmbeddingBackend | None,
     k: int,
 ) -> dict[str, float]:
-    """单臂评测：用给定后端建 NarrativeIndex，跑全部 gold，返回均值 Recall@k / MRR。"""
+    """单臂评测：用给定后端对块库直跑 HybridRetriever（关闭 listwise 二审），返回均值 Recall@k / MRR。
+
+    用 HybridRetriever（manage_vectors=True，惰性嵌入候选并入 store）而非 NarrativeIndex 的
+    store-managed 路径——块库由 builder 无 embedding 入库（向量未落盘），故必须由检索臂自管块向量，
+    向量通道才真正参与打分；否则 hybrid 臂的向量分恒为 0，永远等于 bm25，A/B 度量不到任何增益。
+    """
     store = ChunkStore(chunk_db)
     store.init_schema()
     try:
-        index = NarrativeIndex(store, embedding_backend=embedding_backend)
+        chunks = list(store.iter_chunks())
+        retriever = HybridRetriever(chunks, embedding_backend=embedding_backend)
         recalls: list[float] = []
         mrrs: list[float] = []
         for case in cases:
-            retrieved = _retrieved_ids(index, case.query, k)
+            results = retriever.search(case.query, top_k=k)
+            retrieved = [r.chunk.chunk_id for r in results]
             recalls.append(compute_recall_at_k(retrieved, case.relevant_chunk_ids, k))
             mrrs.append(compute_mrr(retrieved, case.relevant_chunk_ids))
         n = len(cases)
@@ -234,10 +240,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--embedding",
-        choices=["none", "deterministic", "openai", "qwen3", "sentence-transformers", "st"],
+        choices=["none", "auto", "onnx", "deterministic", "openai", "qwen3", "sentence-transformers", "st"],
         default="deterministic",
-        help="hybrid 臂的向量后端（deterministic＝离线词法散列非语义；qwen3＝真实语义后端，"
-             "设备自适应 cuda/mps/cpu，需 [embed] extra）",
+        help="hybrid 臂的向量后端（deterministic＝离线词法散列非语义；onnx/auto＝真语义 ONNX，"
+             "fastembed，需 [embed-onnx]；qwen3＝SentenceTransformer 真语义，需 [embed]）",
     )
     parser.add_argument("--k", type=int, default=10, help="Recall@k 的 k（默认 10）")
     return parser
@@ -250,12 +256,12 @@ def main(argv: list[str] | None = None) -> int:
     cases = load_ab_gold(args.gold)
     embedding_backend = make_embedding_backend(args.embedding)
 
-    real_run = args.embedding in ("qwen3", "sentence-transformers", "st")
+    real_run = args.embedding in ("onnx", "auto", "qwen3", "sentence-transformers", "st")
     if real_run:
         label = f"真实语义后端 {args.embedding}"
         note = (
-            f"注：hybrid 用真实语义后端（{args.embedding}，设备自适应 cuda/mps/cpu）；"
-            "语料/标注见 --corpus/--gold。hybrid 高于 bm25 即为向量通道在该集上的语义召回增益。"
+            f"注：hybrid 用真实语义后端（{args.embedding}）；语料/标注见 --corpus/--gold。"
+            "hybrid 高于 bm25 即为向量通道在该集上的【真实语义召回增益】（被度量、可复现）。"
         )
     else:
         label, note = "合成 gold", None

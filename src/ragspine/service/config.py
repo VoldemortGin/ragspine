@@ -39,7 +39,7 @@ class ServiceConfig:
     provider_type: str = "mock"             # "mock" | "anthropic"
     model: str = DEFAULT_ANTHROPIC_MODEL
     base_url: str | None = None
-    embedding: str = "none"                 # "none" | "deterministic" | "openai"
+    embedding: str = "auto"                 # "auto"(装[embed-onnx]→真语义ONNX,否则纯BM25) | "none" | "onnx" | "deterministic" | "openai"
     vector_store: str = "none"              # "none" | "in_process" | "sqlite_vec"（后者需 [vector]）
     persistence_policy: str = "default"     # "default"(隔离优先) | "persist_everything"
     reference_date: str | None = None       # ISO "YYYY-MM-DD" or None

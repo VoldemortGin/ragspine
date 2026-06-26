@@ -35,8 +35,8 @@ ci: ## Local CI gate: tests + demo smoke (exactly what pre-push runs)
 	PYTHON=$(PYTHON) scripts/ci.sh
 
 .PHONY: test
-test: ## Run the test suite (excludes gpu-marked tests)
-	$(PYTHON) -m pytest tests/ -q -m "not gpu"
+test: ## Run the test suite (excludes gpu- and network-marked tests)
+	$(PYTHON) -m pytest tests/ -q -m "not gpu and not network"
 
 .PHONY: test-all
 test-all: ## Run the full suite including gpu-marked tests

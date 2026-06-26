@@ -106,6 +106,16 @@ llm = [
 embed = [
     "sentence-transformers>=3.0",
 ]
+# 默认【真语义】ONNX 句向量后端（OnnxEmbeddingBackend），W1 让默认检索 loop 真正语义化。
+# fastembed（Apache-2.0，过 ADR 0009 ≤Apache-2.0 许可门）：内置 ONNX 权重 + onnxruntime，
+# 纯 CPU、确定性，比 [embed] 的 torch/transformers 链轻一个量级（默认模型约 0.22GB vs ~GB）。
+# 延迟 import：不装也能 import 核心、跑零依赖 InProcessVectorStore + 纯 BM25 默认；装了之后
+# ServiceConfig 默认 embedding='auto' 即自动启用真语义 dense（BM25+ONNX→RRF）。
+# 离线性诚实：fastembed 首次从 HF 下载权重再缓存（"首拉后离线"）；真正"首跑即离线"的权重数据包
+# 是 follow-up（见 docs/prd-quality-depth.md）。
+embed-onnx = [
+    "fastembed>=0.7,<0.9",
+]
 # 可插拔向量存储后端（VectorStore 缝的真实 adapter）。延迟 import：不装也能 import 核心、
 # 跑零依赖 InProcessVectorStore 默认；装了即由 make_vector_store('sqlite_vec'|'pgvector'|'qdrant') 选用。
 # sqlite-vec：嵌入式 sqlite 扩展（Apache-2.0/MIT，permissive，零服务，conformance 装了即跑）。
@@ -146,7 +156,7 @@ service = [
 # GPU 与否无需在此区分——torch/transformers/paddleocr 装的是自适应版，运行时探测到
 # CUDA 即用 GPU、否则回落 CPU；embed 的 transformers 上限已按 darwin 平台标记处理。
 all = [
-    "rag-spine[pdf,ocr,llm,embed,vector,service,dify]",
+    "rag-spine[pdf,ocr,llm,embed,embed-onnx,vector,service,dify]",
 ]
 
 [build-system]
@@ -170,6 +180,7 @@ corespine = { path = "../corespine", editable = true }
 markers = [
     "gpu: 需要 Ubuntu+NVIDIA GPU 与真实 OCR 模型，本地默认跳过",
     "docling: 走 docling 重模型抽取的测试；ci.sh 放独立进程跑，避免全套并跑时的第三方不确定性",
+    "network: 需联网首次下载模型权重（如 fastembed/HF，'首拉后离线'）；make ci 默认 `-m \"not network\"` 跳过",
 ]
 # 零警告门：把警告升级为错误（我们的代码必须零警告），仅放行已知的第三方 deprecation。
 filterwarnings = [
@@ -205,7 +216,7 @@ strict = true
 [[tool.mypy.overrides]]
 module = [
     "anthropic.*", "openai.*", "openpyxl.*", "paddleocr.*", "pypdfium2.*",
-    "sentence_transformers.*", "docling.*", "pdfspine.*", "rq.*", "redis.*",
+    "sentence_transformers.*", "fastembed.*", "docling.*", "pdfspine.*", "rq.*", "redis.*",
     "pptx.*", "markdown.*", "reportlab.*", "rootutils.*", "sqlite_vec.*", "pg8000.*",
     "qdrant_client.*", "yaml", "numpy.*", "torch.*",
 ]

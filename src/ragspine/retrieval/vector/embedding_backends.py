@@ -8,19 +8,27 @@ OpenAIEmbeddingBackend：OpenAI embeddings API（openai>=1.0 SDK）。
 - 批量请求按 batch_size 分批，返回按 index 恢复与输入对齐的顺序；
 - 返回向量做条数与维度一致性校验，异常即抛，绝不静默给坏向量。
 
+OnnxEmbeddingBackend：真语义 ONNX 句向量后端（W1）。经 fastembed（Apache-2.0，内置 ONNX
+权重 + onnxruntime）跑 CPU 推理，默认 paraphrase-multilingual-MiniLM-L12-v2（Apache-2.0、
+384 维、多语对称句向量，中英跨语言可比）。延迟 import、惰性加载；这是默认检索 loop 真正
+语义化的引擎。**离线性诚实声明：fastembed 首次从 HF 下载权重再缓存（"首拉后离线"），
+"首跑即离线"需把权重做成数据包（follow-up，见 prd-quality-depth.md）。**
+
 DeterministicEmbeddingBackend：离线 / 测试 / 打通管线用的【词法散列】后端
 （hashlib 散列 token 到桶 + L2 归一化），零网络、零三方依赖（仅 hashlib+math）、
 跨进程 / 跨平台可复现。**诚实声明：这是与 BM25 信号高度相关的【非语义】后端，
-不代表、也绝不带来真语义召回增益。真语义增益需 Qwen3 等真实模型（待 GPU infra）。**
+不代表、也绝不带来真语义召回增益（真语义增益见 OnnxEmbeddingBackend）。**
 
 make_embedding_backend：后端工厂，把「接通向量通道」的成本从改代码降为一个
-flag/env（spec / RAGSPINE_EMBEDDING_BACKEND），默认仍为 None＝纯 BM25 现状。
+flag/env（spec / RAGSPINE_EMBEDDING_BACKEND）。'none'＝纯 BM25（lean 零依赖默认）；
+'auto'＝装了 [embed-onnx] 走真语义 ONNX、否则回落纯 BM25（"默认开 dense 在有语义后端时"
+的落地点，守 ADR 0005——extra 不在时 lean 行为逐位不变）。
 
-Qwen3 自托管后端本期不做（部署形态未定）：协议留口，任何实现
-embed_texts(list[str]) -> list[list[float]] 的对象皆可注入。
+任何实现 embed_texts(list[str]) -> list[list[float]] 的对象皆可注入（协议留口）。
 """
 
 import hashlib
+import importlib
 import math
 import os
 import re
@@ -36,6 +44,14 @@ DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-large"
 
 # 默认 SentenceTransformer 模型名（缺省 Qwen3-Embedding-0.6B，唯一出处）。
 DEFAULT_ST_EMBEDDING_MODEL = "Qwen/Qwen3-Embedding-0.6B"
+
+# 默认 ONNX 句向量模型名（唯一出处）。选 paraphrase-multilingual-MiniLM-L12-v2：
+# Apache-2.0（过 ADR 0009 ≤Apache-2.0 许可门）、384 维、多语【对称】句向量（中英跨语言可比，
+# 无 query/passage 前缀之分，正好贴合本协议单一 embed_texts），体积约 0.22GB——轻量真语义默认。
+DEFAULT_ONNX_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+
+# ONNX 后端模型覆盖环境变量名（缺省模型时生效，仅对 onnx/auto spec）。
+ONNX_EMBEDDING_MODEL_ENV = "RAGSPINE_ONNX_EMBEDDING_MODEL"
 
 # 设备/模型覆盖环境变量名（与 EMBEDDING_BACKEND_ENV 同族）。
 EMBEDDING_DEVICE_ENV = "RAGSPINE_EMBEDDING_DEVICE"
@@ -269,18 +285,94 @@ class SentenceTransformerEmbeddingBackend:
         return vectors
 
 
+class OnnxEmbeddingBackend:
+    """真语义 ONNX 句向量后端（实现 EmbeddingBackend 协议，fastembed 运行时延迟 import）。
+
+    默认 paraphrase-multilingual-MiniLM-L12-v2（Apache-2.0、384 维、多语对称句向量），
+    经 fastembed（Apache-2.0，内置 ONNX 权重 + onnxruntime）跑 CPU 推理。设计约束
+    （延迟 import 范式同 OpenAI/ST 后端）：
+    - __init__ 只校验参数、记下模型名，**不** import fastembed、不加载模型——构造极轻，
+      没装 [embed-onnx] 的机器上也能构造对象（auto 探测、单测设备逻辑）；
+    - 模型在首次 embed_texts 时延迟下载并缓存（fastembed 调 HF），之后复用缓存；
+    - 空输入直接返回 []，不触发任何 import / 下载；
+    - 返回向量做条数与维度一致性校验，异常即抛，绝不静默给坏向量。
+
+    **离线性诚实声明（不可省略）**：fastembed 首次会从 HuggingFace 下载 ONNX 权重再缓存到本地
+    （"首拉后离线"，不是首跑即离线）。真正的"首跑即离线"需像 ocrspine-models 那样把权重做成
+    数据包随包出货——这是 follow-up（见 docs/prd-quality-depth.md），本后端先给"首拉后离线 +
+    确定性"的真语义默认。
+
+    **确定性**：pin 模型名 + fastembed 版本后，CPU onnxruntime 推理逐位可复现（同输入两次/两个
+    实例给出完全一致的向量）——并入 conformance（见 tests 的 @pytest.mark.network 用例）。
+    """
+
+    def __init__(
+        self,
+        model_name: str = DEFAULT_ONNX_EMBEDDING_MODEL,
+        *,
+        cache_dir: str | None = None,
+        batch_size: int = DEFAULT_EMBEDDING_BATCH_SIZE,
+        threads: int | None = None,
+    ):
+        if batch_size < 1:
+            raise ValueError(f"batch_size 必须 >= 1，得到 {batch_size}")
+        self.model_name = model_name
+        self.cache_dir = cache_dir
+        self.batch_size = batch_size
+        self.threads = threads
+        self._model: Any = None  # 延迟加载缓存
+
+    def _load_model(self) -> Any:
+        """首次调用时延迟 import fastembed 并构造 TextEmbedding（之后复用缓存）。"""
+        if self._model is None:
+            # 重依赖延迟 import：缺失时由 corespine.lazy_extra_import 翻成
+            # `pip install ragspine[embed-onnx]` 友好提示（离线/纯 BM25 场景无需安装）。
+            fastembed = lazy_extra_import("fastembed", pkg="ragspine", extra="embed-onnx")
+            kwargs: dict[str, Any] = {}
+            if self.cache_dir is not None:
+                kwargs["cache_dir"] = self.cache_dir
+            if self.threads is not None:
+                kwargs["threads"] = self.threads
+            self._model = fastembed.TextEmbedding(model_name=self.model_name, **kwargs)
+        return self._model
+
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        """批量文本 -> 向量（顺序对齐）。空输入直接返回 []，不触发模型加载。"""
+        if not texts:
+            return []
+
+        model = self._load_model()
+        vectors = [[float(x) for x in row] for row in model.embed(list(texts), batch_size=self.batch_size)]
+        if len(vectors) != len(texts):
+            raise RuntimeError(
+                f"embedding 返回条数 {len(vectors)} 与请求条数 {len(texts)} 不一致"
+                f"（model={self.model_name}）"
+            )
+        dims = {len(v) for v in vectors}
+        if len(dims) > 1:
+            raise ValueError(f"embedding 维度不一致：{sorted(dims)}（model={self.model_name}）")
+        return vectors
+
+
 # embedding 后端缝注册表（corespine.Registry 泛化 make_*：名字->工厂 + spec 归一）。
 # 各内置后端在此登记；qwen3 / sentence-transformers / st 是同一 ST 后端的别名，
-# 三个名字都指向同一工厂（Registry 内部对名字做大小写/留白/连字符归一）。
+# 三个名字都指向同一工厂（Registry 内部对名字做大小写/留白/连字符归一）；
+# onnx / fastembed / minilm 同指 OnnxEmbeddingBackend（真语义 ONNX 默认后端）。
 EMBEDDING_BACKENDS: Registry[EmbeddingBackend] = Registry("embedding_backend")
 EMBEDDING_BACKENDS.register("deterministic", DeterministicEmbeddingBackend)
 EMBEDDING_BACKENDS.register("openai", OpenAIEmbeddingBackend)
 EMBEDDING_BACKENDS.register("qwen3", SentenceTransformerEmbeddingBackend)
 EMBEDDING_BACKENDS.register("sentence-transformers", SentenceTransformerEmbeddingBackend)
 EMBEDDING_BACKENDS.register("st", SentenceTransformerEmbeddingBackend)
+EMBEDDING_BACKENDS.register("onnx", OnnxEmbeddingBackend)
+EMBEDDING_BACKENDS.register("fastembed", OnnxEmbeddingBackend)
+EMBEDDING_BACKENDS.register("minilm", OnnxEmbeddingBackend)
 
 # ST 后端的别名集合（归一后；缺省读 RAGSPINE_EMBEDDING_MODEL 仅对这些 spec 生效）。
 _ST_SPECS = frozenset({"qwen3", "sentence_transformers", "st"})
+
+# ONNX 后端的别名集合（归一后；缺省读 RAGSPINE_ONNX_EMBEDDING_MODEL 仅对这些 spec 生效）。
+_ONNX_SPECS = frozenset({"onnx", "fastembed", "minilm"})
 
 
 def make_embedding_backend(spec: str | None = None, **kwargs: Any) -> EmbeddingBackend | None:
@@ -291,7 +383,14 @@ def make_embedding_backend(spec: str | None = None, **kwargs: Any) -> EmbeddingB
     env 注入与 kwargs 透传。
 
     spec 取值（大小写/留白/连字符不敏感；缺省读环境变量 RAGSPINE_EMBEDDING_BACKEND）：
-        - None / 'none'                       -> None（纯 BM25+RRF，保持现状默认）
+        - None / 'none'                       -> None（纯 BM25+RRF，lean 零依赖默认）
+        - 'auto'                              -> 装了 [embed-onnx]（fastembed 可导入）则 OnnxEmbeddingBackend
+                                                 （真语义默认，BM25+dense→RRF）；否则 None（回落纯 BM25）
+                                                 ——"默认开 dense 在有语义后端时"的落地点，守 ADR 0005：
+                                                 extra 不在时 lean 行为逐位不变。
+        - 'onnx' / 'fastembed' / 'minilm'     -> OnnxEmbeddingBackend（真语义 ONNX，延迟 import，
+                                                 缺 fastembed 在首次 embed 时抛友好错；model_name 可经
+                                                 kwargs 或 RAGSPINE_ONNX_EMBEDDING_MODEL 覆盖）
         - 'deterministic'                     -> DeterministicEmbeddingBackend（dim 等经 kwargs 透传）
         - 'openai'                            -> OpenAIEmbeddingBackend（延迟 import，缺 SDK 抛友好错）
         - 'qwen3' / 'sentence-transformers' / 'st'
@@ -310,8 +409,20 @@ def make_embedding_backend(spec: str | None = None, **kwargs: Any) -> EmbeddingB
     normalized = (spec or "none").strip().lower().replace("-", "_").replace(" ", "_")
     if normalized == "none":
         return None
+    if normalized == "auto":
+        # auto＝"装了真语义后端就用、否则回落纯 BM25"。探测 fastembed 是否可导入（不加载模型）：
+        # 装了 [embed-onnx] -> 走 onnx；没装 -> None（lean 路径逐位不变，守 ADR 0005）。
+        try:
+            importlib.import_module("fastembed")
+        except ImportError:
+            return None
+        normalized = "onnx"
     if normalized in _ST_SPECS and "model_name" not in kwargs:
         env_model = os.environ.get(EMBEDDING_MODEL_ENV)
+        if env_model:
+            kwargs["model_name"] = env_model
+    if normalized in _ONNX_SPECS and "model_name" not in kwargs:
+        env_model = os.environ.get(ONNX_EMBEDDING_MODEL_ENV)
         if env_model:
             kwargs["model_name"] = env_model
     return EMBEDDING_BACKENDS.make(normalized, **kwargs)
