@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/
-verified-against: 3eccc8d
+verified-against: 0ee12fc
 ---
 
 # retrieval — agent contract
@@ -16,7 +16,12 @@ Narrative RAG. `chunking/` (paragraph-granular chunker + versioned store; the
 `DefaultChunker` that **delegates byte-identically** to `chunk_document` (entry
 point/signature preserved, all callers untouched) + `make_chunker` /
 `RAGSPINE_CHUNKER` config selector with `ragspine.chunkers` entry-point discovery,
-so semantic / contextual / parent-child strategies become swappable),
+so semantic / contextual / parent-child strategies become swappable — `layout_chunker.py`'s
+`LayoutAwareChunker` (W4b) is the first non-default: heading-boundary sections + `parent_id`/`heading`
+for small-to-big, opt-in via `make_chunker("layout")`, default still byte-identical),
+`contextual.py` (W4a — a deterministic, zero-fabrication context header built from controlled-vocab
+metadata, injected into **index/embed text only** via the opt-in `index_text_fn` seam on
+`HybridRetriever`/`NarrativeIndex`; `chunk.text`/citation untouched, default `None` = byte-identical),
 `lexical/` (Okapi BM25, CJK uni+bigram, RRF fusion — `HybridRetriever` delegates
 its vector **scoring** to the `VectorStore` seam), `vector/` (injectable embedding
 backends, default none = pure BM25; + the pluggable `VectorStore` seam — `store.py`
@@ -69,7 +74,11 @@ two judges — LLM listwise via `link/`, and the offline **local cross-encoder**
   persistence (`PersistencePolicy` + embed-at-ingest).
 - [`docs/chunker.md`](docs/chunker.md) — the `Chunker` seam: the `Protocol`, the
   `DefaultChunker` byte-identical delegation to `chunk_document`, the `make_chunker`
-  factory + entry-point discovery, and the provenance conformance pack.
+  factory + entry-point discovery, the provenance conformance pack, and `LayoutAwareChunker`
+  (W4b: heading-boundary layout + parent-child / small-to-big, opt-in, default byte-identical).
+- [`docs/contextual.md`](docs/contextual.md) — contextual retrieval (W4a): the deterministic,
+  zero-fabrication context header, the `index_text_fn` opt-in seam (index/embed text only, citation
+  + byte-identity preserved), and the `make_index_text_fn` / `RAGSPINE_CONTEXTUAL` selector.
 - [`docs/embedding-backend.md`](docs/embedding-backend.md) — the `EmbeddingBackend` seam: the
   real-semantic `OnnxEmbeddingBackend` default (W1, fastembed/`[embed-onnx]`), the `auto`
   default-on-dense mechanism that keeps the lean BM25 contract byte-identical, determinism +

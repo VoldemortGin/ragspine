@@ -136,7 +136,7 @@ def source_connector(request, source_tree):
 # 注册表：受 conformance 约束的 Chunker 实现（名字）。第三方实现在此追加一行 +
 # 在 _build_chunker 里补一行（或经 make_chunker 的 entry-point 自动发现）即继承整套 provenance pack。
 # ---------------------------------------------------------------------------
-CHUNKER_IMPLS = ("default",)
+CHUNKER_IMPLS = ("default", "layout")
 
 
 def _build_chunker(name: str):
@@ -145,6 +145,10 @@ def _build_chunker(name: str):
         from ragspine.retrieval.chunking.chunker import DefaultChunker
 
         return DefaultChunker()
+    if name == "layout":
+        from ragspine.retrieval.chunking.layout_chunker import LayoutAwareChunker
+
+        return LayoutAwareChunker()
     raise KeyError(name)
 
 

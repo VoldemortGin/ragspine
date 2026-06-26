@@ -32,6 +32,7 @@ from ragspine.retrieval.chunking.chunking import (
     DocumentMeta,
     chunk_document,
 )
+from ragspine.retrieval.contextual import IndexTextFn
 from ragspine.retrieval.rerank.listwise_rerank import DEFAULT_TOP_N, ListwiseJudge, listwise_rerank
 from ragspine.retrieval.vector.persistence_policy import IsolationFirstPolicy, PersistencePolicy
 from ragspine.retrieval.vector.store import InProcessVectorStore, VectorRecord, VectorStore
@@ -205,6 +206,13 @@ def _record_metadata(chunk: StoredChunk | Chunk) -> dict[str, str]:
     return md
 
 
+def _index_text(chunk: StoredChunk | Chunk, index_text_fn: IndexTextFn | None) -> str:
+    """块的【索引/嵌入文本】：注入了 index_text_fn 则用之（W4a contextual 确定性情境头进索引），
+    否则用原文 chunk.text（默认，逐位等价旧行为）。citation 用的 chunk.text 始终不被改动。
+    """
+    return index_text_fn(chunk) if index_text_fn is not None else chunk.text
+
+
 class HybridRetriever:
     """混合检索器：元数据预过滤 -> (BM25 + 向量) x multi-query -> RRF -> top_k。
 
@@ -229,6 +237,7 @@ class HybridRetriever:
         embedding_cache: dict[str, list[float]] | None = None,
         vector_store: VectorStore | None = None,
         manage_vectors: bool = True,
+        index_text_fn: IndexTextFn | None = None,
     ):
         self.chunks = list(chunks)
         self.embedding_backend = embedding_backend
@@ -237,6 +246,9 @@ class HybridRetriever:
         self.b = b
         self.rrf_k = rrf_k
         self.top_k = top_k
+        # 索引/嵌入文本缝（W4a contextual，opt-in）：None=用 chunk.text（默认，逐位等价旧行为）；
+        # 注入 contextual_index_text 则给 BM25 分词与块向量嵌入拼确定性情境头，citation 原文不变。
+        self.index_text_fn = index_text_fn
         # 块向量归谁管：True（默认）= 检索器惰性 embed 候选并 upsert（直连用法，逐位等价原内联）；
         # False = store-managed，块向量已由上层（NarrativeIndex 入库即嵌入落盘）灌好，检索只嵌 query
         # 并查 store，绝不重嵌块——持久化（sqlite-vec）由此「重启不重算」真正生效。
@@ -294,7 +306,9 @@ class HybridRetriever:
         queries = list(dict.fromkeys(raw_queries))
 
         # 3) 各通道打分与排名（仅对通过预过滤的候选）。
-        docs_tokens = [tokenize(c.text) for c in candidates]
+        #    索引文本经 index_text_fn（W4a contextual，默认恒等于 c.text）——BM25 分词与块向量嵌入
+        #    都吃它，让情境头进索引；citation 用的 c.text 不受影响。
+        docs_tokens = [tokenize(_index_text(c, self.index_text_fn)) for c in candidates]
         use_vector = self.embedding_backend is not None and self.vector_store is not None
         if use_vector:
             assert self.embedding_backend is not None and self.vector_store is not None
@@ -303,7 +317,9 @@ class HybridRetriever:
                 # 再灌入 VectorStore 缝；打分/排名由 store.query 负责（替代原内联 cosine 暴力扫）。
                 missing = [c for c in candidates if c.chunk_id not in self._embedding_cache]
                 if missing:
-                    vectors = self.embedding_backend.embed_texts([c.text for c in missing])
+                    vectors = self.embedding_backend.embed_texts(
+                        [_index_text(c, self.index_text_fn) for c in missing]
+                    )
                     for c, vec in zip(missing, vectors, strict=False):
                         self._embedding_cache[c.chunk_id] = vec
                 self.vector_store.upsert(
@@ -420,6 +436,7 @@ class NarrativeIndex:
         rerank_top_n: int = DEFAULT_TOP_N,
         vector_store: VectorStore | None = None,
         persistence_policy: PersistencePolicy | None = None,
+        index_text_fn: IndexTextFn | None = None,
     ):
         self.store = store
         self.embedding_backend = embedding_backend
@@ -429,6 +446,9 @@ class NarrativeIndex:
         self.overlap_chars = overlap_chars
         self.top_k = top_k
         self.rerank_top_n = rerank_top_n
+        # 索引/嵌入文本缝（W4a contextual，opt-in）：入库即嵌入与检索期 BM25 都吃它；
+        # None=用 chunk.text（默认，逐位等价旧行为）。citation 原文 chunk.text 始终不变。
+        self.index_text_fn = index_text_fn
         # 跨 retrieve 共享的向量打分缝（注入优先，否则有 embedding 后端时自建内存默认）；
         # 块向量在【入库时】嵌入并写进此 store（store-managed），retrieve 复用、不重嵌。
         if embedding_backend is not None:
@@ -454,7 +474,9 @@ class NarrativeIndex:
                 # RESTRICTED 块默认被 IsolationFirstPolicy 挡下——其衍生向量绝不写盘。
                 persistable = [c for c in chunks if self.persistence_policy.persistable(c)]
                 if persistable:
-                    vectors = self.embedding_backend.embed_texts([c.text for c in persistable])
+                    vectors = self.embedding_backend.embed_texts(
+                        [_index_text(c, self.index_text_fn) for c in persistable]
+                    )
                     self.vector_store.upsert(
                         [
                             VectorRecord(id=c.chunk_id, vector=tuple(vec), metadata=_record_metadata(c))
@@ -496,6 +518,7 @@ class NarrativeIndex:
             top_k=self.top_k,
             vector_store=self.vector_store,
             manage_vectors=False,  # 块向量已在入库时落盘——检索只嵌 query、查 store，绝不重嵌块。
+            index_text_fn=self.index_text_fn,  # contextual 情境头与入库口径一致（默认 None=不变）。
         )
         results = retriever.search(query, top_k=top_k)
         if not rerank or self.judge is None:

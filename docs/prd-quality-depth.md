@@ -248,11 +248,39 @@ metadata, never indexed. Chunking is fixed-char paragraph-greedy.
   zero fabrication) — so the embedded/lexical text carries situating context (Anthropic's contextual-retrieval
   technique, deterministic variant). An **opt-in** LLM-written context blurb behind `[llm]` is the higher-recall
   adapter, gated by the anti-fabrication discipline (context is metadata, never a citable fact).
+
+  > **✅ SHIPPED (deterministic core; LLM adapter = seam-only follow-up).** `retrieval/contextual.py` builds a
+  > **deterministic** context header from a chunk's already-known controlled-vocab metadata
+  > (`title · entity · period · heading`, **zero LLM, zero fabrication**) and exposes it as an `IndexTextFn`
+  > (`contextual_index_text`). The header enters the **index/embed text only** — never `chunk.text` — so
+  > `source_locator`, the citable original, and the **"chunk text = original substring"** provenance contract are
+  > untouched and `test_byte_identity_golden` stays green. Wired as an **opt-in seam**: `HybridRetriever` /
+  > `NarrativeIndex` default `index_text_fn=None` (BM25 tokenization **and** block-vector embedding both use
+  > `chunk.text` — byte-identical); injecting `contextual_index_text` makes both channels (and at-ingest persisted
+  > vectors) carry context while the query stays plain. Selected by `make_index_text_fn(spec)` /
+  > `RAGSPINE_CONTEXTUAL` env (mirrors `make_chunker`). RESTRICTED isolation is unaffected — context is index-only,
+  > RESTRICTED chunks are still dropped at the two exits and never persisted by the default policy. The LLM
+  > context-blurb adapter is left as a seam (any other `IndexTextFn`, behind `[llm]`) — **follow-up**. Contract:
+  > `retrieval/docs/contextual.md`.
 - **W4b — Layout-aware + parent-child chunking (the family-unique lever).** A `Chunker` strategy that chunks on
   **structural boundaries from the family extractors** (headings, sections, table edges from pdfspine/docspine),
   plus parent-child / small-to-big retrieval (retrieve small, expand to parent for synthesis). The breadth matrix
   lists `semantic · contextual · parent-child` as `Chunker` P1 strategies; W4 specs them to **exploit family
   layout**, which generic loaders (which see only `to_text()`) cannot.
+
+  > **◐ SHIPPED (layout-aware + parent-child seam; richer-family-structure = follow-up).** `LayoutAwareChunker`
+  > (`retrieval/chunking/layout_chunker.py`) is a new `Chunker` strategy, opt-in via `make_chunker("layout" |
+  > "parent_child")` / `RAGSPINE_CHUNKER` — **default stays `DefaultChunker`, byte-identical** (the Chunker seam's
+  > equality + golden tests untouched). It splits on **structural boundaries** (a deterministic heading heuristic:
+  > markdown `#`, numbered / `第N章` headings, short punctuation-free lines), **never merging across a section**;
+  > each child carries `parent_id` (`{doc_id}#s{k}`, the small-to-big parent handle) + `heading`, with
+  > `group_children_by_parent` for sibling expansion. Within a section it **reuses `chunk_document`** (same
+  > budget-greedy / overlap / oversized-split), only remapping to **global** paragraph numbers so locators stay
+  > citation-honest and `chunk.text` stays an original substring. It inherits the Chunker provenance conformance
+  > pack (registered in `tests/conformance` `CHUNKER_IMPLS`). **Follow-up:** feeding the *richer* structure the
+  > family extractors expose (heading levels, table edges from pdfspine/docspine), and persisting
+  > `parent_id`/`heading` through `chunk_store` + retrieval-time small-to-big expansion. Contract:
+  > `retrieval/docs/chunker.md`.
 
 ### W5 — Faithfulness / groundedness eval 🛡  (P1 → a new eval gate)
 
@@ -327,8 +355,8 @@ Legend: **kind** 🛡/⭐/🔧 · **status** ✅ have · ◐ partial · ✗ gap.
 | `.docx` ingestion | **no path** | `docspine` Extractor (tables→facts + paragraphs→chunks) | ⭐ | ✅ | W3b · P1 |
 | PPTX richness | `python-pptx` (color/chart/note) | `pptspine` (richer merges) opt-in; default stays `python-pptx` | ⭐ | ✅ | W3c · P1 |
 | Table richness in IR | docx/ppt fills `→None`; nested tables warned-and-dropped | family `fill→resolved_rgb` (SME-gated color path); nested → independent `StyledGrid` (no IR schema change) | ⭐ | ✅ | W3d · P1 |
-| Contextual retrieval | bare paragraph; context sidecar-only | deterministic context header + LLM adapter | ⭐ | ✗ | W4a · P1 |
-| Chunking | fixed-char paragraph-greedy | family-layout + parent-child | ⭐ | ✗ (proto ✅) | W4b · P1 |
+| Contextual retrieval | bare paragraph; context sidecar-only | deterministic context header + LLM adapter | ⭐ | ✅ (LLM adapter = seam) | W4a · P1 |
+| Chunking | fixed-char paragraph-greedy | family-layout + parent-child | ⭐ | ◐ (layout+parent-child opt-in; richer family struct follow-up) | W4b · P1 |
 | Faithfulness / groundedness eval | **unmeasured** (citation-match only) | claim-level NLI gate + free-text accuracy | 🛡 | ✗ | W5 · P1 |
 | Multi-hop / decomposition | deterministic Cartesian only | LLM decomposition (opt-in) | ⭐ | ✗ | W6a · P2 |
 | Corrective retrieval | one filter-drop retry | CRAG grade→act loop (opt-in) | ⭐ | ✗ | W6b · P2 |
@@ -347,7 +375,8 @@ Legend: **kind** 🛡/⭐/🔧 · **status** ✅ have · ◐ partial · ✗ gap.
 - **P1 — the depth that wins evaluations.**
   - **W2** ✅ local cross-encoder reranker (shipped — see the W2 SHIPPED note above);
     **W3b/W3c/W3d** docspine/pptspine extractors + richer IR;
-    **W4** contextual retrieval + family-layout/parent-child chunking; **W5** the groundedness eval gate.
+    **W4** ✅ contextual retrieval (W4a) + ◐ family-layout/parent-child chunking (W4b, opt-in — see the W4 SHIPPED
+    notes above); **W5** the groundedness eval gate.
 - **P2 — reasoning depth & governance.**
   - **W7a** structured relation graph (charter-native multi-hop) → **W7c** `GraphStore` seam →
     **W7b** opt-in narrative GraphRAG; **W6** agentic depth (decomposition / CRAG / multi-turn), all opt-in.

@@ -58,6 +58,9 @@ class Chunk:
         source_locator: 'prefix#para{起}' 或 'prefix#para{起}-{止}'（1-based，闭区间），
                         服务 citation 回指。
         para_start/end: 块覆盖的段落范围（1-based，含重叠回带的段落）。
+        parent_id:      父小节标识（small-to-big 检索的父句柄）；默认 ''（无层级，
+                        DefaultChunker 不填，向后兼容）。布局感知切块器填 '{doc_id}#s{节序}'。
+        heading:        所属小节标题（布局感知切块器填，亦可喂 contextual 情境头）；默认 ''。
     """
 
     chunk_id: str
@@ -74,6 +77,8 @@ class Chunk:
     period: str = ""
     language: str = ""
     sensitivity: str = "INTERNAL"
+    parent_id: str = ""
+    heading: str = ""
 
 
 def chunk_document(

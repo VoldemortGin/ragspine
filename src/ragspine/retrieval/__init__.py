@@ -4,7 +4,8 @@ RESTRICTED 隔离不变量：敏感度为 RESTRICTED 的内容在 link 与 reran
 被剥离，绝不进入 prompt。
 
 Submodules:
-    chunking/ — 段落级切块器 + 版本化块库。
+    chunking/ — 段落级切块器 + 版本化块库 + 布局感知/父子切块策略（W4b）。
+    contextual.py — 确定性 contextual retrieval（W4a）：受控元数据情境头进索引文本（opt-in）。
     lexical/ — 混合检索：Okapi BM25（CJK uni+bigram）+ 向量 + RRF 融合。
     link/ — 适配层：把检索接入 agent 编排（NarrativeRetriever 协议）。
     rerank/ — Claude listwise 精排，RRF 退化兜底。

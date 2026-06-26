@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/chunking/chunker.py
-verified-against: 443885a09c4377f83dcd1394d77a64962da5f0fe
+verified-against: 0ee12fc
 ---
 
 # Chunker seam — pluggable chunking strategy
@@ -39,6 +39,30 @@ increment, not a side effect.
 
 `"default"`, `"recursive"`, and `"structural"` are aliases for `DefaultChunker` (the paragraph-greedy
 recursive/structural chunker is what the capability matrix calls "recursive/structural").
+`"layout"` / `"parent_child"` / `"parent-child"` select `LayoutAwareChunker` (W4b, below).
+
+## Layout-aware + parent-child (W4b)
+
+`layout_chunker.py`'s `LayoutAwareChunker` is the first **non-default** strategy behind the seam —
+opt-in via `make_chunker("layout")` / `RAGSPINE_CHUNKER`; the default stays `DefaultChunker` and
+**byte-identical**. It splits on **structural boundaries** instead of fixed length:
+
+- `is_heading(line)` — a deterministic heuristic: markdown `#`, numbered (`1.` / `1.2` / `一、`) or
+  `第N章` headings, or a short punctuation-free line. `_sections` groups paragraphs into sections at
+  those boundaries; **a chunk never merges across a section.** Each child carries `parent_id`
+  (`{doc_id}#s{k}`) + `heading`; `group_children_by_parent` regroups siblings for **small-to-big**
+  expansion (retrieve the small child, expand to the parent section for synthesis).
+- **Within** a section it **reuses `chunk_document`** (same budget-greedy packing / overlap /
+  oversized sentence-or-hard split), then **remaps the local paragraph numbers back to global** ones
+  so `source_locator` / `para_start..para_end` stay citation-honest and `chunk.text` remains an
+  original-substring paragraph join. Param validation + empty/whitespace handling are inherited by
+  delegating the per-section call to `chunk_document`.
+
+`Chunk` gained two **optional, default-`""`** fields — `parent_id`, `heading` — so the addition is
+equality-safe (the `DefaultChunker == chunk_document` and byte-identity goldens still hold) and
+backward-compatible. **Follow-up (not this increment):** consuming the *richer* structure the family
+extractors expose (heading levels, table edges from pdfspine/docspine), and persisting
+`parent_id`/`heading` through `chunk_store` for retrieval-time parent expansion.
 
 ## Config selection (mirrors `make_vector_store`)
 
@@ -57,13 +81,14 @@ Built-in names resolve through a lazy-loader registry; importing `chunker.py` pu
 ## Conformance
 
 `tests/conformance/test_chunker_provenance.py` parametrizes over every registered chunker
-(`conftest.CHUNKER_IMPLS`) and asserts each emitted `Chunk` carries a non-null `doc_id` +
-`source_locator` through a single assertion core; a deliberately lineage-dropping stub chunker fed the
-same core **must fail**, proving the pack is non-vacuous (the same "honest reverse proof" used by the
-`VectorStore` and `SourceConnector` packs). A new chunker inherits the whole pack by adding one line
-to `CHUNKER_IMPLS`.
+(`conftest.CHUNKER_IMPLS` — now `("default", "layout")`) and asserts each emitted `Chunk` carries a
+non-null `doc_id` + `source_locator` through a single assertion core; a deliberately lineage-dropping
+stub chunker fed the same core **must fail**, proving the pack is non-vacuous (the same "honest
+reverse proof" used by the `VectorStore` and `SourceConnector` packs). A new chunker inherits the
+whole pack by adding one line to `CHUNKER_IMPLS`.
 
 ## What this is not
 
-The **strategies themselves** (semantic, contextual, parent-child) are the open P1 work. This
-increment ships only the seam + the existing default behind it.
+`semantic` chunking remains open P1 work. `contextual` retrieval shipped as an **index-text** concern,
+not a chunker — see [`contextual.md`](contextual.md) (W4a). `parent-child` + layout-awareness shipped
+as `LayoutAwareChunker` (W4b, above), with richer family-extractor structure as the named follow-up.

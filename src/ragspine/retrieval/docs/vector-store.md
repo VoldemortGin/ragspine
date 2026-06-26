@@ -6,7 +6,7 @@ covers:
   - src/ragspine/retrieval/vector/adapters/qdrant.py
   - src/ragspine/retrieval/vector/persistence_policy.py
   - src/ragspine/retrieval/lexical/retrieval.py
-verified-against: 18a866e
+verified-against: 0ee12fc
 ---
 
 # VectorStore seam — the pluggable vector index, and how it wires into retrieval
@@ -18,6 +18,13 @@ verified-against: 18a866e
 2. **The wiring** (`lexical/retrieval.py`) — `HybridRetriever` delegates its vector **scoring** to
    that seam instead of an inline cosine loop, so a real Qdrant / pgvector / sqlite-vec backend can
    be dropped in by config without touching the retriever.
+
+> **Contextual index-text seam (W4a).** `HybridRetriever` / `NarrativeIndex` also take an opt-in
+> `index_text_fn: IndexTextFn | None` (default `None`). The module-level `_index_text(chunk, fn)`
+> returns `chunk.text` when `fn is None` — so BM25 tokenization, lazy block embedding, **and**
+> at-ingest persisted embedding stay byte-identical — and the headered text when a `fn` (e.g.
+> `contextual_index_text`) is injected. The query is always embedded plain; `chunk.text`/citation is
+> never touched. See [`contextual.md`](contextual.md).
 
 ## The seam
 

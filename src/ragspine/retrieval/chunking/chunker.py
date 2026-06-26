@@ -79,14 +79,24 @@ def _load_default() -> type[Chunker]:
     return DefaultChunker
 
 
+def _load_layout() -> type[Chunker]:
+    """惰性加载布局感知 + 父子切块器（W4b）；import 留在此处以保持本模块零额外依赖。"""
+    from ragspine.retrieval.chunking.layout_chunker import LayoutAwareChunker
+
+    return LayoutAwareChunker
+
+
 _BUILTIN_LOADERS: dict[str, Callable[[], type[Chunker]]] = {
     "default": _load_default,
     "recursive": _load_default,
     "structural": _load_default,
+    "layout": _load_layout,
+    "parent_child": _load_layout,
+    "parent-child": _load_layout,
 }
 
 # 错误信息中展示的内置规范名（别名不重复列出，保持可读）。
-_BUILTIN_DISPLAY_NAMES = ("none", "default")
+_BUILTIN_DISPLAY_NAMES = ("none", "default", "layout")
 
 
 def _discover_entry_points() -> Sequence[Any]:
