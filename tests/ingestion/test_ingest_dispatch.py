@@ -708,3 +708,87 @@ def test_d10_ingest_excel_unchanged_no_spurious_enqueue(
     report = ingest_excel(excel_fixture_path, store, registry, queue)
     assert report.n_enqueued_review == 0
     assert queue.list_pending() == []
+
+
+# ===========================================================================
+# D11 — W3c：.pptx 可选 pptspine 抽取注入（默认仍 python-pptx，additive 不回归）
+# ===========================================================================
+class _FakePptxExtractor:
+    """测试用 pptx 表格 Extractor（registry 协议：extract + version）。
+
+    证明结构化 pptx 派发可注入备选抽取器——注入它即绕开 python-pptx（pptx_styled），
+    且血缘 extractor_version 随注入的解析器而变。返回空 grids（无需真造 StyledGrid）。
+    """
+
+    def __init__(self, *, version: str = "fake_pptx_v0") -> None:
+        self.version = version
+        self.calls: list[str] = []
+
+    def extract(self, path: object) -> list:
+        self.calls.append(str(path))
+        return []
+
+
+def test_d11_default_pptx_stays_python_pptx(store, registry, queue, tmp_path):
+    """铁律（additive 不回归）：未注入 pptx_extractor 时，.pptx 默认仍走 python-pptx
+    的 pptx_styled —— 血缘 extractor_version 为 'pptx_styled@1'（color/chart/note 不丢）。"""
+    from ragspine.ingestion.structured.ingestion import ingest_file
+
+    _init_three(store, registry, queue)
+    p = tmp_path / "acme_hk_deck.pptx"
+    _make_pptx_financial(p, entity_title=RESOLVABLE_ENTITY_TITLE)
+    ingest_file(p, store, registry, queue)  # 不注入 -> 默认 python-pptx
+    rows = store.query("REVENUE", "ACME_HK", "FY", "2024")
+    assert len(rows) == 1
+    assert rows[0].extractor_version == "pptx_styled@1"
+
+
+def test_d11_injected_pptx_extractor_is_used_and_stamped(
+    store, registry, queue, tmp_path, monkeypatch
+):
+    """user story：注入自定义 pptx Extractor，ingest_file 应改用它解析 .pptx（绕开
+    python-pptx），且血缘 extractor_version 随注入的解析器而变（多解析器并存可溯源）。"""
+    from ragspine.ingestion.structured.ingestion import ingest_file
+    import ragspine.ingestion.structured.ingestion as ingestion_mod
+
+    _init_three(store, registry, queue)
+    p = tmp_path / "acme_hk_deck.pptx"
+    _make_pptx_financial(p, entity_title=RESOLVABLE_ENTITY_TITLE)
+
+    captured: dict[str, object] = {}
+    real_ingest_grids = ingestion_mod._ingest_grids
+
+    def _spy(report, grids, *args, **kwargs):
+        captured["extractor_version"] = kwargs.get("extractor_version")
+        return real_ingest_grids(report, grids, *args, **kwargs)
+
+    monkeypatch.setattr(ingestion_mod, "_ingest_grids", _spy)
+    fake = _FakePptxExtractor(version="fake_pptx_v9")
+    report = ingest_file(p, store, registry, queue, pptx_extractor=fake)
+
+    assert fake.calls == [str(p)]  # 注入的 extractor 被调用（而非 python-pptx）
+    assert captured["extractor_version"] == "fake_pptx_v9"
+    assert report.status == "ok"
+
+
+def test_d11_pptspine_extractor_e2e_ingest(store, registry, queue, make_pptx, tmp_path):
+    """user story：注入家族 PptspineGridExtractor 后，pptspine 解析的 .pptx 表格事实
+    真正落库且可检索，血缘 extractor_version 为 'pptspine@1'（更富表合并的 opt-in 路径）。"""
+    pytest.importorskip("pptspine", reason="pptspine 未安装（pip install rag-spine[ppt]）")
+    from ragspine.extraction.extractors.pptspine_extractor import PptspineGridExtractor
+    from ragspine.ingestion.structured.ingestion import ingest_file
+
+    _init_three(store, registry, queue)
+    p = tmp_path / "acme_hk_deck.pptx"
+    make_pptx(p, [[("table", [
+        [RESOLVABLE_ENTITY_TITLE, "FY2024"],
+        ["REVENUE", "2680"],
+    ])]])
+    report = ingest_file(
+        p, store, registry, queue, pptx_extractor=PptspineGridExtractor()
+    )
+    assert report.status == "ok"
+    rows = store.query("REVENUE", "ACME_HK", "FY", "2024", channel="TOTAL")
+    assert len(rows) == 1
+    assert rows[0].value == 2680.0
+    assert rows[0].extractor_version == "pptspine@1"

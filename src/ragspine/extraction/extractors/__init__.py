@@ -9,7 +9,8 @@ Submodules:
     pdf_spine_extractor.py — 数字型 PDF 表格抽取器（pdfspine 封装，默认实现）。
     pdf_scanned_extractor.py — 扫描型 PDF OCR/VLM 抽取契约（两层策略）。
     pptx_extractor.py — PPTX 确定性抽取：原生表格与图表读数，零 OCR、零 LLM。
-    pptx_styled_extractor.py — PPT 增强抽取契约，与旧 pptx_extractor 并存。
+    pptx_styled_extractor.py — PPT 增强抽取契约，与旧 pptx_extractor 并存（默认 .pptx 路径）。
+    pptspine_extractor.py — PPTX 表格抽取器（pptspine 纯 Rust 封装，更富表合并，opt-in，W3c）。
     xlsx_extractor.py — XLSX 确定性抽取：5-yr summary 表按 schema 映射，零幻觉。
     xlsx_styled_extractor.py — XLSX 样式感知抽取器：每 sheet 产出一张 StyledGrid。
 """

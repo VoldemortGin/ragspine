@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/extraction/registry.py
-verified-against: 8b6b4d6
+verified-against: f6a075c
 ---
 
 # Extractor registry — mime → Extractor dispatch
@@ -38,11 +38,19 @@ that format.
 | mime (and suffix alias) | wraps |
 |---|---|
 | `application/pdf` · `.pdf` | `pdf_digital_extractor.extract_grids` |
-| `application/vnd.openxmlformats-officedocument.presentationml.presentation` · `.pptx` | `pptx_styled_extractor.extract_grids` |
+| `application/vnd.openxmlformats-officedocument.presentationml.presentation` · `.pptx` | `pptx_styled_extractor.extract_grids` (default `.pptx`) |
+| `pptx+pptspine` (`PPTX_PPTSPINE_SELECTOR`) | `pptspine_extractor.extract_grids` (W3c, **opt-in** richer-merges alternative) |
 | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` · `.xlsx` | `xlsx_styled_extractor.extract_grids` |
 | `application/vnd.openxmlformats-officedocument.wordprocessingml.document` · `.docx` | `docspine_extractor.extract_grids` (W3b) |
 
 Keys are normalized case- and whitespace-insensitively (`"  Application/PDF "` resolves).
+
+**W3c is additive, not a default swap.** `.pptx` / `PPTX_MIME` keep resolving to `pptx_styled` — that
+default already resolves theme/scheme colours, native charts, styled runs and speaker notes, which
+`pptspine` 0.1.0 does not (a naïve swap would *regress*). `pptspine` (pure-Rust, richer table merges) is
+reached only through the distinct **`"pptx+pptspine"`** selector here, or by injecting
+`ingest_file(..., pptx_extractor=PptspineGridExtractor())` in the structured pipeline — both opt-in,
+stamping `extractor_version="pptspine@1"`.
 
 ## Dispatch + extending without a router edit
 

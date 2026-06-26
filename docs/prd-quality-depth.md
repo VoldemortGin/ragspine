@@ -191,6 +191,27 @@ and OCR-internally consistent. Wiring them turns a rented surface into a moat.
   > fake extractor, plus real-docspine parse/ingest tests (offline, pure-Rust).
 - **W3c — `pptspine` Extractor (⭐, P1).** Replace `python-pptx` with `pptspine` for the structured + narrative
   PPTX path (richer merges, autoshapes, notes, embedded-image OCR via the same `ocrspine`).
+  > **✅ SHIPPED (additive, opt-in — *not* a default replacement).** `pptspine` (PyPI 0.1.0, pure-Rust
+  > PowerPoint/OOXML, Apache-2.0 → passes the ADR 0009 ≤Apache-2.0 licence gate) added as the **`[ppt]`**
+  > extra, lazy-imported. New `PptspineGridExtractor` (`extraction/extractors/pptspine_extractor.py`,
+  > `version="pptspine@1"`): each native table → a `StyledGrid` (`sheet="slide{N}_table{M}"`,
+  > `cell_ref="R{r}C{c}"`, `resolved_rgb=None`) with merge spans best-effort into the **existing** IR
+  > (`is_merged_origin` + `merge_span` from pptspine's resolved `col_span`/`row_span`; swallowed
+  > `hMerge`/`vMerge` continuation cells dropped) — **no IR change** (rich fills/nested-into-IR stays W3d).
+  > **Why opt-in, not the default (the honest call): `python-pptx` is *not* lossy here — the default
+  > `pptx_styled_extractor` already resolves theme/scheme fill colours, native charts, styled runs, and
+  > speaker notes, which `pptspine` 0.1.0 does *not*** (and pptspine 0.1.0 returns only the *first* table
+  > per slide — a graphicFrame-parse limit). So a naïve swap would **lose** colour/chart/note — a regression.
+  > W3c therefore ships `pptspine` as the **richer-merges opt-in** alternative while the default `.pptx` path
+  > stays `python-pptx` (byte-identical; every existing pptx_styled / colour / chart / note test green). Two
+  > opt-in seams: (1) **registry selector** `"pptx+pptspine"` (`registry.PPTX_PPTSPINE_SELECTOR`) dispatches
+  > to pptspine while `.pptx`/`PPTX_MIME` still resolve to `pptx_styled`; (2) **structured-dispatch injection**
+  > `ingest_file(..., pptx_extractor=PptspineGridExtractor())` overrides the default for the `.pptx` branch
+  > (mirrors the PDF `grid_extractor` seam), stamping `extractor_version="pptspine@1"` into fact lineage. Tested
+  > with a pure `zipfile`-synthesized minimal `.pptx` (no binary fixture, no `python-pptx`); wiring tested
+  > offline with a fake extractor, plus a real-pptspine parse/ingest e2e (`pytest.importorskip("pptspine")`,
+  > offline pure-Rust). *Follow-up:* lifting colour/chart/note + multi-table-per-slide onto pptspine (so it can
+  > become the default) tracks pptspine ≥ next release; richer fills/nested **into the IR** is W3d.
 - **W3d — preserve table richness into the IR (⭐, P1).** Extend `StyledGrid`/`StyledCell` so merges/nested/fills
   from pptspine/docspine survive (today pdfspine tables set `resolved_rgb=None` and ppt/doc richness is unreached),
   so cell-level citations and color/structure semantics resolve to page→table→cell across all three formats.
@@ -282,7 +303,7 @@ Legend: **kind** 🛡/⭐/🔧 · **status** ✅ have · ◐ partial · ✗ gap.
 | Rerank offline default | identity pass-through (LLM-only brain) | local cross-encoder (ONNX) | ⭐ | ✅ | W2 · P1 |
 | OCR default + scanned path | GPU PaddleOCR-VL; **scanned never OCR'd** | family OCR (pdfspine→ocrspine) default + scanned path wired | 🛡⭐ | ✅ | W3a · P0 |
 | `.docx` ingestion | **no path** | `docspine` Extractor (tables→facts + paragraphs→chunks) | ⭐ | ✅ | W3b · P1 |
-| PPTX richness | `python-pptx` (lossy) | `pptspine` (merges/nested/notes) | ⭐ | ◐ | W3c · P1 |
+| PPTX richness | `python-pptx` (color/chart/note) | `pptspine` (richer merges) opt-in; default stays `python-pptx` | ⭐ | ✅ | W3c · P1 |
 | Contextual retrieval | bare paragraph; context sidecar-only | deterministic context header + LLM adapter | ⭐ | ✗ | W4a · P1 |
 | Chunking | fixed-char paragraph-greedy | family-layout + parent-child | ⭐ | ✗ (proto ✅) | W4b · P1 |
 | Faithfulness / groundedness eval | **unmeasured** (citation-match only) | claim-level NLI gate + free-text accuracy | 🛡 | ✗ | W5 · P1 |

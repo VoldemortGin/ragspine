@@ -268,3 +268,168 @@ def make_docx():
         return path
 
     return _build
+
+
+# ===========================================================================
+# W3c（pptspine .pptx 线）fixture：纯 zipfile 合成最小 .pptx 的工厂（不落二进制
+# fixture、不引入 python-pptx）。仿照上方 make_docx 写法，纯追加，不改动既有内容。
+# 一个 .pptx 是 OOXML —— 一个装着 XML 部件的 zip 包。pptspine（纯 Rust）直接走 XML，
+# 故只需最小部件集（[Content_Types].xml + 根/演示文稿 rels + 每页 slide{N}.xml）即可解析。
+# 单元格合并经 a:tc 上的 gridSpan/rowSpan（锚点）+ hMerge/vMerge（延续格）表达，
+# 正是 pptspine 富表合并模型的来源（slide.rs 按本地名读取这些属性）。
+# ===========================================================================
+
+_PPTX_A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+_PPTX_R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+_PPTX_P_NS = "http://schemas.openxmlformats.org/presentationml/2006/main"
+_PPTX_TABLE_URI = "http://schemas.openxmlformats.org/drawingml/2006/table"
+_PPTX_EMPTY_RELS = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>'
+)
+_PPTX_ROOT_RELS = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+    '<Relationship Id="rId1" '
+    'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+    'Target="ppt/presentation.xml"/>'
+    "</Relationships>"
+)
+
+
+def _pptx_tc_xml(cell) -> str:
+    """cell 为 str 或 {'text','gridspan','rowspan','hmerge','vmerge'} dict（造合并表用）。
+
+    gridSpan/rowSpan 标在合并锚点格上；hMerge/vMerge 标在被吞的延续格上（空文本）。
+    """
+    if isinstance(cell, dict):
+        text = cell.get("text", "")
+        gridspan = cell.get("gridspan")
+        rowspan = cell.get("rowspan")
+        hmerge = cell.get("hmerge")
+        vmerge = cell.get("vmerge")
+    else:
+        text, gridspan, rowspan, hmerge, vmerge = cell, None, None, None, None
+    attrs = []
+    if gridspan:
+        attrs.append(f'gridSpan="{int(gridspan)}"')
+    if rowspan:
+        attrs.append(f'rowSpan="{int(rowspan)}"')
+    if hmerge:
+        attrs.append('hMerge="1"')
+    if vmerge:
+        attrs.append('vMerge="1"')
+    attr_str = (" " + " ".join(attrs)) if attrs else ""
+    body = (
+        f"<a:p><a:r><a:t>{_xml_escape(text)}</a:t></a:r></a:p>" if text else "<a:p/>"
+    )
+    return f"<a:tc{attr_str}><a:txBody>{body}</a:txBody><a:tcPr/></a:tc>"
+
+
+def _pptx_table_xml(rows) -> str:
+    trs = "".join(
+        f'<a:tr h="370840">{"".join(_pptx_tc_xml(c) for c in row)}</a:tr>'
+        for row in rows
+    )
+    return (
+        "<p:graphicFrame>"
+        '<p:xfrm><a:off x="838200" y="2000250"/><a:ext cx="7772400" cy="2000250"/></p:xfrm>'
+        f'<a:graphic><a:graphicData uri="{_PPTX_TABLE_URI}"><a:tbl>{trs}'
+        "</a:tbl></a:graphicData></a:graphic></p:graphicFrame>"
+    )
+
+
+def _pptx_textbox_xml(text: str) -> str:
+    return (
+        "<p:sp><p:spPr/><p:txBody>"
+        f"<a:p><a:r><a:t>{_xml_escape(text)}</a:t></a:r></a:p>"
+        "</p:txBody></p:sp>"
+    )
+
+
+def _pptx_slide_xml(shapes) -> str:
+    parts = []
+    for kind, payload in shapes:
+        if kind == "table":
+            parts.append(_pptx_table_xml(payload))
+        elif kind == "text":
+            parts.append(_pptx_textbox_xml(payload))
+        else:
+            raise ValueError(f"unknown pptx slide shape kind: {kind!r}")
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        f'<p:sld xmlns:a="{_PPTX_A_NS}" xmlns:r="{_PPTX_R_NS}" xmlns:p="{_PPTX_P_NS}">'
+        f'<p:cSld><p:spTree>{"".join(parts)}</p:spTree></p:cSld></p:sld>'
+    )
+
+
+def _pptx_content_types_xml(n_slides: int) -> str:
+    overrides = "".join(
+        f'<Override PartName="/ppt/slides/slide{i}.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>'
+        for i in range(1, n_slides + 1)
+    )
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" '
+        'ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/ppt/presentation.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>'
+        f"{overrides}</Types>"
+    )
+
+
+def _pptx_presentation_xml(n_slides: int) -> str:
+    sld_ids = "".join(
+        f'<p:sldId id="{256 + i}" r:id="rId{i}"/>' for i in range(1, n_slides + 1)
+    )
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        f'<p:presentation xmlns:a="{_PPTX_A_NS}" xmlns:r="{_PPTX_R_NS}" xmlns:p="{_PPTX_P_NS}">'
+        f'<p:sldIdLst>{sld_ids}</p:sldIdLst>'
+        '<p:sldSz cx="9144000" cy="6858000" type="screen4x3"/>'
+        "</p:presentation>"
+    )
+
+
+def _pptx_presentation_rels_xml(n_slides: int) -> str:
+    rels = "".join(
+        f'<Relationship Id="rId{i}" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" '
+        f'Target="slides/slide{i}.xml"/>'
+        for i in range(1, n_slides + 1)
+    )
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        f"{rels}</Relationships>"
+    )
+
+
+@pytest.fixture
+def make_pptx():
+    """合成最小 .pptx 的工厂（纯 zipfile，不依赖 python-pptx）。
+
+    slides 为有序列表，每项是该页的 shape 列表；shape 为 ('table', rows) 或
+    ('text', str)。rows 为 list[list[cell]]，cell 为 str 或
+    {'text','gridspan','rowspan','hmerge','vmerge'} dict（造合并表用）。返回
+    build(path, slides)。
+    """
+
+    def _build(path, slides):
+        n = len(slides)
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+            z.writestr("[Content_Types].xml", _pptx_content_types_xml(n))
+            z.writestr("_rels/.rels", _PPTX_ROOT_RELS)
+            z.writestr("ppt/presentation.xml", _pptx_presentation_xml(n))
+            z.writestr(
+                "ppt/_rels/presentation.xml.rels", _pptx_presentation_rels_xml(n)
+            )
+            for i, shapes in enumerate(slides, start=1):
+                z.writestr(f"ppt/slides/slide{i}.xml", _pptx_slide_xml(shapes))
+                z.writestr(f"ppt/slides/_rels/slide{i}.xml.rels", _PPTX_EMPTY_RELS)
+        return path
+
+    return _build

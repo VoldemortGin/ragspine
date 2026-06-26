@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/ingestion/
-verified-against: 8b6b4d6
+verified-against: f6a075c
 ---
 
 # ingestion — agent contract
@@ -38,7 +38,11 @@ ingestion + extraction), `review/` (SME human review-queue state machine).
 
 ## Read before editing
 
-<!-- TODO -->
+- **`ingest_file` carries opt-in extractor seams; defaults are byte-identical.** `.pdf` accepts
+  `grid_extractor` (digital) + `ocr_backend` (scanned); `.pptx` accepts `pptx_extractor` (W3c) — inject
+  a family `PptspineGridExtractor` for richer table merges, else the default stays python-pptx
+  (`pptx_styled@1`, which keeps colour/chart/note). The injected extractor's `version` is stamped into
+  fact lineage. Adding a seam must not change the no-injection path.
 
 ## Deep dives
 

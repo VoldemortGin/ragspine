@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/extraction/
-verified-against: 8b6b4d6
+verified-against: f6a075c
 ---
 
 # extraction — agent contract
@@ -13,7 +13,9 @@ in `src/ragspine/extraction/docs/`.
 
 Documents → a frozen StyledGrid IR. `extractors/` (xlsx / pptx / pdf, style- &
 color-aware; **`.docx` via pure-Rust `docspine`, `docspine_extractor`, W3b** — tables →
-`StyledGrid`, body paragraphs → narrative segments), `routing/` (per-page PDF triage), `color/` (color-semantics
+`StyledGrid`, body paragraphs → narrative segments; **`.pptx` *richer-merges* opt-in via pure-Rust
+`pptspine`, `pptspine_extractor`, W3c** — default `.pptx` stays python-pptx `pptx_styled`),
+`routing/` (per-page PDF triage), `color/` (color-semantics
 registry), `verification/` (dual-channel cross-check → review queue), `registry.py`
 (the `mime → Extractor` dispatch seam: a `@runtime_checkable` `Extractor` Protocol —
 `extract(path) → list[StyledGrid]` — + `get_extractor(mime)` / `register_extractor`
@@ -45,6 +47,17 @@ over the existing `extract_grids` impls).
   **into the IR** stays W3d (nested tables emit a grid warning, never silently dropped). Wired into
   structured (`ingestion._EXTRACTOR_BY_SUFFIX[".docx"/".docm"]`) **and** narrative
   (`narrative_extract.extract_docx_narrative`); legacy binary `.doc` is intentionally not registered.
+- **`pptspine_extractor` (W3c) is the *opt-in, additive* family `.pptx` extractor** — lazy-imported
+  `pptspine` (`[ppt]` extra, Apache-2.0). It is **not** the default: a naïve swap would *regress* —
+  python-pptx's `pptx_styled_extractor` already resolves theme/scheme colours, native charts, styled
+  runs and speaker notes, which pptspine 0.1.0 does not (and pptspine 0.1.0 returns only the first table
+  per slide). So the default `.pptx` path stays `pptx_styled`; pptspine is the **richer-merges** option,
+  selectable two ways: registry selector `registry.PPTX_PPTSPINE_SELECTOR` (`"pptx+pptspine"` →
+  pptspine, while `.pptx`/`PPTX_MIME` stay `pptx_styled`), or structured-dispatch injection
+  `ingest_file(..., pptx_extractor=PptspineGridExtractor())`. Each table → `StyledGrid`
+  (`sheet="slide{N}_table{M}"`, `cell_ref="R{r}C{c}"`, `resolved_rgb=None`); merge spans from pptspine's
+  resolved `col_span`/`row_span` → `is_merged_origin`+`merge_span`; rich fills/nested **into the IR** is W3d.
+  `version="pptspine@1"` stamps fact lineage when selected.
 - **The registry is a behavior-preserving thin wrap.** `registry.py` adds a `mime → Extractor`
   dispatch over the existing `extract_grids` functions; it does **not** change extractor behavior, and
   `routing/pdf_router.py` stays authoritative for the per-page digital/scanned PDF split. Add a new

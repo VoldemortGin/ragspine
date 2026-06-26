@@ -99,6 +99,15 @@ ocr = [
 doc = [
     "docspine>=0.1.0",
 ]
+# 家族 .pptx 抽取引擎（W3c，可选/opt-in）：pptspine —— 纯 Rust PowerPoint(OOXML)解析器
+# （信息无损：更富的表 merges gridSpan/rowSpan/hMerge/vMerge + autoshape + 内嵌图 OCR，
+# 内嵌 ocrspine PP-OCRv5）。Apache-2.0，过 ADR 0009 的 ≤Apache-2.0 许可门。
+# 延迟 import（pptspine_extractor 函数体内），不装 [ppt] 也能 import 核心、跑离线默认。
+# 默认 .pptx 仍走 python-pptx（pptx_styled，保 color/chart/note 不丢）；pptspine 是更富
+# 表合并的 opt-in 备选，经 registry 选择项 'pptx+pptspine' 或结构化派发注入 pptx_extractor 启用。
+ppt = [
+    "pptspine>=0.1.0",
+]
 # Agent 编排层接真实 Claude 时安装（mock 模式不需要，SDK 延迟 import）。
 # openai：OpenAIEmbeddingBackend（src/embedding_backends）用，同样延迟 import。
 llm = [
@@ -231,7 +240,7 @@ strict = true
 [[tool.mypy.overrides]]
 module = [
     "anthropic.*", "openai.*", "openpyxl.*", "paddleocr.*", "pypdfium2.*",
-    "sentence_transformers.*", "fastembed.*", "docling.*", "pdfspine.*", "docspine.*", "rq.*", "redis.*",
+    "sentence_transformers.*", "fastembed.*", "docling.*", "pdfspine.*", "docspine.*", "pptspine.*", "rq.*", "redis.*",
     "pptx.*", "markdown.*", "reportlab.*", "rootutils.*", "sqlite_vec.*", "pg8000.*",
     "qdrant_client.*", "yaml", "numpy.*", "torch.*",
 ]

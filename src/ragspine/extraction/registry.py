@@ -23,6 +23,11 @@ PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presen
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
+# W3c 备选选择项：.pptx 默认 mime/后缀仍分发到 python-pptx 的 pptx_styled（保 color/chart/
+# note）；显式用本选择项才切到家族 pptspine（更富表合并 gridSpan/rowSpan/hMerge/vMerge）。
+# 这是 additive opt-in —— 默认 .pptx 分发零行为变化（铁律），pptspine 经此独立 key 选用。
+PPTX_PPTSPINE_SELECTOR = "pptx+pptspine"
+
 
 class UnsupportedFormatError(LookupError):
     """请求一个未登记 mime/格式的抽取器时抛出。
@@ -92,11 +97,20 @@ def _load_docspine() -> Extractor:
     return _FunctionExtractor(extract_grids, name="docspine")
 
 
+def _load_pptspine() -> Extractor:
+    from ragspine.extraction.extractors.pptspine_extractor import extract_grids
+
+    return _FunctionExtractor(extract_grids, name="pptspine")
+
+
 _BUILTIN_LOADERS: dict[str, Callable[[], Extractor]] = {
     PDF_MIME: _load_pdf_digital,
     ".pdf": _load_pdf_digital,
+    # 默认 .pptx / PPTX_MIME -> python-pptx 的 pptx_styled（保 color/chart/note，铁律不回归）。
     PPTX_MIME: _load_pptx_styled,
     ".pptx": _load_pptx_styled,
+    # W3c opt-in 备选：'pptx+pptspine' -> 家族 pptspine（更富表合并）。默认分发不受影响。
+    PPTX_PPTSPINE_SELECTOR: _load_pptspine,
     XLSX_MIME: _load_xlsx_styled,
     ".xlsx": _load_xlsx_styled,
     DOCX_MIME: _load_docspine,

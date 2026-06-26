@@ -49,6 +49,7 @@ from ragspine.extraction.extractors import (
 )
 from ragspine.extraction.extractors.xlsx_styled_extractor import extract_grids
 from ragspine.extraction.ir import StyledGrid
+from ragspine.extraction.registry import Extractor
 from ragspine.extraction.routing import pdf_router
 from ragspine.ingestion.review.review_queue import ReviewQueue
 from ragspine.ingestion.structured.ingestion_manifest import ManifestStore
@@ -498,12 +499,16 @@ def ingest_file(
     valid_as_of: str | None = None,
     grid_extractor: pdf_digital_extractor.GridExtractor | None = None,
     ocr_backend: pdf_scanned_extractor.OcrBackend | None = None,
+    pptx_extractor: Extractor | None = None,
 ) -> IngestReport:
     """统一多格式分发入口：按后缀把文件路由到对应抽取器并复用共享入库逻辑。
 
     分发约定：
         - .xlsx/.xlsm -> xlsx_styled_extractor（extractor_version=xlsx_styled@1）；
-        - .pptx       -> pptx_styled_extractor（pptx_styled@1）；
+        - .pptx       -> 默认 python-pptx 的 pptx_styled_extractor（pptx_styled@1，保
+          color/chart/note）；注入 pptx_extractor（如家族 PptspineGridExtractor，W3c）则
+          改用它解析（更富表合并），血缘 extractor_version 随之而变（additive opt-in，
+          默认不注入时字节级不变）；
         - .docx/.docm -> docspine_extractor（docspine@1，纯 Rust 强表 gridSpan/vMerge/嵌套，
           W3b）；正文段落归叙事通路（narrative_extract.extract_docx_narrative）；
         - .pdf        -> 先 pdf_router.route()：
@@ -555,6 +560,11 @@ def ingest_file(
         return report
 
     extractor, extractor_version, file_type = spec
+    # W3c：.pptx 默认 python-pptx；注入 pptx_extractor 可切到更富表合并的家族 pptspine
+    # （opt-in，不注入时默认分发字节级不变）。血缘 extractor_version 随注入的解析器而变。
+    if suffix == ".pptx" and pptx_extractor is not None:
+        extractor = pptx_extractor.extract
+        extractor_version = getattr(pptx_extractor, "version", extractor_version)
     try:
         grids = extractor(path)
     except Exception as exc:  # noqa: BLE001 —— 失败不裸抛，落进报告（story #16）
