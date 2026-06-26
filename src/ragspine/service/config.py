@@ -21,6 +21,7 @@ from ragspine.agent.llm_provider import (
     LLMProvider,
     MockProvider,
 )
+from ragspine.retrieval.corrective import make_corrective_retriever
 from ragspine.retrieval.link.narrative_link import build_narrative_retriever
 from ragspine.retrieval.rerank.cross_encoder import make_reranker
 from ragspine.retrieval.vector.embedding_backends import make_embedding_backend
@@ -42,6 +43,8 @@ class ServiceConfig:
     base_url: str | None = None
     embedding: str = "auto"                 # "auto"(装[embed-onnx]→真语义ONNX,否则纯BM25) | "none" | "onnx" | "deterministic" | "openai"
     reranker: str = "none"                  # "none"(不重排,默认行为不变) | "cross_encoder"(本地[rerank]) | "auto"(装[rerank]即用,否则不重排)
+    query_decompose: str = "none"           # W6a 查询分解(opt-in): "none"(不分解,默认字节不变) | "llm"(注入provider的LLM多跳分解)
+    corrective: str = "none"                 # W6b 纠错检索(opt-in): "none"(默认,返回base本身字节不变) | "crag"(有界确定性 grade→act 环)
     vector_store: str = "none"              # "none" | "in_process" | "sqlite_vec"（后者需 [vector]）
     persistence_policy: str = "default"     # "default"(隔离优先) | "persist_everything"
     reference_date: str | None = None       # ISO "YYYY-MM-DD" or None
@@ -142,8 +145,11 @@ def open_narrative_retriever(
         persistence_policy=make_persistence_policy(config.persistence_policy),
         reranker=make_reranker(config.reranker),
     )
+    # W6b 纠错检索（opt-in）：默认 "none" → make_corrective_retriever 返回 retriever 本身（字节
+    # 不变）；"crag" 才包成有界确定性 grade→act 环。隔离继承自 base（RESTRICTED 已在出口剔除）。
+    wrapped: NarrativeRetriever = make_corrective_retriever(retriever, config.corrective)
     try:
-        yield retriever
+        yield wrapped
     finally:
         store.close()
 

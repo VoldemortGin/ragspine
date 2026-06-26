@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/
-verified-against: 0ee12fc
+verified-against: 9242275
 ---
 
 # retrieval — agent contract
@@ -38,7 +38,14 @@ the pool covers the true top-k for the conformance datasets so `sqlite_vec`/`pgv
 `listwise_rerank.py` orchestration + `ListwiseJudge` Protocol with RRF-fallback + RESTRICTED isolation;
 two judges — LLM listwise via `link/`, and the offline **local cross-encoder** `cross_encoder.py`
 (fastembed `TextCrossEncoder`, `[rerank]`, deterministic, opt-in via `make_reranker`)),
-`link/` (adapter wiring retrieval into the agent).
+`link/` (adapter wiring retrieval into the agent),
+`corrective.py` (**W6b corrective retrieval / CRAG, opt-in default-off**: `CorrectiveRetriever` wraps any base
+`NarrativeRetriever` and generalizes the lone `retry_without_filters` fallback into a **bounded** (`max_retries`
+clamped ≤2), **deterministic**, **traced** grade→act loop — retrieve→grade; low grade → `drop_filters` →
+`rewrite_query`; still low → refuse `[]`. Default grader `LexicalOverlapGrader` (zero model/network); LLM/CE
+grader = opt-in `RelevanceGrader` seam. `make_corrective_retriever` / `RAGSPINE_CORRECTIVE`, default `none`
+returns base unchanged (byte-identical). **Isolation inherited** — only ever returns a subset of the base's
+RESTRICTED-stripped output, never reads chunks directly).
 
 ## Invariants
 

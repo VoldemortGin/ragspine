@@ -326,11 +326,53 @@ unchanged — the determinism invariant is preserved by construction.
 
 - **W6a — LLM query decomposition** behind the existing `IntentParser`/`QueryRewriter` seams (ADR 0010 already
   decouples this): real multi-sub-question fan-out for "which region grew fastest and why" class queries.
+  > **✅ SHIPPED (opt-in, default-off).** `agent/decompose.py`: a `QueryDecomposer` Protocol + `LLMQueryDecomposer`
+  > (single-shot provider call → a JSON sub-question array; **bounded** by `max_subquestions`; **deterministic
+  > degrade** to `[question]` on `ProviderError` / non-JSON / empty) + a `make_decomposer` / `RAGSPINE_QUERY_DECOMPOSE`
+  > selector (`'none'`→None default; `'llm'`→only when a provider is injected). `answer_question` gains an opt-in
+  > `decomposer=` param: **default `None` ⇒ the entire existing body runs verbatim (byte-identical)**; when injected
+  > *and* the question truly splits (>1 sub-question), each sub-question re-runs the **full** `answer_question`
+  > (`decomposer=None`, no recursion) and the sub-answers are **deterministically concatenated** (route
+  > `decomposed`, sources de-duped, tool_results merged) — zero LLM in the synthesis itself. **Anti-fabrication +
+  > security inherited per sub-question**: each re-runs the deterministic security gate (a competitor sub-question
+  > is still out-of-scope-refused — home numbers never leak) and the found/not-found rewrite — decomposition only
+  > changes *what is asked*, never bypasses a guard. The default `RuleIntentParser` deterministic Cartesian
+  > (`expand_subtasks`) is untouched. Wired into the service via `ServiceConfig.query_decompose` (default `"none"`).
+  > Frozen by `tests/agent/test_query_decompose.py` (byte-identity, fan-out + aggregation, competitor-subquestion
+  > refusal, LLM-parse/bound/degrade). *Follow-up:* an LLM synthesis pass *over* the sub-answers (today's synthesis
+  > is deterministic concatenation, each sub-answer already guarded); HyDE / planning.
 - **W6b — Corrective retrieval (CRAG) / self-RAG**: relevance-grade retrieved context; on low grade,
   re-retrieve (drop filters / rewrite) or refuse — turning the single `retry_without_filters` fallback into a
   principled grade→act loop, with every action traced.
+  > **✅ SHIPPED (opt-in, default-off).** `retrieval/corrective.py`: `CorrectiveRetriever` wraps any base
+  > `NarrativeRetriever` and upgrades the lone `retry_without_filters` fallback into a **bounded, deterministic,
+  > traced grade→act loop** — retrieve→grade; on low grade act in order (`drop_filters` → `rewrite_query`, **capped
+  > at ≤2**: `max_retries` clamped to `0..2`); if still below `min_grade`, **refuse** (return `[]` → the narrative
+  > channel honestly says "未检索到"; refusing weak context is the anti-fabrication-safe choice). The default grader
+  > is the deterministic `LexicalOverlapGrader` (zero model / zero network — query content-token coverage by the
+  > retrieved union); an LLM / cross-encoder grader is an **opt-in `RelevanceGrader` seam** (follow-up). Every step
+  > emits a `GradeAction` trace via `emit_trace` (non-sensitive: action names + grades only, never snippet text).
+  > `make_corrective_retriever` / `RAGSPINE_CORRECTIVE` selector — default `"none"` returns the base **unchanged**
+  > (byte-identical). **Isolation inherited, not re-implemented**: the wrapper only ever returns a *subset* of the
+  > base's already-RESTRICTED-stripped output and never reads chunks directly (frozen by
+  > `tests/retrieval/corrective/test_corrective_isolation.py` — a real `NarrativeIndex` over a RESTRICTED chunk
+  > yields zero RESTRICTED, with a reverse-proof that the chunk IS in the store). Wired via `ServiceConfig.corrective`.
+  > *Follow-up:* the cross-encoder / LLM grader behind the `RelevanceGrader` seam.
 - **W6c — Conversational memory**: a stateless→multi-turn upgrade (follow-ups, coreference) behind the service
   layer, with the security gate + isolation re-asserted per turn.
+  > **◐ SHIPPED (minimal usable skeleton; LLM coreference + endpoint wiring = follow-up).** `service/conversation.py`:
+  > `ConversationMemory` (a **bounded** deque of `ConversationTurn` storing **only** the prior turn's home
+  > entity-code + period — non-sensitive metadata, never answer / value / chunk) + `resolve_followup` (deterministic
+  > carry-forward: a structured/composite follow-up missing entity/period is augmented with the prior turn's home
+  > slots via reverse-alias + period rendering, so the rule parser re-resolves them) + `ConversationSession.ask`.
+  > **Security re-asserted every turn**: each `ask` re-runs the **full** `answer_question` (the deterministic gate
+  > screens the augmented raw question); a competitor follow-up is still out-of-scope-refused, home context is
+  > **never** carried into an out-of-scope question (`resolve_followup` returns the question unchanged the moment
+  > `external_entity` is detected), and a refused turn is **never** remembered — so memory cannot leak RESTRICTED /
+  > competitor or turn a refusal into an answer (frozen by `tests/service/test_conversation.py`, incl. a
+  > "competitor-follow-up-after-home-turn still refused, 1702 never leaks" case). *Follow-up:* true LLM
+  > coreference / pronoun resolution; a multi-turn FastAPI endpoint (the skeleton is programmatic today, not yet
+  > endpoint-wired); the deterministic slot carry-forward is intentionally conservative, not full coreference.
 
 ### W7 — GraphRAG ⭐ (the headline) — two layers, charter-aligned  (P2)
 
@@ -379,9 +421,9 @@ Legend: **kind** 🛡/⭐/🔧 · **status** ✅ have · ◐ partial · ✗ gap.
 | Contextual retrieval | bare paragraph; context sidecar-only | deterministic context header + LLM adapter | ⭐ | ✅ (LLM adapter = seam) | W4a · P1 |
 | Chunking | fixed-char paragraph-greedy | family-layout + parent-child | ⭐ | ◐ (layout+parent-child opt-in; richer family struct follow-up) | W4b · P1 |
 | Faithfulness / groundedness eval | **unmeasured** (citation-match only) | claim-level entailment gate + free-text accuracy | 🛡 | ✅ (offline lexical-entailment default + free-text accuracy; ONNX-NLI / LLM-judge / context-precision-recall = follow-up) | W5 · P1 |
-| Multi-hop / decomposition | deterministic Cartesian only | LLM decomposition (opt-in) | ⭐ | ✗ | W6a · P2 |
-| Corrective retrieval | one filter-drop retry | CRAG grade→act loop (opt-in) | ⭐ | ✗ | W6b · P2 |
-| Conversational memory | stateless single-shot | multi-turn (opt-in) | ⭐ | ✗ | W6c · P2 |
+| Multi-hop / decomposition | deterministic Cartesian only | LLM decomposition (opt-in) | ⭐ | ✅ (opt-in fan-out; per-sub-q guard+gate; det. synthesis, LLM-synth = follow-up) | W6a · P2 |
+| Corrective retrieval | one filter-drop retry | CRAG grade→act loop (opt-in) | ⭐ | ✅ (bounded ≤2 det. grade→act; lexical grader default, CE/LLM grader = seam) | W6b · P2 |
+| Conversational memory | stateless single-shot | multi-turn (opt-in) | ⭐ | ◐ (bounded memory + det. carry-forward + per-turn gate; LLM coref / endpoint = follow-up) | W6c · P2 |
 | Structured relation graph | none (substrate exists) | deterministic typed graph + multi-hop | ⭐ | ✗ | W7a · P2 |
 | Narrative GraphRAG | none | entity/community (opt-in, provenance-bound) | ⭐ | ✗ | W7b · P2 |
 | Graph store seam | none | `GraphStore` Protocol + in-proc default + adapters | 🔧 | ✗ | W7c · P2 |
@@ -401,7 +443,8 @@ Legend: **kind** 🛡/⭐/🔧 · **status** ✅ have · ◐ partial · ✗ gap.
     deterministic default — see the W5 SHIPPED note above).
 - **P2 — reasoning depth & governance.**
   - **W7a** structured relation graph (charter-native multi-hop) → **W7c** `GraphStore` seam →
-    **W7b** opt-in narrative GraphRAG; **W6** agentic depth (decomposition / CRAG / multi-turn), all opt-in.
+    **W7b** opt-in narrative GraphRAG; **W6** ✅/◐ agentic depth (W6a decomposition ✅ · W6b CRAG ✅ · W6c
+    multi-turn ◐), all opt-in, default-off — the deterministic default loop and its byte-identical eval unchanged.
 
 Each piece follows the ADR 0005 promotion rule: experimental adapter until it has a real, CI-tested,
 conformance-bound path, then "core/supported."
@@ -487,6 +530,13 @@ conformance-bound path, then "core/supported."
   conformance but **not** a ratcheted A/B quantifying its precision lift over identity/RRF; that
   eval-delta lands with the W5 groundedness/eval gate (a depth item isn't "done" until the eval
   ratchet shows it improved the answer).
+- **Agentic-depth follow-ups (from W6).** W6 ships all three pieces **opt-in, default-off** (the deterministic
+  default loop + its byte-identical eval are unchanged). Carried: (W6a) an LLM **synthesis pass over the
+  sub-answers** — today the decomposition synthesis is deterministic concatenation (each sub-answer already
+  guarded); plus HyDE / planning. (W6b) the **cross-encoder / LLM `RelevanceGrader`** behind the seam — today the
+  grade is the offline deterministic lexical-overlap proxy. (W6c) **true LLM coreference / pronoun resolution** and
+  a **multi-turn FastAPI endpoint** — today the carry-forward is a conservative deterministic slot fill and the
+  session is programmatic, not yet endpoint-wired.
 - **Real entailment model + the richer groundedness metrics (from W5).** W5 ships the **offline
   deterministic** faithfulness + free-text answer-accuracy gates on a *lexical-overlap* entailment proxy
   (default, CI-green). Deferred behind the `EntailmentJudge` seam (`make_entailment_judge`): the real

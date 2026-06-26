@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from ragspine.agent.agent import AgentResult, answer_question
+from ragspine.agent.decompose import make_decomposer
 from ragspine.agent.intent import (
     CLARIFY_ASK_FIRST,
     CLARIFY_OUT_OF_SCOPE_ENTITY,
@@ -202,6 +203,9 @@ def ask(
             result = answer_question(
                 req.question, store, provider,
                 reference_date=ref, narrative_retriever=retriever,
+                # W6a 查询分解（opt-in）：默认 "none" → make_decomposer 返回 None →
+                # answer_question(decomposer=None) 主流程字节不变。"llm" 且注入 provider 才生效。
+                decomposer=make_decomposer(config.query_decompose, provider=provider),
             )
 
         summary = _tool_status_summary(result.tool_results)

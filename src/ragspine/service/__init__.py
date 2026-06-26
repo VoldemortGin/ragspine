@@ -9,6 +9,7 @@ Submodules:
     faq/ — SME 审核型 FAQ 短路缓存。
     tasks/ — 异步任务队列抽象 + worker 端 ingestion job。
     config.py — 服务层运行时配置（env RAGSPINE_*）与资源/provider 装配。
+    conversation.py — opt-in 多轮会话记忆（W6c）：跟进/指代；每轮重过 security gate + isolation。
 """
 
 from ragspine import _lazy_submodules

@@ -17,6 +17,7 @@ from typing import Protocol, cast, runtime_checkable
 
 from corespine import Usage
 
+from ragspine.agent.decompose import ROUTE_DECOMPOSED, QueryDecomposer
 from ragspine.agent.intent import (
     CLARIFY_ANSWER_WITH_ASSUMPTIONS,
     CLARIFY_ASK_FIRST,
@@ -472,6 +473,50 @@ def _emit_request_trace(
     emit_trace(None, **fields)
 
 
+def _answer_decomposed(
+    subquestions: list[str],
+    store: FactStore,
+    provider: LLMProvider,
+    *,
+    reference_date: date,
+    narrative_retriever: NarrativeRetriever | None,
+    intent_parser: IntentParser | None,
+) -> AgentResult:
+    """W6a 多跳分解 fan-out：每个子问题独立走 answer_question（带全部 guard + 安全门），
+    再确定性合成。
+
+    关键不变量：子答案是各通路 guard 后的【最终文本】（found/not-found 改写、安全门越权拒答、
+    血缘回指都已生效），合成只是确定性拼接 + 来源去重聚合——零 LLM、不夹带散文、不编造数字。
+    每个子问题重新跑完整 answer_question（decomposer 缺省 None，绝不递归分解），故安全门从每个
+    子问句独立复核：分解产出的竞品子问题照样被越权拒答，隔离/拒答不被绕过。
+    """
+    sub_results = [
+        answer_question(
+            sq, store, provider,
+            reference_date=reference_date,
+            narrative_retriever=narrative_retriever,
+            intent_parser=intent_parser,
+        )
+        for sq in subquestions
+    ]
+    lines = [f"多跳分解（{len(subquestions)} 个子问题）："]
+    sources: list[dict[str, object]] = []
+    tool_results: list[dict[str, object]] = []
+    for i, (sq, sub) in enumerate(zip(subquestions, sub_results, strict=True), start=1):
+        lines.append(f"\n【子问题 {i}】{sq}\n{sub.answer}")
+        tool_results.extend(sub.tool_results)
+        for src in sub.sources:
+            if src not in sources:
+                sources.append(src)
+    return AgentResult(
+        answer="\n".join(lines),
+        route=ROUTE_DECOMPOSED,
+        clarification=None,
+        tool_results=tool_results,
+        sources=sources,
+    )
+
+
 def answer_question(
     question: str,
     store: FactStore,
@@ -480,6 +525,7 @@ def answer_question(
     reference_date: date | None = None,
     narrative_retriever: NarrativeRetriever | None = None,
     intent_parser: IntentParser | None = None,
+    decomposer: QueryDecomposer | None = None,
 ) -> AgentResult:
     """单条问题端到端编排入口。
 
@@ -487,7 +533,23 @@ def answer_question(
     narrative_retriever：叙事检索实现（duck-typed 注入），缺省时叙事路坦白降级；
     intent_parser：意图解析器（ADR 0010 可插拔），缺省用零-LLM 规则实现。
         无论用哪个解析器，澄清网关里的安全门都从 raw_question 独立复核越权/竞品。
+    decomposer：W6a 查询分解器（opt-in，默认 None＝不分解，主流程逐位字节不变）。注入且把问题
+        真拆成 >1 子问题时，各子问题独立走本函数（带全部 guard + 安全门）再确定性合成；返回单
+        子问题（不可分解）时回落正常单发路由。
     """
+    # W6a：注入了分解器且真分解（>1 子问题）时走 fan-out；否则（含 decomposer=None）落到下方
+    # 既有主流程——此分支不命中时主流程逐位不变，默认 loop 字节等价。
+    if decomposer is not None:
+        ref0 = reference_date or date.today()
+        subquestions = decomposer.decompose(question, reference_date=ref0)
+        if len(subquestions) > 1:
+            return _answer_decomposed(
+                subquestions, store, provider,
+                reference_date=ref0,
+                narrative_retriever=narrative_retriever,
+                intent_parser=intent_parser,
+            )
+
     request_id = new_request_id()
     ctx = _TraceCtx()
     ref = reference_date or date.today()

@@ -4,7 +4,7 @@ covers:
   - src/ragspine/retrieval/link/
   - src/ragspine/retrieval/rerank/
   - src/ragspine/common/observability/
-verified-against: 3eccc8d
+verified-against: 9242275
 ---
 
 # Invariants (code-enforced)
@@ -50,6 +50,17 @@ volume, access-controlled, and excluded from routine backups. The `where`-filter
 **Frozen by** `tests/retrieval/lexical/test_persistence_ingest.py` (default policy persists zero
 RESTRICTED vectors; opt-in persists them) and the existing two-exit tests under
 `tests/retrieval/link/` and `tests/retrieval/rerank/`.
+
+**Inherited by the W6 opt-in agentic paths (decomposition / CRAG / multi-turn).** All three W6 features are
+opt-in, default-off, and re-use the existing exits rather than opening a new one: W6a query decomposition
+(`agent/decompose.py`) re-runs the **full** `answer_question` per sub-question, so the security gate + two
+exits screen every sub-question independently (a competitor sub-question is still out-of-scope-refused); W6b
+corrective retrieval (`retrieval/corrective.py`, `CorrectiveRetriever`) only ever returns a *subset* of its
+wrapped base retriever's already-RESTRICTED-stripped output and never reads chunks directly (frozen by
+`tests/retrieval/corrective/test_corrective_isolation.py` + reverse-proof); W6c conversational memory
+(`service/conversation.py`) re-screens the augmented question through the gate every turn and never carries
+home context into an out-of-scope question or remembers a refused turn (frozen by
+`tests/service/test_conversation.py`). None can leak RESTRICTED / bypass competitor refusal by construction.
 
 ## Privacy-aware traces
 

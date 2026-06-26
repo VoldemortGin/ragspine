@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/agent/
-verified-against: e9fc18f
+verified-against: 9242275
 ---
 
 # agent — agent contract
@@ -28,6 +28,13 @@ loop, LLM provider abstraction.
   `MockProvider` (offline, deterministic).
 - `query_tools.py` — profile-driven `query_metric` tool schema + execution
   (`found` / `not_found` / `unrecognized_param` — never fabricates).
+- `decompose.py` — **W6a query decomposition (opt-in, default-off).** `QueryDecomposer` Protocol +
+  `LLMQueryDecomposer` (provider→JSON sub-question array, bounded, deterministic degrade) +
+  `make_decomposer` / `RAGSPINE_QUERY_DECOMPOSE`. `answer_question(decomposer=…)` defaults `None`
+  ⇒ main loop **byte-identical**; when injected and the question splits (>1 sub-q), each sub-question
+  re-runs the **full** `answer_question` (`decomposer=None`, no recursion) and the guarded sub-answers
+  are deterministically concatenated (route `decomposed`). Security gate + anti-fabrication rewrite are
+  inherited **per sub-question** — a competitor sub-question is still out-of-scope-refused.
 
 ## Invariants
 

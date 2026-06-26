@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/service/
-verified-against: 3eccc8d
+verified-against: 9242275
 ---
 
 # service — agent contract
@@ -16,6 +16,16 @@ injection), RQ task queue (`FakeQueue` tests / `RQQueue` prod), ingestion jobs
 (worker-owned stores), FAQ short-circuit cache, and the **Dify workflow service**
 (`dify/` — L0 static gate + L1/L2 safe execution; ADR 0014): endpoints
 `/v1/dify/{analyze,compile,run,run/jobs}` reuse the app factory / DI / RQ queue.
+
+`conversation.py` is the **W6c multi-turn skeleton (opt-in, programmatic)**: `ConversationMemory` (bounded,
+stores only the prior turn's home entity-code + period — non-sensitive) + `resolve_followup` (deterministic
+carry-forward of those slots into a structured/composite follow-up that omits them) + `ConversationSession.ask`
+(re-runs the **full** `answer_question` every turn — the security gate re-screens the augmented question; a
+competitor follow-up is still refused, home context is never carried into an out-of-scope question, a refused
+turn is never remembered). Not yet endpoint-wired (follow-up). Two opt-in config knobs feed the agent path:
+`ServiceConfig.query_decompose` (W6a, `make_decomposer` in `routes.py`) and `ServiceConfig.corrective` (W6b,
+`make_corrective_retriever` in `open_narrative_retriever`) — both default `"none"` ⇒ the agent/retriever path is
+byte-identical.
 
 Built on the family core `corespine`: `ServiceConfig.from_env` uses `load_from_env`
 (3 legacy env aliases preserved); the task queue re-exports `corespine.JobStatus`,
