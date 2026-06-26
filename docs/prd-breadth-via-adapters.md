@@ -7,6 +7,10 @@
 > [ADR 0005](adr/0005-lean-core-experimental-isolation.md) (lean core + extras) and
 > [ADR 0009](adr/0009-dependency-and-framework-policy.md) (no orchestration lock-in, permissive-license-only).
 > Once a seam ships, its contract doc lives at `src/ragspine/<domain>/docs/*.md` with `covers:`.
+> **Companion:** [`prd-quality-depth.md`](prd-quality-depth.md) spends the ⭐ quality budget — semantic default,
+> local cross-encoder rerank, spine-family extraction/OCR integration, contextual/parent-child chunking,
+> groundedness eval, and GraphRAG (W7). This PRD *rents the 🔧 commodity surface*; that one *out-engineers the
+> ⭐ stages and proves the 🛡 invariants*.
 
 ## Problem statement
 
@@ -288,7 +292,9 @@ CI-tested path; until then it lives as a clearly-labeled experimental adapter.
   reference adapters per seam*, not parity with LangChain's integration count. The rest is community/3rd-party.
 - **A plugin marketplace / registry website.** Discovery is Python entry points + a docs table, not a hosted index.
 - **Runtime auto-selection / cost-based routing across backends.** Backends are chosen by config, not inferred.
-- **GraphRAG / knowledge-graph store.** A distinct quality-breadth (⭐) effort with its own PRD.
+- **GraphRAG / knowledge-graph store.** A distinct quality-depth (⭐) effort — **now specified in its own PRD:
+  [`prd-quality-depth.md`](prd-quality-depth.md) (workstream W7)**, with a charter-native deterministic structured
+  relation graph (W7a) + an opt-in, provenance-bound narrative GraphRAG (W7b) behind a `GraphStore` seam (W7c).
 - **Incremental sync / deletion-propagation engine** beyond the P2 seam stub — the lineage-correct delete is a
   meaty 🛡 design and gets its own PRD.
 - **Migrating existing concrete backends to a worse abstraction.** Formalizing `Extractor`/`Chunker` is a
