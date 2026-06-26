@@ -1,6 +1,6 @@
 [project]
 name = "rag-spine"
-version = "0.6.0"
+version = "0.7.0"
 description = "Framework-free backend RAG: deterministic dual-channel retrieval + agent orchestration with built-in anti-fabrication and source provenance."
 readme = "README.md"
 license = "Apache-2.0"
@@ -249,6 +249,6 @@ module = [
     "anthropic.*", "openai.*", "openpyxl.*", "paddleocr.*", "pypdfium2.*",
     "sentence_transformers.*", "fastembed.*", "docling.*", "pdfspine.*", "docspine.*", "pptspine.*", "rq.*", "redis.*",
     "pptx.*", "markdown.*", "reportlab.*", "rootutils.*", "sqlite_vec.*", "pg8000.*",
-    "qdrant_client.*", "yaml", "numpy.*", "torch.*",
+    "qdrant_client.*", "yaml", "numpy.*", "torch.*", "networkx.*",
 ]
 ignore_missing_imports = true

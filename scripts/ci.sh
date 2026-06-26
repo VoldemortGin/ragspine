@@ -35,7 +35,12 @@ echo "==> [5/8] test suite (excludes gpu + docling + network — the bulk; filte
 "$PY" -m pytest tests/ -q -m "not gpu and not docling and not network"
 
 echo "==> [6/8] docling extractor tests (own process — isolates 3rd-party ML nondeterminism)"
-"$PY" -m pytest tests/ -q -m "docling"
+# `[pdf-docling]` is an optional extra; on a lean gate (no docling installed) every docling
+# test self-skips and pytest exits 5 ("no tests ran"). Tolerate ONLY that — any real failure
+# (exit 1) still propagates and fails the gate.
+"$PY" -m pytest tests/ -q -m "docling" || { rc=$?; [ "$rc" -eq 5 ] \
+  && echo "  (no docling tests ran — [pdf-docling] not installed; lane skipped)" \
+  || exit "$rc"; }
 
 echo "==> [7/8] QA eval + baseline ratchet (4-gate: numeric / citation / refusal / clarification + fabrication; W5 groundedness: faithfulness / answer-accuracy; ratchets up, never down)"
 # tool = zero-LLM deterministic direct test; agent = answer_question + MockProvider.

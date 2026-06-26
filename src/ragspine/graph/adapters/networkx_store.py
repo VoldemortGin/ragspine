@@ -43,7 +43,7 @@ class NetworkxGraphStore:
 
     def __init__(self) -> None:
         try:
-            import networkx as nx  # type: ignore[import-untyped]
+            import networkx as nx
         except ImportError as exc:  # pragma: no cover
             raise ImportError(
                 "未安装 networkx：pip install 'ragspine[graph]' 或 pip install networkx"
