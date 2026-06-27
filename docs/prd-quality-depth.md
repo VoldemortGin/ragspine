@@ -437,6 +437,187 @@ first and the fabrication-risky layer stays opt-in.
 >   Leiden/Louvain hierarchical communities, incremental extraction, claim-anchoring, global map-reduce query
 >   orchestration — deliberately not built to avoid leaking non-determinism into the default path.
 
+### Second batch — 对标主流竞品的缺口补全 (W8–W12)
+
+After a round of benchmarking ragspine against the mainstream RAG stacks — **LlamaIndex · LangChain+LangGraph ·
+Haystack · RAGFlow · Dify · Weaviate · Vespa · Jina · Cohere + the 2025 frontier** — W1–W7 above already
+**shipped parity on the highest-leverage stages**: true semantic dense+BM25+RRF hybrid (W1), local cross-encoder
+rerank (W2), family layout / strong-table / OCR extraction (W3), Contextual Retrieval + layout/parent-child
+chunking (W4), faithfulness/groundedness eval (W5), agentic decomposition / CRAG / self-RAG / multi-turn (W6),
+and a deterministic structured relation graph + `GraphStore` seam + narrative-GraphRAG skeleton (W7). The
+**moat** that parity rides on — **anti-fabrication + provenance + the family's offline OCR / strong-table
+extraction + the offline deterministic charter** — is exactly what none of those competitors have.
+
+W8–W12 close the **remaining benchmarked gaps**, all under the same rules as the SHIPPED batch: **opt-in,
+default loop byte-identical**, holding [ADR 0001](adr/0001-dual-channel-determinism.md) determinism +
+[ADR 0005](adr/0005-lean-core-experimental-isolation.md) lean-core + [ADR 0009](adr/0009-dependency-and-framework-policy.md)
+permissive-license / lazy-extra, **reusing the existing seams** (the W2 `Reranker` / a thin postprocessor chain,
+`QueryRewriter`/`IntentParser`, `Chunker`, `EmbeddingBackend`/`VectorStore`), with every non-deterministic piece
+(LLM, vision) **default-off**. They are a tracked backlog (status ✗ in the gap matrix), not yet shipped —
+specified here to the same Workstream体例 as W1–W7. The same five-part contract applies (Protocol · offline
+default · thin adapter behind an extra · registry · conformance); these workstreams *reuse* existing seams rather
+than inventing new extension styles.
+
+### W8 — Post-retrieval postprocessor chain ⭐  (P1)
+
+**Gap:** after the W2 cross-encoder rerank, the reranked top-k goes straight to prompt assembly — there is **no
+node-postprocessor stage**. Three things every mainstream stack ships are missing: (1) **diversity de-dup** —
+near-duplicate chunks waste the context window; (2) **lost-in-the-middle reordering** — LLMs attend worst to the
+*middle* of a long context (Liu et al. 2023, *Lost in the Middle*), yet the reranked order puts the best hits
+exactly there; (3) **context / prompt compression** — verbose snippets dilute signal and burn tokens.
+
+**Deliverable:** a deterministic **node-postprocessor chain** that runs *after* the W2 cross-encoder rerank and
+*before* prompt assembly, on a thin `NodePostprocessor` seam (a `make_postprocessor` / `RAGSPINE_POSTPROCESSOR`
+selector mirroring `make_reranker`, composing an ordered list of processors). Three processors — two
+pure-deterministic, one with an opt-in heavy path:
+
+- **MMR diversity de-dup** (Maximal Marginal Relevance, Carbonell & Goldstein 1998) — **deterministic,
+  zero-model**: greedily pick the chunk maximizing `λ·relevance − (1−λ)·max-sim-to-already-picked`, dropping
+  near-duplicates. Benchmarks LlamaIndex `MMRPostprocessor` / `SimilarityPostprocessor`, Haystack
+  `DiversityRanker`.
+- **Lost-in-the-middle reorder** — **deterministic, zero-model**: reorder the surviving set so the
+  most-relevant land at the **head and tail** of the context and the least-relevant sit in the middle.
+  Benchmarks LlamaIndex `LongContextReorder`, Haystack `LostInTheMiddleRanker`.
+- **Context / prompt compression** — **deterministic extractive default**: a sentence-level relevance filter
+  keeping only sentences whose query content-token overlap clears a threshold (reuses the W5
+  `LexicalOverlapJudge` machinery, zero-model). The heavier path is **opt-in**: an abstractive / learned
+  compressor behind `[llm]` (LLM extract) or `[onnx]` — **LLMLingua-2** token-level compression. Benchmarks
+  LlamaIndex `SentenceEmbeddingOptimizer`, LangChain `ContextualCompressionRetriever`
+  (`LLMChainExtractor` / `LLMLinguaCompressor`).
+
+MMR + lost-in-the-middle are pure functions of (scores, lexical/embedding similarity) — byte-identical and
+legitimately *could* be on by default; but to **preserve byte-identity of the shipped loop** they ship
+**opt-in** (`make_postprocessor` default `None` ⇒ no chain ⇒ byte-identical), recommended-on rather than
+on-by-default. The compression's abstractive / LLMLingua path is opt-in behind the extra; its extractive default
+is deterministic. **Isolation inherited, not re-implemented**: a postprocessor only ever returns a
+*subset / reorder* of the already-RESTRICTED-stripped rerank output (the W6b `CorrectiveRetriever` idiom), so it
+cannot surface RESTRICTED. Benchmarks the full **LlamaIndex node-postprocessor chain · Haystack rankers ·
+LangChain `ContextualCompressionRetriever`**.
+
+*Follow-up:* embedding-based MMR similarity (vs lexical) once block vectors are retrieval-time available; the
+LLMLingua-2 ONNX weight pull (same "first-pull-then-offline" honesty as W1/W2); an A/B measuring compression
+token-savings vs answer-accuracy on the W5 gate (a depth item isn't done until the eval ratchet shows it
+improved / held the answer).
+
+### W9 — Query transformation ⭐  (P2, opt-in)
+
+**Gap:** query-side transforms are deterministic-only today — `RuleIntentParser`'s controlled-vocab synonym
+multi-query (`expand_subtasks` Cartesian) and W6a's opt-in LLM decomposition. There is no **HyDE** (hypothetical
+document embeddings), no **RAG-Fusion** (LLM multi-query → per-query retrieve → RRF), no **step-back prompting**
+(abstract the question to a more general one for better recall), and no **Adaptive-RAG** (route by query
+complexity: no-retrieval / single-hop / multi-hop). Competitors ship all four.
+
+**Deliverable:** a family of **opt-in, LLM-backed query transforms** on the existing `QueryRewriter` /
+`IntentParser` seam ([ADR 0010] already decouples query rewriting), selected by a `make_query_transform` /
+`RAGSPINE_QUERY_TRANSFORM` registry (mirroring `make_decomposer`), all **default-off and byte-identical** when
+unselected:
+
+- **HyDE** — an LLM writes a *hypothetical* answer to the query; that hypothetical doc is embedded and retrieval
+  runs against *its* vector (better dense recall for under-specified queries). Behind `[llm]` + `[embed-onnx]`.
+  Benchmarks LlamaIndex `HyDEQueryTransform`, LangChain `HypotheticalDocumentEmbedder`.
+- **RAG-Fusion** — an LLM generates N query variants, each is retrieved independently, results fused by **RRF**
+  (we already own RRF from W1). Benchmarks LlamaIndex `QueryFusionRetriever`, LangChain `MultiQueryRetriever`.
+- **Step-back prompting** — an LLM derives a more abstract "step-back" question; both original + step-back are
+  retrieved and merged (Zheng et al. 2023). A **deterministic variant** is possible (generalize up the
+  controlled-vocab dimension hierarchy, zero-LLM) — carried as follow-up.
+- **Adaptive-RAG** — an LLM (or deterministic heuristic) classifies query complexity and routes: no-retrieval
+  (parametric) / single-hop / multi-hop (→ hands off to W6a decomposition). Benchmarks LangGraph's
+  adaptive-rag.
+
+The deterministic synonym multi-query (existing) and W6a decomposition (existing) are the **deterministic
+basis**; W9 adds the LLM transforms as opt-in adapters over it. Every variant is LLM and **default-off** — the
+byte-identical default loop is unchanged by construction. **Anti-fabrication + security inherited**: HyDE's
+hypothetical doc is a *retrieval probe*, never a citable fact; each fused / step-back / routed sub-query re-runs
+the deterministic security gate (a competitor variant is still out-of-scope-refused — the W6a idiom, home
+numbers never leak). Benchmarks **LlamaIndex `HyDEQueryTransform` / `QueryFusionRetriever` · LangChain
+`MultiQueryRetriever` / HyDE · LangGraph adaptive-rag**.
+
+*Follow-up:* HyDE needs dense-on (W1's `auto`); the **deterministic step-back** (controlled-vocab generalization)
+as a zero-LLM variant; an A/B measuring recall lift per transform on the W5 harness.
+
+### W10 — RAPTOR + chunking strategies ⭐  (P2)
+
+**Gap:** chunking has W4b's layout / parent-child (opt-in) but **no multi-granularity tree** — no way to retrieve
+at theme level for global / thematic synthesis questions. **RAPTOR** (Recursive Abstractive Processing for
+Tree-Organized Retrieval, Sarthi et al. 2024) is the other mainstream global-synthesis route besides W7b
+narrative GraphRAG. And beyond W4b there is no **sentence-window** or **semantic** (embedding-boundary)
+chunking.
+
+**Deliverable:**
+
+- **RAPTOR multi-granularity tree** — recursively cluster chunks (UMAP + GMM as in the paper, or a
+  **deterministic clustering** default: agglomerative / connected-components over the embedding graph),
+  LLM-summarize each cluster, recurse → a tree whose nodes span fine detail → broad theme; retrieval can pull a
+  leaf (detail) **or** an internal node (theme), filling the global / multi-hop synthesis gap as a **second
+  route parallel to W7b**. **Clustering deterministic**; **summaries are `is_synthesis=True`, never citable as
+  fact** (reuses the W5 / W7b anti-fabrication discipline); **every node carries provenance** (its leaf chunks'
+  `source_doc_id` + locators). Behind `[llm]` (+ optional clustering extra), default-off. Benchmarks LlamaIndex
+  RAPTOR pack, RAGFlow RAPTOR.
+- **Sentence-window chunking** — index single sentences, expand to a ±N-sentence window at synthesis time
+  (precise retrieval, rich context). Benchmarks LlamaIndex `SentenceWindowNodeParser`.
+- **Semantic chunking** — split on embedding-similarity boundaries (consecutive sentences whose embedding
+  distance spikes start a new chunk) rather than fixed-char. Behind `[embed-onnx]`. Benchmarks LlamaIndex
+  `SemanticSplitterNodeParser`.
+
+All three ride the **existing `Chunker` seam** (`make_chunker` / `RAGSPINE_CHUNKER`), opt-in; the default
+`DefaultChunker` flat index stays **byte-identical**. RAPTOR is the heaviest (LLM summaries + clustering, behind
+extras); sentence-window is light; semantic needs `[embed-onnx]`. Benchmarks **LlamaIndex RAPTOR pack /
+`SentenceWindowNodeParser` / `SemanticSplitterNodeParser` · RAGFlow RAPTOR**.
+
+*Follow-up:* RAPTOR collapsed-tree vs tree-traversal retrieval modes; incremental tree updates on re-ingest; a
+**deterministic extractive cluster-summary** (zero-LLM RAPTOR variant, summaries still labeled syntheses) so a
+determinism-only deployment still gets multi-granularity; an A/B on global-synthesis golden cases.
+
+### W11 — Retrieval representation upgrade ⭐  (P2, heavy)
+
+**Gap:** retrieval is single-vector dense (W1 ONNX MiniLM) + BM25 → RRF. No **late-interaction / multi-vector**
+(ColBERT-style token-level MaxSim, a precision tier above single-vector dense) and no **learned-sparse** (SPLADE
+neural sparse, stronger than BM25 and still interpretable).
+
+**Deliverable:** two optional retrieval backends on the **existing `EmbeddingBackend` / `VectorStore` seams**
+(or a new **multi-vector seam** where single-vector cosine doesn't express the score):
+
+- **ColBERT / late-interaction** — token-level multi-vector embeddings scored by **MaxSim** late interaction
+  (sum over query tokens of max similarity to any doc token). Offline-first via **fastembed**'s
+  `LateInteractionTextEmbedding` (`colbert-ir/colbertv2.0`, Apache-2.0) or onnx, behind `[colbert]`. Needs a
+  **multi-vector index / store seam** (single-vector cosine `VectorStore` can't express MaxSim). Usable as a
+  **retriever** *or* a **reranker** (the W2 chain). Benchmarks Weaviate / Vespa / Jina ColBERT, LlamaIndex
+  `ColbertIndex` / `ColbertRerank`.
+- **SPLADE / learned-sparse** — neural sparse term-expansion vectors (interpretable like BM25, stronger).
+  Offline via fastembed `SparseTextEmbedding` (`prithivida/Splade_PP_en_v1`) / onnx, behind `[splade]`; fits a
+  sparse-vector store. Benchmarks Vespa SPLADE, the 2025 SPLADE-v3 frontier.
+
+**Heavy**: multi-vector indexes (N vectors / doc), model weights, "first-pull-then-offline". fastembed
+(Apache-2.0) keeps it offline-first and ADR-0009-clean. **Default hybrid (W1) unchanged** — these are opt-in
+backends behind extras, selected by config. **Inherits** the isolation conformance (RESTRICTED never surfaces) +
+provenance. Benchmarks **Weaviate / Vespa / Jina ColBERT · Vespa SPLADE · LlamaIndex `ColbertIndex` /
+`ColbertRerank` · the 2025 ColBERTv2 / SPLADE-v3 frontier**.
+
+*Follow-up:* a multi-vector `VectorStore` adapter (PLAID / Vespa-style index) for scale; a ColBERT-as-reranker
+(W2 chain) vs ColBERT-as-retriever A/B; storage-cost honesty (multi-vector indexes are large).
+
+### W12 — ColPali visual-document retrieval ⭐  (P2, heaviest)
+
+**Gap:** the family OCR→text route (W3a) loses page layout / figures when a question depends on visual structure
+(charts, dense financial tables, figure placement). There is **no vision-document retrieval** — embedding the
+page *as an image* and doing late interaction directly on it, **with no OCR→text step**. **ColPali / ColQwen2**
+(Faysse et al. 2024) is the mainstream route here, often markedly stronger on chart / figure-dense financial
+reports — a strong route **parallel to** (not replacing) W3a's offline OCR→text.
+
+**Deliverable:** an optional **page-as-image visual retriever** — render each page to an image, embed with
+**ColPali / ColQwen2** (a vision-language late-interaction model, e.g. fastembed
+`LateInteractionMultimodalEmbedding` / `vidore/colpali-v1.2` / `vidore/colqwen2-v0.1`), score by **MaxSim over
+patch embeddings** directly on the *image* (no OCR→text), preserving layout / chart / figure visual structure.
+**Reuses the W11 multi-vector / late-interaction seam** (it is late interaction over image patches instead of
+text tokens). Behind `[colpali]` (+ `[llm]` / vision). **Needs a GPU + a vision model** — **honestly annotated**:
+GPU dependency + first-pull weight download, **opt-in, default-off, never on the lean / CPU default path**.
+Offered **alongside** the W3a family-OCR→text route (both available; visual retrieval wins on chart-dense docs,
+OCR→text wins on offline / deterministic / CPU). Benchmarks **LlamaIndex ColPali · Weaviate / Vespa ColPali ·
+the 2025 ColPali / ColQwen frontier**.
+
+*Follow-up:* a CPU / quantized ColPali path if one matures; **fusing** visual-retrieval hits with the OCR→text
+channel (RRF over both routes); honest GPU / throughput benchmarking; ColQwen2 vs ColPali model choice.
+
 ## Gap matrix (depth)
 
 Legend: **kind** 🛡/⭐/🔧 · **status** ✅ have · ◐ partial · ✗ gap.
@@ -458,6 +639,11 @@ Legend: **kind** 🛡/⭐/🔧 · **status** ✅ have · ◐ partial · ✗ gap.
 | Structured relation graph | none (substrate exists) | deterministic typed graph + multi-hop | ⭐ | ✅ | W7a · P2 |
 | Narrative GraphRAG | none | entity/community (opt-in, provenance-bound) | ⭐ | ◐ (extract→community→summary skeleton, fake-LLM-tested; Leiden/incremental/global-query = follow-up) | W7b · P2 |
 | Graph store seam | none | `GraphStore` Protocol + in-proc default + adapters | 🔧 | ✅ | W7c · P2 |
+| Post-retrieval postprocessor | reranked top-k → prompt (no chain) | MMR de-dup + lost-in-the-middle reorder + context compression (det. default · LLMLingua-2 opt-in) — vs LlamaIndex `LongContextReorder`/`MMRPostprocessor`/`SentenceEmbeddingOptimizer` · Haystack `LostInTheMiddleRanker`/`DiversityRanker` · LangChain `ContextualCompressionRetriever` | ⭐ | ✗ | W8 · P1 |
+| Query transformation | det. synonym multi-query + W6a decomposition only | HyDE + RAG-Fusion + step-back + Adaptive-RAG (opt-in LLM) — vs LlamaIndex `HyDEQueryTransform`/`QueryFusionRetriever` · LangChain `MultiQueryRetriever`/HyDE · LangGraph adaptive-rag | ⭐ | ✗ | W9 · P2 |
+| Multi-granularity tree + chunking | flat index; W4b layout/parent-child only | RAPTOR recursive-cluster tree (det. cluster + `is_synthesis` summaries) + sentence-window + semantic chunking — vs LlamaIndex RAPTOR pack/`SentenceWindowNodeParser`/`SemanticSplitterNodeParser` · RAGFlow RAPTOR | ⭐ | ✗ | W10 · P2 |
+| Retrieval representation | single-vector dense + BM25 → RRF | ColBERT late-interaction (multi-vector MaxSim) + SPLADE learned-sparse, offline via fastembed — vs Weaviate/Vespa/Jina ColBERT · Vespa SPLADE · LlamaIndex `ColbertIndex`/`ColbertRerank` | ⭐ | ✗ | W11 · P2 |
+| Visual-document retrieval | OCR→text only (W3a) | ColPali/ColQwen2 page-as-image late interaction (GPU, opt-in) — vs LlamaIndex ColPali · Weaviate/Vespa ColPali · 2025 ColQwen | ⭐ | ✗ | W12 · P2 |
 
 ## Phasing
 
@@ -472,10 +658,19 @@ Legend: **kind** 🛡/⭐/🔧 · **status** ✅ have · ◐ partial · ✗ gap.
     **W4** ✅ contextual retrieval (W4a) + ◐ family-layout/parent-child chunking (W4b, opt-in — see the W4 SHIPPED
     notes above); **W5** ✅ the groundedness eval gate (faithfulness + free-text answer-accuracy, offline
     deterministic default — see the W5 SHIPPED note above).
+  - **W8** ✗ post-retrieval postprocessor chain (the competitor-benchmark batch's P1 item) — MMR de-dup +
+    lost-in-the-middle reorder (both deterministic, zero-model) + extractive context compression after the W2
+    cross-encoder; LLMLingua-2 / LLM compression opt-in. Ships opt-in to keep the loop byte-identical.
 - **P2 — reasoning depth & governance.**
   - **W7a** structured relation graph (charter-native multi-hop) → **W7c** `GraphStore` seam →
     **W7b** opt-in narrative GraphRAG; **W6** ✅/◐ agentic depth (W6a decomposition ✅ · W6b CRAG ✅ · W6c
     multi-turn ◐), all opt-in, default-off — the deterministic default loop and its byte-identical eval unchanged.
+  - **W9–W12** ✗ the rest of the competitor-benchmark batch, all opt-in / default-off behind extras: **W9** LLM
+    query transforms (HyDE / RAG-Fusion / step-back / Adaptive-RAG) on the `QueryRewriter` seam; **W10** RAPTOR
+    multi-granularity tree (det. clustering + `is_synthesis` summaries) + sentence-window / semantic chunking on
+    the `Chunker` seam; **W11** ColBERT late-interaction + SPLADE learned-sparse retrieval backends (heavy,
+    multi-vector seam); **W12** ColPali visual-document retrieval (heaviest, GPU-gated). The deterministic
+    default loop + its byte-identical eval stay unchanged.
 
 Each piece follows the ADR 0005 promotion rule: experimental adapter until it has a real, CI-tested,
 conformance-bound path, then "core/supported."
@@ -497,6 +692,16 @@ conformance-bound path, then "core/supported."
 7. As a security-minded operator, the new graph + rerank + OCR backends **inherit the isolation/provenance
    conformance packs** — a `RESTRICTED`-sourced node never surfaces in a traversal, the same way it can't surface
    in retrieval.
+8. As a LlamaIndex / Haystack user, I get the same **node-postprocessor** stage — MMR de-dup, lost-in-the-middle
+   reorder, context compression — but the deterministic processors keep the default loop **byte-identical and
+   offline** (W8), and I opt into LLMLingua-2 compression only when I want it.
+9. As a user who knows **HyDE / RAPTOR / ColBERT / ColPali** from the mainstream frameworks, I can opt into each
+   (LLM query transforms, a multi-granularity tree, late-interaction / learned-sparse retrieval, visual-document
+   retrieval) — yet `pip install ragspine` stays a deterministic, offline, byte-identical default loop (W9–W12),
+   and the LLM / vision pieces are default-off behind extras.
+10. As a security-minded operator, even the new postprocessor / query-transform / multi-vector / visual backends
+    **inherit the isolation + provenance conformance packs** — RESTRICTED never surfaces through an MMR reorder, a
+    fused sub-query, or a ColBERT / ColPali hit, and HyDE's hypothetical doc is never a citable fact.
 
 ## Implementation decisions
 
@@ -533,13 +738,25 @@ conformance-bound path, then "core/supported."
   lexical-hash + identity rerank — adapters are never on the default path.
 - **Graph multi-hop (W7a).** A peer-comparison / subsidiary-roll-up query returns the correct cited set on a
   fixture profile; a derivation-trace walks the `derived_from` edges deterministically.
+- **Byte-identity under opt-in (W8–W12).** With no postprocessor / query-transform / RAPTOR-chunker / multi-vector
+  backend selected (`make_postprocessor`/`make_query_transform`/`make_chunker`/`EmbeddingBackend` defaults), the
+  full pipeline is **byte-identical** to today; the determinism golden + lean smoke stay green. MMR + lost-in-the-
+  middle are deterministic, byte-identical across two runs (zero model).
+- **Isolation conformance, extended (W8/W11/W12).** A `RESTRICTED` candidate fed through the MMR / lost-in-the-
+  middle / compression postprocessor chain (W8), a fused / step-back sub-query (W9), or a ColBERT / ColPali hit
+  (W11/W12) is **never emitted**; HyDE's hypothetical doc never becomes a citable fact. Reverse-proof stubs fail.
 
 ## Out of scope (v1 of this PRD)
 
 - **A general graph database / Cypher surface.** W7c ships one offline default + one or two adapters behind the
   conformance kit, not a query-language engine.
-- **Training or fine-tuning embedders/rerankers/NLI models.** We ship *pinned, permissive, pre-trained* ONNX
-  models as offline defaults; training is out.
+- **Training or fine-tuning embedders/rerankers/NLI models — or any SOTA retrieval / vision model.** We ship
+  *pinned, permissive, pre-trained* models as offline defaults / opt-in backends (ONNX embedder/reranker/NLI,
+  and the W11/W12 ColBERT / SPLADE / ColPali / LLMLingua weights); authoring or fine-tuning a SOTA model is out.
+- **GPU as a default dependency.** W12 ColPali (and any vision-document route) needs a GPU + a vision model; it
+  is **opt-in, default-off, honestly annotated, never on the lean / CPU default path**. The CPU-offline
+  deterministic loop remains the product; the heavy W11 multi-vector / W12 visual backends are extensions over
+  it, not a new default.
 - **Real-time / streaming ingestion and cross-store incremental sync.** Lineage-correct deletion-propagation
   remains the breadth PRD's P2 🛡 concern.
 - **Full conversational agent / tool-marketplace.** W6 adds bounded, opt-in multi-hop + memory, not an

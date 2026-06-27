@@ -9,8 +9,11 @@
 > Once a seam ships, its contract doc lives at `src/ragspine/<domain>/docs/*.md` with `covers:`.
 > **Companion:** [`prd-quality-depth.md`](prd-quality-depth.md) spends the ⭐ quality budget — semantic default,
 > local cross-encoder rerank, spine-family extraction/OCR integration, contextual/parent-child chunking,
-> groundedness eval, and GraphRAG (W7). This PRD *rents the 🔧 commodity surface*; that one *out-engineers the
-> ⭐ stages and proves the 🛡 invariants*.
+> groundedness eval, and GraphRAG (W7) — plus the **competitor-benchmark batch W8–W12** (post-retrieval
+> postprocessor chain · LLM query transforms HyDE/RAG-Fusion/step-back/Adaptive-RAG · RAPTOR +
+> sentence-window/semantic chunking · ColBERT late-interaction + SPLADE learned-sparse retrieval · ColPali
+> visual-document retrieval), all opt-in / default-off. This PRD *rents the 🔧 commodity surface*; that one
+> *out-engineers the ⭐ stages and proves the 🛡 invariants*.
 
 ## Problem statement
 
@@ -155,13 +158,13 @@ Legend: **kind** 🛡/⭐/🔧 (own/own/adapt) · **status** ✅ have · ◐ par
 | Document extract | `Extractor` *(formalized)* | ⭐🔧 | PDF-digital·PPTX·XLSX | DOCX·HTML·MD·CSV via `unstructured`/`docling` `[pdf]` | ✅ registry | P0 reg ✓ · P1 fmts |
 | OCR | `OcrBackend` | 🔧 | mock | paddleocr `[ocr]` | ✅ | — |
 | Chunking | `Chunker` | ⭐ | recursive/structural | semantic · contextual · parent-child | ✅ proto | P0 proto ✓ · P1 strat |
-| Embedding | `EmbeddingBackend` | 🔧⭐ | lexical-hash (non-semantic) | sentence-transformers `[embed]` · OpenAI `[llm]` | ✅ | — |
+| Embedding | `EmbeddingBackend` | 🔧⭐ | lexical-hash (non-semantic) | sentence-transformers `[embed]` · OpenAI `[llm]` · multi-vector ColBERT `[colbert]` / SPLADE `[splade]` · ColPali visual `[colpali]` | ✅ single-vector · multi-vector/visual → [qd W11/W12](prd-quality-depth.md) | — |
 | Vector store | `VectorStore` | 🔧 | in-proc brute force | **sqlite-vec ✅ · pgvector ✅ · Qdrant ✅** · Milvus·FAISS·Chroma·LanceDB | ✅ seam + 3 adapters | P0 ✓ · more adapters P1 |
 | Graph store | `GraphStore` | 🔧 | **in-proc adjacency ✅** | **networkx ✅** · kuzu·neo4j | **✅ W7 landed** (see [quality-depth PRD](prd-quality-depth.md) W7c) | done · more adapters follow-up |
 | Lexical index | *(built-in)* | ⭐ | BM25 | — | ✅ | — |
-| Retrieve / fuse | `HybridRetriever` | ⭐ | BM25 + vector → RRF | — | ✅ | — |
-| Rerank | `ListwiseJudge` | ⭐ | identity | cross-encoder · Cohere · BGE `[rerank]` | ✅ proto / ✗ adapters | P1 |
-| Query transform | `QueryRewriter` | ⭐ | identity | multi-query · HyDE · self-query | ✅ proto | P1 |
+| Retrieve / fuse | `HybridRetriever` | ⭐ | BM25 + vector → RRF | late-interaction (ColBERT) / visual (ColPali) alt-retrievers | ✅ · alt-retrievers → [qd W11/W12](prd-quality-depth.md) | — |
+| Rerank | `ListwiseJudge` | ⭐ | identity | cross-encoder · Cohere · BGE `[rerank]` · ColBERT-rerank `[colbert]` | ✅ proto · cross-encoder ✅ ([qd W2](prd-quality-depth.md)) · +post-rerank postprocessor chain ([qd W8](prd-quality-depth.md)), ColBERT-rerank ([qd W11](prd-quality-depth.md)) | P1 |
+| Query transform | `QueryRewriter` | ⭐ | identity | multi-query · HyDE · RAG-Fusion · step-back · Adaptive-RAG · self-query | ✅ proto · transforms → [qd W9](prd-quality-depth.md) | P1 |
 | LLM provider | `LLMProvider` | 🔧 | MockProvider | Anthropic · OpenAI `[llm]` | ✅ | — |
 | Intent parse | `IntentParser` | 🛡 | rule-based | LLM-based | ✅ | — |
 | Task queue | `TaskQueue` | 🔧 | FakeQueue | RQ/Redis `[service]` | ✅ | — |
