@@ -21,8 +21,10 @@ from ragspine.agent.llm_provider import (
     LLMProvider,
     MockProvider,
 )
+from ragspine.agent.query_transform import make_query_transform_retriever
 from ragspine.retrieval.corrective import make_corrective_retriever
 from ragspine.retrieval.link.narrative_link import build_narrative_retriever
+from ragspine.retrieval.postprocess.chain import make_postprocessing_retriever
 from ragspine.retrieval.rerank.cross_encoder import make_reranker
 from ragspine.retrieval.vector.embedding_backends import make_embedding_backend
 from ragspine.retrieval.vector.persistence_policy import make_persistence_policy
@@ -43,8 +45,11 @@ class ServiceConfig:
     base_url: str | None = None
     embedding: str = "auto"                 # "auto"(装[embed-onnx]→真语义ONNX,否则纯BM25) | "none" | "onnx" | "deterministic" | "openai"
     reranker: str = "none"                  # "none"(不重排,默认行为不变) | "cross_encoder"(本地[rerank]) | "auto"(装[rerank]即用,否则不重排)
-    query_decompose: str = "none"           # W6a 查询分解(opt-in): "none"(不分解,默认字节不变) | "llm"(注入provider的LLM多跳分解)
+    query_decompose: str = "none"           # W6a/W9 查询分解(opt-in): "none"(默认字节不变) | "llm"(LLM多跳分解) | "adaptive"(W9 Adaptive-RAG:按复杂度路由单跳/多跳); llm/adaptive 需 provider
+    query_transform: str = "none"           # W9 查询变换(opt-in): "none"(默认字节不变) | "hyde" | "rag_fusion" | "step_back"; 均需注入 provider
     corrective: str = "none"                 # W6b 纠错检索(opt-in): "none"(默认,返回base本身字节不变) | "crag"(有界确定性 grade→act 环)
+    postprocessor: str = "none"              # W8 后检索链(opt-in): "none"(默认,不接链字节不变) | "mmr"/"reorder"/"compress"/"recommended"/"a,b,c"
+
     vector_store: str = "none"              # "none" | "in_process" | "sqlite_vec"（后者需 [vector]）
     persistence_policy: str = "default"     # "default"(隔离优先) | "persist_everything"
     reference_date: str | None = None       # ISO "YYYY-MM-DD" or None
@@ -145,9 +150,19 @@ def open_narrative_retriever(
         persistence_policy=make_persistence_policy(config.persistence_policy),
         reranker=make_reranker(config.reranker),
     )
-    # W6b 纠错检索（opt-in）：默认 "none" → make_corrective_retriever 返回 retriever 本身（字节
+    # W9 查询变换（opt-in）：默认 "none"（或未注入 provider）→ 返回 retriever 本身（字节不变）；
+    # "hyde"/"rag_fusion"/"step_back" 才包成 QueryTransformRetriever（变换查询→检索→RRF 融合）。
+    # 作为最内层（先变换检索，再 corrective 评分重试，最后 postprocess）。隔离继承自 base。
+    wrapped: NarrativeRetriever = make_query_transform_retriever(
+        retriever, config.query_transform, provider=provider
+    )
+    # W6b 纠错检索（opt-in）：默认 "none" → make_corrective_retriever 返回 wrapped 本身（字节
     # 不变）；"crag" 才包成有界确定性 grade→act 环。隔离继承自 base（RESTRICTED 已在出口剔除）。
-    wrapped: NarrativeRetriever = make_corrective_retriever(retriever, config.corrective)
+    wrapped = make_corrective_retriever(wrapped, config.corrective)
+    # W8 后检索 postprocessor 链（opt-in）：默认 "none" → 返回 wrapped 本身（字节不变）；选了才包成
+    # PostprocessingRetriever（MMR 去重/lost-in-the-middle 重排/抽取式压缩）。链是最外层，作用于
+    # corrective 的输出、prompt 组装之前。隔离继承自 base（只对已剔除 RESTRICTED 的输出做子集/重排）。
+    wrapped = make_postprocessing_retriever(wrapped, config.postprocessor)
     try:
         yield wrapped
     finally:

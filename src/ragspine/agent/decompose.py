@@ -95,6 +95,107 @@ def _parse_subquestions(text: str) -> list[str]:
     return subs
 
 
+# 复杂度标签：simple=单跳（单一检索即可），complex=多跳（需拆成子问题分别检索再综合）。
+COMPLEXITY_SIMPLE = "simple"
+COMPLEXITY_COMPLEX = "complex"
+
+# 启发式多跳信号（确定性、零 LLM）：并列/比较/归因复合等暗示需拆问。受控小集合，宁缺毋滥。
+_COMPARISON_CUES = ("对比", "相比", "比较", "分别", "各自", "哪个最", "排名", "vs", "versus")
+_CONJUNCTION_CUES = ("以及", "并且", "同时", "还有", "和为什么", "且", "并分析")
+_CAUSAL_CUES = ("为什么", "原因", "为何", "驱动", "归因")
+
+_ADAPTIVE_SYSTEM = (
+    "你是查询复杂度分类器。判断用户问题是【单跳】（simple，单一事实/单一检索即可回答）还是【多跳】"
+    "（complex，需拆成多个子问题分别检索再综合）。只输出一个词：simple 或 complex，不要任何解释。"
+)
+
+
+@runtime_checkable
+class QueryComplexityClassifier(Protocol):
+    """查询复杂度分类协议：问句 -> 'simple' | 'complex'。
+
+    默认实现是确定性启发式（HeuristicComplexityClassifier）；LLM 分类作 opt-in（LLMComplexityClassifier，
+    带启发式兜底）。Adaptive-RAG 用它在【单跳/多跳】间路由——本仓库反编造不变量禁止无依据的
+    parametric/no-retrieval 路由，故绝无"不检索直接答"一档。
+    """
+
+    def classify(
+        self, question: str, *, reference_date: date | None = None
+    ) -> str: ...
+
+
+class HeuristicComplexityClassifier:
+    """确定性启发式复杂度分类（零 LLM、零网络）：命中比较/复合归因/多疑问信号即判 complex，否则 simple。"""
+
+    def classify(
+        self, question: str, *, reference_date: date | None = None
+    ) -> str:
+        q = question
+        if any(cue in q for cue in _COMPARISON_CUES):
+            return COMPLEXITY_COMPLEX
+        if any(cue in q for cue in _CONJUNCTION_CUES):
+            return COMPLEXITY_COMPLEX
+        # 既问"是什么/多少"又问"为什么"——典型一句夹多跳。
+        causal = any(cue in q for cue in _CAUSAL_CUES)
+        factual = any(cue in q for cue in ("多少", "是多少", "是什么", "排名", "占比"))
+        if causal and factual:
+            return COMPLEXITY_COMPLEX
+        return COMPLEXITY_SIMPLE
+
+
+class LLMComplexityClassifier:
+    """LLM 复杂度分类（opt-in）：单轮问 simple/complex；provider 故障 / 回文不合规 -> 启发式兜底。"""
+
+    def __init__(
+        self,
+        provider: LLMProvider,
+        *,
+        fallback: QueryComplexityClassifier | None = None,
+    ):
+        self.provider = provider
+        self.fallback = fallback or HeuristicComplexityClassifier()
+
+    def classify(
+        self, question: str, *, reference_date: date | None = None
+    ) -> str:
+        try:
+            resp = self.provider.chat([
+                {"role": "system", "content": _ADAPTIVE_SYSTEM},
+                {"role": "user", "content": question},
+            ])
+        except ProviderError:
+            return self.fallback.classify(question, reference_date=reference_date)
+        text = (resp.choices[0].message.content or "").strip().lower()
+        if COMPLEXITY_COMPLEX in text:
+            return COMPLEXITY_COMPLEX
+        if COMPLEXITY_SIMPLE in text:
+            return COMPLEXITY_SIMPLE
+        return self.fallback.classify(question, reference_date=reference_date)
+
+
+class AdaptiveDecomposer:
+    """Adaptive-RAG（实现 QueryDecomposer 协议）：先分类复杂度，complex 才委托 base 分解器拆问。
+
+    simple -> [原问题]（answer_question 据此回落正常单发路由）；complex -> base 分解器.decompose（W6a
+    LLMQueryDecomposer）。把"是否值得拆"从无脑总拆，升级为按复杂度自适应路由——省调用、降误拆。
+    """
+
+    def __init__(
+        self,
+        decomposer: QueryDecomposer,
+        classifier: QueryComplexityClassifier | None = None,
+    ):
+        self.decomposer = decomposer
+        self.classifier = classifier or HeuristicComplexityClassifier()
+
+    def decompose(
+        self, question: str, *, reference_date: date | None = None
+    ) -> list[str]:
+        if self.classifier.classify(question, reference_date=reference_date) == COMPLEXITY_COMPLEX:
+            return self.decomposer.decompose(question, reference_date=reference_date)
+        return [question]
+
+
 def make_decomposer(
     spec: str | None = None, *, provider: LLMProvider | None = None
 ) -> QueryDecomposer | None:
@@ -104,6 +205,8 @@ def make_decomposer(
         - None / 'none'  -> None（不分解；answer_question 走既有确定性笛卡尔单发路由，字节不变）
         - 'llm'          -> 注入了 provider 则 LLMQueryDecomposer；未注入 provider 则 None
                             （"注入 provider 才生效"——诚实降级为不分解，绝不空跑）
+        - 'adaptive'     -> 注入了 provider 则 AdaptiveDecomposer(LLMQueryDecomposer, LLMComplexityClassifier)
+                            （W9 Adaptive-RAG：按复杂度路由 单跳/多跳，多跳才拆）；未注入 provider 则 None
         - 其他           -> ValueError
 
     返回 QueryDecomposer 实例或 None（可直接喂给 answer_question 的 decomposer 参数）。
@@ -119,6 +222,12 @@ def make_decomposer(
         if provider is None:
             return None
         return LLMQueryDecomposer(provider)
+    if normalized == "adaptive":
+        if provider is None:
+            return None
+        return AdaptiveDecomposer(
+            LLMQueryDecomposer(provider), LLMComplexityClassifier(provider)
+        )
     raise ValueError(
-        f"未知 query-decompose spec：{normalized!r}（可选 none / llm；llm 需注入 provider）"
+        f"未知 query-decompose spec：{normalized!r}（可选 none / llm / adaptive；llm/adaptive 需注入 provider）"
     )

@@ -7,6 +7,9 @@ Submodules:
     chunker.py — Chunker 缝：可插拔切块策略 Protocol + 行为等价的默认实现（薄壳委托）。
     chunking.py — 叙事通路切块器：文档级纯文本 + 元数据 → Chunk 列表。
     layout_chunker.py — 布局感知 + 父子切块策略（W4b，标题边界切 + parent_id/heading）。
+    sentence_window.py — sentence-window 切块策略（W10）：单句粒度 + ±N 句窗口上下文。
+    semantic_chunker.py — semantic 切块策略（W10）：相邻句嵌入相似度边界切（默认零依赖确定性后端）。
+    raptor.py — RAPTOR 多粒度树（W10）：递归聚类 + 摘要节点（is_synthesis），确定性聚类 + 抽取式摘要默认。
 """
 
 from ragspine import _lazy_submodules

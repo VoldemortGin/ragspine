@@ -136,7 +136,7 @@ def source_connector(request, source_tree):
 # 注册表：受 conformance 约束的 Chunker 实现（名字）。第三方实现在此追加一行 +
 # 在 _build_chunker 里补一行（或经 make_chunker 的 entry-point 自动发现）即继承整套 provenance pack。
 # ---------------------------------------------------------------------------
-CHUNKER_IMPLS = ("default", "layout")
+CHUNKER_IMPLS = ("default", "layout", "sentence_window", "semantic", "raptor")
 
 
 def _build_chunker(name: str):
@@ -149,6 +149,20 @@ def _build_chunker(name: str):
         from ragspine.retrieval.chunking.layout_chunker import LayoutAwareChunker
 
         return LayoutAwareChunker()
+    if name == "sentence_window":
+        from ragspine.retrieval.chunking.sentence_window import SentenceWindowChunker
+
+        return SentenceWindowChunker()
+    if name == "semantic":
+        # W10：默认零依赖确定性后端（不装 [embed-onnx] 也能跑 conformance）。
+        from ragspine.retrieval.chunking.semantic_chunker import SemanticChunker
+
+        return SemanticChunker()
+    if name == "raptor":
+        # W10：默认抽取式摘要 + 连通分量聚类 + 零依赖确定性后端（离线确定性建树）。
+        from ragspine.retrieval.chunking.raptor import RaptorChunker
+
+        return RaptorChunker()
     raise KeyError(name)
 
 
