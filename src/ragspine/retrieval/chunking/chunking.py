@@ -59,8 +59,14 @@ class Chunk:
                         服务 citation 回指。
         para_start/end: 块覆盖的段落范围（1-based，含重叠回带的段落）。
         parent_id:      父小节标识（small-to-big 检索的父句柄）；默认 ''（无层级，
-                        DefaultChunker 不填，向后兼容）。布局感知切块器填 '{doc_id}#s{节序}'。
+                        DefaultChunker 不填，向后兼容）。布局感知切块器填 '{doc_id}#s{节序}'；
+                        RAPTOR 树（W10）填父摘要节点 id。
         heading:        所属小节标题（布局感知切块器填，亦可喂 contextual 情境头）；默认 ''。
+        is_synthesis:   是否为合成/摘要节点（RAPTOR 树的内部节点，W10）；默认 False。合成节点是对
+                        子节点的概括，**绝不可引为事实**（同 W5/W7b 反编造纪律）——其血缘（doc_id +
+                        覆盖段范围）仍齐备，但语义是 synthesis 而非原文。与 parent_id/heading 同属
+                        切块期元数据，持久化列 + 检索期「合成节点不当事实」的落库强制是 follow-up
+                        （见 docs/prd-quality-depth.md W10；现状同 W4b parent_id 未落库）。
     """
 
     chunk_id: str
@@ -79,6 +85,7 @@ class Chunk:
     sensitivity: str = "INTERNAL"
     parent_id: str = ""
     heading: str = ""
+    is_synthesis: bool = False
 
 
 def chunk_document(

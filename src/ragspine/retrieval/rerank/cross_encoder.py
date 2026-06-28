@@ -124,6 +124,26 @@ RERANKERS.register("cross_encoder", CrossEncoderReranker)
 RERANKERS.register("ce", CrossEncoderReranker)
 RERANKERS.register("ms_marco", CrossEncoderReranker)
 
+
+# W11：ColBERT 晚交互 / SPLADE 学习稀疏作为 ListwiseJudge 接入同一精排链（隔离继承）。延迟 import
+# representation 子域（保持本模块零额外依赖、避免 rerank<->representation 环依赖），归 [colbert]/[splade]。
+def _make_colbert(**kwargs: Any) -> ListwiseJudge:
+    from ragspine.retrieval.representation.late_interaction import make_colbert_reranker
+
+    return make_colbert_reranker(**kwargs)
+
+
+def _make_splade(**kwargs: Any) -> ListwiseJudge:
+    from ragspine.retrieval.representation.learned_sparse import make_splade_reranker
+
+    return make_splade_reranker(**kwargs)
+
+
+RERANKERS.register("colbert", _make_colbert)
+RERANKERS.register("late_interaction", _make_colbert)
+RERANKERS.register("splade", _make_splade)
+RERANKERS.register("learned_sparse", _make_splade)
+
 # cross-encoder 后端的别名集合（归一后；缺省读 RAGSPINE_CROSS_ENCODER_MODEL 仅对这些 spec 生效）。
 _CROSS_ENCODER_SPECS = frozenset({"cross_encoder", "ce", "ms_marco"})
 
@@ -143,6 +163,10 @@ def make_reranker(spec: str | None = None, **kwargs: Any) -> ListwiseJudge | Non
         - 'cross_encoder' / 'ce' / 'ms_marco' -> CrossEncoderReranker（本地 cross-encoder，延迟 import，
                                                  缺 fastembed 在首次 judge 时抛友好错；model_name 可经
                                                  kwargs 或 RAGSPINE_CROSS_ENCODER_MODEL 覆盖）
+        - 'colbert' / 'late_interaction'      -> ColBERTReranker（W11 晚交互多向量 MaxSim，[colbert]，
+                                                 RAGSPINE_COLBERT_MODEL 覆盖）
+        - 'splade' / 'learned_sparse'         -> SpladeReranker（W11 学习稀疏点积，[splade]，
+                                                 RAGSPINE_SPLADE_MODEL 覆盖）
         - 其他                                -> ValueError（Registry 列清当前可用名）
 
     返回 ListwiseJudge 实例或 None（可直接喂给 build_narrative_retriever 的 reranker 参数）。

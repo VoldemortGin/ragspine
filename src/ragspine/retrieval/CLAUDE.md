@@ -18,7 +18,12 @@ point/signature preserved, all callers untouched) + `make_chunker` /
 `RAGSPINE_CHUNKER` config selector with `ragspine.chunkers` entry-point discovery,
 so semantic / contextual / parent-child strategies become swappable — `layout_chunker.py`'s
 `LayoutAwareChunker` (W4b) is the first non-default: heading-boundary sections + `parent_id`/`heading`
-for small-to-big, opt-in via `make_chunker("layout")`, default still byte-identical),
+for small-to-big, opt-in via `make_chunker("layout")`, default still byte-identical;
+**W10** adds three more on the same seam — `sentence_window.py` `SentenceWindowChunker` (±N-sentence window),
+`semantic_chunker.py` `SemanticChunker` (embedding-boundary split, zero-dep det. default backend),
+`raptor.py` `RaptorChunker` (recursive det. connected-components cluster + `ClusterSummarizer` seam with
+`ExtractiveSummarizer` zero-LLM default; synthesis nodes `is_synthesis=True`, provenance-bound, `parent_id`-linked) —
+all opt-in, default byte-identical; `Chunk.is_synthesis`/tree `parent_id` are chunking-time only (not yet persisted, like W4b)),
 `contextual.py` (W4a — a deterministic, zero-fabrication context header built from controlled-vocab
 metadata, injected into **index/embed text only** via the opt-in `index_text_fn` seam on
 `HybridRetriever`/`NarrativeIndex`; `chunk.text`/citation untouched, default `None` = byte-identical),
@@ -37,7 +42,21 @@ the pool covers the true top-k for the conformance datasets so `sqlite_vec`/`pgv
 — and `persistence_policy.py` gating what is written at rest), `rerank/` (the ⭐精排 exit:
 `listwise_rerank.py` orchestration + `ListwiseJudge` Protocol with RRF-fallback + RESTRICTED isolation;
 two judges — LLM listwise via `link/`, and the offline **local cross-encoder** `cross_encoder.py`
-(fastembed `TextCrossEncoder`, `[rerank]`, deterministic, opt-in via `make_reranker`)),
+(fastembed `TextCrossEncoder`, `[rerank]`, deterministic, opt-in via `make_reranker`);
+**W11** adds two more `ListwiseJudge` backends from `representation/` (registered in `make_reranker`):
+`ColBERTReranker` (`make_reranker("colbert")`, late-interaction MaxSim, `[colbert]`) and `SpladeReranker`
+(`make_reranker("splade")`, learned-sparse dot, `[splade]`) — both inherit RESTRICTED isolation via the
+same orchestration),
+`representation/` (**W11 retrieval representation upgrade, opt-in**: `late_interaction.py` `MultiVectorBackend`
+seam + `max_sim` + `ColBERTReranker` + `FastEmbedColBERTBackend`; `learned_sparse.py` `SparseEmbeddingBackend`
+seam + `sparse_dot` + `SpladeReranker` + `FastEmbedSpladeBackend`. Both land as `ListwiseJudge`s on the W2
+rerank seam — deterministic scoring given vectors, lazy fastembed load, RESTRICTED inherited; multi-vector/sparse
+as-retriever store = follow-up),
+`visual/` (**W12 ColPali visual-document retrieval, opt-in, GPU-gated, default-off**: `colpali.py`
+`VisualMultiVectorBackend` seam + `PageImage` + `ColPaliRetriever` (page-as-image patch MaxSim, **reuses W11
+`max_sim`**, RESTRICTED pages dropped at construction — never embedded/scored/returned, provenance-bound page
+hits) + `FastEmbedColPaliBackend` (`[colpali]`, lazy, needs GPU) + `make_colpali_retriever`. **Never on the
+CPU/offline default path**; alongside W3a OCR→text; OCR-fusion = follow-up),
 `link/` (adapter wiring retrieval into the agent),
 `corrective.py` (**W6b corrective retrieval / CRAG, opt-in default-off**: `CorrectiveRetriever` wraps any base
 `NarrativeRetriever` and generalizes the lone `retry_without_filters` fallback into a **bounded** (`max_retries`
@@ -45,7 +64,17 @@ clamped ≤2), **deterministic**, **traced** grade→act loop — retrieve→gra
 `rewrite_query`; still low → refuse `[]`. Default grader `LexicalOverlapGrader` (zero model/network); LLM/CE
 grader = opt-in `RelevanceGrader` seam. `make_corrective_retriever` / `RAGSPINE_CORRECTIVE`, default `none`
 returns base unchanged (byte-identical). **Isolation inherited** — only ever returns a subset of the base's
-RESTRICTED-stripped output, never reads chunks directly).
+RESTRICTED-stripped output, never reads chunks directly),
+`postprocess/` (**W8 post-retrieval postprocessor chain, opt-in default-off**: a thin `NodePostprocessor` seam
+(`chain.py` — `postprocess(query, snippets)→snippets`, **subset/reorder only**) + three processors —
+`mmr.py` `MMRPostprocessor` (deterministic MMR diversity de-dup, zero-model), `reorder.py` `LostInTheMiddleReorder`
+(deterministic, most-relevant→head/tail), `compress.py` `ExtractiveCompressor`/`CompressionPostprocessor`
+(deterministic sentence-level relevance filter; LLMLingua-2/LLM = opt-in `Compressor` seam follow-up).
+`PostprocessingRetriever` wraps any base `NarrativeRetriever` (the W6b idiom); `make_postprocessor` /
+`make_postprocessing_retriever` / `RAGSPINE_POSTPROCESSOR` — accepts single names, `recommended` preset
+(`mmr→compress→reorder`), or a comma-chain; default `none` returns base unchanged (byte-identical).
+**Isolation inherited** — only ever returns a subset/reorder of the base's RESTRICTED-stripped output,
+never reads chunks directly).
 
 ## Invariants
 

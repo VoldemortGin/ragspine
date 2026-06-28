@@ -86,6 +86,27 @@ def _load_layout() -> type[Chunker]:
     return LayoutAwareChunker
 
 
+def _load_sentence_window() -> type[Chunker]:
+    """惰性加载 sentence-window 切块器（W10）。"""
+    from ragspine.retrieval.chunking.sentence_window import SentenceWindowChunker
+
+    return SentenceWindowChunker
+
+
+def _load_semantic() -> type[Chunker]:
+    """惰性加载 semantic 切块器（W10，默认零依赖确定性后端，注入 ONNX 即真语义）。"""
+    from ragspine.retrieval.chunking.semantic_chunker import SemanticChunker
+
+    return SemanticChunker
+
+
+def _load_raptor() -> type[Chunker]:
+    """惰性加载 RAPTOR 多粒度树切块器（W10，默认抽取式摘要 + 连通分量聚类，确定性）。"""
+    from ragspine.retrieval.chunking.raptor import RaptorChunker
+
+    return RaptorChunker
+
+
 _BUILTIN_LOADERS: dict[str, Callable[[], type[Chunker]]] = {
     "default": _load_default,
     "recursive": _load_default,
@@ -93,10 +114,14 @@ _BUILTIN_LOADERS: dict[str, Callable[[], type[Chunker]]] = {
     "layout": _load_layout,
     "parent_child": _load_layout,
     "parent-child": _load_layout,
+    "sentence_window": _load_sentence_window,
+    "sentence-window": _load_sentence_window,
+    "semantic": _load_semantic,
+    "raptor": _load_raptor,
 }
 
 # 错误信息中展示的内置规范名（别名不重复列出，保持可读）。
-_BUILTIN_DISPLAY_NAMES = ("none", "default", "layout")
+_BUILTIN_DISPLAY_NAMES = ("none", "default", "layout", "sentence_window", "semantic", "raptor")
 
 
 def _discover_entry_points() -> Sequence[Any]:

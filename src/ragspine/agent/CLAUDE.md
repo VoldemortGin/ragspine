@@ -35,6 +35,18 @@ loop, LLM provider abstraction.
   re-runs the **full** `answer_question` (`decomposer=None`, no recursion) and the guarded sub-answers
   are deterministically concatenated (route `decomposed`). Security gate + anti-fabrication rewrite are
   inherited **per sub-question** — a competitor sub-question is still out-of-scope-refused.
+  **W9 Adaptive-RAG** lives here too: `AdaptiveDecomposer` gates `LLMQueryDecomposer` by a
+  `QueryComplexityClassifier` (`HeuristicComplexityClassifier` det. default + `LLMComplexityClassifier`
+  w/ heuristic fallback) — simple→`[question]`, complex→decompose; `make_decomposer("adaptive")`. The
+  competitor no-retrieval/parametric route is intentionally absent (anti-fabrication forbids ungrounded answers).
+- `query_transform.py` — **W9 query transformation (opt-in, default-off).** `QueryTransform` Protocol
+  (`transform(query)→list[str]`) + `QueryTransformRetriever` wrapping any base `NarrativeRetriever`
+  (per-query `base.retrieve` → multi-query **RRF** fuse via W1 `rrf_fuse`, single-query identity).
+  `HyDETransform` (hypothetical doc = retrieval probe, never citable), `RAGFusionTransform` (N variants, bounded),
+  `StepBackTransform` (abstract + original). `make_query_transform` / `make_query_transform_retriever` /
+  `RAGSPINE_QUERY_TRANSFORM`; all LLM-backed ⇒ no provider returns `None` (honest degrade), provider/parse
+  failure degrades to `[original]`. **Isolation inherited** — only subset/fuses the base's RESTRICTED-stripped
+  output; the answer still runs the security gate on the original question.
 
 ## Invariants
 
