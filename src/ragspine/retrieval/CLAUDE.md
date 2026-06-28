@@ -56,7 +56,12 @@ as-retriever store = follow-up),
 `VisualMultiVectorBackend` seam + `PageImage` + `ColPaliRetriever` (page-as-image patch MaxSim, **reuses W11
 `max_sim`**, RESTRICTED pages dropped at construction — never embedded/scored/returned, provenance-bound page
 hits) + `FastEmbedColPaliBackend` (`[colpali]`, lazy, needs GPU) + `make_colpali_retriever`. **Never on the
-CPU/offline default path**; alongside W3a OCR→text; OCR-fusion = follow-up),
+CPU/offline default path**; alongside W3a OCR→text),
+`fusion/` (**W12-B multi-route fusion, opt-in**: `route_fusion.py` `FusedRetriever` (NarrativeRetriever-shaped) +
+`make_fused_retriever` — RRF-fuses the OCR→text channel with the ColPali visual channel (reuses W1 `rrf_fuse`);
+same-`(doc,page)` cross-route hits **merge** (text hit is the representative — keeps LLM-usable text — and gains
+`visual_score`, a visual-confirmation boost). `visual=None` ⇒ passthrough (byte-identical). Isolation inherited —
+output is always a subset of the two legs' RESTRICTED-stripped hits; never wired by default (needs visual pages / GPU)),
 `link/` (adapter wiring retrieval into the agent),
 `corrective.py` (**W6b corrective retrieval / CRAG, opt-in default-off**: `CorrectiveRetriever` wraps any base
 `NarrativeRetriever` and generalizes the lone `retry_without_filters` fallback into a **bounded** (`max_retries`

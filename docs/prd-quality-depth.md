@@ -719,8 +719,18 @@ channel (RRF over both routes); honest GPU / throughput benchmarking; ColQwen2 v
 >   opt-in, default-off, offered **alongside** W3a OCR→text. Backend constructs lazily (no fastembed/GPU until
 >   first `retrieve`); page vectors embedded once and cached. 10 tests with a fake backend, mypy-strict clean.
 >
-> *Follow-ups (unchanged):* CPU/quantized ColPali; **RRF-fusing** visual hits with the OCR→text channel;
-> GPU/throughput benchmarking; ColQwen2 vs ColPali.
+> *Follow-ups:* CPU/quantized ColPali; GPU/throughput benchmarking; ColQwen2 vs ColPali.
+>
+> **W12-B SHIPPED (✅, RRF route fusion).** `retrieval/fusion/route_fusion.py` `FusedRetriever`
+> (NarrativeRetriever-shaped, drop-in for `answer_question`) RRF-fuses the OCR→text channel with the ColPali
+> visual channel (reuses W1 `rrf_fuse`): both legs retrieve → ranked by `(doc,page)` fusion key → same-page
+> cross-route hits **merge** (the text hit stays the representative so the answer remains LLM-usable, and gains a
+> `visual_score` visual-confirmation boost that lifts its rank above text-only hits) → top-k. `visual=None` ⇒
+> passthrough (no behavior change); page parsed from `page`/`source_locator` (`page`/`slide`, never `para`).
+> **Isolation inherited** — output is always a subset of the two legs' already-RESTRICTED-stripped hits (never
+> fabricates, never reads stores). Not auto-wired (needs visual pages / GPU); `make_fused_retriever`. 10 tests,
+> mypy-strict clean. *Remaining:* OCR→text chunks carrying page (richer cross-route agreement) + an end-to-end
+> chart-dense A/B.
 
 ## Gap matrix (depth)
 

@@ -7,6 +7,8 @@ Submodules:
     chunking/ — 段落级切块器 + 版本化块库 + 布局感知/父子切块策略（W4b）。
     contextual.py — 确定性 contextual retrieval（W4a）：受控元数据情境头进索引文本（opt-in）。
     corrective.py — opt-in 纠错检索（W6b）：有界确定性 grade→act 环；默认 none 时返回 base 本身、字节不变。
+    fusion/ — opt-in 多路融合（W12-B）：OCR→text 文本通道 + ColPali 视觉通道按 RRF 合一（同页跨腿合并 +
+        视觉确认 boost）；visual=None 时透传文本腿、隔离从两腿继承。
     lexical/ — 混合检索：Okapi BM25（CJK uni+bigram）+ 向量 + RRF 融合。
     link/ — 适配层：把检索接入 agent 编排（NarrativeRetriever 协议）。
     postprocess/ — opt-in 后检索 postprocessor 链（W8）：MMR 去重 + lost-in-the-middle 重排 +
