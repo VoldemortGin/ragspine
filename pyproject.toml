@@ -1,6 +1,6 @@
 [project]
 name = "rag-spine"
-version = "0.7.0"
+version = "0.8.0"
 description = "Framework-free backend RAG: deterministic dual-channel retrieval + agent orchestration with built-in anti-fabrication and source provenance."
 readme = "README.md"
 license = "Apache-2.0"
