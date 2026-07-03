@@ -86,6 +86,22 @@ def _load_layout() -> type[Chunker]:
     return LayoutAwareChunker
 
 
+def _load_sentence_window() -> type[Chunker]:
+    """惰性加载句子窗口切块器（W10）；import 留在此处以保持本模块零额外依赖。"""
+    from ragspine.retrieval.chunking.sentence_window_chunker import (
+        SentenceWindowChunker,
+    )
+
+    return SentenceWindowChunker
+
+
+def _load_semantic() -> type[Chunker]:
+    """惰性加载语义切块器（W10）；import 留在此处（其默认 embedder 亦延迟构造）。"""
+    from ragspine.retrieval.chunking.semantic_chunker import SemanticChunker
+
+    return SemanticChunker
+
+
 _BUILTIN_LOADERS: dict[str, Callable[[], type[Chunker]]] = {
     "default": _load_default,
     "recursive": _load_default,
@@ -93,10 +109,13 @@ _BUILTIN_LOADERS: dict[str, Callable[[], type[Chunker]]] = {
     "layout": _load_layout,
     "parent_child": _load_layout,
     "parent-child": _load_layout,
+    "sentence_window": _load_sentence_window,
+    "sentence-window": _load_sentence_window,
+    "semantic": _load_semantic,
 }
 
 # 错误信息中展示的内置规范名（别名不重复列出，保持可读）。
-_BUILTIN_DISPLAY_NAMES = ("none", "default", "layout")
+_BUILTIN_DISPLAY_NAMES = ("none", "default", "layout", "sentence_window", "semantic")
 
 
 def _discover_entry_points() -> Sequence[Any]:

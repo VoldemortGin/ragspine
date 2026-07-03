@@ -603,6 +603,30 @@ as a zero-LLM variant; an A/B measuring recall lift per transform on the W5 harn
 
 ### W10 — RAPTOR + chunking strategies ⭐  (P2)
 
+> **✅ SHIPPED (all opt-in / default-off; the default `DefaultChunker` flat index + the default retrieval loop
+> stay byte-identical — no default-path file changed).** Three new capabilities on the existing seams,
+> benchmarked against **LlamaIndex RAPTOR pack / `SentenceWindowNodeParser` / `SemanticSplitterNodeParser` ·
+> RAGFlow RAPTOR**. (1) **RAPTOR** (`retrieval/raptor.py`): `build_raptor_tree` drops RESTRICTED at the door,
+> builds leaves from chunks, then recurses with **deterministic threshold clustering** (`cluster_by_similarity`
+> — cosine≥τ edges + union-find connected components, the W7b `detect_communities` idiom, **zero randomness**,
+> so same chunks + same embedder ⇒ byte-identical tree) + a per-cluster **`is_synthesis=True` summary** (never a
+> citable fact; numbers stay structured; the LLM summarizer forbids numbers) carrying the **union of its members'
+> provenance** (`⊆` leaf lineage, never fabricated). `RaptorSummarizer` seam: a deterministic zero-LLM
+> `ExtractiveRaptorSummarizer` default (this also lands the "deterministic extractive cluster-summary" follow-up)
+> + an opt-in `LLMRaptorSummarizer` (`[llm]`, degrades to extractive on provider failure). `RaptorTree.retrieve`
+> is collapsed-tree multi-granularity (leaf **or** theme); `RaptorRetriever` is an opt-in `NarrativeRetriever`
+> wrapper; `make_raptor_summarizer` / `make_raptor_retriever` + `RAGSPINE_RAPTOR*`, default `none` returns base
+> unchanged. **Isolation** is frozen with an honest reverse-proof. (2) **Sentence-window**
+> (`SentenceWindowChunker`): one chunk per sentence + a `window_text` (a new optional, default-`""` `Chunk`
+> field — equality-safe) for synthesis-time expansion. (3) **Semantic** (`SemanticChunker`): embedding-distance
+> boundary splits, reusing `chunk_document` per segment; default zero-dep deterministic lexical-hash embedder
+> (offline), real ONNX (`[embed-onnx]`) injectable. Both chunkers ride the existing `make_chunker` /
+> `RAGSPINE_CHUNKER` seam and inherit the provenance conformance pack (`CHUNKER_IMPLS` grew to four). No new
+> dependency (stdlib union-find + math cosine + existing embedders). Contracts:
+> `src/ragspine/retrieval/docs/raptor.md` + `src/ragspine/retrieval/docs/chunker.md`. *Follow-up:* UMAP+GMM
+> soft-clustering opt-in adapter; collapsed-tree vs tree-traversal A/B; retrieval-time window/parent expansion;
+> sub-paragraph semantic boundaries; threading synthesis nodes into `answer_question` behind citation suppression.
+
 **Gap:** chunking has W4b's layout / parent-child (opt-in) but **no multi-granularity tree** — no way to retrieve
 at theme level for global / thematic synthesis questions. **RAPTOR** (Recursive Abstractive Processing for
 Tree-Organized Retrieval, Sarthi et al. 2024) is the other mainstream global-synthesis route besides W7b
@@ -707,7 +731,7 @@ Legend: **kind** 🛡/⭐/🔧 · **status** ✅ have · ◐ partial · ✗ gap.
 | Graph store seam | none | `GraphStore` Protocol + in-proc default + adapters | 🔧 | ✅ | W7c · P2 |
 | Post-retrieval postprocessor | reranked top-k → prompt (no chain) | MMR de-dup + lost-in-the-middle reorder + context compression (det. default · LLMLingua-2 opt-in) — vs LlamaIndex `LongContextReorder`/`MMRPostprocessor`/`SentenceEmbeddingOptimizer` · Haystack `LostInTheMiddleRanker`/`DiversityRanker` · LangChain `ContextualCompressionRetriever` | ⭐ | ✅ (det. MMR + lost-in-the-middle + extractive compression on a `NodePostprocessor` chain, opt-in / byte-identical; LLMLingua-2 / LLM compression = seam-only follow-up) | W8 · P1 |
 | Query transformation | det. synonym multi-query + W6a decomposition only | HyDE + RAG-Fusion + step-back + Adaptive-RAG (opt-in LLM) — vs LlamaIndex `HyDEQueryTransform`/`QueryFusionRetriever` · LangChain `MultiQueryRetriever`/HyDE · LangGraph adaptive-rag | ⭐ | ✅ (all four opt-in / byte-identical; HyDE probe-never-a-fact, RAG-Fusion reuses `rrf_fuse`, per-variant security gate, Adaptive reuses `decomposer=` seam; det. step-back / dense-on / A/B = follow-up) | W9 · P2 |
-| Multi-granularity tree + chunking | flat index; W4b layout/parent-child only | RAPTOR recursive-cluster tree (det. cluster + `is_synthesis` summaries) + sentence-window + semantic chunking — vs LlamaIndex RAPTOR pack/`SentenceWindowNodeParser`/`SemanticSplitterNodeParser` · RAGFlow RAPTOR | ⭐ | ✗ | W10 · P2 |
+| Multi-granularity tree + chunking | flat index; W4b layout/parent-child only | RAPTOR recursive-cluster tree (det. cluster + `is_synthesis` summaries) + sentence-window + semantic chunking — vs LlamaIndex RAPTOR pack/`SentenceWindowNodeParser`/`SemanticSplitterNodeParser` · RAGFlow RAPTOR | ⭐ | ✅ (det. threshold-clustering tree + `is_synthesis`/never-fabricated-provenance summaries + sentence-window/semantic on the `Chunker` seam, all opt-in / byte-identical; UMAP+GMM cluster / tree-traversal mode / retrieval-time expansion = follow-up) | W10 · P2 |
 | Retrieval representation | single-vector dense + BM25 → RRF | ColBERT late-interaction (multi-vector MaxSim) + SPLADE learned-sparse, offline via fastembed — vs Weaviate/Vespa/Jina ColBERT · Vespa SPLADE · LlamaIndex `ColbertIndex`/`ColbertRerank` | ⭐ | ✗ | W11 · P2 |
 | Visual-document retrieval | OCR→text only (W3a) | ColPali/ColQwen2 page-as-image late interaction (GPU, opt-in) — vs LlamaIndex ColPali · Weaviate/Vespa ColPali · 2025 ColQwen | ⭐ | ✗ | W12 · P2 |
 
@@ -734,9 +758,10 @@ Legend: **kind** 🛡/⭐/🔧 · **status** ✅ have · ◐ partial · ✗ gap.
     multi-turn ◐), all opt-in, default-off — the deterministic default loop and its byte-identical eval unchanged.
   - **W9** ✅ LLM query transforms (HyDE / RAG-Fusion / step-back / Adaptive-RAG) on the `QueryRewriter` /
     `IntentParser` seam — all opt-in / default-off, the default loop byte-identical (see the W9 SHIPPED note above).
-  - **W10–W12** ✗ the rest of the competitor-benchmark batch, all opt-in / default-off behind extras: **W10** RAPTOR
-    multi-granularity tree (det. clustering + `is_synthesis` summaries) + sentence-window / semantic chunking on
-    the `Chunker` seam; **W11** ColBERT late-interaction + SPLADE learned-sparse retrieval backends (heavy,
+  - **W10** ✅ RAPTOR multi-granularity tree (det. threshold-clustering + `is_synthesis` summaries) +
+    sentence-window / semantic chunking on the `Chunker` seam — all opt-in / default-off, the default loop
+    byte-identical (see the W10 SHIPPED note above). **W11–W12** ✗ the rest of the competitor-benchmark batch,
+    all opt-in / default-off behind extras: **W11** ColBERT late-interaction + SPLADE learned-sparse retrieval backends (heavy,
     multi-vector seam); **W12** ColPali visual-document retrieval (heaviest, GPU-gated). The deterministic
     default loop + its byte-identical eval stay unchanged.
 

@@ -61,6 +61,8 @@ class Chunk:
         parent_id:      父小节标识（small-to-big 检索的父句柄）；默认 ''（无层级，
                         DefaultChunker 不填，向后兼容）。布局感知切块器填 '{doc_id}#s{节序}'。
         heading:        所属小节标题（布局感知切块器填，亦可喂 contextual 情境头）；默认 ''。
+        window_text:    合成时展开的上下文窗口（sentence-window 切块器填 ±N 句窗口，检索粒度=单句、
+                        生成上下文=窗口，二者解耦）；默认 ''（其余切块器不填，向后兼容 / 等价安全）。
     """
 
     chunk_id: str
@@ -79,6 +81,7 @@ class Chunk:
     sensitivity: str = "INTERNAL"
     parent_id: str = ""
     heading: str = ""
+    window_text: str = ""
 
 
 def chunk_document(

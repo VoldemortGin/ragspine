@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/
-verified-against: a9f5b31
+verified-against: 39de878
 ---
 
 # retrieval — agent contract
@@ -18,7 +18,11 @@ point/signature preserved, all callers untouched) + `make_chunker` /
 `RAGSPINE_CHUNKER` config selector with `ragspine.chunkers` entry-point discovery,
 so semantic / contextual / parent-child strategies become swappable — `layout_chunker.py`'s
 `LayoutAwareChunker` (W4b) is the first non-default: heading-boundary sections + `parent_id`/`heading`
-for small-to-big, opt-in via `make_chunker("layout")`, default still byte-identical),
+for small-to-big, opt-in via `make_chunker("layout")`, default still byte-identical; plus two W10
+strategies, `sentence_window_chunker.py`'s `SentenceWindowChunker` (index single sentences + a
+`window_text` for synthesis-time expansion) and `semantic_chunker.py`'s `SemanticChunker`
+(embedding-distance-boundary splits, reusing `chunk_document` per segment), both opt-in / default
+byte-identical),
 `contextual.py` (W4a — a deterministic, zero-fabrication context header built from controlled-vocab
 metadata, injected into **index/embed text only** via the opt-in `index_text_fn` seam on
 `HybridRetriever`/`NarrativeIndex`; `chunk.text`/citation untouched, default `None` = byte-identical),
@@ -54,7 +58,18 @@ rank relevance + lexical-Jaccard similarity), `LostInTheMiddlePostprocessor` (mo
 `ChainPostprocessor`), default `none` → no chain → `NarrativeIndexRetriever.retrieve` byte-identical. Runs
 *after* the `link/` RESTRICTED strip, so **isolation is inherited** (subset/reorder/compress only). Compression
 writes a separate `prompt_text` key (agent prefers it) — original `text` + all reference fields untouched
-(**provenance never broken**, the W4a index_text layering)).
+(**provenance never broken**, the W4a index_text layering)),
+`raptor.py` (**W10 RAPTOR recursive-cluster multi-granularity tree, opt-in default-off** — the second
+global-synthesis route parallel to W7b narrative GraphRAG). `build_raptor_tree` drops RESTRICTED at the
+door, builds leaves from chunks, then recurses: **deterministic threshold clustering** (`cluster_by_similarity`
+— cosine≥τ edges + union-find connected components, the W7b `detect_communities` idiom, zero randomness) +
+a per-cluster **`is_synthesis=True` summary** (never citable as fact; numbers stay structured) carrying the
+**union of its members' provenance** (`⊆` leaf lineage, never fabricated). `RaptorSummarizer` seam: a
+deterministic zero-LLM `ExtractiveRaptorSummarizer` default + an opt-in `LLMRaptorSummarizer` (`[llm]`,
+degrades to extractive). `RaptorTree.retrieve` is collapsed-tree multi-granularity (leaf **or** theme);
+`RaptorRetriever` (opt-in `NarrativeRetriever` wrapper) appends `is_synthesis`-tagged summary snippets after
+the base's citable leaves. `make_raptor_summarizer` / `make_raptor_retriever` + `RAGSPINE_RAPTOR*`, default
+`none` returns base unchanged (byte-identical).
 
 ## Invariants
 
@@ -90,8 +105,14 @@ writes a separate `prompt_text` key (agent prefers it) — original `text` + all
   persistence (`PersistencePolicy` + embed-at-ingest).
 - [`docs/chunker.md`](docs/chunker.md) — the `Chunker` seam: the `Protocol`, the
   `DefaultChunker` byte-identical delegation to `chunk_document`, the `make_chunker`
-  factory + entry-point discovery, the provenance conformance pack, and `LayoutAwareChunker`
-  (W4b: heading-boundary layout + parent-child / small-to-big, opt-in, default byte-identical).
+  factory + entry-point discovery, the provenance conformance pack, `LayoutAwareChunker`
+  (W4b: heading-boundary layout + parent-child / small-to-big), and the two W10 strategies
+  `SentenceWindowChunker` / `SemanticChunker` — all opt-in, default byte-identical.
+- [`docs/raptor.md`](docs/raptor.md) — the W10 RAPTOR recursive-cluster multi-granularity tree:
+  deterministic threshold clustering, the `is_synthesis` summary discipline (never a citable fact,
+  never-fabricated provenance), the `RaptorSummarizer` seam (extractive default + LLM opt-in/degrade),
+  collapsed-tree multi-granularity retrieval, the RESTRICTED isolation-at-the-door + reverse-proof,
+  and the `make_raptor_*` / `RAGSPINE_RAPTOR*` opt-in factories (default byte-identical).
 - [`docs/contextual.md`](docs/contextual.md) — contextual retrieval (W4a): the deterministic,
   zero-fabrication context header, the `index_text_fn` opt-in seam (index/embed text only, citation
   + byte-identity preserved), and the `make_index_text_fn` / `RAGSPINE_CONTEXTUAL` selector.

@@ -106,6 +106,25 @@ fusion; per-variant / per-step-back competitor screening with a spy-base **rever
 isolation integration test with a RESTRICTED-in-store reverse-proof; factory byte-identity). The authoritative
 per-domain contract is `src/ragspine/agent/CLAUDE.md`.
 
+**Inherited by the W10 RAPTOR tree + chunking strategies (opt-in, isolation-at-the-door + no new default exit).**
+RAPTOR (`retrieval/raptor.py`) is the second global-synthesis route (parallel to W7b) and, like it, is
+opt-in / default-off with three code-enforced disciplines. (1) **Isolation at the door:** `build_raptor_tree`
+drops every `sensitivity == RESTRICTED` chunk **before** any leaf / summary / provenance list is built, so
+RESTRICTED can never enter the tree, a summary, or a citation — frozen by
+`tests/retrieval/test_raptor.py::test_restricted_never_enters_tree` with an honest reverse-proof
+(`test_restricted_exclusion_reverse_proof`: the same chunk marked `INTERNAL` *does* enter). The
+`RaptorRetriever` wrapper inherits it twice — the base already stripped RESTRICTED at the `link/` exit, and the
+tree was built without it. (2) **Summaries are syntheses, never citable facts:** every internal node is
+`is_synthesis=True` (the LLM summarizer prompt forbids concrete numbers, mirroring W7b); numbers stay in the
+structured channel. (3) **Provenance never fabricated:** each summary's `source_doc_id` / `source_locator` is
+the sorted union of its members' lineage and is `⊆` the leaf lineage (frozen by
+`test_summary_provenance_never_fabricated`); clustering is deterministic (cosine-threshold union-find, the W7b
+`detect_communities` idiom). The two W10 **chunking** strategies (`SentenceWindowChunker` / `SemanticChunker`,
+behind the existing `Chunker` seam) inherit the chunker **provenance conformance pack** (`CHUNKER_IMPLS` grew
+to include them) and keep the `chunk.text` = original-substring contract; the default `DefaultChunker` flat
+index stays **byte-identical**. The authoritative per-domain contracts are
+`src/ragspine/retrieval/docs/raptor.md` + `src/ragspine/retrieval/docs/chunker.md`.
+
 ## Privacy-aware traces
 
 <!-- TODO: common/observability records codes / counts / timings only. -->
