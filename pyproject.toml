@@ -158,6 +158,19 @@ colbert = [
 splade = [
     "fastembed>=0.7,<0.9",
 ]
+# ColPali 视觉文档检索后端（ColPaliVisualEmbedder，W12 给检索补一条与家族 OCR→文本 W3a **平行**的强
+# 路线：page-as-image 晚交互——视觉 patch 多向量 vs query token 多向量 MaxSim，不经 OCR→文本，保版面/
+# 图表视觉结构，对图表密集金融报告往往更强）。复用 fastembed（Apache-2.0，过 ADR 0009 ≤Apache-2.0 许可
+# 门）的 LateInteractionMultimodalEmbedding：ONNX 视觉晚交互，默认模型 Qdrant/colpali-v1.3-fp16。
+# **代码依赖 fastembed 是 Apache-2.0（过 CI 依赖许可门）；但模型权重另有许可**——colpali-v1.3 底座
+# PaliGemma 走 Gemma 许可（含使用限制，非 ≤Apache-2.0 宽松许可）；权重是运行时首拉、非打包依赖，故不过
+# CI 依赖许可门，但诚实标注为模型许可注意项；ColQwen2（底座 Qwen2-VL，Apache-2.0）是更宽松替代，可经
+# RAGSPINE_COLPALI_MODEL 指定（fastembed 可用性 = follow-up）。重型视觉模型 + 首拉权重：延迟 import，
+# 不装也能 import 核心、跑离线默认（视觉检索是 opt-in、默认关、字节不变）；真加载/编码打 @pytest.mark.gpu
+# （CI 默认 `-m "not gpu"` 跳过）。离线性诚实同 [embed-onnx]/[rerank]（"首拉后离线"）。
+colpali = [
+    "fastembed>=0.7,<0.9",
+]
 # 可插拔向量存储后端（VectorStore 缝的真实 adapter）。延迟 import：不装也能 import 核心、
 # 跑零依赖 InProcessVectorStore 默认；装了即由 make_vector_store('sqlite_vec'|'pgvector'|'qdrant') 选用。
 # sqlite-vec：嵌入式 sqlite 扩展（Apache-2.0/MIT，permissive，零服务，conformance 装了即跑）。
@@ -205,7 +218,7 @@ service = [
 # GPU 与否无需在此区分——torch/transformers/paddleocr 装的是自适应版，运行时探测到
 # CUDA 即用 GPU、否则回落 CPU；embed 的 transformers 上限已按 darwin 平台标记处理。
 all = [
-    "rag-spine[pdf,ocr,doc,llm,embed,embed-onnx,rerank,colbert,splade,vector,graph,service,dify]",
+    "rag-spine[pdf,ocr,doc,llm,embed,embed-onnx,rerank,colbert,splade,colpali,vector,graph,service,dify]",
 ]
 
 [build-system]

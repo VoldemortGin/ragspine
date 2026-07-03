@@ -144,6 +144,25 @@ fabricating a snippet or dropping lineage. **Frozen by**
 at the upstream orchestration). The authoritative per-domain contract is
 `src/ragspine/retrieval/docs/late-interaction.md`.
 
+**Inherited by the W12 ColPali visual-document retrieval (a new exit, screened at the door).** Visual retrieval
+(`retrieval/vision/colpali.py`, `ColPaliVisualRetriever`) is a **new path that could reach a prompt** — it embeds a
+document **page as an image** and does late interaction directly on it (**no OCR→text**), so the text two-exit
+(`link/` + `rerank/`) never sees the page. Like W7 `GraphStore` / W10 RAPTOR, it is therefore screened **at the
+door**: the retriever drops every `sensitivity == RESTRICTED` page at **index construction**, so a RESTRICTED page
+**never** enters the visual index (`self.pages`), is **never** handed to the visual embedder's `embed_images`, and
+**never** surfaces in a hit (all-RESTRICTED → empty index → `retrieve` returns `[]`, embedder not called;
+case-insensitive, same convention as the two exits). The visual MaxSim scoring **re-uses** `rerank/colbert.maxsim`
+(the same function object) and `page→image` **re-uses** `pypdfium2`; the real backend (fastembed
+`LateInteractionMultimodalEmbedding`, `[colpali]`, lazy, `@pytest.mark.gpu`) is opt-in / default-off — nothing in
+the default loop wires it, so retrieval + `answer_question` stay **byte-identical**. **Anti-fabrication:** a visual
+hit is `is_visual=True` with `text=""` (a page-reference retrieval lead, never a citable fact) — numbers stay in the
+structured channel and the visual model can never inject a fabricated figure; provenance (`doc_id` / page
+`source_locator` / `page_no`) is carried, never fabricated. **Frozen by**
+`tests/retrieval/vision/test_colpali_isolation.py` (RESTRICTED never enters the index / an `embed_images` call / the
+output, with a **reverse-proof** that the same embedder *does* encode the page when handed it directly — proving the
+protection lives at the retriever's door, not the embedder). The authoritative per-domain contract is
+`src/ragspine/retrieval/docs/visual-retrieval.md`.
+
 ## Privacy-aware traces
 
 <!-- TODO: common/observability records codes / counts / timings only. -->

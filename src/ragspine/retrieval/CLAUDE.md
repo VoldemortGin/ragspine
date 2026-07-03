@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/
-verified-against: dcb8fba
+verified-against: 6abb7d3
 ---
 
 # retrieval — agent contract
@@ -74,7 +74,20 @@ deterministic zero-LLM `ExtractiveRaptorSummarizer` default + an opt-in `LLMRapt
 degrades to extractive). `RaptorTree.retrieve` is collapsed-tree multi-granularity (leaf **or** theme);
 `RaptorRetriever` (opt-in `NarrativeRetriever` wrapper) appends `is_synthesis`-tagged summary snippets after
 the base's citable leaves. `make_raptor_summarizer` / `make_raptor_retriever` + `RAGSPINE_RAPTOR*`, default
-`none` returns base unchanged (byte-identical).
+`none` returns base unchanged (byte-identical)),
+`vision/` (**W12 ColPali visual-document retrieval, opt-in default-off** — a route **parallel to** the family
+OCR→text scanned path (`extraction`, W3a), not replacing it: embed a document **page as an image** and do
+**late interaction directly on the image** (visual patch multi-vectors vs query token multi-vectors, **MaxSim**),
+**no OCR→text**, preserving layout / chart / figure structure. `colpali.py`: a `VisualEmbedder` Protocol +
+`ColPaliVisualRetriever` orchestration — **visual MaxSim re-uses `rerank/colbert.maxsim`** (same function object),
+**`page→image` re-uses `pypdfium2`** (`render_pdf_pages`) — + a real fastembed `LateInteractionMultimodalEmbedding`
+backend (`ColPaliVisualEmbedder`, `[colpali]`, lazy, `@pytest.mark.gpu`) + `make_visual_embedder` factory. Default
+`none` ⇒ `None`, nothing in the default loop wires it ⇒ byte-identical. **Isolation is a new exit screened at the
+door**: RESTRICTED pages are dropped at index construction (never embedded, never surfaced); visual hits are
+`is_visual` retrieval leads (`text=""`, provenance carried), never a citable-fact source — numbers stay
+structured. **Model-license honesty**: fastembed code is Apache-2.0 (passes the dependency gate); the default
+`Qdrant/colpali-v1.3-fp16` weights are Gemma-licensed (runtime-pulled, flagged) — ColQwen2 (Qwen2-VL/Apache-2.0)
+is the more-permissive `RAGSPINE_COLPALI_MODEL` alternative.
 
 ## Invariants
 
@@ -135,6 +148,13 @@ the base's citable leaves. `make_raptor_summarizer` / `make_raptor_retriever` + 
   `ListwiseJudge` seam + `make_reranker` factory, the reranker-not-retriever landing decision
   (multi-vector / sparse index = follow-up), inherited RESTRICTED isolation (+ reverse-proofs),
   determinism + first-pull-then-offline honesty, and the default `none` byte-identity.
+- [`docs/visual-retrieval.md`](docs/visual-retrieval.md) — the W12 ColPali visual-document retriever:
+  page-as-image late interaction (visual patch MaxSim, **re-using `rerank/colbert.maxsim`**), the
+  `VisualEmbedder` seam + `ColPaliVisualRetriever` orchestration, `page→image` via `pypdfium2`, the real
+  fastembed `LateInteractionMultimodalEmbedding` backend (`[colpali]`, lazy, gpu-marked), the
+  RESTRICTED-at-the-door isolation (+ reverse-proof), the `is_visual`/`text=""` anti-fabrication stance, the
+  code-vs-model license honesty (fastembed Apache-2.0 vs Gemma-licensed weights / ColQwen2 alternative), and the
+  opt-in / byte-identical default.
 - [`docs/postprocess.md`](docs/postprocess.md) — the post-retrieval `NodePostprocessor` chain (W8): MMR
   de-dup + lost-in-the-middle reorder + extractive compression, the `make_postprocessor` /
   `RAGSPINE_POSTPROCESSOR` factory + comma-chain, the opt-in / byte-identical `postprocessor=` seam on
