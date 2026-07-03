@@ -6,9 +6,10 @@
 
 > **🤖 给 AI / LLM:** 用本库前先读 [`llms.txt`](llms.txt)（精简索引）与 [`docs/llms/`](docs/llms/)（完整 API / recipes / 陷阱）；`pip install` 后这些文档随包位于 `site-packages/ragspine/_llms/`。
 
+[![PyPI](https://img.shields.io/pypi/v/rag-spine.svg)](https://pypi.org/project/rag-spine/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
-![Python](https://img.shields.io/badge/python-3.10%2B-blue)
-![Tests](https://img.shields.io/badge/tests-1295%20passing-brightgreen)
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+![Tests](https://img.shields.io/badge/tests-~1955%20passing-brightgreen)
 [![Docs](https://img.shields.io/badge/docs-rag--spine.org-2dd4bf)](https://rag-spine.org)
 
 ---
@@ -50,6 +51,29 @@ reports) and ships that rigor as **first-class, code-enforced invariants**:
 | **Built-in evaluation** | Four-gate metrics (numeric accuracy / citation validity / refusal / clarification) + baseline regression gating. |
 | **Async ingestion** | FastAPI service + RQ/Redis job queue, worker-owned resources. |
 | **Privacy-aware observability** | Traces carry codes/counts/timings only — never answer, fact, or chunk text. |
+
+## RAG capabilities
+
+RAGSpine covers the mainstream RAG technique surface — benchmarked stage-by-stage against
+LlamaIndex · LangChain/LangGraph · Haystack · RAGFlow · Weaviate · Vespa · Jina — organized
+by retrieval-pipeline layer. **The default loop is offline and deterministic; every
+model-bearing or LLM technique is opt-in and leaves the default byte-identical** (ADR 0001/0005).
+
+| Pipeline layer | Techniques (industry names) | Default / opt-in |
+|---|---|---|
+| **Indexing & chunking** | paragraph-greedy · layout-aware · parent-child / small-to-big · sentence-window · semantic (embedding-boundary) · RAPTOR recursive-summary tree · contextual retrieval (deterministic context headers) | paragraph-greedy default; rest opt-in (`Chunker` seam) |
+| **Retrieval representation** | hybrid **BM25 + dense (ONNX MiniLM) → RRF** · ColBERT late-interaction (multi-vector MaxSim) · SPLADE learned-sparse | hybrid default with `[embed-onnx]` (else pure BM25); ColBERT/SPLADE opt-in *(as rerankers; multi-vector/sparse retrieval index = follow-up)* |
+| **Query transformation** | controlled-vocab synonym multi-query · LLM decomposition · HyDE · RAG-Fusion · step-back · Adaptive-RAG (complexity routing) | synonym multi-query default (deterministic); LLM transforms opt-in |
+| **Post-retrieval & rerank** | LLM listwise rerank · **cross-encoder rerank** · MMR diversity de-dup · lost-in-the-middle reorder · context compression | opt-in (`ListwiseJudge` + `NodePostprocessor` seams) |
+| **Generation & agentic** | dual-channel router · anti-fabrication guard · CRAG / self-RAG corrective retrieval · multi-turn conversational memory | router + guard default; corrective/memory opt-in |
+| **Graph** | deterministic structured relation graph (subsidiary roll-up · peer comparison · derivation trace · doc co-occurrence) + `GraphStore` seam · narrative GraphRAG | in-process graph default; narrative GraphRAG opt-in *(skeleton)* |
+| **Multimodal** | ColPali page-as-image visual retrieval (late interaction, no OCR→text) | opt-in, GPU *(seam + orchestration; real GPU end-to-end = follow-up)* |
+| **Evaluation** | four-gate (numeric accuracy · citation validity · refusal · clarification) + **faithfulness/groundedness** + free-text answer-accuracy, baseline-ratcheted | offline deterministic default *(ONNX-NLI / RAGAS = follow-up)* |
+
+**The moat competitors don't have:** enforced **anti-fabrication** + **source provenance**, the
+spine family's **offline OCR & strong-table extraction** (pdf→ppt→doc, `pdfspine`→`ocrspine`,
+scanned PDFs actually OCR'd on CPU), and an **offline deterministic charter** — the whole
+pipeline runs without a network, a GPU, or a framework.
 
 ## Architecture
 
@@ -104,12 +128,21 @@ Optional extras:
 | Extra | Pulls in | For |
 |---|---|---|
 | `[service]` | fastapi, uvicorn, rq, redis, httpx | the HTTP + async-queue layer |
-| `[pdf]` | docling | digital-PDF table extraction |
-| `[ocr]` | paddleocr | scanned-PDF OCR (Linux + NVIDIA GPU) |
+| `[pdf]` | pdfspine | digital-PDF table extraction (pure-Rust, offline); `[pdf-docling]` for the docling fallback |
+| `[ocr]` | paddleocr | scanned-PDF OCR VLM (Linux + NVIDIA GPU) — the family OCR (`pdfspine`→`ocrspine`) needs no extra |
+| `[doc]` / `[ppt]` | docspine / pptspine | family `.docx` / `.pptx` extraction (strong tables, offline) |
 | `[llm]` | anthropic, openai | real LLM providers (lazy-imported) |
-| `[embed]` | sentence-transformers | real embedding models for the vector channel |
-| `[vector]` | sqlite-vec, pg8000 | persistent `VectorStore` backends: sqlite-vec (embedded) + pgvector (Postgres, BSD driver) |
+| `[embed-onnx]` | fastembed | **default semantic embedding** — ONNX MiniLM, CPU, dense-on hybrid |
+| `[embed]` | sentence-transformers | heavier embedding models for the vector channel |
+| `[rerank]` / `[colbert]` / `[splade]` | fastembed | local cross-encoder / ColBERT late-interaction / SPLADE learned-sparse rerankers |
+| `[colpali]` | fastembed | ColPali page-as-image visual retrieval (GPU) |
+| `[vector]` | sqlite-vec, pg8000, qdrant-client | persistent `VectorStore` backends: sqlite-vec (embedded) + pgvector (Postgres, BSD driver) + qdrant |
+| `[graph]` | networkx | `GraphStore` adapter for the relation graph |
+| `[all]` | all of the above | one-shot install of every optional backend |
 | `[dev]` | pytest, reportlab, markdown | tests + fixture generation |
+
+Install optional backends on demand — the lean default (`pip install rag-spine`) runs offline on
+pure BM25 with zero heavy deps; the quality-depth backends are all opt-in.
 
 **From source**
 
@@ -203,9 +236,17 @@ Endpoints: `GET /healthz`, `GET /readyz`, `POST /v1/ask`,
 ## Extension points (just implement a Protocol)
 
 `LLMProvider` · `EmbeddingBackend` · `VectorStore` · `PersistencePolicy` · `ListwiseJudge` ·
-`OcrBackend` · `NarrativeRetriever` · `TaskQueue` — implement and inject. The core depends on the
+`OcrBackend` · `Extractor` · `Chunker` · `NarrativeRetriever` · `NodePostprocessor` ·
+`QueryDecomposer` / query-transform · `RelevanceGrader` · `EntailmentJudge` · `GraphStore` ·
+`VisualEmbedder` · `TaskQueue` — implement and inject. The core depends on the
 abstraction, never the SDK, so adding a provider / vector store / reranker / OCR engine touches one
-new file. `VectorStore` ships a conformance kit (`tests/conformance/`) that binds provenance /
+new file. The quality-depth seams are config-selectable by a `make_*` factory + `RAGSPINE_*` env,
+mirroring `make_vector_store`: reranker (cross-encoder / ColBERT / SPLADE via `make_reranker`),
+postprocessor (MMR / lost-in-the-middle / compression via `make_postprocessor`), query transform
+(HyDE / RAG-Fusion / step-back / adaptive via `make_query_transform`), chunker (layout /
+parent-child / sentence-window / semantic via `make_chunker`), `make_graph_store`, and
+`make_visual_embedder` — each with an offline default and its own provenance/isolation conformance
+pack. `VectorStore` ships a conformance kit (`tests/conformance/`) that binds provenance /
 isolation / determinism for *any* implementation; select one by config (`make_vector_store` /
 `RAGSPINE_VECTOR_STORE`), or let a third-party package register a backend by name via the
 `ragspine.vector_stores` entry-point group (no core PR). With a persistent store, `NarrativeIndex` embeds-and-persists at ingest
@@ -227,15 +268,16 @@ is written at rest — its default **never persists a `RESTRICTED` chunk's vecto
 ## Testing
 
 ```bash
-.venv/bin/python -m pytest tests/ -q        # 1295 passed, 40 skipped (39 pgvector + 1 gpu)
+.venv/bin/python -m pytest tests/ -q -m "not network and not gpu"   # ~1955 passed (the CI default)
 ```
 
-The project is **test-driven**: tests are the spec. The `gpu` marker gates real-OCR
-integration tests to a Linux + NVIDIA GPU box. The **`pgvector` conformance** skips unless
-`RAGSPINE_PG_URL` points at a Postgres with the pgvector extension — set it and the count
-rises to **1334 passed, 1 skipped** (the pgvector adapter is conformance-bound, just not in the
-default server-less CI). The **Qdrant** conformance runs unconditionally (local mode is purely
-in-process, no server). Everything else runs anywhere.
+The project is **test-driven**: tests are the spec. The `gpu` marker gates real-OCR / ColPali
+integration tests to a Linux + NVIDIA GPU box; the `network` marker gates the real-model
+(fastembed/HF "first-pull-then-offline") assertions — both are excluded by `make ci`. The
+**`pgvector` conformance** skips unless `RAGSPINE_PG_URL` points at a Postgres with the pgvector
+extension (the adapter is conformance-bound, just not in the default server-less CI). The
+**Qdrant** conformance runs unconditionally (local mode is purely in-process, no server).
+Everything else runs anywhere.
 
 ## Continuous integration (local)
 
@@ -261,19 +303,36 @@ version-controlled evaluation sets live under `data/golden/`. Nothing here is re
 
 ## Status & roadmap
 
-**Solid:** structured channel, narrative hybrid retrieval, agent orchestration, office
-extraction (xlsx/pptx/pdf), FastAPI + RQ service, FAQ cache, evaluation harness, 1255 tests.
+**Current release: 0.8.0.** It completes the twelve-workstream **quality-depth** program
+([`docs/prd-quality-depth.md`](docs/prd-quality-depth.md)), benchmarked stage-by-stage against the
+mainstream RAG stacks in two batches — every new capability **opt-in, the default loop byte-identical**:
 
-**Honest gaps (contributions welcome):** the `VectorStore` seam is **wired live with three real
-adapters** — `HybridRetriever` delegates vector scoring to it (byte-identically), it's config-selectable
-(`make_vector_store` / `RAGSPINE_VECTOR_STORE`), named in `.topology()`, and behind `[vector]` ships
-**`sqlite-vec`** (embedded) + **`pgvector`** (Postgres, BSD `pg8000` driver) + **`qdrant`** (HNSW, local
-mode, Apache-2.0 `qdrant-client`) — all persistent and conformance-bound, with Qdrant as the first
-**approximate**-capability backend (the conformance kit now carries an exact-vs-approximate flag). Still
-open: **more adapters (Milvus/FAISS) and true ANN** — the adapters persist but currently score exactly in
-Python, not via native HNSW/IVFFlat KNN — and the BM25-only default has no
-semantic signal until an embedding model is injected (behind `[embed]`/GPU). Pipeline-topology export
-(`.topology()` → Mermaid/DOT/JSON, plus `scripts/topology.py`) ships — see `src/ragspine/pipeline/`.
+- **This release (W8–W12, the second competitor batch):** post-retrieval postprocessor chain
+  (MMR de-dup · lost-in-the-middle · context compression), LLM query transforms (HyDE · RAG-Fusion ·
+  step-back · Adaptive-RAG), RAPTOR recursive-summary tree + sentence-window / semantic chunking,
+  ColBERT late-interaction + SPLADE learned-sparse rerankers, and ColPali page-as-image visual retrieval.
+- **0.7.0 (W1–W7, the first batch):** true semantic ONNX embedding default + dense-on hybrid, local
+  cross-encoder rerank, family OCR / `.docx` / `.pptx` / rich-table extraction, contextual + parent-child
+  chunking, the faithfulness/groundedness eval gate, agentic decomposition / CRAG / self-RAG / multi-turn,
+  and the deterministic GraphRAG relation graph + `GraphStore` seam.
+
+**Solid:** structured channel, narrative hybrid retrieval, agent orchestration, office
+extraction (xlsx/pptx/pdf), FastAPI + RQ service, FAQ cache, evaluation harness, ~1955 tests.
+
+**Honest follow-ups (contributions welcome):** the depth workstreams ship the *technique + conformance*;
+their **measured eval-delta** (real-model A/B ratchets on the W5 groundedness harness) is the follow-up —
+a depth item isn't "done" until the ratchet shows it improved the answer. ColBERT / SPLADE / ColPali land
+as **rerankers / a visual seam**; the heavy **multi-vector & sparse retrieval indexes** (and ColPali's real
+GPU end-to-end) are follow-ups. The groundedness gate defaults to **offline lexical-overlap entailment**;
+the real **ONNX-NLI / RAGAS** judge is opt-in behind the seam. The `VectorStore` seam is **wired live with
+three real adapters** — `HybridRetriever` delegates vector scoring to it (byte-identically), it's
+config-selectable (`make_vector_store` / `RAGSPINE_VECTOR_STORE`), named in `.topology()`, and behind
+`[vector]` ships **`sqlite-vec`** (embedded) + **`pgvector`** (Postgres, BSD `pg8000` driver) + **`qdrant`**
+(HNSW, local mode, Apache-2.0 `qdrant-client`) — all persistent and conformance-bound; still open are
+**more adapters (Milvus/FAISS) and true ANN** (the adapters persist but currently score exactly in Python,
+not via native HNSW/IVFFlat KNN). With `[embed-onnx]` the default is genuinely semantic (BM25 + ONNX MiniLM
+→ RRF, CPU-only); with no extra it falls back to pure BM25. Pipeline-topology export (`.topology()` →
+Mermaid/DOT/JSON, plus `scripts/topology.py`) ships — see [`src/ragspine/pipeline/`](src/ragspine/pipeline/).
 
 ## License
 

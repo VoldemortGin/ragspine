@@ -8,7 +8,7 @@
 
 - pip 安装名：**`rag-spine`**（带连字符！`pip install rag-spine`）
 - import 名：**`import ragspine`**（无连字符）
-- Python：>= 3.10 · 版本：0.1.2 · 许可：Apache-2.0
+- Python：>= 3.11 · 版本：0.8.0 · 许可：Apache-2.0
 - 依赖 **corespine**（Spine 家族薄共享核）：6 缝（config / registry / trace / queue / errors /
   conformance）接入它 —— 统一异常 `CorespineError`、隐私 trace 强制拒正文、`Registry` 选实现、
   `load_from_env` 配置、`JobStatus` + `error_to_dict` 队列、`ConformanceSuite` 不变量基座。
@@ -18,11 +18,20 @@
 | extra | 装什么 | 用于 |
 |---|---|---|
 | `[service]` | fastapi, uvicorn, rq, redis, httpx | HTTP + 异步队列层 |
-| `[pdf]` | docling | 数字 PDF 表格抽取 |
+| `[pdf]` | pdfspine | 数字 PDF 表格抽取（纯 Rust，默认引擎） |
+| `[pdf-docling]` | docling | 可选 docling 版面/表格兜底引擎（重，torch） |
+| `[doc]` | docspine | `.docx` 抽取（强表格 gridSpan/vMerge/嵌套 + 离线 OCR） |
+| `[ppt]` | pptspine | `.pptx` 更富表合并抽取（opt-in，默认走 python-pptx） |
 | `[ocr]` | paddleocr | 扫描 PDF OCR（Linux + NVIDIA GPU） |
 | `[llm]` | anthropic, openai | 真实 LLM / OpenAI embedding provider（延迟 import） |
-| `[embed]` | sentence-transformers | 向量通道的真实 embedding 模型 |
+| `[embed]` | sentence-transformers | 向量通道的真实 embedding 模型（torch 链） |
+| `[embed-onnx]` | fastembed | 默认真语义 ONNX embedding（纯 CPU，hybrid 默认开 dense） |
+| `[rerank]` | fastembed | 本地 cross-encoder 重排（离线确定性） |
+| `[colbert]` | fastembed | ColBERT 晚交互重排（token 级多向量 MaxSim） |
+| `[splade]` | fastembed | SPLADE 学习稀疏重排 |
+| `[colpali]` | fastembed | ColPali 视觉文档检索（page-as-image 晚交互，GPU） |
 | `[vector]` | sqlite-vec, pg8000, qdrant-client | 持久化 `VectorStore`：sqlite-vec / pgvector / qdrant |
+| `[graph]` | networkx | 持久化 `GraphStore`（GraphRAG 关系图后端） |
 | `[all]` | 上述全部（自引用聚合） | 一键装齐功能依赖（不含 dev） |
 | `[dev]` | pytest, ruff, mypy, build, twine … | 测试 + 构建 |
 
