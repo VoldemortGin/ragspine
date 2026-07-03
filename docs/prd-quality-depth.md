@@ -660,6 +660,40 @@ determinism-only deployment still gets multi-granularity; an A/B on global-synth
 
 ### W11 — Retrieval representation upgrade ⭐  (P2, heavy)
 
+> **◐ SHIPPED (ColBERT + SPLADE rerankers complete; multi-vector / sparse retrieval index = follow-up).**
+> Both retrieval representations land as **rerankers** on the **existing `ListwiseJudge` seam** — the
+> minimal-change, seam-reusing increment (LlamaIndex `ColbertRerank` idiom), needing **no multi-vector /
+> sparse index**. The default hybrid loop (W1) is **byte-identical** (4-gate + W5 groundedness ratchet
+> green both modes, 0 fabrication; demo `ALL CHECKS PASSED`). Both opt-in / default-off behind extras.
+> - **ColBERT late-interaction (✅ as reranker).** `retrieval/rerank/colbert.py`: `ColbertReranker`
+>   implements `ListwiseJudge` — embeds the query (`query_embed`) and each candidate (`embed`) into
+>   **token-level multi-vector matrices** via fastembed `LateInteractionTextEmbedding`
+>   (`colbert-ir/colbertv2.0`, Apache-2.0, `[colbert]`, lazy) and scores by **MaxSim** (`maxsim(Q,D) =
+>   Σ_{i∈Q} max_{j∈D} cos(q_i,d_j)`, a pure unit-tested function), returning a descending permutation
+>   (ties keep RRF order → deterministic). Benchmarks Weaviate/Vespa/Jina ColBERT, LlamaIndex `ColbertRerank`.
+> - **SPLADE learned-sparse (✅ as reranker/scorer).** `retrieval/rerank/splade.py`: `SpladeReranker`
+>   implements `ListwiseJudge` — embeds query + candidates into **learned-sparse term-expansion vectors**
+>   via fastembed `SparseTextEmbedding` (`prithivida/Splade_PP_en_v1`, Apache-2.0, `[splade]`, lazy) and
+>   scores by **sparse dot product** (`sparse_dot`, a pure unit-tested function), same descending /
+>   deterministic contract. Benchmarks Vespa SPLADE, the 2025 SPLADE-v3 frontier.
+> - **Reuses the W2 reranker seam, no new surface.** Both register into the **existing** `make_reranker`
+>   factory (`rerank/cross_encoder.py`, the reranker hub) — `RAGSPINE_RERANKER=colbert|splade` /
+>   `ServiceConfig.reranker` selects them; model overridable via `RAGSPINE_COLBERT_MODEL` /
+>   `RAGSPINE_SPLADE_MODEL`. Default `"none"` ⇒ `make_reranker` returns `None` ⇒ the existing judge
+>   selection is byte-identical; `auto` still resolves to the cross-encoder (ColBERT/SPLADE are explicit
+>   named opt-ins). **Isolation inherited, not re-implemented**: both run *inside* `listwise_rerank`,
+>   which already excludes RESTRICTED from any judge — so RESTRICTED text never reaches
+>   `LateInteractionTextEmbedding.embed` / `SparseTextEmbedding.embed` (frozen by
+>   `tests/retrieval/rerank/test_{colbert,splade}_isolation.py`, each with a **reverse-proof** that the
+>   assertion has teeth). Provenance untouched (rerankers only reorder the link-exit's candidates).
+> **Offline honesty** same as W1/W2 (fastembed **first-pull-then-offline**); unit tests use fake-fastembed
+> stubs (zero network / install — the MaxSim / sparse-dot math is genuinely exercised), real-model
+> determinism/relevance is `@pytest.mark.network` (CI `-m "not network"` skips). Contract:
+> `src/ragspine/retrieval/docs/late-interaction.md`. **Follow-ups:** the heavy retrieval-backend halves —
+> a multi-vector `VectorStore` (PLAID / MUVERA / Vespa-style, ColBERT-as-retriever) and a SPLADE sparse
+> inverted index fused with BM25 via RRF (SPLADE-as-retriever); a ColBERT-rerank vs cross-encoder vs
+> identity A/B on the W5 harness; storage-cost honesty (multi-vector indexes are large).
+
 **Gap:** retrieval is single-vector dense (W1 ONNX MiniLM) + BM25 → RRF. No **late-interaction / multi-vector**
 (ColBERT-style token-level MaxSim, a precision tier above single-vector dense) and no **learned-sparse** (SPLADE
 neural sparse, stronger than BM25 and still interpretable).
@@ -732,7 +766,7 @@ Legend: **kind** 🛡/⭐/🔧 · **status** ✅ have · ◐ partial · ✗ gap.
 | Post-retrieval postprocessor | reranked top-k → prompt (no chain) | MMR de-dup + lost-in-the-middle reorder + context compression (det. default · LLMLingua-2 opt-in) — vs LlamaIndex `LongContextReorder`/`MMRPostprocessor`/`SentenceEmbeddingOptimizer` · Haystack `LostInTheMiddleRanker`/`DiversityRanker` · LangChain `ContextualCompressionRetriever` | ⭐ | ✅ (det. MMR + lost-in-the-middle + extractive compression on a `NodePostprocessor` chain, opt-in / byte-identical; LLMLingua-2 / LLM compression = seam-only follow-up) | W8 · P1 |
 | Query transformation | det. synonym multi-query + W6a decomposition only | HyDE + RAG-Fusion + step-back + Adaptive-RAG (opt-in LLM) — vs LlamaIndex `HyDEQueryTransform`/`QueryFusionRetriever` · LangChain `MultiQueryRetriever`/HyDE · LangGraph adaptive-rag | ⭐ | ✅ (all four opt-in / byte-identical; HyDE probe-never-a-fact, RAG-Fusion reuses `rrf_fuse`, per-variant security gate, Adaptive reuses `decomposer=` seam; det. step-back / dense-on / A/B = follow-up) | W9 · P2 |
 | Multi-granularity tree + chunking | flat index; W4b layout/parent-child only | RAPTOR recursive-cluster tree (det. cluster + `is_synthesis` summaries) + sentence-window + semantic chunking — vs LlamaIndex RAPTOR pack/`SentenceWindowNodeParser`/`SemanticSplitterNodeParser` · RAGFlow RAPTOR | ⭐ | ✅ (det. threshold-clustering tree + `is_synthesis`/never-fabricated-provenance summaries + sentence-window/semantic on the `Chunker` seam, all opt-in / byte-identical; UMAP+GMM cluster / tree-traversal mode / retrieval-time expansion = follow-up) | W10 · P2 |
-| Retrieval representation | single-vector dense + BM25 → RRF | ColBERT late-interaction (multi-vector MaxSim) + SPLADE learned-sparse, offline via fastembed — vs Weaviate/Vespa/Jina ColBERT · Vespa SPLADE · LlamaIndex `ColbertIndex`/`ColbertRerank` | ⭐ | ✗ | W11 · P2 |
+| Retrieval representation | single-vector dense + BM25 → RRF | ColBERT late-interaction (multi-vector MaxSim) + SPLADE learned-sparse, offline via fastembed — vs Weaviate/Vespa/Jina ColBERT · Vespa SPLADE · LlamaIndex `ColbertIndex`/`ColbertRerank` | ⭐ | ◐ (ColBERT MaxSim + SPLADE sparse-dot **rerankers** on the `ListwiseJudge` seam + `make_reranker`, opt-in / byte-identical / isolation-inherited + reverse-proof; multi-vector index / SPLADE sparse-retrieval-fused-with-BM25 / A/B = follow-up) | W11 · P2 |
 | Visual-document retrieval | OCR→text only (W3a) | ColPali/ColQwen2 page-as-image late interaction (GPU, opt-in) — vs LlamaIndex ColPali · Weaviate/Vespa ColPali · 2025 ColQwen | ⭐ | ✗ | W12 · P2 |
 
 ## Phasing
@@ -760,10 +794,12 @@ Legend: **kind** 🛡/⭐/🔧 · **status** ✅ have · ◐ partial · ✗ gap.
     `IntentParser` seam — all opt-in / default-off, the default loop byte-identical (see the W9 SHIPPED note above).
   - **W10** ✅ RAPTOR multi-granularity tree (det. threshold-clustering + `is_synthesis` summaries) +
     sentence-window / semantic chunking on the `Chunker` seam — all opt-in / default-off, the default loop
-    byte-identical (see the W10 SHIPPED note above). **W11–W12** ✗ the rest of the competitor-benchmark batch,
-    all opt-in / default-off behind extras: **W11** ColBERT late-interaction + SPLADE learned-sparse retrieval backends (heavy,
-    multi-vector seam); **W12** ColPali visual-document retrieval (heaviest, GPU-gated). The deterministic
-    default loop + its byte-identical eval stay unchanged.
+    byte-identical (see the W10 SHIPPED note above). **W11** ◐ ColBERT late-interaction (MaxSim) + SPLADE
+    learned-sparse land as **rerankers** on the existing `ListwiseJudge` seam + `make_reranker`
+    (`colbert` / `splade` specs, `[colbert]` / `[splade]`), opt-in / default-off / byte-identical /
+    isolation-inherited; the heavy multi-vector / sparse retrieval indexes are follow-ups (see the W11
+    SHIPPED note above). **W12** ✗ ColPali visual-document retrieval (heaviest, GPU-gated), still a gap.
+    The deterministic default loop + its byte-identical eval stay unchanged.
 
 Each piece follows the ADR 0005 promotion rule: experimental adapter until it has a real, CI-tested,
 conformance-bound path, then "core/supported."

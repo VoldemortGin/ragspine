@@ -4,7 +4,9 @@
 
 Submodules:
     listwise_rerank.py — listwise 二审编排：ListwiseJudge 协议 + prompt + 鲁棒解析 + 退化 + 隔离。
-    cross_encoder.py — 本地 cross-encoder 重排（W2）：fastembed TextCrossEncoder 实现 ListwiseJudge + make_reranker 工厂（离线、确定性、纯 CPU、归 [rerank]；默认仍不重排，opt-in）。
+    cross_encoder.py — 本地 cross-encoder 重排（W2）：fastembed TextCrossEncoder 实现 ListwiseJudge + reranker 缝统一工厂 make_reranker（含 W11 colbert/splade 选型；离线、确定性、纯 CPU、归 [rerank]；默认仍不重排，opt-in）。
+    colbert.py — ColBERT 晚交互重排（W11）：fastembed LateInteractionTextEmbedding + MaxSim token 级晚交互实现 ListwiseJudge（离线、确定性、纯 CPU、归 [colbert]；opt-in，对标 LlamaIndex ColbertRerank）。
+    splade.py — SPLADE 学习稀疏重排（W11）：fastembed SparseTextEmbedding + 稀疏点积实现 ListwiseJudge（离线、确定性、纯 CPU、归 [splade]；opt-in，对标 Vespa SPLADE / SPLADE-v3）。
 """
 
 from ragspine import _lazy_submodules

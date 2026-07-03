@@ -10,10 +10,12 @@ CrossEncoderReranker：真本地重排后端，实现既有 ListwiseJudge 协议
 归 [rerank] extra（复用 fastembed，与 W1 的 [embed-onnx] 同范式，过 ADR 0009 ≤Apache-2.0 许可门）。
 默认模型 Xenova/ms-marco-MiniLM-L-6-v2（Apache-2.0、约 80MB）。
 
-make_reranker：reranker 选型工厂，把「换重排大脑」从改代码降为一个 spec 字符串 / env。
+make_reranker：reranker 选型工厂（reranker 缝的统一工厂，把「换重排大脑」从改代码降为一个 spec 字符串 / env）。
 'none'＝不重排（默认，保持 identity/RRF 或注入的 LLM judge，行为不变）；'cross_encoder' 系＝本地
-cross-encoder；'auto'＝装了 fastembed 就用本地 cross-encoder、否则回落 None（不重排）。与 W1
-make_embedding_backend 的 none/auto 范式一致。
+cross-encoder；'colbert' 系＝ColBERT 晚交互 MaxSim 重排（W11，colbert.py）；'splade' 系＝SPLADE 学习
+稀疏点积重排（W11，splade.py）；'auto'＝装了 fastembed 就用本地 cross-encoder、否则回落 None（不重排）。
+与 W1 make_embedding_backend 的 none/auto 范式一致。三种本地重排大脑（cross-encoder / ColBERT / SPLADE）
+都实现 ListwiseJudge、都走同一 listwise_rerank 编排缝（RESTRICTED 不出域一致继承），故共用本工厂选型。
 
 **离线性诚实声明（同 W1 OnnxEmbeddingBackend，不可省略）**：fastembed 首次会从 HuggingFace 下载 ONNX
 权重再缓存（"首拉后离线"，不是首跑即离线）。真正的"首跑即离线"需把权重做成数据包随包出货——follow-up
@@ -34,7 +36,9 @@ from typing import Any
 
 from corespine import Registry, lazy_extra_import
 
+from ragspine.retrieval.rerank.colbert import COLBERT_MODEL_ENV, ColbertReranker
 from ragspine.retrieval.rerank.listwise_rerank import ListwiseJudge
+from ragspine.retrieval.rerank.splade import SPLADE_MODEL_ENV, SpladeReranker
 
 # 默认 cross-encoder 模型名（唯一出处，改这里即全局生效）。选 Xenova/ms-marco-MiniLM-L-6-v2：
 # Apache-2.0（过 ADR 0009 ≤Apache-2.0 许可门）、ONNX、纯 CPU、确定性、约 80MB——轻量真重排默认。
@@ -116,16 +120,34 @@ class CrossEncoderReranker:
         return sorted(range(len(cands)), key=lambda i: scores[i], reverse=True)
 
 
-# reranker 缝注册表（corespine.Registry 泛化 make_*：名字->工厂 + spec 归一）。
-# cross_encoder / ce / ms_marco 同指 CrossEncoderReranker（本地真重排）。Registry 内部对名字做
-# 大小写/留白/连字符归一，故 "cross-encoder"/"CROSS_ENCODER"/" ce " 都解析到同一工厂。
+# reranker 缝注册表（corespine.Registry 泛化 make_*：名字->工厂 + spec 归一）。这是【三种本地重排
+# 大脑】的统一注册表：cross_encoder / ce / ms_marco -> CrossEncoderReranker（W2 pointwise 交叉编码）；
+# colbert / colbertv2 / late_interaction -> ColbertReranker（W11 token 级晚交互 MaxSim，colbert.py）；
+# splade / splade_pp / learned_sparse -> SpladeReranker（W11 学习稀疏点积，splade.py）。三者都实现
+# ListwiseJudge、都走 listwise_rerank（RESTRICTED 不出域一致继承）。Registry 内部对名字做大小写/留白/
+# 连字符归一，故 "cross-encoder"/"CROSS_ENCODER"/" ce "/"late-interaction" 等都解析到同一工厂。
+# 三个后端类的构造均惰性（不 import fastembed），故本表在此登记零 SDK import。
 RERANKERS: Registry[ListwiseJudge] = Registry("reranker")
 RERANKERS.register("cross_encoder", CrossEncoderReranker)
 RERANKERS.register("ce", CrossEncoderReranker)
 RERANKERS.register("ms_marco", CrossEncoderReranker)
+RERANKERS.register("colbert", ColbertReranker)
+RERANKERS.register("colbertv2", ColbertReranker)
+RERANKERS.register("late_interaction", ColbertReranker)
+RERANKERS.register("splade", SpladeReranker)
+RERANKERS.register("splade_pp", SpladeReranker)
+RERANKERS.register("learned_sparse", SpladeReranker)
 
-# cross-encoder 后端的别名集合（归一后；缺省读 RAGSPINE_CROSS_ENCODER_MODEL 仅对这些 spec 生效）。
+# 各本地重排后端的别名集合（归一后）与其模型覆盖环境变量——用于 make_reranker 缺省模型时的 env 注入。
+# 一张 (spec 集合 -> 模型 env 变量名) 表，随新增重排后端在此追加一行即可（数据驱动，避免多段 if 复制）。
 _CROSS_ENCODER_SPECS = frozenset({"cross_encoder", "ce", "ms_marco"})
+_COLBERT_SPECS = frozenset({"colbert", "colbertv2", "late_interaction"})
+_SPLADE_SPECS = frozenset({"splade", "splade_pp", "learned_sparse"})
+_MODEL_ENV_BY_SPECS: tuple[tuple[frozenset[str], str], ...] = (
+    (_CROSS_ENCODER_SPECS, CROSS_ENCODER_MODEL_ENV),
+    (_COLBERT_SPECS, COLBERT_MODEL_ENV),
+    (_SPLADE_SPECS, SPLADE_MODEL_ENV),
+)
 
 
 def make_reranker(spec: str | None = None, **kwargs: Any) -> ListwiseJudge | None:
@@ -143,26 +165,39 @@ def make_reranker(spec: str | None = None, **kwargs: Any) -> ListwiseJudge | Non
         - 'cross_encoder' / 'ce' / 'ms_marco' -> CrossEncoderReranker（本地 cross-encoder，延迟 import，
                                                  缺 fastembed 在首次 judge 时抛友好错；model_name 可经
                                                  kwargs 或 RAGSPINE_CROSS_ENCODER_MODEL 覆盖）
+        - 'colbert' / 'colbertv2' / 'late_interaction'
+                                              -> ColbertReranker（W11 ColBERT 晚交互 MaxSim 重排，延迟
+                                                 import，[colbert]；model_name 可经 kwargs 或
+                                                 RAGSPINE_COLBERT_MODEL 覆盖）
+        - 'splade' / 'splade_pp' / 'learned_sparse'
+                                              -> SpladeReranker（W11 SPLADE 学习稀疏点积重排，延迟
+                                                 import，[splade]；model_name 可经 kwargs 或
+                                                 RAGSPINE_SPLADE_MODEL 覆盖）
         - 其他                                -> ValueError（Registry 列清当前可用名）
 
     返回 ListwiseJudge 实例或 None（可直接喂给 build_narrative_retriever 的 reranker 参数）。
     """
     if spec is None:
         spec = os.environ.get(RERANKER_ENV)
-    # 与 Registry._normalize 同口径地归一，用于 none 短路与 cross_encoder 别名判定。
+    # 与 Registry._normalize 同口径地归一，用于 none 短路与各后端别名判定。
     normalized = (spec or "none").strip().lower().replace("-", "_").replace(" ", "_")
     if normalized == "none":
         return None
     if normalized == "auto":
         # auto＝"装了就用、否则回落不重排"。探测 fastembed 是否可导入（不加载模型）：
-        # 装了 [rerank] -> 走 cross_encoder；没装 -> None（不重排，行为不变）。
+        # 装了 [rerank] -> 走 cross_encoder（默认本地重排大脑，colbert/splade 是显式命名 opt-in）；
+        # 没装 -> None（不重排，行为不变）。
         try:
             importlib.import_module("fastembed")
         except ImportError:
             return None
         normalized = "cross_encoder"
-    if normalized in _CROSS_ENCODER_SPECS and "model_name" not in kwargs:
-        env_model = os.environ.get(CROSS_ENCODER_MODEL_ENV)
-        if env_model:
-            kwargs["model_name"] = env_model
+    if "model_name" not in kwargs:
+        # 缺省模型时按 spec 所属后端读对应模型覆盖 env（数据驱动，随新增后端追加一行即可）。
+        for specs, env_name in _MODEL_ENV_BY_SPECS:
+            if normalized in specs:
+                env_model = os.environ.get(env_name)
+                if env_model:
+                    kwargs["model_name"] = env_model
+                break
     return RERANKERS.make(normalized, **kwargs)

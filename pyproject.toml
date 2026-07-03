@@ -140,6 +140,24 @@ embed-onnx = [
 rerank = [
     "fastembed>=0.7,<0.9",
 ]
+# ColBERT 晚交互重排后端（ColbertReranker，W11 给 ⭐ 检索表示补一档 token 级多向量 MaxSim 晚交互）。
+# 复用 fastembed（Apache-2.0，过 ADR 0009 ≤Apache-2.0 许可门）的 LateInteractionTextEmbedding：内置
+# ONNX 权重 + onnxruntime，纯 CPU、确定性，默认模型 colbert-ir/colbertv2.0（Apache-2.0，2025 前沿 ColBERTv2）。
+# 延迟 import：不装也能 import 核心、跑离线默认（不重排）；装了之后 config reranker='colbert' 即启用晚交互
+# 重排（对标 LlamaIndex ColbertRerank）。离线性诚实同 [embed-onnx]/[rerank]（"首拉后离线"）。
+# 多向量检索后端（PLAID/MUVERA 式多向量索引）= follow-up；本 extra 先落 ColBERT-as-reranker 增量。
+colbert = [
+    "fastembed>=0.7,<0.9",
+]
+# SPLADE 学习稀疏重排后端（SpladeReranker，W11 给 ⭐ 检索表示补一档神经学习稀疏 term-expansion 打分）。
+# 复用 fastembed（Apache-2.0，过 ADR 0009 ≤Apache-2.0 许可门）的 SparseTextEmbedding：内置 ONNX 权重 +
+# onnxruntime，纯 CPU、确定性，默认模型 prithivida/Splade_PP_en_v1（Apache-2.0）。
+# 延迟 import：不装也能 import 核心、跑离线默认（不重排）；装了之后 config reranker='splade' 即启用学习
+# 稀疏点积重排（对标 Vespa SPLADE / 2025 SPLADE-v3）。离线性诚实同 [embed-onnx]/[rerank]（"首拉后离线"）。
+# 与 BM25 并列经 RRF 融合的稀疏倒排检索后端 = follow-up；本 extra 先落 SPLADE-as-reranker 打分增量。
+splade = [
+    "fastembed>=0.7,<0.9",
+]
 # 可插拔向量存储后端（VectorStore 缝的真实 adapter）。延迟 import：不装也能 import 核心、
 # 跑零依赖 InProcessVectorStore 默认；装了即由 make_vector_store('sqlite_vec'|'pgvector'|'qdrant') 选用。
 # sqlite-vec：嵌入式 sqlite 扩展（Apache-2.0/MIT，permissive，零服务，conformance 装了即跑）。
@@ -187,7 +205,7 @@ service = [
 # GPU 与否无需在此区分——torch/transformers/paddleocr 装的是自适应版，运行时探测到
 # CUDA 即用 GPU、否则回落 CPU；embed 的 transformers 上限已按 darwin 平台标记处理。
 all = [
-    "rag-spine[pdf,ocr,doc,llm,embed,embed-onnx,rerank,vector,graph,service,dify]",
+    "rag-spine[pdf,ocr,doc,llm,embed,embed-onnx,rerank,colbert,splade,vector,graph,service,dify]",
 ]
 
 [build-system]

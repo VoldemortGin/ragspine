@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/
-verified-against: 39de878
+verified-against: dcb8fba
 ---
 
 # retrieval — agent contract
@@ -40,8 +40,13 @@ candidate pool then an **exact `_cosine` re-rank** finalizes top-k (`store._pool
 the pool covers the true top-k for the conformance datasets so `sqlite_vec`/`pgvector` stay exact)
 — and `persistence_policy.py` gating what is written at rest), `rerank/` (the ⭐精排 exit:
 `listwise_rerank.py` orchestration + `ListwiseJudge` Protocol with RRF-fallback + RESTRICTED isolation;
-two judges — LLM listwise via `link/`, and the offline **local cross-encoder** `cross_encoder.py`
-(fastembed `TextCrossEncoder`, `[rerank]`, deterministic, opt-in via `make_reranker`)),
+judges — LLM listwise via `link/`, and three offline local brains all selected by `make_reranker`
+(`cross_encoder.py`): the **cross-encoder** `cross_encoder.py` (fastembed `TextCrossEncoder`,
+`[rerank]`, W2), plus two W11 retrieval-representation rerankers — **ColBERT late-interaction**
+`colbert.py` (fastembed `LateInteractionTextEmbedding`, token-level multi-vector **MaxSim**,
+`[colbert]`) and **SPLADE learned-sparse** `splade.py` (fastembed `SparseTextEmbedding`, sparse
+**dot product**, `[splade]`) — all deterministic, offline, opt-in via `make_reranker`
+('colbert'/'splade'), default `none` byte-identical),
 `link/` (adapter wiring retrieval into the agent),
 `corrective.py` (**W6b corrective retrieval / CRAG, opt-in default-off**: `CorrectiveRetriever` wraps any base
 `NarrativeRetriever` and generalizes the lone `retry_without_filters` fallback into a **bounded** (`max_retries`
@@ -124,6 +129,12 @@ the base's citable leaves. `make_raptor_summarizer` / `make_raptor_retriever` + 
   (W2, fastembed `TextCrossEncoder`/`[rerank]`) as a swappable `ListwiseJudge`, the `make_reranker`
   factory + `none`/`auto` opt-in mechanism that keeps the default loop byte-identical, the RESTRICTED
   isolation inherited from `listwise_rerank` (+ its reverse-proof), and determinism honesty.
+- [`docs/late-interaction.md`](docs/late-interaction.md) — the W11 retrieval-representation rerankers:
+  **ColBERT** late-interaction (`colbert.py`, token-level multi-vector MaxSim, `[colbert]`) and
+  **SPLADE** learned-sparse (`splade.py`, sparse dot product, `[splade]`), both on the same
+  `ListwiseJudge` seam + `make_reranker` factory, the reranker-not-retriever landing decision
+  (multi-vector / sparse index = follow-up), inherited RESTRICTED isolation (+ reverse-proofs),
+  determinism + first-pull-then-offline honesty, and the default `none` byte-identity.
 - [`docs/postprocess.md`](docs/postprocess.md) — the post-retrieval `NodePostprocessor` chain (W8): MMR
   de-dup + lost-in-the-middle reorder + extractive compression, the `make_postprocessor` /
   `RAGSPINE_POSTPROCESSOR` factory + comma-chain, the opt-in / byte-identical `postprocessor=` seam on

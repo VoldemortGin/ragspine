@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/service/
-verified-against: 40217c7
+verified-against: dcb8fba
 ---
 
 # service — agent contract

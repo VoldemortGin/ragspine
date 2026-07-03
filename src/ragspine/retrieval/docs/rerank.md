@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/rerank/cross_encoder.py
-verified-against: 3eccc8d
+verified-against: dcb8fba
 ---
 
 # Reranker seam — the ⭐ rerank stage's offline brain (W2)
@@ -20,6 +20,15 @@ orchestration (RESTRICTED isolation + degrade-to-RRF) is unchanged — W2 only a
 | `auto` | `CrossEncoderReranker` *if* `fastembed` importable, else `None` | yes / falls back | `[rerank]` | first-pull-then-offline |
 | `cross_encoder` / `ce` / `ms_marco` | `CrossEncoderReranker` | **yes** | `[rerank]` (`fastembed`, Apache-2.0) | first-pull-then-offline |
 | (injected) `ProviderListwiseJudge` | LLM listwise (`link/narrative_link.py`) | yes (higher-cost) | `[llm]` / any provider | no (API) |
+
+> **W11 extension.** `make_reranker` (`rerank/cross_encoder.py`) is the **reranker-factory hub** for
+> all three offline local brains: the W2 `CrossEncoderReranker` plus two W11 retrieval-representation
+> rerankers — `ColbertReranker` (`colbert` / `colbertv2` / `late_interaction`, token-level
+> multi-vector MaxSim, `[colbert]`) and `SpladeReranker` (`splade` / `splade_pp` / `learned_sparse`,
+> learned-sparse dot product, `[splade]`). All three implement `ListwiseJudge` and share this
+> orchestration + isolation + `make_reranker` selection verbatim; `auto` still resolves to the
+> cross-encoder (ColBERT/SPLADE are explicit named opt-ins). See
+> [`late-interaction.md`](late-interaction.md) for the W11 contract.
 
 `CrossEncoderReranker` is the W2 deliverable: a **lightweight, deterministic, offline** rerank
 brain. Default model `Xenova/ms-marco-MiniLM-L-6-v2` (Apache-2.0, ~80 MB) run on CPU via

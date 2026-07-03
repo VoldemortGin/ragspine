@@ -4,7 +4,7 @@ covers:
   - src/ragspine/retrieval/link/
   - src/ragspine/retrieval/rerank/
   - src/ragspine/common/observability/
-verified-against: a9f5b31
+verified-against: dcb8fba
 ---
 
 # Invariants (code-enforced)
@@ -124,6 +124,25 @@ behind the existing `Chunker` seam) inherit the chunker **provenance conformance
 to include them) and keep the `chunk.text` = original-substring contract; the default `DefaultChunker` flat
 index stays **byte-identical**. The authoritative per-domain contracts are
 `src/ragspine/retrieval/docs/raptor.md` + `src/ragspine/retrieval/docs/chunker.md`.
+
+**Inherited by the W11 retrieval-representation rerankers (opt-in, no new exit).** The W11 ColBERT
+late-interaction reranker (`retrieval/rerank/colbert.py`, `ColbertReranker`, token-level multi-vector
+**MaxSim**) and SPLADE learned-sparse reranker (`retrieval/rerank/splade.py`, `SpladeReranker`,
+sparse **dot product**) both implement the **existing** `ListwiseJudge` Protocol and run *inside* the
+unchanged `listwise_rerank` orchestration — exactly the W2 cross-encoder idiom. So the rerank exit's
+protection (RESTRICTED candidates excluded from any judge, kept in RRF position; all-RESTRICTED →
+judge not called) covers them without re-implementation: RESTRICTED text never reaches
+`LateInteractionTextEmbedding.embed` / `SparseTextEmbedding.embed`. Both land as **rerankers** (not
+retrieval backends), selected by the existing `make_reranker` factory (`colbert` / `splade` specs);
+default `ServiceConfig.reranker == "none"` ⇒ `make_reranker` returns `None` ⇒ the judge selection is
+byte-identical (multi-vector / sparse indexes for the retriever mode are a follow-up). Provenance is
+untouched — a reranker only reorders the candidates the upstream `link/` exit already produced, never
+fabricating a snippet or dropping lineage. **Frozen by**
+`tests/retrieval/rerank/test_colbert_isolation.py` and `tests/retrieval/rerank/test_splade_isolation.py`
+(RESTRICTED never reaches the embed call, kept in position; a **reverse-proof** shows the same reranker
+*does* embed/score the text when handed it directly, bypassing the seam — proving the protection lives
+at the upstream orchestration). The authoritative per-domain contract is
+`src/ragspine/retrieval/docs/late-interaction.md`.
 
 ## Privacy-aware traces
 

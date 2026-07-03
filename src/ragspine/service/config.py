@@ -44,7 +44,7 @@ class ServiceConfig:
     model: str = DEFAULT_ANTHROPIC_MODEL
     base_url: str | None = None
     embedding: str = "auto"                 # "auto"(装[embed-onnx]→真语义ONNX,否则纯BM25) | "none" | "onnx" | "deterministic" | "openai"
-    reranker: str = "none"                  # "none"(不重排,默认行为不变) | "cross_encoder"(本地[rerank]) | "auto"(装[rerank]即用,否则不重排)
+    reranker: str = "none"                  # "none"(不重排,默认行为不变) | "cross_encoder"(本地[rerank]) | "colbert"(晚交互MaxSim,[colbert]) | "splade"(学习稀疏,[splade]) | "auto"(装[rerank]即用,否则不重排)
     query_decompose: str = "none"           # W6a 查询分解(opt-in): "none"(不分解,默认字节不变) | "llm"(注入provider的LLM多跳分解)
     corrective: str = "none"                 # W6b 纠错检索(opt-in): "none"(默认,返回base本身字节不变) | "crag"(有界确定性 grade→act 环)
     postprocessor: str = "none"              # W8 后检索链(opt-in): "none"(默认,不挂链字节不变) | "mmr"/"lost_in_middle"/"compress" | 逗号成链如"mmr,lost_in_middle"
