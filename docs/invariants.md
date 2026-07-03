@@ -87,6 +87,25 @@ surfaces through the `mmr,lost_in_middle,compress` chain, with a **reverse-proof
 *directly* passes through — proving the protection lives at the upstream exit, not the postprocessor). The
 authoritative per-domain contract is `src/ragspine/retrieval/docs/postprocess.md`.
 
+**Inherited by the W9 query transforms (opt-in, no new exit).** The W9 LLM query transforms
+(`agent/query_transform.py`: `HyDERetriever` / `RAGFusionRetriever` / `StepBackRetriever`, composed by
+`make_query_transform`) are `NarrativeRetriever` wrappers (the W6b `CorrectiveRetriever` idiom): each only ever
+calls `base.retrieve(...)` — whose `link/` exit has already stripped `sensitivity == RESTRICTED` — and only
+reorders / fuses (via `rrf_fuse`) that already-stripped subset, so RESTRICTED can neither enter a transform nor
+surface. Two further guarantees make the transforms anti-fabrication-safe: (1) **HyDE's hypothetical document is
+a retrieval probe, never a citable fact** — it replaces only the *query text* fed to `base.retrieve`; the
+returned snippets are the real chunks with real lineage, and the hypothetical doc never enters a snippet /
+answer / citation. (2) **Every LLM-generated variant / step-back question re-runs the deterministic
+`SecurityGate` before retrieval** — a competitor / out-of-scope generated query is dropped and never retrieved
+(the W6a idiom; the original question already passed the gate at `answer_question` entry, so this screens only
+the *newly introduced* queries). Default `"none"` ⇒ `make_query_transform` returns the base unchanged ⇒ the
+retriever path is byte-identical (and `answer_question` itself is untouched — Adaptive-RAG reuses the existing
+`decomposer=` seam via `AdaptiveDecomposer`, `multi` → W6a fan-out, `simple`/`single` → the byte-identical
+single-shot route). **Frozen by** `tests/agent/test_query_transform.py` (HyDE probe-never-a-fact; RAG-Fusion RRF
+fusion; per-variant / per-step-back competitor screening with a spy-base **reverse-proof**; a real-index
+isolation integration test with a RESTRICTED-in-store reverse-proof; factory byte-identity). The authoritative
+per-domain contract is `src/ragspine/agent/CLAUDE.md`.
+
 ## Privacy-aware traces
 
 <!-- TODO: common/observability records codes / counts / timings only. -->

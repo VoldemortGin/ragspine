@@ -21,6 +21,7 @@ from ragspine.agent.llm_provider import (
     LLMProvider,
     MockProvider,
 )
+from ragspine.agent.query_transform import make_query_transform
 from ragspine.retrieval.corrective import make_corrective_retriever
 from ragspine.retrieval.link.narrative_link import build_narrative_retriever
 from ragspine.retrieval.postprocess import make_postprocessor
@@ -47,6 +48,8 @@ class ServiceConfig:
     query_decompose: str = "none"           # W6a 查询分解(opt-in): "none"(不分解,默认字节不变) | "llm"(注入provider的LLM多跳分解)
     corrective: str = "none"                 # W6b 纠错检索(opt-in): "none"(默认,返回base本身字节不变) | "crag"(有界确定性 grade→act 环)
     postprocessor: str = "none"              # W8 后检索链(opt-in): "none"(默认,不挂链字节不变) | "mmr"/"lost_in_middle"/"compress" | 逗号成链如"mmr,lost_in_middle"
+    query_transform: str = "none"            # W9 查询变换(opt-in,需注入provider): "none"(默认返回base字节不变) | "hyde" | "rag_fusion" | "step_back"
+    adaptive: str = "none"                   # W9 Adaptive-RAG 复杂度路由(opt-in): "none"(默认不路由字节不变) | "heuristic"(确定性分类) | "llm"
     vector_store: str = "none"              # "none" | "in_process" | "sqlite_vec"（后者需 [vector]）
     persistence_policy: str = "default"     # "default"(隔离优先) | "persist_everything"
     reference_date: str | None = None       # ISO "YYYY-MM-DD" or None
@@ -148,9 +151,13 @@ def open_narrative_retriever(
         reranker=make_reranker(config.reranker),
         postprocessor=make_postprocessor(config.postprocessor),
     )
-    # W6b 纠错检索（opt-in）：默认 "none" → make_corrective_retriever 返回 retriever 本身（字节
+    # W9 查询变换（opt-in，需注入 provider）：默认 "none" → make_query_transform 返回 retriever 本身
+    # （字节不变）；"hyde"/"rag_fusion"/"step_back" 才包成对应 LLM 变换 wrapper。假想文档只作检索探针
+    # 绝不进答案，生成变体逐个过安全门；隔离继承自 base（RESTRICTED 已在出口剔除）。
+    transformed = make_query_transform(retriever, config.query_transform, provider=provider)
+    # W6b 纠错检索（opt-in）：默认 "none" → make_corrective_retriever 返回 transformed 本身（字节
     # 不变）；"crag" 才包成有界确定性 grade→act 环。隔离继承自 base（RESTRICTED 已在出口剔除）。
-    wrapped: NarrativeRetriever = make_corrective_retriever(retriever, config.corrective)
+    wrapped: NarrativeRetriever = make_corrective_retriever(transformed, config.corrective)
     try:
         yield wrapped
     finally:

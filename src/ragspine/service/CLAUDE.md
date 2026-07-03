@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/service/
-verified-against: a9f5b31
+verified-against: 40217c7
 ---
 
 # service — agent contract
@@ -22,10 +22,13 @@ stores only the prior turn's home entity-code + period — non-sensitive) + `res
 carry-forward of those slots into a structured/composite follow-up that omits them) + `ConversationSession.ask`
 (re-runs the **full** `answer_question` every turn — the security gate re-screens the augmented question; a
 competitor follow-up is still refused, home context is never carried into an out-of-scope question, a refused
-turn is never remembered). Not yet endpoint-wired (follow-up). Two opt-in config knobs feed the agent path:
-`ServiceConfig.query_decompose` (W6a, `make_decomposer` in `routes.py`) and `ServiceConfig.corrective` (W6b,
-`make_corrective_retriever` in `open_narrative_retriever`) — both default `"none"` ⇒ the agent/retriever path is
-byte-identical.
+turn is never remembered). Not yet endpoint-wired (follow-up). Opt-in config knobs feed the agent path, all
+default `"none"` ⇒ the agent/retriever path is **byte-identical**: `ServiceConfig.query_decompose` (W6a,
+`make_decomposer` in `routes.py`), `ServiceConfig.corrective` (W6b, `make_corrective_retriever` in
+`open_narrative_retriever`), `ServiceConfig.query_transform` (W9 HyDE / RAG-Fusion / step-back, `make_query_transform`
+wrapping the base retriever in `open_narrative_retriever`, upstream of the corrective wrap — needs a provider), and
+`ServiceConfig.adaptive` (W9 Adaptive-RAG complexity routing, `make_adaptive_decomposer` in `routes.py` — when set
+it selects the decomposer instead of `query_decompose`).
 
 Built on the family core `corespine`: `ServiceConfig.from_env` uses `load_from_env`
 (3 legacy env aliases preserved); the task queue re-exports `corespine.JobStatus`,

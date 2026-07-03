@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/agent/
-verified-against: a9f5b31
+verified-against: 40217c7
 ---
 
 # agent — agent contract
@@ -35,6 +35,20 @@ loop, LLM provider abstraction.
   re-runs the **full** `answer_question` (`decomposer=None`, no recursion) and the guarded sub-answers
   are deterministically concatenated (route `decomposed`). Security gate + anti-fabrication rewrite are
   inherited **per sub-question** — a competitor sub-question is still out-of-scope-refused.
+- `query_transform.py` — **W9 query transformation (opt-in, default-off).** Four LLM transforms on the
+  `QueryRewriter` / `IntentParser` seam (ADR 0010), all byte-identical when unselected. Three are
+  `NarrativeRetriever` wrappers (the W6b `CorrectiveRetriever` idiom): `HyDERetriever` (hypothetical-doc
+  probe — **never a citable fact**; it replaces only the query *text* fed to `base.retrieve`), `RAGFusionRetriever`
+  (LLM N variants → **RRF via `retrieval.rrf_fuse`**), `StepBackRetriever` (abstract question + original,
+  RRF-merged); selected by `make_query_transform(base, spec, *, provider)` / `RAGSPINE_QUERY_TRANSFORM` (`none`
+  → **base unchanged**; degrades to base when no provider injected). The fourth is **Adaptive-RAG**:
+  `HeuristicComplexityClassifier` (deterministic default — routes by listed-axis count / comparison cues) /
+  `LLMComplexityClassifier` (opt-in) + `AdaptiveDecomposer` (implements `QueryDecomposer`, **reuses
+  `answer_question(decomposer=)`** — `multi` → W6a fan-out, `simple`/`single` → the byte-identical single-shot
+  route); `make_adaptive_decomposer(spec, *, provider)` / `RAGSPINE_ADAPTIVE`. **Security inherited**: every
+  LLM-generated variant / step-back question passes the deterministic `SecurityGate` **before retrieval** (a
+  competitor variant is dropped, never retrieved); isolation inherited from `base` (RESTRICTED stripped upstream).
+  **Degrade honest** (provider failure / no provider → original query).
 
 ## Invariants
 

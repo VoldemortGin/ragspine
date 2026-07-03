@@ -9,6 +9,7 @@ Submodules:
     intent.py — 规则式（无 LLM）意图&范围解析 + 澄清网关。
     llm_provider.py — LLMProvider 协议 + AnthropicProvider（真实）+ MockProvider（离线确定性）。
     query_tools.py — 参数化 query_metric 查询工具：found/not_found/unrecognized，绝不臆造。
+    query_transform.py — opt-in LLM 查询变换（W9）：HyDE + RAG-Fusion + step-back + Adaptive-RAG；默认 none 时旁路、字节不变。
     security_gate.py — 确定性安全门（ADR 0010）：越权/竞品拒答 + 命中遮蔽。
 """
 

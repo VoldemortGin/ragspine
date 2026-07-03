@@ -559,6 +559,48 @@ numbers never leak). Benchmarks **LlamaIndex `HyDEQueryTransform` / `QueryFusion
 *Follow-up:* HyDE needs dense-on (W1's `auto`); the **deterministic step-back** (controlled-vocab generalization)
 as a zero-LLM variant; an A/B measuring recall lift per transform on the W5 harness.
 
+> **✅ SHIPPED (all four opt-in / default-off; default loop byte-identical — `answer_question` is untouched).**
+> `agent/query_transform.py` adds the four LLM query transforms on the existing `QueryRewriter` / `IntentParser`
+> seam (ADR 0010), all **default-off and byte-identical** when unselected:
+> - **HyDE (✅).** `HyDERetriever` (a `NarrativeRetriever` wrapper, seam identical to the W6b
+>   `CorrectiveRetriever`): a single provider call writes a **hypothetical answer document**, and retrieval runs
+>   with **that document as the query text** (aligns the dense vector — and the BM25 tokens — with answer-shaped
+>   passages). The hypothetical doc is a **retrieval probe only**: `base.retrieve` returns the real chunks with
+>   real lineage, so the hypothetical doc **never enters a snippet / answer / citation** (frozen by
+>   `tests/agent/test_query_transform.py`). Benchmarks LlamaIndex `HyDEQueryTransform` / LangChain
+>   `HypotheticalDocumentEmbedder`.
+> - **RAG-Fusion (✅).** `RAGFusionRetriever`: a provider call generates N query variants (bounded by
+>   `max_variants`); the original + each variant is retrieved and the results are fused by **RRF — reusing the
+>   `retrieval.rrf_fuse` we already own from W1** (keyed by `chunk_id`). Different layer from the *deterministic*
+>   `GlossaryQueryRewriter` synonym multi-query: that is controlled-vocab synonyms, this is LLM-generated
+>   variants. Benchmarks LlamaIndex `QueryFusionRetriever` / LangChain `MultiQueryRetriever`.
+> - **Step-back (✅).** `StepBackRetriever`: a provider call derives a more abstract *step-back* question; the
+>   original (specific) + step-back (broader background) results are merged by RRF (Zheng et al. 2023). The
+>   **deterministic controlled-vocab step-back** stays a follow-up.
+> - **Adaptive-RAG (✅).** `HeuristicComplexityClassifier` (the **deterministic default** — routes by
+>   listed-axis count / comparison cues, zero LLM) + opt-in `LLMComplexityClassifier` (same "deterministic
+>   default + opt-in model" idiom as W5 `EntailmentJudge`, deterministic degrade to the heuristic). `AdaptiveDecomposer`
+>   **reuses the existing `answer_question(decomposer=)` seam** (implements `QueryDecomposer`): `multi` →
+>   delegates to the W6a LLM decomposer fan-out; `simple`/`single` → returns `[question]` ⇒ the **normal
+>   single-shot route, byte-identical** (so the deterministic default routing is never changed — adaptive is an
+>   opt-in enhancement, not a replacement). Benchmarks LangGraph adaptive-rag.
+>
+> **Factories:** `make_query_transform(base, spec, *, provider)` / `RAGSPINE_QUERY_TRANSFORM` (default `none` →
+> **returns `base` unchanged**, byte-identical; `hyde`/`rag_fusion`/`step_back` opt-in, and a **degrade to `base`
+> when no provider is injected** — honest, never a no-op LLM) and `make_adaptive_decomposer(spec, *, provider)` /
+> `RAGSPINE_ADAPTIVE` (default `none` → `None`). Wired into the service via `ServiceConfig.query_transform`
+> (`open_narrative_retriever` wraps the base retriever, upstream of the W6b corrective wrap) and
+> `ServiceConfig.adaptive` (`routes.py` decomposer selection) — **both default `none` ⇒ the agent/retriever path
+> is byte-identical.** **Anti-fabrication + security inherited, not re-implemented:** every generated RAG-Fusion
+> variant / step-back question passes the deterministic `SecurityGate` **before retrieval** — a competitor
+> variant is dropped and never retrieved (the W6a idiom, home numbers never leak; frozen with a **reverse-proof**
+> that a spy base never receives the competitor query); the three wrappers only ever reorder / fuse a *subset* of
+> the base's already-RESTRICTED-stripped output (isolation inherited — frozen by a real-index integration test +
+> reverse-proof); numbers still route through the structured channel. **Degrade honest:** provider failure /
+> no provider / malformed reply → fall back to the deterministic behavior (original query), never fabricate.
+> Contract: `src/ragspine/agent/CLAUDE.md`. *Follow-up:* HyDE's dense-on maximization (W1 `auto`); the
+> deterministic zero-LLM step-back; per-transform recall-lift A/B on the W5 harness.
+
 ### W10 — RAPTOR + chunking strategies ⭐  (P2)
 
 **Gap:** chunking has W4b's layout / parent-child (opt-in) but **no multi-granularity tree** — no way to retrieve
@@ -664,7 +706,7 @@ Legend: **kind** 🛡/⭐/🔧 · **status** ✅ have · ◐ partial · ✗ gap.
 | Narrative GraphRAG | none | entity/community (opt-in, provenance-bound) | ⭐ | ◐ (extract→community→summary skeleton, fake-LLM-tested; Leiden/incremental/global-query = follow-up) | W7b · P2 |
 | Graph store seam | none | `GraphStore` Protocol + in-proc default + adapters | 🔧 | ✅ | W7c · P2 |
 | Post-retrieval postprocessor | reranked top-k → prompt (no chain) | MMR de-dup + lost-in-the-middle reorder + context compression (det. default · LLMLingua-2 opt-in) — vs LlamaIndex `LongContextReorder`/`MMRPostprocessor`/`SentenceEmbeddingOptimizer` · Haystack `LostInTheMiddleRanker`/`DiversityRanker` · LangChain `ContextualCompressionRetriever` | ⭐ | ✅ (det. MMR + lost-in-the-middle + extractive compression on a `NodePostprocessor` chain, opt-in / byte-identical; LLMLingua-2 / LLM compression = seam-only follow-up) | W8 · P1 |
-| Query transformation | det. synonym multi-query + W6a decomposition only | HyDE + RAG-Fusion + step-back + Adaptive-RAG (opt-in LLM) — vs LlamaIndex `HyDEQueryTransform`/`QueryFusionRetriever` · LangChain `MultiQueryRetriever`/HyDE · LangGraph adaptive-rag | ⭐ | ✗ | W9 · P2 |
+| Query transformation | det. synonym multi-query + W6a decomposition only | HyDE + RAG-Fusion + step-back + Adaptive-RAG (opt-in LLM) — vs LlamaIndex `HyDEQueryTransform`/`QueryFusionRetriever` · LangChain `MultiQueryRetriever`/HyDE · LangGraph adaptive-rag | ⭐ | ✅ (all four opt-in / byte-identical; HyDE probe-never-a-fact, RAG-Fusion reuses `rrf_fuse`, per-variant security gate, Adaptive reuses `decomposer=` seam; det. step-back / dense-on / A/B = follow-up) | W9 · P2 |
 | Multi-granularity tree + chunking | flat index; W4b layout/parent-child only | RAPTOR recursive-cluster tree (det. cluster + `is_synthesis` summaries) + sentence-window + semantic chunking — vs LlamaIndex RAPTOR pack/`SentenceWindowNodeParser`/`SemanticSplitterNodeParser` · RAGFlow RAPTOR | ⭐ | ✗ | W10 · P2 |
 | Retrieval representation | single-vector dense + BM25 → RRF | ColBERT late-interaction (multi-vector MaxSim) + SPLADE learned-sparse, offline via fastembed — vs Weaviate/Vespa/Jina ColBERT · Vespa SPLADE · LlamaIndex `ColbertIndex`/`ColbertRerank` | ⭐ | ✗ | W11 · P2 |
 | Visual-document retrieval | OCR→text only (W3a) | ColPali/ColQwen2 page-as-image late interaction (GPU, opt-in) — vs LlamaIndex ColPali · Weaviate/Vespa ColPali · 2025 ColQwen | ⭐ | ✗ | W12 · P2 |
@@ -690,8 +732,9 @@ Legend: **kind** 🛡/⭐/🔧 · **status** ✅ have · ◐ partial · ✗ gap.
   - **W7a** structured relation graph (charter-native multi-hop) → **W7c** `GraphStore` seam →
     **W7b** opt-in narrative GraphRAG; **W6** ✅/◐ agentic depth (W6a decomposition ✅ · W6b CRAG ✅ · W6c
     multi-turn ◐), all opt-in, default-off — the deterministic default loop and its byte-identical eval unchanged.
-  - **W9–W12** ✗ the rest of the competitor-benchmark batch, all opt-in / default-off behind extras: **W9** LLM
-    query transforms (HyDE / RAG-Fusion / step-back / Adaptive-RAG) on the `QueryRewriter` seam; **W10** RAPTOR
+  - **W9** ✅ LLM query transforms (HyDE / RAG-Fusion / step-back / Adaptive-RAG) on the `QueryRewriter` /
+    `IntentParser` seam — all opt-in / default-off, the default loop byte-identical (see the W9 SHIPPED note above).
+  - **W10–W12** ✗ the rest of the competitor-benchmark batch, all opt-in / default-off behind extras: **W10** RAPTOR
     multi-granularity tree (det. clustering + `is_synthesis` summaries) + sentence-window / semantic chunking on
     the `Chunker` seam; **W11** ColBERT late-interaction + SPLADE learned-sparse retrieval backends (heavy,
     multi-vector seam); **W12** ColPali visual-document retrieval (heaviest, GPU-gated). The deterministic

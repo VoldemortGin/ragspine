@@ -18,6 +18,7 @@ from ragspine.agent.intent import (
     ROUTE_STRUCTURED,
 )
 from ragspine.agent.llm_provider import LLMProvider
+from ragspine.agent.query_transform import make_adaptive_decomposer
 from ragspine.common.observability import emit_trace, new_request_id
 from ragspine.service.api.dependencies import (
     get_config,
@@ -200,12 +201,17 @@ def ask(
         # 2) miss -> 正常 workflow（资源每请求各自开关）
         with open_fact_store(config) as store, \
                 open_narrative_retriever(config, provider) as retriever:
+            # 分解器选型：W9 Adaptive-RAG（复杂度路由）优先于 W6a 直接分解——config.adaptive
+            # 非 "none" 时按复杂度路由（multi 才 fan-out），否则用 W6a 直接分解。两者默认均 "none"
+            # → decomposer=None → answer_question 主流程字节不变。
+            if config.adaptive != "none":
+                decomposer = make_adaptive_decomposer(config.adaptive, provider=provider)
+            else:
+                decomposer = make_decomposer(config.query_decompose, provider=provider)
             result = answer_question(
                 req.question, store, provider,
                 reference_date=ref, narrative_retriever=retriever,
-                # W6a 查询分解（opt-in）：默认 "none" → make_decomposer 返回 None →
-                # answer_question(decomposer=None) 主流程字节不变。"llm" 且注入 provider 才生效。
-                decomposer=make_decomposer(config.query_decompose, provider=provider),
+                decomposer=decomposer,
             )
 
         summary = _tool_status_summary(result.tool_results)
