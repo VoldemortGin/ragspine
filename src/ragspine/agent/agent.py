@@ -351,7 +351,9 @@ def _multi_subtask_answer(
 
 
 def _snippet_text(snippet: dict[str, object]) -> str:
-    return str(snippet.get("text") or snippet.get("content") or "")
+    # W8：压缩 postprocessor 产出 "prompt_text"（只影响送 prompt 的文本，不改引用字段）；优先读之，
+    # 缺省回落 text/content——未挂压缩链时无 prompt_text，行为字节不变。
+    return str(snippet.get("prompt_text") or snippet.get("text") or snippet.get("content") or "")
 
 
 def _snippet_source(snippet: dict[str, object]) -> dict[str, object]:

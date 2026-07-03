@@ -499,6 +499,30 @@ LLMLingua-2 ONNX weight pull (same "first-pull-then-offline" honesty as W1/W2); 
 token-savings vs answer-accuracy on the W5 gate (a depth item isn't done until the eval ratchet shows it
 improved / held the answer).
 
+> **✅ SHIPPED (deterministic core; LLMLingua-2 / LLM compression = seam-only follow-up).** `retrieval/postprocess.py`:
+> a `NodePostprocessor` Protocol (`postprocess(query, results) -> results`, over the RESTRICTED-stripped snippet
+> dicts) + three implementations — **`MMRPostprocessor`** (Maximal Marginal Relevance greedy `λ·rel −
+> (1−λ)·max_sim`, relevance = input rank, similarity = lexical Jaccard, ties stable by input order; optional
+> `top_n` truly drops the near-dup tail), **`LostInTheMiddlePostprocessor`** (canonical LITM: even ranks →
+> head, odd ranks → reversed tail, so the most relevant land at both ends), **`CompressionPostprocessor`**
+> (deterministic extractive default **reusing W5 `LexicalOverlapJudge`** — keep sentences whose query
+> content-token coverage clears a threshold, keep the best sentence when none do; opt-in `compressor` seam for
+> LLMLingua-2 / LLM). All three **deterministic, zero-model, offline**. Composed by **`make_postprocessor`** /
+> `RAGSPINE_POSTPROCESSOR` (corespine `Registry`, mirroring `make_reranker`); a comma spec like
+> `"mmr,lost_in_middle"` builds a `ChainPostprocessor`. **Default byte-identical**: `build_narrative_retriever`
+> gained a `postprocessor=` seam and `ServiceConfig.postprocessor` defaults to `"none"` → `make_postprocessor`
+> returns `None` → no chain → `NarrativeIndexRetriever.retrieve` output is unchanged (MMR / lost-in-the-middle
+> are deterministic and *could* be on by default, but ship **opt-in** to preserve byte-identity). **Provenance
+> never broken** (the W4a index_text-vs-chunk.text layering): compression writes to a separate **`prompt_text`**
+> key that `agent._snippet_text` prefers for prompt assembly, leaving the original `text` + every reference field
+> (`source_locator` / `doc_id` / `chunk_id` / `title` / `scores` / `sensitivity`) byte-identical, and each kept
+> sentence is a verbatim substring of the original. **Isolation inherited, not re-implemented**: the chain runs
+> *after* the `link/` exit strips RESTRICTED, only ever reorders/de-dups/compresses that already-stripped subset
+> — frozen by `tests/retrieval/postprocess/test_postprocess_isolation.py` (real-index integration + a
+> **reverse-proof** that a RESTRICTED snippet fed *directly* passes through, proving the protection lives at the
+> upstream exit). Determinism / MMR de-dup / LITM two-ends / compression-denoise-and-provenance / chain / factory
+> / byte-identity all frozen under `tests/retrieval/postprocess/`. Contract: `retrieval/docs/postprocess.md`.
+
 ### W9 — Query transformation ⭐  (P2, opt-in)
 
 **Gap:** query-side transforms are deterministic-only today — `RuleIntentParser`'s controlled-vocab synonym
@@ -639,7 +663,7 @@ Legend: **kind** 🛡/⭐/🔧 · **status** ✅ have · ◐ partial · ✗ gap.
 | Structured relation graph | none (substrate exists) | deterministic typed graph + multi-hop | ⭐ | ✅ | W7a · P2 |
 | Narrative GraphRAG | none | entity/community (opt-in, provenance-bound) | ⭐ | ◐ (extract→community→summary skeleton, fake-LLM-tested; Leiden/incremental/global-query = follow-up) | W7b · P2 |
 | Graph store seam | none | `GraphStore` Protocol + in-proc default + adapters | 🔧 | ✅ | W7c · P2 |
-| Post-retrieval postprocessor | reranked top-k → prompt (no chain) | MMR de-dup + lost-in-the-middle reorder + context compression (det. default · LLMLingua-2 opt-in) — vs LlamaIndex `LongContextReorder`/`MMRPostprocessor`/`SentenceEmbeddingOptimizer` · Haystack `LostInTheMiddleRanker`/`DiversityRanker` · LangChain `ContextualCompressionRetriever` | ⭐ | ✗ | W8 · P1 |
+| Post-retrieval postprocessor | reranked top-k → prompt (no chain) | MMR de-dup + lost-in-the-middle reorder + context compression (det. default · LLMLingua-2 opt-in) — vs LlamaIndex `LongContextReorder`/`MMRPostprocessor`/`SentenceEmbeddingOptimizer` · Haystack `LostInTheMiddleRanker`/`DiversityRanker` · LangChain `ContextualCompressionRetriever` | ⭐ | ✅ (det. MMR + lost-in-the-middle + extractive compression on a `NodePostprocessor` chain, opt-in / byte-identical; LLMLingua-2 / LLM compression = seam-only follow-up) | W8 · P1 |
 | Query transformation | det. synonym multi-query + W6a decomposition only | HyDE + RAG-Fusion + step-back + Adaptive-RAG (opt-in LLM) — vs LlamaIndex `HyDEQueryTransform`/`QueryFusionRetriever` · LangChain `MultiQueryRetriever`/HyDE · LangGraph adaptive-rag | ⭐ | ✗ | W9 · P2 |
 | Multi-granularity tree + chunking | flat index; W4b layout/parent-child only | RAPTOR recursive-cluster tree (det. cluster + `is_synthesis` summaries) + sentence-window + semantic chunking — vs LlamaIndex RAPTOR pack/`SentenceWindowNodeParser`/`SemanticSplitterNodeParser` · RAGFlow RAPTOR | ⭐ | ✗ | W10 · P2 |
 | Retrieval representation | single-vector dense + BM25 → RRF | ColBERT late-interaction (multi-vector MaxSim) + SPLADE learned-sparse, offline via fastembed — vs Weaviate/Vespa/Jina ColBERT · Vespa SPLADE · LlamaIndex `ColbertIndex`/`ColbertRerank` | ⭐ | ✗ | W11 · P2 |
@@ -658,9 +682,10 @@ Legend: **kind** 🛡/⭐/🔧 · **status** ✅ have · ◐ partial · ✗ gap.
     **W4** ✅ contextual retrieval (W4a) + ◐ family-layout/parent-child chunking (W4b, opt-in — see the W4 SHIPPED
     notes above); **W5** ✅ the groundedness eval gate (faithfulness + free-text answer-accuracy, offline
     deterministic default — see the W5 SHIPPED note above).
-  - **W8** ✗ post-retrieval postprocessor chain (the competitor-benchmark batch's P1 item) — MMR de-dup +
-    lost-in-the-middle reorder (both deterministic, zero-model) + extractive context compression after the W2
-    cross-encoder; LLMLingua-2 / LLM compression opt-in. Ships opt-in to keep the loop byte-identical.
+  - **W8** ✅ post-retrieval postprocessor chain (the competitor-benchmark batch's P1 item — see the W8 SHIPPED
+    note above) — MMR de-dup + lost-in-the-middle reorder (both deterministic, zero-model) + extractive context
+    compression after the W2 cross-encoder; LLMLingua-2 / LLM compression opt-in. Ships opt-in to keep the loop
+    byte-identical.
 - **P2 — reasoning depth & governance.**
   - **W7a** structured relation graph (charter-native multi-hop) → **W7c** `GraphStore` seam →
     **W7b** opt-in narrative GraphRAG; **W6** ✅/◐ agentic depth (W6a decomposition ✅ · W6b CRAG ✅ · W6c

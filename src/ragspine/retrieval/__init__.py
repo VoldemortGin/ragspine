@@ -9,6 +9,7 @@ Submodules:
     corrective.py — opt-in 纠错检索（W6b）：有界确定性 grade→act 环；默认 none 时返回 base 本身、字节不变。
     lexical/ — 混合检索：Okapi BM25（CJK uni+bigram）+ 向量 + RRF 融合。
     link/ — 适配层：把检索接入 agent 编排（NarrativeRetriever 协议）。
+    postprocess.py — opt-in 后检索 postprocessor 链（W8）：MMR 去冗余 + lost-in-the-middle 重排 + 上下文压缩；默认 none 时不挂链、字节不变。
     rerank/ — Claude listwise 精排，RRF 退化兜底。
     vector/ — 可注入的 embedding 后端（默认无 = 纯 BM25）。
 """

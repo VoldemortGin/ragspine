@@ -23,6 +23,7 @@ from ragspine.agent.llm_provider import (
 )
 from ragspine.retrieval.corrective import make_corrective_retriever
 from ragspine.retrieval.link.narrative_link import build_narrative_retriever
+from ragspine.retrieval.postprocess import make_postprocessor
 from ragspine.retrieval.rerank.cross_encoder import make_reranker
 from ragspine.retrieval.vector.embedding_backends import make_embedding_backend
 from ragspine.retrieval.vector.persistence_policy import make_persistence_policy
@@ -45,6 +46,7 @@ class ServiceConfig:
     reranker: str = "none"                  # "none"(不重排,默认行为不变) | "cross_encoder"(本地[rerank]) | "auto"(装[rerank]即用,否则不重排)
     query_decompose: str = "none"           # W6a 查询分解(opt-in): "none"(不分解,默认字节不变) | "llm"(注入provider的LLM多跳分解)
     corrective: str = "none"                 # W6b 纠错检索(opt-in): "none"(默认,返回base本身字节不变) | "crag"(有界确定性 grade→act 环)
+    postprocessor: str = "none"              # W8 后检索链(opt-in): "none"(默认,不挂链字节不变) | "mmr"/"lost_in_middle"/"compress" | 逗号成链如"mmr,lost_in_middle"
     vector_store: str = "none"              # "none" | "in_process" | "sqlite_vec"（后者需 [vector]）
     persistence_policy: str = "default"     # "default"(隔离优先) | "persist_everything"
     reference_date: str | None = None       # ISO "YYYY-MM-DD" or None
@@ -144,6 +146,7 @@ def open_narrative_retriever(
         vector_store=make_vector_store(config.vector_store),
         persistence_policy=make_persistence_policy(config.persistence_policy),
         reranker=make_reranker(config.reranker),
+        postprocessor=make_postprocessor(config.postprocessor),
     )
     # W6b 纠错检索（opt-in）：默认 "none" → make_corrective_retriever 返回 retriever 本身（字节
     # 不变）；"crag" 才包成有界确定性 grade→act 环。隔离继承自 base（RESTRICTED 已在出口剔除）。

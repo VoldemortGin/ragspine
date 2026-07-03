@@ -31,6 +31,7 @@ from ragspine.retrieval.lexical.retrieval import (
     RetrievableIndex,
     RetrievalResult,
 )
+from ragspine.retrieval.postprocess import NodePostprocessor
 from ragspine.retrieval.rerank.listwise_rerank import (
     RESTRICTED_SENSITIVITY,
     ListwiseJudge,
@@ -72,11 +73,23 @@ class NarrativeIndexRetriever:
     retry_without_filters：元数据过滤把候选全滤光时是否去过滤重试一次
     （默认开，召回优先——agent 给出的 entity/period 过滤是收窄信号而非硬约束，
     叙事文档元数据覆盖不全时不应直接答"未检索到"）。
+
+    postprocessor：可选后检索 postprocessor 链（W8，任一 NodePostprocessor，如
+    make_postprocessor('mmr,lost_in_middle')）；给了即在【RESTRICTED 出口剔除之后】对已剥离的 snippet
+    子集做重排/去冗余/压缩，故隔离继承自出口（RESTRICTED 永不进入 postprocessor）。默认 None＝不挂链，
+    retrieve 输出字节不变。
     """
 
-    def __init__(self, index: RetrievableIndex, *, retry_without_filters: bool = True):
+    def __init__(
+        self,
+        index: RetrievableIndex,
+        *,
+        retry_without_filters: bool = True,
+        postprocessor: NodePostprocessor | None = None,
+    ):
         self.index = index
         self.retry_without_filters = retry_without_filters
+        self.postprocessor = postprocessor
 
     def retrieve(
         self, query: str, *, filters: dict[str, Any] | None = None, top_k: int = 50
@@ -84,7 +97,8 @@ class NarrativeIndexRetriever:
         """A 线协议入口：filters 映射为元数据 kwargs，结果转 snippet dict。
 
         - 只透传 _FILTER_KEYS 中的非空键，未知键/空值丢弃；
-        - RESTRICTED 块在出口处剔除（不出域，见模块 docstring）。
+        - RESTRICTED 块在出口处剔除（不出域，见模块 docstring）；
+        - postprocessor（W8，opt-in）在【剔除之后】对已剥离子集做重排/去冗余/压缩（隔离继承）。
         """
         kwargs = {
             k: v for k, v in (filters or {}).items() if k in _FILTER_KEYS and v
@@ -92,11 +106,14 @@ class NarrativeIndexRetriever:
         results = self.index.retrieve(query, top_k=top_k, **kwargs)
         if not results and kwargs and self.retry_without_filters:
             results = self.index.retrieve(query, top_k=top_k)
-        return [
+        snippets = [
             _to_snippet(r)
             for r in results
             if str(r.chunk.sensitivity).upper() != RESTRICTED_SENSITIVITY
         ]
+        if self.postprocessor is not None:
+            snippets = list(self.postprocessor.postprocess(query, snippets))
+        return snippets
 
 
 def _to_snippet(result: RetrievalResult) -> dict[str, Any]:
@@ -130,6 +147,7 @@ def build_narrative_retriever(
     vector_store: VectorStore | None = None,
     persistence_policy: PersistencePolicy | None = None,
     reranker: ListwiseJudge | None = None,
+    postprocessor: NodePostprocessor | None = None,
 ) -> tuple[NarrativeIndexRetriever, ChunkStore]:
     """开块库并组装默认叙事检索链（CLI/服务接线入口）。
 
@@ -146,6 +164,8 @@ def build_narrative_retriever(
     cross-encoder，W2）。给了即作为 NarrativeIndex 的 judge，**优先于** provider 的 LLM listwise；
     默认 None＝退回原行为（给了 provider 用 ProviderListwiseJudge、否则不二审）——默认 loop 字节不变，
     cross-encoder 是 opt-in。无论哪种 judge 都走 listwise_rerank 编排，RESTRICTED 不出域一致守住。
+    postprocessor：可选后检索 postprocessor 链（W8，make_postprocessor 选型）；给了即在精排出口之后、
+    prompt 组装之前对已 RESTRICTED-剥离的输出做重排/去冗余/压缩。默认 None＝不挂链、retrieve 输出字节不变。
     """
     store = ChunkStore(chunk_db)
     store.init_schema()
@@ -160,4 +180,4 @@ def build_narrative_retriever(
         vector_store=vector_store,
         persistence_policy=persistence_policy,
     )
-    return NarrativeIndexRetriever(index), store
+    return NarrativeIndexRetriever(index, postprocessor=postprocessor), store

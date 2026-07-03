@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/
-verified-against: 9242275
+verified-against: a9f5b31
 ---
 
 # retrieval — agent contract
@@ -45,7 +45,16 @@ clamped ≤2), **deterministic**, **traced** grade→act loop — retrieve→gra
 `rewrite_query`; still low → refuse `[]`. Default grader `LexicalOverlapGrader` (zero model/network); LLM/CE
 grader = opt-in `RelevanceGrader` seam. `make_corrective_retriever` / `RAGSPINE_CORRECTIVE`, default `none`
 returns base unchanged (byte-identical). **Isolation inherited** — only ever returns a subset of the base's
-RESTRICTED-stripped output, never reads chunks directly).
+RESTRICTED-stripped output, never reads chunks directly),
+`postprocess.py` (**W8 post-retrieval postprocessor chain, opt-in default-off**: a `NodePostprocessor` Protocol
++ three deterministic zero-model processors — `MMRPostprocessor` (diversity de-dup, `λ·rel − (1−λ)·max_sim`,
+rank relevance + lexical-Jaccard similarity), `LostInTheMiddlePostprocessor` (most-relevant to both ends), and
+`CompressionPostprocessor` (extractive sentence compression **reusing W5 `LexicalOverlapJudge`**; opt-in
+`compressor` seam for LLMLingua-2 / LLM). `make_postprocessor` / `RAGSPINE_POSTPROCESSOR` (comma spec →
+`ChainPostprocessor`), default `none` → no chain → `NarrativeIndexRetriever.retrieve` byte-identical. Runs
+*after* the `link/` RESTRICTED strip, so **isolation is inherited** (subset/reorder/compress only). Compression
+writes a separate `prompt_text` key (agent prefers it) — original `text` + all reference fields untouched
+(**provenance never broken**, the W4a index_text layering)).
 
 ## Invariants
 
@@ -94,3 +103,8 @@ RESTRICTED-stripped output, never reads chunks directly).
   (W2, fastembed `TextCrossEncoder`/`[rerank]`) as a swappable `ListwiseJudge`, the `make_reranker`
   factory + `none`/`auto` opt-in mechanism that keeps the default loop byte-identical, the RESTRICTED
   isolation inherited from `listwise_rerank` (+ its reverse-proof), and determinism honesty.
+- [`docs/postprocess.md`](docs/postprocess.md) — the post-retrieval `NodePostprocessor` chain (W8): MMR
+  de-dup + lost-in-the-middle reorder + extractive compression, the `make_postprocessor` /
+  `RAGSPINE_POSTPROCESSOR` factory + comma-chain, the opt-in / byte-identical `postprocessor=` seam on
+  `build_narrative_retriever`, the `prompt_text` provenance layering, and the inherited RESTRICTED isolation
+  (+ its reverse-proof).

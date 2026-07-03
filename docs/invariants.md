@@ -4,7 +4,7 @@ covers:
   - src/ragspine/retrieval/link/
   - src/ragspine/retrieval/rerank/
   - src/ragspine/common/observability/
-verified-against: 9242275
+verified-against: a9f5b31
 ---
 
 # Invariants (code-enforced)
@@ -72,6 +72,20 @@ with zero data — graph queries cannot smuggle competitor data or RESTRICTED co
 `tests/conformance/test_graph_store.py` (provenance / RESTRICTED-never-surfaces / determinism, each with an honest
 reverse-proof stub — `_LeakyGraphStore` / `_LineageDroppingGraphStore` — that must FAIL) and the W7a/W7b tests
 under `tests/graph/`. The authoritative per-domain contract is `src/ragspine/graph/CLAUDE.md`.
+
+**Inherited by the W8 post-retrieval postprocessor chain (opt-in, no new exit).** The W8 chain
+(`retrieval/postprocess.py`: `MMRPostprocessor` / `LostInTheMiddlePostprocessor` / `CompressionPostprocessor`,
+composed by `make_postprocessor`) runs *inside* `NarrativeIndexRetriever.retrieve` **after** the `link/` exit has
+already stripped `sensitivity == RESTRICTED`, and only ever reorders / de-dups / compresses that already-stripped
+subset — it never reads chunks directly and never fabricates a snippet, so RESTRICTED can neither enter a
+processor nor surface (the W6b `CorrectiveRetriever` idiom). Default `"none"` ⇒ no chain ⇒ retrieval output is
+byte-identical. Compression preserves provenance by writing a separate `prompt_text` key (`agent._snippet_text`
+prefers it for the prompt) while leaving the original `text` + every reference field (`source_locator` / `doc_id`
+/ `chunk_id`) untouched — the W4a index_text layering. **Frozen by**
+`tests/retrieval/postprocess/test_postprocess_isolation.py` (real-index integration: a RESTRICTED chunk never
+surfaces through the `mmr,lost_in_middle,compress` chain, with a **reverse-proof** that a RESTRICTED snippet fed
+*directly* passes through — proving the protection lives at the upstream exit, not the postprocessor). The
+authoritative per-domain contract is `src/ragspine/retrieval/docs/postprocess.md`.
 
 ## Privacy-aware traces
 
