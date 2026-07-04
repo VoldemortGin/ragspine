@@ -13,7 +13,7 @@ ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpa
 
 from ragspine.fixtures.synthetic_deck import GT_PATH, PPTX_PATH, XLSX_PATH, main as make_synthetic
 from ragspine.extraction.extractors import pptx_extractor, xlsx_extractor
-from ragspine.storage.fact_store import FactStore
+from ragspine.storage.fact_store import SqliteFactStore
 from ragspine.common.glossary import normalize_entity, normalize_metric, normalize_period
 from ragspine.agent.query_tools import (
     QUERY_METRIC_TOOL_ANTHROPIC,
@@ -34,7 +34,7 @@ def _ensure_synthetic():
 def store(tmp_path_factory):
     """抽取合成数据入临时库，供整模块复用（合成数据由 _ensure_synthetic 预生成）。"""
     db_path = tmp_path_factory.mktemp("db") / "fact_metric.db"
-    fs = FactStore(db_path)
+    fs = SqliteFactStore(db_path)
     fs.init_schema()
     xf, _ = xlsx_extractor.extract_facts(XLSX_PATH)
     pf, _ = pptx_extractor.extract_facts(PPTX_PATH)

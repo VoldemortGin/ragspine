@@ -19,7 +19,7 @@ from ragspine.fixtures.synthetic_deck import (
     main as make_synthetic,
 )
 from ragspine.extraction.extractors import pptx_extractor, xlsx_extractor
-from ragspine.storage.fact_store import FactStore
+from ragspine.storage.fact_store import FactStore, SqliteFactStore
 from ragspine.agent.query_tools import execute_query_metric
 from ragspine.common.core import DEFAULT_FACT_DB
 
@@ -33,7 +33,7 @@ def _ingest() -> tuple[FactStore, int, list[str]]:
     """抽取两个源文件并入库（先删旧库）。返回 (store, 入库条数, warnings)。"""
     if DEFAULT_FACT_DB.exists():
         DEFAULT_FACT_DB.unlink()
-    store = FactStore(DEFAULT_FACT_DB)
+    store = SqliteFactStore(DEFAULT_FACT_DB)
     store.init_schema()
 
     warnings: list[str] = []

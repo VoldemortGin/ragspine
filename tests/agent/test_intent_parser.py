@@ -27,7 +27,7 @@ from ragspine.agent.intent import (
     parse_intent,
 )
 from ragspine.agent.llm_provider import MockProvider
-from ragspine.storage.fact_store import FactStore
+from ragspine.storage.fact_store import SqliteFactStore
 
 REF = date(2026, 6, 12)
 
@@ -80,7 +80,7 @@ def test_rule_parser_satisfies_protocol():
 # --------------------------------------------------------------------------
 
 def test_answer_question_uses_injected_parser(tmp_db_path):
-    store = FactStore(str(tmp_db_path))
+    store = SqliteFactStore(str(tmp_db_path))
     store.init_schema()
     fake_intent = ParsedIntent(
         route=ROUTE_NARRATIVE, metric=None, entity=None, period=None,
@@ -105,7 +105,7 @@ def test_answer_question_uses_injected_parser(tmp_db_path):
 def test_security_gate_independent_of_pluggable_parser(tmp_db_path):
     """注入一个【故意漏判竞品】的 parser（external_entity=None），但 raw_question
     含竞品；编排层仍必须确定性拒答——安全门从 raw_question 独立复核，不信任 parser。"""
-    store = FactStore(str(tmp_db_path))
+    store = SqliteFactStore(str(tmp_db_path))
     store.init_schema()
     # 假 parser：把竞品问句当成普通结构化查询，external_entity 留空。
     blind_intent = ParsedIntent(
@@ -128,7 +128,7 @@ def test_security_gate_independent_of_pluggable_parser(tmp_db_path):
 
 def test_default_answer_question_still_refuses_competitor(tmp_db_path):
     """不注入 parser 时，默认 RuleIntentParser 行为不变：竞品照常拒答。"""
-    store = FactStore(str(tmp_db_path))
+    store = SqliteFactStore(str(tmp_db_path))
     store.init_schema()
     result = answer_question(
         "竞安去年REVENUE多少", store, MockProvider(), reference_date=REF

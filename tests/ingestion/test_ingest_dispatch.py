@@ -29,7 +29,7 @@ from pptx.dml.color import RGBColor
 from pptx.util import Inches
 
 from ragspine.extraction.color.color_semantics import ColorMapping, LegendEntry, MappingRegistry
-from ragspine.storage.fact_store import FactStore, VISIBLE_REVIEW_STATUSES
+from ragspine.storage.fact_store import SqliteFactStore, VISIBLE_REVIEW_STATUSES
 from ragspine.ingestion.structured.ingestion import IngestReport, ingest_excel
 from ragspine.ingestion.review.review_queue import ReviewQueue
 
@@ -50,7 +50,7 @@ YELLOW = "FFFF00"
 # --------------------------------------------------------------------------- #
 @pytest.fixture
 def store(tmp_sqlite_factory):
-    fs = FactStore(tmp_sqlite_factory("facts"))
+    fs = SqliteFactStore(tmp_sqlite_factory("facts"))
     yield fs
     fs.close()
 
@@ -178,7 +178,7 @@ def test_d1_xlsx_parity_same_keys(
     keys_file = _fact_keys(store.execute_read("SELECT * FROM fact_metric"))
 
     # 入口 B：ingest_excel（独立三库）
-    store_b = FactStore(tmp_sqlite_factory("facts_b"))
+    store_b = SqliteFactStore(tmp_sqlite_factory("facts_b"))
     reg_b = MappingRegistry(tmp_sqlite_factory("registry_b"))
     q_b = ReviewQueue(tmp_sqlite_factory("queue_b"))
     try:

@@ -21,7 +21,7 @@ import rootutils
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
 from ragspine.agent.agent import answer_question
-from ragspine.storage.fact_store import Fact, FactStore
+from ragspine.storage.fact_store import Fact, SqliteFactStore
 from ragspine.agent.intent import (
     CLARIFY_ANSWER_WITH_ASSUMPTIONS,
     ROUTE_COMPOSITE,
@@ -57,7 +57,7 @@ FACTS = [
 
 @pytest.fixture
 def store(tmp_db_path):
-    fs = FactStore(tmp_db_path)
+    fs = SqliteFactStore(tmp_db_path)
     fs.init_schema()
     fs.upsert_facts(FACTS)
     yield fs

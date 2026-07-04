@@ -26,7 +26,7 @@ from ragspine.cli.ask import main as ask_main
 from ragspine.agent.agent import answer_question
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
 from ragspine.retrieval.chunking.chunking import DocumentMeta
-from ragspine.storage.fact_store import Fact, FactStore
+from ragspine.storage.fact_store import Fact, SqliteFactStore
 from ragspine.agent.llm_provider import MockProvider
 from corespine import ChatCompletion, Choice, ResponseMessage
 from ragspine.retrieval.link.narrative_link import (
@@ -109,7 +109,7 @@ def _build_index(tmp_path, *, judge=None) -> tuple[NarrativeIndex, ChunkStore]:
 @pytest.fixture
 def fact_db(tmp_path):
     db_path = tmp_path / "fact_metric.db"
-    fs = FactStore(db_path)
+    fs = SqliteFactStore(db_path)
     fs.init_schema()
     fs.upsert_facts([REVENUE_HK_FY2025])
     fs.close()
@@ -289,7 +289,7 @@ def test_judge_reorders_index_results(tmp_path):
 def test_composite_end_to_end_number_with_lineage_and_narrative(tmp_path, fact_db):
     """数字（确定值+血缘）与叙事（原文+来源）在同一回答中端到端汇合。"""
     index, chunk_store = _build_index(tmp_path)
-    fs = FactStore(fact_db)
+    fs = SqliteFactStore(fact_db)
     try:
         index.ingest(NARRATIVE_TEXT, NARRATIVE_DOC)
         result = answer_question(
@@ -314,7 +314,7 @@ def test_composite_end_to_end_number_with_lineage_and_narrative(tmp_path, fact_d
 
 def test_narrative_end_to_end_with_real_index(tmp_path, fact_db):
     index, chunk_store = _build_index(tmp_path)
-    fs = FactStore(fact_db)
+    fs = SqliteFactStore(fact_db)
     try:
         index.ingest(
             "香港监管动态：MPFA 强积金新规要求披露管理费。",
@@ -342,7 +342,7 @@ def test_restricted_text_never_reaches_provider_nor_answer(tmp_path, fact_db):
     index, chunk_store = _build_index(
         tmp_path, judge=ProviderListwiseJudge(recorder)
     )
-    fs = FactStore(fact_db)
+    fs = SqliteFactStore(fact_db)
     try:
         index.ingest(
             "香港监管动态：MPFA 强积金新规要求披露管理费。",

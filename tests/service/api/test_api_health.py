@@ -12,7 +12,7 @@ from ragspine.agent.llm_provider import MockProvider
 from ragspine.service.api.app import create_app
 from ragspine.service.config import ServiceConfig
 from ragspine.service.faq.faq_cache import FAQCache
-from ragspine.storage.fact_store import FactStore
+from ragspine.storage.fact_store import SqliteFactStore
 
 
 class PingQueue:
@@ -34,7 +34,7 @@ class PingQueue:
 @pytest.fixture
 def seeded_db_path(tmp_path):
     db_path = tmp_path / "fact_metric.db"
-    fs = FactStore(db_path)
+    fs = SqliteFactStore(db_path)
     fs.init_schema()
     fs.close()
     return db_path

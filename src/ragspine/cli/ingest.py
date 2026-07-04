@@ -27,7 +27,7 @@ from ragspine.extraction.color.color_semantics import MappingRegistry
 from ragspine.ingestion.review.review_queue import ReviewQueue
 from ragspine.ingestion.structured.ingestion import IngestReport, ingest_file
 from ragspine.ingestion.structured.ingestion_manifest import ManifestStore
-from ragspine.storage.fact_store import FactStore
+from ragspine.storage.fact_store import SqliteFactStore
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -93,7 +93,7 @@ def main(argv: list[str] | None = None) -> int:
     for db_path in (args.db, args.mapping_db, args.queue_db):
         _ensure_parent(db_path)
 
-    store = FactStore(args.db)
+    store = SqliteFactStore(args.db)
     registry = MappingRegistry(args.mapping_db)
     queue = ReviewQueue(args.queue_db)
     store.init_schema()

@@ -62,7 +62,7 @@ from ragspine.retrieval.chunking.chunking import DocumentMeta, chunk_document
 from ragspine.retrieval.link.narrative_link import (
     build_narrative_retriever,
 )
-from ragspine.storage.fact_store import Fact, FactStore
+from ragspine.storage.fact_store import Fact, FactStore, SqliteFactStore
 
 # 四命门指标名（基线/报告的键，一处定义）。
 NUMERIC_ACCURACY = "numeric_accuracy"
@@ -302,7 +302,7 @@ def build_eval_kb(kb_dir: str | Path) -> tuple[Path, Path]:
     fact_db = kb_dir / "qa_eval_facts.db"
     chunk_db = kb_dir / "qa_eval_chunks.db"
 
-    store = FactStore(fact_db)
+    store = SqliteFactStore(fact_db)
     store.init_schema()
     store.upsert_facts([Fact(*row) for row in _EVAL_FACT_ROWS])
     store.close()
@@ -785,7 +785,7 @@ def run_qa_eval(
 
     with TemporaryDirectory(prefix="qa_eval_kb_") as tmp:
         fact_db, chunk_db = build_eval_kb(kb_dir if kb_dir is not None else tmp)
-        store = FactStore(fact_db)
+        store = SqliteFactStore(fact_db)
         retriever, chunk_store = build_narrative_retriever(chunk_db)
         try:
             outcomes = {c.id: runner(c, store, retriever) for c in cases}

@@ -21,7 +21,7 @@ from ragspine.service.tasks.task_queue import (
     JOB_FINISHED,
     JobStatus,
 )
-from ragspine.storage.fact_store import FactStore
+from ragspine.storage.fact_store import SqliteFactStore
 
 
 class RecordingQueue:
@@ -56,7 +56,7 @@ class RecordingQueue:
 @pytest.fixture
 def db_path(tmp_path):
     p = tmp_path / "fact_metric.db"
-    fs = FactStore(p)
+    fs = SqliteFactStore(p)
     fs.init_schema()
     fs.close()
     return p

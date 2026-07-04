@@ -159,6 +159,22 @@ Current state (8 Protocols exist): `LLMProvider`, `IntentParser`, `NarrativeRetr
   — that must FAIL). Default behavior is byte-identical: `make_trace_sink()` defaults to `None`, so the
   existing `emit_trace` path is untouched. Remaining: wiring `emit_trace` to a config-selected sink for live
   multi-exit fan-out (P2 follow-up).
+- **`FactStore` (SEAM FORMALIZED, 🛡)** — the structured numeric channel is the **anti-fabrication invariant's
+  storage root**, so its concrete sqlite store is now formalized into a conformance-locked seam. **Shipped
+  (behavior byte-identical)**: a `@runtime_checkable FactStore` `Protocol` lifting the existing sqlite store's
+  public interface (`query` found→value / miss→empty · `upsert_facts` · `delete_by_source_doc` ·
+  `get_by_dim_key` / `set_review_status` / `dim_key_for` · `init_schema` / `count` / `close` / `execute_read`) +
+  the offline default `SqliteFactStore` (the prior `FactStore` concrete, **renamed**, stdlib sqlite3, zero
+  behavior change — Fact 10-tuple contract, `dim_key` upsert, exact-match query, found/not-found→agent rewrite
+  all preserved bit-for-bit) + a `make_fact_store` / `RAGSPINE_FACT_STORE` registry (built-in `sqlite` default +
+  `ragspine.fact_stores` entry-point auto-discovery; **default spec → sqlite default**, so the structured loop
+  stays byte-identical) + the **anti-fabrication / provenance conformance pack**
+  (`tests/conformance/test_fact_store.py`: every registered `FactStore` must prove found-determinism —
+  upsert→query returns the *deterministic* value, a miss returns *empty* (never fabricated) — and provenance
+  survival — found facts carry `source_doc_id` + `source_locator` through upsert/query; with two reverse-proof
+  stubs — `_FabricatingFactStore` (fabricates a value on a miss) / `_LineageDroppingFactStore` (blanks lineage)
+  — that must FAIL, proving the assertions have teeth). Remaining: the DuckDB / Postgres adapters (need external
+  deps, behind their own extras / third-party entry-point registration — P2 follow-up, not pulled into CI).
 
 ## Capability matrix
 
@@ -180,7 +196,7 @@ Legend: **kind** 🛡/⭐/🔧 (own/own/adapt) · **status** ✅ have · ◐ par
 | LLM provider | `LLMProvider` | 🔧 | MockProvider | Anthropic · OpenAI `[llm]` | ✅ | — |
 | Intent parse | `IntentParser` | 🛡 | rule-based | LLM-based | ✅ | — |
 | Task queue | `TaskQueue` | 🔧 | FakeQueue | RQ/Redis `[service]` | ✅ | — |
-| Structured store | `FactStore` *(proto later)* | 🛡 | sqlite | DuckDB · Postgres | ✅ concrete / ✗ proto | P2 |
+| Structured store | `FactStore` *(Protocol)* | 🛡 | sqlite | DuckDB · Postgres | ✅ Protocol + sqlite default + conformance | P2 seam ✓ · adapters follow-up |
 | Trace sink | `TraceSink` *(formalized)* | 🛡 | in-proc privacy-safe ✅ | **OTel (privacy-filtered) ✅** | ✅ seam + conformance | P2 seam ✓ · emit fan-out follow-up |
 | Eval | *(golden sets)* | 🛡 | offline golden | RAGAS-compatible metrics | ✅ | P2 |
 
@@ -239,11 +255,15 @@ tracked now lives as live contracts / docs, and any remaining slices fold into t
   the first 2–3 `SourceConnector`s (**filesystem ✅ shipped** → S3 → HTTP/crawl). *(Vector adapters pgvector and Qdrant
   already shipped in P0/P1, and **native ANN/KNN with exact re-rank for all three has since shipped too**; the next
   vector adapter is Milvus — see the live contract [`vector-store.md`](../src/ragspine/retrieval/docs/vector-store.md).)*
-- **P2 — governance & ops depth.** `FactStore` Protocol (DuckDB/Postgres); **`TraceSink` seam + OTel
-  (privacy-gated) now landed** (`make_trace_sink` / `RAGSPINE_TRACE_SINK` + `OtelTraceSink` behind `[otel]` +
-  the privacy-trace conformance pack — remaining: wiring `emit_trace` to a config-selected sink for live
-  multi-exit fan-out); incremental sync / deletion-propagation across stores (a 🛡 lineage concern),
-  RAGAS-compatible eval export.
+- **P2 — governance & ops depth.** **`FactStore` seam now landed** (`@runtime_checkable FactStore` Protocol +
+  `SqliteFactStore` offline default — the prior concrete, renamed, byte-identical — + `make_fact_store` /
+  `RAGSPINE_FACT_STORE` registry with `ragspine.fact_stores` entry-point discovery + the anti-fabrication /
+  provenance conformance pack `tests/conformance/test_fact_store.py`; remaining: the DuckDB / Postgres adapters,
+  which need external deps and stay behind their own extras / third-party entry-point registration — a
+  follow-up, not pulled into CI); **`TraceSink` seam + OTel (privacy-gated) now landed** (`make_trace_sink` /
+  `RAGSPINE_TRACE_SINK` + `OtelTraceSink` behind `[otel]` + the privacy-trace conformance pack — remaining:
+  wiring `emit_trace` to a config-selected sink for live multi-exit fan-out); incremental sync /
+  deletion-propagation across stores (a 🛡 lineage concern), RAGAS-compatible eval export.
 
 Each backend follows the ADR 0005 promotion rule: it earns "core/supported" status only when it has a real,
 CI-tested path; until then it lives as a clearly-labeled experimental adapter.

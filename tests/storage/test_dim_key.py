@@ -22,11 +22,11 @@ import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
-from ragspine.storage.fact_store import Fact, FactStore, _compute_dim_key
+from ragspine.storage.fact_store import Fact, FactStore, SqliteFactStore, _compute_dim_key
 
 
 def _fresh_store(tmp_db_path) -> FactStore:
-    fs = FactStore(tmp_db_path)
+    fs = SqliteFactStore(tmp_db_path)
     fs.init_schema()
     return fs
 

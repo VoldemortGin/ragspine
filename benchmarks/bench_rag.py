@@ -40,7 +40,7 @@ from ragspine.retrieval.lexical.retrieval import NarrativeIndex
 from ragspine.retrieval.link.narrative_link import NarrativeIndexRetriever
 from ragspine.retrieval.vector.embedding_backends import DeterministicEmbeddingBackend
 from ragspine.retrieval.vector.store import InProcessVectorStore, VectorRecord
-from ragspine.storage.fact_store import Fact, FactStore
+from ragspine.storage.fact_store import Fact, SqliteFactStore
 
 REF = date(2026, 6, 12)
 
@@ -216,7 +216,7 @@ def bench_retrieve() -> dict[str, object]:
 
 def bench_answer() -> dict[str, object]:
     """端到端单条问答延迟：answer_question + MockProvider + FactStore + 叙事检索（composite 路）。"""
-    fs = FactStore(":memory:")
+    fs = SqliteFactStore(":memory:")
     fs.init_schema()
     fs.upsert_facts(
         [

@@ -20,7 +20,7 @@ import rootutils
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
 from ragspine.extraction.color.color_semantics import ColorMapping, LegendEntry, MappingRegistry
-from ragspine.storage.fact_store import Fact, FactStore
+from ragspine.storage.fact_store import Fact, SqliteFactStore
 from ragspine.ingestion.structured.ingestion_manifest import (
     BATCH_DONE,
     BATCH_FAILED,
@@ -46,7 +46,7 @@ def manifest(tmp_sqlite_factory):
 
 @pytest.fixture
 def store(tmp_sqlite_factory):
-    fs = FactStore(tmp_sqlite_factory("facts"))
+    fs = SqliteFactStore(tmp_sqlite_factory("facts"))
     yield fs
     fs.close()
 

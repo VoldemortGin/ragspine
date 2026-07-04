@@ -30,7 +30,7 @@ from ragspine.service.config import (
     validate_ingest_path,
 )
 from ragspine.service.tasks.task_queue import JobError
-from ragspine.storage.fact_store import FactStore
+from ragspine.storage.fact_store import SqliteFactStore
 
 STRUCTURED_INGEST_JOB = "ragspine.service.tasks.jobs.run_structured_ingest_job"
 NARRATIVE_INGEST_JOB = "ragspine.service.tasks.jobs.run_narrative_ingest_job"
@@ -104,7 +104,7 @@ def run_structured_ingest_job(payload: dict[str, Any]) -> dict[str, Any]:
     for p in (db_path, mapping_db_path, queue_db_path):
         _ensure_parent(p)
 
-    store = FactStore(db_path)
+    store = SqliteFactStore(db_path)
     registry = MappingRegistry(mapping_db_path)
     queue = ReviewQueue(queue_db_path)
     store.init_schema()

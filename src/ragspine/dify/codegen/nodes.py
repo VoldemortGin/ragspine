@@ -301,7 +301,7 @@ def emit_answer_question_fold(plan: FoldPlan, names: NameTable) -> list[str]:
         f"# answer_question 折叠：{plan.kr_id} + {plan.llm_id} —— 一次 ragspine.answer_question",
         f"#   （自带反幻觉/ provenance；Dify 数据集：{datasets}）",
         f"{retr}, {store} = build_narrative_retriever(KNOWLEDGE_CHUNK_DB, provider=provider)",
-        f"{facts} = FactStore(ANSWER_QUESTION_FACT_DB)",
+        f"{facts} = SqliteFactStore(ANSWER_QUESTION_FACT_DB)",
         f"{facts}.init_schema()",
         "try:",
         f"    {result} = answer_question(",

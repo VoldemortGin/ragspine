@@ -246,7 +246,7 @@ class _Emitter:
             self.imports.add(
                 "from ragspine.retrieval.link.narrative_link import build_narrative_retriever"
             )
-            self.imports.add("from ragspine import FactStore, answer_question")
+            self.imports.add("from ragspine import SqliteFactStore, answer_question")
             return node_emit.emit_answer_question_fold(plan, self.names)
         if isinstance(node, IterationNode):
             return self._emit_iteration(node)

@@ -21,7 +21,7 @@ from ragspine.service.conversation import (
     ConversationTurn,
     resolve_followup,
 )
-from ragspine.storage.fact_store import Fact, FactStore
+from ragspine.storage.fact_store import Fact, SqliteFactStore
 
 REF = date(2026, 6, 12)
 
@@ -39,7 +39,7 @@ PROFIT_HK_FY2025 = Fact(
 
 @pytest.fixture
 def store(tmp_db_path):
-    fs = FactStore(tmp_db_path)
+    fs = SqliteFactStore(tmp_db_path)
     fs.init_schema()
     fs.upsert_facts([REVENUE_HK_FY2025, PROFIT_HK_FY2025])
     yield fs

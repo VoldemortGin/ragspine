@@ -17,7 +17,7 @@ import rootutils
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
 from ragspine.cli import main
-from ragspine.storage.fact_store import Fact, FactStore
+from ragspine.storage.fact_store import Fact, SqliteFactStore
 
 
 # ---------------------------------------------------------------------------
@@ -55,7 +55,7 @@ def test_quickstart_shows_honest_not_found_refusal(capsys):
 def tiny_fact_db(tmp_path):
     """建一个仅含一条 ACME_CN FY2024 REVENUE 事实的临时 fact 库，返回路径。"""
     db_path = tmp_path / "facts.db"
-    store = FactStore(db_path)
+    store = SqliteFactStore(db_path)
     store.init_schema()
     store.upsert_facts([
         Fact(

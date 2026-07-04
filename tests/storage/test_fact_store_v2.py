@@ -33,11 +33,12 @@ from ragspine.storage.fact_store import (
     REVIEW_REJECTED,
     Fact,
     FactStore,
+    SqliteFactStore,
 )
 
 
 def _fresh_store(tmp_db_path) -> FactStore:
-    fs = FactStore(tmp_db_path)
+    fs = SqliteFactStore(tmp_db_path)
     fs.init_schema()
     return fs
 

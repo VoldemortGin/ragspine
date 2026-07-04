@@ -23,7 +23,7 @@ from ragspine.service.tasks.task_queue import (
     FakeQueue,
     JobError,
 )
-from ragspine.storage.fact_store import FactStore
+from ragspine.storage.fact_store import SqliteFactStore
 
 # IngestReport 序列化后允许出现的 key 全集（绝不含 "value" 等原始事实数值）
 _STRUCTURED_REPORT_KEYS = {
@@ -95,7 +95,7 @@ def test_structured_job_owns_and_closes_its_store(tmp_path, excel_fixture_path):
     assert report["n_facts_ingested"] > 0
 
     # 独立重新打开同一 db：facts 可查询，证明 worker 写入并正确关闭了连接
-    store = FactStore(db_path)
+    store = SqliteFactStore(db_path)
     store.init_schema()
     try:
         assert store.count() == report["n_facts_ingested"]

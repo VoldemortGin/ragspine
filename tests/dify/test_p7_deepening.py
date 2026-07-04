@@ -277,11 +277,11 @@ def test_fold_generates_answer_question_call(
     src = code.source
     assert "answer_question(" in src
     assert "narrative_retriever=" in src
-    assert "FactStore(" in src
+    assert "SqliteFactStore(" in src
     assert "ANSWER_QUESTION_FACT_DB" in src
     # 被折叠的 llm_1 不再逐节点拼 messages（折叠取代了 retrieve+chat 手拼）。
     assert "_messages_llm_1" not in src
-    assert "from ragspine import FactStore, answer_question" in code.imports
+    assert "from ragspine import SqliteFactStore, answer_question" in code.imports
 
 
 def test_fold_disabled_falls_back_to_per_node(

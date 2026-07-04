@@ -28,7 +28,7 @@ from ragspine.agent.decompose import (
     make_decomposer,
 )
 from ragspine.agent.llm_provider import MockProvider
-from ragspine.storage.fact_store import Fact, FactStore
+from ragspine.storage.fact_store import Fact, SqliteFactStore
 
 REF = date(2026, 6, 12)
 
@@ -41,7 +41,7 @@ REVENUE_HK_FY2025 = Fact(
 
 @pytest.fixture
 def store(tmp_db_path):
-    fs = FactStore(tmp_db_path)
+    fs = SqliteFactStore(tmp_db_path)
     fs.init_schema()
     fs.upsert_facts([REVENUE_HK_FY2025])
     yield fs

@@ -23,7 +23,7 @@ from ragspine.graph.query import (
     RollupResult,
 )
 from ragspine.graph.relation import build_relation_graph
-from ragspine.storage.fact_store import Fact, FactStore
+from ragspine.storage.fact_store import Fact, SqliteFactStore
 
 
 @dataclass
@@ -90,7 +90,7 @@ def _chunks() -> list[FakeChunk]:
 
 @pytest.fixture()
 def gq(tmp_path):
-    fs = FactStore(str(tmp_path / "facts.db"))
+    fs = SqliteFactStore(str(tmp_path / "facts.db"))
     fs.init_schema()
     fs.upsert_facts(_facts())
     store = build_relation_graph(_profile(), facts=_facts(), chunks=_chunks())

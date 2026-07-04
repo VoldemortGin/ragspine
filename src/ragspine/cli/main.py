@@ -25,7 +25,7 @@ from tempfile import TemporaryDirectory
 from ragspine.agent.agent import AgentResult, answer_question
 from ragspine.agent.llm_provider import MockProvider
 from ragspine.common.core import DEFAULT_FACT_DB
-from ragspine.storage.fact_store import Fact, FactStore
+from ragspine.storage.fact_store import Fact, SqliteFactStore
 
 # 分发名（PEP 621 [project] name = "rag-spine"，import 名仍是 ragspine）。
 _DIST_NAME = "rag-spine"
@@ -57,7 +57,7 @@ def _cmd_quickstart(args: argparse.Namespace) -> int:
     """headline 离线演示：建临时 KB → 命中（带血缘）+ 查不到（坦白拒答）→ 清理。"""
     print("RAGSpine quickstart —— 全程离线、零 API key，演示反幻觉 + 来源溯源。\n")
     with TemporaryDirectory(prefix="ragspine_quickstart_") as tmp:
-        store = FactStore(Path(tmp) / "facts.db")
+        store = SqliteFactStore(Path(tmp) / "facts.db")
         store.init_schema()
         store.upsert_facts([_QUICKSTART_FACT])
         provider = MockProvider()
@@ -90,7 +90,7 @@ def _cmd_ask(args: argparse.Namespace) -> int:
     else:
         provider = MockProvider()
 
-    store = FactStore(db_path)
+    store = SqliteFactStore(db_path)
     store.init_schema()
     try:
         result = answer_question(args.question, store, provider)  # type: ignore[arg-type]

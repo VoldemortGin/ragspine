@@ -37,7 +37,7 @@ import rootutils
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
 from ragspine.agent.agent import AgentResult, answer_question, _structured_answer
-from ragspine.storage.fact_store import Fact, FactStore
+from ragspine.storage.fact_store import Fact, FactStore, SqliteFactStore
 from ragspine.agent.llm_provider import MockProvider
 from ragspine.agent.query_tools import execute_query_metric
 
@@ -45,7 +45,7 @@ REF = date(2026, 6, 13)
 
 
 def _fresh_store(tmp_db_path) -> FactStore:
-    fs = FactStore(tmp_db_path)
+    fs = SqliteFactStore(tmp_db_path)
     fs.init_schema()
     return fs
 
@@ -131,7 +131,7 @@ def test_t2_migration_adds_columns_to_legacy_db(tmp_db_path):
     conn.close()
 
     # 再次以 FactStore 打开并迁移：补列、不报错、旧数据保留。
-    fs = FactStore(tmp_db_path)
+    fs = SqliteFactStore(tmp_db_path)
     fs.init_schema()  # 不应抛
     cols = _columns(fs)
     assert "valid_as_of" in cols

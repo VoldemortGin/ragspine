@@ -29,6 +29,7 @@ from ragspine.storage.fact_store import (
     REVIEW_REJECTED,
     Fact,
     FactStore,
+    SqliteFactStore,
 )
 
 
@@ -38,7 +39,7 @@ from ragspine.storage.fact_store import (
 @pytest.fixture
 def store(tmp_db_path):
     """临时 sqlite FactStore（建表 init_schema）。"""
-    fs = FactStore(tmp_db_path)
+    fs = SqliteFactStore(tmp_db_path)
     fs.init_schema()
     yield fs
     fs.close()

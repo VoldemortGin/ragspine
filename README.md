@@ -189,9 +189,9 @@ ragspine ask --db data/fact_metric.db "中国内地FY2025的REVENUE是多少"
 ```python
 from ragspine.agent.agent import answer_question
 from ragspine.agent.llm_provider import MockProvider
-from ragspine.storage.fact_store import FactStore
+from ragspine.storage.fact_store import SqliteFactStore
 
-store = FactStore("data/fact_metric.db"); store.init_schema()
+store = SqliteFactStore("data/fact_metric.db"); store.init_schema()
 result = answer_question("中国内地FY2024的REVENUE是多少", store, MockProvider())
 print(result.answer)     # deterministic value, or an honest "not found"
 print(result.sources)    # [{'doc': ..., 'locator': ...}]

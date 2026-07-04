@@ -528,3 +528,114 @@ TRACE_SINK_SUITE: "ConformanceSuite" = ConformanceSuite(
     {name: (lambda n=name: TRACE_SINK_REGISTRY.make(n)) for name in TRACE_SINK_REGISTRY.names()},
     TRACE_SINK_INVARIANTS,
 )
+
+
+# ---------------------------------------------------------------------------
+# 注册表：受 conformance 约束的 FactStore 实现（B2 FactStore 缝，🛡 结构化通路 = 反编造根基）。第三方
+# 实现在此追加一行 + 在 _build_fact_store 里补一行（或经 make_fact_store 的 entry-point 自动发现）即
+# 继承整套反编造 / provenance conformance pack——同 VectorStore / GraphStore / TraceSink 缝的范式。
+# sqlite 是零依赖确定性默认（SqliteFactStore，stdlib，装了即跑、无 importorskip / env 门）；DuckDB /
+# Postgres 为 follow-up（需外部依赖，behind 各自 extra，落地时在此加 importorskip / env 门，缺则 skip）。
+# ---------------------------------------------------------------------------
+FACT_STORE_IMPLS = ("sqlite",)
+
+
+def _build_fact_store(name: str):
+    """名字 -> 已 init_schema 的 FactStore 实例（内存库，延迟 import，红色阶段在此抛 ModuleNotFoundError）。"""
+    from ragspine.storage.fact_store import make_fact_store
+
+    if name == "sqlite":
+        store = make_fact_store("sqlite", db_path=":memory:")
+        assert store is not None
+        store.init_schema()
+        return store
+    raise KeyError(name)
+
+
+@pytest.fixture(params=list(FACT_STORE_IMPLS), ids=list(FACT_STORE_IMPLS))
+def fact_store(request):
+    """每个注册 FactStore 各给一个【全新空库 + 已 init_schema】实例；每条用例对所有实现各跑一遍。
+
+    sqlite 是 stdlib 零依赖默认（装了即跑，无 importorskip / env 门）；DuckDB / Postgres follow-up 时
+    在此按需加可用性门（缺则该参数 skip，黄不红，范式同 vector_store 夹具）。收尾统一 close 关连接。
+    """
+    store = _build_fact_store(request.param)
+    yield store
+    close = getattr(store, "close", None)
+    if callable(close):
+        close()
+
+
+# ===========================================================================
+# corespine 机制层 conformance 骨架（FactStore 缝）——与上文 fact_store fixture-形态参数化两层互补，
+# 领域断言不外迁。范围收敛在【离线零依赖、零服务】的 sqlite 默认实现上（无 importorskip / 服务门，故
+# corespine 套件每格都能确定性执行）。范式同 VECTOR_STORE_SUITE / GRAPH_STORE_SUITE / TRACE_SINK_SUITE。
+# ===========================================================================
+def _make_sqlite_fact_store():
+    """构造已 init_schema 的 sqlite 默认 FactStore（经 make_fact_store 解析；延迟 import 保惰性红色）。"""
+    from ragspine.storage.fact_store import make_fact_store
+
+    store = make_fact_store("sqlite", db_path=":memory:")
+    assert store is not None
+    store.init_schema()
+    return store
+
+
+def _conformance_fact(**over):
+    """构造一条带齐血缘的 Fact（延迟 import，供 InvariantPack 与领域断言共用同一构造口径）。"""
+    from ragspine.storage.fact_store import Fact
+
+    fields = dict(
+        metric_code="REVENUE",
+        entity="ACME_HK",
+        geography="HK",
+        channel="TOTAL",
+        period_type="FY",
+        period="2024",
+        value=4500.0,
+        unit="HKD_MN",
+        source_doc_id="HK_FIN.pptx",
+        source_locator="HK_FIN.pptx!slide3#para2",
+    )
+    fields.update(over)
+    return Fact(**fields)
+
+
+def _fact_found_determinism_stable(store) -> None:
+    """命中→确定值（跨调用逐位一致 + 等于入库值）、未命中→空（绝不臆造）——反编造存储侧根基·机制。"""
+    store.upsert_facts([_conformance_fact(value=4500.0)])
+    first = store.query("REVENUE", "ACME_HK", "FY", "2024")
+    second = store.query("REVENUE", "ACME_HK", "FY", "2024")
+    assert first and second, "命中查询应确定返回一条 Fact（found 语义）"
+    assert first[0].value == second[0].value == 4500.0, "命中值必须确定且等于入库值（不臆造/不漂移）"
+    assert store.query("REVENUE", "ACME_HK", "FY", "2099") == [], "未命中必须返回空（绝不臆造一个值）"
+
+
+def _fact_provenance_round_trip(store) -> None:
+    """found 结果带 source_doc_id + source_locator，lineage 经 upsert/query 存活（不臆造 / 不丢·机制）。"""
+    store.upsert_facts(
+        [_conformance_fact(source_doc_id="HK_FIN.pptx", source_locator="HK_FIN.pptx!slide3#para2")]
+    )
+    hits = store.query("REVENUE", "ACME_HK", "FY", "2024")
+    assert hits, "provenance 判定核未命中（应至少回传入库的一条 Fact）"
+    for f in hits:
+        assert f.source_doc_id == "HK_FIN.pptx", f"found 结果丢了 source_doc_id（血缘根）：{f!r}"
+        assert (
+            f.source_locator == "HK_FIN.pptx!slide3#para2"
+        ), f"found 结果丢了 source_locator（citation 回指）：{f!r}"
+
+
+FACT_STORE_REGISTRY: "Registry" = Registry("fact_store")
+FACT_STORE_REGISTRY.register("sqlite", _make_sqlite_fact_store)
+
+FACT_STORE_INVARIANTS: "InvariantPack" = (
+    InvariantPack("fact_store")
+    .add("found_determinism_stable", _fact_found_determinism_stable)
+    .add("provenance_round_trip", _fact_provenance_round_trip)
+)
+
+# 实现 × 不变量 的笛卡尔积套件：corespine 负责「跑全套 + 定位坏格子」。每格新建实例，杜绝串味。
+FACT_STORE_SUITE: "ConformanceSuite" = ConformanceSuite(
+    {name: (lambda n=name: FACT_STORE_REGISTRY.make(n)) for name in FACT_STORE_REGISTRY.names()},
+    FACT_STORE_INVARIANTS,
+)

@@ -21,7 +21,7 @@ from ragspine.service.api.app import create_app
 from ragspine.service.config import ServiceConfig
 from ragspine.service.faq.faq_cache import FAQCache, FAQItem
 from ragspine.service.tasks.task_queue import FakeQueue
-from ragspine.storage.fact_store import Fact, FactStore
+from ragspine.storage.fact_store import Fact, SqliteFactStore
 
 REF_DATE = "2026-06-12"
 
@@ -32,7 +32,7 @@ REF_DATE = "2026-06-12"
 @pytest.fixture
 def seeded_db_path(tmp_path):
     db_path = tmp_path / "fact_metric.db"
-    fs = FactStore(db_path)
+    fs = SqliteFactStore(db_path)
     fs.init_schema()
     fs.upsert_facts([
         Fact(
@@ -83,7 +83,7 @@ def test_ask_equivalence_with_workflow(base_config, seeded_db_path):
     body = resp.json()
 
     # 直接调用 workflow 取参照
-    store = FactStore(seeded_db_path)
+    store = SqliteFactStore(seeded_db_path)
     store.init_schema()
     ref = base_config.reference_date_obj()
     expected = answer_question(

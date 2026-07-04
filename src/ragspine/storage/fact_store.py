@@ -1,7 +1,27 @@
-"""指标事实表 fact_metric 的存储层（stdlib sqlite3）。
+"""FactStore 缝：结构化指标事实存储（🛡 反编造 + provenance 不变量所在，live 契约见 src/ragspine/storage/CLAUDE.md）。
 
-确定性抽取出的每个数值落成一条 Fact，带完整数据血缘（源文件 + 定位串）。
-查询走参数化 SQL，命中即确定值，未命中即"查不到"，不做任何插值/推断。
+结构化通路是【反编造不变量】的存储侧根基：确定性抽取出的每个数值落成一条 Fact，带完整数据血缘
+（源文件 + 定位串）。查询走参数化精确匹配，**命中即确定值、未命中即空**（绝不插值/臆造/漂移），
+agent 侧据此在无 found fact 时把答案改写为「未找到」。这条缝把这套语义形式化为一个【可注册 /
+可选择 / 带 conformance pack】的 Protocol——五段式范式同 make_vector_store / make_graph_store /
+make_trace_sink：
+
+    1. Protocol —— @runtime_checkable FactStore，抽出 sqlite 默认实现的公开接口（query / upsert_facts
+       / delete_by_source_doc / found→值·miss→空 / provenance round-trip），core 只 import 这个 Protocol。
+    2. 离线默认 —— SqliteFactStore（stdlib sqlite3，零三方依赖、确定性），行为逐位不变，让
+       `pip install ragspine` 的精简默认仍可端到端跑结构化通路（ADR 0005/0009）。
+    3. 薄 adapter —— DuckDB / Postgres 为 follow-up（需外部依赖，behind 各自 extra、延迟 import；
+       第三方今天即可经 entry-point group 注册，无需核心 PR）。
+    4. 注册表 —— make_fact_store / RAGSPINE_FACT_STORE，内置 sqlite 默认 + entry-point 自动发现
+       （group ragspine.fact_stores）；缺省 spec → sqlite 默认实现（默认 loop 字节不变）。
+    5. conformance —— tests/conformance/test_fact_store.py 对【每个注册实现】参数化断言反编造 +
+       provenance 不变量（found-determinism / miss→空 / lineage 存活），伪造/丢血缘的 stub 直接 CI 红。
+
+两项不变量如何被【实现真正保证】（非注释）：
+- 反编造 —— query() 参数化精确匹配，命中即返回确定值（跨调用逐位一致）、未命中即空列表；
+  dim_key 唯一保证命中 0-或-1 行，这是「found→值·miss→空」确定性读路径的根基。
+- Provenance —— Fact 的 source_doc_id / source_locator 原样存、原样随 query 回传；upsert/query 全程
+  不丢血缘，人工更正另加 corrected_by / corrected_audit_seq，故 found 结果永远可回指来源。
 
 v2（多模态抽取期）：Fact 增加可选的样式语义与版本血缘字段
 （tags / source_file_hash / extractor_version / mapping_version / confidence /
@@ -10,11 +30,22 @@ review_status），schema 自动迁移补列；query() 默认只返回 review_st
 """
 
 import json
+import os
 import sqlite3
 import weakref
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, Protocol, runtime_checkable
+
+# 工厂读取的环境变量名（缺省 spec 时生效；范式同 VECTOR_STORE_ENV / GRAPH_STORE_ENV）。
+FACT_STORE_ENV = "RAGSPINE_FACT_STORE"
+
+# 第三方后端自动发现的 entry-point group：一个包在此 group 下注册一行
+# （pyproject `[project.entry-points."ragspine.fact_stores"]`），make_fact_store 就能按名字选中它——
+# 核心零改动、零 SDK import（范式同 VECTOR_STORE_ENTRY_POINT_GROUP / GRAPH_STORE_ENTRY_POINT_GROUP）。
+FACT_STORE_ENTRY_POINT_GROUP = "ragspine.fact_stores"
 
 # review_status 取值：默认确定性抽取自动通过；进复核 / 被拦截 / 被驳回不可见。
 REVIEW_AUTO_APPROVED = "auto_approved"
@@ -153,8 +184,59 @@ def _compute_dim_key(fact: Fact) -> str:
     )
 
 
-class FactStore:
-    """fact_metric 表的读写。维度组合唯一，重复入库走 upsert 覆盖。"""
+@runtime_checkable
+class FactStore(Protocol):
+    """结构化事实存储缝的最小结构接口（core 只 import 这个 Protocol，不 import 任何 DB SDK）。
+
+    刻意抽出【现有 sqlite 默认实现的公开接口】（不加不删方法、不改契约）——这套公开面正是反编造 +
+    provenance 两项不变量绑定的地方：query 的 found→值·miss→空 三态、upsert 的血缘保全、按源撤下、
+    dim_key 自然键、人审写回。任何实现（sqlite 默认现在，将来的 DuckDB / Postgres adapter）只要
+    结构匹配本 Protocol 并通过 tests/conformance/test_fact_store.py，即可被 make_fact_store 选中。
+
+    诚实边界（🛡 契约完整 > 抽象洁癖）：execute_read 是【sqlite 原生只读逃生口】（返回 sqlite3.Row，
+    供台账/指标等观测面复用），刻意保留在公开面以匹配既有契约、保证调用方字节不变；一个非 sqlite
+    后端要么回传兼容的 row-like、要么让这类观测面直接依赖具体实现——这是 DuckDB/Postgres adapter 的
+    follow-up 关切，不在本缝的反编造/provenance 核心内。
+    """
+
+    def init_schema(self) -> None: ...
+
+    def upsert_facts(self, facts: list[Fact], ingested_at: str | None = None) -> int: ...
+
+    def query(
+        self,
+        metric_code: str,
+        entity: str,
+        period_type: str,
+        period: str,
+        channel: str = "TOTAL",
+        review_statuses: tuple[str, ...] | None = VISIBLE_REVIEW_STATUSES,
+    ) -> list[Fact]: ...
+
+    def count(self) -> int: ...
+
+    def execute_read(
+        self, sql: str, params: tuple[object, ...] = ()
+    ) -> list[sqlite3.Row]: ...
+
+    def delete_by_source_doc(self, source_doc_id: str) -> int: ...
+
+    def set_review_status(self, dim_key: str, status: str) -> int: ...
+
+    @staticmethod
+    def dim_key_for(fact: "Fact") -> str: ...
+
+    def get_by_dim_key(self, dim_key: str) -> "Fact | None": ...
+
+    def close(self) -> None: ...
+
+
+class SqliteFactStore:
+    """fact_metric 表的读写（FactStore 缝的零依赖 sqlite 默认实现）。维度组合唯一，重复入库走 upsert 覆盖。
+
+    行为逐位不变（原 concrete `FactStore` 改名而来，纯结构性提取，不改任何存储格式 / 查询语义 /
+    dim_key / found-not-found 语义）。结构匹配 @runtime_checkable FactStore Protocol。
+    """
 
     def __init__(self, db_path: str | Path):
         self.db_path = str(db_path)
@@ -402,3 +484,96 @@ class FactStore:
                 val = json.loads(val) if val else {}
             data[col] = val
         return Fact(**data)
+
+
+# ---------------------------------------------------------------------------
+# 注册表：内置后端名字 -> 惰性 loader（返回 FactStore 实现【类】，尚不实例化）。范式同 make_graph_store：
+# loader 仅在被调用时才 import 对应实现（本模块的 SqliteFactStore 零三方依赖；将来的 DuckDB / Postgres
+# adapter 由各自 loader 延迟 import，behind 各自 extra）。第三方后端【不】登记此表，而是经 entry-point
+# 自动发现（见 _discover_entry_points），无需任何核心 PR。别名共指同一 loader（大小写 / 留白由
+# make_fact_store 归一化）。
+# ---------------------------------------------------------------------------
+def _load_sqlite() -> type[FactStore]:
+    return SqliteFactStore
+
+
+_BUILTIN_LOADERS: dict[str, Callable[[], type[FactStore]]] = {
+    "sqlite": _load_sqlite,
+    "sqlite3": _load_sqlite,
+    "default": _load_sqlite,
+}
+
+# 错误信息中展示的内置规范名（别名不重复列出，保持可读）。
+_BUILTIN_DISPLAY_NAMES = ("none", "sqlite")
+
+
+def _discover_entry_points() -> Sequence[Any]:
+    """发现第三方在 FACT_STORE_ENTRY_POINT_GROUP 下注册的 FactStore 后端（范式同 vector / graph store）。
+
+    在函数内 import entry_points，使 monkeypatch importlib.metadata.entry_points 在测试中生效，
+    也让发现成本只在真正回落时付出。
+    """
+    from importlib.metadata import entry_points
+
+    return list(entry_points(group=FACT_STORE_ENTRY_POINT_GROUP))
+
+
+def _resolve_factory(normalized: str) -> Callable[..., FactStore]:
+    """归一化名字 -> 可 **kwargs 调用得到 FactStore 的工厂（内置类或 entry-point 目标）。
+
+    内置优先于同名 entry point（第三方不能劫持内置 sqlite 默认语义）；未命中再回落 entry-point 自动
+    发现。只【解析】不【实例化】——对内置默认不触发任何重依赖 import（sqlite 是 stdlib）。
+    """
+    loader = _BUILTIN_LOADERS.get(normalized)
+    if loader is not None:
+        return loader()
+    discovered = _discover_entry_points()
+    for entry_point in discovered:
+        if entry_point.name.strip().lower() == normalized:
+            factory: Callable[..., FactStore] = entry_point.load()
+            return factory
+    names = sorted({entry_point.name for entry_point in discovered})
+    raise ValueError(
+        f"未知 fact store spec：{normalized!r}"
+        f"（内置可选 {' / '.join(_BUILTIN_DISPLAY_NAMES)}；"
+        f"已发现的 entry-point 后端：{names or '无'}；"
+        f"第三方包可在 entry-point group {FACT_STORE_ENTRY_POINT_GROUP!r} 下注册一个后端）"
+    )
+
+
+def make_fact_store(spec: str | None = None, **kwargs: Any) -> FactStore | None:
+    """FactStore 工厂：把「选哪个结构化后端」从改代码降为一个 spec/env（范式同 make_graph_store）。
+
+    spec 取值（大小写 / 留白不敏感；缺省读环境变量 RAGSPINE_FACT_STORE）：
+        - None / 缺省 / 'sqlite' / 'sqlite3' / 'default' -> SqliteFactStore（零依赖 stdlib sqlite 默认实现，
+          需传 db_path=...）。**缺省 spec → sqlite 默认实现**——默认结构化通路字节不变。
+        - 'none'                                         -> None（显式不注入具体 store，供调用方自建）。
+        - 其余                                            -> entry-point 自动发现（第三方包在
+          FACT_STORE_ENTRY_POINT_GROUP 下注册 DuckDB / Postgres 等即可被选中）；都不命中 -> ValueError。
+
+    名字经注册表解析（内置 loader 或 entry point），再以 **kwargs 实例化（SqliteFactStore 需 db_path）。
+    返回 FactStore 实例或 None。DuckDB / Postgres 一方 adapter 为 follow-up（需外部依赖，不硬引入 CI）。
+    """
+    if spec is None:
+        spec = os.environ.get(FACT_STORE_ENV)
+    normalized = (spec or "sqlite").strip().lower()
+    if normalized == "none":
+        return None
+    factory = _resolve_factory(normalized)
+    return factory(**kwargs)
+
+
+__all__ = [
+    "FACT_STORE_ENTRY_POINT_GROUP",
+    "FACT_STORE_ENV",
+    "REVIEW_APPROVED",
+    "REVIEW_AUTO_APPROVED",
+    "REVIEW_BLOCKED",
+    "REVIEW_PENDING",
+    "REVIEW_REJECTED",
+    "VISIBLE_REVIEW_STATUSES",
+    "Fact",
+    "FactStore",
+    "SqliteFactStore",
+    "make_fact_store",
+]

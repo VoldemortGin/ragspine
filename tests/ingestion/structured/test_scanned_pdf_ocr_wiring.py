@@ -31,7 +31,7 @@ from ragspine.extraction.extractors.pdf_scanned_extractor import (
     OcrTable,
 )
 from ragspine.ingestion.review.review_queue import ReviewQueue
-from ragspine.storage.fact_store import VISIBLE_REVIEW_STATUSES, FactStore
+from ragspine.storage.fact_store import VISIBLE_REVIEW_STATUSES, SqliteFactStore
 
 # 受控实体（home 公司 profile 可归一）：'ACME Hong Kong' -> ACME_HK。
 RESOLVABLE_ENTITY_TITLE = "ACME Hong Kong"
@@ -76,7 +76,7 @@ class _FakeOcrBackend:
 
 @pytest.fixture
 def store(tmp_sqlite_factory):
-    fs = FactStore(tmp_sqlite_factory("facts"))
+    fs = SqliteFactStore(tmp_sqlite_factory("facts"))
     yield fs
     fs.close()
 

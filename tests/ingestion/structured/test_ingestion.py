@@ -21,7 +21,7 @@ import rootutils
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
 from ragspine.extraction.color.color_semantics import ColorMapping, LegendEntry, MappingRegistry
-from ragspine.storage.fact_store import FactStore, REVIEW_AUTO_APPROVED, VISIBLE_REVIEW_STATUSES
+from ragspine.storage.fact_store import SqliteFactStore, REVIEW_AUTO_APPROVED, VISIBLE_REVIEW_STATUSES
 from ragspine.ingestion.structured.ingestion import IngestReport, ingest_excel
 from ragspine.ingestion.review.review_queue import ReviewQueue
 
@@ -40,7 +40,7 @@ EXPECTED_HK_FACTS = 12
 # --------------------------------------------------------------------------- #
 @pytest.fixture
 def store(tmp_sqlite_factory):
-    fs = FactStore(tmp_sqlite_factory("facts"))
+    fs = SqliteFactStore(tmp_sqlite_factory("facts"))
     yield fs
     fs.close()
 

@@ -37,7 +37,7 @@ from ragspine.agent.security_gate import (
     SecurityGate,
 )
 from ragspine.common.company_profile import DimensionSpec, DomainProfile
-from ragspine.storage.fact_store import Fact, FactStore, _compute_dim_key
+from ragspine.storage.fact_store import Fact, SqliteFactStore, _compute_dim_key
 
 
 # ---------------------------------------------------------------------------
@@ -255,7 +255,7 @@ def test_lab_storage_deterministic_read_and_provenance(tmp_path):
     """真实 FactStore：两条仅 batch 不同的 lab Fact upsert -> count==2；
     确定性 5 列 query 各自唯一命中、value 正确、带 source 血缘（provenance）；
     查不存在的 batch -> 空（not_found 语义）；同身份重复 upsert -> count 不变（幂等）。"""
-    store = FactStore(tmp_path / "lab.db")
+    store = SqliteFactStore(tmp_path / "lab.db")
     store.init_schema()
 
     fact_a = _lab_fact(batch="BATCH_A", value=520.0, locator="p=3,row=2")

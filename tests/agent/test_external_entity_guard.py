@@ -23,7 +23,7 @@ import rootutils
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
 from ragspine.agent.agent import AgentResult, answer_question
-from ragspine.storage.fact_store import Fact, FactStore
+from ragspine.storage.fact_store import Fact, SqliteFactStore
 
 REF = date(2026, 6, 12)
 
@@ -43,7 +43,7 @@ REVENUE_GROUP_FY2025 = Fact(
 
 @pytest.fixture
 def store(tmp_db_path):
-    fs = FactStore(tmp_db_path)
+    fs = SqliteFactStore(tmp_db_path)
     fs.init_schema()
     fs.upsert_facts([REVENUE_HK_FY2025, REVENUE_GROUP_FY2025])
     yield fs

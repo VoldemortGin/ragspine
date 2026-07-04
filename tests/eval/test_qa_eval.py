@@ -26,7 +26,7 @@ from ragspine.cli.run_qa_eval import main as qa_eval_main
 import ragspine.eval.qa_eval as qa_eval_mod
 from ragspine.common.company_profile import DimensionSpec, DomainProfile
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
-from ragspine.storage.fact_store import FactStore
+from ragspine.storage.fact_store import SqliteFactStore
 from ragspine.eval.qa_eval import (
     ALL_GATE_METRICS,
     CITATION_VALIDITY,
@@ -504,7 +504,7 @@ def test_baseline_fabrication_increase_blocks():
 
 def test_build_eval_kb_deterministic_and_idempotent(tmp_path):
     fact_db, chunk_db = build_eval_kb(tmp_path)
-    fs = FactStore(fact_db)
+    fs = SqliteFactStore(fact_db)
     cs = ChunkStore(chunk_db)
     try:
         n_facts, n_chunks = fs.count(), cs.count()
@@ -516,7 +516,7 @@ def test_build_eval_kb_deterministic_and_idempotent(tmp_path):
         cs.close()
     # 幂等重建：活跃数据集不变
     build_eval_kb(tmp_path)
-    fs2, cs2 = FactStore(fact_db), ChunkStore(chunk_db)
+    fs2, cs2 = SqliteFactStore(fact_db), ChunkStore(chunk_db)
     try:
         assert fs2.count() == n_facts
         assert cs2.count() == n_chunks

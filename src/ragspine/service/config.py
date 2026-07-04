@@ -29,7 +29,7 @@ from ragspine.retrieval.rerank.cross_encoder import make_reranker
 from ragspine.retrieval.vector.embedding_backends import make_embedding_backend
 from ragspine.retrieval.vector.persistence_policy import make_persistence_policy
 from ragspine.retrieval.vector.store import make_vector_store
-from ragspine.storage.fact_store import FactStore
+from ragspine.storage.fact_store import FactStore, SqliteFactStore
 
 
 @dataclass(frozen=True)
@@ -127,7 +127,7 @@ def provider_config_dict(config: ServiceConfig) -> dict[str, object]:
 
 @contextmanager
 def open_fact_store(config: ServiceConfig) -> Iterator[FactStore]:
-    store = FactStore(config.db_path)
+    store = SqliteFactStore(config.db_path)
     store.init_schema()
     try:
         yield store

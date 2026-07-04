@@ -77,6 +77,7 @@ _submodule_getattr, _submodule_dir = _lazy_submodules(__name__, __path__)
 # 仍走惰性解析——`import ragspine` 不急切 import 任何子模块，首次访问某名字时才拉起其源模块。
 _CURATED: dict[str, tuple[str, str]] = {
     "FactStore": ("storage.fact_store", "FactStore"),
+    "SqliteFactStore": ("storage.fact_store", "SqliteFactStore"),
     "Fact": ("storage.fact_store", "Fact"),
     "MockProvider": ("agent.llm_provider", "MockProvider"),
     "answer_question": ("agent.agent", "answer_question"),

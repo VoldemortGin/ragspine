@@ -19,14 +19,14 @@ ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpa
 from ragspine.extraction.color.color_semantics import MappingRegistry
 from ragspine.extraction.ir import StyledCell, StyledGrid
 from ragspine.ingestion.review.review_queue import ReviewQueue
-from ragspine.storage.fact_store import VISIBLE_REVIEW_STATUSES, FactStore
+from ragspine.storage.fact_store import VISIBLE_REVIEW_STATUSES, SqliteFactStore
 
 RESOLVABLE_ENTITY_TITLE = "ACME Hong Kong"   # -> ACME_HK
 
 
 @pytest.fixture
 def store(tmp_sqlite_factory):
-    fs = FactStore(tmp_sqlite_factory("facts"))
+    fs = SqliteFactStore(tmp_sqlite_factory("facts"))
     yield fs
     fs.close()
 

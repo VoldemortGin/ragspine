@@ -21,7 +21,7 @@ from ragspine.agent.llm_provider import (
 from ragspine.common.core import DEFAULT_FACT_DB
 from ragspine.retrieval.link.narrative_link import build_narrative_retriever
 from ragspine.retrieval.vector.embedding_backends import make_embedding_backend
-from ragspine.storage.fact_store import FactStore
+from ragspine.storage.fact_store import SqliteFactStore
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -93,7 +93,7 @@ def main(argv: list[str] | None = None) -> int:
             args.chunk_db, provider=provider, embedding_backend=embedding_backend
         )
 
-    store = FactStore(args.db)
+    store = SqliteFactStore(args.db)
     store.init_schema()
     try:
         result = answer_question(

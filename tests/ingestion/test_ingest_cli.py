@@ -34,7 +34,7 @@ from ragspine.fixtures.excel import (
     main as make_excel_fixtures,
 )
 from ragspine.extraction.color.color_semantics import MappingRegistry
-from ragspine.storage.fact_store import FactStore
+from ragspine.storage.fact_store import SqliteFactStore
 from ragspine.ingestion.structured.ingestion_manifest import ManifestStore
 from ragspine.ingestion.structured.ingestion import ingest_file
 from ragspine.ingestion.review.review_queue import ReviewQueue
@@ -79,7 +79,7 @@ def test_t7_cli_ingests_xlsx_with_valid_as_of(tmp_path):
     ])
     assert proc.returncode == 0, proc.stderr
 
-    fs = FactStore(str(db))
+    fs = SqliteFactStore(str(db))
     try:
         rows = fs.execute_read("SELECT valid_as_of FROM fact_metric")
         assert len(rows) >= 1
@@ -124,7 +124,7 @@ def test_t7_cli_dry_run_writes_nothing(tmp_path):
     assert proc.returncode == 0, proc.stderr
 
     # 库可能被建出（init_schema），但事实表必须零写入。
-    fs = FactStore(str(db))
+    fs = SqliteFactStore(str(db))
     try:
         assert fs.count() == 0
     finally:
@@ -145,7 +145,7 @@ def test_t7_cli_creates_db_when_missing(tmp_path):
     ])
     assert proc.returncode == 0, proc.stderr
     assert db.exists()
-    fs = FactStore(str(db))
+    fs = SqliteFactStore(str(db))
     try:
         assert fs.count() >= 1
     finally:
@@ -168,7 +168,7 @@ def test_t7_cli_main_callable_in_process(tmp_path):
         "--valid-as-of", "2025-12-31",
     ])
     assert rc == 0
-    fs = FactStore(str(db))
+    fs = SqliteFactStore(str(db))
     try:
         rows = fs.execute_read("SELECT valid_as_of FROM fact_metric")
         assert rows and all(r["valid_as_of"] == "2025-12-31" for r in rows)
@@ -189,7 +189,7 @@ def test_t8_unsupported_suffix_marks_manifest_failed(tmp_path):
     """user story：作为运营，当一份不支持的文件（.txt）入库失败时，批次台账应把
     它计为失败项（n_failed +1、failures 含该 path 与 error），失败计数才准确——
     修 3A 遗留：ingest_file 不支持后缀分支调 record_input 时漏传 failed=True。"""
-    store = FactStore(str(tmp_path / "facts.db"))
+    store = SqliteFactStore(str(tmp_path / "facts.db"))
     registry = MappingRegistry(str(tmp_path / "registry.db"))
     queue = ReviewQueue(str(tmp_path / "queue.db"))
     manifest = ManifestStore(str(tmp_path / "manifest.db"))
@@ -221,7 +221,7 @@ def test_t8_unsupported_suffix_marks_manifest_failed(tmp_path):
 def test_t8_failed_input_not_counted_as_success(tmp_path):
     """user story：失败的输入不得被混入成功统计——台账里该批 n_facts 不因失败文件
     增长（失败文件零事实），且失败明细 error 指向不支持的格式。"""
-    store = FactStore(str(tmp_path / "facts.db"))
+    store = SqliteFactStore(str(tmp_path / "facts.db"))
     registry = MappingRegistry(str(tmp_path / "registry.db"))
     queue = ReviewQueue(str(tmp_path / "queue.db"))
     manifest = ManifestStore(str(tmp_path / "manifest.db"))

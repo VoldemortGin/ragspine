@@ -22,7 +22,7 @@ from ragspine.agent.query_tools import (
     execute_query_metric,
 )
 from ragspine.common.company_profile import load_company_profile
-from ragspine.storage.fact_store import Fact, FactStore
+from ragspine.storage.fact_store import Fact, SqliteFactStore
 
 _GOLDEN = json.loads(
     (ROOT_DIR / "data" / "golden" / "query_metric_tool_schema.json").read_text(encoding="utf-8")
@@ -63,7 +63,7 @@ _FACT = Fact(
 
 @pytest.fixture
 def store(tmp_db_path):
-    fs = FactStore(tmp_db_path)
+    fs = SqliteFactStore(tmp_db_path)
     fs.init_schema()
     fs.upsert_facts([_FACT])
     yield fs

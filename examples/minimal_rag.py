@@ -7,12 +7,12 @@ Fully offline, no API key, no network. Run from the project root:
 The four names below are RAGSpine's entire minimal-viable API.
 """
 
-from ragspine.storage.fact_store import Fact, FactStore
+from ragspine.storage.fact_store import Fact, SqliteFactStore
 from ragspine.agent.llm_provider import MockProvider
 from ragspine.agent.agent import answer_question
 
 # 1. A fact store (in-memory here; pass a path for a real sqlite db).
-store = FactStore(":memory:")
+store = SqliteFactStore(":memory:")
 store.init_schema()
 
 # 2. One fact. The last two fields are its provenance (which doc, where in it).

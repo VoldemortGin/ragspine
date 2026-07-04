@@ -12,13 +12,13 @@ import rootutils
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
 from ragspine.cli.ask import main as ask_main
-from ragspine.storage.fact_store import Fact, FactStore
+from ragspine.storage.fact_store import Fact, SqliteFactStore
 
 
 @pytest.fixture
 def seeded_db(tmp_path):
     db_path = tmp_path / "fact_metric.db"
-    fs = FactStore(db_path)
+    fs = SqliteFactStore(db_path)
     fs.init_schema()
     fs.upsert_facts([
         Fact(
