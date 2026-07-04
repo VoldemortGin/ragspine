@@ -190,6 +190,17 @@ vector = [
 graph = [
     "networkx>=3.0",
 ]
+# 可插拔 trace 出口（TraceSink 缝 B1 的真实 adapter）：把隐私安全 trace 扇出到 OpenTelemetry。
+# opentelemetry-api/sdk（Apache-2.0，permissive，过 ADR 0009 的 ≤Apache-2.0 许可门），纯 Python、零服务。
+# 延迟 import（OtelTraceSink.__init__ / _load_otel 内）：不装也能 import 核心、跑零依赖
+# InProcessPrivacyTraceSink 隐私默认；装了即由 make_trace_sink('otel') 选用。扇出前先过隐私门
+# （sink.enforce_trace_privacy），故 OTel 出口继承同一条隐私 conformance——绝不成为泄漏面。
+# CI 精简门默认【不装】[otel]，故 tests/conformance/test_trace_sink.py 的 otel 参数由 importorskip
+# 门控（缺则 skip，黄不红）；装了即整套 gate。
+otel = [
+    "opentelemetry-api>=1.20",
+    "opentelemetry-sdk>=1.20",
+]
 # Dify 工作流编译器（ragspine.dify）的边界依赖：
 # - PyYAML（MIT，permissive，过 ADR 0009 的 ≤Apache-2.0 许可门）：parse 段经 yaml.safe_load
 #   把 .yml 文本读成 dict；延迟 import（loader.py 内）。
@@ -218,7 +229,7 @@ service = [
 # GPU 与否无需在此区分——torch/transformers/paddleocr 装的是自适应版，运行时探测到
 # CUDA 即用 GPU、否则回落 CPU；embed 的 transformers 上限已按 darwin 平台标记处理。
 all = [
-    "rag-spine[pdf,ocr,doc,llm,embed,embed-onnx,rerank,colbert,splade,colpali,vector,graph,service,dify]",
+    "rag-spine[pdf,ocr,doc,llm,embed,embed-onnx,rerank,colbert,splade,colpali,vector,graph,otel,service,dify]",
 ]
 
 [build-system]
@@ -280,6 +291,6 @@ module = [
     "anthropic.*", "openai.*", "openpyxl.*", "paddleocr.*", "pypdfium2.*",
     "sentence_transformers.*", "fastembed.*", "docling.*", "pdfspine.*", "docspine.*", "pptspine.*", "rq.*", "redis.*",
     "pptx.*", "markdown.*", "reportlab.*", "rootutils.*", "sqlite_vec.*", "pg8000.*",
-    "qdrant_client.*", "yaml", "numpy.*", "torch.*", "networkx.*",
+    "qdrant_client.*", "yaml", "numpy.*", "torch.*", "networkx.*", "opentelemetry.*",
 ]
 ignore_missing_imports = true

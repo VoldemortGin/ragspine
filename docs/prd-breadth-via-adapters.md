@@ -1,6 +1,6 @@
 # PRD — Breadth via Adapters: the extension contract & capability matrix
 
-> **status:** in progress (P0 `VectorStore` seam wired; P1 `SourceConnector` seam shipped; P0 `Extractor` registry + `Chunker` Protocol formalized; P0 pipeline-topology shipped) · **created:** 2026-06-17 · **methodology:** TDD (conformance tests first)
+> **status:** in progress (P0 `VectorStore` seam wired; P1 `SourceConnector` seam shipped; P0 `Extractor` registry + `Chunker` Protocol formalized; P2 `TraceSink` seam formalized + privacy-trace conformance pack landed; P0 pipeline-topology shipped) · **created:** 2026-06-17 · **methodology:** TDD (conformance tests first)
 > Living backlog — the seams/adapters tracked here land incrementally; it carries no `covers:` frontmatter
 > (each seam's shipped contract doc lives under `src/ragspine/<domain>/docs/*.md`).
 > Realizes [ADR 0003](adr/0003-audience-oss-library.md) (general-purpose OSS library), operating within
@@ -145,8 +145,20 @@ Current state (8 Protocols exist): `LLMProvider`, `IntentParser`, `NarrativeRetr
   every caller untouched) + a `make_chunker(spec)` / `RAGSPINE_CHUNKER` config selector with entry-point
   discovery (`ragspine.chunkers` group), so semantic / contextual / parent-child strategies become swappable,
   quality-critical units. Remaining: those strategies (P1).
-- **`TraceSink` (NEW Protocol, 🛡)** — formalize the privacy-aware trace sink so observability can fan out to
-  OTel/files *through the privacy conformance test*, never around it.
+- **`TraceSink` (SEAM FORMALIZED, 🛡)** — the privacy-aware trace sink is now formalized so observability can
+  fan out to OTel/files *through the privacy conformance test*, never around it. **Shipped:** the seam
+  **reuses** corespine's `@runtime_checkable TraceSink` Protocol (`emit(code, **fields)`) + its in-proc
+  privacy-safe default `InProcessPrivacyTraceSink` (the same sink `common/observability.emit_trace` already
+  enforces with) — no duplicate Protocol — and adds the ragspine-side **registry seam** `make_trace_sink` /
+  `RAGSPINE_TRACE_SINK` with `ragspine.trace_sinks` entry-point auto-discovery (five-段式范式同
+  `make_vector_store`), a reusable **privacy gate** `enforce_trace_privacy` (any sink calls it first, so
+  fan-out goes *through* the privacy test), a real **OTel adapter** `OtelTraceSink` (behind `[otel]`,
+  Apache-2.0, lazy-imported, privacy-gated before any span), and the **privacy-trace conformance pack**
+  (`tests/conformance/test_trace_sink.py`: every registered sink must reject/scrub answer / fact value /
+  chunk text, with two lineage-leaking reverse-proof stubs — `_LeakyTraceSink` / `_ValueSmugglingTraceSink`
+  — that must FAIL). Default behavior is byte-identical: `make_trace_sink()` defaults to `None`, so the
+  existing `emit_trace` path is untouched. Remaining: wiring `emit_trace` to a config-selected sink for live
+  multi-exit fan-out (P2 follow-up).
 
 ## Capability matrix
 
@@ -169,7 +181,7 @@ Legend: **kind** 🛡/⭐/🔧 (own/own/adapt) · **status** ✅ have · ◐ par
 | Intent parse | `IntentParser` | 🛡 | rule-based | LLM-based | ✅ | — |
 | Task queue | `TaskQueue` | 🔧 | FakeQueue | RQ/Redis `[service]` | ✅ | — |
 | Structured store | `FactStore` *(proto later)* | 🛡 | sqlite | DuckDB · Postgres | ✅ concrete / ✗ proto | P2 |
-| Trace sink | `TraceSink` *(new)* | 🛡 | in-proc privacy-safe | OTel (privacy-filtered) | ◐ | P2 |
+| Trace sink | `TraceSink` *(formalized)* | 🛡 | in-proc privacy-safe ✅ | **OTel (privacy-filtered) ✅** | ✅ seam + conformance | P2 seam ✓ · emit fan-out follow-up |
 | Eval | *(golden sets)* | 🛡 | offline golden | RAGAS-compatible metrics | ✅ | P2 |
 
 **Read of the matrix:** the spine (🛡) and the quality stages (⭐) are largely owned and present already. The
@@ -214,7 +226,10 @@ tracked now lives as live contracts / docs, and any remaining slices fold into t
     over `SourceConnector` now landed** (`test_source_connector_provenance.py`, parametrized over registered
     connectors + a lineage-dropping reverse-proof stub); the **`Chunker` provenance pack now landed too**
     (`test_chunker_provenance.py`, parametrized over registered chunkers + a lineage-dropping reverse-proof
-    stub). The `Extractor` provenance pack (over real fixtures) + the privacy-trace pack remain open.
+    stub). The **privacy-trace pack now landed** (`test_trace_sink.py`, parametrized over every registered
+    `TraceSink` — `in_process` + OTel — asserting answer / fact value / chunk text is rejected or scrubbed,
+    with two content-leaking reverse-proof stubs — `_LeakyTraceSink` / `_ValueSmugglingTraceSink` — that must
+    FAIL). The `Extractor` provenance pack (over real fixtures) remains open.
   - ✅ Registry + entry-point discovery so a backend is selectable by config string — config-string ✅
     (`make_vector_store` / `make_persistence_policy`) **and** entry-point auto-discovery ✅
     (`make_vector_store` falls back to the `ragspine.vector_stores` entry-point group, so a third-party
@@ -224,8 +239,11 @@ tracked now lives as live contracts / docs, and any remaining slices fold into t
   the first 2–3 `SourceConnector`s (**filesystem ✅ shipped** → S3 → HTTP/crawl). *(Vector adapters pgvector and Qdrant
   already shipped in P0/P1, and **native ANN/KNN with exact re-rank for all three has since shipped too**; the next
   vector adapter is Milvus — see the live contract [`vector-store.md`](../src/ragspine/retrieval/docs/vector-store.md).)*
-- **P2 — governance & ops depth.** `FactStore` Protocol (DuckDB/Postgres), `TraceSink` → OTel (privacy-gated),
-  incremental sync / deletion-propagation across stores (a 🛡 lineage concern), RAGAS-compatible eval export.
+- **P2 — governance & ops depth.** `FactStore` Protocol (DuckDB/Postgres); **`TraceSink` seam + OTel
+  (privacy-gated) now landed** (`make_trace_sink` / `RAGSPINE_TRACE_SINK` + `OtelTraceSink` behind `[otel]` +
+  the privacy-trace conformance pack — remaining: wiring `emit_trace` to a config-selected sink for live
+  multi-exit fan-out); incremental sync / deletion-propagation across stores (a 🛡 lineage concern),
+  RAGAS-compatible eval export.
 
 Each backend follows the ADR 0005 promotion rule: it earns "core/supported" status only when it has a real,
 CI-tested path; until then it lives as a clearly-labeled experimental adapter.
@@ -275,8 +293,10 @@ CI-tested path; until then it lives as a clearly-labeled experimental adapter.
   lineage-dropping stub fails it.
 - **Conformance: isolation.** Every registered `Retriever`/`Reranker` fed a `RESTRICTED` item returns output
   free of it. A stub that passes it through fails.
-- **Conformance: privacy trace.** Every registered `TraceSink` rejects/scrubs a payload containing answer /
-  fact value / chunk text.
+- **Conformance: privacy trace (✅ landed).** Every registered `TraceSink` rejects/scrubs a payload containing
+  answer / fact value / chunk text — bound in `tests/conformance/test_trace_sink.py`, parametrized over
+  `in_process` + OTel, with two content-leaking reverse-proof stubs (`_LeakyTraceSink` verbatim leak +
+  `_ValueSmuggling` value-under-benign-key) that must FAIL, proving the assertion has teeth.
 - **Conformance: anti-fabrication.** With an adversarial always-fabricating `LLMProvider` and an empty
   structured channel, the orchestrator still answers "not found" (provider-independence regression).
 - **Conformance: determinism.** Each offline default yields byte-identical output across two runs.

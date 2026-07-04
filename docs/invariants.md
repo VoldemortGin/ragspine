@@ -4,7 +4,7 @@ covers:
   - src/ragspine/retrieval/link/
   - src/ragspine/retrieval/rerank/
   - src/ragspine/common/observability/
-verified-against: dcb8fba
+verified-against: d474ea9
 ---
 
 # Invariants (code-enforced)
@@ -165,4 +165,29 @@ protection lives at the retriever's door, not the embedder). The authoritative p
 
 ## Privacy-aware traces
 
-<!-- TODO: common/observability records codes / counts / timings only. -->
+**Guarantees** a trace payload carrying an answer / fact value / chunk text is **rejected (or scrubbed)** —
+observability records only codes / counts / timings, never restricted content. No sink — including OTel — can
+turn the trace channel into a leak surface.
+
+**Enforced** by construction, not by convention. `common/observability` (a package: `trace.py` +
+`sink.py` + `adapters/`) runs every `emit_trace` payload through a corespine `InProcessPrivacyTraceSink`
+first — a forbidden content key (`answer` / `value` / `text` / `content` / `prompt` / `completion` / `chunk` /
+`chunk_text` / `body`, case-insensitive exact key match against `FORBIDDEN_KEYS`) raises `TraceError` **before
+anything is logged**. The default `emit_trace` path is byte-identical to how it has always worked.
+
+**Formalized as a seam (B1).** `common/observability/sink.py` lifts this into a **pluggable, privacy-enforced
+`TraceSink` seam** so observability can fan out to OTel/files *through the privacy conformance test, never
+around it*. It **reuses** corespine's `@runtime_checkable TraceSink` Protocol + `InProcessPrivacyTraceSink`
+default (no duplicate Protocol), adds a `make_trace_sink` / `RAGSPINE_TRACE_SINK` registry with
+`ragspine.trace_sinks` entry-point discovery (five-段式范式同 `make_vector_store`), and a reusable privacy
+gate `enforce_trace_privacy` that **every** sink calls first. The `OtelTraceSink` adapter
+(`observability/adapters/otel.py`, behind `[otel]`, Apache-2.0, lazy-imported) passes the payload through that
+gate before any span attribute is set — so the OTel exit cannot leak content either.
+
+**Frozen by** `tests/conformance/test_trace_sink.py` (the privacy-trace conformance pack): every registered
+`TraceSink` (`in_process` + OTel) must reject/scrub a payload containing answer / fact value / chunk text, and
+two content-leaking reverse-proof stubs — `_LeakyTraceSink` (records the forbidden payload verbatim) and
+`_ValueSmugglingTraceSink` (drops the forbidden key but smuggles the value under a benign key) — fed the same
+decision-core **must FAIL**, proving the assertion has teeth. Plus the pre-existing
+`tests/common/test_observability_resilience.py` (R6–R9: exactly-one trace, no sensitive value leaks,
+forbidden-key rejection, byte-identical default paths).

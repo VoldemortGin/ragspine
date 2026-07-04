@@ -408,3 +408,123 @@ GRAPH_STORE_SUITE: "ConformanceSuite" = ConformanceSuite(
     {name: (lambda n=name: GRAPH_STORE_REGISTRY.make(n)) for name in GRAPH_STORE_REGISTRY.names()},
     GRAPH_STORE_INVARIANTS,
 )
+
+
+# ---------------------------------------------------------------------------
+# 注册表：受 conformance 约束的 TraceSink 实现（B1 TraceSink 缝，🛡）。第三方实现在此追加一行
+# + 在 _build_trace_sink 里补一行（或经 make_trace_sink 的 entry-point 自动发现）即继承整套隐私
+# conformance pack——同 VectorStore / GraphStore 缝的范式。in_process 是 corespine 的进程内隐私
+# 安全默认（构造即拒受限正文）；otel 是 behind [otel] extra 的薄 adapter（OtelTraceSink，扇出前
+# 先过隐私门），由 fixture 的 importorskip 门控（缺 opentelemetry 则该参数 skip，黄不红）。
+# ---------------------------------------------------------------------------
+TRACE_SINK_IMPLS = ("in_process", "otel")
+
+
+def _build_trace_sink(name: str):
+    """名字 -> TraceSink 实例（延迟 import，红色阶段在此抛 ModuleNotFoundError）。"""
+    from ragspine.common.observability.sink import make_trace_sink
+
+    if name == "in_process":
+        sink = make_trace_sink("in_process")
+        assert sink is not None
+        return sink
+    if name == "otel":
+        from ragspine.common.observability.adapters.otel import OtelTraceSink
+
+        return OtelTraceSink()
+    raise KeyError(name)
+
+
+@pytest.fixture(params=list(TRACE_SINK_IMPLS), ids=list(TRACE_SINK_IMPLS))
+def trace_sink(request):
+    """每个注册 TraceSink 各给一个全新实例；每条隐私用例对所有实现各跑一遍。
+
+    otel behind [otel] extra：缺 opentelemetry 时该参数 skip（黄，不红），装了即整套 gate。
+    """
+    if request.param == "otel":
+        pytest.importorskip(
+            "opentelemetry", reason="opentelemetry 未装（pip install rag-spine[otel]）"
+        )
+    return _build_trace_sink(request.param)
+
+
+# ===========================================================================
+# corespine 机制层 conformance 骨架（TraceSink 缝）——与上文 trace_sink fixture-形态参数化
+# 两层互补，领域断言不外迁。范围刻意收敛在【离线零依赖、零服务】的 in_process 隐私默认上
+# （无 importorskip / 服务门，故 corespine 套件每格都能确定性执行）；otel 的可用性门由上文
+# trace_sink fixture 承载，二者职责不重叠（范式同 VECTOR_STORE_SUITE / GRAPH_STORE_SUITE）。
+# ===========================================================================
+def _make_in_process_trace_sink():
+    """构造隐私安全默认 TraceSink（经 ragspine 缝的 make_trace_sink 解析；延迟 import 保惰性红色）。"""
+    from ragspine.common.observability.sink import make_trace_sink
+
+    sink = make_trace_sink("in_process")
+    assert sink is not None
+    return sink
+
+
+TRACE_SINK_REGISTRY: "Registry" = Registry("trace_sink")
+TRACE_SINK_REGISTRY.register("in_process", _make_in_process_trace_sink)
+
+
+def _trace_rejects_forbidden_answer(sink) -> None:
+    """含 answer 正文的载荷必须被拒绝（抛某 CorespineError 子类），绝不静默落库（隐私·机制）。"""
+    from corespine import TraceError
+
+    raised = False
+    try:
+        sink.emit("trace", request_id="r1", answer="机密答案 4500")
+    except TraceError:
+        raised = True
+    assert raised, "含 answer 正文的载荷未被拒绝——隐私 trace 必须拒绝或擦除正文"
+
+
+def _trace_rejects_fact_value(sink) -> None:
+    """含 value 事实数值的载荷必须被拒绝（隐私·机制）。"""
+    from corespine import TraceError
+
+    raised = False
+    try:
+        sink.emit("trace", request_id="r1", value=4500.0)
+    except TraceError:
+        raised = True
+    assert raised, "含 value 事实数值的载荷未被拒绝——隐私 trace 必须拒绝或擦除正文"
+
+
+def _trace_rejects_chunk_text(sink) -> None:
+    """含 chunk_text 正文的载荷必须被拒绝（隐私·机制）。"""
+    from corespine import TraceError
+
+    raised = False
+    try:
+        sink.emit("trace", request_id="r1", chunk_text="整段 chunk 正文")
+    except TraceError:
+        raised = True
+    assert raised, "含 chunk_text 正文的载荷未被拒绝——隐私 trace 必须拒绝或擦除正文"
+
+
+def _trace_records_only_metadata(sink) -> None:
+    """允许的元数据（code/count/timing）emit 不抛，且记录里不含任何受限键（只记元数据·机制）。"""
+    from corespine import FORBIDDEN_KEYS
+
+    sink.emit("trace", request_id="r1", route="structured", n_hits=3, took_ms=12)
+    events = getattr(sink, "events", [])
+    assert events, "允许的元数据 emit 后应有记录"
+    assert all(
+        str(k).strip().lower() not in FORBIDDEN_KEYS for e in events for k in e.fields
+    ), "记录里出现了受限键——只应记 code / 计数 / 耗时 元数据"
+
+
+TRACE_SINK_INVARIANTS: "InvariantPack" = (
+    InvariantPack("trace_sink")
+    .add("rejects_forbidden_answer", _trace_rejects_forbidden_answer)
+    .add("rejects_fact_value", _trace_rejects_fact_value)
+    .add("rejects_chunk_text", _trace_rejects_chunk_text)
+    .add("records_only_metadata", _trace_records_only_metadata)
+)
+
+# 实现 × 不变量 的笛卡尔积套件：corespine 负责「跑全套 + 定位坏格子」。每格新建实例，杜绝串味。
+TRACE_SINK_SUITE: "ConformanceSuite" = ConformanceSuite(
+    {name: (lambda n=name: TRACE_SINK_REGISTRY.make(n)) for name in TRACE_SINK_REGISTRY.names()},
+    TRACE_SINK_INVARIANTS,
+)

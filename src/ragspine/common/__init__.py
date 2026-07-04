@@ -7,7 +7,7 @@ Submodules:
     company_profile.py — 所属公司（home company）身份的配置化载入。
     core.py — 跨切面全局常量（数据根 + 各 sqlite 库默认路径）的单一出处。
     glossary.py — 维度同义词词典与归一化。
-    observability.py — 可观测性原语：request_id 生成 + 结构化 trace 发射。
+    observability/ — 隐私安全可观测性：trace 发射原语 + 可插拔 TraceSink 缝（含 OTel 适配器）。
     sensitivity.py — 叙事入库的确定性敏感度分级策略与纯函数分级器。
 """
 
