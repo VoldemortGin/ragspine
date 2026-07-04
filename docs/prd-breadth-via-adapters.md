@@ -1,6 +1,6 @@
 # PRD — Breadth via Adapters: the extension contract & capability matrix
 
-> **status:** in progress (P0 `VectorStore` seam wired; P1 `SourceConnector` seam shipped; P0 `Extractor` registry + `Chunker` Protocol formalized; P2 `TraceSink` seam formalized + privacy-trace conformance pack landed; P0 pipeline-topology shipped) · **created:** 2026-06-17 · **methodology:** TDD (conformance tests first)
+> **status:** in progress (P0 `VectorStore` seam wired; P1 `SourceConnector` seam shipped; P0 `Extractor` registry + `Chunker` Protocol formalized, with the Chunker **and** Extractor provenance conformance packs landed; P2 `TraceSink` seam formalized + privacy-trace conformance pack landed; P0 pipeline-topology shipped) · **created:** 2026-06-17 · **methodology:** TDD (conformance tests first)
 > Living backlog — the seams/adapters tracked here land incrementally; it carries no `covers:` frontmatter
 > (each seam's shipped contract doc lives under `src/ragspine/<domain>/docs/*.md`).
 > Realizes [ADR 0003](adr/0003-audience-oss-library.md) (general-purpose OSS library), operating within
@@ -245,7 +245,15 @@ tracked now lives as live contracts / docs, and any remaining slices fold into t
     stub). The **privacy-trace pack now landed** (`test_trace_sink.py`, parametrized over every registered
     `TraceSink` — `in_process` + OTel — asserting answer / fact value / chunk text is rejected or scrubbed,
     with two content-leaking reverse-proof stubs — `_LeakyTraceSink` / `_ValueSmugglingTraceSink` — that must
-    FAIL). The `Extractor` provenance pack (over real fixtures) remains open.
+    FAIL). The **`Extractor` provenance pack (over real fixtures) now landed too**
+    (`test_extractor_provenance.py`, parametrized over the built-in extractors — xlsx/pptx via python-pptx,
+    pdf via the declared-default pdfspine grid extractor, docx via docspine, pptx-richer-merges via pptspine
+    — each run over a real/synthetic minimal fixture, asserting every emitted `StyledGrid` carries a non-null
+    `source_doc_id` + `sheet`/`cell_ref` locator, with two lineage-dropping reverse-proof stubs —
+    `_LineageDroppingExtractor` (drops the root) / `_LocatorDroppingExtractor` (drops the locator) — that must
+    FAIL; docling's `.pdf` registry dispatch stays on ci.sh's isolated docling lane, out of this
+    deterministic pack). **All three cross-seam provenance packs (SourceConnector / Extractor / Chunker) are
+    now landed.**
   - ✅ Registry + entry-point discovery so a backend is selectable by config string — config-string ✅
     (`make_vector_store` / `make_persistence_policy`) **and** entry-point auto-discovery ✅
     (`make_vector_store` falls back to the `ragspine.vector_stores` entry-point group, so a third-party
@@ -308,9 +316,13 @@ CI-tested path; until then it lives as a clearly-labeled experimental adapter.
 
 ## Testing decisions (TDD — write these red first)
 
-- **Conformance: provenance.** A generic test runs every registered `SourceConnector`/`Extractor`/`Chunker`
-  over a fixture and asserts every emitted unit has a non-null `source_doc_id` + locator. A deliberately
-  lineage-dropping stub fails it.
+- **Conformance: provenance (✅ landed — all three seams).** A generic test runs every registered
+  `SourceConnector`/`Extractor`/`Chunker` over a fixture and asserts every emitted unit has a non-null
+  `source_doc_id` + locator. A deliberately lineage-dropping stub fails it. Bound in
+  `tests/conformance/test_source_connector_provenance.py` (filesystem connector + `_LineageDroppingConnector`),
+  `test_extractor_provenance.py` (xlsx/pptx/pdf/docx built-ins over real/synthetic fixtures +
+  `_LineageDroppingExtractor` / `_LocatorDroppingExtractor`), and `test_chunker_provenance.py` (every
+  registered chunker + `_LineageDroppingChunker`).
 - **Conformance: isolation.** Every registered `Retriever`/`Reranker` fed a `RESTRICTED` item returns output
   free of it. A stub that passes it through fails.
 - **Conformance: privacy trace (✅ landed).** Every registered `TraceSink` rejects/scrubs a payload containing

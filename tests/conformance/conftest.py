@@ -639,3 +639,77 @@ FACT_STORE_SUITE: "ConformanceSuite" = ConformanceSuite(
     {name: (lambda n=name: FACT_STORE_REGISTRY.make(n)) for name in FACT_STORE_REGISTRY.names()},
     FACT_STORE_INVARIANTS,
 )
+
+
+# ---------------------------------------------------------------------------
+# 注册表：受 conformance 约束的 Extractor 实现（B3 Extractor provenance pack，🛡 血缘经抽取存活）。
+# 第三方实现在此追加一行 + 在 extractor_case 夹具里补一支（或经 register_extractor 的 mime 分发自动
+# 继承）即继承整套 provenance pack——同 SourceConnector / Chunker / FactStore 缝的范式：一个
+# @runtime_checkable Extractor Protocol -> 一套共享 provenance 测试。每个内置抽取器都经其【真实/合成
+# 最小 fixture】跑一遍，断言每张 emitted StyledGrid 带非空 source_doc_id（血缘根）+ sheet/cell_ref
+# locator（citation 回指，下游 source_locator='sheet=…!R{r}C{c}' 的构件），lineage 经抽取存活；在
+# 抽取处丢血缘的实现直接 CI 红，而非生产事故。
+#
+# 覆盖内置抽取器（均 CI 默认可跑、确定性；可选 extra 缺失时 importorskip 优雅跳过，黄不红——范式同
+# vector_store / trace_sink 夹具）：
+#   xlsx_styled —— openpyxl（base dep），合成 excel_styled_fixture.xlsx（经 registry XLSX_MIME 分发）。
+#   pptx_styled —— python-pptx（base dep），合成 styled_deck.pptx（经 registry PPTX_MIME，默认 .pptx 路）。
+#   pdf_spine   —— pdfspine（[pdf]，纯 Rust 确定性，CLAUDE.md 声明的 .pdf 默认 GridExtractor），合成
+#                  digital.pdf。registry 的 .pdf 分发到可选 ML 回退 docling/pdf_digital——重依赖且 3rd-party
+#                  非确定性（ci.sh 单列 [6/8] 隔离进程跑），故本【确定性】pack 走声明默认的 pdfspine 路，
+#                  docling 的 mime 分发本身由 test_extractor_registry.py 覆盖（不实际跑抽取）。
+#   docspine    —— docspine（[doc]，纯 Rust .docx），make_docx 合成最小 .docx（经 registry DOCX_MIME 分发）。
+#   pptspine    —— pptspine（[ppt]，纯 Rust .pptx 富表合并 opt-in 备选），make_pptx 合成最小 .pptx
+#                  （经 registry PPTX_PPTSPINE_SELECTOR 备选选择项分发；默认 .pptx 仍 python-pptx，不受影响）。
+# ---------------------------------------------------------------------------
+EXTRACTOR_IMPLS = ("xlsx_styled", "pptx_styled", "pdf_spine", "docspine", "pptspine")
+
+
+@pytest.fixture(params=list(EXTRACTOR_IMPLS), ids=list(EXTRACTOR_IMPLS))
+def extractor_case(
+    request,
+    tmp_path,
+    make_docx,
+    make_pptx,
+    excel_fixture_path,
+    styled_deck_path,
+    digital_pdf_path,
+):
+    """每个注册 Extractor 各给 (extractor, fixture_path)；每条 provenance 用例对所有实现各跑一遍。
+
+    fixture 用真实/合成最小输入（不落二进制 fixture、不引重依赖）；可选 extra 缺失时 importorskip
+    优雅跳过（黄不红）。返回的 extractor 都实现 @runtime_checkable Extractor.extract（结构匹配），
+    path 是该格式的最小非空表格 fixture（抽出的 StyledGrid 至少一张、每张至少一格）。
+    """
+    name = request.param
+    from ragspine.extraction.registry import (
+        DOCX_MIME,
+        PPTX_MIME,
+        PPTX_PPTSPINE_SELECTOR,
+        XLSX_MIME,
+        _FunctionExtractor,
+        get_extractor,
+    )
+
+    # 合成最小表格：一行表头 + 一行数据（足以产出带 R{r}C{c} locator 的非空网格）。
+    _table = [["Metric", "FY2024"], ["REVENUE", "4500"]]
+
+    if name == "xlsx_styled":
+        return get_extractor(XLSX_MIME), excel_fixture_path
+    if name == "pptx_styled":
+        return get_extractor(PPTX_MIME), styled_deck_path
+    if name == "pdf_spine":
+        pytest.importorskip("pdfspine", reason="pdfspine 未装（pip install rag-spine[pdf]）")
+        # registry 的 .pdf 走 docling；本 pack 走 CLAUDE.md 声明的默认 pdfspine 路（确定性、纯 Rust）。
+        from ragspine.extraction.extractors.pdf_spine_extractor import extract_grids
+
+        return _FunctionExtractor(extract_grids, name="pdf_spine"), digital_pdf_path
+    if name == "docspine":
+        pytest.importorskip("docspine", reason="docspine 未装（pip install rag-spine[doc]）")
+        path = make_docx(tmp_path / "conformance.docx", [("table", _table)])
+        return get_extractor(DOCX_MIME), path
+    if name == "pptspine":
+        pytest.importorskip("pptspine", reason="pptspine 未装（pip install rag-spine[ppt]）")
+        path = make_pptx(tmp_path / "conformance.pptx", [[("table", _table)]])
+        return get_extractor(PPTX_PPTSPINE_SELECTOR), path
+    raise KeyError(name)
