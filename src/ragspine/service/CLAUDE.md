@@ -50,7 +50,41 @@ is unchanged (normalized via `error_to_dict`).
 
 ## Read before editing
 
-<!-- TODO -->
+- **HTTP is a boundary adapter — don't re-home business logic here.** `api/app.py` (app
+  factory) wires `config`/`provider`/`queue`/`faq_cache` onto `app.state`; `api/dependencies.py`
+  reads them back, all overridable via `app.dependency_overrides` in tests. Route handlers
+  (`api/routes.py`) adapt at the edge and call into `agent`/`retrieval` — never read env, build a
+  provider, or reimplement `answer_question` inside a handler. Pull collaborators through the
+  `get_*` deps, not from module globals.
+- **Stores & providers are per-request / per-job, never global singletons.**
+  `config.open_fact_store` / `open_narrative_retriever` are context managers that open **and
+  close** within one request; `tasks/jobs.py` opens *worker-owned* stores from the payload's paths
+  and closes them in `finally`. Don't cache a sqlite connection across requests or reuse the
+  caller's connection inside a worker.
+- **The opt-in agent seams default to `"none"` and the no-injection path stays byte-identical.**
+  `open_narrative_retriever` composes them in a fixed order — `query_transform` (W9) wraps the base
+  retriever **upstream of** the `corrective` (W6b) wrap; `query_decompose` (W6a) / `adaptive` (W9)
+  pick the decomposer in `routes.py`. Every knob defaults so the agent/retriever path is bit-stable
+  (see `agent/` + `retrieval/` CLAUDE.md for the byte-identity contract). Adding or reordering a
+  seam must not perturb the default path.
+- **`provider` is server-decided; a client can never inject it.** `config.provider_config_dict`
+  returns only serializable provider *config* (no instance, no `provider_expr`) — the dify isolated
+  process / RQ worker rebuild it via `build_provider`. Never add a provider instance or
+  `provider_expr` to a serialized payload (Dify trust boundary, above).
+- **Ingest-path validation is defense-in-depth — re-run it in the worker.**
+  `config.validate_ingest_path` (allowed-upload-root + suffix allowlist) runs at enqueue **and
+  again** in `tasks/jobs.py` before landing; the worker never trusts the enqueuer. `PathNotAllowedError`
+  / `JobError` inherit `CorespineError` with stable codes — keep the external
+  `{type,message,stage,retryable}` error shape (normalized via `error_to_dict`) unchanged.
+- **Legacy env aliases are load-bearing.** `ServiceConfig.from_env` rewrites 3 irregular legacy
+  keys (`RAGSPINE_PROVIDER` / `_COMPANY_PROFILE` / `_FAQ_SOURCE`) to canonical field names and falls
+  back `db_path` → `data/fact_metric.db`; `corespine.load_from_env` derives the rest by
+  `PREFIX_FIELDNAME`. Renaming a field silently breaks env compat — add fields, don't rename.
+- **`FakeQueue` and `RQQueue` must stay behaviour-parallel.** Both honour the same `enqueue`
+  signature (RQ-only kwargs `timeout`/`max_retries`/`result_ttl`/`failure_ttl`); `FakeQueue` runs the
+  job inline and is idempotent on an explicit `job_id`; `rq`/`redis` are lazy-imported so the module
+  imports (and offline tests run) without them. `JobStatus` is re-exported from `corespine` — don't
+  fork its shape.
 
 ## Deep dives
 
