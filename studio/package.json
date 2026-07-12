@@ -1,0 +1,32 @@
+{
+  "name": "ragspine-studio",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@dagrejs/dagre": "^3.0.0",
+    "@xyflow/react": "^12.11.2",
+    "js-yaml": "^5.2.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "zustand": "^5.0.14"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.2",
+    "@types/node": "^26.1.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "tailwindcss": "^4.3.2",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.3",
+    "vitest": "^4.1.10"
+  }
+}
