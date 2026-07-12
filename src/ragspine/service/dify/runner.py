@@ -23,6 +23,7 @@ from __future__ import annotations
 import builtins
 import sys
 import tempfile
+import time
 import types
 from dataclasses import fields, is_dataclass
 from pathlib import Path
@@ -33,6 +34,7 @@ from corespine import CorespineError, LLMProvider
 
 from ragspine.dify.codegen.emitter import GeneratedCode
 from ragspine.service.dify.safety import ALLOWED_IMPORT_ROOTS, assert_runnable
+from ragspine.service.dify.tracing import sanitize_node_traces
 
 # 默认执行超时（秒）。ServiceConfig.dify_run_timeout_s 可覆盖。
 DEFAULT_TIMEOUT_S: float = 10.0
@@ -131,12 +133,35 @@ def _exec_in_sandbox(
     try:
         compiled = compile(code.source, "<dify-workflow>", "exec")
         exec(compiled, module.__dict__)  # noqa: S102 — 受限 builtins + L0 闸 + 隔离
+        # 生成代码声明了 trace 计时钟槽位 → 注入真实时钟（runner 是受信代码；生成代码
+        # 自身拿不到 time——不在 import 白名单，独立运行时计时回落 0.0）。
+        if "_TRACE_CLOCK" in module.__dict__:
+            module.__dict__["_TRACE_CLOCK"] = time.perf_counter
         run_workflow = module.__dict__.get("run_workflow")
         inputs_cls = module.__dict__.get("Inputs")
         if not callable(run_workflow) or inputs_cls is None:
             raise DifyRunError("生成模块缺少 run_workflow / Inputs 入口")
-        result = run_workflow(_make_inputs(inputs_cls, inputs), provider=provider)
-        return cast("dict[str, Any]", result)
+        try:
+            result = run_workflow(_make_inputs(inputs_cls, inputs), provider=provider)
+        except BaseException as exc:
+            # 失败也带上已执行节点的 trace（净化后附着再重抛；无 trace 则原样抛，
+            # 由 run_generated 的既有整形逻辑负责——绝不重复包两层）。
+            traces = sanitize_node_traces(module.__dict__.get("_NODE_TRACES"))
+            if traces:
+                if isinstance(exc, CorespineError):
+                    exc.context.setdefault("node_traces", traces)
+                    raise
+                raise DifyRunError(
+                    f"工作流执行失败：{type(exc).__name__}: {exc}",
+                    node_traces=traces,
+                ) from exc
+            raise
+        result_dict = cast("dict[str, Any]", result)
+        if "_NODE_TRACES" in module.__dict__:
+            traces = sanitize_node_traces(module.__dict__.get("_NODE_TRACES"))
+            if traces is not None:
+                result_dict["__node_traces__"] = traces
+        return result_dict
     finally:
         if saved is not None:
             sys.modules[module_name] = saved
@@ -277,7 +302,12 @@ def _run_subprocess(
 
     if not parsed.get("ok"):
         err = parsed.get("error", {})
+        extra: dict[str, Any] = {}
+        if err.get("node_traces"):
+            # 子进程已净化并随 error JSON 过界的节点 trace，原样附着到 context。
+            extra["node_traces"] = err["node_traces"]
         raise DifyRunError(
-            f"工作流子进程执行失败：{err.get('type', '?')}: {err.get('message', '')}"
+            f"工作流子进程执行失败：{err.get('type', '?')}: {err.get('message', '')}",
+            **extra,
         )
     return cast("dict[str, Any]", parsed.get("result", {}))

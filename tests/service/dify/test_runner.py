@@ -141,3 +141,82 @@ def test_runtime_error_wrapped():
         run_generated(GeneratedCode(source=src), {}, MockProvider())
     assert exc.value.code == "dify.run_error"
     assert "boom" in str(exc.value)
+
+
+# ---------------------------------------------------------------------------
+# node trace 采集：emit_node_traces=True 编译的代码 -> __node_traces__ / context 附着
+# ---------------------------------------------------------------------------
+FAIL_TRACE_YAML = """
+app:
+  mode: workflow
+  name: fail-demo
+kind: app
+version: "0.1.5"
+workflow:
+  graph:
+    nodes:
+      - id: start_1
+        data:
+          type: start
+          title: 开始
+          variables:
+            - {variable: question, label: 问题, type: text-input, required: true}
+      - id: code_1
+        data:
+          type: code
+          title: 会炸的代码
+          code: "def main(x):\\n    raise ValueError('boom')\\n"
+          code_language: python3
+          variables:
+            - {variable: x, value_selector: [start_1, question]}
+          outputs:
+            out: {type: string}
+      - id: end_1
+        data:
+          type: end
+          title: 结束
+          outputs:
+            - {variable: out, value_selector: [code_1, out]}
+    edges:
+      - {source: start_1, target: code_1, sourceHandle: source}
+      - {source: code_1, target: end_1, sourceHandle: source}
+"""
+
+
+def _traced_code(name: str) -> GeneratedCode:
+    return compile_dify_yaml(
+        (FIXTURES / name).read_text(encoding="utf-8"), emit_node_traces=True
+    ).code
+
+
+def test_run_generated_returns_sanitized_node_traces():
+    out = run_generated(_traced_code("seq.yml"), {"question": "hello"}, MockProvider())
+    assert "result" in out
+    traces = out["__node_traces__"]
+    assert isinstance(traces, list) and traces
+    assert [t["index"] for t in traces] == list(range(len(traces)))
+    for t in traces:
+        assert t["status"] == "succeeded"
+        assert isinstance(t["elapsed_ms"], float)
+        assert t["elapsed_ms"] >= 0.0
+    # runner 注入了 _TRACE_CLOCK（time.perf_counter）：llm 节点计时应为正。
+    llm = next(t for t in traces if t["node_id"] == "llm_1")
+    assert llm["elapsed_ms"] > 0.0
+
+
+def test_run_generated_failure_attaches_traces_to_context():
+    code = compile_dify_yaml(FAIL_TRACE_YAML, emit_node_traces=True).code
+    with pytest.raises(DifyRunError) as exc:
+        run_generated(code, {"question": "q"}, MockProvider())
+    assert exc.value.code == "dify.run_error"
+    assert "boom" in str(exc.value)
+    traces = exc.value.context["node_traces"]
+    assert isinstance(traces, list) and traces
+    failed = [t for t in traces if t["status"] == "failed"]
+    assert failed and failed[0]["node_id"] == "code_1"
+    assert "ValueError" in failed[0]["error"]
+
+
+def test_run_generated_without_trace_flag_is_backward_compatible():
+    out = run_generated(_code("seq.yml"), {"question": "hello"}, MockProvider())
+    assert "__node_traces__" not in out

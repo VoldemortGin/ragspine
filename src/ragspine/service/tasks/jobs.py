@@ -223,4 +223,5 @@ def run_dify_workflow_job(payload: dict[str, Any]) -> dict[str, Any]:
         )
     except (DifyRunError, DifyTimeoutError) as exc:
         raise JobError(str(exc), stage="execution", retryable=False) from exc
-    return {"result": result, "warnings": list(code.warnings)}
+    node_traces = result.pop("__node_traces__", None)
+    return {"result": result, "warnings": list(code.warnings), "node_traces": node_traces}

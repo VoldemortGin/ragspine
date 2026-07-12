@@ -55,6 +55,7 @@ def compile_dify_yaml(
     emit_trace: bool = False,
     analyze: bool = True,
     fold_answer_question: bool = True,
+    emit_node_traces: bool = False,
 ) -> CompileResult:
     """把一个 Dify 工作流 YAML 编译成纯 Python（+ 可选静态优化建议）。
 
@@ -68,6 +69,9 @@ def compile_dify_yaml(
         fold_answer_question: 是否把「问答骨架」（start→knowledge-retrieval→llm(context 指向该检索)
             →answer/end）折叠成一次 ragspine.answer_question（自带反幻觉/provenance）。默认 True；
             仅对 target='ragspine' 生效。
+        emit_node_traces: 是否在生成代码里注入节点级执行 trace（模块级 _NODE_TRACES，供
+            service runner 采集）。默认 False（生成源码与不带本参数字节相同）；仅对
+            target='ragspine' 生效。与 emit_trace（corespine TraceSink 隐私钩子预留）无关。
 
     返回 CompileResult(code, suggestions, ir)。任何阶段失败抛 DifyCompileError 系。
     """
@@ -84,7 +88,8 @@ def compile_dify_yaml(
         code = generate_spineagent_code(ir, provider_expr=provider_expr)
     else:
         code = generate_code(
-            ir, provider_expr=provider_expr, fold_answer_question=fold_answer_question
+            ir, provider_expr=provider_expr, fold_answer_question=fold_answer_question,
+            emit_node_traces=emit_node_traces,
         )
     suggestions = tuple(analyze_ir(ir)) if analyze else ()
     return CompileResult(code=code, suggestions=suggestions, ir=ir)

@@ -21,8 +21,11 @@ FIXTURES = ROOT_DIR / "tests" / "dify" / "fixtures"
 SCRIPT = ROOT_DIR / "scripts" / "run_dify_workflow.py"
 
 
-def _spec(name: str, **overrides) -> dict:
-    code = compile_dify_yaml((FIXTURES / name).read_text(encoding="utf-8")).code
+def _spec(name: str, *, emit_node_traces: bool = False, **overrides) -> dict:
+    code = compile_dify_yaml(
+        (FIXTURES / name).read_text(encoding="utf-8"),
+        emit_node_traces=emit_node_traces,
+    ).code
     spec = {
         "source": code.source,
         "entrypoint": code.entrypoint,
@@ -79,6 +82,58 @@ def test_subprocess_script_runtime_error_is_structured():
     })
     assert out["ok"] is False
     assert "boom" in out["error"]["message"]
+
+
+# ---------------------------------------------------------------------------
+# node traces 过 L2 边界：成功随 result JSON 过界；失败附在 error JSON
+# ---------------------------------------------------------------------------
+def test_subprocess_script_result_carries_node_traces():
+    out = _run_script(_spec("seq.yml", emit_node_traces=True))
+    assert out["ok"] is True
+    traces = out["result"]["__node_traces__"]
+    assert isinstance(traces, list) and traces
+    assert traces[0]["node_id"] == "start_1"
+
+
+def test_subprocess_script_failure_carries_node_traces():
+    fail_yaml = (
+        "app:\n  mode: workflow\n  name: fail\nkind: app\nversion: \"0.1.5\"\n"
+        "workflow:\n  graph:\n    nodes:\n"
+        "      - id: start_1\n"
+        "        data:\n"
+        "          type: start\n"
+        "          title: s\n"
+        "          variables:\n"
+        "            - {variable: question, label: q, type: text-input}\n"
+        "      - id: code_1\n"
+        "        data:\n"
+        "          type: code\n"
+        "          title: c\n"
+        "          code: \"def main(x):\\n    raise ValueError('boom')\\n\"\n"
+        "          variables:\n"
+        "            - {variable: x, value_selector: [start_1, question]}\n"
+        "          outputs:\n"
+        "            out: {type: string}\n"
+        "      - id: end_1\n"
+        "        data:\n"
+        "          type: end\n"
+        "          title: e\n"
+        "          outputs:\n"
+        "            - {variable: out, value_selector: [code_1, out]}\n"
+        "    edges:\n"
+        "      - {source: start_1, target: code_1, sourceHandle: source}\n"
+        "      - {source: code_1, target: end_1, sourceHandle: source}\n"
+    )
+    code = compile_dify_yaml(fail_yaml, emit_node_traces=True).code
+    out = _run_script({
+        "source": code.source, "entrypoint": code.entrypoint,
+        "imports": list(code.imports), "warnings": list(code.warnings),
+        "inputs": {"question": "q"}, "timeout_s": 5.0, "provider_type": "mock",
+    })
+    assert out["ok"] is False
+    traces = out["error"]["node_traces"]
+    assert isinstance(traces, list) and traces
+    assert any(t["status"] == "failed" and t["node_id"] == "code_1" for t in traces)
 
 
 # ---------------------------------------------------------------------------

@@ -24,6 +24,7 @@ from ragspine.dify.ir.model import (
     StartNode,
     ToolNode,
     UnsupportedNode,
+    VarRef,
     WorkflowIR,
 )
 
@@ -45,14 +46,23 @@ def generate_code(
     *,
     provider_expr: str = "MockProvider()",
     fold_answer_question: bool = True,
+    emit_node_traces: bool = False,
 ) -> GeneratedCode:
     """WorkflowIR → GeneratedCode。provider_expr 为 run_workflow 内 provider 默认值表达式。
 
     fold_answer_question（默认 True）：识别「问答骨架」（start→knowledge-retrieval→llm(context
     指向该检索)→answer/end）并整体折叠成一次 ragspine.answer_question（自带反幻觉/provenance，
     比手拼 retrieve+chat 更短更对）。置 False 关闭折叠，逐节点生成。
+
+    emit_node_traces（默认 False）：在生成代码里注入节点级执行 trace——模块级 _NODE_TRACES
+    列表逐节点记 {node_id/title/node_type/status/elapsed_ms/inputs/outputs/error}，返回前把
+    未执行节点 sweep 成 skipped。计时钟 _TRACE_CLOCK 由 runner 注入（独立运行时计时为 0.0）。
+    默认关时生成源码与不带本参数完全相同（字节级）。
     """
-    builder = _Emitter(ir, provider_expr=provider_expr, fold_answer_question=fold_answer_question)
+    builder = _Emitter(
+        ir, provider_expr=provider_expr, fold_answer_question=fold_answer_question,
+        emit_node_traces=emit_node_traces,
+    )
     return builder.build()
 
 
@@ -60,10 +70,16 @@ class _Emitter:
     """一次编译的可变状态（名表 / 警告 / 钩子函数 / import / 折叠计划）。"""
 
     def __init__(
-        self, ir: WorkflowIR, *, provider_expr: str, fold_answer_question: bool = True
+        self,
+        ir: WorkflowIR,
+        *,
+        provider_expr: str,
+        fold_answer_question: bool = True,
+        emit_node_traces: bool = False,
     ) -> None:
         self.ir = ir
         self.provider_expr = provider_expr
+        self.emit_node_traces = emit_node_traces
         self.names = NameTable(n.id for n in ir.graph.nodes)
         self.warnings: list[str] = []
         self.imports: set[str] = set()
@@ -79,10 +95,12 @@ class _Emitter:
         body = self._emit_body()
         hooks = self._emit_hooks()
         constants = self._emit_module_constants()
+        trace_block = self._emit_trace_module_block()
         inputs_cls = self._emit_inputs_class()
         prelude = self._emit_prelude()
         source = "\n".join(
-            [*prelude, "", *constants, *inputs_cls, "", *hooks, *self._emit_run_workflow(body)]
+            [*prelude, "", *constants, *trace_block, *inputs_cls, "", *hooks,
+             *self._emit_run_workflow(body)]
         )
         source = source.rstrip("\n") + "\n"
         return GeneratedCode(
@@ -120,6 +138,109 @@ class _Emitter:
         extra_block = [*extra, ""] if extra else []
         return [*_PRELUDE_HEAD, *extra_block, *_PRELUDE_HELPERS]
 
+    # -- 节点级 execution trace（emit_node_traces，默认关） -------------------
+
+    def _emit_trace_module_block(self) -> list[str]:
+        """trace 的模块级设施：记录列表 / 可注入计时钟 / 全节点表 / _trace_now。flag 关 → []。
+
+        _TRACE_NODES 收外层 topo_order 全部节点（含被折叠的 kr/llm 与被 if-else gate 的节点；
+        iteration 子图内部节点本就不在外层 topo_order，不含），供 sweep 判定 skipped。
+        """
+        if not self.emit_node_traces:
+            return []
+        lines = [
+            "# 节点级执行 trace：runner 注入 _TRACE_CLOCK（time.perf_counter）并读取 _NODE_TRACES；",
+            "# 独立运行（不经 runner）时 _TRACE_CLOCK 为 None → 计时一律 0.0。",
+            "_NODE_TRACES: list = []",
+            "_TRACE_CLOCK: Any = None",
+            "_TRACE_NODES = (",
+        ]
+        for nid in self.ir.topo_order:
+            node = self.ir.node(nid)
+            lines.append(f"    ({nid!r}, {node.title!r}, {node.kind!r}),")
+        lines += [
+            ")",
+            "",
+            "def _trace_now() -> float:",
+            "    return _TRACE_CLOCK() if _TRACE_CLOCK is not None else 0.0",
+            "",
+        ]
+        return lines
+
+    def _trace_inputs_expr(self, node: IRNode) -> str:
+        """节点输入快照表达式：dep_refs 去重 → {'src.field': _var(...)} dict；无依赖 → None。"""
+        refs: list[VarRef] = []
+        seen: set[tuple[str, str]] = set()
+        for ref in node.dep_refs():
+            key = (ref.node_id, ref.field)
+            if key not in seen:
+                seen.add(key)
+                refs.append(ref)
+        if not refs:
+            return "None"
+        items = ", ".join(
+            f"{r.node_id + '.' + r.field!r}: _var({r.node_id!r}, {r.field!r})"
+            for r in refs
+        )
+        return "{" + items + "}"
+
+    def _emit_traced(self, node: IRNode) -> list[str]:
+        """把单节点 body 包成 trace 单元（try/except + _trace_done）。flag 关 / body 空则原样。
+
+        折叠单元（folds_by_llm 命中）发两条记录：先 kr 后 llm，共用同一 _trace_t0。
+        body 无可执行语句（纯注释）时不 try 包裹（空 try 块非法），直接顺发成功记录。
+        """
+        body = self._emit_one(node)
+        if not self.emit_node_traces or not body:
+            return body
+        plan = self.folds_by_llm.get(node.id)
+        # (node_id, title, kind, inputs 变量名) —— 折叠单元两条，其余一条。
+        records: list[tuple[str, str, str, str]]
+        lines = ["_trace_t0 = _trace_now()"]
+        if plan is not None:
+            kr = self.ir.node(plan.kr_id)
+            lines.append(f"_trace_in_kr = {self._trace_inputs_expr(kr)}")
+            lines.append(f"_trace_in = {self._trace_inputs_expr(node)}")
+            records = [
+                (kr.id, kr.title, kr.kind, "_trace_in_kr"),
+                (node.id, node.title, node.kind, "_trace_in"),
+            ]
+        else:
+            lines.append(f"_trace_in = {self._trace_inputs_expr(node)}")
+            records = [(node.id, node.title, node.kind, "_trace_in")]
+        has_stmt = any(
+            ln.strip() and not ln.strip().startswith("#") for ln in body
+        )
+        if not has_stmt:
+            lines.extend(body)
+            for nid, title, kind, in_var in records:
+                lines.append(
+                    f"_trace_done({nid!r}, {title!r}, {kind!r}, _trace_t0, {in_var})"
+                )
+            return lines
+        lines.append("try:")
+        lines.extend(f"{INDENT}{ln}" if ln else "" for ln in body)
+        lines.append("except BaseException as _trace_exc:")
+        for nid, title, kind, in_var in records:
+            lines.append(
+                f"{INDENT}_trace_done({nid!r}, {title!r}, {kind!r}, "
+                f"_trace_t0, {in_var}, _trace_exc)"
+            )
+        lines.append(f"{INDENT}raise")
+        for nid, title, kind, in_var in records:
+            lines.append(
+                f"_trace_done({nid!r}, {title!r}, {kind!r}, _trace_t0, {in_var})"
+            )
+        return lines
+
+    def _emit_ifelse_trace(self, node: IfElseNode) -> list[str]:
+        """if-else 节点自身的独立 trace 记录（分支判定本身近零耗时，elapsed≈0）。"""
+        return [
+            f"_trace_in = {self._trace_inputs_expr(node)}",
+            f"_trace_done({node.id!r}, {node.title!r}, {node.kind!r}, "
+            "_trace_now(), _trace_in)",
+        ]
+
     def _emit_inputs_class(self) -> list[str]:
         """从 start 节点变量生成 Inputs dataclass（全可选、默认 None）。"""
         start = next(
@@ -144,14 +265,46 @@ class _Emitter:
             f"    provider = provider if provider is not None else {self.provider_expr}",
             "    _ctx: dict[tuple[str, str], Any] = {}",
             "    _result: dict[str, Any] = {}",
+        ]
+        if self.emit_node_traces:
+            head.append("    _NODE_TRACES.clear()")
+        head += [
             "",
             "    def _var(node: str, field: str) -> Any:",
             '        """取某节点输出字段（闭合 _ctx）；缺失返回空串，不因取值缺失整体崩。"""',
             "        return _ctx.get((node, field), '')",
             "",
         ]
+        if self.emit_node_traces:
+            head += [
+                "    def _trace_done(node_id: str, title: str, node_type: str,",
+                "                    t0: float, inputs: Any, exc: Any = None) -> None:",
+                '        """记一条节点执行 trace：输出快照扫 _ctx；exc 非 None 即 failed。"""',
+                "        _outs = {f: v for (n, f), v in _ctx.items() if n == node_id} or None",
+                "        _NODE_TRACES.append({",
+                "            'node_id': node_id, 'title': title, 'node_type': node_type,",
+                "            'status': 'failed' if exc is not None else 'succeeded',",
+                "            'elapsed_ms': (_trace_now() - t0) * 1000.0,",
+                "            'inputs': inputs, 'outputs': None if exc is not None else _outs,",
+                "            'error': f'{type(exc).__name__}: {exc}' if exc is not None else None,",
+                "        })",
+                "",
+            ]
         indented = [f"{INDENT}{ln}" if ln else "" for ln in body]
-        tail = [f"{INDENT}return _result"]
+        tail: list[str] = []
+        if self.emit_node_traces:
+            tail += [
+                f"{INDENT}# sweep：外层节点若无记录（未走到的分支等）→ skipped（排在最后）。",
+                f"{INDENT}_traced = {{t['node_id'] for t in _NODE_TRACES}}",
+                f"{INDENT}for _t_nid, _t_title, _t_kind in _TRACE_NODES:",
+                f"{INDENT}    if _t_nid not in _traced:",
+                f"{INDENT}        _NODE_TRACES.append({{",
+                f"{INDENT}            'node_id': _t_nid, 'title': _t_title, 'node_type': _t_kind,",
+                f"{INDENT}            'status': 'skipped', 'elapsed_ms': 0.0,",
+                f"{INDENT}            'inputs': None, 'outputs': None, 'error': None,",
+                f"{INDENT}        }})",
+            ]
+        tail.append(f"{INDENT}return _result")
         return [*head, *indented, *tail]
 
     # -- 控制流展平 ---------------------------------------------------------
@@ -179,9 +332,11 @@ class _Emitter:
                 continue
             node = self.ir.node(node_id)
             if isinstance(node, IfElseNode):
+                if self.emit_node_traces:
+                    lines.extend(self._emit_ifelse_trace(node))
                 lines.extend(self._emit_ifelse_region(node, gated, emitted))
             else:
-                lines.extend(self._emit_one(node))
+                lines.extend(self._emit_traced(node))
             emitted.add(node_id)
         return lines
 
@@ -228,7 +383,7 @@ class _Emitter:
             task = f"_task_{var}"
             task_names.append(task)
             lines.append(f"def {task}() -> None:")
-            body = self._emit_one(self.ir.node(nid))
+            body = self._emit_traced(self.ir.node(nid))
             lines.extend(f"{INDENT}{ln}" if ln else "" for ln in body)
         lines.append(f"with ThreadPoolExecutor(max_workers={len(group)}) as _ex:")
         lines.append(f"    _futs = [_ex.submit(_t) for _t in ({', '.join(task_names)},)]")
@@ -372,7 +527,10 @@ class _Emitter:
         for nid in member_ids:
             if nid in emitted:
                 continue
-            block.extend(f"{INDENT}{ln}" if ln else "" for ln in self._emit_one(self.ir.node(nid)))
+            block.extend(
+                f"{INDENT}{ln}" if ln else ""
+                for ln in self._emit_traced(self.ir.node(nid))
+            )
             emitted.add(nid)
         return block
 

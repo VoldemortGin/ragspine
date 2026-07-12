@@ -96,10 +96,15 @@ def main() -> int:
         normalized = error_to_dict(exc)
         # 优先回稳定 code（如 dify.unsafe / dify.timeout），与 HTTP 层错误整形口径一致；
         # 非 CorespineError 无 code -> 回退类名。
-        sys.stdout.write(json.dumps({"ok": False, "error": {
+        error = {
             "type": normalized.get("code") or normalized.get("type", type(exc).__name__),
             "message": normalized.get("message", str(exc)),
-        }}, ensure_ascii=False))
+        }
+        # 节点级 trace（runner 已净化、JSON-safe）随 error 过界，父进程附着回 context。
+        context = normalized.get("context")
+        if isinstance(context, dict) and context.get("node_traces"):
+            error["node_traces"] = context["node_traces"]
+        sys.stdout.write(json.dumps({"ok": False, "error": error}, ensure_ascii=False))
     return 0
 
 
