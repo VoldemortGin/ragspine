@@ -1,0 +1,123 @@
+{
+  "name": "Branch Demo",
+  "nodes": [
+    {
+      "id": "c9e4b3a2-2222-4b5b-8d2f-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+      "parameters": {
+        "path": "score-check",
+        "httpMethod": "POST",
+        "options": {}
+      }
+    },
+    {
+      "id": "c9e4b3a2-2222-4b5b-8d2f-000000000002",
+      "name": "Check Score",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [220, 0],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-1",
+              "leftValue": "={{ $json.score }}",
+              "rightValue": 60,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c9e4b3a2-2222-4b5b-8d2f-000000000003",
+      "name": "Approve",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [440, -120],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "assign-1",
+              "name": "status",
+              "value": "approved",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c9e4b3a2-2222-4b5b-8d2f-000000000004",
+      "name": "Reject",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [440, 120],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "assign-2",
+              "name": "status",
+              "value": "rejected",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Check Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Score": {
+      "main": [
+        [
+          {
+            "node": "Approve",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
