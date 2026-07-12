@@ -8,7 +8,8 @@ import { dump } from 'js-yaml';
 import { describe, expect, it } from 'vitest';
 
 import { parseWorkflowYaml, serializeWorkflowYaml, WorkflowParseError } from '../../src/workflow/convert';
-import type { StudioWorkflow } from '../../src/workflow/types';
+import { nodeRegistry } from '../../src/workflow/registry';
+import type { StudioNodeData, StudioWorkflow } from '../../src/workflow/types';
 import {
   assertDeepSubset,
   FIXTURE_NAMES,
@@ -189,6 +190,312 @@ describe('serialization iteration_id policy', () => {
     const doc = loadDoc(serializeWorkflowYaml(moved));
     const llm = rawNodes(doc).find((n) => n.id === 'iter_llm');
     expect((llm?.data as Record<string, unknown>)['iteration_id']).toBe('iter_other');
+  });
+});
+
+describe('round-trip: five new node types (inline)', () => {
+  const originalText = dump({
+    app: { mode: 'workflow', name: 'five-new-types' },
+    kind: 'app',
+    version: '0.1.5',
+    workflow: {
+      graph: {
+        nodes: [
+          {
+            id: 'start_1',
+            position: { x: 0, y: 0 },
+            data: {
+              type: 'start',
+              title: '开始',
+              variables: [{ variable: 'query', label: 'Query', type: 'text-input', required: true }],
+            },
+          },
+          {
+            id: 'http_1',
+            position: { x: 200, y: 0 },
+            data: {
+              type: 'http-request',
+              title: 'HTTP 请求',
+              method: 'post',
+              url: 'https://api.example.com/search',
+              headers: 'Content-Type: application/json',
+              params: '',
+              authorization: { type: 'api-key', config: { type: 'bearer', api_key: 'test-key' } },
+              body: { type: 'json', data: [{ type: 'text', value: '{"q": "{{#start_1.query#}}"}' }] },
+              timeout: { max_connect_timeout: 0, max_read_timeout: 0, max_write_timeout: 0 },
+              ssl_verify: true,
+              variables: [],
+              retry_config: { retry_enabled: true, max_retries: 3, retry_interval: 100 },
+            },
+          },
+          {
+            id: 'agg_1',
+            position: { x: 400, y: 0 },
+            data: {
+              type: 'variable-aggregator',
+              title: '变量聚合',
+              output_type: 'string',
+              variables: [['http_1', 'body']],
+              advanced_settings: {
+                group_enabled: true,
+                groups: [
+                  {
+                    group_name: 'g1',
+                    groupId: 'group-id-1',
+                    output_type: 'string',
+                    variables: [['http_1', 'body']],
+                  },
+                  {
+                    group_name: 'g2',
+                    groupId: 'group-id-2',
+                    output_type: 'string',
+                    variables: [['http_1', 'status_code']],
+                  },
+                ],
+              },
+            },
+          },
+          {
+            id: 'assigner_1',
+            position: { x: 600, y: 0 },
+            data: {
+              type: 'assigner',
+              title: '变量赋值',
+              version: '2',
+              items: [
+                {
+                  variable_selector: ['conversation', 'memory'],
+                  input_type: 'variable',
+                  operation: 'over-write',
+                  value: ['http_1', 'body'],
+                },
+              ],
+            },
+          },
+          {
+            id: 'doc_1',
+            position: { x: 800, y: 0 },
+            data: {
+              type: 'document-extractor',
+              title: '文档提取',
+              variable_selector: ['start_1', 'file'],
+              is_array_file: false,
+            },
+          },
+          {
+            id: 'loop_1',
+            position: { x: 1000, y: 0 },
+            width: 720,
+            height: 360,
+            data: {
+              type: 'loop',
+              title: '循环',
+              loop_count: 5,
+              break_conditions: [
+                {
+                  id: 'bc-1',
+                  varType: 'string',
+                  variable_selector: ['loop_llm', 'text'],
+                  comparison_operator: 'contains',
+                  value: 'DONE',
+                },
+              ],
+              logical_operator: 'and',
+              loop_variables: [
+                { id: 'lv-1', label: 'acc', var_type: 'string', value_type: 'constant', value: '' },
+              ],
+              start_node_id: 'loop_start_1',
+            },
+          },
+          {
+            id: 'loop_llm',
+            position: { x: 60, y: 60 },
+            data: {
+              type: 'llm',
+              title: '循环体 LLM',
+              loop_id: 'loop_1',
+              isInLoop: true,
+              model: { provider: 'anthropic', name: 'claude', completion_params: {} },
+              prompt_template: [{ role: 'user', text: '{{#loop_1.acc#}}' }],
+            },
+          },
+          {
+            id: 'loop_assigner',
+            position: { x: 320, y: 60 },
+            data: {
+              type: 'assigner',
+              title: '写回累积值',
+              version: '2',
+              loop_id: 'loop_1',
+              isInLoop: true,
+              items: [
+                {
+                  variable_selector: ['loop_1', 'acc'],
+                  input_type: 'variable',
+                  operation: 'over-write',
+                  value: ['loop_llm', 'text'],
+                },
+              ],
+            },
+          },
+        ],
+        edges: [
+          { source: 'start_1', target: 'http_1' },
+          { source: 'http_1', target: 'agg_1' },
+          { source: 'agg_1', target: 'assigner_1' },
+          { source: 'assigner_1', target: 'doc_1' },
+          { source: 'doc_1', target: 'loop_1' },
+          { source: 'loop_llm', target: 'loop_assigner' },
+        ],
+      },
+    },
+  });
+  const original = loadDoc(originalText);
+  const wf = parseWorkflowYaml(originalText);
+  const exportedText = serializeWorkflowYaml(wf);
+  const exported = loadDoc(exportedText);
+  const wf2 = parseWorkflowYaml(exportedText);
+
+  it('re-imported node data deep-equals the original raw yaml data', () => {
+    for (const rawNode of rawNodes(original)) {
+      const id = rawNode.id as string;
+      expect(nodeById(wf2, id).data).toEqual(rawNode.data);
+    }
+  });
+
+  it('parents loop children to the container across the round trip', () => {
+    for (const id of ['loop_llm', 'loop_assigner']) {
+      expect(nodeById(wf, id).parentId).toBe('loop_1');
+      expect(nodeById(wf2, id).parentId).toBe('loop_1');
+    }
+    expect(nodeById(wf2, 'loop_1').parentId).toBeUndefined();
+  });
+
+  it('exported doc is a lossless superset of the original doc', () => {
+    assertDeepSubset(original, exported);
+  });
+
+  it('keeps unmodeled fields alive across the round trip', () => {
+    expect(nodeById(wf2, 'loop_llm').data.isInLoop).toBe(true);
+    expect(nodeById(wf2, 'loop_assigner').data.isInLoop).toBe(true);
+    const advanced = nodeById(wf2, 'agg_1').data['advanced_settings'] as {
+      groups: { groupId: string }[];
+    };
+    expect(advanced.groups.map((g) => g.groupId)).toEqual(['group-id-1', 'group-id-2']);
+    expect(nodeById(wf2, 'loop_1').passthrough.width).toBe(720);
+    expect(nodeById(wf2, 'loop_1').passthrough.height).toBe(360);
+  });
+});
+
+describe('registry defaults round-trip for the five new types', () => {
+  const NEW_TYPES = [
+    'http-request',
+    'variable-aggregator',
+    'assigner',
+    'document-extractor',
+    'loop',
+  ] as const;
+
+  function singleNodeWorkflow(data: StudioNodeData): StudioWorkflow {
+    return {
+      name: 't',
+      mode: 'workflow',
+      version: '0.1.5',
+      appPassthrough: {},
+      docPassthrough: {},
+      workflowPassthrough: {},
+      graphPassthrough: {},
+      nodes: [{ id: 'n1', type: data.type, position: { x: 0, y: 0 }, data, passthrough: {} }],
+      edges: [],
+    };
+  }
+
+  for (const type of NEW_TYPES) {
+    it(`${type}: createDefaultData survives serialize -> parse unchanged`, () => {
+      const wf = singleNodeWorkflow(nodeRegistry[type].createDefaultData());
+      const wf2 = parseWorkflowYaml(serializeWorkflowYaml(wf));
+      expect(nodeById(wf2, 'n1').data).toEqual(nodeRegistry[type].createDefaultData());
+    });
+  }
+});
+
+describe('serialization loop_id policy', () => {
+  const loopDoc = (): string =>
+    dump({
+      app: { mode: 'workflow', name: 't' },
+      kind: 'app',
+      version: '0.1.5',
+      workflow: {
+        graph: {
+          nodes: [
+            {
+              id: 'loop_a',
+              data: {
+                type: 'loop',
+                loop_count: 2,
+                break_conditions: [],
+                logical_operator: 'and',
+                loop_variables: [],
+              },
+            },
+            {
+              id: 'loop_b',
+              data: {
+                type: 'loop',
+                loop_count: 3,
+                break_conditions: [],
+                logical_operator: 'and',
+                loop_variables: [],
+              },
+            },
+            { id: 'iter_a', data: { type: 'iteration', iterator_selector: [], output_selector: [] } },
+            { id: 'child_loop', data: { type: 'llm', loop_id: 'loop_a' } },
+            { id: 'child_iter', data: { type: 'llm', iteration_id: 'iter_a' } },
+          ],
+          edges: [],
+        },
+      },
+    });
+
+  const rawDataOf = (wf: StudioWorkflow, id: string): Record<string, unknown> => {
+    const raw = rawNodes(loadDoc(serializeWorkflowYaml(wf))).find((n) => n.id === id);
+    if (raw === undefined) throw new Error(`node "${id}" missing in exported doc`);
+    return raw.data as Record<string, unknown>;
+  };
+
+  it('drops data.loop_id when the node was detached from its loop container', () => {
+    const wf = parseWorkflowYaml(loopDoc());
+    expect(nodeById(wf, 'child_loop').parentId).toBe('loop_a');
+    const detached: StudioWorkflow = {
+      ...wf,
+      nodes: wf.nodes.map((n) => {
+        if (n.id !== 'child_loop') return n;
+        const { parentId: _parentId, ...rest } = n;
+        return rest;
+      }),
+    };
+    expect(rawDataOf(detached, 'child_loop')['loop_id']).toBeUndefined();
+  });
+
+  it('overwrites data.loop_id when parentId moved to another loop container', () => {
+    const wf = parseWorkflowYaml(loopDoc());
+    const moved: StudioWorkflow = {
+      ...wf,
+      nodes: wf.nodes.map((n) => (n.id === 'child_loop' ? { ...n, parentId: 'loop_b' } : n)),
+    };
+    expect(rawDataOf(moved, 'child_loop')['loop_id']).toBe('loop_b');
+  });
+
+  it('replaces iteration_id with loop_id when the node moved into a loop container', () => {
+    const wf = parseWorkflowYaml(loopDoc());
+    expect(nodeById(wf, 'child_iter').parentId).toBe('iter_a');
+    const moved: StudioWorkflow = {
+      ...wf,
+      nodes: wf.nodes.map((n) => (n.id === 'child_iter' ? { ...n, parentId: 'loop_a' } : n)),
+    };
+    const data = rawDataOf(moved, 'child_iter');
+    expect(data['loop_id']).toBe('loop_a');
+    expect(data['iteration_id']).toBeUndefined();
   });
 });
 

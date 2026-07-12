@@ -113,7 +113,8 @@ function namesFrom(list: unknown, key: string): string[] {
 /**
  * Output variable names a node exposes to downstream nodes (Dify semantics).
  * Types without a statically known output set (tool, end, answer, if-else,
- * unknown imported types) return [] — treat their outputs as open.
+ * assigner — which officially has no outputs — and unknown imported types)
+ * return [] — treat their outputs as open.
  */
 export function nodeOutputVariables(node: VariableNode): string[] {
   const data = node.data;
@@ -138,13 +139,39 @@ export function nodeOutputVariables(node: VariableNode): string[] {
       return ['output'];
     case 'iteration':
       return ['output'];
+    case 'http-request':
+      return ['body', 'status_code', 'headers', 'files'];
+    case 'variable-aggregator': {
+      const advanced = data['advanced_settings'];
+      if (
+        typeof advanced === 'object' &&
+        advanced !== null &&
+        !Array.isArray(advanced) &&
+        (advanced as Record<string, unknown>)['group_enabled'] === true
+      ) {
+        const groups = (advanced as Record<string, unknown>)['groups'];
+        return namesFrom(groups, 'group_name').map((name) => `${name}.output`);
+      }
+      return ['output'];
+    }
+    case 'document-extractor':
+      return ['text'];
+    case 'loop':
+      return [...namesFrom(data['loop_variables'], 'label'), 'loop_round'];
     default:
       return [];
   }
 }
 
-/** Variables an iteration container exposes to the nodes inside it. */
+/** Variables an iteration container exposes to the nodes inside it (iteration-specific; loop containers expose their loop_variables labels instead). */
 const CONTAINER_ITEM_VARIABLES = ['item', 'index'] as const;
+
+/** Variables a container exposes to the nodes inside it, per container type. */
+function containerScopedVariables(node: VariableNode): string[] {
+  return node.data.type === 'loop'
+    ? namesFrom(node.data['loop_variables'], 'label')
+    : [...CONTAINER_ITEM_VARIABLES];
+}
 
 /**
  * Flat list of variables referenceable from `nodeId`: for every upstream
@@ -163,7 +190,7 @@ export function availableVariables(
   for (const node of upstreamNodes(nodes, edges, nodeId)) {
     const title = typeof node.data.title === 'string' && node.data.title !== '' ? node.data.title : node.id;
     const variables = ancestors.has(node.id)
-      ? [...CONTAINER_ITEM_VARIABLES]
+      ? containerScopedVariables(node)
       : nodeOutputVariables(node);
     if (variables.length === 0) {
       result.push({ nodeId: node.id, nodeTitle: title, nodeType: node.data.type, variable: OPEN_OUTPUTS });

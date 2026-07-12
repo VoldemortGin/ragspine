@@ -65,7 +65,13 @@ function parseNode(raw: unknown, index: number): StudioNode {
     throw new WorkflowParseError(`Node "${id}" is missing a string "data.type".`);
   }
   const iterationId = data['iteration_id'];
-  const parentId = typeof iterationId === 'string' && iterationId !== '' ? iterationId : undefined;
+  const loopId = data['loop_id'];
+  const parentId =
+    typeof iterationId === 'string' && iterationId !== ''
+      ? iterationId
+      : typeof loopId === 'string' && loopId !== ''
+        ? loopId
+        : undefined;
   return {
     id,
     type,
@@ -181,34 +187,56 @@ export function parseWorkflowYaml(text: string): StudioWorkflow {
   return nodes.some((n) => !hasFinitePosition(n.position)) ? autoLayoutWorkflow(wf) : wf;
 }
 
+/** Container-child id field on node data: iteration children carry iteration_id, loop children loop_id. */
+export type ContainerIdField = 'iteration_id' | 'loop_id';
+
+const CONTAINER_ID_FIELDS: readonly ContainerIdField[] = ['iteration_id', 'loop_id'];
+
+/** Container id field used on children of a container node of `parentType`. */
+export function containerIdField(parentType: string): ContainerIdField {
+  return parentType === 'loop' ? 'loop_id' : 'iteration_id';
+}
+
 /**
- * Return `data` with `iteration_id` kept in sync with the node's parentId:
- * set/overwritten when the node lives in a container, dropped when the node
- * was detached from one. Returns the same object when nothing changes.
+ * Return `data` with the container id field kept in sync with the node's
+ * parentId: `idField` set/overwritten (and the other container id field
+ * dropped) when the node lives in a container, both fields dropped when the
+ * node was detached from one. Returns the same object when nothing changes.
  */
-export function withSyncedIterationId(
+export function withSyncedContainerId(
   data: StudioNodeData,
   parentId: string | undefined,
+  idField: ContainerIdField,
 ): StudioNodeData {
+  const otherField: ContainerIdField = idField === 'loop_id' ? 'iteration_id' : 'loop_id';
   if (parentId !== undefined) {
-    if (data['iteration_id'] === parentId) return data;
-    return { ...data, iteration_id: parentId };
+    if (data[idField] === parentId && !(otherField in data)) return data;
+    const next = { ...data };
+    delete next[otherField];
+    next[idField] = parentId;
+    return next;
   }
-  if ('iteration_id' in data) {
-    const { iteration_id: _dropped, ...rest } = data;
-    return rest;
+  if (CONTAINER_ID_FIELDS.some((field) => field in data)) {
+    const next = { ...data };
+    for (const field of CONTAINER_ID_FIELDS) delete next[field];
+    return next;
   }
   return data;
 }
 
 /** Serialize a StudioWorkflow back into Dify workflow YAML. */
 export function serializeWorkflowYaml(wf: StudioWorkflow): string {
-  const nodes = wf.nodes.map((node) => ({
-    id: node.id,
-    position: { x: node.position.x, y: node.position.y },
-    data: withSyncedIterationId(node.data, node.parentId),
-    ...omit(node.passthrough, NODE_OWN_KEYS),
-  }));
+  const typeById = new Map(wf.nodes.map((n) => [n.id, n.type] as const));
+  const nodes = wf.nodes.map((node) => {
+    // Fall back to iteration_id when the parent node is missing (legacy behavior).
+    const parentType = node.parentId === undefined ? '' : (typeById.get(node.parentId) ?? '');
+    return {
+      id: node.id,
+      position: { x: node.position.x, y: node.position.y },
+      data: withSyncedContainerId(node.data, node.parentId, containerIdField(parentType)),
+      ...omit(node.passthrough, NODE_OWN_KEYS),
+    };
+  });
   const edges = wf.edges.map((edge) => ({
     id: edge.id,
     source: edge.source,

@@ -1,13 +1,13 @@
 /**
  * In-memory clipboard for canvas nodes/edges. Copy captures deep clones of
  * the selection (container children included, fully-internal edges kept);
- * paste materializes them with fresh ids, remapped parentId/iteration_id,
+ * paste materializes them with fresh ids, remapped parentId/container id,
  * rewritten {{#nodeId.var#}} references and an offset that grows on each
  * paste of the same content. Module-level state survives workflow switches
  * (SPA), enabling cross-workflow paste; it is not persisted anywhere.
  */
 
-import { withSyncedIterationId } from '../../../workflow/convert';
+import { containerIdField, withSyncedContainerId } from '../../../workflow/convert';
 import type { StudioFlowEdge, StudioFlowNode } from '../../../workflow/reactflow';
 import type { StudioNodeData, XY } from '../../../workflow/types';
 import { uniqueEdgeId, uniqueNodeId } from './ids';
@@ -145,10 +145,11 @@ export function collectClipboardContent(
 
 /**
  * Materialize `content` against the current canvas: fresh ids, remapped
- * parentId + iteration_id, rewritten internal references, `offset` applied
- * to top-level positions. Every clone comes back selected. A copied child
- * whose container was not copied stays in that container when it still
- * exists, otherwise it is detached at its absolute position.
+ * parentId + container id (iteration_id / loop_id per the parent container
+ * type), rewritten internal references, `offset` applied to top-level
+ * positions. Every clone comes back selected. A copied child whose container
+ * was not copied stays in that container when it still exists, otherwise it
+ * is detached at its absolute position.
  */
 export function materializeClones(
   content: ClipboardContent,
@@ -165,25 +166,32 @@ export function materializeClones(
     idMap.set(node.id, id);
   }
 
+  const copiedTypeById = new Map(content.nodes.map(({ node }) => [node.id, node.data.dify.type] as const));
+  const existingTypeById = new Map(existingNodes.map((n) => [n.id, n.data.dify.type] as const));
+
   const nodes = content.nodes.map(({ node, absolute }): StudioFlowNode => {
     const clone = cloneNode(node);
     clone.id = idMap.get(node.id)!;
     clone.selected = true;
     const parentId = node.parentId;
     const mappedParent = parentId !== undefined ? idMap.get(parentId) : undefined;
+    let parentType = '';
     if (mappedParent !== undefined) {
       clone.parentId = mappedParent; // container copied along: keep relative position
+      parentType = copiedTypeById.get(parentId!) ?? '';
     } else if (parentId !== undefined && presentIds.has(parentId)) {
       clone.position = { x: node.position.x + offset, y: node.position.y + offset };
+      parentType = existingTypeById.get(parentId) ?? '';
     } else {
       delete clone.parentId;
       delete clone.extent;
       clone.position = { x: absolute.x + offset, y: absolute.y + offset };
     }
     clone.data = {
-      dify: withSyncedIterationId(
+      dify: withSyncedContainerId(
         rewriteDeep(node.data.dify, idMap) as StudioNodeData,
         clone.parentId,
+        containerIdField(parentType),
       ),
       passthrough: structuredClone(node.data.passthrough),
     };

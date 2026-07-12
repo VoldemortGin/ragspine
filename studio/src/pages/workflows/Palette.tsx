@@ -1,4 +1,4 @@
-/** Left node palette: the 12 registry types grouped by category, searchable,
+/** Left node palette: the 17 registry types grouped by category, searchable,
  * draggable onto the canvas (click also adds at the viewport center). */
 
 import { useMemo, useState } from 'react';

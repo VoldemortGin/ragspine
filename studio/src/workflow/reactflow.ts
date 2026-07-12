@@ -12,14 +12,14 @@
 
 import type { Edge, Node } from '@xyflow/react';
 
-import { withSyncedIterationId } from './convert';
+import { containerIdField, withSyncedContainerId } from './convert';
 import { DEFAULT_CONTAINER_HEIGHT, DEFAULT_CONTAINER_WIDTH } from './layout';
 import { getNodeDefinition } from './registry';
 import type { StudioEdge, StudioNode, StudioNodeData, StudioWorkflow } from './types';
 
 /** React Flow component-type key for regular Dify nodes. */
 export const DIFY_NODE = 'dify-node';
-/** React Flow component-type key for iteration container (group) nodes. */
+/** React Flow component-type key for container (group) nodes, shared by iteration and loop. */
 export const DIFY_ITERATION = 'dify-iteration';
 
 export interface StudioFlowNodeData extends Record<string, unknown> {
@@ -100,16 +100,19 @@ export function toFlow(wf: StudioWorkflow): { nodes: StudioFlowNode[]; edges: St
 /**
  * Rebuild a StudioWorkflow from live React Flow canvas state. Doc-level
  * meta and passthrough bags come from `base`; parentId is synced back into
- * data.iteration_id (set when contained, dropped when detached).
+ * the container id field (data.iteration_id / data.loop_id per the parent
+ * node's type; set when contained, dropped when detached).
  */
 export function fromFlow(
   nodes: StudioFlowNode[],
   edges: StudioFlowEdge[],
   base: StudioWorkflow,
 ): StudioWorkflow {
+  const typeById = new Map(nodes.map((n) => [n.id, n.data.dify.type] as const));
   const outNodes = nodes.map((rf): StudioNode => {
     const parentId = rf.parentId;
-    const data = withSyncedIterationId(rf.data.dify, parentId);
+    const parentType = parentId === undefined ? '' : (typeById.get(parentId) ?? '');
+    const data = withSyncedContainerId(rf.data.dify, parentId, containerIdField(parentType));
     const passthrough = { ...rf.data.passthrough };
     if (rf.type === DIFY_ITERATION) {
       const width = rf.style?.width;

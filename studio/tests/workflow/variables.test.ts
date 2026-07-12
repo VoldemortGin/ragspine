@@ -124,7 +124,7 @@ describe('nodeOutputVariables', () => {
     expect(nodeOutputVariables(node('t', 'tool'))).toEqual([]);
     expect(nodeOutputVariables(node('e', 'end'))).toEqual([]);
     expect(nodeOutputVariables(node('a', 'answer'))).toEqual([]);
-    expect(nodeOutputVariables(node('x', 'http-request'))).toEqual([]);
+    expect(nodeOutputVariables(node('x', 'assigner'))).toEqual([]);
     expect(nodeOutputVariables(node('u', 'totally-unknown'))).toEqual([]);
   });
 });

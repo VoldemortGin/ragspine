@@ -215,7 +215,7 @@ const IterationNodeView = memo(function IterationNodeView({
           <span className="truncate text-xs font-semibold text-zinc-100">
             {nodeTitle(data.dify.title, def.label)}
           </span>
-          <span className="shrink-0 text-[10px] text-zinc-500">Iteration</span>
+          <span className="shrink-0 text-[10px] text-zinc-500">{def.label}</span>
           {d.is_parallel === true && (
             <Badge variant="info" className="ml-auto shrink-0">
               parallel x{typeof d.parallel_nums === 'number' ? d.parallel_nums : 1}

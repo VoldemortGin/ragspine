@@ -396,3 +396,32 @@ export function IconRedo(props: IconProps) {
     </Svg>
   );
 }
+
+export function IconGlobe(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
+      <path d="M2 12h20" />
+    </Svg>
+  );
+}
+
+export function IconMerge(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="m8 6 4-4 4 4" />
+      <path d="M12 2v10.3a4 4 0 0 1-1.172 2.872L4 22" />
+      <path d="m20 22-5-5" />
+    </Svg>
+  );
+}
+
+export function IconLoop(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M20 10c0-4.4-3.6-8-8-8s-8 3.6-8 8 3.6 8 8 8h8" />
+      <path d="m16 14 4 4-4 4" />
+    </Svg>
+  );
+}

@@ -105,9 +105,52 @@ describe('default data', () => {
     expect(data.code).toContain('def main(');
   });
 
-  it('only iteration is a container', () => {
+  it('only iteration and loop are containers', () => {
     for (const type of NODE_TYPES) {
-      expect(nodeRegistry[type].isContainer).toBe(type === 'iteration');
+      expect(nodeRegistry[type].isContainer).toBe(type === 'iteration' || type === 'loop');
+    }
+  });
+});
+
+describe('newly added dify types', () => {
+  const NEW_TYPES = [
+    'http-request',
+    'variable-aggregator',
+    'assigner',
+    'document-extractor',
+    'loop',
+  ] as const;
+
+  it('registers real definitions, not the unknown-type fallback', () => {
+    expect(getNodeDefinition('http-request').label).toBe('HTTP Request');
+    expect(getNodeDefinition('variable-aggregator').label).toBe('Variable Aggregator');
+    expect(getNodeDefinition('assigner').label).toBe('Variable Assigner');
+    expect(getNodeDefinition('document-extractor').label).toBe('Document Extractor');
+    expect(getNodeDefinition('loop').label).toBe('Loop');
+    for (const type of NEW_TYPES) {
+      expect(getNodeDefinition(type)).toBe(nodeRegistry[type]);
+    }
+  });
+
+  it('categorizes http-request under tools, loop under flow, the rest under transform', () => {
+    expect(nodeRegistry['http-request'].category).toBe('tools');
+    expect(nodeRegistry['variable-aggregator'].category).toBe('transform');
+    expect(nodeRegistry.assigner.category).toBe('transform');
+    expect(nodeRegistry['document-extractor'].category).toBe('transform');
+    expect(nodeRegistry.loop.category).toBe('flow');
+  });
+
+  it('only loop is a container; all five accept incoming edges', () => {
+    for (const type of NEW_TYPES) {
+      expect(nodeRegistry[type].isContainer).toBe(type === 'loop');
+      expect(nodeRegistry[type].hasTargetHandle).toBe(true);
+    }
+  });
+
+  it('default data yields a single source handle', () => {
+    for (const type of NEW_TYPES) {
+      const def = nodeRegistry[type];
+      expect(def.getSourceHandles(def.createDefaultData()).map((h) => h.id)).toEqual(['source']);
     }
   });
 });
@@ -150,14 +193,14 @@ describe('summaries', () => {
 
 describe('unknown type fallback', () => {
   it('returns a generic definition for unknown types', () => {
-    const def = getNodeDefinition('http-request');
-    expect(def.type).toBe('http-request');
-    expect(def.label).toBe('http-request');
+    const def = getNodeDefinition('list-operator');
+    expect(def.type).toBe('list-operator');
+    expect(def.label).toBe('list-operator');
     expect(def.isContainer).toBe(false);
     expect(def.hasTargetHandle).toBe(true);
-    expect(def.createDefaultData()).toEqual({ type: 'http-request' });
-    expect(def.getSourceHandles({ type: 'http-request' }).map((h) => h.id)).toEqual(['source']);
-    expect(typeof def.summarize({ type: 'http-request' })).toBe('string');
+    expect(def.createDefaultData()).toEqual({ type: 'list-operator' });
+    expect(def.getSourceHandles({ type: 'list-operator' }).map((h) => h.id)).toEqual(['source']);
+    expect(typeof def.summarize({ type: 'list-operator' })).toBe('string');
   });
 
   it('returns the registry definition for known types', () => {
@@ -166,7 +209,7 @@ describe('unknown type fallback', () => {
     }
   });
 
-  it('accent colors are distinct across the 12 types', () => {
+  it('accent colors are distinct across the 17 types', () => {
     const accents = NODE_TYPES.map((type) => nodeRegistry[type].accent);
     expect(new Set(accents).size).toBe(NODE_TYPES.length);
   });

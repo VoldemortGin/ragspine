@@ -6,10 +6,15 @@ import {
   IconBraces,
   IconCode,
   IconDatabase,
+  IconFileText,
   IconFlag,
   IconGitBranch,
+  IconGlobe,
   IconListFilter,
+  IconLoop,
+  IconMerge,
   IconMessageSquare,
+  IconPencil,
   IconPlay,
   IconRepeat,
   IconScanText,
@@ -34,6 +39,11 @@ const ICONS: Record<string, ComponentType<IconProps>> = {
   'knowledge-retrieval': IconDatabase,
   'parameter-extractor': IconScanText,
   tool: IconWrench,
+  'http-request': IconGlobe,
+  'variable-aggregator': IconMerge,
+  assigner: IconPencil,
+  'document-extractor': IconFileText,
+  loop: IconLoop,
 };
 
 export function nodeTypeIcon(type: string): ComponentType<IconProps> {

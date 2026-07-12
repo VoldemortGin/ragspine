@@ -1,6 +1,6 @@
 /**
  * Node type registry: per-type metadata (label, category, accent, handles,
- * default data, summary line) for the 12 Dify palette types, plus a generic
+ * default data, summary line) for the 17 Dify palette types, plus a generic
  * fallback definition for unknown node types found in imported YAML.
  *
  * Pure module: no React, no side effects.
@@ -8,17 +8,21 @@
 
 import { isDifyNodeType } from './types';
 import type {
+  AssignerNodeData,
   ClassifierClass,
   CodeNodeData,
   DifyNodeType,
+  DocumentExtractorNodeData,
   EndNodeData,
   ExtractorParameter,
   HandleSpec,
+  HttpRequestNodeData,
   IfElseCase,
   IfElseNodeData,
   IterationNodeData,
   KnowledgeRetrievalNodeData,
   LlmNodeData,
+  LoopNodeData,
   NodeTypeDefinition,
   ParameterExtractorNodeData,
   QuestionClassifierNodeData,
@@ -27,6 +31,7 @@ import type {
   StudioNodeData,
   TemplateTransformNodeData,
   ToolNodeData,
+  VariableAggregatorNodeData,
 } from './types';
 
 /** Single unlabeled "source" handle used by all non-branching nodes. */
@@ -319,10 +324,126 @@ export const nodeRegistry: Record<DifyNodeType, NodeTypeDefinition> = {
       return typeof name === 'string' && name !== '' ? name : 'tool not set';
     },
   },
+
+  'http-request': {
+    type: 'http-request',
+    label: 'HTTP Request',
+    description: 'Sends an HTTP request and exposes the response.',
+    category: 'tools',
+    accent: '#f472b6',
+    isContainer: false,
+    hasTargetHandle: true,
+    createDefaultData: (): HttpRequestNodeData => ({
+      type: 'http-request',
+      method: 'get',
+      url: '',
+      headers: '',
+      params: '',
+      authorization: { type: 'no-auth', config: null },
+      body: { type: 'none', data: [] },
+      ssl_verify: true,
+      variables: [],
+      retry_config: { retry_enabled: true, max_retries: 3, retry_interval: 100 },
+    }),
+    getSourceHandles: singleSourceHandle,
+    summarize: (data) => {
+      const d = data as HttpRequestNodeData;
+      const rawMethod: unknown = d.method;
+      const method = typeof rawMethod === 'string' && rawMethod !== '' ? rawMethod.toUpperCase() : 'GET';
+      const url = typeof d.url === 'string' && d.url.trim() !== '' ? truncate(d.url) : 'url not set';
+      return `${method} ${url}`;
+    },
+  },
+
+  'variable-aggregator': {
+    type: 'variable-aggregator',
+    label: 'Variable Aggregator',
+    description: 'Merges variables from multiple branches into one output.',
+    category: 'transform',
+    accent: '#c084fc',
+    isContainer: false,
+    hasTargetHandle: true,
+    createDefaultData: (): VariableAggregatorNodeData => ({
+      type: 'variable-aggregator',
+      output_type: 'any',
+      variables: [],
+    }),
+    getSourceHandles: singleSourceHandle,
+    summarize: (data) => {
+      const d = data as VariableAggregatorNodeData;
+      if (d.advanced_settings?.group_enabled === true) {
+        const groups = d.advanced_settings.groups;
+        return count(Array.isArray(groups) ? groups.length : 0, 'group');
+      }
+      return count(Array.isArray(d.variables) ? d.variables.length : 0, 'variable');
+    },
+  },
+
+  assigner: {
+    type: 'assigner',
+    label: 'Variable Assigner',
+    description: 'Writes values into writable (conversation/loop) variables.',
+    category: 'transform',
+    accent: '#818cf8',
+    isContainer: false,
+    hasTargetHandle: true,
+    createDefaultData: (): AssignerNodeData => ({ type: 'assigner', version: '2', items: [] }),
+    getSourceHandles: singleSourceHandle,
+    summarize: (data) => {
+      const items = (data as AssignerNodeData).items;
+      return count(Array.isArray(items) ? items.length : 0, 'assignment');
+    },
+  },
+
+  'document-extractor': {
+    type: 'document-extractor',
+    label: 'Document Extractor',
+    description: 'Extracts plain text from an uploaded document file.',
+    category: 'transform',
+    accent: '#4ade80',
+    isContainer: false,
+    hasTargetHandle: true,
+    createDefaultData: (): DocumentExtractorNodeData => ({
+      type: 'document-extractor',
+      variable_selector: [],
+      is_array_file: false,
+    }),
+    getSourceHandles: singleSourceHandle,
+    summarize: (data) => {
+      const d = data as DocumentExtractorNodeData;
+      const selector = Array.isArray(d.variable_selector) ? d.variable_selector : [];
+      const label = selector.length > 0 ? selector.join('.') : 'no input';
+      return d.is_array_file === true ? `${label} (array)` : label;
+    },
+  },
+
+  loop: {
+    type: 'loop',
+    label: 'Loop',
+    description: 'Repeats an inner subgraph until break conditions or a max count.',
+    category: 'flow',
+    accent: '#67e8f9',
+    isContainer: true,
+    hasTargetHandle: true,
+    createDefaultData: (): LoopNodeData => ({
+      type: 'loop',
+      loop_count: 10,
+      break_conditions: [],
+      logical_operator: 'and',
+      loop_variables: [],
+    }),
+    getSourceHandles: singleSourceHandle,
+    summarize: (data) => {
+      const d = data as LoopNodeData;
+      const loopCount = typeof d.loop_count === 'number' ? d.loop_count : 10;
+      const breaks = Array.isArray(d.break_conditions) ? d.break_conditions.length : 0;
+      return breaks > 0 ? `x${loopCount}, ${count(breaks, 'break condition')}` : `x${loopCount}`;
+    },
+  },
 };
 
 /**
- * Resolve a node type definition. Unknown types (anything outside the 12
+ * Resolve a node type definition. Unknown types (anything outside the 17
  * palette types) get a generic fallback so imported YAML always renders.
  */
 export function getNodeDefinition(type: string): NodeTypeDefinition {
