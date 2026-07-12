@@ -61,6 +61,9 @@ class ServiceConfig:
     dify_run_timeout_s: float = 10.0         # /v1/dify/run 单次执行超时上限（秒）
     dify_run_isolation: str = "inprocess"    # "inprocess"(L1) | "subprocess"(L2，Linux setrlimit，跨平台回落 L1)
     studio_dir: str = ""                     # Studio 前端静态产物目录；""=不启用（不挂 /studio）
+    dify_public_apps: str = ""               # dify 公共 API app 注册表："key1=/path/a.yml;key2=/path/b.yml"（; 分条目、首个 = 分 key/路径）；""=未配置 -> /v1/workflows/* 一律 401
+    n8n_api_key: str | None = None           # n8n 公共 API key；None=未启用，/api/v1/* 一律 401
+    n8n_store_path: str = "data/n8n_store"   # n8n workflow/execution 文件存储根目录
 
     # 历史 env 键别名 -> 字段名。corespine load_from_env 默认按 PREFIX_FIELDNAME
     # 推导键名，与这三个不规则旧键冲突；构造时把旧键改写到规范键以保持向后兼容。
