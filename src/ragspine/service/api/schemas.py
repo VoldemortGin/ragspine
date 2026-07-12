@@ -4,7 +4,7 @@
 route 层计算后填入。
 """
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -131,7 +131,83 @@ class DifyRunRequest(BaseModel):
     fold_answer_question: bool = True
 
 
+class NodeTrace(BaseModel):
+    """一条节点级执行 trace（run 端点的可观测面；字段名为前端消费契约，定死）。"""
+
+    index: int                # 执行顺序，从 0 开始（skipped 记录排在最后）
+    node_id: str              # dify DSL 节点 id
+    title: str                # 节点标题（IR 的 title）
+    node_type: str            # llm / code / if-else / knowledge-retrieval / ...（IRNode.kind）
+    status: Literal["succeeded", "failed", "skipped"]
+    elapsed_ms: float
+    inputs: dict[str, Any] | None    # 输入变量快照（dep_refs 解析），无依赖为 None
+    outputs: dict[str, Any] | None   # 该节点写入 _ctx 的输出字段快照，空为 None
+    error: str | None
+
+
 class DifyRunResponse(BaseModel):
     request_id: str
     result: dict[str, Any] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
+    node_traces: list[NodeTrace] | None = None
+
+
+# ---------------------------------------------------------------------------
+# 管线拓扑导出（pipeline/topology → Studio 可视化）
+# ---------------------------------------------------------------------------
+class TopologyNodeInfo(BaseModel):
+    """拓扑节点的对外形状（与内部 pipeline.graph.Node dataclass 解耦）。"""
+
+    id: str
+    label: str
+    kind: str
+    domain: str | None = None
+    symbol: str | None = None
+
+
+class TopologyEdgeInfo(BaseModel):
+    """拓扑边的对外形状（与内部 pipeline.graph.Edge dataclass 解耦）。"""
+
+    src: str
+    dst: str
+    label: str | None = None
+    kind: str = "flow"
+
+
+class TopologyResponse(BaseModel):
+    request_id: str
+    title: str
+    nodes: list[TopologyNodeInfo] = Field(default_factory=list)
+    edges: list[TopologyEdgeInfo] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# n8n workflow 兼容层（ragspine.n8n）：n8n JSON ↔ Dify DSL 转换 / 运行
+# ---------------------------------------------------------------------------
+class N8nConvertRequest(BaseModel):
+    """convert：n8n workflow JSON ↔ Dify DSL 双向转换（纯转换，不执行，安全）。"""
+
+    direction: Literal["n8n_to_dify", "dify_to_n8n"]
+    workflow: dict[str, Any] | str  # str 时按 JSON/YAML 自动识别
+
+
+class N8nConvertResponse(BaseModel):
+    """workflow 是目标格式 dict；n8n_to_dify 方向另给序列化好的 Dify DSL YAML。"""
+
+    request_id: str
+    workflow: dict[str, Any] = Field(default_factory=dict)
+    yaml: str | None = None  # to dify 时为 Dify DSL YAML；to n8n 时为 None
+    warnings: list[str] = Field(default_factory=list)
+
+
+class N8nRunRequest(BaseModel):
+    """run：n8n workflow → dify DSL → 完整复用 /v1/dify/run 管线（同一信任边界开关）。"""
+
+    workflow: dict[str, Any]
+    inputs: dict[str, Any] = Field(default_factory=dict)
+
+
+class N8nRunResponse(DifyRunResponse):
+    """形状 = DifyRunResponse（result/warnings/node_traces）+ n8n→dify 转换期 warnings。"""
+
+    convert_warnings: list[str] = Field(default_factory=list)

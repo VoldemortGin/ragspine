@@ -11,7 +11,7 @@
 
 | 文件 | 作用 |
 |---|---|
-| `deploy/Dockerfile` | 多阶段、uv 驱动；装 `ragspine[service,vector]`。**一个镜像两种角色**，server/worker 仅 command 不同。 |
+| `deploy/Dockerfile` | 多阶段、uv 驱动；装 `ragspine[service,vector]` ＋ 内置 Studio Web UI 静态产物。**一个镜像两种角色**，server/worker 仅 command 不同。 |
 | `deploy/compose.yaml` | `app`（server）+ `worker` + `redis`，默认离线；`postgres` / `qdrant` 两个 profile 选择性接入。 |
 | `deploy/.env.example` | 所有 `RAGSPINE_*` 变量 + LLM key 占位符，离线安全默认（拷为 `deploy/.env` 用）。 |
 | `deploy/.dockerignore` | 裁剪构建上下文（排除 `tests/` / venv / 缓存 / `.git` / `*.egg-info`）。 |
@@ -62,6 +62,14 @@ curl -s localhost:8000/v1/dify/run -H 'content-type: application/json' \
 docker compose -f deploy/compose.yaml down            # 停服务，留数据卷
 docker compose -f deploy/compose.yaml down -v         # 连命名卷一起删（清空持久化数据）
 ```
+
+## Studio Web UI
+
+镜像自带 Studio 前端（`studio/` 的 Vite 构建产物，Dockerfile 内置
+`RAGSPINE_STUDIO_DIR=/opt/ragspine/studio`）。`up` 之后浏览器访问
+`http://localhost:8000/studio/` 即可；把 `RAGSPINE_STUDIO_DIR` 设为空串可禁用挂载。
+本地前端开发不必进容器：`make studio-dev` 起 Vite dev server（API 请求经 Vite proxy
+转发到 :8000 的本地 server）。
 
 ## 接真实 LLM（Anthropic）
 

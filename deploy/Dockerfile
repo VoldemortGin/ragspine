@@ -2,8 +2,9 @@
 #
 # RAGSpine 部署镜像（落地 deploy/README.md）。
 #
-# 多阶段、uv 驱动：builder 在隔离层里把 ragspine[service,vector] 装进 /opt/venv，runtime
-# 只拷该 venv + 脚本运行所需的运行时文件，得到一个精简、不可变的镜像。
+# 多阶段、uv 驱动：builder 在隔离层里把 ragspine[service,vector] 装进 /opt/venv；
+# studio-builder 用 node22/pnpm 把 Studio Web UI（studio/）构建成纯静态产物；runtime
+# 只拷该 venv + Studio 静态产物 + 脚本运行所需的运行时文件，得到一个精简、不可变的镜像。
 #
 # 【一个镜像，两种角色】：server 与 worker 共用此镜像，角色仅由启动 command 决定——
 #   server: python scripts/run_server.py --host 0.0.0.0 --port 8000
@@ -44,6 +45,26 @@ RUN uv venv /opt/venv --python /usr/local/bin/python3.12 \
  && VIRTUAL_ENV=/opt/venv uv pip install --no-cache --no-sources ".[service,vector,dify]"
 
 # ---------------------------------------------------------------------------
+# studio-builder：构建 Studio Web UI（studio/，Vite + React，pnpm 管理）为纯静态产物。
+# 先只拷 package.json + lockfile 装依赖（层缓存友好：改源码不重装依赖），再拷其余源码
+# 构建。宿主机的 studio/node_modules 与 studio/dist 经仓库根 .dockerignore 排除，
+# 不进构建上下文（pnpm 的符号链接式 node_modules 跨机器不可用，混入会毒化构建）。
+# ---------------------------------------------------------------------------
+FROM node:22-slim AS studio-builder
+
+# corepack 启用 pnpm（node22 自带 corepack）；关掉首次下载的交互确认（非 TTY 构建环境）。
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+RUN corepack enable pnpm
+
+WORKDIR /studio
+
+COPY studio/package.json studio/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+
+COPY studio/ ./
+RUN pnpm build
+
+# ---------------------------------------------------------------------------
 # runtime：拷 venv + 脚本运行所需的运行时文件，配置全走 RAGSPINE_* 环境变量。
 # ---------------------------------------------------------------------------
 FROM python:3.12-slim-bookworm AS runtime
@@ -63,6 +84,8 @@ ENV PYTHONUNBUFFERED=1 \
     RAGSPINE_DIFY_RUN_ENABLED=false \
     RAGSPINE_DIFY_RUN_TIMEOUT_S=10 \
     RAGSPINE_DIFY_RUN_ISOLATION=subprocess \
+    # ---- Studio Web UI：镜像内置静态产物，FastAPI 挂载到 /studio（置空串＝禁用）----
+    RAGSPINE_STUDIO_DIR=/opt/ragspine/studio \
     # ---- 持久化路径：落在命名卷 /var/lib/ragspine（compose 挂载）----
     RAGSPINE_DB_PATH=/var/lib/ragspine/fact_metric.db \
     RAGSPINE_CHUNK_DB_PATH=/var/lib/ragspine/narrative.db \
@@ -83,6 +106,9 @@ COPY scripts/ ./scripts/
 COPY src/ ./src/
 COPY config/ ./config/
 COPY data/ ./data/
+
+# Studio Web UI 静态产物（RAGSPINE_STUDIO_DIR 指向此处，FastAPI 挂载到 /studio；只读即可）。
+COPY --from=studio-builder /studio/dist /opt/ragspine/studio
 
 # 命名卷挂载点（sqlite 库 + 上传目录）；先建目录 + 改属主，命名卷首次创建即继承该属主。
 RUN mkdir -p /var/lib/ragspine/uploads \

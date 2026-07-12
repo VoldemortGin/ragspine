@@ -38,3 +38,7 @@ docs/site/
 
 # Local tooling artifacts (eval scratch output)
 .jbeval/
+
+# Studio frontend (studio/ at repo root) — dependencies and build output are regenerable.
+node_modules/
+studio/dist/

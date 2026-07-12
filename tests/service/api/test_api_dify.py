@@ -277,6 +277,108 @@ def test_dify_run_async_compile_error_before_enqueue(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# NODE TRACES — run 响应带节点级 execution trace（NodeTrace 契约）
+# ---------------------------------------------------------------------------
+FAIL_TRACE_YAML = """
+app:
+  mode: workflow
+  name: fail-demo
+kind: app
+version: "0.1.5"
+workflow:
+  graph:
+    nodes:
+      - id: start_1
+        data:
+          type: start
+          title: 开始
+          variables:
+            - {variable: question, label: 问题, type: text-input, required: true}
+      - id: code_1
+        data:
+          type: code
+          title: 会炸的代码
+          code: "def main(x):\\n    raise ValueError('boom')\\n"
+          code_language: python3
+          variables:
+            - {variable: x, value_selector: [start_1, question]}
+          outputs:
+            out: {type: string}
+      - id: end_1
+        data:
+          type: end
+          title: 结束
+          outputs:
+            - {variable: out, value_selector: [code_1, out]}
+    edges:
+      - {source: start_1, target: code_1, sourceHandle: source}
+      - {source: code_1, target: end_1, sourceHandle: source}
+"""
+
+
+def test_dify_run_returns_node_traces(tmp_path):
+    client = _make_client(tmp_path, run_enabled=True)
+    resp = client.post(
+        "/v1/dify/run", json={"yaml": _fixture("seq.yml"), "inputs": {"question": "hi"}}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    # result 内不残留内部键。
+    assert "__node_traces__" not in body["result"]
+    traces = body["node_traces"]
+    assert isinstance(traces, list)
+    assert [t["node_id"] for t in traces] == ["start_1", "llm_1", "tt_1", "end_1"]
+    # 契约逐字段断言（前端按此消费，字段名定死）。
+    llm = traces[1]
+    assert llm["index"] == 1
+    assert llm["node_id"] == "llm_1"
+    assert llm["title"] == "应答模型"
+    assert llm["node_type"] == "llm"
+    assert llm["status"] == "succeeded"
+    assert isinstance(llm["elapsed_ms"], float)
+    assert llm["elapsed_ms"] >= 0.0
+    assert llm["inputs"] == {"start_1.question": "hi"}
+    assert isinstance(llm["outputs"], dict) and "text" in llm["outputs"]
+    assert llm["error"] is None
+
+
+def test_dify_run_failure_response_includes_node_traces(tmp_path):
+    client = _make_client(tmp_path, run_enabled=True)
+    resp = client.post(
+        "/v1/dify/run", json={"yaml": FAIL_TRACE_YAML, "inputs": {"question": "q"}}
+    )
+    assert resp.status_code == 400
+    err = resp.json()["error"]
+    assert err["type"] == "dify.run_error"
+    # 固化形状：失败 trace 附在 error dict 的 node_traces 键（向后兼容新增）。
+    traces = err["node_traces"]
+    assert isinstance(traces, list) and traces
+    failed = [t for t in traces if t["status"] == "failed"]
+    assert failed and failed[0]["node_id"] == "code_1"
+    assert "ValueError" in failed[0]["error"]
+
+
+def test_dify_run_async_job_result_has_node_traces(tmp_path):
+    client = _make_client(tmp_path, run_enabled=True)
+    resp = client.post(
+        "/v1/dify/run/jobs",
+        json={"yaml": _fixture("seq.yml"), "inputs": {"question": "hi"}},
+    )
+    assert resp.status_code == 200
+    job_id = resp.json()["job_id"]
+    status = client.get(f"/v1/jobs/{job_id}")
+    assert status.status_code == 200
+    body = status.json()
+    assert body["status"] == "finished"
+    job_result = body["result"]
+    # node_traces 与 result / warnings 平级。
+    traces = job_result["node_traces"]
+    assert isinstance(traces, list) and traces
+    assert traces[0]["node_id"] == "start_1"
+    assert "__node_traces__" not in job_result["result"]
+
+
+# ---------------------------------------------------------------------------
 # ISOLATION — subprocess 隔离端到端（Linux 真子进程；macOS/Windows 回落 L1）
 # ---------------------------------------------------------------------------
 def test_dify_run_subprocess_isolation_end_to_end(tmp_path):

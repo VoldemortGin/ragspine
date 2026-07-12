@@ -83,6 +83,20 @@ serve: ## Run the FastAPI server
 worker: ## Run the RQ worker (needs Redis)
 	$(PYTHON) scripts/run_worker.py
 
+# ---- studio (Web UI) -----------------------------------------------------------------
+
+.PHONY: studio-install
+studio-install: ## Install Studio frontend dependencies (pnpm, node 22)
+	cd studio && pnpm install
+
+.PHONY: studio-dev
+studio-dev: ## Run the Studio Vite dev server (proxies API to :8000)
+	cd studio && pnpm dev
+
+.PHONY: studio-build
+studio-build: ## Build the Studio static bundle into studio/dist
+	cd studio && pnpm build
+
 # ---- fixtures / docs -----------------------------------------------------------------
 
 .PHONY: fixtures

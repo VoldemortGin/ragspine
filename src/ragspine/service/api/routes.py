@@ -6,7 +6,7 @@
 from datetime import date
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from ragspine.agent.agent import AgentResult, answer_question
@@ -20,6 +20,7 @@ from ragspine.agent.intent import (
 from ragspine.agent.llm_provider import LLMProvider
 from ragspine.agent.query_transform import make_adaptive_decomposer
 from ragspine.common.observability import emit_trace, new_request_id
+from ragspine.pipeline.topology import agent_topology, service_topology
 from ragspine.service.api.dependencies import (
     get_config,
     get_faq_cache,
@@ -43,7 +44,14 @@ from ragspine.service.api.schemas import (
     IngestStructuredJobRequest,
     JobStatusResponse,
     JobSubmitResponse,
+    N8nConvertRequest,
+    N8nConvertResponse,
+    N8nRunRequest,
+    N8nRunResponse,
     SourceInfo,
+    TopologyEdgeInfo,
+    TopologyNodeInfo,
+    TopologyResponse,
 )
 from ragspine.service.config import (
     PathNotAllowedError,
@@ -75,10 +83,13 @@ QueueDep = Annotated[TaskQueue, Depends(get_queue)]
 
 
 def _error_response(status_code: int, *, type_: str, message: str,
-                    request_id: str | None = None) -> JSONResponse:
-    payload = ErrorResponse(
-        error={"type": type_, "message": message, "request_id": request_id}
-    )
+                    request_id: str | None = None,
+                    node_traces: Any = None) -> JSONResponse:
+    error: dict[str, Any] = {"type": type_, "message": message, "request_id": request_id}
+    if node_traces:
+        # dify run 失败时附带节点级 trace（已净化、JSON-safe），供前端可视化失败节点。
+        error["node_traces"] = node_traces
+    payload = ErrorResponse(error=error)
     return JSONResponse(status_code=status_code, content=payload.model_dump())
 
 
@@ -413,7 +424,8 @@ def dify_run(
 
     try:
         compiled = compile_dify_yaml(
-            req.yaml, fold_answer_question=req.fold_answer_question
+            req.yaml, fold_answer_question=req.fold_answer_question,
+            emit_node_traces=True,
         )
     except DifyCompileError as exc:
         return _error_response(400, type_=exc.code, message=str(exc), request_id=request_id)
@@ -430,14 +442,20 @@ def dify_run(
         # L0 静态闸：含 NotImplementedError 骨架 / 不支持节点 / 越权 import -> 422（未执行）。
         return _error_response(422, type_=exc.code, message=str(exc), request_id=request_id)
     except (DifyRunError, DifyTimeoutError) as exc:
-        return _error_response(400, type_=exc.code, message=str(exc), request_id=request_id)
+        # 执行失败也把已执行节点的 trace（runner 净化后附在 context）带给前端。
+        return _error_response(
+            400, type_=exc.code, message=str(exc), request_id=request_id,
+            node_traces=exc.context.get("node_traces"),
+        )
 
+    node_traces = result.pop("__node_traces__", None)
     emit_trace(
         request_id=request_id, op="dify.run",
         isolation=config.dify_run_isolation, n_result_keys=len(result),
     )
     return DifyRunResponse(
-        request_id=request_id, result=result, warnings=list(code.warnings)
+        request_id=request_id, result=result, warnings=list(code.warnings),
+        node_traces=node_traces,
     )
 
 
@@ -467,7 +485,8 @@ def dify_run_async(
 
     try:
         compiled = compile_dify_yaml(
-            req.yaml, fold_answer_question=req.fold_answer_question
+            req.yaml, fold_answer_question=req.fold_answer_question,
+            emit_node_traces=True,
         )
     except DifyCompileError as exc:
         return _error_response(400, type_=exc.code, message=str(exc), request_id=request_id)
@@ -495,3 +514,136 @@ def dify_run_async(
     }
     job_id = queue.enqueue(DIFY_WORKFLOW_JOB, payload)
     return JobSubmitResponse(job_id=job_id)
+
+
+# ---------------------------------------------------------------------------
+# 管线拓扑导出（供 Studio 可视化；静态派生，零执行、零重资源）
+# ---------------------------------------------------------------------------
+_TOPOLOGY_SCOPES = ("agent", "service")
+
+
+@router.get("/v1/topology", response_model=None)
+def get_topology(
+    request: Request, scope: str = "agent"
+) -> TopologyResponse | JSONResponse:
+    """按 scope 导出静态管线拓扑：agent（请求流）| service（服务层）。
+
+    agent scope 刻意【不】打开 narrative retriever（重操作）——narrative_retriever=None，
+    拓扑如实反映"无叙事分支"的装配；service scope 从 app.state 反射（duck-typed）。
+    """
+    request_id = new_request_id()
+    if scope == "agent":
+        graph = agent_topology()
+    elif scope == "service":
+        graph = service_topology(request.app)
+    else:
+        return _error_response(
+            400, type_="InvalidScope",
+            message=f"未知 scope: {scope!r}（可选: {', '.join(_TOPOLOGY_SCOPES)}）",
+            request_id=request_id,
+        )
+
+    emit_trace(
+        request_id=request_id, op="topology", scope=scope,
+        n_nodes=len(graph.nodes), n_edges=len(graph.edges),
+    )
+    return TopologyResponse(
+        request_id=request_id,
+        title=graph.title,
+        nodes=[
+            TopologyNodeInfo(
+                id=n.id, label=n.label, kind=n.kind, domain=n.domain, symbol=n.symbol
+            )
+            for n in graph.nodes
+        ],
+        edges=[
+            TopologyEdgeInfo(src=e.src, dst=e.dst, label=e.label, kind=e.kind)
+            for e in graph.edges
+        ],
+    )
+
+
+# ---------------------------------------------------------------------------
+# n8n workflow 兼容层：n8n JSON ↔ Dify DSL 转换 / 运行
+#
+# convert（纯转换，不执行，安全）→ run（n8n→dify 后调用 dify_run，完整复用其编译 +
+# 受限执行与信任边界，不重写）。ragspine.n8n 延迟 import；N8nConvertError（code n8n.*）
+# 整形为 400。PyYAML 经 [dify] extra 带入，同样延迟 import。
+# ---------------------------------------------------------------------------
+def _dify_dict_to_yaml(doc: dict[str, Any]) -> str:
+    """Dify DSL dict → YAML 文本（PyYAML 延迟 import，与 dify parse 段同一依赖假设）。"""
+    import yaml
+
+    text: str = yaml.safe_dump(doc, allow_unicode=True, sort_keys=False)
+    return text
+
+
+@router.post("/v1/n8n/convert", response_model=None)
+def n8n_convert(req: N8nConvertRequest) -> N8nConvertResponse | JSONResponse:
+    """n8n workflow JSON ↔ Dify DSL 双向转换。无法语义映射处进 warnings，绝不静默丢弃。"""
+    request_id = new_request_id()
+    from ragspine.n8n.api import dify_to_n8n, n8n_to_dify
+    from ragspine.n8n.errors import N8nConvertError
+
+    try:
+        if req.direction == "n8n_to_dify":
+            workflow, warnings = n8n_to_dify(req.workflow)
+            yaml_text: str | None = _dify_dict_to_yaml(workflow)
+        else:
+            workflow, warnings = dify_to_n8n(req.workflow)
+            yaml_text = None
+    except N8nConvertError as exc:
+        return _error_response(400, type_=exc.code, message=str(exc), request_id=request_id)
+
+    emit_trace(
+        request_id=request_id, op="n8n.convert", direction=req.direction,
+        n_nodes=len(workflow.get("nodes", []) or []), n_warnings=len(warnings),
+    )
+    return N8nConvertResponse(
+        request_id=request_id, workflow=workflow, yaml=yaml_text, warnings=warnings,
+    )
+
+
+@router.post("/v1/n8n/run", response_model=None)
+def n8n_run(
+    req: N8nRunRequest,
+    config: ConfigDep,
+    provider: ProviderDep,
+) -> N8nRunResponse | JSONResponse:
+    """n8n workflow → dify DSL → 完整复用 dify_run（编译 + 受限执行，信任边界）。
+
+    受同一开关管控（RAGSPINE_DIFY_RUN_ENABLED，未开启 -> 403）；转换失败
+    （N8nConvertError，code n8n.*）-> 400；其后错误分级（编译 400 / L0 闸 422 /
+    执行失败超时 400）与响应形状（+ convert_warnings）均由 dify_run 决定。
+    """
+    request_id = new_request_id()
+
+    # 信任边界开关先行（与 dify_run 同一开关；转换前快速失败，不泄漏转换结果）。
+    if not config.dify_run_enabled:
+        return _error_response(
+            403, type_="dify.run_disabled",
+            message="dify 工作流执行未开启（设 RAGSPINE_DIFY_RUN_ENABLED=true 开启）",
+            request_id=request_id,
+        )
+
+    from ragspine.n8n.api import n8n_to_dify
+    from ragspine.n8n.errors import N8nConvertError
+
+    try:
+        dify_doc, convert_warnings = n8n_to_dify(req.workflow)
+    except N8nConvertError as exc:
+        return _error_response(400, type_=exc.code, message=str(exc), request_id=request_id)
+
+    response = dify_run(
+        DifyRunRequest(yaml=_dify_dict_to_yaml(dify_doc), inputs=req.inputs),
+        config, provider,
+    )
+    if isinstance(response, JSONResponse):
+        return response  # dify_run 已整形（400/422 等），原样透传
+    emit_trace(
+        request_id=response.request_id, op="n8n.run",
+        n_convert_warnings=len(convert_warnings),
+    )
+    return N8nRunResponse(
+        **response.model_dump(), convert_warnings=convert_warnings,
+    )

@@ -1,0 +1,10 @@
+# 构建上下文裁剪 —— 镜像构建的上下文＝【仓库根】（compose: context .. / CI: context .），
+# BuildKit 只读取上下文根的 .dockerignore（或 Dockerfile 同目录的 Dockerfile.dockerignore），
+# 故此文件必须放在仓库根（deploy/.dockerignore 记录的是同一意图，但根上下文构建不读它）。
+#
+# 此处只放【构建正确性必需】的排除：deploy/Dockerfile 的 studio-builder 阶段有
+# `COPY studio/ ./`，绝不能把宿主机的 node_modules（pnpm 符号链接结构，跨机器不可用，
+# 会覆盖容器内刚装好的依赖）与本地 dist 带进构建上下文。其余子树镜像本就只经显式
+# COPY（src/ scripts/ config/ data/）拼装，不受影响。
+studio/node_modules/
+studio/dist/

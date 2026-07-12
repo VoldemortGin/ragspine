@@ -4,7 +4,10 @@
 生产由 from_env + 默认实例装配。HTTP 层只做边界适配，不重写业务 workflow。
 """
 
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from ragspine.agent.llm_provider import LLMProvider
 from ragspine.service.api.routes import router
@@ -35,4 +38,10 @@ def create_app(
     app.state.queue = queue
     app.state.faq_cache = faq_cache
     app.include_router(router)
+    # Studio 前端静态站点（可选）：studio_dir 非空且目录存在才挂载，否则静默不挂——
+    # 诚实边界：产物是否就位由部署层保证，缺失时 /studio 即 404，API 不受影响。
+    if config.studio_dir and Path(config.studio_dir).is_dir():
+        app.mount(
+            "/studio", StaticFiles(directory=config.studio_dir, html=True), name="studio"
+        )
     return app
