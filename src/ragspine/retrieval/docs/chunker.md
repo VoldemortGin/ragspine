@@ -2,7 +2,7 @@
 covers:
   - src/ragspine/retrieval/chunking/chunker.py
   - src/ragspine/retrieval/chunking/domain_presets.py
-verified-against: e50ede40a6bdd1179b68f37f4122b11e28664fef
+verified-against: e6d36368639903633ceb4d142684324cc12bce57
 ---
 
 # Chunker seam — pluggable chunking strategy
