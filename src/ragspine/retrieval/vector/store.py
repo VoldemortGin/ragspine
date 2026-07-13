@@ -84,10 +84,15 @@ class VectorStore(Protocol):
 
 
 def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
-    """余弦相似度；零向量一律 0.0（口径同 retrieval.cosine_similarity）。"""
-    dot = sum(x * y for x, y in zip(a, b, strict=False))
-    norm_a = math.sqrt(sum(x * x for x in a))
-    norm_b = math.sqrt(sum(y * y for y in b))
+    """余弦相似度；零向量一律 0.0（口径同 retrieval.cosine_similarity）。
+
+    用 math.fsum（正确舍入、跨解释器版本稳定）而非内置 sum：CPython 3.12 起 sum() 对 float
+    改用 Neumaier 补偿求和，令 sum() 结果与 3.11 差 1 ULP，会翻转近似平分的 cosine 名次、经 RRF
+    放大成跨 Python 版本的分值漂移（byte-identity golden 在 3.11 与 3.12+ 各异）。fsum 消此根因。
+    """
+    dot = math.fsum(x * y for x, y in zip(a, b, strict=False))
+    norm_a = math.sqrt(math.fsum(x * x for x in a))
+    norm_b = math.sqrt(math.fsum(y * y for y in b))
     if norm_a == 0.0 or norm_b == 0.0:
         return 0.0
     return dot / (norm_a * norm_b)

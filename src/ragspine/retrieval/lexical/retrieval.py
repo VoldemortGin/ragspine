@@ -107,10 +107,15 @@ def bm25_scores(
 
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
-    """余弦相似度；零向量一律 0.0。"""
-    dot = sum(x * y for x, y in zip(a, b, strict=False))
-    norm_a = math.sqrt(sum(x * x for x in a))
-    norm_b = math.sqrt(sum(y * y for y in b))
+    """余弦相似度；零向量一律 0.0。
+
+    用 math.fsum（正确舍入、跨 Python 版本稳定）而非内置 sum：CPython 3.12 起 sum() 对 float
+    改用 Neumaier 补偿求和，与 3.11 差 1 ULP，会翻转近似平分名次 -> 跨版本分值漂移。口径与
+    vector.store._cosine 一致。
+    """
+    dot = math.fsum(x * y for x, y in zip(a, b, strict=False))
+    norm_a = math.sqrt(math.fsum(x * x for x in a))
+    norm_b = math.sqrt(math.fsum(y * y for y in b))
     if norm_a == 0.0 or norm_b == 0.0:
         return 0.0
     return dot / (norm_a * norm_b)
