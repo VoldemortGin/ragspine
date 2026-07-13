@@ -12,8 +12,10 @@ in `src/ragspine/ingestion/docs/`.
 ## What lives here
 
 IR/text → stores. `source/` (the `SourceConnector` seam — *where* raw documents enter
-ingestion: a `Protocol` + frozen `RawDoc` + a dependency-free `FilesystemConnector` default +
-`make_source_connector` / `RAGSPINE_SOURCE_CONNECTOR` config selector with entry-point discovery),
+ingestion: a `Protocol` + frozen `RawDoc` + a dependency-free `FilesystemConnector` / `InMemoryConnector`
+default + lazy-`httpx` `HttpConnector` / `NotionConnector` (behind `[connectors]`) +
+`make_source_connector` / `RAGSPINE_SOURCE_CONNECTOR` config selector with entry-point discovery + a
+`bridge.ingest_from_connector` that carries `RawDoc` lineage end-to-end into the `FactStore`),
 `structured/` (fact ingestion + idempotent batch manifest ledger), `narrative/` (document chunk
 ingestion + extraction), `review/` (SME human review-queue state machine).
 

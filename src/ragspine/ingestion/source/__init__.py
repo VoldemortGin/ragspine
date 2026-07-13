@@ -5,6 +5,9 @@ RawDoc 流，让 provenance 不变量从【入口】就被 conformance 绑死。
 
 Submodules:
     connector.py — SourceConnector Protocol + RawDoc + FilesystemConnector 默认 + make_source_connector 工厂。
+    memory.py    — InMemoryConnector（零依赖、确定性的「只读外部库 / fixture」连接器）。
+    remote.py    — HttpConnector / NotionConnector（惰性 import httpx 的远程拉取，behind [connectors]）。
+    bridge.py    — ingest_from_connector：把 RawDoc 血缘端到端带进 FactStore（落盘 + 委托 ingest_file）。
 """
 
 from ragspine import _lazy_submodules

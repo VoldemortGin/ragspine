@@ -99,7 +99,7 @@ def vector_store_capability(request) -> str:
 # 注册表：受 conformance 约束的 SourceConnector 实现（名字）。第三方实现在此追加一行 +
 # 在 _build_source_connector 里补一行（或将来换成 entry-point 自动发现）即继承整套 provenance pack。
 # ---------------------------------------------------------------------------
-SOURCE_CONNECTOR_IMPLS = ("filesystem",)
+SOURCE_CONNECTOR_IMPLS = ("filesystem", "in_memory")
 
 
 def _build_source_connector(name: str, root):
@@ -108,6 +108,30 @@ def _build_source_connector(name: str, root):
         from ragspine.ingestion.source.connector import FilesystemConnector
 
         return FilesystemConnector(root)
+    if name == "in_memory":
+        # 把 fixture 树的同一批可见文件读成 RawDoc 包进 InMemoryConnector：零依赖确定性、
+        # 与 filesystem 同 provenance 口径（source_doc_id = 文件名，locator = 路径）。
+        import hashlib
+
+        from ragspine.ingestion.source.connector import RawDoc
+        from ragspine.ingestion.source.memory import InMemoryConnector
+
+        files = [
+            p
+            for p in sorted(root.rglob("*"), key=lambda p: p.relative_to(root).as_posix())
+            if p.is_file() and not p.name.startswith(("~$", "."))
+        ]
+        docs = [
+            RawDoc(
+                source_doc_id=p.name,
+                locator=str(p),
+                content=(content := p.read_bytes()),
+                content_type=p.suffix.lower(),
+                metadata={"file_hash": hashlib.sha256(content).hexdigest()},
+            )
+            for p in files
+        ]
+        return InMemoryConnector(docs)
     raise KeyError(name)
 
 

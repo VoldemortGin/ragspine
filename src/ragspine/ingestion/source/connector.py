@@ -113,14 +113,41 @@ def _load_filesystem() -> type[SourceConnector]:
     return FilesystemConnector
 
 
+def _load_in_memory() -> type[SourceConnector]:
+    from ragspine.ingestion.source.memory import InMemoryConnector
+
+    return InMemoryConnector
+
+
+def _load_http() -> type[SourceConnector]:
+    # remote.py 在函数体内 import（httpx 在其方法体内再惰性 import）：解析 http/notion 名字
+    # 不触发 httpx，离线默认路径零三方依赖。
+    from ragspine.ingestion.source.remote import HttpConnector
+
+    return HttpConnector
+
+
+def _load_notion() -> type[SourceConnector]:
+    from ragspine.ingestion.source.remote import NotionConnector
+
+    return NotionConnector
+
+
 _BUILTIN_LOADERS: dict[str, Any] = {
     "filesystem": _load_filesystem,
     "fs": _load_filesystem,
     "local": _load_filesystem,
+    "in_memory": _load_in_memory,
+    "memory": _load_in_memory,
+    "fixture": _load_in_memory,
+    "http": _load_http,
+    "https": _load_http,
+    "url": _load_http,
+    "notion": _load_notion,
 }
 
 # 错误信息中展示的内置规范名（别名不重复列出，保持可读）。
-_BUILTIN_DISPLAY_NAMES = ("none", "filesystem")
+_BUILTIN_DISPLAY_NAMES = ("none", "filesystem", "in_memory", "http", "notion")
 
 
 def _discover_entry_points() -> Sequence[Any]:
