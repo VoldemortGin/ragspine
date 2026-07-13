@@ -296,6 +296,9 @@ class PdfSpineOcrBackend:
           对栅格图做 PP-OCRv5 识别 + 几何重建，返回 ``ImageTable`` 列表（每格携带
           text / bbox / 颜色 / OCR 置信度）。词级 ``min_confidence`` 取 0.0（不预筛），
           低置信【格】的阈值分流交给 extract_grids/_build_grid（min_confidence=0.85）。
+          **该方法属可选特性**：pdfspine 0.0.4（``[pdf]`` extra 的下限）只暴露页级
+          ``get_textpage_ocr``、不含图像表重建；缺失时 recognize 按契约降级为空表 + 告警
+          （见 recognize），绝不抛异常、绝不静默丢弃扫描件。
         - ``ImageTable.row_count/col_count/cells``、``ImageTableCell.row/col/text/
           confidence``：row/col 为 0-based -> 转 1-based；confidence 为 0..100 -> /100。
 
@@ -319,17 +322,28 @@ class PdfSpineOcrBackend:
         把 PNG 经 pdfspine.open 转成单页 Document，对每页跑 find_image_tables，再把
         每个 ImageTable 映射成 OcrTable（行列 0->1-based，置信度 0..100 -> 0..1）。
         未检出表格时返回空表 + 一条 warning，不抛异常。
+
+        当所装 pdfspine 未提供图像表重建 API（find_image_tables，属可选 OCR 特性——
+        pdfspine 0.0.4 的 OCR 面是页级 get_textpage_ocr，不含图像表重建）时，家族默认
+        后端无法从栅格图重建表格：按本方法契约返回空表 + 一条告警（绝不抛异常），交由
+        上层 extract_grids/_ingest_pdf 走「未识别出表格 -> 告警 + 入复核」路径，使扫描件
+        绝不被静默丢弃。
         """
         import pdfspine  # 惰性 import：归 [pdf] extra。
 
         doc = pdfspine.open(stream=image_bytes, filetype="png")
+        capability_missing = False
         try:
             tables: list[OcrTable] = []
             for page in doc:
-                # find_image_tables 是 pdfspine Page 的运行时公共方法（签名/返回已核验
-                # 吻合），但其 .pyi 类型存根尚未声明它 —— 第三方存根缺口，待 pdfspine
-                # 补 stub 后移除本 ignore。
-                for image_table in page.find_image_tables(  # type: ignore[attr-defined]
+                # find_image_tables 是 pdfspine 的可选图像表重建 API；部分 pdfspine 构建/
+                # 版本（含 0.0.4）不暴露它（.pyi 亦未声明）。缺失时绝不抛异常——标记降级、
+                # 返回空表，交由上层入复核（honor recognize 的「不抛异常」契约）。
+                find_image_tables = getattr(page, "find_image_tables", None)
+                if find_image_tables is None:
+                    capability_missing = True
+                    break
+                for image_table in find_image_tables(
                     engine=self._engine,
                     dpi=self._dpi,
                     language=self._language,
@@ -343,7 +357,13 @@ class PdfSpineOcrBackend:
 
         warnings: list[str] = []
         if not tables:
-            warnings.append(f"page{page_no}: pdfspine find_image_tables 未检出任何表格")
+            if capability_missing:
+                warnings.append(
+                    f"page{page_no}: 所装 pdfspine 未提供 find_image_tables 图像表重建 API，"
+                    "家族默认 OCR 后端无法重建表格，转入人工复核"
+                )
+            else:
+                warnings.append(f"page{page_no}: pdfspine find_image_tables 未检出任何表格")
         return OcrPageResult(page_no=page_no, tables=tables, warnings=warnings)
 
     @staticmethod
