@@ -268,9 +268,10 @@ def _run_subprocess(
         "rlimit_as_bytes": _SUBPROCESS_RLIMIT_AS_BYTES,
         **provider_config,
     }
-    # 仓库根 = runner.py 上溯 4 层（src/ragspine/service/dify/runner.py -> parents[4]）；
-    # scripts/ 在仓库根下（parents[3] 会错指到 src/scripts/，文件不存在 -> 子进程 python
-    # 无法打开脚本 -> 退出码 2；这条只在 Linux 真子进程路径触发，macOS 回落 L1 遮蔽了它）。
+    # 仓库根 = runner.py 上溯 4 层（本文件在 src/ragspine/service/dify/ 下，parents[4] 即仓库根，
+    # parents[3] 只到 src 层）。脚本 run_dify_workflow.py 在仓库根的 scripts 目录下。早前误用
+    # parents[3] 令路径落到 src 层下的 scripts 子目录（无此文件）-> 子进程 python 打不开脚本 ->
+    # 退出码 2；这条只在 Linux 真子进程路径触发，macOS 回落 L1 遮蔽了它。
     script = Path(__file__).resolve().parents[4] / "scripts" / "run_dify_workflow.py"
     # 子进程 cwd 设为进程私有 tmp：honor「在临时目录里跑」的 L1 chdir(tmp) 语义，但隔离在
     # 子进程内、不污染父进程 cwd。脚本经自身 __file__ 锚定项目根，不依赖 cwd，故安全。
