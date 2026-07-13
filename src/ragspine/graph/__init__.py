@@ -15,6 +15,7 @@
 Submodules:
     store.py — W7c GraphStore 缝：Protocol + 零依赖确定性内存默认 InProcessGraphStore + 工厂。
     relation.py — W7a 结构关系图：从受控维度（profile + facts + chunks）确定性建图。
+    extractor.py — RelationExtractor 缝：默认确定性共现 + opt-in LLM 边（标注 model-derived/unverified，behind [llm]）。
     query.py — W7a 多跳查询入口：子公司汇总 / 同业对比 / 派生追溯（继承安全门 + RESTRICTED 隔离）。
     narrative.py — W7b 叙事 GraphRAG 骨架（opt-in，behind [graph]+[llm]）：抽取 + 社区 + 摘要。
     adapters/ — 第三方 GraphStore 适配器（networkx 等），延迟 import，behind [graph] extra。

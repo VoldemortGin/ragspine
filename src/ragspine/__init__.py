@@ -13,6 +13,7 @@ Submodules:
     fixtures/ — 合成 fixture / ground-truth 生成器（确定性、硬编码），tests 与 scripts 共用。
     graph/ — GraphRAG 域（W7）：确定性结构关系图 + GraphStore 缝 + 叙事 GraphRAG 骨架。
     ingestion/ — IR/文本 → 各类存储：结构化事实、叙事块、人工复核队列。
+    n8n/ — n8n workflow JSON ↔ Dify DSL 双向无损转换器（parse/convert 两段）。
     pipeline/ — 管线拓扑导出：从真实装配派生静态 PipelineGraph（Mermaid/DOT/JSON）。
     retrieval/ — 叙事 RAG：切块、BM25 词法、向量、listwise 精排、agent 接入。
     service/ — HTTP 服务层：ServiceConfig、FastAPI app、任务队列、FAQ 短路缓存。
