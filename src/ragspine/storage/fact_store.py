@@ -128,6 +128,55 @@ class Fact:
                 "period": f"{self.period_type}{self.period}",
             }
 
+    @classmethod
+    def metric(
+        cls,
+        *,
+        metric_code: str,
+        entity: str,
+        period_type: str,
+        period: str,
+        value: float,
+        unit: str,
+        source_doc_id: str,
+        source_locator: str,
+        channel: str = "TOTAL",
+        geography: str = "",
+        **extra: object,
+    ) -> "Fact":
+        """Keyword-only 建造器：免受 10 个位置字段顺序之扰，只按名字传。
+
+        位置构造器 `Fact(metric_code, entity, geography, channel, period_type, period,
+        value, unit, source_doc_id, source_locator, ...)` 的前十个字段是顺序敏感的、易错位
+        （`qa_eval` 还靠 `Fact(*row)` 绑 10-tuple，故字段顺序不可改）。本建造器全部
+        keyword-only、顺序无关：`channel` 缺省 'TOTAL'（同 `query` 口径），`geography`
+        缺省 ''（无地理维，同 narrative_ingest 默认），其余 v2 可选字段
+        （`tags` / `source_file_hash` / `confidence` / `review_status` / `valid_as_of` /
+        `dimensions` ...）经 `**extra` 透传给位置构造器。
+
+        例：
+            fact = Fact.metric(
+                metric_code="REVENUE", entity="ACME_CN",
+                period_type="FY", period="2024",
+                value=2680.0, unit="US$m",
+                source_doc_id="q4.xlsx", source_locator="sheet=PL!B2",
+                geography="CN", confidence=0.98,
+            )
+        """
+        return cls(
+            metric_code=metric_code,
+            entity=entity,
+            geography=geography,
+            channel=channel,
+            period_type=period_type,
+            period=period,
+            value=value,
+            unit=unit,
+            source_doc_id=source_doc_id,
+            source_locator=source_locator,
+            **extra,  # type: ignore[arg-type]
+        )
+
 
 # 基础列（与原始 schema 顺序一致，旧测试依赖）。
 _BASE_COLUMNS = [
@@ -236,10 +285,24 @@ class SqliteFactStore:
 
     行为逐位不变（原 concrete `FactStore` 改名而来，纯结构性提取，不改任何存储格式 / 查询语义 /
     dim_key / found-not-found 语义）。结构匹配 @runtime_checkable FactStore Protocol。
+
+    线程契约（并发使用约定）——**一个实例绑定到创建它的线程，不跨线程共享**：
+        - 底层是单条 `sqlite3.connect(...)`（默认 `check_same_thread=True`），故在【创建它的
+          线程之外】使用同一实例会抛
+          `ProgrammingError: SQLite objects created in a thread can only be used in that same thread`。
+          这是【刻意】的护栏，不是缺陷：共享一条 sqlite 连接跨线程写没有加锁保护，会静默损坏。
+        - **FastAPI / 线程池场景**：不要把一个 store 实例挂到 app.state 跨请求共享。每个请求 / 每次
+          操作【各自打开一个】store（服务层已如此：`service` 的 `open_fact_store(config)` 是
+          per-request 上下文管理器，在承接该请求的线程里 open→用→close，天然满足本契约）。
+          worker 侧同理，job 自持自己的 store。
+        - 需要真正的并发读写？那是连接池 / WAL 多连接的活，属显式 follow-up（DuckDB/Postgres
+          adapter 或 sqlite WAL 池），**本默认实现刻意不引入连接池**——保持零依赖、单连接、可预测。
     """
 
     def __init__(self, db_path: str | Path):
         self.db_path = str(db_path)
+        # 单连接、绑定创建线程（check_same_thread 默认 True）。跨线程共享请改为 per-request/op
+        # 各开一个 store（见类 docstring「线程契约」；服务层 open_fact_store 已照此办）。
         self._conn = sqlite3.connect(self.db_path)
         self._conn.row_factory = sqlite3.Row
         # 确定性资源回收：对象被 GC 回收时（即便调用方忘了 close）也关连接，
@@ -413,6 +476,19 @@ class SqliteFactStore:
         )
         self._conn.commit()
         return cur.rowcount
+
+    def has_source_doc(self, source_doc_id: str) -> bool:
+        """该 source_doc_id 是否已有【任一】事实入库（不论 review_status）。
+
+        存在性助手：产品层据此判断某源文档是否已 ingest（幂等入库 / 去重 / 增量刷新前的
+        探测），免得 `execute_read('SELECT ...')` 再数长度。`LIMIT 1` 命中即返回，不拉全行。
+        不存在返回 False、不报错。
+        """
+        row = self._conn.execute(
+            "SELECT 1 FROM fact_metric WHERE source_doc_id = ? LIMIT 1",
+            (source_doc_id,),
+        ).fetchone()
+        return row is not None
 
     def set_review_status(self, dim_key: str, status: str) -> int:
         """按 dim_key 改写某条事实的 review_status，返回受影响行数（0 或 1）。

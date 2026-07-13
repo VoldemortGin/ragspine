@@ -55,10 +55,20 @@ Formalized into the five-part breadth contract (same paradigm as `make_vector_st
   channel, period_type, period, value, unit, source_doc_id, source_locator`. `qa_eval`
   binds a 10-tuple via `Fact(*row)`; reordering or removing any breaks it. New fields are
   **additive only**, appended at the end (the arbitrary-dimension `dimensions` bag is the
-  last field).
+  last field). For hand-written call sites, prefer the keyword-only builder
+  **`Fact.metric(...)`** (order-immune; `channel` defaults `"TOTAL"`, `geography` defaults
+  `""`, v2 fields pass through) over the positional constructor — it can't silently misorder.
 - **`dimensions` is an in-memory bag, excluded from DB columns**, reserved-name-guarded in
   `__post_init__` (it may never shadow a structural/lineage/`dim_key` column); empty bags
   derive an identity mirror. Don't write it to a column or let a reserved name through.
+- **`SqliteFactStore` is single-threaded — one instance per thread/request.** It holds one
+  `sqlite3` connection bound to its creating thread (`check_same_thread=True`); using an
+  instance from another thread raises. Under a FastAPI threadpool, open one store per
+  request/op (the service's `open_fact_store(config)` context manager already does), never
+  share one across requests. True concurrent read/write (connection pool / WAL) is a
+  deliberate follow-up — this default stays zero-dep single-connection. `has_source_doc(id)`
+  is the cheap existence probe (does any fact for that `source_doc_id` exist, regardless of
+  `review_status`).
 
 ## Deep dives
 
