@@ -11,6 +11,8 @@
     - docx（W3b）：docspine 遍历正文按文档顺序取段落文本；表格内容跳过（表格数字归
       结构化通路管，与 pptx 同口径）。定位串 'para={N}'（N 只给产出非空文本的段落编号，
       1-based）。docspine 是可选 [doc] extra，惰性 import。
+    - txt（纯文本）：按空行拆成段落块，逐块归一化后成段；定位串 'para={N}'（N 只给
+      产出非空文本的块编号，1-based，与 docx 同口径）。零三方依赖。
 
 统一返回 NarrativeDoc：segments 各段文本内部以 '\\n' 分行、to_text() 以空行
 （'\\n\\n'）连接各段，正好配合 chunking 的「非空行 = 段落」切分契约。
@@ -25,7 +27,7 @@ from pptx import Presentation
 from ragspine.extraction.extractors.pptx_styled_extractor import compute_file_hash
 
 # 本期支持的叙事来源后缀（扫描件 / 其它格式归别的线）。
-SUPPORTED_SUFFIXES = {".pptx", ".pdf", ".docx", ".docm"}
+SUPPORTED_SUFFIXES = {".pptx", ".pdf", ".docx", ".docm", ".txt"}
 
 
 @dataclass
@@ -174,6 +176,30 @@ def extract_docx_narrative(path: str | Path) -> NarrativeDoc:
     return doc
 
 
+def extract_txt_narrative(path: str | Path) -> NarrativeDoc:
+    """抽取一个纯文本 .txt 的叙事文本：按空行拆段落块，逐块归一化聚合。
+
+    - UTF-8 读取，容错 errors='replace'（避免个别坏字节中断整批，与 no-fabrication 无冲突）。
+    - 仅产出非空文本的块获得 para 序号；locator='para={N}'（N=非空块序，1-based，
+      空块不占用，与 docx 同口径）。零三方依赖、确定性。
+    """
+    path = Path(path)
+    doc = NarrativeDoc(doc_id=path.name, file_hash=compute_file_hash(path))
+
+    raw = path.read_text(encoding="utf-8", errors="replace")
+    para_no = 0
+    for block in raw.split("\n\n"):
+        text = _clean_block(block)
+        if not text:
+            continue
+        para_no += 1
+        doc.segments.append(NarrativeSegment(
+            text=text,
+            source_locator=f"para={para_no}",
+        ))
+    return doc
+
+
 def extract_narrative(path: str | Path) -> NarrativeDoc:
     """按后缀分发到对应抽取器；不支持的后缀 ValueError。"""
     path = Path(path)
@@ -184,4 +210,8 @@ def extract_narrative(path: str | Path) -> NarrativeDoc:
         return extract_pdf_narrative(path)
     if suffix in (".docx", ".docm"):
         return extract_docx_narrative(path)
-    raise ValueError(f"不支持的叙事来源类型：{path.name}（仅 .pptx / .pdf / .docx）")
+    if suffix == ".txt":
+        return extract_txt_narrative(path)
+    raise ValueError(
+        f"不支持的叙事来源类型：{path.name}（仅 .pptx / .pdf / .docx / .txt）"
+    )

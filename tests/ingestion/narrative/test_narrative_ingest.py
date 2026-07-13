@@ -257,7 +257,7 @@ def test_folder_scan_only_supported_types(tmp_path, store):
     folder.mkdir()
     _make_deck(folder / "deck.pptx", ["Narrative."])
     _make_pdf(folder / "report.pdf", ["Some report text."])
-    (folder / "readme.txt").write_text("ignore me", encoding="utf-8")
+    (folder / "readme.md").write_text("ignore me", encoding="utf-8")
     (folder / "~$deck.pptx").write_bytes(b"office lock file")
 
     report = ingest_narrative(folder, store)

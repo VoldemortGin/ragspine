@@ -208,7 +208,7 @@ def test_dispatch_by_suffix(deck_path, mixed_pdf_path):
 
 
 def test_dispatch_unsupported_suffix(tmp_path):
-    path = tmp_path / "notes.txt"
+    path = tmp_path / "notes.rtf"
     path.write_text("plain text", encoding="utf-8")
     with pytest.raises(ValueError):
         extract_narrative(path)
