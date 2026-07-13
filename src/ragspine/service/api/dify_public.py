@@ -215,7 +215,8 @@ def _execute_workflow(
     except DifyUnsafeError as exc:
         return _RunOutcome("failed", None, f"{exc.code}: {exc}", [], _elapsed())
     except (DifyRunError, DifyTimeoutError) as exc:
-        traces = exc.context.get("node_traces") or []
+        raw_traces = exc.context.get("node_traces")
+        traces = raw_traces if isinstance(raw_traces, list) else []
         return _RunOutcome("failed", None, f"{exc.code}: {exc}", traces, _elapsed())
 
     traces = result.pop("__node_traces__", None) or []
@@ -442,7 +443,8 @@ def app_info(request: Request, config: ConfigDep) -> JSONResponse:
     if isinstance(loaded, JSONResponse):
         return loaded
     doc = _parse_app_yaml(loaded[2])
-    app_section = doc.get("app") if isinstance(doc.get("app"), dict) else {}
+    app_raw = doc.get("app")
+    app_section = app_raw if isinstance(app_raw, dict) else {}
     return JSONResponse(
         content={
             "name": str(app_section.get("name", "")),
