@@ -14,8 +14,9 @@ query_metric 的 tool-use 循环与三态最终回答，绝不编造数字。
 """
 
 import json
+from collections.abc import Iterator
 from datetime import date
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from corespine import (
     ChatCompletion,
@@ -47,7 +48,30 @@ _ANTHROPIC_FINISH = {
 
 # re-export corespine 的 LLMProvider 协议与 ProviderError 异常；ragspine 不再自定义。
 __all__ = ["LLMProvider", "AnthropicProvider", "MockProvider", "ProviderError",
-           "DEFAULT_ANTHROPIC_MODEL", "NARRATIVE_PROMPT_PREFIX"]
+           "DEFAULT_ANTHROPIC_MODEL", "NARRATIVE_PROMPT_PREFIX",
+           "StreamingProvider", "iter_text_chunks", "STREAM_CHUNK_CHARS"]
+
+# 确定性定长文本 delta：SSE 逐块推送用，跨平台稳定（按 code point 切片）。
+STREAM_CHUNK_CHARS = 24
+
+
+def iter_text_chunks(text: str, size: int = STREAM_CHUNK_CHARS) -> Iterator[str]:
+    """把 text 切成连续的 size 字符片段。空串不产出 chunk；确定性、跨平台。"""
+    for i in range(0, len(text), size):
+        yield text[i:i + size]
+
+
+@runtime_checkable
+class StreamingProvider(Protocol):
+    """可选的流式扩展缝（独立于 corespine 的 LLMProvider，不改后者）。
+
+    实现者仍是合法的 LLMProvider（只多一个 chat_stream 方法）；调用方经
+    isinstance(provider, StreamingProvider) 探测能力，缺省 chat-only provider 不受影响。
+    """
+
+    def chat_stream(
+        self, messages: list[dict[str, Any]], *, tools: list[dict[str, Any]] | None = None
+    ) -> Iterator[str]: ...
 
 
 def _openai_tool_to_anthropic(tool: dict[str, Any]) -> dict[str, Any]:
@@ -262,6 +286,17 @@ class MockProvider:
             )
 
         return _completion_text("请补充想查询的指标/实体/期间，例如：香港去年REVENUE多少。")
+
+    def chat_stream(
+        self, messages: list[dict[str, Any]], *, tools: list[dict[str, Any]] | None = None
+    ) -> Iterator[str]:
+        """确定性地流式回放 chat(...) 会产出的同一段文本。
+
+        直接复用 chat 派生内容再定长切块；首轮 tool_call 的 content=None → 无 chunk。
+        """
+        resp = self.chat(messages, tools=tools)
+        text = resp.choices[0].message.content or ""
+        yield from iter_text_chunks(text)
 
     @staticmethod
     def _final_answer_text(result: dict[str, object]) -> str:

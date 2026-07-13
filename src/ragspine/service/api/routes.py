@@ -3,11 +3,13 @@
 不重写 Agent/retrieval/ingestion 逻辑——一律调用既有 workflow。
 """
 
+import json
+from collections.abc import Iterator
 from datetime import date
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from ragspine.agent.agent import AgentResult, answer_question
 from ragspine.agent.decompose import make_decomposer
@@ -17,7 +19,7 @@ from ragspine.agent.intent import (
     ROUTE_COMPOSITE,
     ROUTE_STRUCTURED,
 )
-from ragspine.agent.llm_provider import LLMProvider
+from ragspine.agent.llm_provider import LLMProvider, iter_text_chunks
 from ragspine.agent.query_transform import make_adaptive_decomposer
 from ragspine.common.observability import emit_trace, new_request_id
 from ragspine.pipeline.topology import agent_topology, service_topology
@@ -247,6 +249,98 @@ def ask(
             500, type_="InternalError", message="internal error",
             request_id=request_id,
         )
+
+
+def _sse_frame(event: dict[str, Any]) -> str:
+    """SSE 单帧封装，与 dify_public._sse_iter 同款 `data: {json}\\n\\n` 形状。"""
+    return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+
+@router.post("/v1/ask/stream", response_model=None)
+def ask_stream(
+    req: AskRequest,
+    config: ConfigDep,
+    provider: ProviderDep,
+    faq_cache: FAQCacheDep,
+) -> StreamingResponse | JSONResponse:
+    """SSE 流式 ask：与 /v1/ask 完全同一守卫链，但把已守卫的 answer 分块推送。
+
+    **反编造纪律**：整条守卫链（含 not_found→拒答改写）在流打开之前跑到完成——所有
+    provider/store/retriever 访问都在下方 try 块（生成器之外）里；生成器只回放已算好的
+    answer 字符串，零模型/存储访问。因此 not-found 流只可能承载拒答文案。守卫前置计算
+    任何失败 → 正常 JSON 500（绝不半开流）。
+    """
+    request_id = new_request_id()
+    try:
+        ref = _ref_date(req.reference_date, config)
+
+        # 1) FAQ 短路（命中即用缓存答案，绝不触达 provider/fact store/retriever）
+        hit = faq_cache.lookup(req.question, reference_date=ref)
+        if hit is not None:
+            emit_trace(
+                request_id=request_id, cache_hit=True,
+                faq_id=hit.item_id, faq_version=hit.version,
+            )
+            answer = hit.answer
+            route = "faq"
+            answer_kind = "normal"
+            clarification: dict[str, Any] | None = None
+            sources = [SourceInfo(doc=hit.source).model_dump()] if hit.source else []
+            tool_status_summary = {"found": 0, "not_found": 0, "unrecognized": 0}
+            cache = CacheInfo(
+                hit=True, type=hit.cache_type, faq_id=hit.item_id,
+                version=hit.version, source=hit.source,
+            ).model_dump()
+        else:
+            # 2) miss -> 正常 workflow（资源每请求各自开关；守卫在此跑完）
+            with open_fact_store(config) as store, \
+                    open_narrative_retriever(config, provider) as retriever:
+                if config.adaptive != "none":
+                    decomposer = make_adaptive_decomposer(config.adaptive, provider=provider)
+                else:
+                    decomposer = make_decomposer(config.query_decompose, provider=provider)
+                result = answer_question(
+                    req.question, store, provider,
+                    reference_date=ref, narrative_retriever=retriever,
+                    decomposer=decomposer,
+                )
+            summary = _tool_status_summary(result.tool_results)
+            answer_kind = _answer_kind(result, summary)
+            emit_trace(
+                request_id=request_id, cache_hit=False, route=result.route,
+                answer_kind=answer_kind, found=summary["found"],
+                not_found=summary["not_found"], unrecognized=summary["unrecognized"],
+            )
+            answer = result.answer
+            route = result.route
+            clar_info = _clarification_info(result)
+            clarification = clar_info.model_dump() if clar_info is not None else None
+            sources = [SourceInfo.model_validate(s).model_dump() for s in result.sources]
+            tool_status_summary = summary
+            cache = CacheInfo(hit=False).model_dump()
+    except Exception:  # 守卫前置计算失败 -> 正常 JSON 500，绝不半开流
+        return _error_response(
+            500, type_="InternalError", message="internal error",
+            request_id=request_id,
+        )
+
+    def gen() -> Iterator[str]:
+        # 仅回放已算好的守卫值，零 provider/store 访问。
+        yield _sse_frame({"type": "start", "request_id": request_id})
+        for chunk in iter_text_chunks(answer):
+            yield _sse_frame({"type": "delta", "text": chunk})
+        yield _sse_frame({
+            "type": "done",
+            "request_id": request_id,
+            "route": route,
+            "answer_kind": answer_kind,
+            "clarification": clarification,
+            "sources": sources,
+            "tool_status_summary": tool_status_summary,
+            "cache": cache,
+        })
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 # ---------------------------------------------------------------------------

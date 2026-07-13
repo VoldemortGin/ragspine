@@ -36,6 +36,20 @@ its `TaskQueue` Protocol extends `corespine.TaskQueue`, and `JobError` / `PathNo
 inherit `CorespineError` with stable codes. External error shape `{type,message,stage,retryable}`
 is unchanged (normalized via `error_to_dict`).
 
+`/v1/ask/stream` is the **SSE variant of `/v1/ask`** (`routes.py` `ask_stream`, returns
+`StreamingResponse` `text/event-stream`), driven by the `StreamingProvider` seam
+(`agent/llm_provider.py`: a `@runtime_checkable` Protocol adding only `chat_stream(...) -> Iterator[str]`
+alongside `LLMProvider.chat`, plus `iter_text_chunks` / `STREAM_CHUNK_CHARS`; `MockProvider` satisfies it).
+Events: `{"type":"start",request_id}` → one `{"type":"delta","text":chunk}` per `iter_text_chunks(answer)`
+→ `{"type":"done",...route/answer_kind/clarification/sources/tool_status_summary/cache}`, framed
+`data: {json}\n\n` (same idiom as `dify_public._sse_iter`).
+**Invariant — guard-before-stream**: the anti-fabrication guard runs to completion (the not_found→refusal
+rewrite is applied) **before the SSE stream opens** — the whole guarded compute (FAQ short-circuit →
+`answer_question` → derive answer/route/answer_kind/sources/cache → emit trace) happens in the handler body,
+wrapped in `try/except → _error_response(500)` (a pre-stream failure is a normal JSON 500, never a half-open
+stream); the generator streams only the already-guarded `AgentResult.answer` and makes **no** provider/store
+calls, so a not-found answer can only ever stream the refusal.
+
 ## Invariants
 
 - **FAQ conservative exclusions** — structured-numeric / competitor / real-time /
