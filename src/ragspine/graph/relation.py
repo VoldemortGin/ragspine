@@ -28,6 +28,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from ragspine.common.company_profile import DimensionSpec, DomainProfile
+from ragspine.graph.extractor import RelationExtractor
 from ragspine.graph.store import GraphEdge, GraphNode, GraphStore, InProcessGraphStore
 from ragspine.storage.fact_store import Fact
 
@@ -247,12 +248,18 @@ def build_relation_graph(
     facts: Iterable[Fact] = (),
     chunks: Iterable[object] = (),
     store: GraphStore | None = None,
+    relation_extractor: RelationExtractor | None = None,
 ) -> GraphStore:
     """从受控维度（profile + facts + chunks）确定性地建出结构关系图，返回 store。
 
     store 为 None 时新建零依赖内存默认 InProcessGraphStore。建图按 id / (src,dst,type) 升序
     单遍构造、幂等（upsert 替换），同输入同输出。每个节点/边带非空血缘；doc 节点的敏感度取自
     chunk（最严者胜），于是 RESTRICTED chunk 的 doc 节点被存储层自动隔离、绝不出域。
+
+    relation_extractor 为 None（默认）时输出【字节不变】——不追加任何关系边。注入时，在 base 图
+    之上【追加】其抽出的实体↔实体关系边（upsert 幂等，不改 base 边）：默认确定性共现
+    （DeterministicRelationExtractor）或 opt-in LLM（LLMRelationExtractor，边带 model-derived
+    /unverified 标记、RESTRICTED 不入 LLM、竞品端点经 SecurityGate 剔除）。
     """
     facts = list(facts)
     chunks = list(chunks)
@@ -266,4 +273,7 @@ def build_relation_graph(
     _add_chunk_mentions(chunks, build)
     store.upsert_nodes([build.nodes[nid] for nid in sorted(build.nodes)])
     store.upsert_edges([build.edges[key] for key in sorted(build.edges)])
+    if relation_extractor is not None:
+        extra_edges = relation_extractor.extract(chunks)
+        store.upsert_edges(sorted(extra_edges, key=lambda e: (e.src, e.dst, e.type)))
     return store

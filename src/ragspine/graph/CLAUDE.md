@@ -28,6 +28,13 @@ default `answer_question` / retrieval / eval path stays byte-identical (ADR 0001
   `detect_communities`, `CommunitySummarizer` / `LLMCommunitySummarizer`,
   `make_narrative_graph` / `RAGSPINE_NARRATIVE_GRAPH`. LLM extraction is non-deterministic →
   never on the default path; community summaries are **syntheses, never citable facts**.
+- `extractor.py` — **`RelationExtractor` seam** (append extra relation edges to the base
+  graph). Default `DeterministicRelationExtractor` (rule-based same-doc entity co-occurrence →
+  `co_occurs_with` edges, deterministic, clean lineage — distinct from base doc→entity
+  `mentions`) + opt-in `LLMRelationExtractor` (behind `[llm]`; mirrors `LLMGraphExtractor`'s
+  degrade discipline), selected by `make_relation_extractor` / `RAGSPINE_RELATION_EXTRACTOR`.
+  Wired into `build_relation_graph(..., relation_extractor=None)` — default-off / byte-identical;
+  injected → upsert-append on top of the unchanged base edges.
 - `adapters/` — third-party `GraphStore` adapters (`networkx_store.py`), lazy-imported,
   behind `[graph]` extra; each runs the same `tests/conformance/test_graph_store.py` pack.
 
@@ -53,6 +60,13 @@ default `answer_question` / retrieval / eval path stays byte-identical (ADR 0001
 - **Anti-fabrication unbroken.** Numbers stay in the structured channel. The relation graph
   never invents facts; W7b community summaries are explicitly `is_synthesis=True` and never
   citable as facts. `answer_question` is untouched — W7 adds capability beside it, not within.
+- **LLM-derived relation edges are never silently trusted.** `LLMRelationExtractor` edges
+  carry `derived=model-derived` + `verified=unverified`, RESTRICTED chunks never reach the LLM
+  (isolation routing at input), and every extracted endpoint is `SecurityGate`-screened (a
+  competitor/external endpoint drops the edge). The deterministic default
+  (`DeterministicRelationExtractor`) is rule-derived with clean lineage (no model markers), and
+  `build_relation_graph`'s default (`relation_extractor=None`) stays byte-identical;
+  `answer_question` untouched.
 
 ## Read before editing
 
