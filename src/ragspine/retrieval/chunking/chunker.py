@@ -123,13 +123,22 @@ def _load_book() -> type[Chunker]:
     return BookChunker
 
 
+def _load_parent_child() -> type[Chunker]:
+    """惰性加载父子（small-to-big）分段预设（批次 2.2）；import 留在此处以保持本模块零额外依赖。"""
+    from ragspine.retrieval.chunking.domain_presets import ParentChildChunker
+
+    return ParentChildChunker
+
+
 _BUILTIN_LOADERS: dict[str, Callable[[], type[Chunker]]] = {
     "default": _load_default,
     "recursive": _load_default,
     "structural": _load_default,
     "layout": _load_layout,
-    "parent_child": _load_layout,
-    "parent-child": _load_layout,
+    "parent_child": _load_parent_child,
+    "parent-child": _load_parent_child,
+    "small_to_big": _load_parent_child,
+    "small-to-big": _load_parent_child,
     "sentence_window": _load_sentence_window,
     "sentence-window": _load_sentence_window,
     "semantic": _load_semantic,
@@ -147,6 +156,7 @@ _BUILTIN_DISPLAY_NAMES = (
     "none",
     "default",
     "layout",
+    "parent_child",
     "sentence_window",
     "semantic",
     "laws",

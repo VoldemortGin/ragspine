@@ -63,6 +63,10 @@ class Chunk:
         heading:        所属小节标题（布局感知切块器填，亦可喂 contextual 情境头）；默认 ''。
         window_text:    合成时展开的上下文窗口（sentence-window 切块器填 ±N 句窗口，检索粒度=单句、
                         生成上下文=窗口，二者解耦）；默认 ''（其余切块器不填，向后兼容 / 等价安全）。
+        parent_locator: 父小节的【真实】段落跨度 locator（parent-child 预设填，
+                        '{prefix}#para{起}-{止}' 覆盖整节）；child 命中展开到 parent 上下文时的
+                        citation 回指——指向真实 parent 段落跨度，绝不臆造。默认 ''（其余切块器不填，
+                        向后兼容 / 等价安全）。
     """
 
     chunk_id: str
@@ -82,6 +86,7 @@ class Chunk:
     parent_id: str = ""
     heading: str = ""
     window_text: str = ""
+    parent_locator: str = ""
 
 
 def chunk_document(

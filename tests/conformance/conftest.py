@@ -163,6 +163,7 @@ def source_connector(request, source_tree):
 CHUNKER_IMPLS = (
     "default",
     "layout",
+    "parent_child",
     "sentence_window",
     "semantic",
     "laws",
@@ -203,6 +204,10 @@ def _build_chunker(name: str):
         from ragspine.retrieval.chunking.domain_presets import BookChunker
 
         return BookChunker()
+    if name == "parent_child":
+        from ragspine.retrieval.chunking.domain_presets import ParentChildChunker
+
+        return ParentChildChunker()
     raise KeyError(name)
 
 

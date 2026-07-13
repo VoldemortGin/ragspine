@@ -116,6 +116,16 @@ class LayoutAwareChunker:
         """
         return is_heading(line)
 
+    def _child_extra(self, section_text: str, parent_locator: str) -> dict[str, str]:
+        """每个 child 块的额外 Chunk 字段（可覆写钩子）：默认 {}（基类输出逐位等价）。
+
+        parent-child（small-to-big）预设覆写本方法返回 {'window_text': 父小节全文,
+        'parent_locator': 父小节真实段落跨度}——child 精准命中后可确定性展开到 parent 上下文，
+        provenance 指向真实 parent locator。默认返回空 dict，故基类不填 window_text/parent_locator
+        （二者回落各自默认 ''），行为不变。
+        """
+        return {}
+
     def chunk(
         self,
         text: str,
@@ -145,6 +155,13 @@ class LayoutAwareChunker:
             )
             globals_ = [gno for gno, _ in sec_paras]  # 小节内局部段号 -> 全局段号映射表
             parent_id = f"{meta.doc_id}#s{s_idx}"
+            # 父小节的真实段落跨度 locator（parent-child 预设经 _child_extra 用之，指向真实 parent 段落）。
+            g_first, g_last = globals_[0], globals_[-1]
+            parent_part = (
+                f"para{g_first}" if g_first == g_last else f"para{g_first}-{g_last}"
+            )
+            parent_locator = f"{prefix}#{parent_part}"
+            extra = self._child_extra(section_text, parent_locator)
             for lc in local_chunks:
                 seq = len(out)
                 g_start = globals_[lc.para_start - 1]
@@ -170,6 +187,7 @@ class LayoutAwareChunker:
                         sensitivity=meta.sensitivity,
                         parent_id=parent_id,
                         heading=heading,
+                        **extra,
                     )
                 )
         return out
