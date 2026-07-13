@@ -102,6 +102,27 @@ def _load_semantic() -> type[Chunker]:
     return SemanticChunker
 
 
+def _load_laws() -> type[Chunker]:
+    """惰性加载法律条款层级预设（Item ⑩）；import 留在此处以保持本模块零额外依赖。"""
+    from ragspine.retrieval.chunking.domain_presets import LawsChunker
+
+    return LawsChunker
+
+
+def _load_qa() -> type[Chunker]:
+    """惰性加载问答对成对预设（Item ⑩）；import 留在此处以保持本模块零额外依赖。"""
+    from ragspine.retrieval.chunking.domain_presets import QaChunker
+
+    return QaChunker
+
+
+def _load_book() -> type[Chunker]:
+    """惰性加载章节层级预设（Item ⑩）；import 留在此处以保持本模块零额外依赖。"""
+    from ragspine.retrieval.chunking.domain_presets import BookChunker
+
+    return BookChunker
+
+
 _BUILTIN_LOADERS: dict[str, Callable[[], type[Chunker]]] = {
     "default": _load_default,
     "recursive": _load_default,
@@ -112,10 +133,26 @@ _BUILTIN_LOADERS: dict[str, Callable[[], type[Chunker]]] = {
     "sentence_window": _load_sentence_window,
     "sentence-window": _load_sentence_window,
     "semantic": _load_semantic,
+    "laws": _load_laws,
+    "law": _load_laws,
+    "legal": _load_laws,
+    "qa": _load_qa,
+    "faq": _load_qa,
+    "book": _load_book,
+    "chapter": _load_book,
 }
 
 # 错误信息中展示的内置规范名（别名不重复列出，保持可读）。
-_BUILTIN_DISPLAY_NAMES = ("none", "default", "layout", "sentence_window", "semantic")
+_BUILTIN_DISPLAY_NAMES = (
+    "none",
+    "default",
+    "layout",
+    "sentence_window",
+    "semantic",
+    "laws",
+    "qa",
+    "book",
+)
 
 
 def _discover_entry_points() -> Sequence[Any]:

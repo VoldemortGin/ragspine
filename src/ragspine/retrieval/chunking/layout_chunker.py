@@ -20,7 +20,7 @@ small-to-big：检索命中小子块后，group_children_by_parent 把同 parent
 """
 
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from ragspine.retrieval.chunking.chunking import (
     DEFAULT_CHUNK_CHARS,
@@ -81,15 +81,19 @@ def _paragraphs(text: str) -> list[tuple[int, str]]:
 
 def _sections(
     paras: list[tuple[int, str]],
+    is_heading_fn: Callable[[str], bool] = is_heading,
 ) -> list[tuple[str, list[tuple[int, str]]]]:
     """把全局段落切成小节：每个标题段起一节（标题为该节首段，随其内容同块）；
     首个标题前的前导段自成一节（heading=''）。返回 [(heading, [(全局段号, 段文本), ...]), ...]。
+
+    is_heading_fn 为可覆写的标题谓词，默认取模块级 is_heading（默认调用方逐位等价）；
+    领域预设切块器传入各自的谓词以调优小节边界。
     """
     sections: list[tuple[str, list[tuple[int, str]]]] = []
     heading = ""
     current: list[tuple[int, str]] = []
     for gno, ptext in paras:
-        if is_heading(ptext):
+        if is_heading_fn(ptext):
             if current:
                 sections.append((heading, current))
             heading = ptext
@@ -103,6 +107,14 @@ def _sections(
 
 class LayoutAwareChunker:
     """布局感知 + 父子切块器（Chunker 缝实现）：标题边界切 + 小节内复用 chunk_document 预算贪心。"""
+
+    def _is_heading(self, line: str) -> bool:
+        """小节边界的标题谓词（可覆写钩子）：默认复用模块级 is_heading。
+
+        领域预设子类只覆写本方法即调优小节边界，其余（chunk_document 复用、parent_id/heading
+        标注、locator/全局段号）全部继承——默认谓词不变，故基类行为逐位等价。
+        """
+        return is_heading(line)
 
     def chunk(
         self,
@@ -125,7 +137,7 @@ class LayoutAwareChunker:
 
         prefix = meta.source_locator_prefix or meta.doc_id
         out: list[Chunk] = []
-        for s_idx, (heading, sec_paras) in enumerate(_sections(paras)):
+        for s_idx, (heading, sec_paras) in enumerate(_sections(paras, self._is_heading)):
             section_text = "\n".join(t for _, t in sec_paras)
             # 小节内的预算贪心 / 重叠 / 超长段切分全交给 chunk_document（行为一致、零重复）。
             local_chunks = chunk_document(

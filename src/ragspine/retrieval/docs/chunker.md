@@ -1,7 +1,8 @@
 ---
 covers:
   - src/ragspine/retrieval/chunking/chunker.py
-verified-against: 39de878
+  - src/ragspine/retrieval/chunking/domain_presets.py
+verified-against: e50ede40a6bdd1179b68f37f4122b11e28664fef
 ---
 
 # Chunker seam — pluggable chunking strategy
@@ -94,6 +95,31 @@ and **byte-identical**. Both are provenance-conformant (`CHUNKER_IMPLS` now
   the conformance pack runs offline); inject the real-semantic ONNX backend (`[embed-onnx]`) for
   quality. **Follow-up:** sub-paragraph (sentence-level) semantic boundaries need sub-paragraph
   locators, which the system's paragraph-granular `source_locator` doesn't yet express.
+
+## Domain presets — laws / qa / book (thin compositions over `LayoutAwareChunker`)
+
+`domain_presets.py` adds three **non-default** presets that are *not* a new engine — each is a thin
+`LayoutAwareChunker` subclass overriding **only** `_is_heading` (the overridable heading hook added
+to the base) and reusing everything else (per-section `chunk_document` reuse, `parent_id`/`heading`
+stamping, global-paragraph locators, param validation). Zero third-party deps, deterministic; opt-in
+via `make_chunker("laws"/"qa"/"book")`, the default still `DefaultChunker` and **byte-identical**
+(the refactor only parametrized `_sections(paras, is_heading_fn=is_heading)` with the module `is_heading`
+as default, so every existing caller is byte-identical).
+
+- **`LawsChunker`** (`laws`/`law`/`legal`) — clause-hierarchy. `_is_heading` = markdown OR `第N章`
+  (`_CHAPTER_RE`) OR **clause** (`_CLAUSE_RE = ^第[0-9一二三四五六七八九十百千]+[条款项]`) OR numbered
+  (`_NUM_HEADING_RE`). So each `第N条` starts its own clause-level section (clause line = `heading`,
+  own `parent_id`) — the base `_CHAPTER_RE` lacks 条/款/项, which is the whole point. It deliberately
+  **omits** the generic short-line heuristic: statutes have short substantive lines that are not headings.
+- **`BookChunker`** (`book`/`chapter`) — chapter-hierarchy. `_is_heading` = markdown OR `_CHAPTER_RE`
+  OR `_NUM_HEADING_RE` (structural only, short-line heuristic **off**) so prose/dialogue short lines
+  stay within a chapter instead of being mistaken for chapter titles.
+- **`QaChunker`** (`qa`/`faq`) — paired Q&A. `_is_heading` = a question detector (line starts with a
+  `Q:`/`Q.`/`Q、`/`Q)`/`Q）`/`问：`/`问:`/`问、` prefix, or ends with `?`/`？`). Because `_sections`
+  keeps a heading's following non-heading paragraphs in its section, each question + its answer
+  paragraph(s) share one `parent_id` (the question is the `heading`) — the pair stays paired. A long
+  answer exceeding `max_chars` still budget-splits via `chunk_document`, but the resulting chunks keep
+  the **same** `parent_id`, so small-to-big regrouping recovers the whole pair.
 
 ## Config selection (mirrors `make_vector_store`)
 

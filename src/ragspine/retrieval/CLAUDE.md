@@ -22,7 +22,11 @@ for small-to-big, opt-in via `make_chunker("layout")`, default still byte-identi
 strategies, `sentence_window_chunker.py`'s `SentenceWindowChunker` (index single sentences + a
 `window_text` for synthesis-time expansion) and `semantic_chunker.py`'s `SemanticChunker`
 (embedding-distance-boundary splits, reusing `chunk_document` per segment), both opt-in / default
-byte-identical),
+byte-identical; plus `domain_presets.py`'s three thin `LayoutAwareChunker` subclasses that override
+**only** the heading predicate — `laws` (clause-hierarchy: `第N条/款/项` each start a clause-level
+section), `qa` (paired: each question + its following answer share one `parent_id`), `book`
+(chapter-hierarchy: `第N章`/markdown/numbered start sections), opt-in via
+`make_chunker("laws"/"qa"/"book")`, default byte-identical),
 `contextual.py` (W4a — a deterministic, zero-fabrication context header built from controlled-vocab
 metadata, injected into **index/embed text only** via the opt-in `index_text_fn` seam on
 `HybridRetriever`/`NarrativeIndex`; `chunk.text`/citation untouched, default `None` = byte-identical),
