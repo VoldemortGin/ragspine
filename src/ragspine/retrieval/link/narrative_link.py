@@ -117,9 +117,20 @@ class NarrativeIndexRetriever:
 
 
 def _to_snippet(result: RetrievalResult) -> dict[str, Any]:
-    """RetrievalResult → A 线 snippet dict（agent 取 text / doc_id / source_locator）。"""
+    """RetrievalResult → A 线 snippet dict（agent 取 text / doc_id / source_locator）。
+
+    父子（small-to-big）展开：块带 window_text（父小节富上下文）时，把它写进【独立的】prompt_text
+    键——agent._snippet_text 优先读之作【生成上下文】，而 text / source_locator / chunk_id 仍是命中的
+    细 child（citation 诚实、命中证据不被窗口伪装）。window 扩展只影响送 prompt 的上下文，绝不产生新
+    检索命中。带 parent_locator（父小节真实段落跨度）时附带之，作 provenance 的父级回指（非命中证据）。
+    默认切块器 window_text/parent_locator 均为空 → 两键都不加 → snippet 逐位等价旧行为（字节不变）。
+
+    隔离：本函数只对【已过 RESTRICTED 双出口剔除】的块调用（见 NarrativeIndexRetriever.retrieve 的
+    出口过滤）——window_text 随其 child 块受同一出口门控，RESTRICTED 块整段被拒（连同其父窗口），
+    父上下文绝不经 child 泄漏。
+    """
     c = result.chunk
-    return {
+    snippet: dict[str, Any] = {
         "text": c.text,
         "doc_id": c.doc_id,
         "title": c.title,
@@ -137,6 +148,13 @@ def _to_snippet(result: RetrievalResult) -> dict[str, Any]:
             "fused": result.fused_score,
         },
     }
+    window_text = getattr(c, "window_text", "") or ""
+    if window_text:
+        snippet["prompt_text"] = window_text
+    parent_locator = getattr(c, "parent_locator", "") or ""
+    if parent_locator:
+        snippet["parent_locator"] = parent_locator
+    return snippet
 
 
 def build_narrative_retriever(

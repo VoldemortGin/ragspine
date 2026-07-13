@@ -191,3 +191,84 @@ def test_execute_read(filled):
         ("REG",),
     )
     assert rows[0]["n"] == 2
+
+
+# ===========================================================================
+# 父子（small-to-big）/ 布局字段持久化（批次 2.2 follow-up）
+# ===========================================================================
+
+def test_parent_child_fields_roundtrip(store):
+    """parent_id/heading/window_text/parent_locator 写入读回保真（存储级 small-to-big）。"""
+    c = _chunk(
+        parent_id="d1#s0",
+        heading="# 甲节",
+        window_text="甲节全文\n甲段一。\n甲段二。",
+        parent_locator="d1#para1-3",
+    )
+    store.replace_doc_chunks("d1", [c])
+    row = store.iter_chunks()[0]
+    assert row.parent_id == "d1#s0"
+    assert row.heading == "# 甲节"
+    assert row.window_text == "甲节全文\n甲段一。\n甲段二。"
+    assert row.parent_locator == "d1#para1-3"
+
+
+def test_default_chunks_have_empty_parent_child_fields(store):
+    """默认切块器（不填 small-to-big 字段）读回为空串——向后兼容 / 字节不变语义。"""
+    store.replace_doc_chunks("d1", [_chunk()])
+    row = store.iter_chunks()[0]
+    assert (row.parent_id, row.heading, row.window_text, row.parent_locator) == ("", "", "", "")
+
+
+def test_migration_adds_columns_to_old_db(tmp_db_path):
+    """加法式迁移：旧库（缺四列）经 init_schema 补列、旧行读回空串，绝不丢数据。"""
+    import sqlite3
+
+    # 手工建一个【批次 2.2 之前】的老 schema（无 parent_id/heading/window_text/parent_locator）。
+    conn = sqlite3.connect(str(tmp_db_path))
+    conn.execute(
+        """
+        CREATE TABLE narrative_chunk (
+            chunk_id TEXT NOT NULL, doc_id TEXT NOT NULL, seq INTEGER NOT NULL,
+            text TEXT NOT NULL, source_locator TEXT NOT NULL,
+            para_start INTEGER NOT NULL, para_end INTEGER NOT NULL,
+            title TEXT NOT NULL DEFAULT '', topic TEXT NOT NULL DEFAULT '',
+            entity TEXT NOT NULL DEFAULT '', geography TEXT NOT NULL DEFAULT '',
+            period TEXT NOT NULL DEFAULT '', language TEXT NOT NULL DEFAULT '',
+            sensitivity TEXT NOT NULL DEFAULT 'INTERNAL', valid_as_of TEXT NOT NULL DEFAULT '',
+            ingested_at TEXT NOT NULL, version INTEGER NOT NULL, active INTEGER NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO narrative_chunk (chunk_id, doc_id, seq, text, source_locator, "
+        "para_start, para_end, ingested_at, version, active) "
+        "VALUES ('d1#c0','d1',0,'旧块','d1#para1',1,1,'2026-01-01T00:00:00+00:00',1,1)"
+    )
+    conn.commit()
+    conn.close()
+
+    # 老库经 ChunkStore.init_schema 迁移：补齐四列，旧行仍可读，新字段读回空串。
+    store = ChunkStore(tmp_db_path)
+    store.init_schema()
+    try:
+        rows = store.iter_chunks()
+        assert len(rows) == 1
+        assert rows[0].text == "旧块"
+        assert (rows[0].parent_id, rows[0].window_text, rows[0].parent_locator) == ("", "", "")
+        # 迁移后可正常写入带父子字段的新块。
+        store.replace_doc_chunks(
+            "d2", [_chunk(doc_id="d2", window_text="w", parent_locator="d2#para1")]
+        )
+        d2 = store.iter_chunks(doc_id="d2")[0]
+        assert d2.window_text == "w" and d2.parent_locator == "d2#para1"
+    finally:
+        store.close()
+
+
+def test_init_schema_idempotent_after_migration(store):
+    """迁移是幂等的：新建库已带齐四列，重复 init_schema 不报错、不重复加列。"""
+    store.init_schema()
+    store.init_schema()
+    store.replace_doc_chunks("d1", [_chunk(window_text="w")])
+    assert store.iter_chunks()[0].window_text == "w"

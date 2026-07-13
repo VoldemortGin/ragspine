@@ -62,9 +62,11 @@ opt-in via `make_chunker("layout")` / `RAGSPINE_CHUNKER`; the default stays `Def
 
 `Chunk` gained two **optional, default-`""`** fields — `parent_id`, `heading` — so the addition is
 equality-safe (the `DefaultChunker == chunk_document` and byte-identity goldens still hold) and
-backward-compatible. **Follow-up (not this increment):** consuming the *richer* structure the family
-extractors expose (heading levels, table edges from pdfspine/docspine), and persisting
-`parent_id`/`heading` through `chunk_store` for retrieval-time parent expansion.
+backward-compatible. **Store-level expansion shipped (ADR 0018):** `chunk_store` now persists
+`parent_id`/`heading`/`window_text`/`parent_locator`, ingest routes through the `chunker=` seam, and the
+A-line exit (`link/_to_snippet`) swaps the parent `window_text` in as generation-only `prompt_text` (child
+stays the hit + citation). **Follow-up (not this increment):** consuming the *richer* structure the family
+extractors expose (heading levels, table edges from pdfspine/docspine).
 
 ## Sentence-window + semantic (W10)
 
@@ -80,9 +82,9 @@ and **byte-identical**. Both are provenance-conformant (`CHUNKER_IMPLS` now
   `window_text` holding the ±`window_size`-sentence window for synthesis-time expansion. `Chunk`
   gained a third **optional, default-`""`** field — `window_text` — again equality-safe (default
   chunkers leave it `""`; the goldens hold). `source_locator` / `para_*` point at the sentence's
-  paragraph (global 1-based). **Follow-up:** persisting `window_text` through `chunk_store` and
-  swapping the window back in at prompt time (the same retrieval-time wiring deferred for W4b
-  small-to-big); budget-splitting an oversized single sentence.
+  paragraph (global 1-based). **Store-level wiring shipped (ADR 0018):** `window_text` persists through
+  `chunk_store` and the A-line exit swaps it back in as generation-only `prompt_text` (shared with W4b
+  small-to-big). **Follow-up:** budget-splitting an oversized single sentence.
 - **`semantic_chunker.py`'s `SemanticChunker`** (benchmarks LlamaIndex `SemanticSplitterNodeParser`)
   — splits on **embedding-similarity boundaries** instead of fixed length: it embeds each paragraph,
   computes consecutive-paragraph distance (`1 − cosine`), and starts a new chunk where the distance
@@ -151,5 +153,5 @@ whole pack by adding one line to `CHUNKER_IMPLS`.
 `LayoutAwareChunker` (W4b), sentence-window + semantic as `SentenceWindowChunker` /
 `SemanticChunker` (W10) — all opt-in, the default byte-identical. RAPTOR's recursive-cluster
 **multi-granularity tree** is a *retrieval-side* capability, not a chunker — it consumes chunks and
-builds a summary tree above them; see [`raptor.md`](raptor.md) (W10). Richer family-extractor
-structure and retrieval-time window/parent expansion remain named follow-ups.
+builds a summary tree above them; see [`raptor.md`](raptor.md) (W10). Retrieval-time window/parent
+expansion is now wired end-to-end (ADR 0018); richer family-extractor structure remains a named follow-up.

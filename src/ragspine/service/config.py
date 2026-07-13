@@ -52,6 +52,7 @@ class ServiceConfig:
     postprocessor: str = "none"              # W8 后检索链(opt-in): "none"(默认,不挂链字节不变) | "mmr"/"lost_in_middle"/"compress" | 逗号成链如"mmr,lost_in_middle"
     query_transform: str = "none"            # W9 查询变换(opt-in,需注入provider): "none"(默认返回base字节不变) | "hyde" | "rag_fusion" | "step_back"
     adaptive: str = "none"                   # W9 Adaptive-RAG 复杂度路由(opt-in): "none"(默认不路由字节不变) | "heuristic"(确定性分类) | "llm"
+    chunker: str = "none"                   # 批次2.2 follow-up 切块策略(ingest,opt-in): "none"(默认内置chunk_document,字节不变) | "parent_child"/"small_to_big"(父子small-to-big) | "layout"/"laws"/"qa"/"book"/"sentence_window"/"semantic"
     vector_store: str = "none"              # "none" | "in_process" | "sqlite_vec"（后者需 [vector]）
     persistence_policy: str = "default"     # "default"(隔离优先) | "persist_everything"
     reference_date: str | None = None       # ISO "YYYY-MM-DD" or None

@@ -10,10 +10,11 @@
     - locator / para 用【全局】段号（句子所属段落，1-based；与 chunk_document 同口径）；
     - 参数校验 / 空文本处理直接复用 chunk_document（非法参数 -> ValueError，空/纯空白 -> []）。
 
-诚实边界（follow-up）：window_text 是在切块期物化到内存 Chunk 上的窗口；把它【持久化过 chunk_store】
-并在检索命中时于 prompt 里换回窗口，与 W4b 布局切块「命中即展开父块」同属检索期接线的 follow-up
-（见 docs/prd-quality-depth.md W10 / retrieval/docs/chunker.md）。超长单句的预算切分亦为 follow-up
-（句子天然短；本策略保「块=单句」的语义纯粹）。
+检索期接线（批次 2.2 follow-up 已打通）：window_text 现随块经 chunk_store 持久化（新增列），
+检索命中时在 A 线出口（narrative_link._to_snippet）换回窗口作生成上下文（写独立的 prompt_text 键，
+citation 仍指命中句），与 W4b 布局切块「命中即展开父块」共用同一存储级 small-to-big 通路
+（见 ADR 0018 / retrieval/docs/chunker.md）。超长单句的预算切分仍为 follow-up（句子天然短；
+本策略保「块=单句」的语义纯粹）。
 """
 
 from ragspine.retrieval.chunking.chunking import (

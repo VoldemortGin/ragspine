@@ -28,7 +28,13 @@ share one `parent_id`; `book`: chapter-hierarchy `第N章`/markdown/numbered) an
 `small_to_big`, 批次 2.2 ③) overrides **only** the `_child_extra` hook to attach `window_text`=parent
 section text + `parent_locator`=the section's **real** para span (small-to-big: precise child hit →
 deterministic expansion to parent context, provenance points at the true parent locator), opt-in via
-`make_chunker("laws"/"qa"/"book"/"parent_child")`, default byte-identical),
+`make_chunker("laws"/"qa"/"book"/"parent_child")`, default byte-identical; **store-level expansion now wired
+end-to-end (ADR 0018)** — `ChunkStore` persists `parent_id`/`heading`/`window_text`/`parent_locator` (four
+additive columns, old DBs migrated in place), ingest routes through the `chunker=` seam
+(`NarrativeIndex`/`ingest_narrative`, `ServiceConfig.chunker`, default `none` byte-identical), and
+`link/_to_snippet` surfaces `window_text` as a separate `prompt_text` (parent context = **generation-only**,
+child stays the hit + citation; window never becomes a hit) with `parent_locator` as a provenance
+back-reference — RESTRICTED chunks are dropped whole at the exit so the parent window never leaks),
 `contextual.py` (W4a — a deterministic, zero-fabrication context header built from controlled-vocab
 metadata, injected into **index/embed text only** via the opt-in `index_text_fn` seam on
 `HybridRetriever`/`NarrativeIndex`; `chunk.text`/citation untouched, default `None` = byte-identical),
@@ -129,6 +135,12 @@ is the more-permissive `RAGSPINE_COLPALI_MODEL` alternative.
   and keeps the `library_id` provenance dimension; economy mode is the existing BM25 exit path with
   the vector channel off. Every new mode is bound in `tests/conformance/test_metadata_filter_invariants.py`
   / `test_multi_index_isolation.py` / `test_retrieval_mode_invariants.py` (parametrized + reverse-proof).
+- **Parent-child window expansion is generation-only and rides the RESTRICTED exit (ADR 0018).**
+  `link/_to_snippet` writes `window_text` to a separate `prompt_text` (parent context for **generation**);
+  `text` / `source_locator` / `chunk_id` stay the hit child (citation honest, the window is never a hit).
+  It runs **after** the `link/` RESTRICTED strip, so a RESTRICTED chunk's whole snippet — parent window
+  included — is dropped (整段拒绝); the window can never leak via a child. Bound by
+  `tests/conformance/test_parent_child_isolation.py` (+ reverse-proof).
 
 ## Read before editing
 

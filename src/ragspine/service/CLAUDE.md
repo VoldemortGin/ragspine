@@ -13,7 +13,9 @@ Auto-loaded when working under `src/ragspine/service/`. Keep terse; deep dives g
 
 `ServiceConfig` (env `RAGSPINE_*`), FastAPI app (app factory + dependency
 injection), RQ task queue (`FakeQueue` tests / `RQQueue` prod), ingestion jobs
-(worker-owned stores), FAQ short-circuit cache, and the **Dify workflow service**
+(worker-owned stores; `ServiceConfig.chunker` — default `"none"` byte-identical — rides the
+narrative-ingest job payload into `ingest_narrative(chunker=make_chunker(...))`, so `parent_child`
+small-to-big chunking is a config switch, ADR 0018), FAQ short-circuit cache, and the **Dify workflow service**
 (`dify/` — L0 static gate + L1/L2 safe execution; ADR 0014): endpoints
 `/v1/dify/{analyze,compile,run,run/jobs}` reuse the app factory / DI / RQ queue.
 

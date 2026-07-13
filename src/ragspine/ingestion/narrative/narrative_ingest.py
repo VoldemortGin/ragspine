@@ -34,6 +34,7 @@ from ragspine.ingestion.narrative.narrative_extract import (
     extract_narrative,
 )
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
+from ragspine.retrieval.chunking.chunker import Chunker
 from ragspine.retrieval.chunking.chunking import DocumentMeta, chunk_document
 
 # 模块级 home 公司 profile（沿用 glossary/intent/query_tools 的 env-aware 装载模式，
@@ -123,6 +124,7 @@ def ingest_narrative(
     *,
     meta_by_doc: dict[str, dict[str, Any]] | None = None,
     dry_run: bool = False,
+    chunker: Chunker | None = None,
 ) -> NarrativeIngestReport:
     """批量叙事入库编排，返回逐文件汇总报告。
 
@@ -133,6 +135,8 @@ def ingest_narrative(
         meta_by_doc: 可选 per-doc 元数据映射 {文件名: {topic/entity/.../valid_as_of}}；
                      未知字段 ValueError。
         dry_run:     True 时完整跑抽取与切块并产出报告，但块库 / 台账零写入。
+        chunker:     可选切块策略（Chunker 缝，经 make_chunker 选型，如 make_chunker('parent_child')
+                     的父子 small-to-big 预设）。默认 None＝内置 chunk_document（字节级零行为变化）。
 
     行为见模块 docstring：hash 幂等跳过、单文件失败不中断整批、no_text 不落库。
     """
@@ -151,7 +155,7 @@ def ingest_narrative(
         _ensure_registry(registry)
         for path in _resolve_inputs(inputs):
             report.files.append(
-                _ingest_one(path, store, registry, meta_by_doc, dry_run)
+                _ingest_one(path, store, registry, meta_by_doc, dry_run, chunker)
             )
     finally:
         registry.close()
@@ -168,6 +172,7 @@ def _ingest_one(
     registry: sqlite3.Connection,
     meta_by_doc: dict[str, dict[str, Any]],
     dry_run: bool,
+    chunker: Chunker | None = None,
 ) -> FileReport:
     """单文件：hash 比对 -> 抽取 -> 切块 -> 写入；任何异常落进 failed 报告。"""
     doc_id = path.name
@@ -210,7 +215,13 @@ def _ingest_one(
         language=meta.get("language", ""),
         sensitivity=sensitivity,
     )
-    chunks = chunk_document(doc.to_text(), doc_meta)
+    # 切块：默认 None 走内置 chunk_document（字节级零行为变化）；注入了 Chunker 缝（如父子 small-to-big
+    # 预设）则用之——window_text/parent_locator 等字段随块经 replace_doc_chunks 持久化。
+    chunks = (
+        chunker.chunk(doc.to_text(), doc_meta)
+        if chunker is not None
+        else chunk_document(doc.to_text(), doc_meta)
+    )
     rep.n_chunks = len(chunks)
     rep.status = STATUS_INGESTED
     if dry_run:

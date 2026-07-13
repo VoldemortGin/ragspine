@@ -25,6 +25,7 @@ from typing import Protocol, runtime_checkable
 from ragspine.common.glossary import ENTITY_SYNONYMS, METRIC_SYNONYMS
 from ragspine.pipeline.graph import PipelineGraph
 from ragspine.retrieval.chunking.chunk_store import ChunkStore, StoredChunk
+from ragspine.retrieval.chunking.chunker import Chunker
 from ragspine.retrieval.chunking.chunking import (
     DEFAULT_CHUNK_CHARS,
     DEFAULT_OVERLAP_CHARS,
@@ -454,6 +455,7 @@ class NarrativeIndex:
         persistence_policy: PersistencePolicy | None = None,
         index_text_fn: IndexTextFn | None = None,
         filter_extractor: FilterExtractor | None = None,
+        chunker: Chunker | None = None,
     ):
         self.store = store
         self.embedding_backend = embedding_backend
@@ -466,6 +468,9 @@ class NarrativeIndex:
         # automatic 元数据过滤缝（批次 2.2 ①，opt-in 默认关）：给了即在 retrieve 时从 query 抽过滤条件
         # 收窄候选。抽取结果只作过滤条件、绝不进答案通道；默认 None＝不启用（字节不变）。
         self.filter_extractor = filter_extractor
+        # 切块策略缝（批次 2.2 follow-up，opt-in 默认关）：入库时用它切块（如父子 small-to-big 预设，
+        # 填 window_text/parent_locator 并经 ChunkStore 持久化）。None＝内置 chunk_document（字节级零变化）。
+        self.chunker = chunker
         # 索引/嵌入文本缝（W4a contextual，opt-in）：入库即嵌入与检索期 BM25 都吃它；
         # None=用 chunk.text（默认，逐位等价旧行为）。citation 原文 chunk.text 始终不变。
         self.index_text_fn = index_text_fn
@@ -481,9 +486,19 @@ class NarrativeIndex:
         self.persistence_policy = persistence_policy or IsolationFirstPolicy()
 
     def ingest(self, text: str, meta: DocumentMeta, valid_as_of: str = "") -> int:
-        """切块 + 幂等入库 + 入库即嵌入落盘（policy 门控、doc 粒度失效），返回入库块数。"""
-        chunks = chunk_document(
-            text, meta, max_chars=self.max_chars, overlap_chars=self.overlap_chars
+        """切块 + 幂等入库 + 入库即嵌入落盘（policy 门控、doc 粒度失效），返回入库块数。
+
+        切块走 chunker 缝（注入了则用之，如父子 small-to-big 预设，产出带 window_text/parent_locator
+        并随块持久化）；默认 None＝内置 chunk_document（字节级零行为变化）。
+        """
+        chunks = (
+            self.chunker.chunk(
+                text, meta, max_chars=self.max_chars, overlap_chars=self.overlap_chars
+            )
+            if self.chunker is not None
+            else chunk_document(
+                text, meta, max_chars=self.max_chars, overlap_chars=self.overlap_chars
+            )
         )
         self.store.replace_doc_chunks(meta.doc_id, chunks, valid_as_of=valid_as_of)
         if self.vector_store is not None:

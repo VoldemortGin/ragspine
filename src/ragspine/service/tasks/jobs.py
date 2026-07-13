@@ -22,6 +22,7 @@ from ragspine.ingestion.review.review_queue import ReviewQueue
 from ragspine.ingestion.structured.ingestion import IngestReport, ingest_file
 from ragspine.ingestion.structured.ingestion_manifest import ManifestStore
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
+from ragspine.retrieval.chunking.chunker import make_chunker
 from ragspine.service.config import (
     PathNotAllowedError,
     ServiceConfig,
@@ -165,11 +166,14 @@ def run_narrative_ingest_job(payload: dict[str, Any]) -> dict[str, Any]:
     store = ChunkStore(chunk_db_path)
     store.init_schema()
     try:
+        # 切块策略缝（批次 2.2 follow-up）：payload 带 chunker spec 时经 make_chunker 选型
+        # （如 'parent_child' 父子 small-to-big）；缺省 / 'none' → None → 内置 chunk_document（字节不变）。
         report = ingest_narrative(
             inputs,
             store,
             meta_by_doc=payload.get("meta_by_doc"),
             dry_run=payload.get("dry_run", False),
+            chunker=make_chunker(payload.get("chunker")),
         )
         return narrative_report_to_dict(report)
     finally:

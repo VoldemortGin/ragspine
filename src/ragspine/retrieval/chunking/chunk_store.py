@@ -40,6 +40,14 @@ class StoredChunk:
     period: str = ""
     language: str = ""
     sensitivity: str = "INTERNAL"
+    # 父子（small-to-big）/ 布局字段（批次 2.2 follow-up）：默认 '' 向后兼容（默认切块器不填）。
+    # parent_id/heading 由布局感知切块器填；window_text=父小节全文（检索命中细 child 后合成时展开的
+    # 富上下文，只影响生成上下文、不产生新检索命中）；parent_locator=父小节真实段落跨度（provenance 附指，
+    # 绝不伪装成命中证据）。
+    parent_id: str = ""
+    heading: str = ""
+    window_text: str = ""
+    parent_locator: str = ""
     valid_as_of: str = ""
     ingested_at: str = ""
     version: int = 1
@@ -76,6 +84,10 @@ class ChunkStore:
                 period         TEXT NOT NULL DEFAULT '',
                 language       TEXT NOT NULL DEFAULT '',
                 sensitivity    TEXT NOT NULL DEFAULT 'INTERNAL',
+                parent_id      TEXT NOT NULL DEFAULT '',
+                heading        TEXT NOT NULL DEFAULT '',
+                window_text    TEXT NOT NULL DEFAULT '',
+                parent_locator TEXT NOT NULL DEFAULT '',
                 valid_as_of    TEXT NOT NULL DEFAULT '',
                 ingested_at    TEXT NOT NULL,
                 version        INTEGER NOT NULL,
@@ -95,7 +107,24 @@ class ChunkStore:
             ON narrative_chunk (active, doc_id, seq)
             """
         )
+        self._migrate_add_columns()
         self._conn.commit()
+
+    # 父子（small-to-big）/ 布局字段的加法式迁移：老库（建于本批次之前）缺这四列，
+    # 逐列 ALTER TABLE ADD COLUMN 补上（NOT NULL DEFAULT ''，旧行读回空串）。新建库已在
+    # CREATE TABLE 里带齐，此处对其为幂等 no-op。绝不删列 / 改列——旧库始终可读。
+    _ADDED_COLUMNS = ("parent_id", "heading", "window_text", "parent_locator")
+
+    def _migrate_add_columns(self) -> None:
+        existing = {
+            row["name"]
+            for row in self._conn.execute("PRAGMA table_info(narrative_chunk)").fetchall()
+        }
+        for col in self._ADDED_COLUMNS:
+            if col not in existing:
+                self._conn.execute(
+                    f"ALTER TABLE narrative_chunk ADD COLUMN {col} TEXT NOT NULL DEFAULT ''"
+                )
 
     def replace_doc_chunks(
         self, doc_id: str, chunks: list[Chunk], valid_as_of: str = ""
@@ -121,14 +150,16 @@ class ChunkStore:
             INSERT INTO narrative_chunk (
                 chunk_id, doc_id, seq, text, source_locator, para_start, para_end,
                 title, topic, entity, geography, period, language, sensitivity,
+                parent_id, heading, window_text, parent_locator,
                 valid_as_of, ingested_at, version, active
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
             """,
             [
                 (
                     c.chunk_id, c.doc_id, c.seq, c.text, c.source_locator,
                     c.para_start, c.para_end, c.title, c.topic, c.entity,
                     c.geography, c.period, c.language, c.sensitivity,
+                    c.parent_id, c.heading, c.window_text, c.parent_locator,
                     valid_as_of, ingested_at, version,
                 )
                 for c in chunks
@@ -191,6 +222,10 @@ class ChunkStore:
             period=row["period"],
             language=row["language"],
             sensitivity=row["sensitivity"],
+            parent_id=row["parent_id"],
+            heading=row["heading"],
+            window_text=row["window_text"],
+            parent_locator=row["parent_locator"],
             valid_as_of=row["valid_as_of"],
             ingested_at=row["ingested_at"],
             version=row["version"],

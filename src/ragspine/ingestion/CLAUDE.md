@@ -17,7 +17,11 @@ default + lazy-`httpx` `HttpConnector` / `NotionConnector` (behind `[connectors]
 `make_source_connector` / `RAGSPINE_SOURCE_CONNECTOR` config selector with entry-point discovery + a
 `bridge.ingest_from_connector` that carries `RawDoc` lineage end-to-end into the `FactStore`),
 `structured/` (fact ingestion + idempotent batch manifest ledger), `narrative/` (document chunk
-ingestion + extraction; sources: `.pptx` / `.pdf` / `.docx` / `.docm` + `.txt` plain text), `review/` (SME human review-queue state machine).
+ingestion + extraction; sources: `.pptx` / `.pdf` / `.docx` / `.docm` + `.txt` plain text —
+`ingest_narrative(..., chunker=)` routes chunking through the retrieval `Chunker` seam, default `None` →
+built-in `chunk_document` **byte-identical**; injecting `make_chunker("parent_child")` lands children with
+`window_text` / `parent_locator` that `ChunkStore` now persists for store-level small-to-big, ADR 0018),
+`review/` (SME human review-queue state machine).
 
 ## Invariants
 
