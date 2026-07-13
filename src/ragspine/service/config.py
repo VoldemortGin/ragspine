@@ -24,6 +24,7 @@ from ragspine.agent.llm_provider import (
 from ragspine.agent.query_transform import make_query_transform
 from ragspine.retrieval.corrective import make_corrective_retriever
 from ragspine.retrieval.link.narrative_link import build_narrative_retriever
+from ragspine.retrieval.mode import make_retrieval_mode
 from ragspine.retrieval.postprocess import make_postprocessor
 from ragspine.retrieval.rerank.cross_encoder import make_reranker
 from ragspine.retrieval.vector.embedding_backends import make_embedding_backend
@@ -43,6 +44,7 @@ class ServiceConfig:
     provider_type: str = "mock"             # "mock" | "anthropic"
     model: str = DEFAULT_ANTHROPIC_MODEL
     base_url: str | None = None
+    retrieval_mode: str = "auto"            # 批次2.2④ 检索模式预设: "auto"/"hybrid"/"vector"(默认,embedding按下方配置装配,字节不变) | "economy"/"bm25"/"lexical"(零embedding成本,纯BM25关键词检索)
     embedding: str = "auto"                 # "auto"(装[embed-onnx]→真语义ONNX,否则纯BM25) | "none" | "onnx" | "deterministic" | "openai"
     reranker: str = "none"                  # "none"(不重排,默认行为不变) | "cross_encoder"(本地[rerank]) | "colbert"(晚交互MaxSim,[colbert]) | "splade"(学习稀疏,[splade]) | "auto"(装[rerank]即用,否则不重排)
     query_decompose: str = "none"           # W6a 查询分解(opt-in): "none"(不分解,默认字节不变) | "llm"(注入provider的LLM多跳分解)
@@ -146,11 +148,16 @@ def open_narrative_retriever(
     if not config.chunk_db_path:
         yield None
         return
+    # 批次2.2④ 检索模式预设：economy（零 embedding 成本）显式关掉向量通道——绝不构造 embedding 后端 /
+    # 向量库，纯 BM25 关键词检索。默认 'auto' = 混合模式，embedding/向量库按配置装配（字节不变）。
+    mode = make_retrieval_mode(config.retrieval_mode)
+    embedding_backend = make_embedding_backend(config.embedding) if mode.uses_embedding else None
+    vector_store = make_vector_store(config.vector_store) if mode.uses_embedding else None
     retriever, store = build_narrative_retriever(
         config.chunk_db_path,
         provider=provider,
-        embedding_backend=make_embedding_backend(config.embedding),
-        vector_store=make_vector_store(config.vector_store),
+        embedding_backend=embedding_backend,
+        vector_store=vector_store,
         persistence_policy=make_persistence_policy(config.persistence_policy),
         reranker=make_reranker(config.reranker),
         postprocessor=make_postprocessor(config.postprocessor),
