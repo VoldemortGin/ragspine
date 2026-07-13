@@ -224,7 +224,7 @@ def ask(
             result = answer_question(
                 req.question, store, provider,
                 reference_date=ref, narrative_retriever=retriever,
-                decomposer=decomposer,
+                decomposer=decomposer, history=req.history,
             )
 
         summary = _tool_status_summary(result.tool_results)
@@ -302,7 +302,7 @@ def ask_stream(
                 result = answer_question(
                     req.question, store, provider,
                     reference_date=ref, narrative_retriever=retriever,
-                    decomposer=decomposer,
+                    decomposer=decomposer, history=req.history,
                 )
             summary = _tool_status_summary(result.tool_results)
             answer_kind = _answer_kind(result, summary)

@@ -11,6 +11,7 @@
 
 import json
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Protocol, cast, runtime_checkable
@@ -44,6 +45,12 @@ from ragspine.common.observability import emit_trace, new_request_id
 from ragspine.storage.fact_store import FactStore
 
 MAX_TOOL_ITERATIONS = 5
+
+# 对话历史的一轮：(role, text)，role ∈ {"user","assistant"}。刻意用扁平二元组而非
+# 任意 message dict——公开面不接受 system / tool 角色，也无法夹带 tool_calls，历史只可能是
+# 纯生成上下文。硬边界（ADR 0017）：历史【绝不】进确定性意图解析（意图只看当前 question），
+# 只作为 LLM provider 调用的上下文 messages 插在 system 与当前问句之间。
+HistoryTurn = tuple[str, str]
 
 
 def _usage_dict(usage: Usage | None) -> dict[str, int | None] | None:
@@ -145,14 +152,37 @@ def _execute_tool(
     )
 
 
+def _history_messages(
+    history: Sequence[HistoryTurn] | None,
+) -> list[dict[str, object]]:
+    """把 (role, text) 历史轮次转成 OpenAI 形状 messages，插在 system 与当前问句之间。
+
+    role 归一到 {user, assistant}（其余按 user 处理）；history 为 None/空 → 返回 []，
+    此时所有调用点的消息序列逐字节不变（缺省字节等价的根据）。历史绝不含 system / tool
+    角色、绝不夹带 tool_calls，也【绝不】进意图解析——只作生成上下文。
+    """
+    if not history:
+        return []
+    msgs: list[dict[str, object]] = []
+    for role, text in history:
+        r = "assistant" if role == "assistant" else "user"
+        msgs.append({"role": r, "content": text})
+    return msgs
+
+
 def _run_tool_loop(
     question: str,
     store: FactStore,
     provider: LLMProvider,
     reference_date: date,
     ctx: _TraceCtx,
+    history_messages: list[dict[str, object]],
 ) -> tuple[str, list[dict[str, object]]]:
     """标准 tool use 循环：user → (tool_use → tool_result)* → 最终文本。
+
+    history_messages 是已转好的对话历史（OpenAI 形状），插在 system 与当前问句之间——
+    它只是给 provider 的上下文，当前问句始终是最后一条 user 消息（意图解析只看它）；
+    空历史时消息序列与既有逐字节一致。
 
     provider 网络/API 失败（ProviderError）→ 诚实降级：返回固定降级文案、空结果，
     绝不编造数字；其他异常（逻辑 bug）照常抛出，不被吞掉。
@@ -161,6 +191,7 @@ def _run_tool_loop(
     tools = [QUERY_METRIC_TOOL_OPENAI]
     messages: list[dict[str, object]] = [
         {"role": "system", "content": system},
+        *history_messages,
         {"role": "user", "content": question},
     ]
     tool_results: list[dict[str, object]] = []
@@ -390,6 +421,7 @@ def _run_narrative(
     retriever: NarrativeRetriever | None,
     intent: ParsedIntent,
     ctx: _TraceCtx,
+    history_messages: list[dict[str, object]],
 ) -> tuple[str, str, list[dict[str, object]]]:
     """叙事通路：检索 → 合成 → 附来源。检索未接入/无结果时坦白降级；返回
     (answer, answer_plain, sources)。answer_plain 是模型散文本身（不含编排层追加的
@@ -424,12 +456,15 @@ def _run_narrative(
         for i, (s, src) in enumerate(zip(snippets, sources, strict=True))
     )
     prompt = f"{NARRATIVE_PROMPT_PREFIX}。\n问题：{question}\n检索片段：\n{body}"
+    # 历史仅作生成上下文插在 system 与当前问句之间；检索 query（上方）与合成 prompt 仍只用
+    # 当前 question，历史绝不进检索、绝不成为新“证据”，空历史时消息序列逐字节不变。
     started = time.perf_counter()
     try:
         resp = provider.chat([
             {"role": "system",
              "content": _NARRATIVE_SYSTEM_PROMPT_TEMPLATE.format(
                  company=_PROFILE.home_company_name)},
+            *history_messages,
             {"role": "user", "content": prompt},
         ])
     except ProviderError:
@@ -507,6 +542,7 @@ def _answer_decomposed(
     reference_date: date,
     narrative_retriever: NarrativeRetriever | None,
     intent_parser: IntentParser | None,
+    history: Sequence[HistoryTurn] | None,
 ) -> AgentResult:
     """W6a 多跳分解 fan-out：每个子问题独立走 answer_question（带全部 guard + 安全门），
     再确定性合成。
@@ -522,6 +558,7 @@ def _answer_decomposed(
             reference_date=reference_date,
             narrative_retriever=narrative_retriever,
             intent_parser=intent_parser,
+            history=history,
         )
         for sq in subquestions
     ]
@@ -556,6 +593,7 @@ def answer_question(
     narrative_retriever: NarrativeRetriever | None = None,
     intent_parser: IntentParser | None = None,
     decomposer: QueryDecomposer | None = None,
+    history: Sequence[HistoryTurn] | None = None,
 ) -> AgentResult:
     """单条问题端到端编排入口。
 
@@ -566,6 +604,11 @@ def answer_question(
     decomposer：W6a 查询分解器（opt-in，默认 None＝不分解，主流程逐位字节不变）。注入且把问题
         真拆成 >1 子问题时，各子问题独立走本函数（带全部 guard + 安全门）再确定性合成；返回单
         子问题（不可分解）时回落正常单发路由。
+    history：可选对话历史（ADR 0017），(role, text) 轮次序列，role ∈ {"user","assistant"}。
+        默认 None＝无历史，全路径逐字节不变。**硬边界**：历史【绝不】进确定性意图解析——意图
+        与澄清网关只看当前 question；历史只作为 LLM provider 调用的上下文 messages（插在 system
+        与当前问句之间）。因此历史里的内容不产生新“证据”：结构化查无实据仍确定性改写为查不到，
+        provenance 仍只指向真实检索/工具命中，安全门仍从 raw question 独立复核。
     """
     # W6a：注入了分解器且真分解（>1 子问题）时走 fan-out；否则（含 decomposer=None）落到下方
     # 既有主流程——此分支不命中时主流程逐位不变，默认 loop 字节等价。
@@ -578,13 +621,17 @@ def answer_question(
                 reference_date=ref0,
                 narrative_retriever=narrative_retriever,
                 intent_parser=intent_parser,
+                history=history,
             )
 
     request_id = new_request_id()
     ctx = _TraceCtx()
     ref = reference_date or date.today()
     parser = intent_parser or RuleIntentParser()
+    # 意图解析只看当前 question——历史绝不参与（修复产品层「历史污染意图解析」痛点的本质）。
     intent = parser.parse(question, reference_date=ref)
+    # 历史转成 provider 上下文 messages（空历史 → []，下游消息序列逐字节不变）。
+    hist_msgs = _history_messages(history)
     clar = clarify_scope(intent, reference_date=ref)
 
     # 外部/竞品实体越权：最前置拒答，绝不调 tool/检索/LLM，绝不输出 home 公司数字
@@ -616,7 +663,7 @@ def answer_question(
 
     if intent.route == ROUTE_NARRATIVE:
         answer, answer_plain, sources = _run_narrative(
-            question, provider, narrative_retriever, intent, ctx
+            question, provider, narrative_retriever, intent, ctx, hist_msgs
         )
         _emit_request_trace(request_id, intent, clar, [], ctx)
         return AgentResult(answer=answer, route=intent.route,
@@ -636,13 +683,13 @@ def answer_question(
         answer, answer_plain, sources = _multi_subtask_answer(tool_results)
     else:
         model_text, tool_results = _run_tool_loop(
-            effective_question, store, provider, ref, ctx
+            effective_question, store, provider, ref, ctx, hist_msgs
         )
         answer, answer_plain, sources = _structured_answer(model_text, tool_results)
 
     if intent.route == ROUTE_COMPOSITE:
         narrative_answer, narrative_answer_plain, narrative_sources = _run_narrative(
-            question, provider, narrative_retriever, intent, ctx
+            question, provider, narrative_retriever, intent, ctx, hist_msgs
         )
         answer = f"{answer}\n\n归因分析：\n{narrative_answer}"
         answer_plain = f"{answer_plain}\n\n归因分析：\n{narrative_answer_plain}"

@@ -17,7 +17,12 @@ loop, LLM provider abstraction.
 
 - `agent.py` — **orchestrator**; sole public entry `answer_question()`. Routes
   narrative / structured / composite, runs the tool loop, applies the guards.
-  Takes an injectable `intent_parser` (defaults to `RuleIntentParser`).
+  Takes an injectable `intent_parser` (defaults to `RuleIntentParser`). Optional
+  `history: Sequence[tuple[str, str]] | None` (ADR 0017, default `None` ⇒ byte-identical):
+  `(role, text)` turns are converted by `_history_messages` and **inserted between the system
+  prompt and the current user turn** — pure generation context. History **never** enters intent
+  parsing (parser sees only the current `question`; it stays the last user message), produces no
+  new evidence (anti-fabrication + provenance unchanged), and never touches retrieval.
 - `intent.py` — rule-based (no LLM) intent + scope parse and the clarification gate.
   Exposes the `IntentParser` Protocol + default `RuleIntentParser`; `clarify_scope`
   delegates the out-of-scope decision to the `SecurityGate`.
@@ -68,6 +73,10 @@ loop, LLM provider abstraction.
   `IntentParser` Protocol; the `SecurityGate` is not. The gate re-derives external /
   competitor scope from the raw question and decides refusal independently of whatever
   the parser produced — swapping in an LLM parser cannot defeat it (ADR 0010).
+- **Conversation history is generation-only, never a parse input (ADR 0017).** The `history=` seam
+  feeds provider context messages only; the current question stays the last user turn so the
+  deterministic parser/security gate read it unpolluted. Don't splice history into the question or
+  the intent parser — that reintroduces the poisoning defect this seam fixes.
 - **No hardcoded company** — home identity / entities / tool schema all derive from
   `load_company_profile()` (`agent.py` `_PROFILE`, `query_tools.py` builders).
   Never backfill "ACME".

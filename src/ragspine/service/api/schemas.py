@@ -12,6 +12,10 @@ from pydantic import BaseModel, ConfigDict, Field
 class AskRequest(BaseModel):
     question: str
     reference_date: str | None = None
+    # 可选对话历史（ADR 0017）：(role, text) 轮次序列，role ∈ {"user","assistant"}。默认 None＝
+    # 无历史，行为逐字节不变。语义与引擎 answer_question(history=) 一致——历史只作 LLM 生成上下文，
+    # 绝不进确定性意图解析、绝不产生新证据。
+    history: list[tuple[str, str]] | None = Field(default=None)
 
 
 class CacheInfo(BaseModel):

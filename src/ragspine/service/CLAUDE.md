@@ -43,6 +43,10 @@ alongside `LLMProvider.chat`, plus `iter_text_chunks` / `STREAM_CHUNK_CHARS`; `M
 Events: `{"type":"start",request_id}` → one `{"type":"delta","text":chunk}` per `iter_text_chunks(answer)`
 → `{"type":"done",...route/answer_kind/clarification/sources/tool_status_summary/cache}`, framed
 `data: {json}\n\n` (same idiom as `dify_public._sse_iter`).
+Both `/v1/ask` and `/v1/ask/stream` accept an optional `AskRequest.history` (`list[(role, text)]`,
+default `None`) passed straight through to `answer_question(history=)` (ADR 0017, same semantics):
+generation-context only, never intent-parsing input, no new evidence. Default-absent ⇒ byte-identical.
+
 **Invariant — guard-before-stream**: the anti-fabrication guard runs to completion (the not_found→refusal
 rewrite is applied) **before the SSE stream opens** — the whole guarded compute (FAQ short-circuit →
 `answer_question` → derive answer/route/answer_kind/sources/cache → emit trace) happens in the handler body,
