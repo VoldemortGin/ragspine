@@ -33,6 +33,8 @@ from ragspine.retrieval.chunking.chunking import (
     chunk_document,
 )
 from ragspine.retrieval.contextual import IndexTextFn
+from ragspine.retrieval.filtering.automatic import FilterExtractor
+from ragspine.retrieval.filtering.metadata_filter import MetadataFilter
 from ragspine.retrieval.rerank.listwise_rerank import DEFAULT_TOP_N, ListwiseJudge, listwise_rerank
 from ragspine.retrieval.vector.persistence_policy import IsolationFirstPolicy, PersistencePolicy
 from ragspine.retrieval.vector.store import InProcessVectorStore, VectorRecord, VectorStore
@@ -281,11 +283,16 @@ class HybridRetriever:
         period: str | None = None,
         language: str | None = None,
         top_k: int | None = None,
+        metadata_filter: MetadataFilter | None = None,
     ) -> list[RetrievalResult]:
         """检索：先按元数据过滤候选，再对候选打分融合，返回 top_k（默认 50）。
 
         排序：fused_score 降序，平分按 chunk_id 升序（确定性）。
         纯 BM25 模式下全 query 零命中的块不进结果。
+
+        metadata_filter（批次 2.2 ①，opt-in）：在 5 维等值预过滤之后、任何打分/embedding 之前再叠加一层
+        确定性条件过滤（=、in、范围等最小算子集），只【收窄】候选。默认 None＝不叠加（字节不变）。
+        它绝不能绕过 RESTRICTED 隔离——只是把候选变少，link/rerank 双出口照常剔除 RESTRICTED。
         """
         limit = self.top_k if top_k is None else top_k
 
@@ -302,6 +309,9 @@ class HybridRetriever:
             for c in self.chunks
             if all(getattr(c, name) == val for name, val in filters.items() if val is not None)
         ]
+        # 1b) 元数据条件过滤（opt-in）：同样在打分之前，只收窄候选（结果恒为子序列）。
+        if metadata_filter is not None:
+            candidates = metadata_filter.apply(candidates)
         if not candidates:
             return []
         by_id = {c.chunk_id: c for c in candidates}
@@ -418,6 +428,7 @@ class RetrievableIndex(Protocol):
         top_k: int | None = None,
         rerank: bool = True,
         top_n: int | None = None,
+        metadata_filter: MetadataFilter | None = None,
     ) -> list[RetrievalResult]: ...
 
 
@@ -442,6 +453,7 @@ class NarrativeIndex:
         vector_store: VectorStore | None = None,
         persistence_policy: PersistencePolicy | None = None,
         index_text_fn: IndexTextFn | None = None,
+        filter_extractor: FilterExtractor | None = None,
     ):
         self.store = store
         self.embedding_backend = embedding_backend
@@ -451,6 +463,9 @@ class NarrativeIndex:
         self.overlap_chars = overlap_chars
         self.top_k = top_k
         self.rerank_top_n = rerank_top_n
+        # automatic 元数据过滤缝（批次 2.2 ①，opt-in 默认关）：给了即在 retrieve 时从 query 抽过滤条件
+        # 收窄候选。抽取结果只作过滤条件、绝不进答案通道；默认 None＝不启用（字节不变）。
+        self.filter_extractor = filter_extractor
         # 索引/嵌入文本缝（W4a contextual，opt-in）：入库即嵌入与检索期 BM25 都吃它；
         # None=用 chunk.text（默认，逐位等价旧行为）。citation 原文 chunk.text 始终不变。
         self.index_text_fn = index_text_fn
@@ -502,12 +517,21 @@ class NarrativeIndex:
         top_k: int | None = None,
         rerank: bool = True,
         top_n: int | None = None,
+        metadata_filter: MetadataFilter | None = None,
     ) -> list[RetrievalResult]:
         """混合检索 +（给了 judge 且 rerank=True 时）listwise 二审。
 
         二审遵守 ragspine.retrieval.rerank.listwise_rerank 的 Restricted 不出域策略；judge 缺省或
         rerank=False 时直接返回 RRF 序 top_k。
+
+        metadata_filter（批次 2.2 ①，opt-in）：显式条件过滤，打分前收窄候选，默认 None＝不过滤（字节不变）。
+        显式未给且构造时注入了 filter_extractor 时，从 query 自动抽取一个过滤条件（automatic 缝，opt-in）——
+        抽取结果只作过滤条件、绝不进答案通道，且只收窄候选，绝不绕过 RESTRICTED 隔离。
         """
+        # automatic 缝：显式过滤优先；否则若注入了抽取器，则从 query 抽取（默认无抽取器＝不过滤，字节不变）。
+        effective_filter = metadata_filter
+        if effective_filter is None and self.filter_extractor is not None:
+            effective_filter = self.filter_extractor.extract(query)
         # 预过滤下推到块库（iter_chunks 即"打分之前"的元数据过滤）。
         chunks = self.store.iter_chunks(
             topic=topic,
@@ -525,7 +549,7 @@ class NarrativeIndex:
             manage_vectors=False,  # 块向量已在入库时落盘——检索只嵌 query、查 store，绝不重嵌块。
             index_text_fn=self.index_text_fn,  # contextual 情境头与入库口径一致（默认 None=不变）。
         )
-        results = retriever.search(query, top_k=top_k)
+        results = retriever.search(query, top_k=top_k, metadata_filter=effective_filter)
         if not rerank or self.judge is None:
             return results
         return listwise_rerank(
