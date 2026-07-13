@@ -279,7 +279,7 @@ def test_t6_structured_answer_annotates_when_valid_as_of_present():
             },
         }
     ]
-    answer, sources = _structured_answer("香港 FY2025 REVENUE 为 1702 USD_M。", tool_results)
+    answer, _, sources = _structured_answer("香港 FY2025 REVENUE 为 1702 USD_M。", tool_results)
     assert "截至 2025-12-31" in answer
     assert "ACME_FY2025_Results.pptx" in answer  # 血缘仍在
     assert sources == [tool_results[0]["source"]]
@@ -306,11 +306,11 @@ def test_t6_structured_answer_byte_identical_when_no_valid_as_of():
     model_text = "香港 FY2025 REVENUE 为 1702 百万美元。"
 
     # 不带 valid_as_of 键（旧结果形态）。
-    answer_legacy, _ = _structured_answer(model_text, [dict(base_result)])
+    answer_legacy, _, _ = _structured_answer(model_text, [dict(base_result)])
     # 带 valid_as_of=None（新结果形态、但值为空）。
     result_with_none = dict(base_result)
     result_with_none["valid_as_of"] = None
-    answer_none, _ = _structured_answer(model_text, [result_with_none])
+    answer_none, _, _ = _structured_answer(model_text, [result_with_none])
 
     # 现状文案：确定性合成行（实体 期间 指标：值 单位 + 来源），无任何「截至」标注。
     # 注：found 路径已弃用模型散文（反幻觉确定性合成），model_text 仅证其被忽略。

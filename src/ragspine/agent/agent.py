@@ -91,6 +91,9 @@ class AgentResult:
     clarification: ClarificationResult | None = None
     tool_results: list[dict[str, object]] = field(default_factory=list)
     sources: list[dict[str, object]] = field(default_factory=list)
+    # answer 的无内联来源变体：正文与 answer 逐字节一致，但剥去「（来源：…）」/
+    # 「（资料来源：…）」后缀；产品层用 .sources 自渲染引用 UI，避免重复。
+    answer_plain: str = ""
 
 
 @dataclass
@@ -224,8 +227,11 @@ def _source_of(result: dict[str, object]) -> dict[str, object]:
 
 def _structured_answer(
     model_text: str, tool_results: list[dict[str, object]]
-) -> tuple[str, list[dict[str, object]]]:
-    """结构化回答的硬约束后处理：防编造 + 血缘补全。返回 (answer, sources)。"""
+) -> tuple[str, str, list[dict[str, object]]]:
+    """结构化回答的硬约束后处理：防编造 + 血缘补全。返回 (answer, answer_plain, sources)。
+
+    answer_plain 与 answer 正文逐字节一致，但每条只保留「body」（不含内联「（来源：…）」后缀）；
+    在此处按 body/suffix 分开构造，绝不对成品串做正则剥离。"""
     found = [r for r in tool_results if r.get("status") == "found"]
     if found:
         # 确定性合成（反幻觉，审计 HIGH 修复）：found 路径的数字一律取自 fact 值，
@@ -234,6 +240,7 @@ def _structured_answer(
         # 「实体 期间 指标（渠道）：值 单位（来源…）」，与 _multi_subtask_answer 同格式。
         sources = [_source_of(r) for r in found]
         lines: list[str] = []
+        plain_lines: list[str] = []
         for r in found:
             source = _source_of(r)
             label = (
@@ -246,22 +253,25 @@ def _structured_answer(
             # valid_as_of 存在时附「截至」业务时点。
             valid_as_of = r.get("valid_as_of")
             asof = f" · 截至 {valid_as_of}" if valid_as_of else ""
-            lines.append(
-                f"{label}：{r['value']:g} {r['unit']}"
-                f"（来源：{source.get('doc')} · {source.get('locator')}{asof}）"
-            )
-        return "\n".join(lines), sources
+            body = f"{label}：{r['value']:g} {r['unit']}"
+            suffix = f"（来源：{source.get('doc')} · {source.get('locator')}{asof}）"
+            lines.append(body + suffix)
+            plain_lines.append(body)
+        return "\n".join(lines), "\n".join(plain_lines), sources
 
     not_found = [r for r in tool_results if r.get("status") == "not_found"]
     if not_found:
-        return _not_found_answer(not_found[0]), []
+        # 反编造改写：answer 与 answer_plain 同为被守卫的拒答，plain 不得泄漏被压制的数值。
+        refusal = _not_found_answer(not_found[0])
+        return refusal, refusal, []
 
     unrecognized = [r for r in tool_results if r.get("status") == "unrecognized_param"]
     if unrecognized:
-        return _unrecognized_answer(unrecognized[0]), []
+        rejection = _unrecognized_answer(unrecognized[0])
+        return rejection, rejection, []
 
     # 模型未调工具直接作答（如要求澄清）：原样返回，无来源
-    return model_text, []
+    return model_text, model_text, []
 
 
 def _period_to_param(period: tuple[str, str]) -> str:
@@ -293,10 +303,14 @@ def _run_subtasks(
 
 def _multi_subtask_answer(
     tool_results: list[dict[str, object]],
-) -> tuple[str, list[dict[str, object]]]:
+) -> tuple[str, str, list[dict[str, object]]]:
     """多子任务对比式合成（确定性）：逐项列数+血缘；not_found 子项明确说查不到，
-    绝不编造，也不拖垮其他子项。返回 (answer, sources)。"""
+    绝不编造，也不拖垮其他子项。返回 (answer, answer_plain, sources)。
+
+    answer_plain 与 answer 正文逐字节一致，仅 found 行去掉内联「（来源：…）」后缀；
+    not_found / unrecognized 行本就无来源后缀，两者相同。"""
     lines: list[str] = []
+    plain_lines: list[str] = []
     sources: list[dict[str, object]] = []
     found: list[dict[str, object]] = []
     for r in tool_results:
@@ -311,23 +325,26 @@ def _multi_subtask_answer(
             )
             if r.get("channel") and r["channel"] != "TOTAL":
                 label += f"（渠道 {r['channel']}）"
-            lines.append(
-                f"- {label}：{r['value']:g} {r['unit']}"
-                f"（来源：{source.get('doc')} · {source.get('locator')}）"
-            )
+            body = f"- {label}：{r['value']:g} {r['unit']}"
+            suffix = f"（来源：{source.get('doc')} · {source.get('locator')}）"
+            lines.append(body + suffix)
+            plain_lines.append(body)
         elif r.get("status") == "not_found":
             raw_norm = r.get("normalized", {})
             norm = raw_norm if isinstance(raw_norm, dict) else {}
-            lines.append(
+            line = (
                 f"- {norm.get('entity')} {_period_label(str(norm.get('period_type', '')), str(norm.get('period', '')))} "
                 f"{norm.get('metric_code')}：查不到（未在事实表中找到，不提供推测数字）"
             )
+            lines.append(line)
+            plain_lines.append(line)
         else:  # unrecognized_param 或未知状态
-            lines.append(
-                f"- 无法识别参数 {r.get('param')}：'{r.get('raw')}'，该子项跳过。"
-            )
+            line = f"- 无法识别参数 {r.get('param')}：'{r.get('raw')}'，该子项跳过。"
+            lines.append(line)
+            plain_lines.append(line)
 
     answer = "对比结果：\n" + "\n".join(lines)
+    answer_plain = "对比结果：\n" + "\n".join(plain_lines)
 
     # 恰为两期可比（同指标/实体/渠道/单位、期间不同）时给出确定性差值
     if len(tool_results) == 2 and len(found) == 2:
@@ -345,9 +362,11 @@ def _multi_subtask_answer(
             )
             if a_value:
                 delta += f"（{diff / a_value * 100:+.1f}%）"
+            # 差值无来源后缀 → 两路同样追加。
             answer = f"{answer}\n{delta}"
+            answer_plain = f"{answer_plain}\n{delta}"
 
-    return answer, sources
+    return answer, answer_plain, sources
 
 
 def _snippet_text(snippet: dict[str, object]) -> str:
@@ -371,16 +390,19 @@ def _run_narrative(
     retriever: NarrativeRetriever | None,
     intent: ParsedIntent,
     ctx: _TraceCtx,
-) -> tuple[str, list[dict[str, object]]]:
-    """叙事通路：检索 → 合成 → 附来源。检索未接入/无结果时坦白降级；
+) -> tuple[str, str, list[dict[str, object]]]:
+    """叙事通路：检索 → 合成 → 附来源。检索未接入/无结果时坦白降级；返回
+    (answer, answer_plain, sources)。answer_plain 是模型散文本身（不含编排层追加的
+    「（资料来源：…）」血缘兜底后缀）；降级/无结果路本就无后缀，两者相同。
 
     provider 失败（ProviderError）→ 诚实降级文案，不崩、不编造；其他异常照常抛出。
     """
     if retriever is None:
-        return (
+        degraded = (
             "叙事检索通路尚未接入，暂时无法回答归因/监管/进展类问题；"
-            "数字类问题可直接提问。", [],
+            "数字类问题可直接提问。"
         )
+        return degraded, degraded, []
 
     filters: dict[str, str] = {}
     if intent.entity:
@@ -389,7 +411,8 @@ def _run_narrative(
         filters["period"] = intent.period[1]
     snippets = retriever.retrieve(question, filters=filters or None, top_k=50)
     if not snippets:
-        return ("未检索到与该问题相关的资料，无法基于现有知识库作答。", [])
+        no_material = "未检索到与该问题相关的资料，无法基于现有知识库作答。"
+        return no_material, no_material, []
 
     # 仅采集非敏感元数据（chunk_id + 各通道分数），绝不采集 chunk 正文。
     ctx.chunk_ids = [s.get("chunk_id") for s in snippets if s.get("chunk_id")]
@@ -412,15 +435,16 @@ def _run_narrative(
     except ProviderError:
         ctx.provider_error = True
         ctx.record_provider(time.perf_counter() - started, None)
-        return _DEGRADE_NARRATIVE, []
+        return _DEGRADE_NARRATIVE, _DEGRADE_NARRATIVE, []
     ctx.record_provider(time.perf_counter() - started, _usage_dict(resp.usage))
     answer = resp.choices[0].message.content or ""
+    answer_plain = answer  # 裸散文：不含编排层追加的血缘兜底后缀
     # 血缘兜底：来源文件名必须出现在回答里
     missing = [s for s in sources if s["doc"] and str(s["doc"]) not in answer]
     if missing:
         cite = "；".join(f"{s['doc']} {s['locator']}".strip() for s in missing)
         answer = f"{answer}\n（资料来源：{cite}）"
-    return answer, sources
+    return answer, answer_plain, sources
 
 
 def _tool_status_counts(tool_results: list[dict[str, object]]) -> dict[str, int]:
@@ -501,11 +525,14 @@ def _answer_decomposed(
         )
         for sq in subquestions
     ]
-    lines = [f"多跳分解（{len(subquestions)} 个子问题）："]
+    header = f"多跳分解（{len(subquestions)} 个子问题）："
+    lines = [header]
+    plain_lines = [header]
     sources: list[dict[str, object]] = []
     tool_results: list[dict[str, object]] = []
     for i, (sq, sub) in enumerate(zip(subquestions, sub_results, strict=True), start=1):
         lines.append(f"\n【子问题 {i}】{sq}\n{sub.answer}")
+        plain_lines.append(f"\n【子问题 {i}】{sq}\n{sub.answer_plain}")
         tool_results.extend(sub.tool_results)
         for src in sub.sources:
             if src not in sources:
@@ -516,6 +543,7 @@ def _answer_decomposed(
         clarification=None,
         tool_results=tool_results,
         sources=sources,
+        answer_plain="\n".join(plain_lines),
     )
 
 
@@ -562,14 +590,16 @@ def answer_question(
     # 外部/竞品实体越权：最前置拒答，绝不调 tool/检索/LLM，绝不输出 home 公司数字
     if clar.mode == CLARIFY_OUT_OF_SCOPE_ENTITY:
         _emit_request_trace(request_id, intent, clar, [], ctx)
+        # 拒答文本无内联来源 → answer_plain 与 answer 相同。
         return AgentResult(answer=clar.question or "", route=intent.route,
-                           clarification=clar, tool_results=[], sources=[])
+                           clarification=clar, tool_results=[], sources=[],
+                           answer_plain=clar.question or "")
 
     # 前置单选：歧义会导致实质错误，直接反问，不调用 LLM
     if clar.mode == CLARIFY_ASK_FIRST:
         _emit_request_trace(request_id, intent, clar, [], ctx)
         return AgentResult(answer=clar.question or "", route=intent.route,
-                           clarification=clar)
+                           clarification=clar, answer_plain=clar.question or "")
 
     # 默认先答：把假设槽位回填进问题（结构化通路按受控代码追加限定）
     effective_question = question
@@ -585,12 +615,13 @@ def answer_question(
         effective_question = f"{question}（按默认口径：{'，'.join(addenda)}）"
 
     if intent.route == ROUTE_NARRATIVE:
-        answer, sources = _run_narrative(
+        answer, answer_plain, sources = _run_narrative(
             question, provider, narrative_retriever, intent, ctx
         )
         _emit_request_trace(request_id, intent, clar, [], ctx)
         return AgentResult(answer=answer, route=intent.route,
-                           clarification=clar, sources=sources)
+                           clarification=clar, sources=sources,
+                           answer_plain=answer_plain)
 
     # structured / composite 都先跑数字子任务。
     # 多指标/多实体/多期间（用户明确列举的轴）→ 展开为多个子任务确定性执行；
@@ -602,26 +633,29 @@ def answer_question(
     )
     if len(subtasks) > 1:
         tool_results = _run_subtasks(subtasks, store)
-        answer, sources = _multi_subtask_answer(tool_results)
+        answer, answer_plain, sources = _multi_subtask_answer(tool_results)
     else:
         model_text, tool_results = _run_tool_loop(
             effective_question, store, provider, ref, ctx
         )
-        answer, sources = _structured_answer(model_text, tool_results)
+        answer, answer_plain, sources = _structured_answer(model_text, tool_results)
 
     if intent.route == ROUTE_COMPOSITE:
-        narrative_answer, narrative_sources = _run_narrative(
+        narrative_answer, narrative_answer_plain, narrative_sources = _run_narrative(
             question, provider, narrative_retriever, intent, ctx
         )
         answer = f"{answer}\n\n归因分析：\n{narrative_answer}"
+        answer_plain = f"{answer_plain}\n\n归因分析：\n{narrative_answer_plain}"
         sources = sources + narrative_sources
 
     if clar.mode == CLARIFY_ANSWER_WITH_ASSUMPTIONS:
         options = "／".join(clar.narrowing_options)
-        answer = (
-            f"【假设】{clar.assumption_note}（如需收窄：{options}）\n{answer}"
-        )
+        # 假设前缀无内联来源 → 两路一致追加。
+        prefix = f"【假设】{clar.assumption_note}（如需收窄：{options}）\n"
+        answer = prefix + answer
+        answer_plain = prefix + answer_plain
 
     _emit_request_trace(request_id, intent, clar, tool_results, ctx)
     return AgentResult(answer=answer, route=intent.route, clarification=clar,
-                       tool_results=tool_results, sources=sources)
+                       tool_results=tool_results, sources=sources,
+                       answer_plain=answer_plain)
