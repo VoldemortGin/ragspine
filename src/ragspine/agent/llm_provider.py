@@ -248,6 +248,21 @@ class MockProvider:
     第一轮（无 tool 结果）：用意图解析从用户话语产出 query_metric 的 tool_call（OpenAI 形状）；
     第二轮（有 tool 结果）：按 found / not_found / unrecognized 三态生成最终回答，found 时回答必带
     数值与血缘，not_found 时明确说查不到，绝不编造。
+
+    与 `corespine.MockProvider` 的区别（两处同名，别混用）：
+        - **本类（ragspine.agent.llm_provider.MockProvider）是 tool-use / agent 感知的**：它懂
+          ragspine 的意图解析 + `query_metric` 工具协议，能脚本化整条 agent 工具循环
+          （intent → tool_call → 三态最终答），专用于离线端到端跑 / 测 `answer_question` 的
+          结构化 + 叙事管线。选它当你要驱动 agent 循环。
+        - **`corespine.MockProvider` 是框架无关的通用 chat mock**：回显最后一条 user 消息 + 整段
+          对话的稳定 hex 指纹，**刻意绝不伪造 tool_calls**（离线不假装会 function-calling），
+          还带 `stream_chat`。选它当你只需一个确定性的裸 chat 缝（与 agent / 工具无关的单元测试）。
+          corespine 那侧只读不改；两者都实现同一 `LLMProvider.chat` 协议、可互换喂给 corespine 层。
+
+    叙事问答的已知局限（如实标注，不在此修）：本 mock 的“叙事合成”只是确定性回显检索到的片段正文
+    （见 `chat` 里 `NARRATIVE_PROMPT_PREFIX` 分支），其余能力偏 **metric 中心**（意图解析 → 数值
+    工具调用）；它【不】真做开放式叙事推理。要评测真实叙事问答质量请接真实 provider，别拿本 mock
+    的叙事回显当能力上限。
     """
 
     def __init__(self, reference_date: date | None = None) -> None:
