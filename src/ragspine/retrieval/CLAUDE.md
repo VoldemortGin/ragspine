@@ -22,11 +22,13 @@ for small-to-big, opt-in via `make_chunker("layout")`, default still byte-identi
 strategies, `sentence_window_chunker.py`'s `SentenceWindowChunker` (index single sentences + a
 `window_text` for synthesis-time expansion) and `semantic_chunker.py`'s `SemanticChunker`
 (embedding-distance-boundary splits, reusing `chunk_document` per segment), both opt-in / default
-byte-identical; plus `domain_presets.py`'s three thin `LayoutAwareChunker` subclasses that override
-**only** the heading predicate — `laws` (clause-hierarchy: `第N条/款/项` each start a clause-level
-section), `qa` (paired: each question + its following answer share one `parent_id`), `book`
-(chapter-hierarchy: `第N章`/markdown/numbered start sections), opt-in via
-`make_chunker("laws"/"qa"/"book")`, default byte-identical),
+byte-identical; plus `domain_presets.py`'s thin `LayoutAwareChunker` subclasses — three override **only** the
+heading predicate (`laws`: clause-hierarchy `第N条/款/项`; `qa`: each question + its following answer
+share one `parent_id`; `book`: chapter-hierarchy `第N章`/markdown/numbered) and one (`parent_child` /
+`small_to_big`, 批次 2.2 ③) overrides **only** the `_child_extra` hook to attach `window_text`=parent
+section text + `parent_locator`=the section's **real** para span (small-to-big: precise child hit →
+deterministic expansion to parent context, provenance points at the true parent locator), opt-in via
+`make_chunker("laws"/"qa"/"book"/"parent_child")`, default byte-identical),
 `contextual.py` (W4a — a deterministic, zero-fabrication context header built from controlled-vocab
 metadata, injected into **index/embed text only** via the opt-in `index_text_fn` seam on
 `HybridRetriever`/`NarrativeIndex`; `chunk.text`/citation untouched, default `None` = byte-identical),
@@ -93,6 +95,25 @@ structured. **Model-license honesty**: fastembed code is Apache-2.0 (passes the 
 `Qdrant/colpali-v1.3-fp16` weights are Gemma-licensed (runtime-pulled, flagged) — ColQwen2 (Qwen2-VL/Apache-2.0)
 is the more-permissive `RAGSPINE_COLPALI_MODEL` alternative.
 
+批次 2.2（检索产品化配置，对标 Dify dataset retrieval 的产品化面）——三块新增，全部离线确定性、
+默认路径字节不变：
+`filtering/` (**① 元数据过滤**): `metadata_filter.py` 的 `FilterCondition`/`MetadataFilter` —
+打分**之前**的确定性条件过滤（最小算子集 `eq/ne/in/nin/gt/gte/lt/lte/between`，字符串字典序、缺字段不命中），
+**只收窄**候选（`apply` 恒返回保序子序列），故绝不绕过 RESTRICTED（link/rerank 双出口照常剔除）；经
+`HybridRetriever.search(metadata_filter=)` / `NarrativeIndex.retrieve(metadata_filter=)` 接入，默认 `None`＝字节不变。
+`automatic.py` 的 `FilterExtractor` 缝 + `make_filter_extractor`（默认 `none`→`None`，opt-in
+`ControlledVocabFilterExtractor` 确定性受控词表规则抽取；LLM 抽取器 opt-in 适配器接入）——抽取产物**只能**是
+`MetadataFilter`（结构上无途径进答案通道），经 `NarrativeIndex(filter_extractor=)` 注入。
+`routing/` (**② 多库/多路检索路由**): `multi_index.py` 的 `LibraryIndex`/`MultiIndexRetriever`（实现 A 线
+`NarrativeRetriever` 协议）——并行多库检索后**跨库 RRF 融合**（复用 `lexical.rrf_fuse`），每条结果带 `library_id`
+（provenance 保留库来源维度）；隔离**继承**自各库 base 出口（RESTRICTED 绝不出域）。`router.py` 的
+`LibraryRouter` 缝 + `make_library_router`（默认 `none`＝扇出全部库＝模式 a；`keyword` 确定性 `KeywordLibraryRouter`
+按库描述词面匹配＝模式 b；LLM 路由 opt-in），零重叠时回落全部库不饿死召回。
+`mode.py` (**④ economy 模式包装**): `RetrievalMode` + `make_retrieval_mode`（`ServiceConfig.retrieval_mode`）—
+把既有纯 BM25 关键词检索（`embedding_backend=None`）包装成显式 `economy` 预设（**零 embedding 成本**，装配时绝不
+构造 embedding 后端/向量库），与 `hybrid`/`vector` 在同一配置面切换；默认 `auto`＝混合（embedding 按 `ServiceConfig.embedding`
+装配，字节不变）。
+
 ## Invariants
 
 - **RESTRICTED isolation** — sensitivity-`RESTRICTED` content is stripped at two
@@ -102,6 +123,12 @@ is the more-permissive `RAGSPINE_COLPALI_MODEL` alternative.
 - **At-rest persistence** — the default `PersistencePolicy` (`IsolationFirstPolicy`)
   **never persists a `RESTRICTED` chunk's vector** at ingest; only `PersistEverything`
   (opt-in, RESTRICTED-tier db) does. See `docs/invariants.md` + `docs/vector-store.md`.
+- **New 批次 2.2 modes inherit isolation, never add a bypass** — metadata filtering only
+  **narrows** candidates (a filter can never surface RESTRICTED — the two exits still strip it);
+  multi-index routing operates on already-stripped per-library snippets (RESTRICTED never fuses in)
+  and keeps the `library_id` provenance dimension; economy mode is the existing BM25 exit path with
+  the vector channel off. Every new mode is bound in `tests/conformance/test_metadata_filter_invariants.py`
+  / `test_multi_index_isolation.py` / `test_retrieval_mode_invariants.py` (parametrized + reverse-proof).
 
 ## Read before editing
 
