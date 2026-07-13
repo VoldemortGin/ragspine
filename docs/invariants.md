@@ -4,7 +4,7 @@ covers:
   - src/ragspine/retrieval/link/
   - src/ragspine/retrieval/rerank/
   - src/ragspine/common/observability/
-verified-against: c0d09ef34603ca2befa6f2eba930bde4f32841d7
+verified-against: 2322fbdc39d771831030b08854a12b331b5b5355
 ---
 
 # Invariants (code-enforced)
@@ -27,6 +27,13 @@ freezes it.
 **Enforced** at two exits before any prompt: `retrieval/link/narrative_link.py` (the snippet
 adapter drops RESTRICTED chunks) and `retrieval/rerank/listwise_rerank.py` (RESTRICTED text never
 enters the listwise judge prompt). Both must stay; neither is sufficient alone.
+
+**Parent-child window expansion rides the same exit (ADR 0018).** The small-to-big `window_text` →
+`prompt_text` swap in `narrative_link._to_snippet` runs **after** the `link/` exit has dropped RESTRICTED
+chunks, so a RESTRICTED chunk's whole snippet — parent window included — is rejected (整段拒绝) and the
+parent context can never leak via a child. The expanded window is generation-context only; `text` /
+`source_locator` stay the hit child, so citation stays honest and the window is never a hit. **Frozen by**
+`tests/conformance/test_parent_child_isolation.py` (end-to-end + a RESTRICTED-windowed reverse-proof).
 
 **Judge-agnostic (W2).** The rerank exit's protection lives in the `listwise_rerank` *orchestration*,
 not in any particular judge, so it covers **every** `ListwiseJudge` equally: the LLM listwise judge
