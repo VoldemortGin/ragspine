@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/raptor.py
-verified-against: 39de878
+verified-against: 11bf4362ea0e8a230f6a9749f16ba0ed5a1662d5
 ---
 
 # RAPTOR — recursive-cluster multi-granularity tree (W10)

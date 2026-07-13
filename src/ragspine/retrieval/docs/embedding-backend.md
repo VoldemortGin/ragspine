@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/vector/embedding_backends.py
-verified-against: e634e99
+verified-against: 11bf4362ea0e8a230f6a9749f16ba0ed5a1662d5
 ---
 
 # EmbeddingBackend seam — the default loop made semantic (W1)

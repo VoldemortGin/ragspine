@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/contextual.py
-verified-against: 0ee12fc
+verified-against: 11bf4362ea0e8a230f6a9749f16ba0ed5a1662d5
 ---
 
 # Contextual retrieval — deterministic context header (W4a)

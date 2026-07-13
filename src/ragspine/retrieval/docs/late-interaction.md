@@ -2,7 +2,7 @@
 covers:
   - src/ragspine/retrieval/rerank/colbert.py
   - src/ragspine/retrieval/rerank/splade.py
-verified-against: dcb8fba
+verified-against: 11bf4362ea0e8a230f6a9749f16ba0ed5a1662d5
 ---
 
 # Retrieval representation upgrade — ColBERT late-interaction + SPLADE learned-sparse (W11)

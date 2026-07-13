@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/postprocess.py
-verified-against: a9f5b31
+verified-against: 11bf4362ea0e8a230f6a9749f16ba0ed5a1662d5
 ---
 
 # Post-retrieval postprocessor chain — the node-postprocessor stage (W8)
