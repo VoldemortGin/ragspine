@@ -35,6 +35,13 @@ if TYPE_CHECKING:
     # 仅供类型注解；reportlab 是 dev-only extra，运行时改在各绘制函数内惰性 import，
     # 故 `import ragspine.fixtures.pdf` 不拉起 reportlab，保住 import-clean。
     from reportlab.pdfgen.canvas import Canvas
+else:
+    # 运行时占位：让 beartype 能解析注解里的前向引用 "Canvas"（本模块 `from __future__ import
+    # annotations`，注解是字符串，beartype 在绘制函数【首次被调用】时按模块全局解析 "Canvas"）。
+    # 缺此占位则新鲜生成 fixture（CI 全新 checkout，磁盘无缓存 PDF）时抛
+    # BeartypeCallHintForwardRefException。置为 object 既不在 import 期拉 reportlab（保 import-clean），
+    # 又让运行时校验退化为 isinstance(_, object) 恒真；真实类型安全仍由 TYPE_CHECKING 下的 mypy 保障。
+    Canvas = object
 
 ROOT_DIR = rootutils.find_root(Path(__file__), indicator=".project-root")
 
