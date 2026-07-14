@@ -8,7 +8,7 @@
 
 - pip 安装名：**`rag-spine`**（带连字符！`pip install rag-spine`）
 - import 名：**`import ragspine`**（无连字符）
-- Python：>= 3.11 · 版本：0.8.0 · 许可：Apache-2.0
+- Python：>= 3.11 · 版本：0.10.0 · 许可：Apache-2.0
 - 依赖 **corespine**（Spine 家族薄共享核）：6 缝（config / registry / trace / queue / errors /
   conformance）接入它 —— 统一异常 `CorespineError`、隐私 trace 强制拒正文、`Registry` 选实现、
   `load_from_env` 配置、`JobStatus` + `error_to_dict` 队列、`ConformanceSuite` 不变量基座。

@@ -91,4 +91,4 @@ def make_library_router(spec: str | None = None, **kwargs: object) -> LibraryRou
         raise ValueError(
             f"未知 library_router spec {spec!r}；可用：none（默认扇出） / keyword / description / lexical"
         )
-    return factory(**kwargs)  # type: ignore[arg-type]
+    return factory(**kwargs)

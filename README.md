@@ -9,7 +9,7 @@
 [![PyPI](https://img.shields.io/pypi/v/rag-spine.svg)](https://pypi.org/project/rag-spine/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
-![Tests](https://img.shields.io/badge/tests-~1955%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-2273%20passing-brightgreen)
 [![Docs](https://img.shields.io/badge/docs-rag--spine.org-2dd4bf)](https://rag-spine.org)
 
 ---
@@ -268,7 +268,7 @@ is written at rest — its default **never persists a `RESTRICTED` chunk's vecto
 ## Testing
 
 ```bash
-.venv/bin/python -m pytest tests/ -q -m "not network and not gpu"   # ~1955 passed (the CI default)
+.venv/bin/python -m pytest tests/ -q -m "not gpu and not docling and not network"   # 2273 passed (the CI default)
 ```
 
 The project is **test-driven**: tests are the spec. The `gpu` marker gates real-OCR / ColPali
@@ -303,11 +303,13 @@ version-controlled evaluation sets live under `data/golden/`. Nothing here is re
 
 ## Status & roadmap
 
-**Current release: 0.8.0.** It completes the twelve-workstream **quality-depth** program
-([`docs/prd-quality-depth.md`](docs/prd-quality-depth.md)), benchmarked stage-by-stage against the
-mainstream RAG stacks in two batches — every new capability **opt-in, the default loop byte-identical**:
+**Current release: 0.10.0.** It productizes retrieval controls and adds generation-only conversation
+history on top of the completed twelve-workstream **quality-depth** program
+([`docs/prd-quality-depth.md`](docs/prd-quality-depth.md)):
 
-- **This release (W8–W12, the second competitor batch):** post-retrieval postprocessor chain
+- **This release (0.10.0):** metadata filtering, multi-library routing, an economy retrieval preset,
+  store-level parent-child expansion, and conversation history that only enters generation context.
+- **0.8.0 (W8–W12, the second competitor batch):** post-retrieval postprocessor chain
   (MMR de-dup · lost-in-the-middle · context compression), LLM query transforms (HyDE · RAG-Fusion ·
   step-back · Adaptive-RAG), RAPTOR recursive-summary tree + sentence-window / semantic chunking,
   ColBERT late-interaction + SPLADE learned-sparse rerankers, and ColPali page-as-image visual retrieval.
@@ -317,7 +319,7 @@ mainstream RAG stacks in two batches — every new capability **opt-in, the defa
   and the deterministic GraphRAG relation graph + `GraphStore` seam.
 
 **Solid:** structured channel, narrative hybrid retrieval, agent orchestration, office
-extraction (xlsx/pptx/pdf), FastAPI + RQ service, FAQ cache, evaluation harness, ~1955 tests.
+extraction (xlsx/pptx/pdf), FastAPI + RQ service, FAQ cache, evaluation harness, 2273 tests.
 
 **Honest follow-ups (contributions welcome):** the depth workstreams ship the *technique + conformance*;
 their **measured eval-delta** (real-model A/B ratchets on the W5 groundedness harness) is the follow-up —
