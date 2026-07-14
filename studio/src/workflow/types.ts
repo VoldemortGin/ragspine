@@ -143,6 +143,7 @@ export interface PromptMessage {
 export interface ModelConfig {
   provider?: string;
   name?: string;
+  mode?: 'chat' | 'completion';
   completion_params?: { max_tokens?: number; [key: string]: unknown };
   [key: string]: unknown;
 }
@@ -150,7 +151,11 @@ export interface ModelConfig {
 export interface LlmNodeData extends StudioNodeData {
   prompt_template?: PromptMessage[];
   model?: ModelConfig;
-  context?: { enabled?: boolean; variable_selector?: ValueSelector; [key: string]: unknown };
+  context?: {
+    enabled?: boolean;
+    variable_selector?: ValueSelector;
+    [key: string]: unknown;
+  };
 }
 
 export interface CodeVariable {
@@ -229,8 +234,15 @@ export interface IterationNodeData extends StudioNodeData {
 export interface KnowledgeRetrievalNodeData extends StudioNodeData {
   query_variable_selector?: ValueSelector;
   dataset_ids?: string[];
+  retrieval_mode?: 'single' | 'multiple';
   top_k?: number; // default 4; may instead live in multiple_retrieval_config.top_k
-  multiple_retrieval_config?: { top_k?: number; [key: string]: unknown };
+  multiple_retrieval_config?: {
+    top_k?: number;
+    score_threshold?: number | null;
+    reranking_mode?: string;
+    reranking_enable?: boolean;
+    [key: string]: unknown;
+  };
 }
 
 export interface ExtractorParameter {
@@ -246,6 +258,7 @@ export interface ParameterExtractorNodeData extends StudioNodeData {
   parameters?: ExtractorParameter[];
   instruction?: string;
   model?: ModelConfig;
+  reasoning_mode?: 'function_call' | 'prompt';
 }
 
 export interface ToolParameterValue {

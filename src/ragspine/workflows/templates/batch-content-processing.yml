@@ -1,0 +1,177 @@
+app:
+  description: Spine-authored workflow that applies one instruction to a JSON list in parallel.
+  icon: "🧩"
+  icon_background: "#E4FBCC"
+  mode: workflow
+  name: Batch Content Processing
+  use_icon_as_answer_icon: false
+dependencies:
+  - type: marketplace
+    value:
+      marketplace_plugin_unique_identifier: langgenius/openai:0.3.8@592c8252795b5f75807de2d609a03196ed02596b409f7642b4a07548c7ff57ef
+kind: app
+version: "0.6.0"
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features: {}
+  graph:
+    nodes:
+      - data:
+          desc: ""
+          selected: false
+          title: Provide items
+          type: start
+          variables:
+            - variable: batch
+              label: Batch JSON
+              description: A JSON object containing an items array of strings.
+              type: json_object
+              required: true
+              json_schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: string
+                required: [items]
+            - variable: instruction
+              label: Processing instruction
+              max_length: null
+              options: []
+              type: text-input
+              required: true
+        height: 116
+        id: start_1
+        position: {x: 30, y: 260}
+        positionAbsolute: {x: 30, y: 260}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          desc: ""
+          error_handle_mode: terminated
+          flatten_output: true
+          is_parallel: true
+          iterator_input_type: array[string]
+          iterator_selector: [start_1, batch, items]
+          output_selector: [item_llm, text]
+          output_type: array[string]
+          parallel_nums: 4
+          selected: false
+          start_node_id: iteration_start_1
+          title: Process every item
+          type: iteration
+        height: 260
+        id: iteration_1
+        position: {x: 334, y: 200}
+        positionAbsolute: {x: 334, y: 200}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 420
+        zIndex: 1
+      - data:
+          desc: ""
+          isInIteration: true
+          selected: false
+          title: ""
+          type: iteration-start
+        draggable: false
+        height: 48
+        id: iteration_start_1
+        parentId: iteration_1
+        position: {x: 24, y: 86}
+        positionAbsolute: {x: 358, y: 286}
+        selectable: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom-iteration-start
+        width: 44
+        zIndex: 1002
+      - data:
+          context: {enabled: false, variable_selector: []}
+          desc: ""
+          isInIteration: true
+          isInLoop: false
+          iteration_id: iteration_1
+          model:
+            completion_params: {max_tokens: 700}
+            mode: chat
+            name: gpt-4o-mini
+            provider: langgenius/openai/openai
+          prompt_template:
+            - id: batch-system
+              role: system
+              text: "Apply the requested transformation to one item. Preserve factual details and return only the transformed item."
+            - id: batch-user
+              role: user
+              text: "Instruction: {{#start_1.instruction#}}\n\nItem: {{#iteration_1.item#}}"
+          selected: false
+          title: Process one item
+          type: llm
+          vision: {enabled: false, configs: {variable_selector: []}}
+        height: 120
+        id: item_llm
+        parentId: iteration_1
+        position: {x: 100, y: 50}
+        positionAbsolute: {x: 434, y: 250}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+        zIndex: 1002
+      - data:
+          desc: ""
+          outputs:
+            - value_selector: [iteration_1, output]
+              value_type: array[string]
+              variable: results
+          selected: false
+          title: Return processed items
+          type: end
+        height: 90
+        id: end_1
+        position: {x: 814, y: 260}
+        positionAbsolute: {x: 814, y: 260}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+    edges:
+      - data: {isInIteration: false, isInLoop: false, sourceType: start, targetType: iteration}
+        id: start_1-source-iteration_1-target
+        source: start_1
+        sourceHandle: source
+        target: iteration_1
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data:
+          isInIteration: true
+          isInLoop: false
+          iteration_id: iteration_1
+          sourceType: iteration-start
+          targetType: llm
+        id: iteration_start_1-source-item_llm-target
+        source: iteration_start_1
+        sourceHandle: source
+        target: item_llm
+        targetHandle: target
+        type: custom
+        zIndex: 1002
+      - data: {isInIteration: false, isInLoop: false, sourceType: iteration, targetType: end}
+        id: iteration_1-source-end_1-target
+        source: iteration_1
+        sourceHandle: source
+        target: end_1
+        targetHandle: target
+        type: custom
+        zIndex: 0
+    viewport: {x: 0, y: 0, zoom: 0.7}

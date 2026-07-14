@@ -5,8 +5,8 @@ NotImplementedError 钩子的 warning）/ 编译错误整形 400。注入 MockPr
 零真实 LLM API（TestClient）。run 端点的安全三层与异步测试见后续阶段。
 """
 
+import json
 import os
-from pathlib import Path
 
 import pytest
 import rootutils
@@ -14,10 +14,11 @@ from fastapi.testclient import TestClient
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
-from ragspine.agent.llm_provider import MockProvider
-from ragspine.service.api.app import create_app
-from ragspine.service.config import ServiceConfig
-from ragspine.service.tasks.task_queue import FakeQueue
+from ragspine.agent.llm_provider import MockProvider  # noqa: E402
+from ragspine.service.api.app import create_app  # noqa: E402
+from ragspine.service.config import ServiceConfig  # noqa: E402
+from ragspine.service.tasks.task_queue import FakeQueue  # noqa: E402
+from ragspine.workflows.formats import parse_workflow  # noqa: E402
 
 FIXTURES = ROOT_DIR / "tests" / "dify" / "fixtures"
 
@@ -26,17 +27,16 @@ def _fixture(name: str) -> str:
     return (FIXTURES / name).read_text(encoding="utf-8")
 
 
-def _make_client(tmp_path, *, run_enabled=False, timeout_s=10.0, provider=None,
-                 isolation="inprocess"):
+def _make_client(
+    tmp_path, *, run_enabled=False, timeout_s=10.0, provider=None, isolation="inprocess"
+):
     config = ServiceConfig(
         db_path=str(tmp_path / "fact.db"),
         dify_run_enabled=run_enabled,
         dify_run_timeout_s=timeout_s,
         dify_run_isolation=isolation,
     )
-    app = create_app(
-        config, provider=provider or MockProvider(), queue=FakeQueue()
-    )
+    app = create_app(config, provider=provider or MockProvider(), queue=FakeQueue())
     return TestClient(app)
 
 
@@ -69,8 +69,10 @@ def test_dify_analyze_seq_has_no_suggestions(client):
 
 
 def test_dify_analyze_bad_app_mode_is_400(client):
-    bad = "app:\n  mode: chat\n  name: x\nkind: app\nversion: \"0.1.5\"\n" \
-          "workflow:\n  graph:\n    nodes: []\n    edges: []\n"
+    bad = (
+        'app:\n  mode: chat\n  name: x\nkind: app\nversion: "0.1.5"\n'
+        "workflow:\n  graph:\n    nodes: []\n    edges: []\n"
+    )
     resp = client.post("/v1/dify/analyze", json={"yaml": bad})
     assert resp.status_code == 400
     err = resp.json()["error"]
@@ -93,6 +95,42 @@ def test_dify_compile_returns_code(client):
     assert body["warnings"] == []
 
 
+def test_dify_compile_accepts_canonical_workflow_json(client):
+    workflow = parse_workflow(_fixture("seq.yml"), format="yaml")
+
+    resp = client.post("/v1/dify/compile", json={"workflow": workflow})
+
+    assert resp.status_code == 200
+    assert "def run_workflow(" in resp.json()["code"]
+
+
+def test_dify_compile_never_reads_existing_path_string(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    """HTTP yaml 字段永远是正文；同名服务端文件不得被读取或泄露。"""
+    sentinel = "SERVER_LOCAL_SECRET_MUST_NOT_LEAK"
+    path = tmp_path / "server-local.yml"
+    path.write_text(
+        _fixture("seq.yml") + f"\nserver_local_secret: {sentinel}\n",
+        encoding="utf-8",
+    )
+
+    from ragspine.workflows import formats
+
+    def reject_file_read(*args, **kwargs):
+        raise AssertionError("HTTP str body must not read a server-side file")
+
+    monkeypatch.setattr(formats, "read_bounded_file", reject_file_read)
+
+    resp = client.post("/v1/dify/compile", json={"yaml": str(path)})
+
+    assert resp.status_code == 400
+    assert resp.json()["error"]["type"] == "workflow.format"
+    assert sentinel not in resp.text
+
+
 def test_dify_compile_unsupported_node_emits_warning(client):
     # agent_tool.yml 含 tool 节点 -> 生成带 NotImplementedError 的 @function_tool 占位 + warning
     resp = client.post("/v1/dify/compile", json={"yaml": _fixture("agent_tool.yml")})
@@ -108,16 +146,114 @@ def test_dify_compile_malformed_yaml_is_400(client):
     resp = client.post("/v1/dify/compile", json={"yaml": ": : not valid : ["})
     assert resp.status_code == 400
     err = resp.json()["error"]
-    assert err["type"] == "dify.compile"
+    assert err["type"] == "workflow.format"
 
 
-def test_dify_compile_bad_target_is_400(client):
+def test_dify_compile_bad_target_is_422_without_reflection(client):
+    secret = "sk-secret-target-must-not-reflect"
     resp = client.post(
         "/v1/dify/compile",
-        json={"yaml": _fixture("seq.yml"), "target": "nonsense"},
+        json={"yaml": _fixture("seq.yml"), "target": secret},
     )
+    assert resp.status_code == 422
+    assert secret not in resp.text
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/v1/dify/analyze",
+        "/v1/dify/compile",
+        "/v1/dify/run",
+        "/v1/dify/run/jobs",
+    ],
+)
+def test_dify_canonical_document_over_one_mib_is_safe_400(tmp_path, path):
+    secret = "sk-oversized-document-must-not-reflect"
+    workflow = parse_workflow(_fixture("seq.yml"), format="yaml")
+    # Each item stays below the per-string cap while their compact canonical JSON
+    # representation exceeds the shared 1 MiB decoded-document limit.
+    workflow["padding"] = [secret + ("x" * 249_900) for _ in range(5)]
+    client = _make_client(tmp_path, run_enabled=True)
+
+    resp = client.post(path, json={"workflow": workflow})
+
     assert resp.status_code == 400
-    assert resp.json()["error"]["type"] == "dify.unsupported_target"
+    assert resp.json()["error"]["type"] == "workflow.format"
+    assert secret not in resp.text
+
+
+def test_dify_canonical_document_over_node_limit_is_safe_400(client):
+    workflow = parse_workflow(_fixture("seq.yml"), format="yaml")
+    workflow["padding"] = [0] * 20_001
+
+    resp = client.post("/v1/dify/compile", json={"workflow": workflow})
+
+    assert resp.status_code == 400
+    assert resp.json()["error"]["type"] == "workflow.format"
+
+
+def test_dify_legacy_yaml_document_uses_same_one_mib_byte_limit(client):
+    secret = "sk-oversized-yaml-must-not-reflect"
+    yaml_text = _fixture("seq.yml") + "\npadding: |\n  " + secret + ("x" * (1024 * 1024))
+
+    resp = client.post("/v1/dify/compile", json={"yaml": yaml_text})
+
+    assert resp.status_code == 400
+    assert resp.json()["error"]["type"] == "workflow.format"
+    assert secret not in resp.text
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/v1/workflow-scaffold",
+        "/v1/dify/analyze",
+        "/v1/dify/compile",
+        "/v1/dify/run",
+        "/v1/dify/run/jobs",
+    ],
+)
+def test_workflow_json_routes_reject_oversized_raw_body_before_validation(
+    client,
+    path,
+):
+    secret = "sk-raw-body-must-not-reflect"
+    raw = json.dumps(
+        {"unexpected": secret + ("x" * (2 * 1024 * 1024))},
+    ).encode()
+
+    resp = client.post(
+        path,
+        content=raw,
+        headers={"content-type": "application/json"},
+    )
+
+    assert resp.status_code == 413
+    assert resp.json()["error"]["type"] == "RequestTooLarge"
+    assert secret not in resp.text
+
+
+def test_workflow_json_route_rejects_chunked_oversized_raw_body(client):
+    secret = b"sk-chunked-body-must-not-reflect"
+
+    def chunks():
+        yield b'{"yaml":"' + secret
+        for _ in range(5):
+            yield b"x" * (512 * 1024)
+
+    resp = client.post(
+        "/v1/dify/compile",
+        content=chunks(),
+        headers={
+            "content-type": "application/json",
+            "transfer-encoding": "chunked",
+        },
+    )
+
+    assert resp.status_code == 413
+    assert resp.json()["error"]["type"] == "RequestTooLarge"
+    assert secret.decode() not in resp.text
 
 
 # ---------------------------------------------------------------------------
@@ -148,9 +284,7 @@ def test_dify_run_mock_when_enabled(tmp_path):
 def test_dify_run_static_gate_rejects_unsupported_node_without_exec(tmp_path):
     # agent_tool.yml 含 tool 占位 -> L0 闸拒（warnings 非空）-> 422，且绝不 exec。
     client = _make_client(tmp_path, run_enabled=True)
-    resp = client.post(
-        "/v1/dify/run", json={"yaml": _fixture("agent_tool.yml"), "inputs": {}}
-    )
+    resp = client.post("/v1/dify/run", json={"yaml": _fixture("agent_tool.yml"), "inputs": {}})
     assert resp.status_code == 422
     err = resp.json()["error"]
     assert err["type"] == "dify.unsafe"
@@ -163,7 +297,7 @@ def test_dify_run_import_allowlist_via_unsupported_http_node(tmp_path):
     # http-request 节点同样生成 NotImplementedError 骨架 + warning -> L0 闸 422（未执行）。
     # 这条间接验证「越权能力的节点不会被跑」——与单元层的 import 白名单互补。
     http_yaml = (
-        "app:\n  mode: workflow\n  name: x\nkind: app\nversion: \"0.1.5\"\n"
+        'app:\n  mode: workflow\n  name: x\nkind: app\nversion: "0.1.5"\n'
         "workflow:\n  graph:\n    nodes:\n"
         "      - id: start_1\n        data: {type: start, title: s, variables: []}\n"
         "      - id: http_1\n        data: {type: http-request, title: h}\n"
@@ -195,7 +329,7 @@ def test_dify_run_compile_error_is_400(tmp_path):
     client = _make_client(tmp_path, run_enabled=True)
     resp = client.post("/v1/dify/run", json={"yaml": ": : bad : [", "inputs": {}})
     assert resp.status_code == 400
-    assert resp.json()["error"]["type"] == "dify.compile"
+    assert resp.json()["error"]["type"] == "workflow.format"
 
 
 def test_dify_run_provider_from_config_not_client(tmp_path):
@@ -217,13 +351,17 @@ def test_dify_run_provider_from_config_not_client(tmp_path):
     assert resp.status_code == 200
     # seq.yml 有一个 llm 节点 -> 服务端 provider 被调用一次
     assert spy.calls == 1
-    # 请求体里不接受 provider_expr：即便塞了也被 pydantic 忽略（schema 无此字段）
+    # 请求体严格拒绝 provider_expr，且 422 不反射被拒绝值。
     resp2 = client.post(
         "/v1/dify/run",
-        json={"yaml": _fixture("seq.yml"), "inputs": {"question": "hi"},
-              "provider_expr": "__import__('os')"},
+        json={
+            "yaml": _fixture("seq.yml"),
+            "inputs": {"question": "hi"},
+            "provider_expr": "__import__('os')",
+        },
     )
-    assert resp2.status_code == 200  # 多余字段被忽略，未注入
+    assert resp2.status_code == 422
+    assert "__import__" not in resp2.text
 
 
 # ---------------------------------------------------------------------------
@@ -261,9 +399,7 @@ def test_dify_run_async_disabled_by_default(tmp_path):
 
 def test_dify_run_async_static_gate_rejects_before_enqueue(tmp_path):
     client = _make_client(tmp_path, run_enabled=True)
-    resp = client.post(
-        "/v1/dify/run/jobs", json={"yaml": _fixture("agent_tool.yml"), "inputs": {}}
-    )
+    resp = client.post("/v1/dify/run/jobs", json={"yaml": _fixture("agent_tool.yml"), "inputs": {}})
     # 入队前 L0 闸拒 -> 422（绝不入队、绝不执行）
     assert resp.status_code == 422
     assert resp.json()["error"]["type"] == "dify.unsafe"
@@ -273,7 +409,7 @@ def test_dify_run_async_compile_error_before_enqueue(tmp_path):
     client = _make_client(tmp_path, run_enabled=True)
     resp = client.post("/v1/dify/run/jobs", json={"yaml": ": : bad : [", "inputs": {}})
     assert resp.status_code == 400
-    assert resp.json()["error"]["type"] == "dify.compile"
+    assert resp.json()["error"]["type"] == "workflow.format"
 
 
 # ---------------------------------------------------------------------------
@@ -344,9 +480,7 @@ def test_dify_run_returns_node_traces(tmp_path):
 
 def test_dify_run_failure_response_includes_node_traces(tmp_path):
     client = _make_client(tmp_path, run_enabled=True)
-    resp = client.post(
-        "/v1/dify/run", json={"yaml": FAIL_TRACE_YAML, "inputs": {"question": "q"}}
-    )
+    resp = client.post("/v1/dify/run", json={"yaml": FAIL_TRACE_YAML, "inputs": {"question": "q"}})
     assert resp.status_code == 400
     err = resp.json()["error"]
     assert err["type"] == "dify.run_error"

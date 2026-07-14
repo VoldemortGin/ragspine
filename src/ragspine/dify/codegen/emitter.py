@@ -66,6 +66,20 @@ def generate_code(
     return builder.build()
 
 
+def _has_nested_reference(ir: WorkflowIR) -> bool:
+    """Whether any selector needs safe traversal below a stored context field."""
+
+    for node in ir.graph.nodes:
+        if any("." in ref.field for ref in node.dep_refs()):
+            return True
+        if isinstance(node, IterationNode):
+            if node.output is not None and "." in node.output.field:
+                return True
+            if node.body is not None and _has_nested_reference(node.body):
+                return True
+    return False
+
+
 class _Emitter:
     """一次编译的可变状态（名表 / 警告 / 钩子函数 / import / 折叠计划）。"""
 
@@ -80,6 +94,7 @@ class _Emitter:
         self.ir = ir
         self.provider_expr = provider_expr
         self.emit_node_traces = emit_node_traces
+        self.nested_var_lookup = _has_nested_reference(ir)
         self.names = NameTable(n.id for n in ir.graph.nodes)
         self.warnings: list[str] = []
         self.imports: set[str] = set()
@@ -268,13 +283,9 @@ class _Emitter:
         ]
         if self.emit_node_traces:
             head.append("    _NODE_TRACES.clear()")
-        head += [
-            "",
-            "    def _var(node: str, field: str) -> Any:",
-            '        """取某节点输出字段（闭合 _ctx）；缺失返回空串，不因取值缺失整体崩。"""',
-            "        return _ctx.get((node, field), '')",
-            "",
-        ]
+        head.append("")
+        head.extend(self._emit_var_closure())
+        head.append("")
         if self.emit_node_traces:
             head += [
                 "    def _trace_done(node_id: str, title: str, node_type: str,",
@@ -306,6 +317,51 @@ class _Emitter:
             ]
         tail.append(f"{INDENT}return _result")
         return [*head, *indented, *tail]
+
+    def _emit_var_closure(self, *, include_docstring: bool = True) -> list[str]:
+        """Emit exact lookup, adding safe JSON traversal only when selectors require it."""
+
+        lines = ["    def _var(node: str, field: str) -> Any:"]
+        if include_docstring:
+            lines.append(
+                '        """取某节点输出字段（闭合 _ctx）；缺失返回空串，不因取值缺失整体崩。"""'
+            )
+        if not self.nested_var_lookup:
+            lines.append("        return _ctx.get((node, field), '')")
+            return lines
+        lines.extend(
+            [
+                "        _exact_key = (node, field)",
+                "        if _exact_key in _ctx:",
+                "            return _ctx[_exact_key]",
+                "        _parts = field.split('.')",
+                "        for _cut in range(len(_parts) - 1, 0, -1):",
+                "            _base_key = (node, '.'.join(_parts[:_cut]))",
+                "            if _base_key not in _ctx:",
+                "                continue",
+                "            _value = _ctx[_base_key]",
+                "            for _part in _parts[_cut:]:",
+                "                if isinstance(_value, dict):",
+                "                    if _part not in _value:",
+                "                        return ''",
+                "                    _value = _value[_part]",
+                "                elif (",
+                "                    isinstance(_value, (list, tuple))",
+                "                    and _part.isascii()",
+                "                    and _part.isdecimal()",
+                "                    and len(_part) <= 9",
+                "                ):",
+                "                    _index = int(_part)",
+                "                    if _index >= len(_value):",
+                "                        return ''",
+                "                    _value = _value[_index]",
+                "                else:",
+                "                    return ''",
+                "            return _value",
+                "        return ''",
+            ]
+        )
+        return lines
 
     # -- 控制流展平 ---------------------------------------------------------
 
@@ -439,8 +495,7 @@ class _Emitter:
         lines.append("    _ctx = dict(_ctx_outer)")
         lines.append(f"    _ctx[({node.id!r}, 'item')] = _item")
         lines.append("")
-        lines.append("    def _var(node: str, field: str) -> Any:")
-        lines.append("        return _ctx.get((node, field), '')")
+        lines.extend(self._emit_var_closure(include_docstring=False))
         lines.append("")
         # 子图节点按拓扑序展平（子图通常简单线性；复用同一节点 emitter）。
         if node.body is not None:

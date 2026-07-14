@@ -6,10 +6,11 @@
 import json
 from collections.abc import Iterator
 from datetime import date
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import JsonValue
 
 from ragspine.agent.agent import AgentResult, answer_question
 from ragspine.agent.decompose import make_decomposer
@@ -28,6 +29,7 @@ from ragspine.service.api.dependencies import (
     get_faq_cache,
     get_provider,
     get_queue,
+    get_workflow_matcher,
 )
 from ragspine.service.api.schemas import (
     AskRequest,
@@ -54,6 +56,14 @@ from ragspine.service.api.schemas import (
     TopologyEdgeInfo,
     TopologyNodeInfo,
     TopologyResponse,
+    WorkflowCompatibilityInfo,
+    WorkflowRequirementInfo,
+    WorkflowScaffoldRequest,
+    WorkflowScaffoldResponse,
+    WorkflowSourceMetadata,
+    WorkflowTemplateDetailResponse,
+    WorkflowTemplateInfo,
+    WorkflowTemplateListResponse,
 )
 from ragspine.service.config import (
     PathNotAllowedError,
@@ -65,6 +75,7 @@ from ragspine.service.config import (
 )
 from ragspine.service.faq.faq_cache import FAQCache
 from ragspine.service.tasks.task_queue import TaskQueue
+from ragspine.workflows.matching import LexicalTemplateMatcher, TemplateMatcher
 
 # 与 worker 侧 jobs 模块约定的 func_path（此处只用字面量，不 import jobs）。
 STRUCTURED_INGEST_JOB = "ragspine.service.tasks.jobs.run_structured_ingest_job"
@@ -82,11 +93,22 @@ ConfigDep = Annotated[ServiceConfig, Depends(get_config)]
 ProviderDep = Annotated[LLMProvider, Depends(get_provider)]
 FAQCacheDep = Annotated[FAQCache, Depends(get_faq_cache)]
 QueueDep = Annotated[TaskQueue, Depends(get_queue)]
+WorkflowMatcherDep = Annotated[TemplateMatcher, Depends(get_workflow_matcher)]
+
+_WORKFLOW_LEXICAL_FALLBACK = LexicalTemplateMatcher()
+_WORKFLOW_MATCHER_FALLBACK_WARNING = (
+    "Semantic template matching failed; used the offline lexical fallback."
+)
 
 
-def _error_response(status_code: int, *, type_: str, message: str,
-                    request_id: str | None = None,
-                    node_traces: Any = None) -> JSONResponse:
+def _error_response(
+    status_code: int,
+    *,
+    type_: str,
+    message: str,
+    request_id: str | None = None,
+    node_traces: Any = None,
+) -> JSONResponse:
     error: dict[str, Any] = {"type": type_, "message": message, "request_id": request_id}
     if node_traces:
         # dify run 失败时附带节点级 trace（已净化、JSON-safe），供前端可视化失败节点。
@@ -194,8 +216,10 @@ def ask(
         hit = faq_cache.lookup(req.question, reference_date=ref)
         if hit is not None:
             emit_trace(
-                request_id=request_id, cache_hit=True,
-                faq_id=hit.item_id, faq_version=hit.version,
+                request_id=request_id,
+                cache_hit=True,
+                faq_id=hit.item_id,
+                faq_version=hit.version,
             )
             return AskResponse(
                 request_id=request_id,
@@ -206,14 +230,19 @@ def ask(
                 sources=[SourceInfo(doc=hit.source)] if hit.source else [],
                 tool_status_summary={"found": 0, "not_found": 0, "unrecognized": 0},
                 cache=CacheInfo(
-                    hit=True, type=hit.cache_type, faq_id=hit.item_id,
-                    version=hit.version, source=hit.source,
+                    hit=True,
+                    type=hit.cache_type,
+                    faq_id=hit.item_id,
+                    version=hit.version,
+                    source=hit.source,
                 ),
             )
 
         # 2) miss -> 正常 workflow（资源每请求各自开关）
-        with open_fact_store(config) as store, \
-                open_narrative_retriever(config, provider) as retriever:
+        with (
+            open_fact_store(config) as store,
+            open_narrative_retriever(config, provider) as retriever,
+        ):
             # 分解器选型：W9 Adaptive-RAG（复杂度路由）优先于 W6a 直接分解——config.adaptive
             # 非 "none" 时按复杂度路由（multi 才 fan-out），否则用 W6a 直接分解。两者默认均 "none"
             # → decomposer=None → answer_question 主流程字节不变。
@@ -222,17 +251,25 @@ def ask(
             else:
                 decomposer = make_decomposer(config.query_decompose, provider=provider)
             result = answer_question(
-                req.question, store, provider,
-                reference_date=ref, narrative_retriever=retriever,
-                decomposer=decomposer, history=req.history,
+                req.question,
+                store,
+                provider,
+                reference_date=ref,
+                narrative_retriever=retriever,
+                decomposer=decomposer,
+                history=req.history,
             )
 
         summary = _tool_status_summary(result.tool_results)
         answer_kind = _answer_kind(result, summary)
         emit_trace(
-            request_id=request_id, cache_hit=False, route=result.route,
-            answer_kind=answer_kind, found=summary["found"],
-            not_found=summary["not_found"], unrecognized=summary["unrecognized"],
+            request_id=request_id,
+            cache_hit=False,
+            route=result.route,
+            answer_kind=answer_kind,
+            found=summary["found"],
+            not_found=summary["not_found"],
+            unrecognized=summary["unrecognized"],
         )
         return AskResponse(
             request_id=request_id,
@@ -246,7 +283,9 @@ def ask(
         )
     except Exception:  # 防御性兜底：绝不泄露 traceback
         return _error_response(
-            500, type_="InternalError", message="internal error",
+            500,
+            type_="InternalError",
+            message="internal error",
             request_id=request_id,
         )
 
@@ -278,8 +317,10 @@ def ask_stream(
         hit = faq_cache.lookup(req.question, reference_date=ref)
         if hit is not None:
             emit_trace(
-                request_id=request_id, cache_hit=True,
-                faq_id=hit.item_id, faq_version=hit.version,
+                request_id=request_id,
+                cache_hit=True,
+                faq_id=hit.item_id,
+                faq_version=hit.version,
             )
             answer = hit.answer
             route = "faq"
@@ -288,28 +329,41 @@ def ask_stream(
             sources = [SourceInfo(doc=hit.source).model_dump()] if hit.source else []
             tool_status_summary = {"found": 0, "not_found": 0, "unrecognized": 0}
             cache = CacheInfo(
-                hit=True, type=hit.cache_type, faq_id=hit.item_id,
-                version=hit.version, source=hit.source,
+                hit=True,
+                type=hit.cache_type,
+                faq_id=hit.item_id,
+                version=hit.version,
+                source=hit.source,
             ).model_dump()
         else:
             # 2) miss -> 正常 workflow（资源每请求各自开关；守卫在此跑完）
-            with open_fact_store(config) as store, \
-                    open_narrative_retriever(config, provider) as retriever:
+            with (
+                open_fact_store(config) as store,
+                open_narrative_retriever(config, provider) as retriever,
+            ):
                 if config.adaptive != "none":
                     decomposer = make_adaptive_decomposer(config.adaptive, provider=provider)
                 else:
                     decomposer = make_decomposer(config.query_decompose, provider=provider)
                 result = answer_question(
-                    req.question, store, provider,
-                    reference_date=ref, narrative_retriever=retriever,
-                    decomposer=decomposer, history=req.history,
+                    req.question,
+                    store,
+                    provider,
+                    reference_date=ref,
+                    narrative_retriever=retriever,
+                    decomposer=decomposer,
+                    history=req.history,
                 )
             summary = _tool_status_summary(result.tool_results)
             answer_kind = _answer_kind(result, summary)
             emit_trace(
-                request_id=request_id, cache_hit=False, route=result.route,
-                answer_kind=answer_kind, found=summary["found"],
-                not_found=summary["not_found"], unrecognized=summary["unrecognized"],
+                request_id=request_id,
+                cache_hit=False,
+                route=result.route,
+                answer_kind=answer_kind,
+                found=summary["found"],
+                not_found=summary["not_found"],
+                unrecognized=summary["unrecognized"],
             )
             answer = result.answer
             route = result.route
@@ -320,7 +374,9 @@ def ask_stream(
             cache = CacheInfo(hit=False).model_dump()
     except Exception:  # 守卫前置计算失败 -> 正常 JSON 500，绝不半开流
         return _error_response(
-            500, type_="InternalError", message="internal error",
+            500,
+            type_="InternalError",
+            message="internal error",
             request_id=request_id,
         )
 
@@ -329,16 +385,18 @@ def ask_stream(
         yield _sse_frame({"type": "start", "request_id": request_id})
         for chunk in iter_text_chunks(answer):
             yield _sse_frame({"type": "delta", "text": chunk})
-        yield _sse_frame({
-            "type": "done",
-            "request_id": request_id,
-            "route": route,
-            "answer_kind": answer_kind,
-            "clarification": clarification,
-            "sources": sources,
-            "tool_status_summary": tool_status_summary,
-            "cache": cache,
-        })
+        yield _sse_frame(
+            {
+                "type": "done",
+                "request_id": request_id,
+                "route": route,
+                "answer_kind": answer_kind,
+                "clarification": clarification,
+                "sources": sources,
+                "tool_status_summary": tool_status_summary,
+                "cache": cache,
+            }
+        )
 
     return StreamingResponse(gen(), media_type="text/event-stream")
 
@@ -353,9 +411,7 @@ def submit_structured_job(
     queue: QueueDep,
 ) -> JobSubmitResponse | JSONResponse:
     try:
-        resolved = validate_ingest_path(
-            req.file, config, suffixes=_STRUCTURED_SUFFIXES
-        )
+        resolved = validate_ingest_path(req.file, config, suffixes=_STRUCTURED_SUFFIXES)
     except PathNotAllowedError as exc:
         return _error_response(400, type_="PathNotAllowedError", message=str(exc))
 
@@ -384,9 +440,7 @@ def submit_narrative_job(
     resolved_inputs: list[str] = []
     try:
         for item in raw_inputs:
-            resolved = validate_ingest_path(
-                item, config, suffixes=_NARRATIVE_SUFFIXES
-            )
+            resolved = validate_ingest_path(item, config, suffixes=_NARRATIVE_SUFFIXES)
             resolved_inputs.append(str(resolved))
     except PathNotAllowedError as exc:
         return _error_response(400, type_="PathNotAllowedError", message=str(exc))
@@ -411,8 +465,161 @@ def get_job(
     st = queue.get(job_id)
     if st is None:
         return _error_response(404, type_="JobNotFound", message="job not found")
-    return JobStatusResponse(
-        id=st.id, status=st.status, result=st.result, error=st.error
+    return JobStatusResponse(id=st.id, status=st.status, result=st.result, error=st.error)
+
+
+# ---------------------------------------------------------------------------
+# 离线工作流模板 catalog / scaffold
+#
+# 三个端点都是只读边界：catalog 只来自包内 manifest，scaffold 只调用离线 matcher；
+# 不接受 provider/API key/path/URL，也不执行生成的工作流。刻意避开 Dify 兼容 API 已占用的
+# /v1/workflows/* 命名空间。
+# ---------------------------------------------------------------------------
+def _workflow_template_info(template: Any) -> WorkflowTemplateInfo:
+    """内部 frozen dataclass -> 不含 YAML 的 HTTP metadata。"""
+    return WorkflowTemplateInfo.model_validate(template, from_attributes=True)
+
+
+def _workflow_compatibility_info(value: Any) -> WorkflowCompatibilityInfo:
+    return WorkflowCompatibilityInfo.model_validate(value, from_attributes=True)
+
+
+def _workflow_requirement_info(value: Any) -> WorkflowRequirementInfo:
+    return WorkflowRequirementInfo.model_validate(value, from_attributes=True)
+
+
+def _workflow_source_metadata(value: Any) -> WorkflowSourceMetadata | None:
+    if value is None:
+        return None
+    return WorkflowSourceMetadata.model_validate(value, from_attributes=True)
+
+
+@router.get("/v1/workflow-templates", response_model=None)
+def list_workflow_templates() -> WorkflowTemplateListResponse:
+    """列出包内 catalog 的事实型 metadata；完整 YAML 刻意不进入列表响应。"""
+    from ragspine.workflows.catalog import WorkflowCatalog
+
+    request_id = new_request_id()
+    templates = WorkflowCatalog.default().list()
+    emit_trace(
+        request_id=request_id,
+        op="workflow_catalog.list",
+        n_templates=len(templates),
+    )
+    return WorkflowTemplateListResponse(
+        request_id=request_id,
+        templates=[_workflow_template_info(template) for template in templates],
+    )
+
+
+@router.get("/v1/workflow-templates/{template_id}", response_model=None)
+def get_workflow_template(
+    template_id: str,
+) -> WorkflowTemplateDetailResponse | JSONResponse:
+    """取一个模板详情；这是唯一返回完整 Dify YAML 的 catalog 端点。"""
+    from ragspine.workflows.catalog import WorkflowCatalog
+    from ragspine.workflows.errors import WorkflowTemplateNotFoundError
+
+    request_id = new_request_id()
+    try:
+        template = WorkflowCatalog.default().get(template_id)
+    except WorkflowTemplateNotFoundError as exc:
+        return _error_response(
+            404,
+            type_=exc.code,
+            message="workflow template not found",
+            request_id=request_id,
+        )
+
+    info = _workflow_template_info(template)
+    emit_trace(request_id=request_id, op="workflow_catalog.get", found=True)
+    return WorkflowTemplateDetailResponse(
+        request_id=request_id,
+        **info.model_dump(),
+        workflow=cast(dict[str, JsonValue], template.workflow),
+        yaml=template.yaml,
+    )
+
+
+@router.post("/v1/workflow-scaffold", response_model=None)
+def workflow_scaffold(
+    req: WorkflowScaffoldRequest,
+    matcher: WorkflowMatcherDep,
+) -> WorkflowScaffoldResponse | JSONResponse:
+    """按描述离线复用或生成 Dify workflow；只返回配置，绝不执行。"""
+    from ragspine.workflows.catalog import WorkflowCatalog
+    from ragspine.workflows.errors import (
+        WorkflowInputError,
+        WorkflowMatcherError,
+        WorkflowTemplateNotFoundError,
+    )
+    from ragspine.workflows.scaffold import scaffold_workflow
+
+    request_id = new_request_id()
+    catalog = WorkflowCatalog.default()
+    if req.template_id is not None:
+        try:
+            catalog.get(req.template_id)
+        except WorkflowTemplateNotFoundError as exc:
+            return _error_response(
+                404,
+                type_=exc.code,
+                message="workflow template not found",
+                request_id=request_id,
+            )
+
+    try:
+        result = scaffold_workflow(
+            req.description,
+            catalog=catalog,
+            matcher=matcher,
+            template_id=req.template_id,
+            reuse=req.reuse,
+        )
+        response_warnings = list(result.warnings)
+    except WorkflowMatcherError:
+        result = scaffold_workflow(
+            req.description,
+            catalog=catalog,
+            matcher=_WORKFLOW_LEXICAL_FALLBACK,
+            template_id=req.template_id,
+            reuse=req.reuse,
+        )
+        response_warnings = [*result.warnings, _WORKFLOW_MATCHER_FALLBACK_WARNING]
+    except WorkflowTemplateNotFoundError as exc:
+        return _error_response(
+            404,
+            type_=exc.code,
+            message="workflow template not found",
+            request_id=request_id,
+        )
+    except WorkflowInputError as exc:
+        return _error_response(
+            400,
+            type_=exc.code,
+            message=str(exc),
+            request_id=request_id,
+        )
+
+    emit_trace(
+        request_id=request_id,
+        op="workflow_scaffold",
+        origin=result.origin,
+        reused=result.template_id is not None,
+        n_warnings=len(response_warnings),
+    )
+    return WorkflowScaffoldResponse(
+        request_id=request_id,
+        workflow=cast(dict[str, JsonValue], result.workflow),
+        yaml=result.yaml,
+        template_id=result.template_id,
+        origin=result.origin,
+        confidence=result.confidence,
+        matcher=result.matcher,
+        warnings=response_warnings,
+        compatibility=_workflow_compatibility_info(result.compatibility),
+        requirements=[_workflow_requirement_info(item) for item in result.requirements],
+        source=_workflow_source_metadata(result.source),
     )
 
 
@@ -435,15 +642,78 @@ def _dify_suggestion_info(s: Any) -> DifySuggestionInfo:
     )
 
 
+def _dify_document_yaml(req: Any) -> str:
+    """Normalize either HTTP representation through one bounded canonical document."""
+
+    from ragspine.workflows.formats import (
+        dump_dify_yaml,
+        dump_json,
+        parse_workflow,
+    )
+
+    if req.workflow is not None:
+        # dump_json validates the already-decoded Pydantic value (depth/node/type
+        # limits); reparsing applies the same 1 MiB UTF-8 byte limit used by YAML.
+        canonical_json = dump_json(
+            cast(dict[str, object], req.workflow),
+            pretty=False,
+        )
+        document = parse_workflow(canonical_json, format="json")
+    else:
+        assert req.yaml is not None
+        document = parse_workflow(cast(str, req.yaml), format="yaml")
+        # A compact canonical representation is bounded as well, so a terse YAML
+        # document cannot expand into an oversized in-memory canonical document.
+        canonical_json = dump_json(document, pretty=False)
+        document = parse_workflow(canonical_json, format="json")
+    return dump_dify_yaml(document)
+
+
+def _workflow_format_response(request_id: str) -> JSONResponse:
+    """Return a stable opaque error; parser failures can contain submitted secrets."""
+
+    return _error_response(
+        400,
+        type_="workflow.format",
+        message="invalid workflow document",
+        request_id=request_id,
+    )
+
+
+def _compile_dify_document(
+    workflow_yaml: str,
+    *,
+    target: str = "ragspine",
+    fold_answer_question: bool,
+    emit_node_traces: bool = False,
+) -> Any:
+    """Keep the optional Dify compiler lazy-loaded behind one adapter."""
+
+    from ragspine.dify.api import compile_dify_yaml
+
+    return compile_dify_yaml(
+        workflow_yaml,
+        target=target,
+        fold_answer_question=fold_answer_question,
+        emit_node_traces=emit_node_traces,
+    )
+
+
 @router.post("/v1/dify/analyze", response_model=None)
 def dify_analyze(req: DifyAnalyzeRequest) -> DifyAnalyzeResponse | JSONResponse:
     request_id = new_request_id()
     # 延迟 import：[dify] extra 未装时只这条链报错，不影响其余服务。
     from ragspine.dify.api import analyze as analyze_dify
     from ragspine.dify.errors import DifyCompileError
+    from ragspine.workflows.errors import WorkflowFormatError
 
     try:
-        suggestions = analyze_dify(req.yaml)
+        workflow_yaml = _dify_document_yaml(req)
+    except WorkflowFormatError:
+        return _workflow_format_response(request_id)
+
+    try:
+        suggestions = analyze_dify(workflow_yaml)
     except DifyCompileError as exc:
         return _error_response(400, type_=exc.code, message=str(exc), request_id=request_id)
 
@@ -457,14 +727,19 @@ def dify_analyze(req: DifyAnalyzeRequest) -> DifyAnalyzeResponse | JSONResponse:
 @router.post("/v1/dify/compile", response_model=None)
 def dify_compile(req: DifyCompileRequest) -> DifyCompileResponse | JSONResponse:
     request_id = new_request_id()
-    from ragspine.dify.api import compile_dify_yaml
     from ragspine.dify.errors import DifyCompileError
+    from ragspine.workflows.errors import WorkflowFormatError
+
+    try:
+        workflow_yaml = _dify_document_yaml(req)
+    except WorkflowFormatError:
+        return _workflow_format_response(request_id)
 
     try:
         # provider_expr 固定为离线默认；客户端不可注入（防代码注入），运行期再由
         # run_workflow(provider=...) 用服务端 provider 覆盖。
-        compiled = compile_dify_yaml(
-            req.yaml,
+        compiled = _compile_dify_document(
+            workflow_yaml,
             target=req.target,
             fold_answer_question=req.fold_answer_question,
         )
@@ -473,8 +748,11 @@ def dify_compile(req: DifyCompileRequest) -> DifyCompileResponse | JSONResponse:
 
     code = compiled.code
     emit_trace(
-        request_id=request_id, op="dify.compile", target=req.target,
-        n_warnings=len(code.warnings), n_suggestions=len(compiled.suggestions),
+        request_id=request_id,
+        op="dify.compile",
+        target=req.target,
+        n_warnings=len(code.warnings),
+        n_suggestions=len(compiled.suggestions),
     )
     return DifyCompileResponse(
         request_id=request_id,
@@ -503,12 +781,12 @@ def dify_run(
     # 信任边界开关：默认关，env 显式开（RAGSPINE_DIFY_RUN_ENABLED=true）才放行。
     if not config.dify_run_enabled:
         return _error_response(
-            403, type_="dify.run_disabled",
+            403,
+            type_="dify.run_disabled",
             message="dify 工作流执行未开启（设 RAGSPINE_DIFY_RUN_ENABLED=true 开启）",
             request_id=request_id,
         )
 
-    from ragspine.dify.api import compile_dify_yaml
     from ragspine.dify.errors import DifyCompileError
     from ragspine.service.dify.runner import (
         DifyRunError,
@@ -516,10 +794,17 @@ def dify_run(
         run_workflow_isolated,
     )
     from ragspine.service.dify.safety import DifyUnsafeError
+    from ragspine.workflows.errors import WorkflowFormatError
 
     try:
-        compiled = compile_dify_yaml(
-            req.yaml, fold_answer_question=req.fold_answer_question,
+        workflow_yaml = _dify_document_yaml(req)
+    except WorkflowFormatError:
+        return _workflow_format_response(request_id)
+
+    try:
+        compiled = _compile_dify_document(
+            workflow_yaml,
+            fold_answer_question=req.fold_answer_question,
             emit_node_traces=True,
         )
     except DifyCompileError as exc:
@@ -528,7 +813,9 @@ def dify_run(
     code = compiled.code
     try:
         result = run_workflow_isolated(
-            code, req.inputs, provider,
+            code,
+            req.inputs,
+            provider,
             timeout_s=config.dify_run_timeout_s,
             isolation=config.dify_run_isolation,
             provider_config=provider_config_dict(config),
@@ -539,17 +826,24 @@ def dify_run(
     except (DifyRunError, DifyTimeoutError) as exc:
         # 执行失败也把已执行节点的 trace（runner 净化后附在 context）带给前端。
         return _error_response(
-            400, type_=exc.code, message=str(exc), request_id=request_id,
+            400,
+            type_=exc.code,
+            message=str(exc),
+            request_id=request_id,
             node_traces=exc.context.get("node_traces"),
         )
 
     node_traces = result.pop("__node_traces__", None)
     emit_trace(
-        request_id=request_id, op="dify.run",
-        isolation=config.dify_run_isolation, n_result_keys=len(result),
+        request_id=request_id,
+        op="dify.run",
+        isolation=config.dify_run_isolation,
+        n_result_keys=len(result),
     )
     return DifyRunResponse(
-        request_id=request_id, result=result, warnings=list(code.warnings),
+        request_id=request_id,
+        result=result,
+        warnings=list(code.warnings),
         node_traces=node_traces,
     )
 
@@ -569,18 +863,25 @@ def dify_run_async(
     request_id = new_request_id()
     if not config.dify_run_enabled:
         return _error_response(
-            403, type_="dify.run_disabled",
+            403,
+            type_="dify.run_disabled",
             message="dify 工作流执行未开启（设 RAGSPINE_DIFY_RUN_ENABLED=true 开启）",
             request_id=request_id,
         )
 
-    from ragspine.dify.api import compile_dify_yaml
     from ragspine.dify.errors import DifyCompileError
     from ragspine.service.dify.safety import DifyUnsafeError, assert_runnable
+    from ragspine.workflows.errors import WorkflowFormatError
 
     try:
-        compiled = compile_dify_yaml(
-            req.yaml, fold_answer_question=req.fold_answer_question,
+        workflow_yaml = _dify_document_yaml(req)
+    except WorkflowFormatError:
+        return _workflow_format_response(request_id)
+
+    try:
+        compiled = _compile_dify_document(
+            workflow_yaml,
+            fold_answer_question=req.fold_answer_question,
             emit_node_traces=True,
         )
     except DifyCompileError as exc:
@@ -618,9 +919,7 @@ _TOPOLOGY_SCOPES = ("agent", "service")
 
 
 @router.get("/v1/topology", response_model=None)
-def get_topology(
-    request: Request, scope: str = "agent"
-) -> TopologyResponse | JSONResponse:
+def get_topology(request: Request, scope: str = "agent") -> TopologyResponse | JSONResponse:
     """按 scope 导出静态管线拓扑：agent（请求流）| service（服务层）。
 
     agent scope 刻意【不】打开 narrative retriever（重操作）——narrative_retriever=None，
@@ -633,27 +932,28 @@ def get_topology(
         graph = service_topology(request.app)
     else:
         return _error_response(
-            400, type_="InvalidScope",
+            400,
+            type_="InvalidScope",
             message=f"未知 scope: {scope!r}（可选: {', '.join(_TOPOLOGY_SCOPES)}）",
             request_id=request_id,
         )
 
     emit_trace(
-        request_id=request_id, op="topology", scope=scope,
-        n_nodes=len(graph.nodes), n_edges=len(graph.edges),
+        request_id=request_id,
+        op="topology",
+        scope=scope,
+        n_nodes=len(graph.nodes),
+        n_edges=len(graph.edges),
     )
     return TopologyResponse(
         request_id=request_id,
         title=graph.title,
         nodes=[
-            TopologyNodeInfo(
-                id=n.id, label=n.label, kind=n.kind, domain=n.domain, symbol=n.symbol
-            )
+            TopologyNodeInfo(id=n.id, label=n.label, kind=n.kind, domain=n.domain, symbol=n.symbol)
             for n in graph.nodes
         ],
         edges=[
-            TopologyEdgeInfo(src=e.src, dst=e.dst, label=e.label, kind=e.kind)
-            for e in graph.edges
+            TopologyEdgeInfo(src=e.src, dst=e.dst, label=e.label, kind=e.kind) for e in graph.edges
         ],
     )
 
@@ -691,11 +991,17 @@ def n8n_convert(req: N8nConvertRequest) -> N8nConvertResponse | JSONResponse:
         return _error_response(400, type_=exc.code, message=str(exc), request_id=request_id)
 
     emit_trace(
-        request_id=request_id, op="n8n.convert", direction=req.direction,
-        n_nodes=len(workflow.get("nodes", []) or []), n_warnings=len(warnings),
+        request_id=request_id,
+        op="n8n.convert",
+        direction=req.direction,
+        n_nodes=len(workflow.get("nodes", []) or []),
+        n_warnings=len(warnings),
     )
     return N8nConvertResponse(
-        request_id=request_id, workflow=workflow, yaml=yaml_text, warnings=warnings,
+        request_id=request_id,
+        workflow=workflow,
+        yaml=yaml_text,
+        warnings=warnings,
     )
 
 
@@ -716,7 +1022,8 @@ def n8n_run(
     # 信任边界开关先行（与 dify_run 同一开关；转换前快速失败，不泄漏转换结果）。
     if not config.dify_run_enabled:
         return _error_response(
-            403, type_="dify.run_disabled",
+            403,
+            type_="dify.run_disabled",
             message="dify 工作流执行未开启（设 RAGSPINE_DIFY_RUN_ENABLED=true 开启）",
             request_id=request_id,
         )
@@ -731,14 +1038,17 @@ def n8n_run(
 
     response = dify_run(
         DifyRunRequest(yaml=_dify_dict_to_yaml(dify_doc), inputs=req.inputs),
-        config, provider,
+        config,
+        provider,
     )
     if isinstance(response, JSONResponse):
         return response  # dify_run 已整形（400/422 等），原样透传
     emit_trace(
-        request_id=response.request_id, op="n8n.run",
+        request_id=response.request_id,
+        op="n8n.run",
         n_convert_warnings=len(convert_warnings),
     )
     return N8nRunResponse(
-        **response.model_dump(), convert_warnings=convert_warnings,
+        **response.model_dump(),
+        convert_warnings=convert_warnings,
     )

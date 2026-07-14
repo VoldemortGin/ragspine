@@ -48,6 +48,15 @@ function truncate(text: string, max = 40): string {
   return flat.length <= max ? flat : `${flat.slice(0, max - 3)}...`;
 }
 
+function defaultOpenAiModel() {
+  return {
+    provider: 'langgenius/openai/openai',
+    name: 'gpt-4o-mini',
+    mode: 'chat' as const,
+    completion_params: {},
+  };
+}
+
 function ifElseHandles(cases: IfElseCase[]): HandleSpec[] {
   const handles: HandleSpec[] = cases.map((c, index) => ({
     id: typeof c.case_id === 'string' && c.case_id !== '' ? c.case_id : `case_${index + 1}`,
@@ -78,7 +87,14 @@ export const nodeRegistry: Record<DifyNodeType, NodeTypeDefinition> = {
     hasTargetHandle: false,
     createDefaultData: (): StartNodeData => ({
       type: 'start',
-      variables: [{ variable: 'query', label: 'Query', type: 'text-input', required: true }],
+      variables: [
+        {
+          variable: 'query',
+          label: 'Query',
+          type: 'text-input',
+          required: true,
+        },
+      ],
     }),
     getSourceHandles: singleSourceHandle,
     summarize: (data) => {
@@ -132,8 +148,10 @@ export const nodeRegistry: Record<DifyNodeType, NodeTypeDefinition> = {
     hasTargetHandle: true,
     createDefaultData: (): LlmNodeData => ({
       type: 'llm',
-      model: { provider: 'anthropic', name: '', completion_params: {} },
+      model: defaultOpenAiModel(),
       prompt_template: [{ role: 'user', text: '' }],
+      context: { enabled: false, variable_selector: [] },
+      vision: { enabled: false, configs: { variable_selector: [] } },
     }),
     getSourceHandles: singleSourceHandle,
     summarize: (data) => {
@@ -268,7 +286,15 @@ export const nodeRegistry: Record<DifyNodeType, NodeTypeDefinition> = {
       type: 'knowledge-retrieval',
       query_variable_selector: [],
       dataset_ids: [],
-      top_k: 4,
+      retrieval_mode: 'multiple',
+      multiple_retrieval_config: {
+        top_k: 4,
+        score_threshold: null,
+        reranking_mode: 'reranking_model',
+        reranking_enable: false,
+      },
+      metadata_filtering_mode: 'disabled',
+      vision: { enabled: false, configs: { variable_selector: [] } },
     }),
     getSourceHandles: singleSourceHandle,
     summarize: (data) => {
@@ -297,7 +323,9 @@ export const nodeRegistry: Record<DifyNodeType, NodeTypeDefinition> = {
       query: [],
       parameters: [],
       instruction: '',
-      model: { name: '' },
+      model: defaultOpenAiModel(),
+      reasoning_mode: 'function_call',
+      vision: { enabled: false, configs: { variable_selector: [] } },
     }),
     getSourceHandles: singleSourceHandle,
     summarize: (data) => {
@@ -317,7 +345,11 @@ export const nodeRegistry: Record<DifyNodeType, NodeTypeDefinition> = {
     accent: '#fb7185',
     isContainer: false,
     hasTargetHandle: true,
-    createDefaultData: (): ToolNodeData => ({ type: 'tool', tool_name: '', tool_parameters: {} }),
+    createDefaultData: (): ToolNodeData => ({
+      type: 'tool',
+      tool_name: '',
+      tool_parameters: {},
+    }),
     getSourceHandles: singleSourceHandle,
     summarize: (data) => {
       const name = (data as ToolNodeData).tool_name;
@@ -343,14 +375,20 @@ export const nodeRegistry: Record<DifyNodeType, NodeTypeDefinition> = {
       body: { type: 'none', data: [] },
       ssl_verify: true,
       variables: [],
-      retry_config: { retry_enabled: true, max_retries: 3, retry_interval: 100 },
+      retry_config: {
+        retry_enabled: true,
+        max_retries: 3,
+        retry_interval: 100,
+      },
     }),
     getSourceHandles: singleSourceHandle,
     summarize: (data) => {
       const d = data as HttpRequestNodeData;
       const rawMethod: unknown = d.method;
-      const method = typeof rawMethod === 'string' && rawMethod !== '' ? rawMethod.toUpperCase() : 'GET';
-      const url = typeof d.url === 'string' && d.url.trim() !== '' ? truncate(d.url) : 'url not set';
+      const method =
+        typeof rawMethod === 'string' && rawMethod !== '' ? rawMethod.toUpperCase() : 'GET';
+      const url =
+        typeof d.url === 'string' && d.url.trim() !== '' ? truncate(d.url) : 'url not set';
       return `${method} ${url}`;
     },
   },
@@ -387,7 +425,11 @@ export const nodeRegistry: Record<DifyNodeType, NodeTypeDefinition> = {
     accent: '#818cf8',
     isContainer: false,
     hasTargetHandle: true,
-    createDefaultData: (): AssignerNodeData => ({ type: 'assigner', version: '2', items: [] }),
+    createDefaultData: (): AssignerNodeData => ({
+      type: 'assigner',
+      version: '2',
+      items: [],
+    }),
     getSourceHandles: singleSourceHandle,
     summarize: (data) => {
       const items = (data as AssignerNodeData).items;

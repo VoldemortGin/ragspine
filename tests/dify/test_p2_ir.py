@@ -7,6 +7,7 @@ from collections.abc import Callable
 
 import pytest
 
+from ragspine.dify.codegen.emitter import generate_code
 from ragspine.dify.errors import CyclicGraph, UnsupportedNodeType
 from ragspine.dify.ir.lower import lower_to_ir
 from ragspine.dify.ir.model import (
@@ -149,6 +150,71 @@ def test_iteration_subgraph(fixture_text: Callable[[str], str]) -> None:
     assert "iter_llm" not in {n.id for n in ir.graph.nodes}
     assert iter_node.body is not None
     assert {n.id for n in iter_node.body.graph.nodes} == {"iter_llm"}
+
+
+def test_dify_iteration_start_is_structural_not_executable() -> None:
+    """Dify 0.6 的 iteration-start 画布锚点不进入 IR，也不生成 unsupported 钩子。"""
+    dsl = """
+app:
+  mode: workflow
+  name: current-dify-iteration
+version: "0.6.0"
+workflow:
+  graph:
+    nodes:
+      - id: start_1
+        data:
+          type: start
+          title: Start
+          variables:
+            - {variable: items, type: "array[string]", required: true}
+      - id: iteration_1
+        data:
+          type: iteration
+          title: Iterate
+          iterator_selector: [start_1, items]
+          output_selector: [item_llm, text]
+          output_type: "array[string]"
+          start_node_id: iteration_start_1
+      - id: iteration_start_1
+        parentId: iteration_1
+        type: custom-iteration-start
+        data:
+          type: iteration-start
+          title: ""
+          isInIteration: true
+      - id: item_llm
+        parentId: iteration_1
+        data:
+          type: llm
+          title: Process item
+          iteration_id: iteration_1
+          model: {provider: langgenius/openai/openai, name: gpt-4o-mini, mode: chat}
+          prompt_template:
+            - {role: user, text: "Item: {{#iteration_1.item#}}"}
+      - id: end_1
+        data:
+          type: end
+          title: End
+          outputs:
+            - {variable: results, value_selector: [iteration_1, output]}
+    edges:
+      - {source: start_1, target: iteration_1, sourceHandle: source}
+      - {source: iteration_start_1, target: item_llm, sourceHandle: source}
+      - {source: iteration_1, target: end_1, sourceHandle: source}
+"""
+    ir = lower_to_ir(parse_dify_yaml(dsl))
+    iteration = ir_node(ir, "iteration_1")
+    assert isinstance(iteration, IterationNode)
+    assert {node.id for node in ir.graph.nodes} == {"start_1", "iteration_1", "end_1"}
+    assert {(edge.source, edge.target) for edge in ir.graph.edges} == {
+        ("start_1", "iteration_1"),
+        ("iteration_1", "end_1"),
+    }
+    assert iteration.body is not None
+    assert {node.id for node in iteration.body.graph.nodes} == {"item_llm"}
+    assert iteration.body.graph.edges == ()
+    assert generate_code(ir).warnings == ()
 
 
 # ---- UnsupportedNode 留钩子（不抛异常） -----------------------------------

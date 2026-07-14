@@ -10,12 +10,13 @@
 from __future__ import annotations
 
 import ast
+import json
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-
 from corespine import ConformanceSuite, InvariantPack
+
 from ragspine import MockProvider
 from ragspine.cli import main
 from ragspine.dify import (
@@ -25,14 +26,22 @@ from ragspine.dify import (
     compile_dify_yaml,
 )
 from ragspine.dify.errors import DifyCompileError
+from ragspine.workflows import dump_dify_yaml
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 _FIXTURES = ("seq", "branch", "parallel", "iteration")
 
-_IMPORT_WHITELIST = frozenset({
-    "__future__", "dataclasses", "typing", "string", "concurrent",
-    "corespine", "ragspine",
-})
+_IMPORT_WHITELIST = frozenset(
+    {
+        "__future__",
+        "dataclasses",
+        "typing",
+        "string",
+        "concurrent",
+        "corespine",
+        "ragspine",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -57,9 +66,7 @@ def test_compile_no_analyze(fixtures_dir: Path) -> None:
 
 def test_compile_provider_expr_propagates(fixtures_dir: Path) -> None:
     """provider_expr 进入生成代码的 provider 默认值。"""
-    result = compile_dify_yaml(
-        fixtures_dir / "seq.yml", provider_expr="MockProvider(prefix='x')"
-    )
+    result = compile_dify_yaml(fixtures_dir / "seq.yml", provider_expr="MockProvider(prefix='x')")
     assert "MockProvider(prefix='x')" in result.code.source
 
 
@@ -118,14 +125,90 @@ def test_cli_compile_missing_file(capsys: pytest.CaptureFixture[str]) -> None:
     assert "不存在" in capsys.readouterr().err
 
 
-def test_cli_compile_invalid_dsl(
-    capsys: pytest.CaptureFixture[str], tmp_path: Path
-) -> None:
+def test_cli_compile_invalid_dsl(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
     bad = tmp_path / "bad.yml"
     bad.write_text("app:\n  mode: chat\n", encoding="utf-8")  # 不支持的 mode
     rc = main(["dify", "compile", str(bad)])
     assert rc == 1
     assert "编译失败" in capsys.readouterr().err
+
+
+def test_cli_compile_accepts_equivalent_json_yaml_and_toml(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    workflow: dict[str, object] = {
+        "app": {"mode": "workflow", "name": "format-demo"},
+        "kind": "app",
+        "version": "0.6.0",
+        "workflow": {
+            "graph": {
+                "nodes": [
+                    {
+                        "id": "start_1",
+                        "data": {
+                            "type": "start",
+                            "title": "Start",
+                            "variables": [],
+                        },
+                    },
+                    {
+                        "id": "end_1",
+                        "data": {"type": "end", "title": "End", "outputs": []},
+                    },
+                ],
+                "edges": [
+                    {
+                        "source": "start_1",
+                        "target": "end_1",
+                        "sourceHandle": "source",
+                    }
+                ],
+            }
+        },
+    }
+    documents = {
+        "workflow.json": json.dumps(workflow),
+        "workflow.yml": dump_dify_yaml(workflow),
+        "workflow.toml": """
+kind = "app"
+version = "0.6.0"
+
+[app]
+mode = "workflow"
+name = "format-demo"
+
+[workflow.graph]
+
+[[workflow.graph.nodes]]
+id = "start_1"
+[workflow.graph.nodes.data]
+type = "start"
+title = "Start"
+variables = []
+
+[[workflow.graph.nodes]]
+id = "end_1"
+[workflow.graph.nodes.data]
+type = "end"
+title = "End"
+outputs = []
+
+[[workflow.graph.edges]]
+source = "start_1"
+target = "end_1"
+sourceHandle = "source"
+""",
+    }
+
+    generated: list[str] = []
+    for filename, document in documents.items():
+        path = tmp_path / filename
+        path.write_text(document, encoding="utf-8")
+        assert main(["dify", "compile", str(path), "--no-analyze"]) == 0
+        generated.append(capsys.readouterr().out)
+
+    assert generated[0] == generated[1] == generated[2]
+    assert "def run_workflow(" in generated[0]
 
 
 # ---------------------------------------------------------------------------

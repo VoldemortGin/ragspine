@@ -4,14 +4,14 @@
 ingestion 路径安全校验。不依赖网络、真实 LLM key 或 Redis。
 """
 
+from dataclasses import FrozenInstanceError
 from datetime import date
-from pathlib import Path
 
 import pytest
 
 from ragspine.agent.llm_provider import (
-    AnthropicProvider,
     DEFAULT_ANTHROPIC_MODEL,
+    AnthropicProvider,
     MockProvider,
 )
 from ragspine.service.config import (
@@ -38,6 +38,7 @@ def test_from_env_defaults_when_empty():
     # W1：默认 'auto'＝装了 [embed-onnx] 走真语义 ONNX、否则回落纯 BM25。lean 运行时行为不变
     # （extra 不在时 make_embedding_backend('auto') -> None，守 ADR 0005），仅默认配置字符串升级。
     assert cfg.embedding == "auto"
+    assert cfg.workflow_matcher == "auto"
     assert cfg.vector_store == "none"
     assert cfg.persistence_policy == "default"
     assert cfg.reference_date is None
@@ -58,6 +59,7 @@ def test_from_env_parses_all_keys():
         "RAGSPINE_MODEL": "claude-test",
         "RAGSPINE_BASE_URL": "https://gateway.example/v1",
         "RAGSPINE_EMBEDDING": "deterministic",
+        "RAGSPINE_WORKFLOW_MATCHER": "none",
         "RAGSPINE_VECTOR_STORE": "in_process",
         "RAGSPINE_PERSISTENCE_POLICY": "persist_everything",
         "RAGSPINE_REFERENCE_DATE": "2026-06-12",
@@ -76,6 +78,7 @@ def test_from_env_parses_all_keys():
     assert cfg.model == "claude-test"
     assert cfg.base_url == "https://gateway.example/v1"
     assert cfg.embedding == "deterministic"
+    assert cfg.workflow_matcher == "none"
     assert cfg.vector_store == "in_process"
     assert cfg.persistence_policy == "persist_everything"
     assert cfg.reference_date == "2026-06-12"
@@ -86,7 +89,7 @@ def test_from_env_parses_all_keys():
 
 def test_config_is_frozen():
     cfg = ServiceConfig(db_path="/tmp/x.db")
-    with pytest.raises(Exception):
+    with pytest.raises(FrozenInstanceError):
         cfg.db_path = "/tmp/y.db"  # type: ignore[misc]
 
 

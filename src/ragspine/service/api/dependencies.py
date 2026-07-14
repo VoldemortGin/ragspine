@@ -11,6 +11,7 @@ from ragspine.agent.llm_provider import LLMProvider
 from ragspine.service.config import ServiceConfig
 from ragspine.service.faq.faq_cache import FAQCache
 from ragspine.service.tasks.task_queue import TaskQueue
+from ragspine.workflows.matching import TemplateMatcher
 
 
 def get_config(request: Request) -> ServiceConfig:
@@ -27,3 +28,7 @@ def get_faq_cache(request: Request) -> FAQCache:
 
 def get_queue(request: Request) -> TaskQueue:
     return cast(TaskQueue, request.app.state.queue)
+
+
+def get_workflow_matcher(request: Request) -> TemplateMatcher:
+    return cast(TemplateMatcher, request.app.state.workflow_matcher)

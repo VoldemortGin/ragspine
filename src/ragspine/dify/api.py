@@ -60,7 +60,8 @@ def compile_dify_yaml(
     """把一个 Dify 工作流 YAML 编译成纯 Python（+ 可选静态优化建议）。
 
     参数：
-        source: Dify DSL 的 YAML 文本，或指向 `.yml` 文件的路径（str/Path）。
+        source: Dify DSL 的 YAML 文本，或显式 ``Path``。字符串始终按正文处理，避免
+            服务端把不可信请求误当成本地路径；文件调用请写 ``Path("flow.yml")``。
         target: 编译目标，'ragspine'（命令式纯 Python 脚本，默认）或 'spineagent'（含 agent/tool-use
             结构时映射到 spineagent Coordinator/agent 编排，生成代码 import spineagent）。
         provider_expr: 生成代码内 provider 默认值表达式（默认 'MockProvider()'，离线可跑）。

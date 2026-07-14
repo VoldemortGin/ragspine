@@ -1,0 +1,136 @@
+app:
+  description: Spine-authored workflow for evidence-grounded Q&A over a paper dataset.
+  icon: "🧩"
+  icon_background: "#E4FBCC"
+  mode: advanced-chat
+  name: Paper RAG Q&A
+  use_icon_as_answer_icon: false
+dependencies:
+  - current_identifier: null
+    type: marketplace
+    value:
+      marketplace_plugin_unique_identifier: langgenius/openai:0.3.8@592c8252795b5f75807de2d609a03196ed02596b409f7642b4a07548c7ff57ef
+kind: app
+version: "0.6.0"
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features: {}
+  graph:
+    nodes:
+      - data:
+          desc: ""
+          selected: false
+          title: Ask about a paper
+          type: start
+          variables:
+            - label: Question
+              max_length: null
+              options: []
+              required: true
+              type: text-input
+              variable: question
+        height: 90
+        id: start_1
+        position: {x: 30, y: 220}
+        positionAbsolute: {x: 30, y: 220}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          dataset_ids: [replace-with-paper-dataset]
+          desc: ""
+          metadata_filtering_mode: disabled
+          multiple_retrieval_config:
+            reranking_enable: false
+            reranking_mode: reranking_model
+            score_threshold: null
+            top_k: 6
+          query_variable_selector: [start_1, question]
+          retrieval_mode: multiple
+          selected: false
+          title: Retrieve paper evidence
+          type: knowledge-retrieval
+          vision: {enabled: false, configs: {variable_selector: []}}
+        height: 140
+        id: retrieval_1
+        position: {x: 334, y: 220}
+        positionAbsolute: {x: 334, y: 220}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          context:
+            enabled: true
+            variable_selector: [retrieval_1, result]
+          desc: ""
+          model:
+            completion_params: {max_tokens: 1400}
+            mode: chat
+            name: gpt-4o-mini
+            provider: langgenius/openai/openai
+          prompt_template:
+            - id: paper-system
+              role: system
+              text: "Answer only from the retrieved paper evidence. Explain technical terms, cite the relevant passage, and say when the evidence is insufficient."
+            - id: paper-user
+              role: user
+              text: "Question about the paper: {{#start_1.question#}}"
+          selected: false
+          title: Evidence-grounded answer
+          type: llm
+          vision: {enabled: false, configs: {variable_selector: []}}
+        height: 140
+        id: llm_1
+        position: {x: 638, y: 220}
+        positionAbsolute: {x: 638, y: 220}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          answer: "{{#llm_1.text#}}"
+          desc: ""
+          selected: false
+          title: Reply
+          type: answer
+        height: 90
+        id: answer_1
+        position: {x: 942, y: 220}
+        positionAbsolute: {x: 942, y: 220}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+    edges:
+      - data: {isInIteration: false, isInLoop: false, sourceType: start, targetType: knowledge-retrieval}
+        id: start_1-source-retrieval_1-target
+        source: start_1
+        sourceHandle: source
+        target: retrieval_1
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data: {isInIteration: false, isInLoop: false, sourceType: knowledge-retrieval, targetType: llm}
+        id: retrieval_1-source-llm_1-target
+        source: retrieval_1
+        sourceHandle: source
+        target: llm_1
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data: {isInIteration: false, isInLoop: false, sourceType: llm, targetType: answer}
+        id: llm_1-source-answer_1-target
+        source: llm_1
+        sourceHandle: source
+        target: answer_1
+        targetHandle: target
+        type: custom
+        zIndex: 0
+    viewport: {x: 0, y: 0, zoom: 0.7}

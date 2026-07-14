@@ -1,6 +1,7 @@
 /** React Flow adapters: toFlow/fromFlow round trip and container handling. */
 
 import { describe, expect, it } from 'vitest';
+import { dump } from 'js-yaml';
 
 import { parseWorkflowYaml } from '../../src/workflow/convert';
 import { DIFY_ITERATION, DIFY_NODE, fromFlow, toFlow } from '../../src/workflow/reactflow';
@@ -109,5 +110,63 @@ describe('fromFlow', () => {
     const container = rebuilt.nodes.find((n) => n.id === 'iter_1');
     expect(container?.passthrough.width).toBe(999);
     expect(container?.passthrough.height).toBe(555);
+  });
+
+  it('synchronizes imported derived wrappers when a child moves or detaches', () => {
+    const wf = parseWorkflowYaml(
+      dump({
+        app: { mode: 'workflow', name: 'wrapper-sync' },
+        kind: 'app',
+        version: '0.6.0',
+        workflow: {
+          graph: {
+            nodes: [
+              {
+                id: 'iteration_1',
+                position: { x: 100, y: 200 },
+                positionAbsolute: { x: 100, y: 200 },
+                data: { type: 'iteration' },
+              },
+              {
+                id: 'child_1',
+                parentId: 'iteration_1',
+                extent: 'parent',
+                position: { x: 30, y: 40 },
+                positionAbsolute: { x: 130, y: 240 },
+                zIndex: 1002,
+                data: { type: 'llm', iteration_id: 'iteration_1' },
+              },
+            ],
+            edges: [],
+          },
+        },
+      }),
+    );
+    const { nodes, edges } = toFlow(wf);
+    const moved = nodes.map((node) =>
+      node.id === 'child_1' ? { ...node, position: { x: 50, y: 60 } } : node,
+    );
+    const movedWorkflow = fromFlow(moved, edges, wf);
+    const movedChild = movedWorkflow.nodes.find((node) => node.id === 'child_1');
+    expect(movedChild?.passthrough['positionAbsolute']).toEqual({
+      x: 150,
+      y: 260,
+    });
+    expect(movedChild?.passthrough['parentId']).toBe('iteration_1');
+
+    const detached = moved.map((node) => {
+      if (node.id !== 'child_1') return node;
+      const { parentId: _parentId, extent: _extent, ...rest } = node;
+      return { ...rest, position: { x: 150, y: 260 } };
+    });
+    const detachedWorkflow = fromFlow(detached, edges, movedWorkflow);
+    const detachedChild = detachedWorkflow.nodes.find((node) => node.id === 'child_1');
+    expect(detachedChild?.passthrough['positionAbsolute']).toEqual({
+      x: 150,
+      y: 260,
+    });
+    expect(detachedChild?.passthrough['parentId']).toBeUndefined();
+    expect(detachedChild?.passthrough['extent']).toBeUndefined();
+    expect(detachedChild?.passthrough['zIndex']).toBeUndefined();
   });
 });

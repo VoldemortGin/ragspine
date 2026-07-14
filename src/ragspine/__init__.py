@@ -18,6 +18,7 @@ Submodules:
     retrieval/ — 叙事 RAG：切块、BM25 词法、向量、listwise 精排、agent 接入。
     service/ — HTTP 服务层：ServiceConfig、FastAPI app、任务队列、FAQ 短路缓存。
     storage/ — sqlite 存储层：数值事实表（fact_metric），全程保留来源 lineage。
+    workflows/ — 自然语言工作流脚手架：模板目录、语义匹配、Dify DSL 生成与格式转换。
 """
 
 # 仅 stdlib，且【不】触发任何第一方 import —— 放在 beartype claw 钩子之前是安全的
@@ -105,4 +106,3 @@ def __getattr__(name: str) -> object:
 
 def __dir__() -> list[str]:
     return sorted({*__all__, *_submodule_dir()})
-

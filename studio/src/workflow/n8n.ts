@@ -5,6 +5,8 @@
  * object; anything else (Dify YAML included) is not detected as n8n.
  */
 
+import { workflowTextExceedsLimit } from './convert';
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -14,6 +16,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * Returns the parsed object, or null when the text is not n8n JSON.
  */
 export function detectN8nWorkflow(text: string): Record<string, unknown> | null {
+  if (workflowTextExceedsLimit(text)) return null;
   let doc: unknown;
   try {
     doc = JSON.parse(text);

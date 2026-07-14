@@ -42,12 +42,47 @@ function numberOr(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
+function validContainerParent(
+  node: StudioFlowNode,
+  typeById: ReadonlyMap<string, string>,
+): string | undefined {
+  if (node.parentId === undefined) return undefined;
+  return containerIdField(typeById.get(node.parentId) ?? '') === undefined
+    ? undefined
+    : node.parentId;
+}
+
+function absoluteFlowPosition(
+  node: StudioFlowNode,
+  nodeById: ReadonlyMap<string, StudioFlowNode>,
+  typeById: ReadonlyMap<string, string>,
+): { x: number; y: number } {
+  let x = node.position.x;
+  let y = node.position.y;
+  let current = node;
+  const seen = new Set<string>([node.id]);
+  for (;;) {
+    const parentId = validContainerParent(current, typeById);
+    if (parentId === undefined || seen.has(parentId)) break;
+    const parent = nodeById.get(parentId);
+    if (parent === undefined) break;
+    seen.add(parentId);
+    x += parent.position.x;
+    y += parent.position.y;
+    current = parent;
+  }
+  return { x, y };
+}
+
 /**
  * Convert a StudioWorkflow into React Flow nodes/edges. Container children
  * are emitted AFTER their parent (React Flow requirement) with
  * parentId + extent 'parent' and container-relative positions.
  */
-export function toFlow(wf: StudioWorkflow): { nodes: StudioFlowNode[]; edges: StudioFlowEdge[] } {
+export function toFlow(wf: StudioWorkflow): {
+  nodes: StudioFlowNode[];
+  edges: StudioFlowEdge[];
+} {
   const parentIds = new Set<string>();
   for (const node of wf.nodes) {
     if (node.parentId !== undefined) parentIds.add(node.parentId);
@@ -109,11 +144,31 @@ export function fromFlow(
   base: StudioWorkflow,
 ): StudioWorkflow {
   const typeById = new Map(nodes.map((n) => [n.id, n.data.dify.type] as const));
+  const nodeById = new Map(nodes.map((n) => [n.id, n] as const));
   const outNodes = nodes.map((rf): StudioNode => {
     const parentId = rf.parentId;
     const parentType = parentId === undefined ? '' : (typeById.get(parentId) ?? '');
     const data = withSyncedContainerId(rf.data.dify, parentId, containerIdField(parentType));
     const passthrough = { ...rf.data.passthrough };
+    const validParentId = validContainerParent(rf, typeById);
+    if ('positionAbsolute' in passthrough) {
+      passthrough['positionAbsolute'] = absoluteFlowPosition(rf, nodeById, typeById);
+    }
+    if ('parentId' in passthrough) {
+      if (validParentId === undefined) delete passthrough['parentId'];
+      else passthrough['parentId'] = validParentId;
+    }
+    if ('extent' in passthrough) {
+      if (validParentId === undefined) delete passthrough['extent'];
+      else if (rf.extent !== undefined) passthrough['extent'] = rf.extent;
+    }
+    if (
+      validParentId === undefined &&
+      passthrough['zIndex'] === 1002 &&
+      ('iteration_id' in rf.data.dify || 'loop_id' in rf.data.dify)
+    ) {
+      delete passthrough['zIndex'];
+    }
     if (rf.type === DIFY_ITERATION) {
       const width = rf.style?.width;
       const height = rf.style?.height;

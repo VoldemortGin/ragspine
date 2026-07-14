@@ -10,6 +10,8 @@ import pytest
 from ragspine.dify.errors import DifyCompileError, UnsupportedAppMode
 from ragspine.dify.parse.loader import parse_dify_yaml
 from ragspine.dify.parse.schema import DifyDoc
+from ragspine.workflows.errors import WorkflowFormatError
+from ragspine.workflows.formats import MAX_WORKFLOW_BYTES, MAX_YAML_ALIASES
 
 
 @pytest.mark.parametrize(
@@ -37,12 +39,64 @@ def test_parse_fixtures(
 
 
 def test_parse_from_path(fixtures_dir: Path) -> None:
-    """source 可为 .yml 文件路径（str 或 Path），与文本解析等价。"""
+    """只有显式 Path 才读取文件；正文 str 与 Path 解析结果等价。"""
     path = fixtures_dir / "seq.yml"
     by_path = parse_dify_yaml(path)
-    by_str = parse_dify_yaml(str(path))
     by_text = parse_dify_yaml(path.read_text(encoding="utf-8"))
-    assert by_path.mode == by_str.mode == by_text.mode == "workflow"
+    assert by_path.mode == by_text.mode == "workflow"
+
+
+def test_existing_path_string_is_always_treated_as_yaml_body(fixtures_dir: Path) -> None:
+    """str 即使恰好命中服务端文件，也不得触发本地文件读取。"""
+    path = fixtures_dir / "seq.yml"
+
+    with pytest.raises(DifyCompileError):
+        parse_dify_yaml(str(path))
+
+
+def test_explicit_path_rejects_symlink(
+    tmp_path: Path,
+    fixture_text: Callable[[str], str],
+) -> None:
+    target = tmp_path / "target.yml"
+    target.write_text(fixture_text("seq"), encoding="utf-8")
+    link = tmp_path / "link.yml"
+    try:
+        link.symlink_to(target)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"当前平台不可创建 symlink: {exc}")
+
+    with pytest.raises(DifyCompileError) as error:
+        parse_dify_yaml(link)
+
+    assert isinstance(error.value.__cause__, WorkflowFormatError)
+
+
+def test_explicit_path_rejects_oversized_file(tmp_path: Path) -> None:
+    path = tmp_path / "oversized.yml"
+    path.write_bytes(b"x" * (MAX_WORKFLOW_BYTES + 1))
+
+    with pytest.raises(DifyCompileError) as error:
+        parse_dify_yaml(path)
+
+    assert isinstance(error.value.__cause__, WorkflowFormatError)
+
+
+def test_explicit_path_rejects_invalid_utf8(tmp_path: Path) -> None:
+    path = tmp_path / "invalid-utf8.yml"
+    path.write_bytes(b"\xff\xfe")
+
+    with pytest.raises(DifyCompileError) as error:
+        parse_dify_yaml(path)
+
+    assert isinstance(error.value.__cause__, WorkflowFormatError)
+
+
+def test_explicit_missing_path_normalizes_os_error(tmp_path: Path) -> None:
+    with pytest.raises(DifyCompileError) as error:
+        parse_dify_yaml(tmp_path / "missing.yml")
+
+    assert isinstance(error.value.__cause__, WorkflowFormatError)
 
 
 def test_node_type_and_data_normalized(fixture_text: Callable[[str], str]) -> None:
@@ -90,6 +144,40 @@ def test_reject_bad_yaml() -> None:
     """YAML 语法错 → DifyCompileError。"""
     with pytest.raises(DifyCompileError):
         parse_dify_yaml("app: : : not valid yaml\n  - broken")
+
+
+def test_reject_duplicate_yaml_keys() -> None:
+    dsl = (
+        "app:\n  mode: workflow\n"
+        "app:\n  mode: workflow\n"
+        "workflow:\n  graph:\n    nodes: []\n    edges: []\n"
+    )
+
+    with pytest.raises(DifyCompileError) as error:
+        parse_dify_yaml(dsl)
+
+    assert isinstance(error.value.__cause__, WorkflowFormatError)
+
+
+def test_reject_excessive_yaml_aliases() -> None:
+    aliases = "\n".join("  - *app" for _ in range(MAX_YAML_ALIASES + 1))
+    dsl = (
+        "app: &app\n  mode: workflow\n"
+        "workflow:\n  graph:\n    nodes: []\n    edges: []\n"
+        f"copies:\n{aliases}\n"
+    )
+
+    with pytest.raises(DifyCompileError) as error:
+        parse_dify_yaml(dsl)
+
+    assert isinstance(error.value.__cause__, WorkflowFormatError)
+
+
+def test_reject_oversized_yaml_body() -> None:
+    with pytest.raises(DifyCompileError) as error:
+        parse_dify_yaml("#" * (MAX_WORKFLOW_BYTES + 1))
+
+    assert isinstance(error.value.__cause__, WorkflowFormatError)
 
 
 def test_reject_non_mapping_top_level() -> None:

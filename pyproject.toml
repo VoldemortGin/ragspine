@@ -40,6 +40,9 @@ dependencies = [
     "openpyxl>=3.1.0",
     "rootutils>=1.0.7",
     "pypdfium2>=5.0",
+    # Workflow/Dify wire formats are a base CLI promise: safe YAML parsing and
+    # serialization must work after a plain `uv add rag-spine`.
+    "PyYAML>=6.0",
     # company profile TOML 读取：requires-python >= 3.11，用 stdlib tomllib，无需第三方 tomli。
     # 运行时类型契约（ADR 0004 质量门）：import 期对全包注解强制执行，与 mypy --strict
     # 的静态半边互补。守护式 import（见 src/ragspine/__init__.py）使其缺失时仍可离线运行，

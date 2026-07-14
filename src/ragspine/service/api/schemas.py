@@ -4,9 +4,9 @@
 route 层计算后填入。
 """
 
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 
 class AskRequest(BaseModel):
@@ -99,10 +99,25 @@ class DifySuggestionInfo(BaseModel):
     node_ids: list[str] = Field(default_factory=list)
 
 
-class DifyAnalyzeRequest(BaseModel):
-    """analyze：只跑静态优化分析（零代码生成、零 API、绝对安全）。"""
+class _DifyDocumentRequest(BaseModel):
+    """JSON HTTP envelope carrying either canonical JSON or legacy YAML text."""
 
-    yaml: str
+    model_config = ConfigDict(extra="forbid")
+
+    workflow: dict[str, JsonValue] | None = None
+    # The decoded document is bounded by UTF-8 bytes (not Python characters) at the
+    # route boundary so canonical JSON and legacy YAML share exactly the same limit.
+    yaml: str | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one_document(self) -> Self:
+        if (self.workflow is None) == (self.yaml is None):
+            raise ValueError("exactly one of workflow or yaml is required")
+        return self
+
+
+class DifyAnalyzeRequest(_DifyDocumentRequest):
+    """analyze：只跑静态优化分析（零代码生成、零 API、绝对安全）。"""
 
 
 class DifyAnalyzeResponse(BaseModel):
@@ -110,11 +125,10 @@ class DifyAnalyzeResponse(BaseModel):
     suggestions: list[DifySuggestionInfo] = Field(default_factory=list)
 
 
-class DifyCompileRequest(BaseModel):
-    """compile：把 Dify YAML 编译成纯 Python 代码字符串（不执行，安全）。"""
+class DifyCompileRequest(_DifyDocumentRequest):
+    """compile：把 canonical workflow 编译成纯 Python 代码字符串（不执行）。"""
 
-    yaml: str
-    target: str = "ragspine"            # "ragspine" | "spineagent"
+    target: Literal["ragspine", "spineagent"] = "ragspine"
     fold_answer_question: bool = True
 
 
@@ -127,10 +141,9 @@ class DifyCompileResponse(BaseModel):
     suggestions: list[DifySuggestionInfo] = Field(default_factory=list)
 
 
-class DifyRunRequest(BaseModel):
+class DifyRunRequest(_DifyDocumentRequest):
     """run：编译 + 受限执行（信任边界——默认关闭，env 显式开启才放行）。"""
 
-    yaml: str
     inputs: dict[str, Any] = Field(default_factory=dict)
     fold_answer_question: bool = True
 
@@ -138,14 +151,14 @@ class DifyRunRequest(BaseModel):
 class NodeTrace(BaseModel):
     """一条节点级执行 trace（run 端点的可观测面；字段名为前端消费契约，定死）。"""
 
-    index: int                # 执行顺序，从 0 开始（skipped 记录排在最后）
-    node_id: str              # dify DSL 节点 id
-    title: str                # 节点标题（IR 的 title）
-    node_type: str            # llm / code / if-else / knowledge-retrieval / ...（IRNode.kind）
+    index: int  # 执行顺序，从 0 开始（skipped 记录排在最后）
+    node_id: str  # dify DSL 节点 id
+    title: str  # 节点标题（IR 的 title）
+    node_type: str  # llm / code / if-else / knowledge-retrieval / ...（IRNode.kind）
     status: Literal["succeeded", "failed", "skipped"]
     elapsed_ms: float
-    inputs: dict[str, Any] | None    # 输入变量快照（dep_refs 解析），无依赖为 None
-    outputs: dict[str, Any] | None   # 该节点写入 _ctx 的输出字段快照，空为 None
+    inputs: dict[str, Any] | None  # 输入变量快照（dep_refs 解析），无依赖为 None
+    outputs: dict[str, Any] | None  # 该节点写入 _ctx 的输出字段快照，空为 None
     error: str | None
 
 
@@ -215,3 +228,99 @@ class N8nRunResponse(DifyRunResponse):
     """形状 = DifyRunResponse（result/warnings/node_traces）+ n8n→dify 转换期 warnings。"""
 
     convert_warnings: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# 离线工作流模板 catalog / scaffold（ragspine.workflows）
+# ---------------------------------------------------------------------------
+class WorkflowCompatibilityInfo(BaseModel):
+    """模板与可导入工作流格式的兼容信息。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    format: str
+    dsl_version: str
+    status: Literal["runnable", "import_only", "blocked"]
+
+
+class WorkflowRequirementInfo(BaseModel):
+    """使用模板前需由用户显式配置的一项能力。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    kind: str
+    name: str
+    required: bool = True
+
+
+class WorkflowSourceMetadata(BaseModel):
+    """只含事实型来源元数据；不缓存上游正文、凭据或密钥。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    provider: str
+    title: str
+    author: str | None = None
+    upstream_id: str | None = None
+    upstream_url: str | None = None
+    license_status: str = "unknown"
+    observed_metric: str | None = None
+    observed_value: int | None = None
+    observed_at: str | None = None
+
+
+class WorkflowTemplateInfo(BaseModel):
+    """列表项：刻意不含完整 YAML。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    description: str
+    categories: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    intents: list[str] = Field(default_factory=list)
+    examples: list[str] = Field(default_factory=list)
+    compatibility: WorkflowCompatibilityInfo
+    requirements: list[WorkflowRequirementInfo] = Field(default_factory=list)
+    source: WorkflowSourceMetadata | None = None
+    sha256: str
+
+
+class WorkflowTemplateListResponse(BaseModel):
+    request_id: str
+    templates: list[WorkflowTemplateInfo] = Field(default_factory=list)
+
+
+class WorkflowTemplateDetailResponse(WorkflowTemplateInfo):
+    request_id: str
+    workflow: dict[str, JsonValue]
+    yaml: str
+
+
+class WorkflowScaffoldRequest(BaseModel):
+    """只允许语义描述与 catalog 选择；客户端不能注入 provider/I/O 能力。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    description: str = Field(min_length=1, max_length=4096)
+    template_id: str | None = Field(
+        default=None,
+        max_length=64,
+        pattern=r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$",
+    )
+    reuse: bool = True
+
+
+class WorkflowScaffoldResponse(BaseModel):
+    request_id: str
+    workflow: dict[str, JsonValue]
+    yaml: str
+    template_id: str | None = None
+    origin: Literal["template", "generated"]
+    confidence: float = Field(ge=0.0, le=1.0)
+    matcher: str
+    warnings: list[str] = Field(default_factory=list)
+    compatibility: WorkflowCompatibilityInfo
+    requirements: list[WorkflowRequirementInfo] = Field(default_factory=list)
+    source: WorkflowSourceMetadata | None = None

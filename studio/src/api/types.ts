@@ -156,7 +156,12 @@ export interface AskResponse {
 
 export type TopologyScope = 'agent' | 'service';
 
-export type TopologyNodeKind = 'stage' | 'store' | 'external' | 'gate' | 'channel';
+export type TopologyNodeKind =
+  | 'stage'
+  | 'store'
+  | 'external'
+  | 'gate'
+  | 'channel';
 
 export interface TopologyNode {
   id: string;
@@ -235,4 +240,82 @@ export interface N8nConvertResponse {
   /** Converted Dify DSL YAML (n8n_to_dify only; null for dify_to_n8n). */
   yaml: string | null;
   warnings: string[];
+}
+
+/* ------------------------- Workflow template catalog ------------------ */
+
+export interface WorkflowTemplateCompatibility {
+  format: string;
+  dsl_version: string;
+  status: string;
+}
+
+export interface WorkflowTemplateRequirement {
+  kind: string;
+  name: string;
+  required: boolean;
+}
+
+export interface WorkflowTemplateSource {
+  provider: string;
+  title: string;
+  author: string | null;
+  upstream_id: string | null;
+  upstream_url: string | null;
+  license_status: string;
+  observed_metric: string | null;
+  observed_value: number | null;
+  observed_at: string | null;
+}
+
+export interface WorkflowTemplateSummary {
+  id: string;
+  name: string;
+  description: string;
+  categories: string[];
+  tags: string[];
+  intents: string[];
+  examples: string[];
+  compatibility: WorkflowTemplateCompatibility;
+  requirements: WorkflowTemplateRequirement[];
+  source: WorkflowTemplateSource | null;
+  /** Content hash may be present in list/detail responses for integrity checks. */
+  sha256?: string;
+}
+
+export interface WorkflowTemplateListResponse {
+  request_id: string;
+  templates: WorkflowTemplateSummary[];
+}
+
+export interface WorkflowTemplateDetail extends WorkflowTemplateSummary {
+  request_id: string;
+  /** Canonical JSON-compatible Dify workflow object. */
+  workflow?: Record<string, unknown>;
+  /** Transitional/export compatibility for older servers. */
+  yaml?: string;
+}
+
+export interface WorkflowScaffoldRequest {
+  description: string;
+  template_id?: string;
+  reuse?: boolean;
+}
+
+export type WorkflowScaffoldOrigin = 'template' | 'generated';
+
+export interface WorkflowScaffoldResponse {
+  request_id: string;
+  /** Canonical JSON-compatible Dify workflow object. */
+  workflow?: Record<string, unknown>;
+  /** Transitional/export compatibility for older servers. */
+  yaml?: string;
+  origin: WorkflowScaffoldOrigin;
+  template_id: string | null;
+  confidence: number;
+  matcher: string;
+  warnings: string[];
+  compatibility: WorkflowTemplateCompatibility;
+  requirements: WorkflowTemplateRequirement[];
+  source: WorkflowTemplateSource | null;
 }

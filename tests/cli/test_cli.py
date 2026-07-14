@@ -6,7 +6,7 @@
 - ask —— 镜像 scripts/ask.py：从 --db 建 FactStore、用 mock provider 跑 answer_question，
   命中打印数值 + 来源，未命中坦白拒答；缺库路径给出诚实报错。
 - version —— 打印分发版本号。
-- 无参 / 未知子命令 —— argparse 以非零退出（不静默吞）。
+- 无参 / 未知选项 —— argparse 以非零退出（不静默吞）。
 """
 
 import os
@@ -117,7 +117,7 @@ def test_version_prints_version_string(capsys):
 
 
 # ---------------------------------------------------------------------------
-# 无参 / 未知子命令
+# 无参 / 未知选项
 # ---------------------------------------------------------------------------
 
 def test_no_args_exits_nonzero(capsys):
@@ -127,8 +127,8 @@ def test_no_args_exits_nonzero(capsys):
     assert exc.value.code != 0
 
 
-def test_unknown_subcommand_exits_nonzero(capsys):
-    """未知子命令：argparse 以非零码退出。"""
+def test_unknown_option_exits_nonzero(capsys):
+    """未知选项：argparse 以非零码退出。"""
     with pytest.raises(SystemExit) as exc:
-        main(["frobnicate"])
+        main(["--definitely-invalid"])
     assert exc.value.code != 0

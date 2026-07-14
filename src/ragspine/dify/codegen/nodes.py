@@ -211,10 +211,10 @@ def _emit_parameter_extractor(
     msgs = f"_pe_messages_{var}"
     resp = f"_pe_resp_{var}"
     args = f"_pe_args_{var}"
-    properties = ", ".join(
-        f"{p.name!r}: {{'type': {p.type!r}, 'description': {p.description!r}}}"
-        for p in node.parameters
-    )
+    properties = {
+        parameter.name: _parameter_json_schema(parameter.type, parameter.description)
+        for parameter in node.parameters
+    }
     required = [p.name for p in node.parameters if p.required]
     prompt = node.instruction or "请从下面文本中抽取所需参数。"
     lines = [
@@ -226,7 +226,7 @@ def _emit_parameter_extractor(
         f"        'description': {node.instruction or '抽取结构化参数'!r},",
         "        'parameters': {",
         "            'type': 'object',",
-        f"            'properties': {{{properties}}},",
+        f"            'properties': {properties!r},",
         f"            'required': {required!r},",
         "        },",
         "    },",
@@ -247,6 +247,35 @@ def _emit_parameter_extractor(
             f"_ctx[({node.id!r}, {p.name!r})] = {args}.get({p.name!r})"
         )
     return lines
+
+
+def _parameter_json_schema(type_name: str, description: str) -> dict[str, object]:
+    """Map Dify parameter types to valid JSON Schema used by function calling."""
+
+    normalized = type_name.strip().lower().replace(" ", "_")
+    if normalized.startswith("array[") and normalized.endswith("]"):
+        item_type = normalized[6:-1].strip()
+        schema: dict[str, object] = {
+            "type": "array",
+            "items": _parameter_json_schema(item_type, ""),
+        }
+    elif normalized in {"number", "float", "double"}:
+        schema = {"type": "number"}
+    elif normalized in {"integer", "int"}:
+        schema = {"type": "integer"}
+    elif normalized in {"boolean", "bool"}:
+        schema = {"type": "boolean"}
+    elif normalized in {"object", "json", "json_object"}:
+        schema = {"type": "object"}
+    elif normalized == "array":
+        schema = {"type": "array", "items": {}}
+    else:
+        # Dify's select/text/file-like values are represented as strings. Unknown future
+        # wire types also degrade to a valid string schema instead of emitting invalid JSON Schema.
+        schema = {"type": "string"}
+    if description:
+        schema["description"] = description
+    return schema
 
 
 def _emit_tool(node: ToolNode, names: NameTable) -> list[str]:

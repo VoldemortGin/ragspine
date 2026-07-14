@@ -80,10 +80,38 @@ describe('default data', () => {
     ]);
   });
 
-  it('llm defaults to an anthropic model and one user message', () => {
+  it('llm defaults satisfy the Dify 0.6 graphon model contract', () => {
     const data = nodeRegistry.llm.createDefaultData();
-    expect(data.model).toEqual({ provider: 'anthropic', name: '', completion_params: {} });
+    expect(data.model).toEqual({
+      provider: 'langgenius/openai/openai',
+      name: 'gpt-4o-mini',
+      mode: 'chat',
+      completion_params: {},
+    });
+    expect(data.context).toEqual({ enabled: false, variable_selector: [] });
     expect(data.prompt_template).toEqual([{ role: 'user', text: '' }]);
+  });
+
+  it('knowledge retrieval defaults to a complete multiple-retrieval config', () => {
+    const data = nodeRegistry['knowledge-retrieval'].createDefaultData();
+    expect(data.retrieval_mode).toBe('multiple');
+    expect(data.multiple_retrieval_config).toEqual({
+      top_k: 4,
+      score_threshold: null,
+      reranking_mode: 'reranking_model',
+      reranking_enable: false,
+    });
+  });
+
+  it('parameter extractor defaults satisfy the Dify 0.6 graphon model contract', () => {
+    const data = nodeRegistry['parameter-extractor'].createDefaultData();
+    expect(data.model).toEqual({
+      provider: 'langgenius/openai/openai',
+      name: 'gpt-4o-mini',
+      mode: 'chat',
+      completion_params: {},
+    });
+    expect(data.reasoning_mode).toBe('function_call');
   });
 
   it('if-else defaults to a single true case', () => {
@@ -157,9 +185,12 @@ describe('newly added dify types', () => {
 
 describe('summaries', () => {
   it('llm summarizes to the model name', () => {
-    expect(nodeRegistry.llm.summarize({ type: 'llm', model: { name: 'claude-opus-4-8' } })).toBe(
-      'claude-opus-4-8',
-    );
+    expect(
+      nodeRegistry.llm.summarize({
+        type: 'llm',
+        model: { name: 'claude-opus-4-8' },
+      }),
+    ).toBe('claude-opus-4-8');
   });
 
   it('if-else summarizes to the case count', () => {
@@ -173,9 +204,13 @@ describe('summaries', () => {
 
   it('knowledge-retrieval reads top_k from either location', () => {
     const def = nodeRegistry['knowledge-retrieval'];
-    expect(def.summarize({ type: 'knowledge-retrieval', top_k: 7, dataset_ids: ['a'] })).toBe(
-      'k=7, 1 dataset',
-    );
+    expect(
+      def.summarize({
+        type: 'knowledge-retrieval',
+        top_k: 7,
+        dataset_ids: ['a'],
+      }),
+    ).toBe('k=7, 1 dataset');
     expect(
       def.summarize({
         type: 'knowledge-retrieval',
@@ -187,7 +222,9 @@ describe('summaries', () => {
   });
 
   it('tool summarizes to the tool name', () => {
-    expect(nodeRegistry.tool.summarize({ type: 'tool', tool_name: 'get_weather' })).toBe('get_weather');
+    expect(nodeRegistry.tool.summarize({ type: 'tool', tool_name: 'get_weather' })).toBe(
+      'get_weather',
+    );
   });
 });
 

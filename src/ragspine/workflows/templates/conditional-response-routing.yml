@@ -1,0 +1,199 @@
+app:
+  description: Spine-authored workflow that routes requests by an urgency score.
+  icon: "🧩"
+  icon_background: "#E4FBCC"
+  mode: advanced-chat
+  name: Conditional Response Routing
+  use_icon_as_answer_icon: false
+dependencies:
+  - current_identifier: null
+    type: marketplace
+    value:
+      marketplace_plugin_unique_identifier: langgenius/openai:0.3.8@592c8252795b5f75807de2d609a03196ed02596b409f7642b4a07548c7ff57ef
+kind: app
+version: "0.6.0"
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features: {}
+  graph:
+    nodes:
+      - data:
+          desc: ""
+          selected: false
+          title: Route request
+          type: start
+          variables:
+            - label: Urgency score from 0 to 100
+              max_length: null
+              options: []
+              required: true
+              type: number
+              variable: urgency
+            - label: Request
+              max_length: null
+              options: []
+              required: true
+              type: paragraph
+              variable: request
+        height: 116
+        id: start_1
+        position: {x: 30, y: 280}
+        positionAbsolute: {x: 30, y: 280}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          cases:
+            - case_id: "true"
+              conditions:
+                - comparison_operator: "≥"
+                  id: urgency-at-least-70
+                  value: "70"
+                  varType: number
+                  variable_selector: [start_1, urgency]
+              id: "true"
+              logical_operator: and
+          desc: ""
+          selected: false
+          title: Check urgency
+          type: if-else
+        height: 126
+        id: gate_1
+        position: {x: 334, y: 280}
+        positionAbsolute: {x: 334, y: 280}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          context: {enabled: false, variable_selector: []}
+          desc: ""
+          model:
+            completion_params: {max_tokens: 700}
+            mode: chat
+            name: gpt-4o-mini
+            provider: langgenius/openai/openai
+          prompt_template:
+            - id: urgent-system
+              role: system
+              text: "Give a concise immediate-action response. Put safety-critical actions first and identify what needs human escalation."
+            - id: urgent-user
+              role: user
+              text: "{{#start_1.request#}}"
+          selected: false
+          title: Urgent response
+          type: llm
+          vision: {enabled: false, configs: {variable_selector: []}}
+        height: 120
+        id: urgent_1
+        position: {x: 638, y: 140}
+        positionAbsolute: {x: 638, y: 140}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          context: {enabled: false, variable_selector: []}
+          desc: ""
+          model:
+            completion_params: {max_tokens: 900}
+            mode: chat
+            name: gpt-4o-mini
+            provider: langgenius/openai/openai
+          prompt_template:
+            - id: normal-system
+              role: system
+              text: "Give a complete, calm response with clear next steps and material assumptions."
+            - id: normal-user
+              role: user
+              text: "{{#start_1.request#}}"
+          selected: false
+          title: Standard response
+          type: llm
+          vision: {enabled: false, configs: {variable_selector: []}}
+        height: 120
+        id: normal_1
+        position: {x: 638, y: 420}
+        positionAbsolute: {x: 638, y: 420}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          answer: "{{#urgent_1.text#}}"
+          desc: ""
+          selected: false
+          title: Urgent reply
+          type: answer
+        height: 90
+        id: urgent_answer_1
+        position: {x: 942, y: 140}
+        positionAbsolute: {x: 942, y: 140}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          answer: "{{#normal_1.text#}}"
+          desc: ""
+          selected: false
+          title: Standard reply
+          type: answer
+        height: 90
+        id: normal_answer_1
+        position: {x: 942, y: 420}
+        positionAbsolute: {x: 942, y: 420}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+    edges:
+      - data: {isInIteration: false, isInLoop: false, sourceType: start, targetType: if-else}
+        id: start_1-source-gate_1-target
+        source: start_1
+        sourceHandle: source
+        target: gate_1
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data: {isInIteration: false, isInLoop: false, sourceType: if-else, targetType: llm}
+        id: gate_1-true-urgent_1-target
+        source: gate_1
+        sourceHandle: "true"
+        target: urgent_1
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data: {isInIteration: false, isInLoop: false, sourceType: if-else, targetType: llm}
+        id: gate_1-false-normal_1-target
+        source: gate_1
+        sourceHandle: "false"
+        target: normal_1
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data: {isInIteration: false, isInLoop: false, sourceType: llm, targetType: answer}
+        id: urgent_1-source-urgent_answer_1-target
+        source: urgent_1
+        sourceHandle: source
+        target: urgent_answer_1
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data: {isInIteration: false, isInLoop: false, sourceType: llm, targetType: answer}
+        id: normal_1-source-normal_answer_1-target
+        source: normal_1
+        sourceHandle: source
+        target: normal_answer_1
+        targetHandle: target
+        type: custom
+        zIndex: 0
+    viewport: {x: 0, y: 0, zoom: 0.7}

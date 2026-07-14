@@ -1,0 +1,125 @@
+app:
+  description: Spine-authored workflow for concise, evidence-aware executive summaries.
+  icon: "🧩"
+  icon_background: "#E4FBCC"
+  mode: workflow
+  name: Executive Summary
+  use_icon_as_answer_icon: false
+dependencies:
+  - type: marketplace
+    current_identifier: null
+    value:
+      marketplace_plugin_unique_identifier: langgenius/openai:0.3.8@592c8252795b5f75807de2d609a03196ed02596b409f7642b4a07548c7ff57ef
+kind: app
+version: "0.6.0"
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features: {}
+  graph:
+    nodes:
+      - data:
+          desc: ""
+          selected: false
+          title: Provide source material
+          type: start
+          variables:
+            - label: Source material
+              max_length: null
+              options: []
+              required: true
+              type: paragraph
+              variable: material
+            - label: Intended audience
+              max_length: null
+              options: []
+              required: false
+              type: text-input
+              variable: audience
+        height: 116
+        id: start_1
+        position: {x: 30, y: 220}
+        positionAbsolute: {x: 30, y: 220}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          context:
+            enabled: false
+            variable_selector: []
+          desc: ""
+          model:
+            completion_params:
+              max_tokens: 1200
+            mode: chat
+            name: gpt-4o-mini
+            provider: langgenius/openai/openai
+          prompt_template:
+            - id: summary-system
+              role: system
+              text: "Create a concise executive summary. Separate verified facts, decisions, risks, and open questions. Do not invent missing details."
+            - id: summary-user
+              role: user
+              text: "Audience: {{#start_1.audience#}}\n\nSource material:\n{{#start_1.material#}}"
+          selected: false
+          title: Build executive summary
+          type: llm
+          vision:
+            configs:
+              variable_selector: []
+            enabled: false
+        height: 120
+        id: llm_1
+        position: {x: 334, y: 220}
+        positionAbsolute: {x: 334, y: 220}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          desc: ""
+          outputs:
+            - value_selector: [llm_1, text]
+              value_type: string
+              variable: summary
+          selected: false
+          title: Return summary
+          type: end
+        height: 90
+        id: end_1
+        position: {x: 638, y: 220}
+        positionAbsolute: {x: 638, y: 220}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+    edges:
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: start
+          targetType: llm
+        id: start_1-source-llm_1-target
+        source: start_1
+        sourceHandle: source
+        target: llm_1
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: llm
+          targetType: end
+        id: llm_1-source-end_1-target
+        source: llm_1
+        sourceHandle: source
+        target: end_1
+        targetHandle: target
+        type: custom
+        zIndex: 0
+    viewport: {x: 0, y: 0, zoom: 0.7}

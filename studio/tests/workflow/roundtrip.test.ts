@@ -7,7 +7,12 @@
 import { dump } from 'js-yaml';
 import { describe, expect, it } from 'vitest';
 
-import { parseWorkflowYaml, serializeWorkflowYaml, WorkflowParseError } from '../../src/workflow/convert';
+import {
+  parseWorkflowToml,
+  parseWorkflowYaml,
+  serializeWorkflowYaml,
+  WorkflowParseError,
+} from '../../src/workflow/convert';
 import { nodeRegistry } from '../../src/workflow/registry';
 import type { StudioNodeData, StudioWorkflow } from '../../src/workflow/types';
 import {
@@ -19,7 +24,48 @@ import {
   rawNodes,
 } from './helpers';
 
-function edgeKey(edge: { source: string; target: string; sourceHandle: string; targetHandle: string }): string {
+const TOML_WORKFLOW = `
+kind = "app"
+version = "0.6.0"
+
+[app]
+mode = "workflow"
+name = "TOML workflow"
+
+[workflow]
+conversation_variables = []
+environment_variables = []
+
+[workflow.features]
+
+[workflow.graph]
+edges = [
+  { source = "start_1", target = "end_1", sourceHandle = "source", targetHandle = "target" },
+]
+
+[[workflow.graph.nodes]]
+id = "start_1"
+position = { x = 30, y = 220 }
+[workflow.graph.nodes.data]
+type = "start"
+title = "Start"
+variables = []
+
+[[workflow.graph.nodes]]
+id = "end_1"
+position = { x = 334, y = 220 }
+[workflow.graph.nodes.data]
+type = "end"
+title = "End"
+outputs = []
+`;
+
+function edgeKey(edge: {
+  source: string;
+  target: string;
+  sourceHandle: string;
+  targetHandle: string;
+}): string {
   return `${edge.source} --${edge.sourceHandle}/${edge.targetHandle}--> ${edge.target}`;
 }
 
@@ -91,6 +137,50 @@ for (const name of FIXTURE_NAMES) {
   });
 }
 
+describe('TOML import normalization', () => {
+  it('normalizes TOML into the same Studio/Dify object path', () => {
+    const workflow = parseWorkflowToml(TOML_WORKFLOW);
+
+    expect(workflow.name).toBe('TOML workflow');
+    expect(workflow.version).toBe('0.6.0');
+    expect(workflow.nodes.map((node) => node.id)).toEqual(['start_1', 'end_1']);
+    expect(parseWorkflowYaml(serializeWorkflowYaml(workflow)).nodes).toHaveLength(2);
+  });
+
+  it('rejects TOML date objects because the canonical model is JSON-only', () => {
+    expect(() => parseWorkflowToml(`${TOML_WORKFLOW}\ncreated_at = 2026-07-14T12:00:00Z\n`)).toThrow(
+      /JSON-compatible/,
+    );
+  });
+
+  it('does not let __proto__ tables supply inherited app/workflow sections', () => {
+    const polluted = `
+kind = "app"
+version = "0.6.0"
+
+[__proto__.app]
+mode = "workflow"
+name = "inherited"
+
+[__proto__.workflow.graph]
+nodes = []
+edges = []
+`;
+
+    expect(() => parseWorkflowToml(polluted)).toThrow(/top-level "app"/);
+  });
+
+  it('preserves __proto__ as an own passthrough key without changing prototypes', () => {
+    const workflow = parseWorkflowToml(
+      TOML_WORKFLOW.replace('[app]', '"__proto__" = { marker = "preserved" }\n\n[app]'),
+    );
+
+    expect(Object.hasOwn(workflow.docPassthrough, '__proto__')).toBe(true);
+    expect(Object.getPrototypeOf(workflow.docPassthrough)).toBeNull();
+    expect(workflow.docPassthrough['__proto__']).toEqual({ marker: 'preserved' });
+  });
+});
+
 describe('fixture-specific spot checks', () => {
   it('iteration: iter_llm is parented to iter_1 and unknown fields survive', () => {
     const wf = parseWorkflowYaml(loadFixtureText('iteration'));
@@ -107,7 +197,9 @@ describe('fixture-specific spot checks', () => {
   });
 
   it('knowledge: multiple_retrieval_config.top_k === 3 survives un-normalized', () => {
-    const wf2 = parseWorkflowYaml(serializeWorkflowYaml(parseWorkflowYaml(loadFixtureText('knowledge'))));
+    const wf2 = parseWorkflowYaml(
+      serializeWorkflowYaml(parseWorkflowYaml(loadFixtureText('knowledge'))),
+    );
     const data = nodeById(wf2, 'kr_1').data;
     expect(data.multiple_retrieval_config).toEqual({ top_k: 3 });
     expect(data.top_k).toBeUndefined();
@@ -156,7 +248,12 @@ describe('edge id policy', () => {
   it('never collides with explicit edge ids', () => {
     const wf = parseWorkflowYaml(
       minimalDoc([
-        { id: 'a__source__b', source: 'a', target: 'b', sourceHandle: 'source' },
+        {
+          id: 'a__source__b',
+          source: 'a',
+          target: 'b',
+          sourceHandle: 'source',
+        },
         { source: 'a', target: 'b' },
       ]),
     );
@@ -181,7 +278,7 @@ describe('serialization iteration_id policy', () => {
     expect((llm?.data as Record<string, unknown>)['iteration_id']).toBeUndefined();
   });
 
-  it('overwrites data.iteration_id when parentId changed', () => {
+  it('does not invent iteration membership for a missing parent graph node', () => {
     const wf = parseWorkflowYaml(loadFixtureText('iteration'));
     const moved: StudioWorkflow = {
       ...wf,
@@ -189,7 +286,208 @@ describe('serialization iteration_id policy', () => {
     };
     const doc = loadDoc(serializeWorkflowYaml(moved));
     const llm = rawNodes(doc).find((n) => n.id === 'iter_llm');
-    expect((llm?.data as Record<string, unknown>)['iteration_id']).toBe('iter_other');
+    expect((llm?.data as Record<string, unknown>)['iteration_id']).toBe('iter_1');
+    expect(llm?.['parentId']).toBeUndefined();
+  });
+});
+
+describe('ReactFlow wrapper defaults', () => {
+  it('adds missing defaults while preserving every imported wrapper value', () => {
+    const originalText = dump({
+      app: {
+        description: 'keep app description',
+        icon: '🔬',
+        icon_background: '#123456',
+        mode: 'workflow',
+        name: 'wrapper-preservation',
+        use_icon_as_answer_icon: true,
+      },
+      dependencies: [
+        {
+          type: 'package',
+          value: { plugin_unique_identifier: 'vendor/custom' },
+        },
+      ],
+      kind: 'app',
+      version: '0.6.0',
+      workflow: {
+        conversation_variables: [{ id: 'conversation-value' }],
+        environment_variables: [{ id: 'environment-value' }],
+        features: { opening_statement: 'keep' },
+        graph: {
+          viewport: { x: 11, y: 22, zoom: 1.25 },
+          nodes: [
+            {
+              id: 'start_1',
+              type: 'custom-input',
+              position: { x: 12, y: 34 },
+              positionAbsolute: { x: 12, y: 34 },
+              selected: true,
+              sourcePosition: 'left',
+              targetPosition: 'right',
+              width: 333,
+              height: 111,
+              arbitrary_wrapper_value: { keep: true },
+              data: { type: 'start', title: 'Start', variables: [] },
+            },
+            {
+              id: 'end_1',
+              position: { x: 300, y: 34 },
+              data: { type: 'end', title: 'End', outputs: [] },
+            },
+          ],
+          edges: [
+            {
+              id: 'custom-edge-id',
+              source: 'start_1',
+              target: 'end_1',
+              sourceHandle: 'custom-source',
+              targetHandle: 'custom-target',
+              type: 'custom-edge-type',
+              zIndex: 91,
+              data: {
+                isInIteration: false,
+                isInLoop: false,
+                sourceType: 'start',
+                targetType: 'end',
+                arbitrary: 'keep',
+              },
+            },
+          ],
+        },
+      },
+    });
+    const original = loadDoc(originalText);
+    const exported = loadDoc(serializeWorkflowYaml(parseWorkflowYaml(originalText)));
+
+    assertDeepSubset(original, exported);
+    const exportedStart = rawNodes(exported).find((node) => node['id'] === 'start_1');
+    expect(exportedStart?.['positionAbsolute']).toEqual({ x: 12, y: 34 });
+    expect(exportedStart?.['type']).toBe('custom-input');
+    const exportedEdge = rawEdges(exported)[0];
+    expect(exportedEdge?.['type']).toBe('custom-edge-type');
+    expect(exportedEdge?.['zIndex']).toBe(91);
+    expect((exportedEdge?.['data'] as Record<string, unknown>)['arbitrary']).toBe('keep');
+  });
+
+  it('refreshes derived position and edge membership after graph edits', () => {
+    const text = dump({
+      app: { mode: 'workflow', name: 'derived-wrapper-sync' },
+      kind: 'app',
+      version: '0.6.0',
+      workflow: {
+        graph: {
+          nodes: [
+            {
+              id: 'iteration_1',
+              position: { x: 100, y: 200 },
+              positionAbsolute: { x: 100, y: 200 },
+              data: { type: 'iteration' },
+            },
+            {
+              id: 'child_1',
+              parentId: 'iteration_1',
+              extent: 'parent',
+              position: { x: 30, y: 40 },
+              positionAbsolute: { x: 130, y: 240 },
+              zIndex: 1002,
+              data: { type: 'llm', iteration_id: 'iteration_1' },
+            },
+            {
+              id: 'child_2',
+              parentId: 'iteration_1',
+              extent: 'parent',
+              position: { x: 260, y: 40 },
+              positionAbsolute: { x: 360, y: 240 },
+              zIndex: 1002,
+              data: { type: 'end', iteration_id: 'iteration_1', outputs: [] },
+            },
+            {
+              id: 'outside_1',
+              position: { x: 700, y: 200 },
+              positionAbsolute: { x: 700, y: 200 },
+              data: { type: 'end', outputs: [] },
+            },
+          ],
+          edges: [
+            {
+              id: 'inner-edge',
+              source: 'child_1',
+              target: 'child_2',
+              sourceHandle: 'source',
+              targetHandle: 'target',
+              type: 'custom',
+              zIndex: 1002,
+              data: {
+                arbitrary: 'keep',
+                isInIteration: true,
+                isInLoop: false,
+                iteration_id: 'iteration_1',
+                sourceType: 'llm',
+                targetType: 'end',
+              },
+            },
+          ],
+        },
+      },
+    });
+    const parsed = parseWorkflowYaml(text);
+    const edited: StudioWorkflow = {
+      ...parsed,
+      nodes: parsed.nodes.map((node) =>
+        node.id === 'child_1' ? { ...node, position: { x: 50, y: 60 } } : node,
+      ),
+      edges: parsed.edges.map((edge) => ({
+        ...edge,
+        target: 'outside_1',
+      })),
+    };
+    const exported = loadDoc(serializeWorkflowYaml(edited));
+    const moved = rawNodes(exported).find((node) => node['id'] === 'child_1');
+    expect(moved?.['positionAbsolute']).toEqual({ x: 150, y: 260 });
+    const reconnected = rawEdges(exported)[0];
+    expect(reconnected?.['zIndex']).toBe(0);
+    expect(reconnected?.['data']).toEqual({
+      arbitrary: 'keep',
+      isInIteration: false,
+      isInLoop: false,
+      sourceType: 'llm',
+      targetType: 'end',
+    });
+  });
+
+  it('computes a missing child positionAbsolute only for a real container parent', () => {
+    const text = dump({
+      app: { mode: 'workflow', name: 'container-wrappers' },
+      kind: 'app',
+      version: '0.6.0',
+      workflow: {
+        graph: {
+          nodes: [
+            {
+              id: 'iteration_1',
+              position: { x: 100, y: 200 },
+              data: {
+                type: 'iteration',
+                iterator_selector: ['start_1', 'items'],
+                output_selector: ['child_1', 'text'],
+              },
+            },
+            {
+              id: 'child_1',
+              position: { x: 30, y: 40 },
+              data: { type: 'llm', iteration_id: 'iteration_1' },
+            },
+          ],
+          edges: [],
+        },
+      },
+    });
+    const exported = loadDoc(serializeWorkflowYaml(parseWorkflowYaml(text)));
+    const child = rawNodes(exported).find((node) => node['id'] === 'child_1');
+    expect(child?.['parentId']).toBe('iteration_1');
+    expect(child?.['positionAbsolute']).toEqual({ x: 130, y: 240 });
+    expect(child?.['zIndex']).toBe(1002);
   });
 });
 
@@ -207,7 +505,14 @@ describe('round-trip: five new node types (inline)', () => {
             data: {
               type: 'start',
               title: '开始',
-              variables: [{ variable: 'query', label: 'Query', type: 'text-input', required: true }],
+              variables: [
+                {
+                  variable: 'query',
+                  label: 'Query',
+                  type: 'text-input',
+                  required: true,
+                },
+              ],
             },
           },
           {
@@ -220,12 +525,26 @@ describe('round-trip: five new node types (inline)', () => {
               url: 'https://api.example.com/search',
               headers: 'Content-Type: application/json',
               params: '',
-              authorization: { type: 'api-key', config: { type: 'bearer', api_key: 'test-key' } },
-              body: { type: 'json', data: [{ type: 'text', value: '{"q": "{{#start_1.query#}}"}' }] },
-              timeout: { max_connect_timeout: 0, max_read_timeout: 0, max_write_timeout: 0 },
+              authorization: {
+                type: 'api-key',
+                config: { type: 'bearer', api_key: 'test-key' },
+              },
+              body: {
+                type: 'json',
+                data: [{ type: 'text', value: '{"q": "{{#start_1.query#}}"}' }],
+              },
+              timeout: {
+                max_connect_timeout: 0,
+                max_read_timeout: 0,
+                max_write_timeout: 0,
+              },
               ssl_verify: true,
               variables: [],
-              retry_config: { retry_enabled: true, max_retries: 3, retry_interval: 100 },
+              retry_config: {
+                retry_enabled: true,
+                max_retries: 3,
+                retry_interval: 100,
+              },
             },
           },
           {
@@ -302,7 +621,13 @@ describe('round-trip: five new node types (inline)', () => {
               ],
               logical_operator: 'and',
               loop_variables: [
-                { id: 'lv-1', label: 'acc', var_type: 'string', value_type: 'constant', value: '' },
+                {
+                  id: 'lv-1',
+                  label: 'acc',
+                  var_type: 'string',
+                  value_type: 'constant',
+                  value: '',
+                },
               ],
               start_node_id: 'loop_start_1',
             },
@@ -315,7 +640,11 @@ describe('round-trip: five new node types (inline)', () => {
               title: '循环体 LLM',
               loop_id: 'loop_1',
               isInLoop: true,
-              model: { provider: 'anthropic', name: 'claude', completion_params: {} },
+              model: {
+                provider: 'anthropic',
+                name: 'claude',
+                completion_params: {},
+              },
               prompt_template: [{ role: 'user', text: '{{#loop_1.acc#}}' }],
             },
           },
@@ -405,7 +734,15 @@ describe('registry defaults round-trip for the five new types', () => {
       docPassthrough: {},
       workflowPassthrough: {},
       graphPassthrough: {},
-      nodes: [{ id: 'n1', type: data.type, position: { x: 0, y: 0 }, data, passthrough: {} }],
+      nodes: [
+        {
+          id: 'n1',
+          type: data.type,
+          position: { x: 0, y: 0 },
+          data,
+          passthrough: {},
+        },
+      ],
       edges: [],
     };
   }
@@ -448,7 +785,14 @@ describe('serialization loop_id policy', () => {
                 loop_variables: [],
               },
             },
-            { id: 'iter_a', data: { type: 'iteration', iterator_selector: [], output_selector: [] } },
+            {
+              id: 'iter_a',
+              data: {
+                type: 'iteration',
+                iterator_selector: [],
+                output_selector: [],
+              },
+            },
             { id: 'child_loop', data: { type: 'llm', loop_id: 'loop_a' } },
             { id: 'child_iter', data: { type: 'llm', iteration_id: 'iter_a' } },
           ],
@@ -500,6 +844,22 @@ describe('serialization loop_id policy', () => {
 });
 
 describe('parse errors', () => {
+  it('rejects workflow documents larger than 1 MiB before parsing', () => {
+    expect(() => parseWorkflowYaml(`#${'x'.repeat(1_048_576)}`)).toThrow(/1 MiB/);
+  });
+
+  it('rejects excessive YAML aliases', () => {
+    const aliases = Array.from({ length: 65 }, () => '*shared').join(', ');
+    const text = `app: {mode: workflow, name: aliases}\nkind: app\nversion: "0.6.0"\nworkflow: {graph: {nodes: [], edges: []}}\nshared: &shared {}\naliases: [${aliases}]\n`;
+    expect(() => parseWorkflowYaml(text)).toThrow(/maxAliases/);
+  });
+
+  it('rejects excessive YAML collection depth', () => {
+    const nested = `${'['.repeat(40)}null${']'.repeat(40)}`;
+    const text = `app: {mode: workflow, name: depth}\nkind: app\nversion: "0.6.0"\nworkflow: {graph: {nodes: [], edges: []}}\nextra: ${nested}\n`;
+    expect(() => parseWorkflowYaml(text)).toThrow(/maxDepth/);
+  });
+
   it('rejects unparseable yaml', () => {
     expect(() => parseWorkflowYaml('a: [1, 2')).toThrow(WorkflowParseError);
   });
@@ -535,7 +895,9 @@ describe('parse errors', () => {
   it('rejects a node without data.type', () => {
     const doc = dump({
       app: { mode: 'workflow', name: 'x' },
-      workflow: { graph: { nodes: [{ id: 'a', data: { title: 't' } }], edges: [] } },
+      workflow: {
+        graph: { nodes: [{ id: 'a', data: { title: 't' } }], edges: [] },
+      },
     });
     expect(() => parseWorkflowYaml(doc)).toThrow(/data\.type/);
   });
@@ -544,7 +906,10 @@ describe('parse errors', () => {
     const doc = dump({
       app: { mode: 'workflow', name: 'x' },
       workflow: {
-        graph: { nodes: [{ id: 'a', data: { type: 'start' } }], edges: [{ target: 'a' }] },
+        graph: {
+          nodes: [{ id: 'a', data: { type: 'start' } }],
+          edges: [{ target: 'a' }],
+        },
       },
     });
     expect(() => parseWorkflowYaml(doc)).toThrow(/source/);

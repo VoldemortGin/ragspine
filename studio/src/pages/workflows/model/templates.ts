@@ -1,335 +1,320 @@
-/**
- * Built-in workflow templates for the "New workflow" gallery.
- *
- * The non-blank yamls are copies of representative backend fixtures
- * (tests/dify/fixtures at the repo root). Their nodes carry no positions;
- * parseWorkflowYaml auto-layouts position-less nodes on load.
- */
+/** Pure helpers for the server-backed workflow-template catalog. */
 
-import { serializeWorkflowYaml } from '../../../workflow/convert';
-import { nodeRegistry } from '../../../workflow/registry';
+import type {
+  WorkflowScaffoldResponse,
+  WorkflowTemplateDetail,
+  WorkflowTemplateSource,
+  WorkflowTemplateSummary,
+} from '../../../api/types';
+import { parseWorkflowYaml, serializeWorkflowYaml } from '../../../workflow/convert';
 import { createTemplateWorkflow } from './template';
 
-export interface WorkflowTemplate {
-  id: string;
+export interface CreatableWorkflowTemplate {
   name: string;
-  description: string;
-  /** Dify DSL for the starter document. */
   yaml: string;
 }
 
-/* Copy of tests/dify/fixtures/qa_fold.yml (linear RAG: kr -> llm -> answer). */
-const RAG_QA_YAML = `app:
-  mode: advanced-chat
-  name: qa-fold-demo
-kind: app
-version: "0.1.5"
-workflow:
-  graph:
-    nodes:
-      - id: start_1
-        data:
-          type: start
-          title: 开始
-          variables:
-            - {variable: question, label: 问题, type: text-input, required: true}
-      - id: kr_1
-        data:
-          type: knowledge-retrieval
-          title: 知识检索
-          query_variable_selector: [start_1, question]
-          dataset_ids: [ds_hk]
-          multiple_retrieval_config: {top_k: 4}
-      - id: llm_1
-        data:
-          type: llm
-          title: 应答模型
-          model:
-            provider: anthropic
-            name: claude-opus-4-8
-            completion_params: {max_tokens: 512}
-          context:
-            enabled: true
-            variable_selector: [kr_1, result]
-          prompt_template:
-            - role: user
-              text: "根据资料回答：{{#start_1.question#}}"
-      - id: answer_1
-        data:
-          type: answer
-          title: 回复
-          answer: "{{#llm_1.text#}}"
-    edges:
-      - {source: start_1, target: kr_1, sourceHandle: source}
-      - {source: kr_1, target: llm_1, sourceHandle: source}
-      - {source: llm_1, target: answer_1, sourceHandle: source}
-`;
+export interface WorkflowTemplateFilters {
+  query: string;
+  category: string;
+  platform: string;
+}
 
-/* Copy of tests/dify/fixtures/branch.yml (if-else branch joining an answer). */
-const BRANCH_YAML = `app:
-  mode: advanced-chat
-  name: branch-demo
-kind: app
-version: "0.1.5"
-workflow:
-  graph:
-    nodes:
-      - id: start_1
-        data:
-          type: start
-          title: 开始
-          variables:
-            - variable: score
-              label: 分数
-              type: number
-              required: true
-      - id: ifelse_1
-        data:
-          type: if-else
-          title: 阈值判断
-          cases:
-            - case_id: "true"
-              logical_operator: and
-              conditions:
-                - variable_selector:
-                    - start_1
-                    - score
-                  comparison_operator: ">"
-                  value: "60"
-      - id: llm_yes
-        data:
-          type: llm
-          title: 通过应答
-          model:
-            provider: anthropic
-            name: claude-opus-4-8
-            completion_params:
-              max_tokens: 512
-          prompt_template:
-            - role: user
-              text: "恭喜通过，分数 {{#start_1.score#}}"
-      - id: llm_no
-        data:
-          type: llm
-          title: 未过应答
-          model:
-            provider: anthropic
-            name: claude-opus-4-8
-            completion_params:
-              max_tokens: 512
-          prompt_template:
-            - role: user
-              text: "未通过，分数 {{#start_1.score#}}"
-      - id: answer_1
-        data:
-          type: answer
-          title: 回复
-          answer: "{{#llm_yes.text#}}{{#llm_no.text#}}"
-    edges:
-      - source: start_1
-        target: ifelse_1
-        sourceHandle: source
-      - source: ifelse_1
-        target: llm_yes
-        sourceHandle: "true"
-      - source: ifelse_1
-        target: llm_no
-        sourceHandle: "false"
-      - source: llm_yes
-        target: answer_1
-        sourceHandle: source
-      - source: llm_no
-        target: answer_1
-        sourceHandle: source
-`;
+export interface WorkflowTemplateSourceView {
+  platform: string;
+  title: string;
+  author: string;
+  popularity: string;
+  observedAt: string;
+  licenseStatus: string;
+  httpsUrl: string | null;
+}
 
-/* Copy of tests/dify/fixtures/iteration.yml (iteration container over an array). */
-const ITERATION_YAML = `app:
-  mode: workflow
-  name: iteration-demo
-kind: app
-version: "0.1.5"
-workflow:
-  graph:
-    nodes:
-      - id: start_1
-        data:
-          type: start
-          title: 开始
-          variables:
-            - variable: items
-              label: 条目列表
-              type: array
-              required: true
-      - id: iter_1
-        data:
-          type: iteration
-          title: 逐项处理
-          iterator_selector:
-            - start_1
-            - items
-          output_selector:
-            - iter_llm
-            - text
-          output_type: array[string]
-          is_parallel: true
-          parallel_nums: 5
-          start_node_id: iter_llm
-      - id: iter_llm
-        data:
-          type: llm
-          title: 处理单项
-          iteration_id: iter_1
-          model:
-            provider: anthropic
-            name: claude-opus-4-8
-            completion_params:
-              max_tokens: 512
-          prompt_template:
-            - role: user
-              text: "翻译这一项：{{#iter_1.item#}}"
-      - id: end_1
-        data:
-          type: end
-          title: 结束
-          outputs:
-            - variable: results
-              value_selector:
-                - iter_1
-                - output
-    edges:
-      - source: start_1
-        target: iter_1
-        sourceHandle: source
-      - source: iter_1
-        target: end_1
-        sourceHandle: source
-`;
+export const TEMPLATE_PROVENANCE_NOTICE =
+  'Spine-authored equivalent · upstream reference only · config not redistributed';
+export const SCAFFOLD_DATA_FLOW_NOTICE =
+  'Studio sends this description to the configured RAGSpine server, which returns a Dify-compatible definition. Studio saves it locally and does not execute it.';
 
-/* Copy of tests/dify/fixtures/parallel.yml (parallel fan-out + template join). */
-const PARALLEL_YAML = `app:
-  mode: workflow
-  name: parallel-demo
-kind: app
-version: "0.1.5"
-workflow:
-  graph:
-    nodes:
-      - id: start_1
-        data:
-          type: start
-          title: 开始
-          variables:
-            - variable: topic
-              label: 主题
-              type: text-input
-              required: true
-      - id: llm_a
-        data:
-          type: llm
-          title: 视角A
-          model:
-            provider: anthropic
-            name: claude-opus-4-8
-            completion_params:
-              max_tokens: 1024
-          prompt_template:
-            - role: user
-              text: "从正面分析：{{#start_1.topic#}}"
-      - id: llm_b
-        data:
-          type: llm
-          title: 视角B
-          model:
-            provider: anthropic
-            name: claude-opus-4-8
-            completion_params:
-              max_tokens: 1024
-          prompt_template:
-            - role: user
-              text: "从反面分析：{{#start_1.topic#}}"
-      - id: tt_join
-        data:
-          type: template-transform
-          title: 合并
-          template: "正面：{{ a }}\\n反面：{{ b }}"
-          variables:
-            - variable: a
-              value_selector:
-                - llm_a
-                - text
-            - variable: b
-              value_selector:
-                - llm_b
-                - text
-      - id: end_1
-        data:
-          type: end
-          title: 结束
-          outputs:
-            - variable: result
-              value_selector:
-                - tt_join
-                - output
-    edges:
-      - source: start_1
-        target: llm_a
-        sourceHandle: source
-      - source: start_1
-        target: llm_b
-        sourceHandle: source
-      - source: llm_a
-        target: tt_join
-        sourceHandle: source
-      - source: llm_b
-        target: tt_join
-        sourceHandle: source
-      - source: tt_join
-        target: end_1
-        sourceHandle: source
-`;
+/** The only local catalog entry: an offline-safe fallback when the API is unavailable. */
+export const BLANK_WORKFLOW_TEMPLATE: Readonly<CreatableWorkflowTemplate & { id: 'blank' }> = {
+  id: 'blank',
+  name: 'Blank',
+  yaml: serializeWorkflowYaml(createTemplateWorkflow('Blank')),
+};
 
-/** Blank first: the gallery's quick-create default. */
-export const WORKFLOW_TEMPLATES: readonly WorkflowTemplate[] = [
-  {
-    id: 'blank',
-    name: 'Blank',
-    description: 'Minimal starter: start → LLM → end.',
-    yaml: serializeWorkflowYaml(createTemplateWorkflow('Blank')),
-  },
-  {
-    id: 'rag-qa',
-    name: 'RAG Q&A',
-    description:
-      'Linear RAG (advanced-chat): knowledge retrieval feeds an LLM as context, replied via an answer node.',
-    yaml: RAG_QA_YAML,
-  },
-  {
-    id: 'branch',
-    name: 'Conditional branch',
-    description: 'An if-else node routes to different LLM prompts, joined by one answer node.',
-    yaml: BRANCH_YAML,
-  },
-  {
-    id: 'iteration',
-    name: 'Iteration',
-    description: 'An iteration container runs an inner LLM over each item of an input array.',
-    yaml: ITERATION_YAML,
-  },
-  {
-    id: 'parallel',
-    name: 'Parallel fan-out',
-    description: 'Two LLMs analyze the same topic concurrently; a template node joins the results.',
-    yaml: PARALLEL_YAML,
-  },
-];
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 
-/** Rough node-type badges: scan `type:` strings, keep only known node types. */
-export function templateNodeTypes(yaml: string): string[] {
-  const types: string[] = [];
-  for (const match of yaml.matchAll(/\btype:\s*([a-z][a-z0-9-]*)/g)) {
-    const t = match[1]!;
-    if (t in nodeRegistry && !types.includes(t)) types.push(t);
+function safeString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function safeStrings(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(safeString).filter((item) => item !== '');
+}
+
+function safeSource(value: unknown): WorkflowTemplateSource | null {
+  return isRecord(value) ? (value as unknown as WorkflowTemplateSource) : null;
+}
+
+function normalizeCompatibility(value: unknown): WorkflowTemplateSummary['compatibility'] {
+  if (!isRecord(value)) return { format: '', dsl_version: '', status: '' };
+  return {
+    format: safeString(value['format']),
+    dsl_version: safeString(value['dsl_version']),
+    status: safeString(value['status']),
+  };
+}
+
+function normalizeRequirements(value: unknown): WorkflowTemplateSummary['requirements'] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!isRecord(item)) return [];
+    const name = safeString(item['name']);
+    if (name === '') return [];
+    return [
+      {
+        kind: safeString(item['kind']),
+        name,
+        required: item['required'] === true,
+      },
+    ];
+  });
+}
+
+function normalizeSource(value: unknown): WorkflowTemplateSource | null {
+  if (!isRecord(value)) return null;
+  return {
+    provider: safeString(value['provider']),
+    title: safeString(value['title']),
+    author: safeString(value['author']) || null,
+    upstream_id: safeString(value['upstream_id']) || null,
+    upstream_url: safeString(value['upstream_url']) || null,
+    license_status: safeString(value['license_status']),
+    observed_metric: safeString(value['observed_metric']) || null,
+    observed_value:
+      typeof value['observed_value'] === 'number' && Number.isFinite(value['observed_value'])
+        ? value['observed_value']
+        : null,
+    observed_at: safeString(value['observed_at']) || null,
+  };
+}
+
+/**
+ * Narrow an untrusted list response to render-safe catalog summaries.
+ * Entries without a stable id/name are dropped; nested fields are normalized.
+ */
+export function normalizeWorkflowTemplateSummaries(value: unknown): WorkflowTemplateSummary[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!isRecord(item)) return [];
+    const id = safeString(item['id']);
+    const name = safeString(item['name']);
+    if (id === '' || name === '') return [];
+    const sha256 = safeString(item['sha256']);
+    return [
+      {
+        id,
+        name,
+        description: safeString(item['description']),
+        categories: safeStrings(item['categories']),
+        tags: safeStrings(item['tags']),
+        intents: safeStrings(item['intents']),
+        examples: safeStrings(item['examples']),
+        compatibility: normalizeCompatibility(item['compatibility']),
+        requirements: normalizeRequirements(item['requirements']),
+        source: normalizeSource(item['source']),
+        ...(sha256 !== '' ? { sha256 } : {}),
+      },
+    ];
+  });
+}
+
+function requirementLabel(value: unknown): string {
+  if (!isRecord(value)) return '';
+  const name = safeString(value['name']);
+  const kind = safeString(value['kind']);
+  if (name === '') return kind;
+  return kind === '' ? name : `${kind}: ${name}`;
+}
+
+/** Runtime-defensive requirement labels: malformed server fields are ignored, never rendered. */
+export function templateRequirementLabels(template: WorkflowTemplateSummary): string[] {
+  const raw: unknown = template.requirements;
+  if (!Array.isArray(raw)) return [];
+  return raw.map(requirementLabel).filter((label) => label !== '');
+}
+
+/** Only permit ordinary HTTPS links from catalog provenance metadata. */
+export function safeHttpsUrl(value: unknown): string | null {
+  const raw = safeString(value);
+  if (raw === '') return null;
+  try {
+    const url = new URL(raw);
+    return url.protocol === 'https:' ? url.toString() : null;
+  } catch {
+    return null;
   }
-  return types;
+}
+
+/** Render-ready provenance fields with strict runtime guards at the API boundary. */
+export function templateSourceView(template: WorkflowTemplateSummary): WorkflowTemplateSourceView {
+  const source = safeSource(template.source);
+  if (source === null) {
+    return {
+      platform: '',
+      title: '',
+      author: '',
+      popularity: '',
+      observedAt: '',
+      licenseStatus: '',
+      httpsUrl: null,
+    };
+  }
+  const observedMetric = safeString(source.observed_metric);
+  const observedValue =
+    typeof source.observed_value === 'number' && Number.isFinite(source.observed_value)
+      ? source.observed_value
+      : null;
+  return {
+    platform: safeString(source.provider),
+    title: safeString(source.title),
+    author: safeString(source.author),
+    popularity:
+      observedMetric !== '' && observedValue !== null
+        ? `${observedMetric}: ${String(observedValue)}`
+        : '',
+    observedAt: safeString(source.observed_at),
+    licenseStatus: safeString(source.license_status),
+    httpsUrl: safeHttpsUrl(source.upstream_url),
+  };
+}
+
+/** Compact compatibility label; malformed objects degrade to "Compatibility unknown". */
+export function templateCompatibilityLabel(template: WorkflowTemplateSummary): string {
+  const value: unknown = template.compatibility;
+  if (!isRecord(value)) return 'Compatibility unknown';
+  const format = safeString(value['format']);
+  const version = safeString(value['dsl_version']);
+  const status = safeString(value['status']);
+  const parts = [format, version, status].filter((part) => part !== '');
+  return parts.length > 0 ? parts.join(' · ') : 'Compatibility unknown';
+}
+
+function popularityValue(template: WorkflowTemplateSummary): number | null {
+  const source = safeSource(template.source);
+  return source !== null &&
+    typeof source.observed_value === 'number' &&
+    Number.isFinite(source.observed_value)
+    ? source.observed_value
+    : null;
+}
+
+/** Popular templates first; missing/malformed popularity sorts last, then by stable name/id. */
+export function sortWorkflowTemplates(
+  templates: readonly WorkflowTemplateSummary[],
+): WorkflowTemplateSummary[] {
+  return [...templates].sort((left, right) => {
+    const leftPopularity = popularityValue(left);
+    const rightPopularity = popularityValue(right);
+    if (leftPopularity !== rightPopularity) {
+      if (leftPopularity === null) return 1;
+      if (rightPopularity === null) return -1;
+      return rightPopularity - leftPopularity;
+    }
+    const byName = safeString(left.name).localeCompare(safeString(right.name));
+    return byName !== 0 ? byName : safeString(left.id).localeCompare(safeString(right.id));
+  });
+}
+
+function searchableText(template: WorkflowTemplateSummary): string {
+  const source = templateSourceView(template);
+  return [
+    safeString(template.name),
+    safeString(template.description),
+    ...safeStrings(template.categories),
+    ...safeStrings(template.tags),
+    ...safeStrings(template.intents),
+    ...safeStrings(template.examples),
+    ...templateRequirementLabels(template),
+    source.platform,
+    source.title,
+    source.author,
+    templateCompatibilityLabel(template),
+  ]
+    .join(' ')
+    .toLocaleLowerCase();
+}
+
+export function filterWorkflowTemplates(
+  templates: readonly WorkflowTemplateSummary[],
+  filters: WorkflowTemplateFilters,
+): WorkflowTemplateSummary[] {
+  const query = filters.query.trim().toLocaleLowerCase();
+  const category = filters.category.trim().toLocaleLowerCase();
+  const platform = filters.platform.trim().toLocaleLowerCase();
+
+  return sortWorkflowTemplates(
+    templates.filter((template) => {
+      const categories = safeStrings(template.categories).map((item) => item.toLocaleLowerCase());
+      const sourcePlatform = templateSourceView(template).platform.toLocaleLowerCase();
+      return (
+        (query === '' || searchableText(template).includes(query)) &&
+        (category === '' || categories.includes(category)) &&
+        (platform === '' || sourcePlatform === platform)
+      );
+    }),
+  );
+}
+
+function uniqueSorted(values: readonly string[]): string[] {
+  return [...new Set(values.filter((item) => item !== ''))].sort((a, b) => a.localeCompare(b));
+}
+
+export function workflowTemplateCategories(
+  templates: readonly WorkflowTemplateSummary[],
+): string[] {
+  return uniqueSorted(templates.flatMap((template) => safeStrings(template.categories)));
+}
+
+export function workflowTemplatePlatforms(templates: readonly WorkflowTemplateSummary[]): string[] {
+  return uniqueSorted(templates.map((template) => templateSourceView(template).platform));
+}
+
+function workflowDocumentText(response: {
+  workflow?: Record<string, unknown>;
+  yaml?: string;
+}): string {
+  if (isRecord(response.workflow)) return JSON.stringify(response.workflow);
+  const yaml = safeString(response.yaml);
+  if (yaml !== '') return yaml;
+  throw new Error('Workflow response did not contain a workflow document.');
+}
+
+function fallbackWorkflowName(description: string): string {
+  const normalized = description.trim().replace(/\s+/g, ' ');
+  return normalized === '' ? 'Generated workflow' : normalized.slice(0, 72);
+}
+
+/** Validate a detail payload before handing it to the existing local library action. */
+export function detailToCreatableTemplate(
+  detail: WorkflowTemplateDetail,
+): CreatableWorkflowTemplate {
+  const yaml = workflowDocumentText(detail);
+  const parsed = parseWorkflowYaml(yaml);
+  const name = safeString(detail.name) || safeString(parsed.name) || 'Workflow template';
+  return { name, yaml };
+}
+
+/** Prefer canonical JSON workflow data, with legacy YAML only as a compatibility fallback. */
+export function scaffoldToCreatableTemplate(
+  response: WorkflowScaffoldResponse,
+  description: string,
+): CreatableWorkflowTemplate {
+  const yaml = workflowDocumentText(response);
+  const parsed = parseWorkflowYaml(yaml);
+  const name = safeString(parsed.name) || fallbackWorkflowName(description);
+  return { name, yaml };
 }

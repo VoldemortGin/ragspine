@@ -1,0 +1,179 @@
+app:
+  description: Spine-authored workflow that analyzes opportunities and risks in parallel.
+  icon: "🧩"
+  icon_background: "#E4FBCC"
+  mode: workflow
+  name: Parallel Perspective Analysis
+  use_icon_as_answer_icon: false
+dependencies:
+  - current_identifier: null
+    type: marketplace
+    value:
+      marketplace_plugin_unique_identifier: langgenius/openai:0.3.8@592c8252795b5f75807de2d609a03196ed02596b409f7642b4a07548c7ff57ef
+kind: app
+version: "0.6.0"
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features: {}
+  graph:
+    nodes:
+      - data:
+          desc: ""
+          selected: false
+          title: Analysis topic
+          type: start
+          variables:
+            - label: Topic
+              max_length: null
+              options: []
+              required: true
+              type: paragraph
+              variable: topic
+        height: 90
+        id: start_1
+        position: {x: 30, y: 280}
+        positionAbsolute: {x: 30, y: 280}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          context: {enabled: false, variable_selector: []}
+          desc: ""
+          model:
+            completion_params: {max_tokens: 900}
+            mode: chat
+            name: gpt-4o-mini
+            provider: langgenius/openai/openai
+          prompt_template:
+            - id: opportunities-system
+              role: system
+              text: "Analyze opportunities, supporting evidence, assumptions, and leading indicators."
+            - id: opportunities-user
+              role: user
+              text: "Topic: {{#start_1.topic#}}"
+          selected: false
+          title: Opportunity analysis
+          type: llm
+          vision: {enabled: false, configs: {variable_selector: []}}
+        height: 120
+        id: opportunities_1
+        position: {x: 334, y: 160}
+        positionAbsolute: {x: 334, y: 160}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          context: {enabled: false, variable_selector: []}
+          desc: ""
+          model:
+            completion_params: {max_tokens: 900}
+            mode: chat
+            name: gpt-4o-mini
+            provider: langgenius/openai/openai
+          prompt_template:
+            - id: risks-system
+              role: system
+              text: "Analyze risks, counter-evidence, failure modes, and mitigations."
+            - id: risks-user
+              role: user
+              text: "Topic: {{#start_1.topic#}}"
+          selected: false
+          title: Risk analysis
+          type: llm
+          vision: {enabled: false, configs: {variable_selector: []}}
+        height: 120
+        id: risks_1
+        position: {x: 334, y: 400}
+        positionAbsolute: {x: 334, y: 400}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          desc: ""
+          selected: false
+          template: "OPPORTUNITIES\n{{ opportunities }}\n\nRISKS\n{{ risks }}"
+          title: Combine perspectives
+          type: template-transform
+          variables:
+            - value_selector: [opportunities_1, text]
+              value_type: string
+              variable: opportunities
+            - value_selector: [risks_1, text]
+              value_type: string
+              variable: risks
+        height: 120
+        id: merge_1
+        position: {x: 638, y: 280}
+        positionAbsolute: {x: 638, y: 280}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          desc: ""
+          outputs:
+            - value_selector: [merge_1, output]
+              value_type: string
+              variable: analysis
+          selected: false
+          title: Return analysis
+          type: end
+        height: 90
+        id: end_1
+        position: {x: 942, y: 280}
+        positionAbsolute: {x: 942, y: 280}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+    edges:
+      - data: {isInIteration: false, isInLoop: false, sourceType: start, targetType: llm}
+        id: start_1-source-opportunities_1-target
+        source: start_1
+        sourceHandle: source
+        target: opportunities_1
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data: {isInIteration: false, isInLoop: false, sourceType: start, targetType: llm}
+        id: start_1-source-risks_1-target
+        source: start_1
+        sourceHandle: source
+        target: risks_1
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data: {isInIteration: false, isInLoop: false, sourceType: llm, targetType: template-transform}
+        id: opportunities_1-source-merge_1-target
+        source: opportunities_1
+        sourceHandle: source
+        target: merge_1
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data: {isInIteration: false, isInLoop: false, sourceType: llm, targetType: template-transform}
+        id: risks_1-source-merge_1-target
+        source: risks_1
+        sourceHandle: source
+        target: merge_1
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data: {isInIteration: false, isInLoop: false, sourceType: template-transform, targetType: end}
+        id: merge_1-source-end_1-target
+        source: merge_1
+        sourceHandle: source
+        target: end_1
+        targetHandle: target
+        type: custom
+        zIndex: 0
+    viewport: {x: 0, y: 0, zoom: 0.7}

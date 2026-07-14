@@ -17,25 +17,50 @@
 """
 
 import argparse
+import os
+import re
+import stat
 import sys
+import unicodedata
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempfile import TemporaryDirectory, mkstemp
+from typing import Literal
 
 from ragspine.agent.agent import AgentResult, answer_question
 from ragspine.agent.llm_provider import MockProvider
 from ragspine.common.core import DEFAULT_FACT_DB
 from ragspine.storage.fact_store import Fact, SqliteFactStore
+from ragspine.workflows.matching import TemplateMatcher
 
 # 分发名（PEP 621 [project] name = "rag-spine"，import 名仍是 ragspine）。
 _DIST_NAME = "rag-spine"
 
+_KNOWN_COMMANDS = frozenset({"ask", "dify", "quickstart", "version", "workflow"})
+_WINDOWS_RESERVED_NAMES = frozenset(
+    {
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        *(f"COM{index}" for index in range(1, 10)),
+        *(f"LPT{index}" for index in range(1, 10)),
+    }
+)
+_WINDOWS_INVALID_FILENAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_WorkflowOutputFormat = Literal["yaml", "json"]
+
 # quickstart 用的微型合成事实（虚构公司 ACME，确定性、可重建；与 qa_eval 的口径一致）。
 # 命中演示：ACME_CN FY2024 REVENUE 1320 USD_M，带完整来源血缘。
 _QUICKSTART_FACT = Fact(
-    metric_code="REVENUE", entity="ACME_CN", geography="CN",
-    channel="TOTAL", period_type="FY", period="2024",
-    value=1320.0, unit="USD_M",
+    metric_code="REVENUE",
+    entity="ACME_CN",
+    geography="CN",
+    channel="TOTAL",
+    period_type="FY",
+    period="2024",
+    value=1320.0,
+    unit="USD_M",
     source_doc_id="ACME_FY2024_Results.pptx",
     source_locator="slide=6,table=1,row=2,col=3",
 )
@@ -86,6 +111,7 @@ def _cmd_ask(args: argparse.Namespace) -> int:
     if args.provider == "anthropic":
         # 真实 Claude：SDK 延迟 import（缺 [llm] extra 或 key 时由 provider 自身报错）。
         from ragspine.agent.llm_provider import AnthropicProvider
+
         provider: object = AnthropicProvider()
     else:
         provider = MockProvider()
@@ -111,16 +137,22 @@ def _cmd_version(args: argparse.Namespace) -> int:
 
 
 def _cmd_dify_compile(args: argparse.Namespace) -> int:
-    """编译一个 Dify 工作流 YAML 为纯 Python，打印代码（+ 默认附静态优化建议）。"""
+    """编译 JSON/YAML/TOML Dify 工作流为纯 Python。"""
     from ragspine.dify.api import compile_dify_yaml
     from ragspine.dify.errors import DifyCompileError
+    from ragspine.workflows.errors import WorkflowFormatError
+    from ragspine.workflows.formats import dump_dify_yaml, load_workflow
 
     path = Path(args.path)
     if not path.exists():
         print(f"error: 文件不存在：{path}", file=sys.stderr)
         return 2
     try:
-        result = compile_dify_yaml(path, analyze=not args.no_analyze)
+        source = dump_dify_yaml(load_workflow(path))
+        result = compile_dify_yaml(source, analyze=not args.no_analyze)
+    except WorkflowFormatError as exc:
+        print(f"error: 工作流格式无效（{exc.code}）：{exc}", file=sys.stderr)
+        return 1
     except DifyCompileError as exc:
         print(f"error: 编译失败（{exc.code}）：{exc}", file=sys.stderr)
         return 1
@@ -138,16 +170,22 @@ def _cmd_dify_compile(args: argparse.Namespace) -> int:
 
 
 def _cmd_dify_analyze(args: argparse.Namespace) -> int:
-    """只对一个 Dify 工作流 YAML 跑静态优化分析，打印建议列表（零代码生成、零 API）。"""
+    """只对 JSON/YAML/TOML Dify 工作流跑静态优化分析。"""
     from ragspine.dify.api import analyze as dify_analyze
     from ragspine.dify.errors import DifyCompileError
+    from ragspine.workflows.errors import WorkflowFormatError
+    from ragspine.workflows.formats import dump_dify_yaml, load_workflow
 
     path = Path(args.path)
     if not path.exists():
         print(f"error: 文件不存在：{path}", file=sys.stderr)
         return 2
     try:
-        suggestions = dify_analyze(path)
+        source = dump_dify_yaml(load_workflow(path))
+        suggestions = dify_analyze(source)
+    except WorkflowFormatError as exc:
+        print(f"error: 工作流格式无效（{exc.code}）：{exc}", file=sys.stderr)
+        return 1
     except DifyCompileError as exc:
         print(f"error: 分析失败（{exc.code}）：{exc}", file=sys.stderr)
         return 1
@@ -157,6 +195,326 @@ def _cmd_dify_analyze(args: argparse.Namespace) -> int:
         print(f"  [{s.severity.value:6s}] {s.rule_id:12s} {s.title}")
         if s.node_ids:
             print(f"            节点：{', '.join(s.node_ids)}")
+    return 0
+
+
+def _serialize_workflow(workflow: dict[str, object], output_format: _WorkflowOutputFormat) -> str:
+    """Serialize one canonical workflow mapping for CLI output."""
+
+    from ragspine.workflows.formats import dump_dify_yaml, dump_json
+
+    if output_format == "json":
+        return dump_json(workflow)
+    return dump_dify_yaml(workflow)
+
+
+def _safe_workflow_slug(value: str) -> str:
+    """Build a portable ASCII filename stem from untrusted natural language."""
+
+    normalized = unicodedata.normalize("NFKD", value)
+    ascii_value = normalized.encode("ascii", "ignore").decode("ascii").lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", ascii_value).strip("-.")[:64].rstrip("-.")
+    if not slug:
+        slug = "workflow"
+    if slug.upper() in _WINDOWS_RESERVED_NAMES:
+        slug = f"workflow-{slug}"
+    return slug
+
+
+def _is_windows_reserved_path(path: Path) -> bool:
+    """Return whether a filename is invalid on Windows, on every host OS."""
+
+    name = path.name
+    return (
+        not name
+        or _WINDOWS_INVALID_FILENAME.search(name) is not None
+        or name.endswith((" ", "."))
+        or name.split(".", maxsplit=1)[0].upper() in _WINDOWS_RESERVED_NAMES
+    )
+
+
+def _write_new_workflow(path: Path, content: str, *, force: bool) -> None:
+    """Write UTF-8 using exclusive create, rejecting links and special files."""
+
+    from ragspine.workflows.errors import WorkflowInputError
+
+    if _is_windows_reserved_path(path):
+        raise WorkflowInputError(f"输出文件名不兼容 Windows: {path.name!r}")
+    if not path.parent.is_dir():
+        raise WorkflowInputError(f"输出目录不存在: {path.parent}")
+
+    try:
+        before = path.lstat()
+    except FileNotFoundError:
+        before = None
+    except OSError as exc:
+        raise WorkflowInputError(f"无法检查输出路径: {path}: {exc}") from exc
+
+    if before is not None:
+        reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        attributes = getattr(before, "st_file_attributes", 0)
+        if (
+            stat.S_ISLNK(before.st_mode)
+            or not stat.S_ISREG(before.st_mode)
+            or (reparse_flag and attributes & reparse_flag)
+        ):
+            raise WorkflowInputError(f"拒绝写入链接或非普通文件: {path}")
+        if not force:
+            raise WorkflowInputError(f"输出文件已存在: {path}；如需覆盖请加 --force")
+
+    data = content.encode("utf-8")
+    if force:
+        _atomic_replace_workflow(path, data)
+        return
+
+    flags = (
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_EXCL
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_BINARY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    fd = -1
+    opened_identity: tuple[int, int] | None = None
+    try:
+        fd = os.open(path, flags, 0o600)
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode):
+            raise WorkflowInputError(f"输出路径不是普通文件: {path}")
+        opened_identity = (opened.st_dev, opened.st_ino)
+        _write_all(fd, data)
+        os.fsync(fd)
+        os.close(fd)
+        fd = -1
+        _fsync_directory(path.parent)
+    except FileExistsError as exc:
+        raise WorkflowInputError(f"输出文件已存在: {path}；如需覆盖请加 --force") from exc
+    except Exception:
+        if fd >= 0:
+            os.close(fd)
+        if opened_identity is not None:
+            _unlink_if_identity(path, opened_identity)
+        raise
+
+
+def _atomic_replace_workflow(path: Path, data: bytes) -> None:
+    """Write a same-directory temporary file, then atomically replace target."""
+
+    from ragspine.workflows.errors import WorkflowInputError
+
+    fd, temporary_name = mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    temporary = Path(temporary_name)
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode):
+            raise WorkflowInputError("临时输出不是普通文件")
+        temporary_identity = (opened.st_dev, opened.st_ino)
+        _write_all(fd, data)
+        os.fsync(fd)
+        os.close(fd)
+        fd = -1
+
+        try:
+            temporary_stat = temporary.lstat()
+        except OSError as exc:
+            raise WorkflowInputError("临时输出在替换前丢失") from exc
+        if not stat.S_ISREG(temporary_stat.st_mode) or (
+            temporary_stat.st_dev,
+            temporary_stat.st_ino,
+        ) != temporary_identity:
+            raise WorkflowInputError("临时输出在写入期间被替换")
+
+        try:
+            current = path.lstat()
+        except FileNotFoundError:
+            current = None
+        if current is not None:
+            reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+            attributes = getattr(current, "st_file_attributes", 0)
+            if (
+                stat.S_ISLNK(current.st_mode)
+                or not stat.S_ISREG(current.st_mode)
+                or (reparse_flag and attributes & reparse_flag)
+            ):
+                raise WorkflowInputError(f"拒绝覆盖链接或非普通文件: {path}")
+        os.replace(temporary, path)
+        _fsync_directory(path.parent)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _write_all(fd: int, data: bytes) -> None:
+    """Write all bytes, treating a zero-byte write as an I/O failure."""
+
+    offset = 0
+    while offset < len(data):
+        written = os.write(fd, data[offset:])
+        if written <= 0:
+            raise OSError("写入 workflow 时没有取得进展")
+        offset += written
+
+
+def _unlink_if_identity(path: Path, identity: tuple[int, int]) -> None:
+    """Remove our partial file only if the path still names the same inode."""
+
+    try:
+        current = path.lstat()
+        if stat.S_ISREG(current.st_mode) and (current.st_dev, current.st_ino) == identity:
+            path.unlink()
+            _fsync_directory(path.parent)
+    except FileNotFoundError:
+        pass
+
+
+def _fsync_directory(directory: Path) -> None:
+    """Best-effort directory fsync; some platforms do not support it."""
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_DIRECTORY", 0)
+    try:
+        fd = os.open(directory, flags)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
+def _workflow_matcher(name: str) -> TemplateMatcher:
+    """Compatibility seam delegating to the shared workflow matcher factory."""
+
+    from ragspine.workflows.matching import make_template_matcher
+
+    return make_template_matcher(name)
+
+
+def _cmd_workflow_create(args: argparse.Namespace) -> int:
+    """Reuse or generate a Dify workflow from a natural-language description."""
+
+    from ragspine.workflows.catalog import load_builtin_catalog
+    from ragspine.workflows.errors import WorkflowError, WorkflowMatcherError
+    from ragspine.workflows.matching import LexicalTemplateMatcher
+    from ragspine.workflows.scaffold import scaffold_workflow
+
+    description = " ".join(args.description).strip()
+    try:
+        if not description and args.template:
+            description = load_builtin_catalog().get(args.template).name
+        matcher_fell_back = False
+        matcher: TemplateMatcher
+        if args.template or args.no_reuse:
+            matcher = LexicalTemplateMatcher()
+        else:
+            try:
+                matcher = _workflow_matcher(args.matcher)
+            except Exception:
+                if args.matcher != "auto":
+                    raise
+                matcher_fell_back = True
+                matcher = LexicalTemplateMatcher()
+                print(
+                    "warning: 语义 matcher 初始化失败，已回退 lexical",
+                    file=sys.stderr,
+                )
+        if (
+            args.matcher == "auto"
+            and matcher.name == "lexical"
+            and not args.template
+            and not args.no_reuse
+            and not matcher_fell_back
+        ):
+            print(
+                "warning: 未安装可用的语义 embedding，已离线回退 lexical matcher",
+                file=sys.stderr,
+            )
+        try:
+            result = scaffold_workflow(
+                description,
+                matcher=matcher,
+                template_id=args.template,
+                reuse=not args.no_reuse,
+            )
+        except Exception as exc:
+            if args.matcher != "auto" or (
+                isinstance(exc, WorkflowError)
+                and not isinstance(exc, WorkflowMatcherError)
+            ):
+                raise
+            print("warning: 语义匹配不可用，已回退 lexical", file=sys.stderr)
+            result = scaffold_workflow(
+                description,
+                matcher=LexicalTemplateMatcher(),
+                template_id=args.template,
+                reuse=not args.no_reuse,
+            )
+        content = _serialize_workflow(result.workflow, args.format)
+        if args.stdout:
+            sys.stdout.write(content)
+            print(f"matcher={result.matcher}", file=sys.stderr)
+            return 0
+
+        suffix = ".json" if args.format == "json" else ".yml"
+        output = (
+            Path(args.output)
+            if args.output
+            else Path(f"{_safe_workflow_slug(args.template or description)}{suffix}")
+        )
+        _write_new_workflow(output, content, force=args.force)
+    except WorkflowError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except OSError as exc:
+        print(f"error: workflow 输出失败: {exc}", file=sys.stderr)
+        return 2
+    except (ImportError, RuntimeError, ValueError) as exc:
+        print(f"error: workflow matcher 不可用: {exc}", file=sys.stderr)
+        return 2
+
+    print(
+        f"created {output} ({result.origin}"
+        + (f":{result.template_id}" if result.template_id else "")
+        + f", matcher={result.matcher})"
+    )
+    return 0
+
+
+def _cmd_workflow_list(args: argparse.Namespace) -> int:
+    """Print the bundled, release-validated workflow catalog."""
+
+    from ragspine.workflows.catalog import load_builtin_catalog
+    from ragspine.workflows.errors import WorkflowError
+
+    try:
+        templates = load_builtin_catalog().list()
+    except WorkflowError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    for template in templates:
+        categories = ",".join(template.categories)
+        print(f"{template.id}\t{template.name}\t{categories}")
+    return 0
+
+
+def _cmd_workflow_show(args: argparse.Namespace) -> int:
+    """Print one allowlisted workflow template as YAML or JSON."""
+
+    from ragspine.workflows.catalog import load_builtin_catalog
+    from ragspine.workflows.errors import WorkflowError
+
+    try:
+        template = load_builtin_catalog().get(args.template_id)
+        sys.stdout.write(_serialize_workflow(template.workflow, args.format))
+    except WorkflowError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     return 0
 
 
@@ -177,11 +535,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p_ask = sub.add_parser("ask", help="单条提问（默认离线 mock，确定性）")
     p_ask.add_argument("question", help="用户问题，如：中国内地FY2024的REVENUE是多少")
     p_ask.add_argument(
-        "--db", default=str(DEFAULT_FACT_DB),
+        "--db",
+        default=str(DEFAULT_FACT_DB),
         help="fact_metric sqlite 路径（默认 data/fact_metric.db）",
     )
     p_ask.add_argument(
-        "--provider", choices=["mock", "anthropic"], default="mock",
+        "--provider",
+        choices=["mock", "anthropic"],
+        default="mock",
         help="mock=离线确定性（默认）；anthropic=真实 Claude（需装 [llm] + key）",
     )
     p_ask.set_defaults(func=_cmd_ask)
@@ -189,7 +550,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_ver = sub.add_parser("version", help="打印分发版本号")
     p_ver.set_defaults(func=_cmd_version)
 
-    # dify：Dify 工作流 YAML → 纯 Python 编译器 + 静态优化建议器（需 [dify] extra）。
+    # dify：Dify 工作流 JSON/YAML/TOML → 纯 Python 编译器 + 静态优化建议器。
     p_dify = sub.add_parser("dify", help="Dify 工作流编译器（compile / analyze）")
     dify_sub = p_dify.add_subparsers(dest="dify_command", metavar="<subcommand>")
     dify_sub.required = True
@@ -197,24 +558,75 @@ def _build_parser() -> argparse.ArgumentParser:
     p_compile = dify_sub.add_parser(
         "compile", help="编译 .yml 为纯 Python（默认附静态优化建议到 stderr）"
     )
-    p_compile.add_argument("path", help="Dify 工作流 YAML 文件路径")
-    p_compile.add_argument(
-        "--no-analyze", action="store_true", help="跳过静态优化分析（只出代码）"
-    )
+    p_compile.add_argument("path", help="Dify 工作流 .json/.yaml/.yml/.toml 文件路径")
+    p_compile.add_argument("--no-analyze", action="store_true", help="跳过静态优化分析（只出代码）")
     p_compile.set_defaults(func=_cmd_dify_compile)
 
     p_analyze = dify_sub.add_parser(
         "analyze", help="只跑静态优化分析，打印建议列表（零代码生成、零 API）"
     )
-    p_analyze.add_argument("path", help="Dify 工作流 YAML 文件路径")
+    p_analyze.add_argument("path", help="Dify 工作流 .json/.yaml/.yml/.toml 文件路径")
     p_analyze.set_defaults(func=_cmd_dify_analyze)
+
+    p_workflow = sub.add_parser("workflow", help="从自然语言创建或浏览 Dify 0.6 工作流")
+    workflow_sub = p_workflow.add_subparsers(dest="workflow_command", metavar="<subcommand>")
+    workflow_sub.required = True
+
+    p_workflow_create = workflow_sub.add_parser(
+        "create", help="按描述复用相近模板，否则生成安全的 start→llm→end 工作流"
+    )
+    p_workflow_create.add_argument(
+        "description", nargs="*", help='工作流功能描述（可直接使用 `ragspine "描述"`）'
+    )
+    p_workflow_create.add_argument("--template", help="跳过匹配，按 catalog template id 创建")
+    p_workflow_create.add_argument(
+        "--no-reuse", action="store_true", help="不复用模板，强制生成基础工作流"
+    )
+    p_workflow_create.add_argument(
+        "--matcher",
+        choices=["lexical", "auto", "onnx"],
+        default="auto",
+        help=(
+            "模板匹配器（默认 auto：装有 [embed-onnx] 时语义匹配并在首次使用时下载/缓存模型，"
+            "否则离线回退 lexical；onnx 强制要求该 extra）"
+        ),
+    )
+    p_workflow_create.add_argument(
+        "--format", choices=["yaml", "json"], default="yaml", help="输出格式"
+    )
+    output_group = p_workflow_create.add_mutually_exclusive_group()
+    output_group.add_argument("-o", "--output", help="输出文件路径")
+    output_group.add_argument("--stdout", action="store_true", help="只把工作流文档写到 stdout")
+    p_workflow_create.add_argument(
+        "--force", action="store_true", help="覆盖已存在的普通文件（仍拒绝链接）"
+    )
+    p_workflow_create.set_defaults(func=_cmd_workflow_create)
+
+    p_workflow_list = workflow_sub.add_parser("list", help="列出内置工作流模板")
+    p_workflow_list.set_defaults(func=_cmd_workflow_list)
+
+    p_workflow_show = workflow_sub.add_parser("show", help="查看一个内置模板")
+    p_workflow_show.add_argument("template_id", help="catalog template id")
+    p_workflow_show.add_argument(
+        "--format", choices=["yaml", "json"], default="yaml", help="输出格式"
+    )
+    p_workflow_show.set_defaults(func=_cmd_workflow_show)
 
     return parser
 
 
+def _normalize_implicit_workflow(argv: list[str]) -> list[str]:
+    """Treat the first unknown positional as a natural-language workflow request."""
+
+    if argv and not argv[0].startswith("-") and argv[0] not in _KNOWN_COMMANDS:
+        return ["workflow", "create", *argv]
+    return argv
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI 入口：解析参数并分发到子命令处理器，返回进程退出码。"""
-    args = _build_parser().parse_args(argv)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    args = _build_parser().parse_args(_normalize_implicit_workflow(raw_argv))
     func = args.func
     result: int = func(args)
     return result

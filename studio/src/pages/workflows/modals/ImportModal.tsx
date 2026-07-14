@@ -1,11 +1,16 @@
-/** Modal for importing a workflow from pasted or file-picked Dify YAML or
- * n8n JSON. n8n input is detected automatically and converted to Dify DSL by
+/** Modal for importing a workflow from pasted or file-picked Dify JSON/YAML/TOML
+ * or n8n JSON. n8n input is detected automatically and converted to Dify DSL by
  * the RAGSpine server (Convert previews warnings + yaml before importing). */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { ApiError, convertN8n } from '../../../api/client';
 import { Button, CodeBlock, IconUpload, Modal, Spinner, TextArea } from '../../../components';
+import {
+  MAX_WORKFLOW_BYTES,
+  parseWorkflowToml,
+  serializeWorkflowYaml,
+} from '../../../workflow/convert';
 import { detectN8nWorkflow } from '../../../workflow/n8n';
 import { describeApiError } from '../shared';
 
@@ -52,6 +57,9 @@ export function ImportModal({ open, onClose, onImport }: ImportModalProps) {
 
   const pickFile = async (file: File) => {
     try {
+      if (file.size > MAX_WORKFLOW_BYTES) {
+        throw new Error('Workflow document exceeds the 1 MiB import limit.');
+      }
       const content = await file.text();
       setSource(content, file.name);
     } catch (err) {
@@ -62,8 +70,13 @@ export function ImportModal({ open, onClose, onImport }: ImportModalProps) {
     }
   };
 
+  const detectedN8n = useMemo(
+    () => (conversion === null ? detectN8nWorkflow(text) : null),
+    [conversion, text],
+  );
+
   const convert = () => {
-    const workflow = detectN8nWorkflow(text);
+    const workflow = detectedN8n;
     if (workflow === null) return;
     setConverting(true);
     setError(null);
@@ -86,8 +99,20 @@ export function ImportModal({ open, onClose, onImport }: ImportModalProps) {
   };
 
   const handleImport = () => {
+    const source = conversion !== null ? conversion.yaml : text;
     try {
-      onImport(conversion !== null ? conversion.yaml : text);
+      if (conversion === null && fileName?.toLowerCase().endsWith('.toml') === true) {
+        onImport(serializeWorkflowYaml(parseWorkflowToml(source)));
+      } else {
+        try {
+          onImport(source);
+        } catch (primaryError) {
+          // Pasted input has no suffix. JSON is already accepted by the YAML parser; if that
+          // path fails, make one bounded TOML attempt before reporting the original error.
+          if (fileName !== null || conversion !== null) throw primaryError;
+          onImport(serializeWorkflowYaml(parseWorkflowToml(source)));
+        }
+      }
     } catch (err) {
       setError({
         title: 'Import failed',
@@ -99,7 +124,7 @@ export function ImportModal({ open, onClose, onImport }: ImportModalProps) {
     onClose();
   };
 
-  const needsConvert = conversion === null && detectN8nWorkflow(text) !== null;
+  const needsConvert = detectedN8n !== null;
 
   return (
     <Modal
@@ -130,7 +155,7 @@ export function ImportModal({ open, onClose, onImport }: ImportModalProps) {
           <input
             ref={fileRef}
             type="file"
-            accept=".yml,.yaml,.json"
+            accept=".yml,.yaml,.json,.toml"
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0];
@@ -146,7 +171,7 @@ export function ImportModal({ open, onClose, onImport }: ImportModalProps) {
             <span className="truncate font-mono text-[11px] text-zinc-400">{fileName}</span>
           ) : (
             <span className="text-[11px] text-zinc-500">
-              or paste Dify workflow YAML / n8n workflow JSON below
+              or paste Dify JSON / YAML / TOML, or n8n workflow JSON below
             </span>
           )}
         </div>

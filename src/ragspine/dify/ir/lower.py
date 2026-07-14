@@ -5,7 +5,8 @@
 2. 变量引用归一：把 Dify 的 value_selector（["nodeId","field"]）与模板里的 {{#nodeId.field#}}
    统一成 VarRef / TemplateValue。
 3. 拓扑：把控制流边 + 数据依赖摊平成有向边，算 topo_order 与 parallel_layers（环 → CyclicGraph）。
-   iteration 节点的子图（带 iteration_id 的内层节点）抽出、各自 lower 成嵌套 WorkflowIR。
+   iteration 节点的子图（带 iteration_id 的内层节点）抽出、各自 lower 成嵌套 WorkflowIR；
+   Dify 画布专用的 iteration-start 结构节点不进入可执行 IR。
 """
 
 from __future__ import annotations
@@ -61,7 +62,13 @@ def lower_to_ir(doc: DifyDoc) -> WorkflowIR:
     # 先按 iteration_id 把内层子节点从主图剥离（它们属于某 iteration 节点的子图）。
     body_nodes: dict[str, list[DifyNode]] = {}
     top_nodes: list[DifyNode] = []
+    structural_node_ids: set[str] = set()
     for node in doc.nodes:
+        # iteration-start 是 Dify React Flow 画布中的容器入口锚点。运行时迭代项由父
+        # iteration 节点提供，它本身没有可执行语义，也不应生成 unsupported 钩子。
+        if node.node_type == "iteration-start":
+            structural_node_ids.add(node.id)
+            continue
         iteration_id = node.data.get("iteration_id")
         if isinstance(iteration_id, str) and iteration_id:
             body_nodes.setdefault(iteration_id, []).append(node)
@@ -72,7 +79,10 @@ def lower_to_ir(doc: DifyDoc) -> WorkflowIR:
     body_node_ids = {n.id for ns in body_nodes.values() for n in ns}
     top_edges = [
         e for e in doc.edges
-        if e.source not in body_node_ids and e.target not in body_node_ids
+        if e.source not in body_node_ids
+        and e.target not in body_node_ids
+        and e.source not in structural_node_ids
+        and e.target not in structural_node_ids
     ]
 
     ir_nodes = tuple(

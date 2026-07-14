@@ -1,0 +1,189 @@
+{
+  "schema_version": 1,
+  "templates": [
+    {
+      "id": "rag-paper-qa",
+      "name": "Paper RAG Q&A",
+      "description": "Grounded question answering over an indexed research paper or technical document.",
+      "categories": ["rag", "research"],
+      "tags": ["paper", "knowledge-retrieval", "citations", "cnn"],
+      "intents": ["understand a research paper", "ask questions about a paper", "论文理解", "论文问答"],
+      "examples": ["A rag form understanding paper of CNN", "Build a RAG workflow for understanding a CNN paper", "创建一个可以理解论文并回答问题的 RAG 工作流"],
+      "compatibility": {"format": "dify", "dsl_version": "0.6.0", "status": "runnable"},
+      "requirements": [
+        {"kind": "dataset", "name": "replace-with-paper-dataset", "required": true},
+        {"kind": "llm_provider", "name": "langgenius/openai/openai", "required": true}
+      ],
+      "source": {
+        "provider": "n8n",
+        "title": "Chat with PDF docs using AI (quoting sources)",
+        "author": "David Roberts",
+        "upstream_id": "2165",
+        "upstream_url": "https://n8n.io/workflows/2165-chat-with-pdf-docs-using-ai-quoting-sources/",
+        "license_status": "unknown-not-redistributed",
+        "observed_metric": "totalViews",
+        "observed_value": 95385,
+        "observed_at": "2026-07-14T17:24:00+08:00"
+      },
+      "yaml": "rag-paper-qa.yml",
+      "sha256": "8bd7737b92954e5b6c099b7a5d8abc0e4d91abada5447149abfd8d8a4288c761"
+    },
+    {
+      "id": "executive-summary",
+      "name": "Executive Summary",
+      "description": "Turn source material into a decision-focused summary with risks and open questions.",
+      "categories": ["writing", "analysis"],
+      "tags": ["summary", "brief", "executive", "digest"],
+      "intents": ["summarize a long report", "make an executive brief", "生成摘要", "管理层简报"],
+      "examples": ["Summarize this report for executives", "把长报告整理成管理层摘要"],
+      "compatibility": {"format": "dify", "dsl_version": "0.6.0", "status": "runnable"},
+      "requirements": [
+        {"kind": "llm_provider", "name": "langgenius/openai/openai", "required": true}
+      ],
+      "source": {
+        "provider": "n8n",
+        "title": "Webhook-enabled AI PDF analyzer",
+        "author": "n8n Team",
+        "upstream_id": "4336",
+        "upstream_url": "https://n8n.io/workflows/4336-webhook-enabled-ai-pdf-analyzer/",
+        "license_status": "unknown-not-redistributed",
+        "observed_metric": "totalViews",
+        "observed_value": 2955,
+        "observed_at": "2026-07-14T17:24:00+08:00"
+      },
+      "yaml": "executive-summary.yml",
+      "sha256": "45026eb410bce99d1a948debe6d468b5548bd2b67ad50d30ca12d80cd626e29f"
+    },
+    {
+      "id": "multilingual-translation",
+      "name": "Multilingual Translation",
+      "description": "Translate structured business or technical text while preserving facts and formatting.",
+      "categories": ["language", "writing"],
+      "tags": ["translate", "multilingual", "localization", "terminology"],
+      "intents": ["translate text", "localize content", "翻译文档", "多语言转换"],
+      "examples": ["Translate this technical document into Chinese", "把这份材料翻译成英文并保留格式"],
+      "compatibility": {"format": "dify", "dsl_version": "0.6.0", "status": "runnable"},
+      "requirements": [
+        {"kind": "llm_provider", "name": "langgenius/openai/openai", "required": true}
+      ],
+      "source": {
+        "provider": "dify",
+        "title": "file translation",
+        "author": "eddiebee",
+        "upstream_id": "8514f1a1-9ed6-4fc1-8e9e-5d77dbfbbe3d",
+        "upstream_url": "https://marketplace.dify.ai/template/eddiebee/file%20translation?creationType=templates&language=en-US&templateId=8514f1a1-9ed6-4fc1-8e9e-5d77dbfbbe3d&theme=light",
+        "license_status": "unknown-not-redistributed",
+        "observed_metric": "usage_count",
+        "observed_value": 618,
+        "observed_at": "2026-07-14T17:24:00+08:00"
+      },
+      "yaml": "multilingual-translation.yml",
+      "sha256": "a96e45abc8946160646e384bf9d32aa1a741ce692d731511a19717de01284720"
+    },
+    {
+      "id": "batch-content-processing",
+      "name": "Batch Content Processing",
+      "description": "Apply one controlled transformation to a list of independent items in parallel.",
+      "categories": ["automation", "content"],
+      "tags": ["batch", "iteration", "parallel", "transform"],
+      "intents": ["process a list of items", "batch transform content", "批量处理", "逐项转换"],
+      "examples": ["Process every product description with the same instruction", "批量改写一组内容"],
+      "compatibility": {"format": "dify", "dsl_version": "0.6.0", "status": "runnable"},
+      "requirements": [
+        {"kind": "llm_provider", "name": "langgenius/openai/openai", "required": true}
+      ],
+      "source": {
+        "provider": "dify",
+        "title": "Multi-Question RAG Workflow",
+        "author": "langgenius",
+        "upstream_id": "d2d2ae92-d95b-4d55-b343-be411c3147d3",
+        "upstream_url": "https://marketplace.dify.ai/template/langgenius/Multi-Question%20RAG%20Workflow?creationType=templates&language=en-US&templateId=d2d2ae92-d95b-4d55-b343-be411c3147d3",
+        "license_status": "unknown-not-redistributed",
+        "observed_metric": "usage_count_rounded",
+        "observed_value": 2100,
+        "observed_at": "2026-07-14T17:24:00+08:00"
+      },
+      "yaml": "batch-content-processing.yml",
+      "sha256": "e262e74d42999088a626df4ba47b9b4f1648e4b49c6d9e41bbf99a0eaf280b9e"
+    },
+    {
+      "id": "parallel-perspective-analysis",
+      "name": "Parallel Perspective Analysis",
+      "description": "Analyze opportunities and risks concurrently, then combine both perspectives.",
+      "categories": ["research", "analysis"],
+      "tags": ["parallel", "research", "opportunities", "risks"],
+      "intents": ["deep research", "compare perspectives", "risk opportunity analysis", "多角度研究"],
+      "examples": ["Research the upside and downside of this strategy", "并行分析一个主题的机会和风险"],
+      "compatibility": {"format": "dify", "dsl_version": "0.6.0", "status": "runnable"},
+      "requirements": [
+        {"kind": "llm_provider", "name": "langgenius/openai/openai", "required": true}
+      ],
+      "source": {
+        "provider": "dify",
+        "title": "DeepResearch",
+        "author": "langgenius",
+        "upstream_id": "c32f60fa-0551-4db0-8970-9faae6b76861",
+        "upstream_url": "https://marketplace.dify.ai/template/langgenius/DeepResearch?creationType=templates&language=en-US&templateId=c32f60fa-0551-4db0-8970-9faae6b76861",
+        "license_status": "unknown-not-redistributed",
+        "observed_metric": "usage_count",
+        "observed_value": 1951,
+        "observed_at": "2026-07-14T17:24:00+08:00"
+      },
+      "yaml": "parallel-perspective-analysis.yml",
+      "sha256": "2c23f9523745fbfed7b534b0e5c30b4bc7c3e0ea7e008d824bd6ae3e8220b872"
+    },
+    {
+      "id": "structured-information-extraction",
+      "name": "Structured Information Extraction",
+      "description": "Extract explicitly supported entities, dates, and amounts into named output fields.",
+      "categories": ["extraction", "analysis"],
+      "tags": ["structured", "entities", "dates", "amounts"],
+      "intents": ["extract structured fields", "parse entities and dates", "信息抽取", "结构化字段"],
+      "examples": ["Extract names dates and amounts from this text", "从文本中抽取实体、日期和金额"],
+      "compatibility": {"format": "dify", "dsl_version": "0.6.0", "status": "runnable"},
+      "requirements": [
+        {"kind": "llm_provider", "name": "langgenius/openai/openai", "required": true},
+        {"kind": "model_capability", "name": "function-calling", "required": true}
+      ],
+      "source": {
+        "provider": "n8n",
+        "title": "Image-Based Data Extraction API using Gemini AI",
+        "author": "Srinivasan KB",
+        "upstream_id": "3149",
+        "upstream_url": "https://n8n.io/workflows/3149-image-based-data-extraction-api-using-gemini-ai/",
+        "license_status": "unknown-not-redistributed",
+        "observed_metric": "totalViews",
+        "observed_value": 3487,
+        "observed_at": "2026-07-14T17:24:00+08:00"
+      },
+      "yaml": "structured-information-extraction.yml",
+      "sha256": "5fa4ceca1331dd8ed8e200e1bb39928c670e6f82311f3dbd720c5b2288526dbb"
+    },
+    {
+      "id": "conditional-response-routing",
+      "name": "Conditional Response Routing",
+      "description": "Route urgent and normal requests into distinct response policies.",
+      "categories": ["routing", "support"],
+      "tags": ["conditional", "if-else", "urgency", "response"],
+      "intents": ["route requests by urgency", "conditional support response", "条件分流", "紧急程度路由"],
+      "examples": ["Route urgent requests to an escalation response", "按紧急程度选择不同回复策略"],
+      "compatibility": {"format": "dify", "dsl_version": "0.6.0", "status": "runnable"},
+      "requirements": [
+        {"kind": "llm_provider", "name": "langgenius/openai/openai", "required": true}
+      ],
+      "source": {
+        "provider": "dify",
+        "title": "work ticket system",
+        "author": "langgenius",
+        "upstream_id": "b7f34cb1-f944-4741-8a50-818726383619",
+        "upstream_url": "https://marketplace.dify.ai/template/langgenius/work%20ticket%20system?creationType=templates&language=en-US&templateId=b7f34cb1-f944-4741-8a50-818726383619&theme=light",
+        "license_status": "unknown-not-redistributed",
+        "observed_metric": "usage_count_rounded",
+        "observed_value": 1300,
+        "observed_at": "2026-07-14T17:24:00+08:00"
+      },
+      "yaml": "conditional-response-routing.yml",
+      "sha256": "db655b054d4a7213e99eb078dc2ee81624ef18ce3e7986526ac139f33a5be2b9"
+    }
+  ]
+}
