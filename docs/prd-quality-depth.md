@@ -1,9 +1,29 @@
 # PRD — Quality Depth: out-engineer the ⭐ stages, tap the family stack, and measure groundedness
 
-> **status:** proposed · **created:** 2026-06-26 · **methodology:** TDD — eval gate (red) → conformance (red) → implement to green
+> **status:** in progress · **created:** 2026-06-26 · **last audited:** 2026-07-17 ·
+> **methodology:** TDD — eval gate (red) → conformance (red) → implement to green
 > Living backlog — like [`prd-breadth-via-adapters.md`](prd-breadth-via-adapters.md), it carries no `covers:` frontmatter; each shipped piece's contract doc lands under `src/ragspine/<domain>/docs/*.md`.
 > **Companion to [`prd-breadth-via-adapters.md`](prd-breadth-via-adapters.md):** that PRD *rents the commodity surface* (🔧) through a uniform adapter contract; **this PRD spends the ⭐ budget** — it makes the *default* answer correct, turns the spine family's document stack into a compound moat, and adds the graph + groundedness measurement an anti-fabrication engine needs.
 > Realizes [ADR 0001](adr/0001-dual-channel-determinism.md) (dual-channel determinism), [ADR 0006](adr/0006-quality-bar-invariants-and-benchmark.md) (quality bar), operating within [ADR 0005](adr/0005-lean-core-experimental-isolation.md) (lean core + extras) and [ADR 0009](adr/0009-dependency-and-framework-policy.md) (permissive-license-only, no framework lock-in).
+
+## Status audit (2026-07-17)
+
+The audit distinguishes a working implementation slice from the full outcome promised by the workstream.
+A model seam, opt-in code path, or deterministic proxy is not marked complete when the PRD also requires a
+default-path integration or a measured eval ratchet.
+
+- [x] Complete slices: W3a/W3b/W3d; W6a/W6b; W7c.
+- [~] Implementation shipped but the stated outcome is partial: W1/W2, W3c, W4a/W4b, W5, W6c,
+  W7a/W7b, and W8–W12. Each matrix row names its remaining default-path, real-model, retrieval-index,
+  or eval proof.
+- [ ] No whole workstream is completely unstarted; pending work is carried inside the partial rows and the
+  follow-up section.
+
+| Audit status | Count |
+|---|---:|
+| Done | 6 |
+| Partial | 14 |
+| Pending | 0 |
 
 ## Problem statement
 
@@ -782,51 +802,52 @@ Legend: **kind** 🛡/⭐/🔧 · **status** ✅ have · ◐ partial · ✗ gap.
 
 | Quality stage | Today | Target | Kind | Status | WS · Phase |
 |---|---|---|---|---|---|
-| Default embedding | lexical-hash (non-semantic), dense **off** | ONNX multilingual-MiniLM default (`[embed-onnx]`), dense **on** via `auto` | ⭐ | ✅ | W1 · P0 |
-| Rerank offline default | identity pass-through (LLM-only brain) | local cross-encoder (ONNX) | ⭐ | ✅ | W2 · P1 |
+| Default embedding | lexical-hash (non-semantic), dense **off** | ONNX multilingual-MiniLM default (`[embed-onnx]`), dense **on** via `auto` | ⭐ | ◐ semantic path shipped; real-model CI ratchet/re-baseline pending | W1 · P0 |
+| Rerank offline default | identity pass-through (LLM-only brain) | local cross-encoder (ONNX) | ⭐ | ◐ implementation shipped; required reranker A/B ratchet pending | W2 · P1 |
 | OCR default + scanned path | GPU PaddleOCR-VL; **scanned never OCR'd** | family OCR (pdfspine→ocrspine) default + scanned path wired | 🛡⭐ | ✅ | W3a · P0 |
 | `.docx` ingestion | **no path** | `docspine` Extractor (tables→facts + paragraphs→chunks) | ⭐ | ✅ | W3b · P1 |
-| PPTX richness | `python-pptx` (color/chart/note) | `pptspine` (richer merges) opt-in; default stays `python-pptx` | ⭐ | ✅ | W3c · P1 |
+| PPTX richness | `python-pptx` (color/chart/note) | `pptspine` richer path | ⭐ | ◐ opt-in extractor shipped; default replacement/integration outcome not complete | W3c · P1 |
 | Table richness in IR | docx/ppt fills `→None`; nested tables warned-and-dropped | family `fill→resolved_rgb` (SME-gated color path); nested → independent `StyledGrid` (no IR schema change) | ⭐ | ✅ | W3d · P1 |
-| Contextual retrieval | bare paragraph; context sidecar-only | deterministic context header + LLM adapter | ⭐ | ✅ (LLM adapter = seam) | W4a · P1 |
+| Contextual retrieval | bare paragraph; context sidecar-only | deterministic context header + LLM adapter | ⭐ | ◐ deterministic path shipped; LLM adapter remains a seam | W4a · P1 |
 | Chunking | fixed-char paragraph-greedy | family-layout + parent-child | ⭐ | ◐ (layout+parent-child opt-in; richer family struct follow-up) | W4b · P1 |
-| Faithfulness / groundedness eval | **unmeasured** (citation-match only) | claim-level entailment gate + free-text accuracy | 🛡 | ✅ (offline lexical-entailment default + free-text accuracy; ONNX-NLI / LLM-judge / context-precision-recall = follow-up) | W5 · P1 |
+| Faithfulness / groundedness eval | **unmeasured** (citation-match only) | claim-level entailment gate + free-text accuracy | 🛡 | ◐ lexical-overlap proxy + free-text gate shipped; ONNX-NLI/LLM judge and context precision/recall pending | W5 · P1 |
 | Multi-hop / decomposition | deterministic Cartesian only | LLM decomposition (opt-in) | ⭐ | ✅ (opt-in fan-out; per-sub-q guard+gate; det. synthesis, LLM-synth = follow-up) | W6a · P2 |
 | Corrective retrieval | one filter-drop retry | CRAG grade→act loop (opt-in) | ⭐ | ✅ (bounded ≤2 det. grade→act; lexical grader default, CE/LLM grader = seam) | W6b · P2 |
 | Conversational memory | stateless single-shot | multi-turn (opt-in) | ⭐ | ◐ (bounded memory + det. carry-forward + per-turn gate; LLM coref / endpoint = follow-up) | W6c · P2 |
-| Structured relation graph | none (substrate exists) | deterministic typed graph + multi-hop | ⭐ | ✅ | W7a · P2 |
+| Structured relation graph | none (substrate exists) | deterministic typed graph + multi-hop in the normal answer path | ⭐ | ◐ graph/query API shipped; ordinary `answer_question` integration pending | W7a · P2 |
 | Narrative GraphRAG | none | entity/community (opt-in, provenance-bound) | ⭐ | ◐ (extract→community→summary skeleton, fake-LLM-tested; Leiden/incremental/global-query = follow-up) | W7b · P2 |
 | Graph store seam | none | `GraphStore` Protocol + in-proc default + adapters | 🔧 | ✅ | W7c · P2 |
-| Post-retrieval postprocessor | reranked top-k → prompt (no chain) | MMR de-dup + lost-in-the-middle reorder + context compression (det. default · LLMLingua-2 opt-in) — vs LlamaIndex `LongContextReorder`/`MMRPostprocessor`/`SentenceEmbeddingOptimizer` · Haystack `LostInTheMiddleRanker`/`DiversityRanker` · LangChain `ContextualCompressionRetriever` | ⭐ | ✅ (det. MMR + lost-in-the-middle + extractive compression on a `NodePostprocessor` chain, opt-in / byte-identical; LLMLingua-2 / LLM compression = seam-only follow-up) | W8 · P1 |
-| Query transformation | det. synonym multi-query + W6a decomposition only | HyDE + RAG-Fusion + step-back + Adaptive-RAG (opt-in LLM) — vs LlamaIndex `HyDEQueryTransform`/`QueryFusionRetriever` · LangChain `MultiQueryRetriever`/HyDE · LangGraph adaptive-rag | ⭐ | ✅ (all four opt-in / byte-identical; HyDE probe-never-a-fact, RAG-Fusion reuses `rrf_fuse`, per-variant security gate, Adaptive reuses `decomposer=` seam; det. step-back / dense-on / A/B = follow-up) | W9 · P2 |
-| Multi-granularity tree + chunking | flat index; W4b layout/parent-child only | RAPTOR recursive-cluster tree (det. cluster + `is_synthesis` summaries) + sentence-window + semantic chunking — vs LlamaIndex RAPTOR pack/`SentenceWindowNodeParser`/`SemanticSplitterNodeParser` · RAGFlow RAPTOR | ⭐ | ✅ (det. threshold-clustering tree + `is_synthesis`/never-fabricated-provenance summaries + sentence-window/semantic on the `Chunker` seam, all opt-in / byte-identical; UMAP+GMM cluster / tree-traversal mode / retrieval-time expansion = follow-up) | W10 · P2 |
+| Post-retrieval postprocessor | reranked top-k → prompt (no chain) | MMR de-dup + lost-in-the-middle reorder + context compression (det. default · LLMLingua-2 opt-in) — vs LlamaIndex `LongContextReorder`/`MMRPostprocessor`/`SentenceEmbeddingOptimizer` · Haystack `LostInTheMiddleRanker`/`DiversityRanker` · LangChain `ContextualCompressionRetriever` | ⭐ | ◐ deterministic chain shipped; LLMLingua/LLM compression and measured A/B pending | W8 · P1 |
+| Query transformation | det. synonym multi-query + W6a decomposition only | HyDE + RAG-Fusion + step-back + Adaptive-RAG (opt-in LLM) — vs LlamaIndex `HyDEQueryTransform`/`QueryFusionRetriever` · LangChain `MultiQueryRetriever`/HyDE · LangGraph adaptive-rag | ⭐ | ◐ four opt-in transforms shipped; deterministic step-back/dense-on and per-transform eval ratchets pending | W9 · P2 |
+| Multi-granularity tree + chunking | flat index; W4b layout/parent-child only | RAPTOR recursive-cluster tree (det. cluster + `is_synthesis` summaries) + sentence-window + semantic chunking — vs LlamaIndex RAPTOR pack/`SentenceWindowNodeParser`/`SemanticSplitterNodeParser` · RAGFlow RAPTOR | ⭐ | ◐ tree and chunkers shipped; retrieval-time expansion/tree traversal and measured A/B pending | W10 · P2 |
 | Retrieval representation | single-vector dense + BM25 → RRF | ColBERT late-interaction (multi-vector MaxSim) + SPLADE learned-sparse, offline via fastembed — vs Weaviate/Vespa/Jina ColBERT · Vespa SPLADE · LlamaIndex `ColbertIndex`/`ColbertRerank` | ⭐ | ◐ (ColBERT MaxSim + SPLADE sparse-dot **rerankers** on the `ListwiseJudge` seam + `make_reranker`, opt-in / byte-identical / isolation-inherited + reverse-proof; multi-vector index / SPLADE sparse-retrieval-fused-with-BM25 / A/B = follow-up) | W11 · P2 |
 | Visual-document retrieval | OCR→text only (W3a) | ColPali/ColQwen2 page-as-image late interaction (GPU, opt-in) — vs LlamaIndex ColPali · Weaviate/Vespa ColPali · 2025 ColQwen | ⭐ | ◐ (ColPali page-as-image visual **MaxSim retriever** re-using W11 `colbert.maxsim` + `pypdfium2` `page→image`, on a `VisualEmbedder` seam + `make_visual_embedder`, opt-in / byte-identical / isolation-at-the-door + reverse-proof; real fastembed `LateInteractionMultimodalEmbedding` backend gpu-marked; GPU end-to-end / OCR-text RRF fusion / persistent multi-vector index = follow-up) | W12 · P2 |
 
 ## Phasing
 
 - **P0 — make the default correct (no new model risk to the lean path).**
-  - **W1** ✅ real semantic embedding default + dense-on via `auto` (pure BM25 stays the zero-dep
-    fallback; lean path byte-identical). Shipped — see the W1 SHIPPED note above.
-  - **W3a** `ocrspine` default OCR + **wire the scanned-PDF path** (pure plumbing, zero charter tension).
+  - **W1** ◐ real semantic embedding default + dense-on via `auto` shipped (pure BM25 stays the zero-dep
+    fallback; lean path byte-identical); real-model CI ratchet/re-baseline remains.
+  - **W3a** ✅ `ocrspine` default OCR + **wire the scanned-PDF path** (pure plumbing, zero charter tension).
   - Re-baseline retrieval A/B with the real default; add it to the CI ratchet.
 - **P1 — the depth that wins evaluations.**
-  - **W2** ✅ local cross-encoder reranker (shipped — see the W2 SHIPPED note above);
-    **W3b/W3c/W3d** docspine/pptspine extractors + richer IR;
-    **W4** ✅ contextual retrieval (W4a) + ◐ family-layout/parent-child chunking (W4b, opt-in — see the W4 SHIPPED
-    notes above); **W5** ✅ the groundedness eval gate (faithfulness + free-text answer-accuracy, offline
-    deterministic default — see the W5 SHIPPED note above).
-  - **W8** ✅ post-retrieval postprocessor chain (the competitor-benchmark batch's P1 item — see the W8 SHIPPED
+  - **W2** ◐ local cross-encoder reranker shipped; required A/B ratchet remains;
+    **W3b ✅ / W3c ◐ / W3d ✅** docspine/pptspine extractors + richer IR;
+    **W4a ◐ / W4b ◐** deterministic contextual and layout/parent-child paths shipped, with the richer
+    adapters/default-path outcome still pending; **W5** ◐ lexical groundedness proxy + free-text answer-accuracy shipped; real entailment
+    judge and context precision/recall remain.
+  - **W8** ◐ post-retrieval postprocessor chain (the competitor-benchmark batch's P1 item — see the W8 SHIPPED
     note above) — MMR de-dup + lost-in-the-middle reorder (both deterministic, zero-model) + extractive context
     compression after the W2 cross-encoder; LLMLingua-2 / LLM compression opt-in. Ships opt-in to keep the loop
     byte-identical.
 - **P2 — reasoning depth & governance.**
-  - **W7a** structured relation graph (charter-native multi-hop) → **W7c** `GraphStore` seam →
-    **W7b** opt-in narrative GraphRAG; **W6** ✅/◐ agentic depth (W6a decomposition ✅ · W6b CRAG ✅ · W6c
+  - **W7a** ◐ structured relation graph (query API shipped; normal answer-path integration pending) →
+    **W7c** ✅ `GraphStore` seam →
+    **W7b** ◐ opt-in narrative GraphRAG; **W6** ✅/◐ agentic depth (W6a decomposition ✅ · W6b CRAG ✅ · W6c
     multi-turn ◐), all opt-in, default-off — the deterministic default loop and its byte-identical eval unchanged.
-  - **W9** ✅ LLM query transforms (HyDE / RAG-Fusion / step-back / Adaptive-RAG) on the `QueryRewriter` /
+  - **W9** ◐ LLM query transforms (HyDE / RAG-Fusion / step-back / Adaptive-RAG) on the `QueryRewriter` /
     `IntentParser` seam — all opt-in / default-off, the default loop byte-identical (see the W9 SHIPPED note above).
-  - **W10** ✅ RAPTOR multi-granularity tree (det. threshold-clustering + `is_synthesis` summaries) +
+  - **W10** ◐ RAPTOR multi-granularity tree (det. threshold-clustering + `is_synthesis` summaries) +
     sentence-window / semantic chunking on the `Chunker` seam — all opt-in / default-off, the default loop
     byte-identical (see the W10 SHIPPED note above). **W11** ◐ ColBERT late-interaction (MaxSim) + SPLADE
     learned-sparse land as **rerankers** on the existing `ListwiseJudge` seam + `make_reranker`

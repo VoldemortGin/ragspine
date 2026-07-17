@@ -1,6 +1,9 @@
 # PRD — Breadth via Adapters: the extension contract & capability matrix
 
-> **status:** in progress (P0 `VectorStore` seam wired; P1 `SourceConnector` seam shipped; P0 `Extractor` registry + `Chunker` Protocol formalized, with the Chunker **and** Extractor provenance conformance packs landed; P2 `TraceSink` seam formalized + privacy-trace conformance pack landed; P0 pipeline-topology shipped) · **created:** 2026-06-17 · **methodology:** TDD (conformance tests first)
+> **status:** in progress (P0 `VectorStore` seam wired; `SourceConnector` seam plus filesystem/in-memory/HTTP/
+> Notion adapters and the structured-ingestion bridge shipped; `Extractor`, `Chunker`, `FactStore`, and
+> `TraceSink` seams formalized with their conformance packs; P0 pipeline-topology shipped) ·
+> **created:** 2026-06-17 · **last audited:** 2026-07-17 · **methodology:** TDD (conformance tests first)
 > Living backlog — the seams/adapters tracked here land incrementally; it carries no `covers:` frontmatter
 > (each seam's shipped contract doc lives under `src/ragspine/<domain>/docs/*.md`).
 > Realizes [ADR 0003](adr/0003-audience-oss-library.md) (general-purpose OSS library), operating within
@@ -14,6 +17,18 @@
 > sentence-window/semantic chunking · ColBERT late-interaction + SPLADE learned-sparse retrieval · ColPali
 > visual-document retrieval), all opt-in / default-off. This PRD *rents the 🔧 commodity surface*; that one
 > *out-engineers the ⭐ stages and proves the 🛡 invariants*.
+
+## Status audit (2026-07-17)
+
+- [x] `SourceConnector` protocol, filesystem and in-memory defaults, HTTP and Notion remote adapters,
+  provenance conformance, and the structured-ingestion bridge are implemented.
+- [~] Connector breadth remains partial: S3, GCS, Drive, and Confluence adapters plus the narrative-ingestion
+  bridge are still pending.
+- [x] `Chunker` now has contextual, layout/parent-child, sentence-window, semantic, and RAPTOR-related
+  strategies behind the shared protocol; additional strategies are follow-ups rather than an unstarted P1.
+- [x] `FactStore` protocol, SQLite default, registry/entry-point discovery, and anti-fabrication/provenance
+  conformance are implemented; DuckDB/Postgres remain adapter follow-ups.
+- [~] Eval integration remains partial because the offline gates exist but RAGAS-compatible export does not.
 
 ## Problem statement
 
@@ -119,8 +134,9 @@ Current state (8 Protocols exist): `LLMProvider`, `IntentParser`, `NarrativeRetr
   a file today) + `make_source_connector` / `RAGSPINE_SOURCE_CONNECTOR` config selector with entry-point
   auto-discovery (`ragspine.source_connectors` group), and a **provenance conformance pack** bound at the
   point of entry (every `RawDoc` carries non-null `source_doc_id` + locator, with a lineage-dropping stub
-  proving it non-vacuous). Not yet wired into the existing narrative ingest path (behavior-preserving). This
-  unlocks S3/Drive/Notion/HTTP later behind one Protocol. Remaining: the remote adapters (P1).
+  proving it non-vacuous). `InMemoryConnector`, `HttpConnector`, and `NotionConnector` plus the structured-
+  ingestion bridge have since landed behind that Protocol. Remaining: S3/GCS/Drive/Confluence adapters and
+  the behavior-preserving narrative-ingestion bridge (P1).
 - **`VectorStore` (DONE, 🔧)** — `upsert(...)`, `query(vector, k, where) -> list[Hit]`, `delete`, `count`.
   **Shipped, wired, and adapted:** `Protocol` + `InProcessVectorStore` offline default (brute-force cosine) +
   conformance kit, `HybridRetriever` delegates vector scoring to it byte-identically, config-selected
@@ -137,14 +153,15 @@ Current state (8 Protocols exist): `LLMProvider`, `IntentParser`, `NarrativeRetr
   `_FunctionExtractor` wraps the existing `extract_grids`), `register_extractor(mime, …)` to add a format with
   **no router edit**, `get_extractor(mime)` dispatch, and a typed `UnsupportedFormatError` (a `LookupError`,
   not a bare `KeyError`) for an unregistered mime. The per-page digital/scanned PDF triage stays in
-  `routing/pdf_router.py`, untouched. Remaining: the new formats themselves (DOCX/HTML/MD/CSV via
-  `unstructured`/`docling`, P1).
+  `routing/pdf_router.py`, untouched. The `docspine` DOCX extractor has since landed; HTML/MD/CSV remain
+  candidate adapters via `unstructured`/`docling` (P1).
 - **`Chunker` (Protocol shipped, ⭐)** — chunking existed as a concrete `chunk_document` module. **Shipped
   (behavior-preserving):** a `@runtime_checkable` `Chunker` `Protocol` + a `DefaultChunker` dependency-free
   default that **delegates byte-identically** to `chunk_document` (the entry point + signature are preserved,
   every caller untouched) + a `make_chunker(spec)` / `RAGSPINE_CHUNKER` config selector with entry-point
-  discovery (`ragspine.chunkers` group), so semantic / contextual / parent-child strategies become swappable,
-  quality-critical units. Remaining: those strategies (P1).
+  discovery (`ragspine.chunkers` group). Semantic, contextual, layout/parent-child, sentence-window, and
+  RAPTOR-related strategies have since landed as swappable quality-critical units. Remaining: further
+  specialized or third-party strategies (P1 follow-up).
 - **`TraceSink` (SEAM FORMALIZED, 🛡)** — the privacy-aware trace sink is now formalized so observability can
   fan out to OTel/files *through the privacy conformance test*, never around it. **Shipped:** the seam
   **reuses** corespine's `@runtime_checkable TraceSink` Protocol (`emit(code, **fields)`) + its in-proc
@@ -182,10 +199,10 @@ Legend: **kind** 🛡/⭐/🔧 (own/own/adapt) · **status** ✅ have · ◐ par
 
 | Pipeline seam | Protocol | Kind | Offline default | Adapter targets (extra) | Status | Phase |
 |---|---|---|---|---|---|---|
-| Source connector | `SourceConnector` | 🔧 | **local filesystem ✅** | S3·GCS·Drive·Notion·Confluence·HTTP | ◐ seam | P1 seam ✓ · adapters P1 |
-| Document extract | `Extractor` *(formalized)* | ⭐🔧 | PDF-digital·PPTX·XLSX | DOCX·HTML·MD·CSV via `unstructured`/`docling` `[pdf]` | ✅ registry | P0 reg ✓ · P1 fmts |
+| Source connector | `SourceConnector` | 🔧 | **filesystem + in-memory ✅** | **HTTP ✅ · Notion ✅** · S3·GCS·Drive·Confluence | ◐ seam + 4 implementations + structured bridge; narrative bridge pending | P1 seam ✓ · more adapters P1 |
+| Document extract | `Extractor` *(formalized)* | ⭐🔧 | PDF-digital·PPTX·XLSX·**DOCX via docspine ✅** | HTML·MD·CSV via `unstructured`/`docling` `[pdf]` | ✅ registry + DOCX | P0 reg ✓ · P1 more fmts |
 | OCR | `OcrBackend` | 🔧 | mock | paddleocr `[ocr]` | ✅ | — |
-| Chunking | `Chunker` | ⭐ | recursive/structural | semantic · contextual · parent-child | ✅ proto | P0 proto ✓ · P1 strat |
+| Chunking | `Chunker` | ⭐ | recursive/structural | **semantic ✅ · contextual ✅ · layout/parent-child ✅ · sentence-window ✅** | ✅ protocol + strategy set | P0 proto ✓ · P1 strategies ✓ |
 | Embedding | `EmbeddingBackend` | 🔧⭐ | lexical-hash (non-semantic) | sentence-transformers `[embed]` · OpenAI `[llm]` · multi-vector ColBERT `[colbert]` / SPLADE `[splade]` · ColPali visual `[colpali]` | ✅ single-vector · multi-vector/visual → [qd W11/W12](prd-quality-depth.md) | — |
 | Vector store | `VectorStore` | 🔧 | in-proc brute force | **sqlite-vec ✅ · pgvector ✅ · Qdrant ✅** · Milvus·FAISS·Chroma·LanceDB | ✅ seam + 3 adapters | P0 ✓ · more adapters P1 |
 | Graph store | `GraphStore` | 🔧 | **in-proc adjacency ✅** | **networkx ✅** · kuzu·neo4j | **✅ W7 landed** (see [quality-depth PRD](prd-quality-depth.md) W7c) | done · more adapters follow-up |
@@ -198,7 +215,7 @@ Legend: **kind** 🛡/⭐/🔧 (own/own/adapt) · **status** ✅ have · ◐ par
 | Task queue | `TaskQueue` | 🔧 | FakeQueue | RQ/Redis `[service]` | ✅ | — |
 | Structured store | `FactStore` *(Protocol)* | 🛡 | sqlite | DuckDB · Postgres | ✅ Protocol + sqlite default + conformance | P2 seam ✓ · adapters follow-up |
 | Trace sink | `TraceSink` *(formalized)* | 🛡 | in-proc privacy-safe ✅ | **OTel (privacy-filtered) ✅** | ✅ seam + conformance | P2 seam ✓ · emit fan-out follow-up |
-| Eval | *(golden sets)* | 🛡 | offline golden | RAGAS-compatible metrics | ✅ | P2 |
+| Eval | *(golden sets)* | 🛡 | offline golden | RAGAS-compatible metrics/export | ◐ offline gates shipped; RAGAS export pending | P2 |
 
 **Read of the matrix:** the spine (🛡) and the quality stages (⭐) are largely owned and present already. The
 **P0 `VectorStore` seam is wired live with its first real adapters** — `Protocol` + offline default +
@@ -209,14 +226,15 @@ the live contract / deep dive
 [`vector-store.md`](../src/ragspine/retrieval/docs/vector-store.md); what remains there is **more adapters**
 (Milvus/FAISS, P1). The `SourceConnector` **seam is now shipped** (Protocol + `FilesystemConnector` default +
 `make_source_connector` config selector + entry-point discovery + provenance conformance pack — see the deep
-dive [`source-connector.md`](../src/ragspine/ingestion/docs/source-connector.md)); the remaining breadth gap
-there is its **remote adapters** (S3/Drive/Notion/HTTP, P1). The **`Extractor` registry and `Chunker` Protocol
+dive [`source-connector.md`](../src/ragspine/ingestion/docs/source-connector.md)); HTTP and Notion plus the
+structured-ingestion bridge have since landed. The remaining breadth gap is S3/GCS/Drive/Confluence and the
+narrative-ingestion bridge. The **`Extractor` registry and `Chunker` Protocol
 are now formalized** (behavior-preserving lifts of existing code — a `mime → Extractor` registry +
 `get_extractor` dispatch, and a `Chunker` Protocol whose `DefaultChunker` delegates byte-identically to
 `chunk_document`; see the deep dives [`extractor-registry.md`](../src/ragspine/extraction/docs/extractor-registry.md)
 and [`chunker.md`](../src/ragspine/retrieval/docs/chunker.md)); the open commodity surface there is filling out
-`Extractor` **formats** (DOCX/HTML/MD/CSV, P1) and `Chunker` **strategies** (semantic/contextual/parent-child,
-P1) — exactly the surface that should be *adapted*, not authored.
+`Extractor` **formats** (HTML/MD/CSV, P1) and further specialized `Chunker` adapters; contextual,
+layout/parent-child, semantic and sentence-window strategies are already implemented.
 
 ### 已完成并退役的 PRD（live 契约见下）
 
@@ -258,9 +276,10 @@ tracked now lives as live contracts / docs, and any remaining slices fold into t
     (`make_vector_store` / `make_persistence_policy`) **and** entry-point auto-discovery ✅
     (`make_vector_store` falls back to the `ragspine.vector_stores` entry-point group, so a third-party
     `ragspine-foo` registers a backend by name with **no core PR** — user stories 1 & 4 land).
-- **P1 — the breadth that wins evaluations.** Format coverage (DOCX/HTML/MD/CSV via `unstructured`/`docling`),
-  rerank adapters (cross-encoder/Cohere/BGE), query-transform strategies (multi-query/HyDE/self-query),
-  the first 2–3 `SourceConnector`s (**filesystem ✅ shipped** → S3 → HTTP/crawl). *(Vector adapters pgvector and Qdrant
+- **P1 — the breadth that wins evaluations.** Remaining format coverage (HTML/MD/CSV via
+  `unstructured`/`docling`), further rerank/query-transform adapters, and additional `SourceConnector`s
+  (**filesystem/in-memory/HTTP/Notion ✅ shipped** → S3/GCS/Drive/Confluence; structured bridge ✅ →
+  narrative bridge). *(Vector adapters pgvector and Qdrant
   already shipped in P0/P1, and **native ANN/KNN with exact re-rank for all three has since shipped too**; the next
   vector adapter is Milvus — see the live contract [`vector-store.md`](../src/ragspine/retrieval/docs/vector-store.md).)*
 - **P2 — governance & ops depth.** **`FactStore` seam now landed** (`@runtime_checkable FactStore` Protocol +

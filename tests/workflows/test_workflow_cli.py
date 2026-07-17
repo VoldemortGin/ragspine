@@ -365,6 +365,35 @@ def test_list_and_show_catalog(capsys: pytest.CaptureFixture[str]) -> None:
     assert shown["app"]["name"] == "Paper RAG Q&A"
 
 
+def test_preview_catalog_template_as_versioned_graph_json(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(["workflow", "preview", "rag-paper-qa"]) == 0
+
+    output = capsys.readouterr().out
+    preview = json.loads(output)
+    assert preview["preview_schema_version"] == 1
+    assert len(preview["nodes"]) == 4
+    assert len(preview["edges"]) == 3
+    assert preview["nodes"][0]["type"] == "start"
+    assert "prompt_template" not in output
+    assert "completion_params" not in output
+
+
+@pytest.mark.parametrize("command", ["show", "preview"])
+def test_catalog_output_unknown_secret_shaped_template_id_does_not_echo_it(
+    capsys: pytest.CaptureFixture[str],
+    command: str,
+) -> None:
+    secret_id = "SG." + "A" * 22 + "." + "B" * 43
+
+    assert main(["workflow", command, secret_id]) == 2
+
+    captured = capsys.readouterr()
+    assert secret_id not in captured.out
+    assert secret_id not in captured.err
+
+
 def test_windows_reserved_output_name_is_rejected_on_every_os(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

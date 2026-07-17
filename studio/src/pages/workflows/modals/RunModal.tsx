@@ -288,7 +288,7 @@ export function RunModal({
   const run = useEditorStore((s) => s.run);
   const startRun = useEditorStore((s) => s.startRun);
   const resetRun = useEditorStore((s) => s.resetRun);
-  const setSelection = useEditorStore((s) => s.setSelection);
+  const selectSingleNode = useEditorStore((s) => s.selectSingleNode);
 
   const [values, setValues] = useState<Record<string, string>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -315,7 +315,7 @@ export function RunModal({
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pickNode = (nodeId: string) => {
-    setSelection({ kind: 'node', id: nodeId });
+    selectSingleNode(nodeId);
     onClose();
   };
 

@@ -9,14 +9,14 @@ from __future__ import annotations
 
 import hashlib
 import re
+from concurrent.futures import Future
 from copy import deepcopy
 from dataclasses import replace
-from functools import lru_cache
 from importlib.resources import files
 from importlib.resources.abc import Traversable
 from pathlib import Path, PurePosixPath
+from threading import Lock
 from typing import Any, cast
-from urllib.parse import urlparse
 
 from ragspine.workflows.errors import (
     WorkflowCatalogError,
@@ -30,8 +30,11 @@ from ragspine.workflows.model import (
     WorkflowSource,
     WorkflowTemplate,
 )
+from ragspine.workflows.source_policy import validate_source_reference
 
 CATALOG_SCHEMA_VERSION = 1
+BUILTIN_CATALOG_TARGET_SIZE = 1000
+GENERATED_CATALOG_RESOURCE = "generated-catalog.json"
 MAX_CATALOG_BYTES = 128 * 1024
 MAX_TEMPLATE_BYTES = 128 * 1024
 MAX_TEMPLATES = 128
@@ -63,18 +66,47 @@ _SENSITIVE_KEYS = frozenset(
         "apikey",
         "access_token",
         "authorization",
+        "auth_token",
+        "aws_access_key_id",
+        "aws_secret_access_key",
+        "aws_security_token",
+        "aws_session_token",
         "client_secret",
         "credential",
         "credentials",
         "password",
+        "private_key",
+        "refresh_token",
         "secret",
+        "secret_key",
         "token",
+        "webhook_secret",
     }
+)
+_PLACEHOLDER_LITERALS = frozenset(
+    {"~", "null", "none", "unset", "redacted", "change_me", "change_me_before_use"}
+    | {f"your_{key}" for key in _SENSITIVE_KEYS}
+)
+_PLACEHOLDER_PATTERNS = (
+    re.compile(r"\$\{[a-z_][a-z0-9_]*\}"),
+    re.compile(r"\{\{\s*#?[a-z0-9_.-]+#?\s*\}\}"),
+    re.compile(r"<[a-z][a-z0-9_.-]*>"),
 )
 _SECRET_PATTERNS = (
     re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----", re.IGNORECASE),
-    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
+    re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b"),
     re.compile(r"(?<![A-Za-z0-9])sk-(?:proj-|ant-api\d*-)?[A-Za-z0-9_-]{16,}"),
+    re.compile(r"\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}\b"),
+    re.compile(r"(?<![A-Za-z0-9_])whsec_[A-Za-z0-9]{16,}(?![A-Za-z0-9_])"),
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{16,}\b"),
+    re.compile(
+        r"(?<![A-Za-z0-9_-])SG\.[A-Za-z0-9_-]{22,}\.[A-Za-z0-9_-]{43,}"
+        r"(?![A-Za-z0-9_-])"
+    ),
+    re.compile(r"(?<![A-Za-z0-9_])SK[0-9A-Fa-f]{32}(?![A-Za-z0-9_])"),
+    re.compile(r"\bglpat-[A-Za-z0-9_-]{16,}\b"),
+    re.compile(r"\bhf_[A-Za-z0-9]{20,}\b"),
     re.compile(r"\b(?:ghp|github_pat)_[A-Za-z0-9_-]{16,}\b"),
     re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/-]{12,}={0,2}"),
     re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\b"),
@@ -90,6 +122,14 @@ class WorkflowCatalog:
             raise WorkflowCatalogError("workflow catalog template id 必须唯一")
         self._templates = tuple(_clone_template(template) for template in templates)
         self._by_id = {template.id: template for template in self._templates}
+        self._template_refs = tuple(
+            replace(template, workflow={}, yaml="") for template in self._templates
+        )
+        self._runnable_template_refs = tuple(
+            template
+            for template in self._template_refs
+            if template.compatibility.status == "runnable"
+        )
 
     @classmethod
     def default(cls) -> WorkflowCatalog:
@@ -111,23 +151,83 @@ class WorkflowCatalog:
             if template.compatibility.status == "runnable"
         )
 
+    def _metadata_refs(self) -> tuple[WorkflowTemplate, ...]:
+        """Internal metadata-only refs; never expose catalog workflow/YAML state."""
+
+        return self._template_refs
+
+    def _matching_refs(self) -> tuple[WorkflowTemplate, ...]:
+        """Internal runnable refs for matchers; selection must resolve through ``get``."""
+
+        return self._runnable_template_refs
+
     def get(self, template_id: str) -> WorkflowTemplate:
         """Look up an allowlisted template id; never interpret it as a path."""
 
-        try:
-            return _clone_template(self._by_id[template_id])
-        except KeyError as exc:
-            raise WorkflowTemplateNotFoundError(
-                f"未知 workflow template id: {template_id!r}", template_id=template_id
-            ) from exc
+        template = self._by_id.get(template_id)
+        if template is None:
+            raise WorkflowTemplateNotFoundError("workflow template 不存在")
+        return _clone_template(template)
 
 
-@lru_cache(maxsize=1)
+_BUILTIN_CATALOG_LOCK = Lock()
+_builtin_catalog_cached: WorkflowCatalog | None = None
+_builtin_catalog_flight: Future[WorkflowCatalog] | None = None
+
+
 def load_builtin_catalog() -> WorkflowCatalog:
-    """Load and integrity-check package resources using ``importlib.resources``."""
+    """Load package resources once, coalescing concurrent cold callers."""
 
-    root = files("ragspine.workflows.templates")
-    return _load_catalog(root)
+    global _builtin_catalog_cached, _builtin_catalog_flight
+
+    with _BUILTIN_CATALOG_LOCK:
+        if _builtin_catalog_cached is not None:
+            return _builtin_catalog_cached
+        flight = _builtin_catalog_flight
+        leader = flight is None
+        if flight is None:
+            flight = Future()
+            _builtin_catalog_flight = flight
+
+    if not leader:
+        return flight.result()
+
+    try:
+        root = files("ragspine.workflows.templates")
+        loaded = _load_builtin_catalog(root)
+    except BaseException as exc:
+        with _BUILTIN_CATALOG_LOCK:
+            if _builtin_catalog_flight is flight:
+                _builtin_catalog_flight = None
+        flight.set_exception(exc)
+        raise
+
+    with _BUILTIN_CATALOG_LOCK:
+        if _builtin_catalog_cached is None:
+            _builtin_catalog_cached = loaded
+        resolved = _builtin_catalog_cached
+        if _builtin_catalog_flight is flight:
+            _builtin_catalog_flight = None
+    flight.set_result(resolved)
+    return resolved
+
+
+def clear_builtin_catalog_cache() -> None:
+    """Clear the built-in cache after any in-flight load; intended for tests."""
+
+    global _builtin_catalog_cached
+
+    while True:
+        with _BUILTIN_CATALOG_LOCK:
+            flight = _builtin_catalog_flight
+            if flight is None:
+                _builtin_catalog_cached = None
+                return
+        try:
+            flight.result()
+        except BaseException:
+            # A failed flight is already evicted and a later caller may retry.
+            pass
 
 
 def load_catalog(directory: Path) -> WorkflowCatalog:
@@ -138,6 +238,47 @@ def load_catalog(directory: Path) -> WorkflowCatalog:
     if not directory.is_dir():
         raise WorkflowCatalogError(f"catalog 根目录不存在: {directory}")
     return _load_catalog(directory)
+
+
+def _load_builtin_catalog(root: Traversable) -> WorkflowCatalog:
+    """Combine curated YAML resources with an optional reviewed descriptor snapshot."""
+
+    curated = _load_catalog(root)
+    descriptor_resource = root.joinpath(GENERATED_CATALOG_RESOURCE)
+    if not descriptor_resource.is_file():
+        return curated
+
+    from ragspine.workflows.generated_catalog import (
+        MAX_DESCRIPTOR_CATALOG_BYTES,
+        build_workflow_templates,
+        load_workflow_descriptors,
+    )
+
+    curated_templates = curated.list()
+    expected_generated = BUILTIN_CATALOG_TARGET_SIZE - len(curated_templates)
+    if expected_generated < 0:
+        raise WorkflowCatalogError(
+            f"curated workflow template 数超过目标 {BUILTIN_CATALOG_TARGET_SIZE}"
+        )
+    raw_descriptors = _read_limited(
+        descriptor_resource,
+        MAX_DESCRIPTOR_CATALOG_BYTES,
+        label=GENERATED_CATALOG_RESOURCE,
+    )
+    descriptors = load_workflow_descriptors(
+        raw_descriptors,
+        expected_count=expected_generated,
+    )
+    generated = build_workflow_templates(
+        descriptors,
+        expected_count=expected_generated,
+    )
+    combined = WorkflowCatalog((*curated_templates, *generated))
+    if len(combined.list()) != BUILTIN_CATALOG_TARGET_SIZE:
+        raise WorkflowCatalogError(
+            f"built-in workflow catalog 必须是 {BUILTIN_CATALOG_TARGET_SIZE} 条"
+        )
+    return combined
 
 
 def _load_catalog(root: Traversable) -> WorkflowCatalog:
@@ -169,7 +310,7 @@ def _load_template(root: Traversable, data: dict[str, Any], *, index: int) -> Wo
     template_id = _as_str(data.get("id"), f"{label}.id")
     _reject_secrets(data, template_id=template_id)
     if _ID_RE.fullmatch(template_id) is None:
-        raise WorkflowCatalogError(f"非法 template id: {template_id!r}")
+        raise WorkflowCatalogError("非法 template id")
     relative = _safe_resource_path(_as_str(data.get("yaml"), f"{label}.yaml"))
     resource = root.joinpath(*relative.parts)
     if isinstance(resource, Path) and resource.is_symlink():
@@ -177,16 +318,16 @@ def _load_template(root: Traversable, data: dict[str, Any], *, index: int) -> Wo
     yaml_bytes = _read_limited(resource, MAX_TEMPLATE_BYTES, label=str(relative))
     expected_sha = _as_str(data.get("sha256"), f"{label}.sha256")
     if _SHA256_RE.fullmatch(expected_sha) is None:
-        raise WorkflowCatalogError(f"非法 sha256: {template_id}")
+        raise WorkflowCatalogError("非法 template sha256")
     actual_sha = hashlib.sha256(yaml_bytes).hexdigest()
     if actual_sha != expected_sha:
         raise WorkflowCatalogError(
-            f"template hash 漂移: {template_id} expected={expected_sha} actual={actual_sha}"
+            f"template hash 漂移: expected={expected_sha} actual={actual_sha}"
         )
     try:
         yaml_text = yaml_bytes.decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise WorkflowCatalogError(f"template 不是 UTF-8: {template_id}") from exc
+        raise WorkflowCatalogError("template 不是 UTF-8") from exc
     compatibility_data = _as_mapping(data.get("compatibility"), f"{label}.compatibility")
     compatibility = WorkflowCompatibility(
         format=_as_str(compatibility_data.get("format"), "compatibility.format"),
@@ -194,22 +335,20 @@ def _load_template(root: Traversable, data: dict[str, Any], *, index: int) -> Wo
         status=cast("Any", _as_str(compatibility_data.get("status"), "compatibility.status")),
     )
     if compatibility.format != "dify" or compatibility.dsl_version != "0.6.0":
-        raise WorkflowCatalogError(f"template {template_id} 必须是 Dify DSL 0.6.0")
+        raise WorkflowCatalogError("template 必须是 Dify DSL 0.6.0")
     if compatibility.status not in {"runnable", "import_only", "blocked"}:
-        raise WorkflowCatalogError(
-            f"template {template_id} compatibility.status 非法: {compatibility.status!r}"
-        )
+        raise WorkflowCatalogError("template compatibility.status 非法")
     try:
         workflow = parse_workflow(yaml_bytes, format="yaml")
     except WorkflowFormatError as exc:
-        raise WorkflowCatalogError(f"template YAML 无效: {template_id}") from exc
+        raise WorkflowCatalogError("template YAML 无效") from exc
     _validate_workflow(
         template_id,
         workflow,
         runnable=compatibility.status == "runnable",
     )
     if workflow.get("version") != "0.6.0":
-        raise WorkflowCatalogError(f"template wire version 非 0.6.0: {template_id}")
+        raise WorkflowCatalogError("template wire version 非 0.6.0")
 
     raw_requirements = data.get("requirements", [])
     if not isinstance(raw_requirements, list):
@@ -250,29 +389,20 @@ def _parse_requirement(data: dict[str, Any]) -> WorkflowRequirement:
 
 
 def _parse_source(data: dict[str, Any]) -> WorkflowSource:
-    url = _as_str(data.get("upstream_url"), "source.upstream_url")
-    parsed = urlparse(url)
-    if (
-        parsed.scheme != "https"
-        or not parsed.netloc
-        or parsed.username is not None
-        or parsed.password is not None
-    ):
-        raise WorkflowCatalogError("source.upstream_url 必须是无用户凭据的绝对 HTTPS URL")
     value = _as_int(data.get("observed_value"), "source.observed_value")
-    if value < 0:
-        raise WorkflowCatalogError("source.observed_value 不得为负")
-    return WorkflowSource(
+    source = WorkflowSource(
         provider=_as_str(data.get("provider"), "source.provider"),
         title=_as_str(data.get("title"), "source.title"),
         author=_as_str(data.get("author"), "source.author"),
         upstream_id=_as_str(data.get("upstream_id"), "source.upstream_id"),
-        upstream_url=url,
+        upstream_url=_as_str(data.get("upstream_url"), "source.upstream_url"),
         license_status=_as_str(data.get("license_status"), "source.license_status"),
         observed_metric=_as_str(data.get("observed_metric"), "source.observed_metric"),
         observed_value=value,
         observed_at=_as_str(data.get("observed_at"), "source.observed_at"),
     )
+    validate_source_reference(source)
+    return source
 
 
 def _validate_workflow(
@@ -284,7 +414,7 @@ def _validate_workflow(
     """Validate parsed structure so YAML quoting/flow style cannot bypass gates."""
 
     if document.get("version") != "0.6.0":
-        raise WorkflowCatalogError(f"template 不是 Dify DSL 0.6.0: {template_id}")
+        raise WorkflowCatalogError("template 不是 Dify DSL 0.6.0")
     _reject_secrets(document, template_id=template_id)
     if not runnable:
         return
@@ -292,15 +422,15 @@ def _validate_workflow(
     workflow = _as_mapping(document.get("workflow"), "workflow")
     environment = workflow.get("environment_variables", [])
     if environment != []:
-        raise WorkflowCatalogError(f"runnable template 不得内置环境变量或凭据: {template_id}")
+        raise WorkflowCatalogError("runnable template 不得内置环境变量或凭据")
     if workflow.get("conversation_variables", []) != []:
-        raise WorkflowCatalogError(f"runnable template 不得内置会话状态: {template_id}")
+        raise WorkflowCatalogError("runnable template 不得内置会话状态")
     if workflow.get("features", {}) != {}:
-        raise WorkflowCatalogError(f"runnable template 不得预启用扩展能力: {template_id}")
+        raise WorkflowCatalogError("runnable template 不得预启用扩展能力")
 
     dependencies = document.get("dependencies", [])
     if not isinstance(dependencies, list):
-        raise WorkflowCatalogError(f"template dependencies 必须是 list: {template_id}")
+        raise WorkflowCatalogError("template dependencies 必须是 list")
     for dependency in dependencies:
         item = _as_mapping(dependency, "dependency")
         value = _as_mapping(item.get("value"), "dependency.value")
@@ -309,32 +439,34 @@ def _validate_workflow(
             "dependency.value.marketplace_plugin_unique_identifier",
         )
         if item.get("type") != "marketplace" or identifier not in _ALLOWED_PLUGIN_IDENTIFIERS:
-            raise WorkflowCatalogError(f"runnable template 含未允许的插件依赖: {template_id}")
+            raise WorkflowCatalogError("runnable template 含未允许的插件依赖")
 
     graph = _as_mapping(workflow.get("graph"), "workflow.graph")
     nodes = graph.get("nodes")
     if not isinstance(nodes, list):
-        raise WorkflowCatalogError(f"workflow.graph.nodes 必须是 list: {template_id}")
+        raise WorkflowCatalogError("workflow.graph.nodes 必须是 list")
     for raw_node in nodes:
         node = _as_mapping(raw_node, "workflow.graph.nodes[]")
         data = _as_mapping(node.get("data"), "workflow.graph.nodes[].data")
         node_type = _as_str(data.get("type"), "workflow.graph.nodes[].data.type")
         if node_type not in _ALLOWED_NODE_TYPES:
-            raise WorkflowCatalogError(f"runnable template 含禁止节点: {template_id}")
+            raise WorkflowCatalogError("runnable template 含禁止节点")
         if node_type in {"llm", "parameter-extractor"}:
             model = _as_mapping(data.get("model"), "node.data.model")
             provider = _as_str(model.get("provider"), "node.data.model.provider")
             if provider not in _ALLOWED_MODEL_PROVIDERS:
-                raise WorkflowCatalogError(f"runnable template 含未允许的模型插件: {template_id}")
+                raise WorkflowCatalogError("runnable template 含未允许的模型插件")
 
 
 def _reject_secrets(value: object, *, template_id: str) -> None:
     """Reject credential-shaped values without reflecting them into errors."""
 
+    del template_id
+
     def visit(item: object) -> None:
         if isinstance(item, str):
             if "\x00" in item or any(pattern.search(item) for pattern in _SECRET_PATTERNS):
-                raise WorkflowCatalogError(f"template 疑似含凭据或敏感值: {template_id}")
+                raise WorkflowCatalogError("template 疑似含凭据或敏感值")
             return
         if isinstance(item, list):
             for child in item:
@@ -347,19 +479,17 @@ def _reject_secrets(value: object, *, template_id: str) -> None:
         for raw_key, child in item.items():
             key = _normalize_key(str(raw_key))
             if key in normalized:
-                raise WorkflowCatalogError(
-                    f"template 字段规范化后冲突，疑似含歧义配置: {template_id}"
-                )
+                raise WorkflowCatalogError("template 字段规范化后冲突，疑似含歧义配置")
             normalized[key] = child
             if key in _SENSITIVE_KEYS and not _is_placeholder(child):
-                raise WorkflowCatalogError(f"template 疑似含凭据或敏感值: {template_id}")
+                raise WorkflowCatalogError("template 疑似含凭据或敏感值")
             visit(child)
 
         label = normalized.get("name", normalized.get("variable"))
         if isinstance(label, str) and _normalize_key(label) in _SENSITIVE_KEYS:
             for value_key in ("value", "default", "default_value"):
                 if value_key in normalized and not _is_placeholder(normalized[value_key]):
-                    raise WorkflowCatalogError(f"template 疑似含凭据或敏感值: {template_id}")
+                    raise WorkflowCatalogError("template 疑似含凭据或敏感值")
 
     visit(value)
 
@@ -374,10 +504,8 @@ def _is_placeholder(value: object) -> bool:
     if not isinstance(value, str):
         return False
     normalized = value.strip().lower()
-    return (
-        normalized in {"null", "none", "unset", "redacted"}
-        or normalized.startswith(("${", "{{", "your_", "change_me"))
-        or (normalized.startswith("<") and normalized.endswith(">"))
+    return normalized in _PLACEHOLDER_LITERALS or any(
+        pattern.fullmatch(normalized) is not None for pattern in _PLACEHOLDER_PATTERNS
     )
 
 
@@ -451,8 +579,11 @@ def _clone_template(template: WorkflowTemplate) -> WorkflowTemplate:
 __all__ = [
     "WorkflowCatalog",
     "load_builtin_catalog",
+    "clear_builtin_catalog_cache",
     "load_catalog",
+    "BUILTIN_CATALOG_TARGET_SIZE",
     "CATALOG_SCHEMA_VERSION",
+    "GENERATED_CATALOG_RESOURCE",
     "MAX_CATALOG_BYTES",
     "MAX_TEMPLATE_BYTES",
 ]

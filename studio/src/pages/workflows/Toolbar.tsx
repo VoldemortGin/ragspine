@@ -15,6 +15,7 @@ import {
   IconCode,
   IconCopy,
   IconDownload,
+  IconListFilter,
   IconNetwork,
   IconPencil,
   IconPlay,
@@ -416,9 +417,20 @@ export interface ToolbarProps {
   onCompile: () => void;
   onRun: (mode: 'sync' | 'async') => void;
   onOpenSuggestions: () => void;
+  onOpenExecution: () => void;
+  executionAvailable: boolean;
+  executionCount: number;
 }
 
-export function Toolbar({ onImport, onCompile, onRun, onOpenSuggestions }: ToolbarProps) {
+export function Toolbar({
+  onImport,
+  onCompile,
+  onRun,
+  onOpenSuggestions,
+  onOpenExecution,
+  executionAvailable,
+  executionCount,
+}: ToolbarProps) {
   const autoLayout = useEditorStore((s) => s.autoLayout);
   const undo = useEditorStore((s) => s.undo);
   const redo = useEditorStore((s) => s.redo);
@@ -447,7 +459,11 @@ export function Toolbar({ onImport, onCompile, onRun, onOpenSuggestions }: Toolb
   const suggestionCount = analysis?.status === 'done' ? analysis.suggestions.length : null;
 
   return (
-    <div className="flex h-12 shrink-0 items-center gap-2 border-b border-white/10 px-3">
+    <div
+      role="toolbar"
+      aria-label="Workflow actions"
+      className="flex h-12 shrink-0 items-center gap-2 overflow-x-auto overflow-y-hidden border-b border-white/10 px-3"
+    >
       <WorkflowSwitcher />
       <Button
         variant="ghost"
@@ -508,6 +524,21 @@ export function Toolbar({ onImport, onCompile, onRun, onOpenSuggestions }: Toolb
       >
         <IconClock size={13} />
         Run async
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onOpenExecution}
+        disabled={!executionAvailable}
+        title="Inspect node traces and replay a completed run"
+      >
+        <IconListFilter size={13} />
+        Executions
+        {executionCount > 0 && (
+          <Badge variant="neutral" className="!px-1.5">
+            {executionCount}
+          </Badge>
+        )}
       </Button>
 
       <span className="mx-1 h-5 w-px bg-white/10" />

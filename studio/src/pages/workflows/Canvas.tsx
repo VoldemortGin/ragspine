@@ -185,8 +185,10 @@ export function Canvas({ hotkeysEnabled, onImportClick }: CanvasProps) {
   }, [revision, fitView]);
 
   // Branch edges get their handle label + all edges get an arrow marker.
-  // After a finished run, edges whose BOTH endpoints actually executed are
-  // highlighted and the rest are dimmed (render-layer only, never persisted).
+  // After a finished run, edges whose BOTH endpoints were recorded are shown
+  // as a dashed contextual hint and the rest are dimmed. This is deliberately
+  // not styled as an exact traversed path: the backend does not emit edge or
+  // source-handle events yet.
   const displayEdges = useMemo(() => {
     const nodesById = new Map(nodes.map((n) => [n.id, n] as const));
     const finished = execution.status === 'succeeded' || execution.status === 'failed';
@@ -196,6 +198,7 @@ export function Canvas({ hotkeysEnabled, onImportClick }: CanvasProps) {
       let stroke = selected ? '#818cf8' : '#52525b';
       let marker = selected ? '#818cf8' : '#71717a';
       let strokeWidth = 1.5;
+      let strokeDasharray: string | undefined;
       if (finished && !selected) {
         const src = execution.traces[edge.source];
         const dst = execution.traces[edge.target];
@@ -204,9 +207,12 @@ export function Canvas({ hotkeysEnabled, onImportClick }: CanvasProps) {
           dst !== undefined &&
           src.status !== 'skipped' &&
           dst.status !== 'skipped';
-        stroke = walked ? '#34d399' : '#3f3f46';
+        stroke = walked ? '#818cf8' : '#3f3f46';
         marker = stroke;
-        if (walked) strokeWidth = 2;
+        if (walked) {
+          strokeWidth = 1.75;
+          strokeDasharray = '5 4';
+        }
       }
       return {
         ...edge,
@@ -217,7 +223,7 @@ export function Canvas({ hotkeysEnabled, onImportClick }: CanvasProps) {
           height: 16,
           color: marker,
         },
-        style: { stroke, strokeWidth },
+        style: { stroke, strokeWidth, ...(strokeDasharray !== undefined ? { strokeDasharray } : {}) },
       };
     });
   }, [nodes, edges, execution]);

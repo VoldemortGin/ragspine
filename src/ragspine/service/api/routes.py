@@ -3,12 +3,13 @@
 不重写 Agent/retrieval/ingestion 逻辑——一律调用既有 workflow。
 """
 
+import hashlib
 import json
 from collections.abc import Iterator
 from datetime import date
 from typing import Annotated, Any, cast
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import JsonValue
 
@@ -494,21 +495,133 @@ def _workflow_source_metadata(value: Any) -> WorkflowSourceMetadata | None:
     return WorkflowSourceMetadata.model_validate(value, from_attributes=True)
 
 
+def _workflow_preview_json(workflow: dict[str, object]) -> dict[str, object]:
+    """Project one canonical workflow into the public graph-only preview contract."""
+
+    from ragspine.workflows.preview import build_workflow_preview
+
+    return build_workflow_preview(workflow).to_dict()
+
+
+def _if_none_match_matches(value: str | None, current_etag: str) -> bool:
+    """Evaluate an If-None-Match field with RFC 9110 weak comparison."""
+
+    if value is None:
+        return False
+    value = value.strip()
+    if value == "*":
+        return True
+    if not value:
+        return False
+
+    current_opaque_tag = current_etag.removeprefix("W/")
+    matched = False
+    cursor = 0
+    while cursor < len(value):
+        while cursor < len(value) and value[cursor] in " \t":
+            cursor += 1
+        if value.startswith("W/", cursor):
+            cursor += 2
+        if cursor >= len(value) or value[cursor] != '"':
+            return False
+
+        tag_start = cursor
+        cursor += 1
+        while cursor < len(value) and value[cursor] != '"':
+            codepoint = ord(value[cursor])
+            is_etag_char = (
+                codepoint == 0x21 or 0x23 <= codepoint <= 0x7E or 0x80 <= codepoint <= 0xFF
+            )
+            if not is_etag_char:
+                return False
+            cursor += 1
+        if cursor >= len(value):
+            return False
+        cursor += 1
+        matched = matched or value[tag_start:cursor] == current_opaque_tag
+
+        while cursor < len(value) and value[cursor] in " \t":
+            cursor += 1
+        if cursor == len(value):
+            return matched
+        if value[cursor] != ",":
+            return False
+        cursor += 1
+        if cursor == len(value):
+            return False
+
+    return False
+
+
 @router.get("/v1/workflow-templates", response_model=None)
-def list_workflow_templates() -> WorkflowTemplateListResponse:
-    """列出包内 catalog 的事实型 metadata；完整 YAML 刻意不进入列表响应。"""
+def list_workflow_templates(
+    request: Request,
+    response: Response,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 100,
+) -> WorkflowTemplateListResponse | Response:
+    """分页列出事实型 metadata；完整 YAML 刻意不进入列表响应。"""
     from ragspine.workflows.catalog import WorkflowCatalog
 
     request_id = new_request_id()
-    templates = WorkflowCatalog.default().list()
+    templates = WorkflowCatalog.default()._metadata_refs()
+    total = len(templates)
+    page = templates[offset : offset + limit]
+    next_offset = offset + len(page) if offset + len(page) < total else None
+    page_infos = [_workflow_template_info(template) for template in page]
+
+    # request_id is intentionally excluded: this is a weak validator for the
+    # catalog representation, while request_id is per-request trace metadata.
+    validator_payload = {
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "next_offset": next_offset,
+        "templates": [info.model_dump(mode="json") for info in page_infos],
+    }
+    canonical_payload = json.dumps(
+        validator_payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    digest = hashlib.sha256(canonical_payload)
+    etag = f'W/"{digest.hexdigest()}"'
+    cache_headers = {
+        "Cache-Control": "public, max-age=300, stale-while-revalidate=3600",
+        "ETag": etag,
+    }
+    if_none_match_values = request.headers.getlist("if-none-match")
+    if_none_match = ",".join(if_none_match_values) if if_none_match_values else None
+    if _if_none_match_matches(if_none_match, etag):
+        emit_trace(
+            request_id=request_id,
+            op="workflow_catalog.list",
+            n_templates=0,
+            total=total,
+            offset=offset,
+            limit=limit,
+            not_modified=True,
+        )
+        return Response(status_code=304, headers=cache_headers)
+
+    for name, value in cache_headers.items():
+        response.headers[name] = value
     emit_trace(
         request_id=request_id,
         op="workflow_catalog.list",
-        n_templates=len(templates),
+        n_templates=len(page),
+        total=total,
+        offset=offset,
+        limit=limit,
     )
     return WorkflowTemplateListResponse(
         request_id=request_id,
-        templates=[_workflow_template_info(template) for template in templates],
+        total=total,
+        offset=offset,
+        limit=limit,
+        next_offset=next_offset,
+        templates=page_infos,
     )
 
 
@@ -538,6 +651,7 @@ def get_workflow_template(
         **info.model_dump(),
         workflow=cast(dict[str, JsonValue], template.workflow),
         yaml=template.yaml,
+        preview=cast(dict[str, JsonValue], _workflow_preview_json(template.workflow)),
     )
 
 
@@ -612,6 +726,7 @@ def workflow_scaffold(
         request_id=request_id,
         workflow=cast(dict[str, JsonValue], result.workflow),
         yaml=result.yaml,
+        preview=cast(dict[str, JsonValue], _workflow_preview_json(result.workflow)),
         template_id=result.template_id,
         origin=result.origin,
         confidence=result.confidence,

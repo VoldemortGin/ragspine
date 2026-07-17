@@ -27,9 +27,15 @@ import { ApiError } from '../../src/api/client';
 import type { NodeTrace } from '../../src/api/types';
 import {
   appendRunHistory,
+  executionFromRunHistory,
   loadRunHistory,
   nodeTracesFromError,
+  orderedNodeTraces,
+  summarizeNodeTraces,
+  traceMapThroughStep,
+  toNodeTraces,
   tracesToMap,
+  workflowFingerprint,
 } from '../../src/pages/workflows/model/execution';
 import type { RunHistoryEntry } from '../../src/pages/workflows/model/execution';
 import { useEditorStore } from '../../src/pages/workflows/store';
@@ -103,6 +109,113 @@ describe('tracesToMap', () => {
   });
 });
 
+describe('trace wire normalization', () => {
+  it('repairs unsafe payload slots and rejects invalid numeric fields', () => {
+    expect(
+      toNodeTraces([
+        { ...trace(), inputs: ['bad'], outputs: 'bad', error: { message: 'bad' } },
+        { ...trace({ node_id: 'nan' }), elapsed_ms: Number.NaN },
+        { ...trace({ node_id: 'fractional' }), index: 1.5 },
+      ]),
+    ).toEqual([{ ...trace(), inputs: null, outputs: null, error: null }]);
+  });
+});
+
+describe('completed-run replay helpers', () => {
+  const traces = [
+    trace({ node_id: 'end', index: 2, elapsed_ms: 7 }),
+    trace({ node_id: 'start', index: 0, elapsed_ms: 3 }),
+    trace({ node_id: 'branch', index: 1, status: 'skipped', elapsed_ms: 0 }),
+  ];
+
+  it('orders traces stably without mutating the wire response', () => {
+    expect(orderedNodeTraces(traces).map((item) => item.node_id)).toEqual([
+      'start',
+      'branch',
+      'end',
+    ]);
+    expect(traces[0]!.node_id).toBe('end');
+  });
+
+  it('builds an honest frame through the selected execution step', () => {
+    expect(traceMapThroughStep(traces, -1)).toEqual({});
+    expect(Object.keys(traceMapThroughStep(traces, 0))).toEqual(['start']);
+    expect(Object.keys(traceMapThroughStep(traces, 1))).toEqual(['start', 'branch']);
+    expect(Object.keys(traceMapThroughStep(traces, null))).toEqual(['start', 'branch', 'end']);
+  });
+
+  it('summarizes status counts and aggregate node time', () => {
+    expect(summarizeNodeTraces(traces)).toEqual({
+      total: 3,
+      succeeded: 2,
+      failed: 0,
+      skipped: 1,
+      elapsedMs: 10,
+    });
+  });
+
+  it('reconstructs canvas execution state for a historical replay frame', () => {
+    const execution = executionFromRunHistory(
+      runEntry({ status: 'failed', error: 'boom', node_traces: traces }),
+      0,
+    );
+    expect(execution.status).toBe('failed');
+    expect(execution.error).toBe('boom');
+    expect(Object.keys(execution.traces)).toEqual(['start']);
+  });
+
+  it('previews a historical frame in the store and restores the latest run', () => {
+    const id = state().activeId;
+    const fingerprint = workflowFingerprint(state().getYaml());
+    const older = runEntry({
+      at: '2026-07-09T00:00:00.000Z',
+      node_traces: traces,
+      workflowFingerprint: fingerprint,
+    });
+    const latestTrace = trace({ node_id: 'latest', index: 0 });
+    appendRunHistory(id, older);
+    appendRunHistory(
+      id,
+      runEntry({
+        at: '2026-07-10T00:00:00.000Z',
+        node_traces: [latestTrace],
+        workflowFingerprint: fingerprint,
+      }),
+    );
+
+    state().previewRunHistory(older, 0);
+    expect(Object.keys(state().execution.traces)).toEqual(['start']);
+    state().restoreLatestExecution();
+    expect(Object.keys(state().execution.traces)).toEqual(['latest']);
+  });
+
+  it('refuses to project a run recorded from another workflow revision', () => {
+    const incompatible = runEntry({
+      node_traces: traces,
+      workflowFingerprint: workflowFingerprint('a different workflow'),
+    });
+    state().previewRunHistory(incompatible, null);
+    expect(state().execution).toEqual({ status: 'idle', traces: {} });
+  });
+
+  it('programmatic trace focus collapses an existing canvas multi-selection', () => {
+    useEditorStore.setState((current) => ({
+      nodes: current.nodes.map((node) =>
+        node.id === 'start_1' || node.id === 'llm_1' ? { ...node, selected: true } : node,
+      ),
+      multiSelection: ['start_1', 'llm_1'],
+      selection: { kind: 'node', id: 'llm_1' },
+    }));
+
+    state().selectSingleNode('start_1');
+    expect(state().multiSelection).toEqual(['start_1']);
+    expect(state().selection).toEqual({ kind: 'node', id: 'start_1' });
+    expect(state().nodes.filter((node) => node.selected === true).map((node) => node.id)).toEqual([
+      'start_1',
+    ]);
+  });
+});
+
 describe('nodeTracesFromError', () => {
   it('extracts node_traces from either level of the 400 error body', () => {
     const traces = [trace()];
@@ -121,6 +234,11 @@ describe('nodeTracesFromError', () => {
 });
 
 describe('run history persistence', () => {
+  it('creates a stable workflow identity that changes with the document', () => {
+    expect(workflowFingerprint('app: one')).toBe(workflowFingerprint('app: one'));
+    expect(workflowFingerprint('app: one')).not.toBe(workflowFingerprint('app: two'));
+  });
+
   it('pushes newest first and caps at 10 entries', () => {
     const id = state().activeId;
     for (let i = 0; i < 12; i += 1) {
@@ -159,6 +277,33 @@ describe('run history persistence', () => {
     expect(stored.status).toBe('succeeded');
     expect(stored.result).toBeNull();
   });
+
+  it('normalizes damaged legacy entries before the inspector reads them', () => {
+    const id = state().activeId;
+    localStorage.setItem(
+      `ragspine-studio.workflow-run-history:${id}`,
+      JSON.stringify([
+        {
+          at: '2026-07-10T00:00:00.000Z',
+          status: 'succeeded',
+          inputs: ['not', 'a', 'mapping'],
+          warnings: [1, 'kept'],
+          node_traces: [{ invalid: true }, trace()],
+        },
+        { status: 'failed' },
+      ]),
+    );
+    expect(loadRunHistory(id)).toEqual([
+      {
+        at: '2026-07-10T00:00:00.000Z',
+        status: 'succeeded',
+        inputs: {},
+        result: null,
+        warnings: ['kept'],
+        node_traces: [trace()],
+      },
+    ]);
+  });
 });
 
 describe('startRun (sync, stubbed fetch)', () => {
@@ -188,6 +333,7 @@ describe('startRun (sync, stubbed fetch)', () => {
     const history = loadRunHistory(state().activeId);
     expect(history).toHaveLength(1);
     expect(history[0]).toMatchObject({ status: 'succeeded', inputs: { q: 'x' }, result: 'hi' });
+    expect(history[0]!.workflowFingerprint).toMatch(/^wf-v1:/);
     expect(history[0]!.node_traces).toHaveLength(2);
   });
 
@@ -219,7 +365,7 @@ describe('startRun (sync, stubbed fetch)', () => {
     expect(history[0]!.node_traces).toHaveLength(2);
   });
 
-  it('undo/redo of canvas edits never touches execution state', async () => {
+  it('clears stale execution overlays when the canvas changes', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () =>
@@ -229,18 +375,42 @@ describe('startRun (sync, stubbed fetch)', () => {
     state().addNodeAtPosition('llm', { x: 100, y: 100 });
     state().startRun('sync', {});
     await vi.waitFor(() => expect(state().execution.status).toBe('succeeded'));
-    const execution = state().execution;
-
     state().undo();
-    expect(state().execution).toBe(execution);
+    expect(state().execution).toEqual({ status: 'idle', traces: {} });
     state().redo();
-    expect(state().execution).toBe(execution);
+    expect(state().execution).toEqual({ status: 'idle', traces: {} });
+  });
+
+  it('does not project a completed run when the canvas changed in flight', async () => {
+    let resolveResponse: ((response: Response) => void) | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveResponse = resolve;
+          }),
+      ),
+    );
+
+    state().startRun('sync', {});
+    expect(state().execution.status).toBe('running');
+    state().addNodeAtPosition('template-transform', { x: 500, y: 100 });
+    expect(state().execution.status).toBe('running');
+
+    resolveResponse?.(
+      jsonResponse({ request_id: 'changed', result: 'ok', warnings: [], node_traces: [trace()] }),
+    );
+    await vi.waitFor(() => expect(state().run.name).toBe('result'));
+    expect(state().execution).toEqual({ status: 'idle', traces: {} });
+    expect(loadRunHistory(state().activeId)[0]!.node_traces).toHaveLength(1);
   });
 });
 
 describe('per-workflow execution state', () => {
   it('loads the most recent stored run when switching workflows', () => {
     const firstId = state().activeId;
+    const firstFingerprint = workflowFingerprint(state().getYaml());
     state().createWorkflow();
     const secondId = state().activeId;
     expect(secondId).not.toBe(firstId);
@@ -251,9 +421,16 @@ describe('per-workflow execution state', () => {
         status: 'failed',
         error: 'boom',
         node_traces: [trace({ node_id: 'llm_9', status: 'failed' })],
+        workflowFingerprint: firstFingerprint,
       }),
     );
-    appendRunHistory(firstId, runEntry({ node_traces: [trace({ node_id: 'llm_9' })] }));
+    appendRunHistory(
+      firstId,
+      runEntry({
+        node_traces: [trace({ node_id: 'llm_9' })],
+        workflowFingerprint: firstFingerprint,
+      }),
+    );
 
     state().switchWorkflow(firstId);
     // The newest entry wins (succeeded, not the older failed one).

@@ -8,9 +8,14 @@ from ragspine.service.dify.tracing import sanitize_node_traces
 
 def _record(**overrides):
     base = {
-        "node_id": "n1", "title": "标题", "node_type": "llm",
-        "status": "succeeded", "elapsed_ms": 1.5,
-        "inputs": {"a.b": "x"}, "outputs": {"text": "y"}, "error": None,
+        "node_id": "n1",
+        "title": "标题",
+        "node_type": "llm",
+        "status": "succeeded",
+        "elapsed_ms": 1.5,
+        "inputs": {"a.b": "x"},
+        "outputs": {"text": "y"},
+        "error": None,
     }
     base.update(overrides)
     return base
@@ -69,6 +74,87 @@ def test_long_string_truncated():
     assert len(v) == 2000 + len("…(truncated)")
 
 
+def test_sensitive_values_redacted_recursively():
+    out = sanitize_node_traces(
+        [
+            _record(
+                inputs={
+                    "api_key": "sk-input-secret",
+                    "nested": {
+                        "PASSWORD": "correct horse battery staple",
+                        "items": [
+                            {"client-secret": "client-secret-value"},
+                            {"session.cookie": "session-cookie-value"},
+                        ],
+                    },
+                },
+                outputs={
+                    "Authorization": "Bearer abcdefghijklmnopqrstuvwxyz",
+                    "refresh_token": "refresh-token-value",
+                },
+            )
+        ]
+    )
+
+    assert out[0]["inputs"] == {
+        "api_key": "[REDACTED]",
+        "nested": {
+            "PASSWORD": "[REDACTED]",
+            "items": [
+                {"client-secret": "[REDACTED]"},
+                {"session.cookie": "[REDACTED]"},
+            ],
+        },
+    }
+    assert out[0]["outputs"] == {
+        "Authorization": "[REDACTED]",
+        "refresh_token": "[REDACTED]",
+    }
+
+
+def test_sensitive_key_matching_handles_case_separators_and_prefixes():
+    secrets = {
+        "ApiKey": "a",
+        "OPENAI-API-KEY": "b",
+        "auth.token": "c",
+        "access token": "d",
+        "db_password": "e",
+        "webhookSecret": "f",
+        "Private-Key": "g",
+        "credentials": "h",
+    }
+
+    out = sanitize_node_traces([_record(inputs=secrets)])
+
+    assert set(out[0]["inputs"].values()) == {"[REDACTED]"}
+
+
+def test_non_secret_metadata_and_normal_values_are_preserved():
+    normal = {
+        "token_count": 12,
+        "secret_length": 32,
+        "cookie_policy": "strict",
+        "authorization_mode": "oauth2",
+        "password_hint": "managed externally",
+        "nested": [{"message": "Bearer is an HTTP authorization scheme"}],
+    }
+
+    out = sanitize_node_traces([_record(inputs=normal)])
+
+    assert out[0]["inputs"] == normal
+
+
+def test_deep_sensitive_value_never_leaks_through_depth_fallback():
+    deep = {"api_key": "deep-secret-value"}
+    for index in range(20):
+        deep = {f"level_{index}": deep}
+
+    out = sanitize_node_traces([_record(inputs={"deep": deep})])
+    serialized = json.dumps(out)
+
+    assert "deep-secret-value" not in serialized
+
+
 def test_unserializable_object_becomes_repr():
     class Weird:
         def __repr__(self) -> str:
@@ -80,9 +166,7 @@ def test_unserializable_object_becomes_repr():
 
 
 def test_nan_and_inf_become_strings():
-    out = sanitize_node_traces(
-        [_record(inputs={"a": float("nan"), "b": float("inf"), "c": 1.5})]
-    )
+    out = sanitize_node_traces([_record(inputs={"a": float("nan"), "b": float("inf"), "c": 1.5})])
     ins = out[0]["inputs"]
     assert ins["a"] == "nan"
     assert ins["b"] == "inf"

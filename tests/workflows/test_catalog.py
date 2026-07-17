@@ -51,8 +51,8 @@ def _replace_first_template(directory: Path, yaml_text: str) -> str:
     return filename
 
 
-def test_builtin_catalog_contains_seven_integrity_checked_templates() -> None:
-    catalog = load_builtin_catalog()
+def test_curated_catalog_contains_seven_integrity_checked_templates(tmp_path: Path) -> None:
+    catalog = load_catalog(_copy_catalog(tmp_path))
     templates = catalog.list()
 
     assert len(templates) == 7
@@ -63,6 +63,52 @@ def test_builtin_catalog_contains_seven_integrity_checked_templates() -> None:
         assert template.compatibility.format == "dify"
         assert template.compatibility.dsl_version == "0.6.0"
         assert template.compatibility.status == "runnable"
+
+
+@pytest.mark.parametrize(
+    "source_updates",
+    [
+        {"provider": "evil-provider"},
+        {
+            "upstream_url": (
+                "https://n8n.io.evil.example/workflows/"
+                "2165-chat-with-pdf-docs-using-ai-quoting-sources/"
+            )
+        },
+        {
+            "upstream_url": (
+                "https://n8n.io:443/workflows/2165-chat-with-pdf-docs-using-ai-quoting-sources/"
+            )
+        },
+        {"upstream_url": "https://n8n.io/workflows/9999-wrong-identity/"},
+        {"upstream_id": "not-numeric"},
+        {"observed_at": "2026-07-14T17:24:00"},
+        {"license_status": "copied-without-review"},
+        {"observed_metric": "usage_count"},
+    ],
+    ids=(
+        "provider",
+        "evil-host",
+        "explicit-port",
+        "bad-path",
+        "bad-upstream-id",
+        "naive-date",
+        "bad-license",
+        "unbound-metric",
+    ),
+)
+def test_curated_catalog_rejects_source_outside_shared_reference_policy(
+    tmp_path: Path, source_updates: dict[str, object]
+) -> None:
+    directory = _copy_catalog(tmp_path)
+    manifest = _read_manifest(directory)
+    entry = cast(dict[str, Any], manifest["templates"][0])
+    source = cast(dict[str, Any], entry["source"])
+    source.update(source_updates)
+    _write_manifest(directory, manifest)
+
+    with pytest.raises(WorkflowCatalogError, match="source reference"):
+        load_catalog(directory)
 
 
 def test_catalog_attribution_is_reference_only_and_uses_canonical_urls() -> None:
@@ -100,6 +146,19 @@ def test_unknown_template_id_uses_domain_error() -> None:
         load_builtin_catalog().get("missing-template")
 
     assert error.value.code == "workflow.template_not_found"
+
+
+def test_unknown_secret_shaped_template_id_is_not_retained_or_reflected() -> None:
+    secret_id = "SG." + "A" * 22 + "." + "B" * 43
+
+    with pytest.raises(WorkflowTemplateNotFoundError) as error:
+        load_builtin_catalog().get(secret_id)
+
+    assert secret_id not in str(error.value)
+    assert secret_id not in str(error.value.to_dict())
+    assert error.value.context == {}
+    assert error.value.__cause__ is None
+    assert error.value.__context__ is None
 
 
 def test_template_hash_drift_is_rejected(tmp_path: Path) -> None:
@@ -180,8 +239,22 @@ workflow:
     [
         "api_key: sk-proj-abcdefghijklmnopqrstuvwxyz123456",
         "authorization: 'Bearer eyJhbGciOiJIUzI1NiJ9.payload.signature'",
+        "auth_token: correct-horse-battery-staple",
+        "refresh_token: correct-horse-battery-staple",
+        "webhook_secret: correct-horse-battery-staple",
+        "secret_key: correct-horse-battery-staple",
+        "private_key: correct-horse-battery-staple",
+        "aws_access_key_id: correct-horse-battery-staple",
+        "aws_secret_access_key: correct-horse-battery-staple",
+        "aws_security_token: correct-horse-battery-staple",
+        "aws_session_token: correct-horse-battery-staple",
         "password: correct-horse-battery-staple",
         "credential: sk-ant-api03-abcdefghijklmnopqrstuvwxyz",
+        "external_reference: ASIAAAAAAAAAAAAAAAAA",
+        "external_reference: whsec_AAAAAAAAAAAAAAAA",
+        "external_reference: AIzaAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "external_reference: SG.AAAAAAAAAAAAAAAAAAAAAA.BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        "external_reference: " + "SK" + "0" * 32,
     ],
 )
 def test_catalog_rejects_structurally_nested_secrets_without_echoing_them(
@@ -209,6 +282,104 @@ workflow:
         load_catalog(directory)
 
     assert secret_value not in str(error.value)
+
+
+@pytest.mark.parametrize(
+    ("key", "placeholder"),
+    [
+        ("api_key", "${API_KEY}"),
+        ("auth_token", "{{ auth_token }}"),
+        ("refresh_token", "your_refresh_token"),
+        ("webhook_secret", "change_me_before_use"),
+        ("secret_key", "<secret_key>"),
+        ("private_key", "redacted"),
+        ("aws_access_key_id", "${AWS_ACCESS_KEY_ID}"),
+        ("aws_secret_access_key", "unset"),
+        ("aws_security_token", "<aws_security_token>"),
+        ("aws_session_token", "null"),
+    ],
+)
+def test_catalog_accepts_only_complete_sensitive_value_placeholders(
+    tmp_path: Path,
+    key: str,
+    placeholder: str,
+) -> None:
+    directory = _copy_catalog(tmp_path)
+    manifest = _read_manifest(directory)
+    entry = cast(dict[str, Any], manifest["templates"][0])
+    path = directory / cast(str, entry["yaml"])
+    yaml_text = path.read_text(encoding="utf-8").replace(
+        "workflow:\n",
+        f'workflow:\n  private:\n    {key}: "{placeholder}"\n',
+        1,
+    )
+    _replace_first_template(directory, yaml_text)
+
+    load_catalog(directory)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "${API_KEY}actual-secret",
+        "{{ api_key }}actual-secret",
+        "your_api_key_actual_secret",
+        "change_me_before_use_actual_secret",
+        "<api_key>actual-secret",
+    ],
+)
+def test_catalog_rejects_placeholder_prefix_followed_by_a_secret_value(
+    tmp_path: Path,
+    value: str,
+) -> None:
+    directory = _copy_catalog(tmp_path)
+    manifest = _read_manifest(directory)
+    entry = cast(dict[str, Any], manifest["templates"][0])
+    path = directory / cast(str, entry["yaml"])
+    yaml_text = path.read_text(encoding="utf-8").replace(
+        "workflow:\n",
+        f'workflow:\n  private:\n    api_key: "{value}"\n',
+        1,
+    )
+    _replace_first_template(directory, yaml_text)
+
+    with pytest.raises(WorkflowCatalogError, match="凭据|敏感"):
+        load_catalog(directory)
+
+
+def test_catalog_rejects_placeholder_prefix_in_named_sensitive_variable(
+    tmp_path: Path,
+) -> None:
+    directory = _copy_catalog(tmp_path)
+    manifest = _read_manifest(directory)
+    entry = cast(dict[str, Any], manifest["templates"][0])
+    path = directory / cast(str, entry["yaml"])
+    yaml_text = path.read_text(encoding="utf-8").replace(
+        "workflow:\n",
+        """workflow:
+  private:
+    - variable: refresh_token
+      value: "${REFRESH_TOKEN}actual-secret"
+""",
+        1,
+    )
+    _replace_first_template(directory, yaml_text)
+
+    with pytest.raises(WorkflowCatalogError, match="凭据|敏感"):
+        load_catalog(directory)
+
+
+def test_catalog_secret_shaped_template_id_is_never_reflected(tmp_path: Path) -> None:
+    directory = _copy_catalog(tmp_path)
+    manifest = _read_manifest(directory)
+    secret_id = "sk-proj-catalogidmustneverbereflected123456789"
+    cast(dict[str, Any], manifest["templates"][0])["id"] = secret_id
+    _write_manifest(directory, manifest)
+
+    with pytest.raises(WorkflowCatalogError) as error:
+        load_catalog(directory)
+
+    assert secret_id not in str(error.value)
 
 
 @pytest.mark.parametrize(

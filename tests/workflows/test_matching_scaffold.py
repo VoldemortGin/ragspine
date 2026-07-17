@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier, BrokenBarrierError, Event, Lock
 from typing import cast
 
 import pytest
@@ -21,7 +24,7 @@ from ragspine.workflows.matching import (
     choose_reusable,
     make_template_matcher,
 )
-from ragspine.workflows.model import TemplateMatch
+from ragspine.workflows.model import TemplateMatch, WorkflowTemplate
 from ragspine.workflows.planner import MAX_DESCRIPTION_CHARS
 from ragspine.workflows.scaffold import scaffold_workflow
 
@@ -65,6 +68,118 @@ def test_lexical_matcher_has_deterministic_english_and_chinese_goldens(
     assert matches[0].matcher == "lexical"
 
 
+def test_lexical_matcher_aligns_bilingual_catalog_taxonomy() -> None:
+    matcher = LexicalTemplateMatcher()
+    templates = load_builtin_catalog().runnable()
+    cases = (
+        (
+            "发票自动识别、抽取金额税额并审核",
+            None,
+            {"industry:accounting", "use-case:invoice-processing"},
+        ),
+        (
+            "Extract and validate invoice number tax amount and vendor",
+            None,
+            {"industry:accounting", "use-case:invoice-processing"},
+        ),
+        (
+            "法律研究助手：根据案例和法规形成带证据的研究报告",
+            None,
+            {"industry:legal", "use-case:research"},
+        ),
+        (
+            "Legal research agent for contracts and case law",
+            None,
+            {"industry:legal", "use-case:research"},
+        ),
+        (
+            "客服工单按紧急程度分类并路由到对应团队",
+            "conditional-response-routing",
+            set(),
+        ),
+        (
+            "每天汇总人工智能新闻生成摘要",
+            None,
+            {"industry:media", "use-case:summarization"},
+        ),
+        (
+            "Create a daily AI news digest and evidence summary",
+            None,
+            {"industry:media", "use-case:summarization"},
+        ),
+        (
+            "预约客户会议，基于日历可用时间推荐时段",
+            None,
+            {"use-case:scheduling"},
+        ),
+        (
+            "Schedule a patient appointment using calendar availability",
+            None,
+            {"industry:healthcare", "use-case:scheduling"},
+        ),
+        (
+            "监控竞争对手价格变化并产生信号报告",
+            None,
+            {"use-case:monitoring"},
+        ),
+        (
+            "天气预报",
+            None,
+            {"industry:environment"},
+        ),
+        (
+            "智能知识库客服问答",
+            None,
+            {"use-case:knowledge-retrieval"},
+        ),
+        (
+            "Publish a marketing campaign post to social media",
+            None,
+            {"use-case:social-publishing"},
+        ),
+        (
+            "Cybersecurity incident alert and severity triage",
+            None,
+            {"industry:cybersecurity", "use-case:alerting"},
+        ),
+    )
+
+    for query, expected_id, expected_categories in cases:
+        leader = matcher.rank(query, templates)[0].template
+        if expected_id is not None:
+            assert leader.id == expected_id, query
+        assert expected_categories.issubset(leader.categories), query
+
+
+def test_equivalent_catalog_candidates_do_not_block_safe_reuse() -> None:
+    matcher = LexicalTemplateMatcher()
+
+    weather = scaffold_workflow("Weather forecast workflow", matcher=matcher)
+    extraction = scaffold_workflow("Extract structured fields", matcher=matcher)
+
+    assert weather.origin == "template"
+    assert weather.template_id is not None
+    assert weather.template_id.startswith("dify-environment-general-assistance-weather-")
+    assert extraction.origin == "template"
+    assert extraction.template_id == "structured-information-extraction"
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "Monitor website uptime and alert on failures",
+        "招聘简历筛选和候选人分类",
+        "酒店预订客服助手",
+        "Publish a marketing campaign post to social media",
+    ],
+)
+def test_cross_function_or_cross_industry_partial_matches_generate(query: str) -> None:
+    result = scaffold_workflow(query)
+
+    assert result.origin == "generated"
+    assert result.template_id is None
+
+
 def test_embedding_matcher_uses_injected_cosine_backend() -> None:
     templates = load_builtin_catalog().runnable()[:2]
     matcher = EmbeddingTemplateMatcher(
@@ -78,6 +193,224 @@ def test_embedding_matcher_uses_injected_cosine_backend() -> None:
     assert matches[0].confidence == pytest.approx(1.0)
     assert matches[1].confidence == pytest.approx(0.0)
     assert all(match.matcher == "test-semantic" for match in matches)
+
+
+def test_embedding_matcher_reuses_catalog_vectors_across_queries() -> None:
+    class RecordingBackend:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, ...]] = []
+
+        def embed_texts(self, texts: list[str]) -> list[list[float]]:
+            self.calls.append(tuple(texts))
+            if len(texts) == 1:
+                return [[1.0, 0.0]]
+            return [[1.0, 0.0], [1.0, 0.0], [0.0, 1.0]]
+
+    backend = RecordingBackend()
+    templates = load_builtin_catalog().runnable()[:2]
+    matcher = EmbeddingTemplateMatcher(backend)
+
+    first = matcher.rank("first semantic query", templates)
+    second = matcher.rank("second semantic query", templates)
+
+    assert first[0].template.id == second[0].template.id == templates[0].id
+    assert [len(call) for call in backend.calls] == [3, 1]
+
+
+def test_embedding_catalog_encoding_is_single_flight_across_concurrent_queries() -> None:
+    class BlockingBackend:
+        def __init__(self) -> None:
+            self.calls: list[int] = []
+            self.started = Event()
+            self.release = Event()
+            self.lock = Lock()
+
+        def embed_texts(self, texts: list[str]) -> list[list[float]]:
+            with self.lock:
+                self.calls.append(len(texts))
+            if len(texts) > 1:
+                self.started.set()
+                assert self.release.wait(timeout=10)
+                return [[1.0, 0.0], [1.0, 0.0], [0.0, 1.0]]
+            return [[1.0, 0.0]]
+
+    backend = BlockingBackend()
+    matcher = EmbeddingTemplateMatcher(backend)
+    templates = load_builtin_catalog().runnable()[:2]
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(matcher.rank, "first query", templates)
+        assert backend.started.wait(timeout=10)
+        second = pool.submit(matcher.rank, "second query", templates)
+        backend.release.set()
+        first_matches = first.result(timeout=20)
+        second_matches = second.result(timeout=20)
+
+    assert first_matches[0].template.id == second_matches[0].template.id
+    assert sorted(backend.calls) == [1, 3]
+
+
+def test_embedding_single_flight_failure_does_not_poison_retry() -> None:
+    class RetryBackend:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def embed_texts(self, texts: list[str]) -> list[list[float]]:
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("sk-proj-backend-error-must-not-leak")
+            return [[1.0, 0.0], [1.0, 0.0], [0.0, 1.0]]
+
+    backend = RetryBackend()
+    matcher = EmbeddingTemplateMatcher(backend)
+    templates = load_builtin_catalog().runnable()[:2]
+
+    with pytest.raises(WorkflowMatcherError) as error:
+        matcher.rank("first query", templates)
+    matches = matcher.rank("retry query", templates)
+
+    assert "sk-proj-backend-error" not in str(error.value)
+    assert backend.calls == 2
+    assert matches[0].template.id == templates[0].id
+
+
+def test_scaffold_matches_metadata_refs_then_clones_only_selected_workflow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ragspine.workflows import catalog as catalog_module
+
+    catalog = catalog_module.WorkflowCatalog(load_builtin_catalog().list()[:2])
+    real_clone = catalog_module._clone_template
+    clone_calls = 0
+
+    class MutatingMatcher:
+        name = "metadata-only"
+        reuse_threshold = 0.5
+        reuse_margin = 0.0
+
+        def rank(
+            self,
+            query: str,
+            templates: Sequence[WorkflowTemplate],
+        ) -> tuple[TemplateMatch, ...]:
+            del query
+            assert templates[0].yaml == ""
+            assert templates[0].workflow == {}
+            templates[0].workflow["attacker"] = "cannot reach catalog workflow"
+            return (TemplateMatch(templates[0], confidence=1.0, matcher=self.name),)
+
+    def recording_clone(template: WorkflowTemplate) -> WorkflowTemplate:
+        nonlocal clone_calls
+        clone_calls += 1
+        return real_clone(template)
+
+    monkeypatch.setattr(catalog_module, "_clone_template", recording_clone)
+
+    result = scaffold_workflow("select first", catalog=catalog, matcher=MutatingMatcher())
+
+    assert clone_calls == 1
+    assert result.origin == "template"
+    assert "app" in result.workflow
+    assert "attacker" not in result.workflow
+
+
+def test_lexical_matcher_reuses_catalog_tokenization_across_queries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ragspine.workflows import matching as matching_module
+
+    real_tokenize = matching_module.tokenize
+    calls = 0
+
+    def recording_tokenize(text: str) -> list[str]:
+        nonlocal calls
+        calls += 1
+        return real_tokenize(text)
+
+    monkeypatch.setattr(matching_module, "tokenize", recording_tokenize)
+    templates = load_builtin_catalog().runnable()[:2]
+    matcher = LexicalTemplateMatcher()
+
+    matcher.rank("first query", templates)
+    matcher.rank("second query", templates)
+
+    assert calls == 4
+
+
+def test_lexical_catalog_tokenization_is_single_flight_and_lock_free() -> None:
+    from ragspine.workflows import matching as matching_module
+
+    templates = load_builtin_catalog().runnable()
+    template_texts = {template.search_text for template in templates}
+    first_template_text = templates[0].search_text
+    real_tokenize = matching_module.tokenize
+    matcher = LexicalTemplateMatcher()
+    rendezvous = Barrier(2)
+    count_lock = Lock()
+    template_calls = 0
+    tokenized_outside_lock: list[bool] = []
+
+    def recording_tokenize(text: str) -> list[str]:
+        nonlocal template_calls
+        if text in template_texts:
+            matcher_lock = getattr(matcher, "_template_token_lock", None)
+            if matcher_lock is not None:
+                acquired = matcher_lock.acquire(blocking=False)
+                tokenized_outside_lock.append(acquired)
+                if acquired:
+                    matcher_lock.release()
+            with count_lock:
+                template_calls += 1
+            if text == first_template_text:
+                try:
+                    rendezvous.wait(timeout=0.5)
+                except BrokenBarrierError:
+                    pass
+        return real_tokenize(text)
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(matching_module, "tokenize", recording_tokenize)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(matcher.rank, "first concurrent query", templates)
+            second = pool.submit(matcher.rank, "second concurrent query", templates)
+            first_matches = first.result(timeout=20)
+            second_matches = second.result(timeout=20)
+
+    assert first_matches
+    assert second_matches
+    assert template_calls == len(templates) == 1000
+    assert tokenized_outside_lock and all(tokenized_outside_lock)
+
+
+def test_lexical_single_flight_failure_does_not_poison_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ragspine.workflows import matching as matching_module
+
+    templates = load_builtin_catalog().runnable()[:2]
+    first_template_text = templates[0].search_text
+    real_tokenize = matching_module.tokenize
+    failed = False
+    template_calls = 0
+
+    def fail_once(text: str) -> list[str]:
+        nonlocal failed, template_calls
+        if text == first_template_text:
+            template_calls += 1
+            if not failed:
+                failed = True
+                raise RuntimeError("transient tokenizer failure")
+        return real_tokenize(text)
+
+    monkeypatch.setattr(matching_module, "tokenize", fail_once)
+    matcher = LexicalTemplateMatcher()
+
+    with pytest.raises(RuntimeError, match="transient tokenizer failure"):
+        matcher.rank("first query", templates)
+    matches = matcher.rank("retry query", templates)
+
+    assert template_calls == 2
+    assert matches
 
 
 @pytest.mark.parametrize(

@@ -10,7 +10,7 @@ Submodules:
     filtering/ — 元数据过滤：显式过滤条件 + 可注入自动过滤提取器（默认关闭）。
     lexical/ — 混合检索：Okapi BM25（CJK uni+bigram）+ 向量 + RRF 融合。
     link/ — 适配层：把检索接入 agent 编排（NarrativeRetriever 协议）。
-    mode.py — 检索模式预设（balanced / economy），把产品选择映射为确定性参数。
+    mode.py — 检索模式预设（hybrid / economy），把产品选择映射为确定性参数。
     postprocess.py — opt-in 后检索 postprocessor 链（W8）：MMR 去冗余 + lost-in-the-middle 重排 + 上下文压缩；默认 none 时不挂链、字节不变。
     raptor.py — opt-in RAPTOR 递归聚类+摘要树（W10）：确定性聚类 + is_synthesis 合成摘要 + 多粒度检索；默认关时返回 base 本身、字节不变。
     rerank/ — Claude listwise 精排，RRF 退化兜底。

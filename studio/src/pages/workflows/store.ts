@@ -37,11 +37,19 @@ import {
   appendRunHistory,
   deleteRunHistory,
   executionFromHistory,
+  executionFromRunHistory,
+  IDLE_EXECUTION,
   nodeTracesFromError,
   parseJobRunResult,
   tracesToMap,
+  workflowFingerprint,
 } from './model/execution';
-import type { ExecutionState, RunFailure, RunSlice } from './model/execution';
+import type {
+  ExecutionState,
+  RunFailure,
+  RunHistoryEntry,
+  RunSlice,
+} from './model/execution';
 import { uniqueEdgeId, uniqueNodeId } from './model/ids';
 import {
   deleteRunInputs,
@@ -96,6 +104,8 @@ interface EditorState {
   base: StudioWorkflow;
   /** Bumped whenever a whole document is (re)loaded — canvas re-fits view. */
   revision: number;
+  /** Bumped on every document mutation for run/graph compatibility checks. */
+  documentVersion: number;
   saveState: 'saved' | 'dirty';
   selection: EditorSelection | null;
   /** Node ids in the current React Flow multi-selection (>1 => multi UI). */
@@ -133,6 +143,8 @@ interface EditorState {
   duplicateNode: (id: string) => void;
   duplicateNodes: (ids: readonly string[]) => void;
   setSelection: (sel: EditorSelection | null) => void;
+  /** Programmatic focus that intentionally collapses any pointer multi-select. */
+  selectSingleNode: (id: string) => void;
   setMultiSelection: (ids: readonly string[]) => void;
   selectAll: () => void;
 
@@ -153,6 +165,10 @@ interface EditorState {
   startRun: (mode: 'sync' | 'async', inputs: Record<string, unknown>) => void;
   /** Return the run slice to idle (canvas badges from `execution` persist). */
   resetRun: () => void;
+  /** Project a stored run (or one replay frame) onto the canvas. */
+  previewRunHistory: (entry: RunHistoryEntry, throughStep?: number | null) => void;
+  /** Restore the active workflow's latest completed run on the canvas. */
+  restoreLatestExecution: () => void;
 
   /* panels + toggles */
   setPanelOpen: (open: boolean) => void;
@@ -349,7 +365,11 @@ export const useEditorStore = create<EditorState>()((set, get) => {
 
   /** Mark the document dirty and schedule the debounced auto-save. */
   const touch = () => {
-    set({ saveState: 'dirty' });
+    set((state) => ({
+      saveState: 'dirty',
+      documentVersion: state.documentVersion + 1,
+      ...(state.execution.status === 'running' ? {} : { execution: IDLE_EXECUTION }),
+    }));
     scheduleSave();
   };
 
@@ -421,12 +441,16 @@ export const useEditorStore = create<EditorState>()((set, get) => {
       edges,
       base: wf,
       revision: state.revision + 1,
+      documentVersion: state.documentVersion + 1,
       selection: null,
       multiSelection: [],
       panelOpen: false,
       analysis: null,
       highlight: null,
-      execution: executionFromHistory(state.activeId),
+      execution: executionFromHistory(
+        state.activeId,
+        workflowFingerprint(serializeWorkflowYaml(wf)),
+      ),
       run: { name: 'idle' },
       saveState: markDirty ? state.saveState : 'saved',
       ...(clearHistory ? { past: [], future: [] } : {}),
@@ -441,6 +465,7 @@ export const useEditorStore = create<EditorState>()((set, get) => {
     workflowId: string,
     inputs: Record<string, unknown>,
     startedAt: string,
+    fingerprint: string,
     outcome: RunOutcome,
   ) => {
     const finishedAt = new Date().toISOString();
@@ -452,9 +477,17 @@ export const useEditorStore = create<EditorState>()((set, get) => {
       result: outcome.status === 'succeeded' ? outcome.result : null,
       warnings: outcome.status === 'succeeded' ? outcome.warnings : [],
       node_traces: outcome.traces,
+      workflowFingerprint: fingerprint,
       ...(error !== undefined ? { error } : {}),
     });
     if (token !== runToken) return;
+    let canvasCompatible = false;
+    try {
+      canvasCompatible = workflowFingerprint(get().getYaml()) === fingerprint;
+    } catch {
+      // A trace must never be projected when the current document cannot be
+      // serialized and compared with the workflow that actually ran.
+    }
     set({
       run:
         outcome.status === 'succeeded'
@@ -466,13 +499,15 @@ export const useEditorStore = create<EditorState>()((set, get) => {
               traces: outcome.traces,
             }
           : { name: 'error', failure: outcome.failure, traces: outcome.traces },
-      execution: {
-        status: outcome.status,
-        traces: tracesToMap(outcome.traces),
-        startedAt,
-        finishedAt,
-        ...(error !== undefined ? { error } : {}),
-      },
+      execution: canvasCompatible
+        ? {
+            status: outcome.status,
+            traces: tracesToMap(outcome.traces),
+            startedAt,
+            finishedAt,
+            ...(error !== undefined ? { error } : {}),
+          }
+        : IDLE_EXECUTION,
     });
   };
 
@@ -481,6 +516,7 @@ export const useEditorStore = create<EditorState>()((set, get) => {
   return {
     ...doc,
     revision: 0,
+    documentVersion: 0,
     saveState: 'saved',
     selection: null,
     multiSelection: [],
@@ -491,7 +527,10 @@ export const useEditorStore = create<EditorState>()((set, get) => {
     highlight: null,
     past: [],
     future: [],
-    execution: executionFromHistory(doc.activeId),
+    execution: executionFromHistory(
+      doc.activeId,
+      workflowFingerprint(serializeWorkflowYaml(fromFlow(doc.nodes, doc.edges, doc.base))),
+    ),
     run: { name: 'idle' },
 
     /* ------------------------------ canvas ------------------------------ */
@@ -712,10 +751,54 @@ export const useEditorStore = create<EditorState>()((set, get) => {
     },
 
     setSelection: (sel) => {
-      set((state) => ({
-        selection: sel,
-        panelOpen: sel !== null && sel.kind === 'node' ? true : state.panelOpen,
-      }));
+      set((state) => {
+        // React Flow has already applied node flags for pointer multi-select.
+        // Programmatic selection (timeline/history) still needs to update
+        // those flags so the focused card receives its visible selected ring.
+        const preserveMulti =
+          sel?.kind === 'node' &&
+          state.multiSelection.length > 1 &&
+          state.multiSelection.includes(sel.id);
+        return {
+          selection: sel,
+          panelOpen: sel !== null && sel.kind === 'node' ? true : state.panelOpen,
+          nodes: preserveMulti
+            ? state.nodes
+            : state.nodes.map((node) => {
+                const selected = sel?.kind === 'node' && node.id === sel.id;
+                return node.selected === selected ? node : { ...node, selected };
+              }),
+          edges: preserveMulti
+            ? state.edges
+            : state.edges.map((edge) => {
+                const selected = sel?.kind === 'edge' && edge.id === sel.id;
+                return edge.selected === selected ? edge : { ...edge, selected };
+              }),
+          multiSelection: preserveMulti
+            ? state.multiSelection
+            : sel?.kind === 'node'
+              ? [sel.id]
+              : [],
+        };
+      });
+    },
+
+    selectSingleNode: (id) => {
+      set((state) => {
+        if (!state.nodes.some((node) => node.id === id)) return state;
+        return {
+          nodes: state.nodes.map((node) => {
+            const selected = node.id === id;
+            return node.selected === selected ? node : { ...node, selected };
+          }),
+          edges: state.edges.map((edge) =>
+            edge.selected === true ? { ...edge, selected: false } : edge,
+          ),
+          selection: { kind: 'node', id },
+          multiSelection: [id],
+          panelOpen: true,
+        };
+      });
     },
 
     setMultiSelection: (ids) => set({ multiSelection: [...ids] }),
@@ -810,6 +893,7 @@ export const useEditorStore = create<EditorState>()((set, get) => {
         return;
       }
       const startedAt = new Date().toISOString();
+      const fingerprint = workflowFingerprint(yaml);
       set({
         run: { name: 'running' },
         execution: { status: 'running', traces: {}, startedAt },
@@ -817,7 +901,7 @@ export const useEditorStore = create<EditorState>()((set, get) => {
       const fold = get().fold;
 
       const fail = (err: unknown) =>
-        finishRun(token, workflowId, inputs, startedAt, {
+        finishRun(token, workflowId, inputs, startedAt, fingerprint, {
           status: 'failed',
           failure: { kind: 'api', error: err },
           traces: nodeTracesFromError(err),
@@ -826,7 +910,7 @@ export const useEditorStore = create<EditorState>()((set, get) => {
       if (mode === 'sync') {
         runWorkflow(yaml, inputs, fold)
           .then((res) =>
-            finishRun(token, workflowId, inputs, startedAt, {
+            finishRun(token, workflowId, inputs, startedAt, fingerprint, {
               status: 'succeeded',
               result: res.result,
               warnings: res.warnings,
@@ -851,7 +935,7 @@ export const useEditorStore = create<EditorState>()((set, get) => {
                 if (status.status === 'finished') {
                   stopJobPolling();
                   const parsed = parseJobRunResult(status.result);
-                  finishRun(token, workflowId, inputs, startedAt, {
+                  finishRun(token, workflowId, inputs, startedAt, fingerprint, {
                     status: 'succeeded',
                     result: parsed.result,
                     warnings: parsed.warnings,
@@ -860,7 +944,7 @@ export const useEditorStore = create<EditorState>()((set, get) => {
                   });
                 } else if (status.status === 'failed') {
                   stopJobPolling();
-                  finishRun(token, workflowId, inputs, startedAt, {
+                  finishRun(token, workflowId, inputs, startedAt, fingerprint, {
                     status: 'failed',
                     failure: {
                       kind: 'job',
@@ -883,6 +967,35 @@ export const useEditorStore = create<EditorState>()((set, get) => {
     },
 
     resetRun: () => set({ run: { name: 'idle' } }),
+
+    previewRunHistory: (entry, throughStep = null) => {
+      // A historical replay must never replace the in-flight pulse state.
+      if (get().execution.status === 'running') return;
+      let currentFingerprint: string;
+      try {
+        currentFingerprint = workflowFingerprint(get().getYaml());
+      } catch {
+        set({ execution: IDLE_EXECUTION });
+        return;
+      }
+      if (entry.workflowFingerprint !== currentFingerprint) {
+        set({ execution: IDLE_EXECUTION });
+        return;
+      }
+      set({ execution: executionFromRunHistory(entry, throughStep) });
+    },
+
+    restoreLatestExecution: () => {
+      if (get().execution.status === 'running') return;
+      let currentFingerprint: string;
+      try {
+        currentFingerprint = workflowFingerprint(get().getYaml());
+      } catch {
+        set({ execution: IDLE_EXECUTION });
+        return;
+      }
+      set({ execution: executionFromHistory(get().activeId, currentFingerprint) });
+    },
 
     /* ------------------------- panels + toggles ------------------------- */
 

@@ -1,4 +1,4 @@
-"""Workflow catalog and scaffolding domain errors."""
+"""Workflow catalog, scaffolding, and preview domain errors."""
 
 from corespine import CorespineError
 
@@ -37,3 +37,9 @@ class WorkflowFormatError(WorkflowError):
     """A workflow wire document is malformed, oversized, or too complex."""
 
     code = "workflow.format"
+
+
+class WorkflowPreviewError(WorkflowError):
+    """A workflow graph cannot be represented by the safe preview contract."""
+
+    code = "workflow.preview"

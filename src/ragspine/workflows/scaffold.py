@@ -56,14 +56,16 @@ def scaffold_workflow(
 
     resolved_matcher = matcher or LexicalTemplateMatcher()
     if reuse:
-        matches = resolved_matcher.rank(normalized, resolved_catalog.runnable())
+        matches = resolved_matcher.rank(normalized, resolved_catalog._matching_refs())
         selected_match = choose_reusable(
             matches,
             threshold=(resolved_matcher.reuse_threshold if threshold is None else threshold),
             margin=resolved_matcher.reuse_margin if margin is None else margin,
         )
         if selected_match is not None:
-            selected = selected_match.template
+            # Matcher candidates contain metadata only.  Resolve the id back
+            # through the catalog to return one defensive workflow clone.
+            selected = resolved_catalog.get(selected_match.template.id)
             return ScaffoldResult(
                 yaml=selected.yaml,
                 workflow=selected.workflow,

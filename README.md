@@ -303,11 +303,15 @@ version-controlled evaluation sets live under `data/golden/`. Nothing here is re
 
 ## Status & roadmap
 
-**Current release: 0.10.0.** It productizes retrieval controls and adds generation-only conversation
-history on top of the completed twelve-workstream **quality-depth** program
+**Current release: 0.11.0.** It adds a 1,000-template workflow catalog, natural-language
+scaffolding, Dify/n8n interoperability, and versioned graph previews on top of the completed
+twelve-workstream **quality-depth** program
 ([`docs/prd-quality-depth.md`](docs/prd-quality-depth.md)):
 
-- **This release (0.10.0):** metadata filtering, multi-library routing, an economy retrieval preset,
+- **This release (0.11.0):** bounded offline catalog loading and semantic matching, JSON/YAML/TOML
+  workflow input, Dify-compatible scaffolding, n8n conversion, public graph-preview generation,
+  CLI/API access, and the website export contract for all 1,000 bundled templates.
+- **0.10.0:** metadata filtering, multi-library routing, an economy retrieval preset,
   store-level parent-child expansion, and conversation history that only enters generation context.
 - **0.8.0 (W8–W12, the second competitor batch):** post-retrieval postprocessor chain
   (MMR de-dup · lost-in-the-middle · context compression), LLM query transforms (HyDE · RAG-Fusion ·

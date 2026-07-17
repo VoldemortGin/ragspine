@@ -19,6 +19,17 @@ small-to-big chunking is a config switch, ADR 0018), FAQ short-circuit cache, an
 (`dify/` — L0 static gate + L1/L2 safe execution; ADR 0014): endpoints
 `/v1/dify/{analyze,compile,run,run/jobs}` reuse the app factory / DI / RQ queue.
 
+The separate **offline workflow catalog/scaffolder** is configuration-only and never executes a
+workflow: `GET /v1/workflow-templates` returns metadata-only pages (`offset`, `limit <= 100`,
+`total`, `next_offset`) with a page-specific weak ETag and public `max-age=300,
+stale-while-revalidate=3600`; its list rows deliberately omit YAML, the full workflow, and previews.
+`GET /v1/workflow-templates/{template_id}` returns the selected canonical Dify document plus YAML and
+a versioned graph-only preview; `POST /v1/workflow-scaffold` either reuses a bundled template or builds
+the bounded offline fallback and returns the same preview contract. Preview projection exposes only
+node/edge identity, labels, geometry, containment, and branch labels—never prompts, provider config,
+variables, or credentials. `ServiceConfig.workflow_matcher` is constructed during app lifespan, stored
+on `app.state`, and obtained through DI; unavailable semantic matching falls back to the lexical matcher.
+
 `conversation.py` is the **W6c multi-turn skeleton (opt-in, programmatic)**: `ConversationMemory` (bounded,
 stores only the prior turn's home entity-code + period — non-sensitive) + `resolve_followup` (deterministic
 carry-forward of those slots into a structured/composite follow-up that omits them) + `ConversationSession.ask`
@@ -58,9 +69,16 @@ calls, so a not-found answer can only ever stream the refusal.
 
 ## Invariants
 
+- **HTTP ingress is bounded before parsing.** The app-level receive wrapper rejects request bodies over
+  2 MiB before Starlette/Pydantic buffering, and 422 responses never reflect submitted `input`/`ctx`
+  values. Keep this outer cap and opaque validation shape when adding body-bearing endpoints.
 - **FAQ conservative exclusions** — structured-numeric / competitor / real-time /
   expired / disabled / RESTRICTED content must never short-circuit. The FAQ layer
   sits in front of the anti-fabrication guard, so a wrong short-circuit bypasses it.
+- **Workflow catalog/scaffold is a read-only trust boundary.** It accepts no provider, API key, URL,
+  arbitrary path, or install request and never runs generated code. List responses stay metadata-only;
+  detail/scaffold previews must continue through the bounded public graph projection rather than
+  copying arbitrary Dify node data.
 - **Dify run is a trust boundary** — `/v1/dify/{analyze,compile}` never execute (always
   safe); `/v1/dify/run[/jobs]` is default-off (`dify_run_enabled=False` → 403) and, when
   on, always passes L0 static gate (warnings reject + import allowlist) → L1 restricted
@@ -71,7 +89,7 @@ calls, so a not-found answer can only ever stream the refusal.
 ## Read before editing
 
 - **HTTP is a boundary adapter — don't re-home business logic here.** `api/app.py` (app
-  factory) wires `config`/`provider`/`queue`/`faq_cache` onto `app.state`; `api/dependencies.py`
+  factory) wires `config`/`provider`/`queue`/`faq_cache`/`workflow_matcher` onto `app.state`; `api/dependencies.py`
   reads them back, all overridable via `app.dependency_overrides` in tests. Route handlers
   (`api/routes.py`) adapt at the edge and call into `agent`/`retrieval` — never read env, build a
   provider, or reimplement `answer_question` inside a handler. Pull collaborators through the

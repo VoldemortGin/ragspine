@@ -289,6 +289,10 @@ class WorkflowTemplateInfo(BaseModel):
 
 class WorkflowTemplateListResponse(BaseModel):
     request_id: str
+    total: int = Field(ge=0)
+    offset: int = Field(ge=0)
+    limit: int = Field(ge=1, le=100)
+    next_offset: int | None = Field(default=None, ge=0)
     templates: list[WorkflowTemplateInfo] = Field(default_factory=list)
 
 
@@ -296,6 +300,7 @@ class WorkflowTemplateDetailResponse(WorkflowTemplateInfo):
     request_id: str
     workflow: dict[str, JsonValue]
     yaml: str
+    preview: dict[str, JsonValue]
 
 
 class WorkflowScaffoldRequest(BaseModel):
@@ -316,6 +321,7 @@ class WorkflowScaffoldResponse(BaseModel):
     request_id: str
     workflow: dict[str, JsonValue]
     yaml: str
+    preview: dict[str, JsonValue]
     template_id: str | None = None
     origin: Literal["template", "generated"]
     confidence: float = Field(ge=0.0, le=1.0)

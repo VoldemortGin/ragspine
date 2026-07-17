@@ -319,10 +319,14 @@ def _atomic_replace_workflow(path: Path, data: bytes) -> None:
             temporary_stat = temporary.lstat()
         except OSError as exc:
             raise WorkflowInputError("临时输出在替换前丢失") from exc
-        if not stat.S_ISREG(temporary_stat.st_mode) or (
-            temporary_stat.st_dev,
-            temporary_stat.st_ino,
-        ) != temporary_identity:
+        if (
+            not stat.S_ISREG(temporary_stat.st_mode)
+            or (
+                temporary_stat.st_dev,
+                temporary_stat.st_ino,
+            )
+            != temporary_identity
+        ):
             raise WorkflowInputError("临时输出在写入期间被替换")
 
         try:
@@ -444,8 +448,7 @@ def _cmd_workflow_create(args: argparse.Namespace) -> int:
             )
         except Exception as exc:
             if args.matcher != "auto" or (
-                isinstance(exc, WorkflowError)
-                and not isinstance(exc, WorkflowMatcherError)
+                isinstance(exc, WorkflowError) and not isinstance(exc, WorkflowMatcherError)
             ):
                 raise
             print("warning: 语义匹配不可用，已回退 lexical", file=sys.stderr)
@@ -512,6 +515,24 @@ def _cmd_workflow_show(args: argparse.Namespace) -> int:
     try:
         template = load_builtin_catalog().get(args.template_id)
         sys.stdout.write(_serialize_workflow(template.workflow, args.format))
+    except WorkflowError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
+def _cmd_workflow_preview(args: argparse.Namespace) -> int:
+    """Print one template's versioned, graph-only preview as JSON."""
+
+    from ragspine.workflows.catalog import load_builtin_catalog
+    from ragspine.workflows.errors import WorkflowError
+    from ragspine.workflows.formats import dump_json
+    from ragspine.workflows.preview import build_workflow_preview
+
+    try:
+        template = load_builtin_catalog().get(args.template_id)
+        preview = build_workflow_preview(template.workflow)
+        sys.stdout.write(dump_json(preview.to_dict()))
     except WorkflowError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -611,6 +632,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--format", choices=["yaml", "json"], default="yaml", help="输出格式"
     )
     p_workflow_show.set_defaults(func=_cmd_workflow_show)
+
+    p_workflow_preview = workflow_sub.add_parser(
+        "preview", help="输出一个内置模板的版本化只读流程图 JSON"
+    )
+    p_workflow_preview.add_argument("template_id", help="catalog template id")
+    p_workflow_preview.set_defaults(func=_cmd_workflow_preview)
 
     return parser
 

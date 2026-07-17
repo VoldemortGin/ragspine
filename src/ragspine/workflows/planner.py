@@ -9,12 +9,23 @@ document structure.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 
 from ragspine.workflows.errors import WorkflowInputError
 
 MAX_DESCRIPTION_CHARS = 4096
 DIFY_DSL_VERSION = "0.6.0"
+
+
+@dataclass(frozen=True)
+class WorkflowInput:
+    """One bounded start-node input in a safe workflow blueprint."""
+
+    variable: str
+    label: str
+    kind: str = "paragraph"
+    required: bool = True
 
 
 @dataclass(frozen=True)
@@ -25,6 +36,7 @@ class WorkflowBlueprint:
     goal: str
     input_name: str = "input"
     output_name: str = "result"
+    inputs: tuple[WorkflowInput, ...] = ()
 
 
 def normalize_description(description: str) -> str:
@@ -61,15 +73,13 @@ def make_blueprint(description: str) -> WorkflowBlueprint:
 def render_blueprint(blueprint: WorkflowBlueprint) -> str:
     """Render a fixed Dify graph, structurally escaping every dynamic scalar."""
 
+    inputs = _validated_inputs(blueprint)
+    output_name_value = _validated_variable(blueprint.output_name, label="output_name")
     name = _yaml_scalar(blueprint.name)
-    goal_prompt = _yaml_scalar(
-        "You are the specialist for this workflow. "
-        f"Goal: {blueprint.goal}\n"
-        "Follow the goal precisely, state material uncertainty, and return a focused result."
-    )
-    input_name = _yaml_scalar(blueprint.input_name)
-    output_name = _yaml_scalar(blueprint.output_name)
-    user_prompt = _yaml_scalar(f"{{{{#start_1.{blueprint.input_name}#}}}}")
+    goal_prompt = _yaml_scalar(blueprint_system_prompt(blueprint))
+    output_name = _yaml_scalar(output_name_value)
+    variables = _render_input_variables(inputs)
+    user_prompt = _yaml_scalar(_render_user_prompt(blueprint, inputs))
     return f'''app:
   description: "Spine-authored workflow generated from a natural-language request."
   icon: "🧩"
@@ -97,12 +107,7 @@ workflow:
           type: start
           title: Start
           variables:
-            - variable: {input_name}
-              label: Input
-              max_length: null
-              options: []
-              type: paragraph
-              required: true
+{variables}
         height: 90
         position: {{x: 30, y: 220}}
         positionAbsolute: {{x: 30, y: 220}}
@@ -201,6 +206,73 @@ def generate_dify_yaml(description: str) -> str:
     return render_blueprint(make_blueprint(description))
 
 
+def blueprint_system_prompt(blueprint: WorkflowBlueprint) -> str:
+    """Return the canonical prompt used by both rendering and catalog generation."""
+
+    return (
+        "You are the specialist for this workflow. "
+        f"Goal: {blueprint.goal}\n"
+        "Follow the goal precisely, state material uncertainty, and return a focused result."
+    )
+
+
+def _validated_inputs(blueprint: WorkflowBlueprint) -> tuple[WorkflowInput, ...]:
+    inputs = blueprint.inputs or (
+        WorkflowInput(
+            variable=_validated_variable(blueprint.input_name, label="input_name"),
+            label="Input",
+        ),
+    )
+    if len(inputs) > 8:
+        raise WorkflowInputError("workflow blueprint start input 最多 8 个")
+    variables: set[str] = set()
+    for item in inputs:
+        variable = _validated_variable(item.variable, label="input variable")
+        if variable in variables:
+            raise WorkflowInputError("workflow blueprint input variable 不得重复")
+        variables.add(variable)
+        if not isinstance(item.label, str) or not item.label.strip():
+            raise WorkflowInputError("workflow blueprint input label 必须是非空字符串")
+        if item.kind not in {"paragraph", "text-input"}:
+            raise WorkflowInputError("workflow blueprint input type 只支持 paragraph/text-input")
+        if not isinstance(item.required, bool):
+            raise WorkflowInputError("workflow blueprint input required 必须是 bool")
+    return inputs
+
+
+def _validated_variable(value: str, *, label: str) -> str:
+    if not isinstance(value, str) or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", value) is None:
+        raise WorkflowInputError(f"workflow blueprint {label} 非法")
+    return value
+
+
+def _render_input_variables(inputs: tuple[WorkflowInput, ...]) -> str:
+    blocks: list[str] = []
+    for item in inputs:
+        blocks.append(
+            "\n".join(
+                (
+                    f"            - variable: {_yaml_scalar(item.variable)}",
+                    f"              label: {_yaml_scalar(item.label)}",
+                    "              max_length: null",
+                    "              options: []",
+                    f"              type: {item.kind}",
+                    f"              required: {'true' if item.required else 'false'}",
+                )
+            )
+        )
+    return "\n".join(blocks)
+
+
+def _render_user_prompt(
+    blueprint: WorkflowBlueprint,
+    inputs: tuple[WorkflowInput, ...],
+) -> str:
+    if not blueprint.inputs:
+        return f"{{{{#start_1.{inputs[0].variable}#}}}}"
+    return "\n\n".join(f"{item.label}:\n{{{{#start_1.{item.variable}#}}}}" for item in inputs)
+
+
 def _yaml_scalar(value: str) -> str:
     """JSON strings are valid YAML double-quoted scalars."""
 
@@ -216,9 +288,11 @@ def _neutralize_template_markers(value: str) -> str:
 __all__ = [
     "DIFY_DSL_VERSION",
     "MAX_DESCRIPTION_CHARS",
+    "WorkflowInput",
     "WorkflowBlueprint",
     "normalize_description",
     "make_blueprint",
+    "blueprint_system_prompt",
     "render_blueprint",
     "generate_dify_yaml",
 ]

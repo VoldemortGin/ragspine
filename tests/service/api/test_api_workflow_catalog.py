@@ -4,6 +4,7 @@ import json
 import os
 import socket
 from collections.abc import Sequence
+from dataclasses import replace
 
 import pytest
 import rootutils
@@ -28,9 +29,7 @@ class _SemanticMatcher:
     def __init__(self) -> None:
         self.calls = 0
 
-    def rank(
-        self, query: str, templates: Sequence[WorkflowTemplate]
-    ) -> tuple[TemplateMatch, ...]:
+    def rank(self, query: str, templates: Sequence[WorkflowTemplate]) -> tuple[TemplateMatch, ...]:
         del query
         self.calls += 1
         return (TemplateMatch(templates[0], confidence=1.0, matcher=self.name),)
@@ -77,6 +76,129 @@ def test_workflow_template_list_is_metadata_only(client: TestClient) -> None:
         } <= set(template)
         assert "yaml" not in template
         assert "dify_yaml" not in template
+        assert "preview" not in template
+
+
+def test_workflow_template_list_does_not_clone_full_workflows(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ragspine.workflows import catalog as catalog_module
+
+    catalog = catalog_module.load_builtin_catalog()
+    monkeypatch.setattr(catalog_module, "load_builtin_catalog", lambda: catalog)
+
+    def reject_clone(template: WorkflowTemplate) -> WorkflowTemplate:
+        del template
+        raise AssertionError("metadata list must not clone full workflow documents")
+
+    monkeypatch.setattr(catalog_module, "_clone_template", reject_clone)
+
+    response = client.get("/v1/workflow-templates")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1000
+    assert body["offset"] == 0
+    assert body["limit"] == 100
+    assert body["next_offset"] == 100
+    assert len(body["templates"]) == 100
+
+
+def test_workflow_template_list_is_bounded_paginated_and_cacheable(
+    client: TestClient,
+) -> None:
+    first = client.get("/v1/workflow-templates", params={"offset": 100, "limit": 25})
+
+    assert first.status_code == 200
+    body = first.json()
+    assert body["total"] == 1000
+    assert body["offset"] == 100
+    assert body["limit"] == 25
+    assert body["next_offset"] == 125
+    assert len(body["templates"]) == 25
+    assert first.headers["cache-control"].startswith("public, max-age=300")
+    assert first.headers["etag"].startswith('W/"')
+
+    not_modified = client.get(
+        "/v1/workflow-templates",
+        params={"offset": 100, "limit": 25},
+        headers={"if-none-match": first.headers["etag"]},
+    )
+    assert not_modified.status_code == 304
+    assert not not_modified.content
+    assert not_modified.headers["etag"] == first.headers["etag"]
+
+    strong_etag = first.headers["etag"].removeprefix("W/")
+    listed_match = client.get(
+        "/v1/workflow-templates",
+        params={"offset": 100, "limit": 25},
+        headers={"if-none-match": f'W/"stale", {strong_etag}'},
+    )
+    assert listed_match.status_code == 304
+
+    repeated_match = client.get(
+        "/v1/workflow-templates",
+        params={"offset": 100, "limit": 25},
+        headers=[("if-none-match", 'W/"stale"'), ("if-none-match", strong_etag)],
+    )
+    assert repeated_match.status_code == 304
+
+    wildcard_match = client.get(
+        "/v1/workflow-templates",
+        params={"offset": 100, "limit": 25},
+        headers={"if-none-match": "*"},
+    )
+    assert wildcard_match.status_code == 304
+
+    stale = client.get(
+        "/v1/workflow-templates",
+        params={"offset": 100, "limit": 25},
+        headers={"if-none-match": 'W/"stale"'},
+    )
+    assert stale.status_code == 200
+
+
+def test_workflow_template_list_handles_empty_page_and_parameter_bounds(
+    client: TestClient,
+) -> None:
+    empty = client.get("/v1/workflow-templates", params={"offset": 10_000})
+
+    assert empty.status_code == 200
+    body = empty.json()
+    assert body["total"] == 1000
+    assert body["offset"] == 10_000
+    assert body["limit"] == 100
+    assert body["next_offset"] is None
+    assert body["templates"] == []
+
+    for params in ({"offset": -1}, {"limit": 0}, {"limit": 101}):
+        assert client.get("/v1/workflow-templates", params=params).status_code == 422
+
+
+def test_workflow_template_list_etag_covers_metadata(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ragspine.workflows import catalog as catalog_module
+
+    template = catalog_module.load_builtin_catalog().list()[0]
+    catalogs = [catalog_module.WorkflowCatalog((template,))]
+    monkeypatch.setattr(catalog_module, "load_builtin_catalog", lambda: catalogs[0])
+
+    original = client.get("/v1/workflow-templates")
+    assert original.status_code == 200
+
+    catalogs[0] = catalog_module.WorkflowCatalog(
+        (replace(template, description=f"{template.description} updated"),)
+    )
+    changed = client.get(
+        "/v1/workflow-templates",
+        headers={"if-none-match": original.headers["etag"]},
+    )
+
+    assert changed.status_code == 200
+    assert changed.headers["etag"] != original.headers["etag"]
 
 
 def test_workflow_template_detail_includes_yaml(client: TestClient) -> None:
@@ -93,6 +215,10 @@ def test_workflow_template_detail_includes_yaml(client: TestClient) -> None:
     assert body["compatibility"]
     assert isinstance(body["requirements"], list)
     assert "source" in body
+    assert body["preview"]["preview_schema_version"] == 1
+    assert body["preview"]["nodes"]
+    assert body["preview"]["edges"]
+    assert "prompt_template" not in json.dumps(body["preview"], ensure_ascii=False)
 
 
 def test_workflow_template_detail_missing_is_404(client: TestClient) -> None:
@@ -100,6 +226,18 @@ def test_workflow_template_detail_missing_is_404(client: TestClient) -> None:
 
     assert response.status_code == 404
     assert response.json()["error"]["type"] == "workflow.template_not_found"
+
+
+def test_workflow_template_detail_secret_shaped_id_is_not_echoed(
+    client: TestClient,
+) -> None:
+    secret_id = "SK" + "0123456789abcdef" * 2
+
+    response = client.get(f"/v1/workflow-templates/{secret_id}")
+
+    assert response.status_code == 404
+    assert response.json()["error"]["type"] == "workflow.template_not_found"
+    assert secret_id not in response.text
 
 
 def test_workflow_scaffold_generates_offline_when_reuse_disabled(
@@ -132,6 +270,9 @@ def test_workflow_scaffold_generates_offline_when_reuse_disabled(
     assert isinstance(body["requirements"], list)
     assert "source" in body
     assert body["source"] is None
+    assert body["preview"]["preview_schema_version"] == 1
+    assert len(body["preview"]["nodes"]) == 3
+    assert len(body["preview"]["edges"]) == 2
     assert 0.0 <= body["confidence"] <= 1.0
     assert body["matcher"]
     assert isinstance(body["warnings"], list)
@@ -157,6 +298,7 @@ def test_workflow_scaffold_reuses_explicit_catalog_template(client: TestClient) 
     assert isinstance(body["workflow"], dict)
     assert body["yaml"]
     assert body["matcher"]
+    assert body["preview"]["preview_schema_version"] == 1
 
 
 def test_workflow_scaffold_reuses_cached_injected_semantic_matcher(tmp_path) -> None:
