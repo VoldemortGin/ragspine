@@ -30,7 +30,7 @@ To exercise workflow execution from the editor, the server must be started with
 ## Build
 
 ```bash
-pnpm build        # typechecks (tsc --noEmit), then emits studio/dist
+pnpm build        # typechecks (tsc --noEmit), then emits src/ragspine/service/studio_dist
 ```
 
 The bundle is built with `base: '/studio/'` and is meant to be mounted by the

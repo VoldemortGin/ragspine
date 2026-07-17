@@ -41,7 +41,10 @@ def test_studio_default_targets_packaged_assets(tmp_path):
 
 
 def test_studio_not_mounted_when_packaged_assets_missing(tmp_path):
-    client = make_client(tmp_path)
+    # 源码树构建过 Studio 后默认包内路径真实存在，不能依赖环境状态；
+    # 用 tmp 下不存在的目录模拟"wheel 未含产物"的安装环境（同一挂载容错路径）。
+    missing_packaged = tmp_path / "studio_dist"
+    client = make_client(tmp_path, studio_dir=str(missing_packaged))
     assert client.get("/studio/").status_code == 404
 
 

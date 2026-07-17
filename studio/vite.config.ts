@@ -6,6 +6,11 @@ const BACKEND = 'http://localhost:8000';
 
 export default defineConfig({
   base: '/studio/',
+  // 产物直接落到包内路径（hatch artifacts 打包；缺失时不阻塞 editable 安装/gate）。
+  build: {
+    outDir: '../src/ragspine/service/studio_dist',
+    emptyOutDir: true,
+  },
   plugins: [react(), tailwindcss()],
   server: {
     proxy: {

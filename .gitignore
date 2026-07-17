@@ -40,5 +40,7 @@ docs/site/
 .jbeval/
 
 # Studio frontend (studio/ at repo root) — dependencies and build output are regenerable.
+# vite 产物直接输出到包内路径（见 studio/vite.config.ts），由 hatch artifacts 打包。
 node_modules/
 studio/dist/
+src/ragspine/service/studio_dist/

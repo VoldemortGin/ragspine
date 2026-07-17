@@ -94,7 +94,7 @@ studio-dev: ## Run the Studio Vite dev server (proxies API to :8000)
 	cd studio && pnpm dev
 
 .PHONY: studio-build
-studio-build: ## Build the Studio static bundle into studio/dist
+studio-build: ## Build the Studio static bundle into src/ragspine/service/studio_dist
 	cd studio && pnpm build
 
 # ---- fixtures / docs -----------------------------------------------------------------
