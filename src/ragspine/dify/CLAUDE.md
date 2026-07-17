@@ -45,7 +45,8 @@ IR 及以下层零 pydantic、零 Dify 概念泄漏。
 | knowledge-retrieval | `build_narrative_retriever + retrieve`（ragspine 叙事检索原语；`KNOWLEDGE_CHUNK_DB` 默认 `':memory:'` 离线空库） |
 | parameter-extractor | `provider.chat(tools=[function-tool schema])` function-calling，解析 tool_calls arguments → 写 `_ctx` |
 | tool | spineagent `@function_tool` 占位（生成代码 import spineagent，编译器不新增依赖）+ invoke 调用点；函数体留 `NotImplementedError` 待补全 |
-| http-request / 插件 等真正需外部副作用的 | **留钩子**（残余钩子集）：生成带 `raise NotImplementedError` + 详细 docstring 的函数 + warning（编译器无法凭空生成外部副作用，产可运行骨架，不整体失败） |
+| http-request | 已建模：受控 HTTP 槽位（`_HTTP_CLIENT`），执行默认禁用——L0 闸拒绝，须 `RAGSPINE_DIFY_HTTP_ENABLED` 显式开启后由 runner 注入受控客户端（`service/dify/http_client.py`：超时钳制、1MB 截断、仅 http(s)）；生成代码零网络 import |
+| 插件 等真正需外部副作用的 | **留钩子**（残余钩子集）：生成带 `raise NotImplementedError` + 详细 docstring 的函数 + warning（编译器无法凭空生成外部副作用，产可运行骨架，不整体失败） |
 
 ## P7 高层编译
 
