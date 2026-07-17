@@ -12,20 +12,27 @@
   纯 Python 脚本并打印（默认附静态优化建议到 stderr）；`dify analyze <path>` 只跑零-API
   静态优化分析、打印建议列表。延迟 import（不装 [dify] 时其它子命令照常可用）。
 
-# TODO: serve / worker / demo / topology 子命令暂不提供——它们需要 [service] extra
-# 或随仓库分发的 scripts/，与"零-SDK 离线核心自包含"的设计相悖；待服务层入 wheel 后再补。
+# `workflow serve` 需要 [service] extra（fastapi/uvicorn 延迟 import，未装时诚实报错并
+# 提示安装），本地起 API + Studio 并经 launch-session 自动加载工作流。
+# TODO: worker / demo / topology 子命令暂不提供——它们需要随仓库分发的 scripts/，
+# 与"零-SDK 离线核心自包含"的设计相悖；待需要时再补。
 """
 
 import argparse
+import json
 import os
 import re
+import socket
 import stat
 import sys
+import threading
+import time
 import unicodedata
+import webbrowser
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from tempfile import TemporaryDirectory, mkstemp
-from typing import Literal
+from typing import Any, Literal, cast
 
 from ragspine.agent.agent import AgentResult, answer_question
 from ragspine.agent.llm_provider import MockProvider
@@ -49,6 +56,10 @@ _WINDOWS_RESERVED_NAMES = frozenset(
 )
 _WINDOWS_INVALID_FILENAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _WorkflowOutputFormat = Literal["yaml", "json"]
+# workflow preview/run 把参数认作本地文件（而非 catalog template id）的判定要素：
+# 已存在的文件、含路径分隔符、或带受支持的 workflow 后缀。catalog id 只含 [a-z0-9-]，
+# 永不含 "." / "/"，故两个命名空间不会相互遮蔽。
+_WORKFLOW_FILE_SUFFIXES = frozenset({".json", ".yaml", ".yml", ".toml"})
 
 # quickstart 用的微型合成事实（虚构公司 ACME，确定性、可重建；与 qa_eval 的口径一致）。
 # 命中演示：ACME_CN FY2024 REVENUE 1320 USD_M，带完整来源血缘。
@@ -521,21 +532,233 @@ def _cmd_workflow_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def _is_workflow_file_argument(value: str) -> bool:
+    """Return whether a workflow source argument names a local file, not a catalog id."""
+
+    if "/" in value or "\\" in value:
+        return True
+    path = Path(value)
+    return path.is_file() or path.suffix.lower() in _WORKFLOW_FILE_SUFFIXES
+
+
 def _cmd_workflow_preview(args: argparse.Namespace) -> int:
-    """Print one template's versioned, graph-only preview as JSON."""
+    """Print a versioned, graph-only preview JSON for a template id or a local file."""
 
     from ragspine.workflows.catalog import load_builtin_catalog
     from ragspine.workflows.errors import WorkflowError
-    from ragspine.workflows.formats import dump_json
+    from ragspine.workflows.formats import dump_json, load_workflow
     from ragspine.workflows.preview import build_workflow_preview
 
     try:
-        template = load_builtin_catalog().get(args.template_id)
-        preview = build_workflow_preview(template.workflow)
+        if _is_workflow_file_argument(args.source):
+            path = Path(args.source)
+            if not path.exists():
+                print(f"error: 文件不存在：{path}", file=sys.stderr)
+                return 2
+            workflow: dict[str, object] = load_workflow(path)
+        else:
+            workflow = load_builtin_catalog().get(args.source).workflow
+        preview = build_workflow_preview(workflow)
         sys.stdout.write(dump_json(preview.to_dict()))
     except WorkflowError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+    return 0
+
+
+def _print_node_trace_summary(traces: object) -> None:
+    """把节点 trace 摘要打到 stderr（执行顺序/状态/耗时；完整 inputs/outputs 在 stdout JSON）。"""
+
+    if not isinstance(traces, list) or not traces:
+        return
+    print(f"\n节点 trace（共 {len(traces)} 条，按执行顺序）：", file=sys.stderr)
+    for raw in traces:
+        trace: dict[str, object] = raw if isinstance(raw, dict) else {}
+        elapsed = trace.get("elapsed_ms", 0.0)
+        elapsed_text = f"{elapsed:.1f}ms" if isinstance(elapsed, int | float) else "?"
+        line = (
+            f"  [{trace.get('index', '?')}] {trace.get('node_id', '?')}"
+            f" · {trace.get('title', '')}（{trace.get('node_type', '?')}）"
+            f" — {trace.get('status', '?')}，{elapsed_text}"
+        )
+        error = trace.get("error")
+        if error:
+            line += f"，error: {error}"
+        print(line, file=sys.stderr)
+
+
+def _cmd_workflow_run(args: argparse.Namespace) -> int:
+    """本地一次性执行工作流文件：编译（带节点 trace）→ L0 安全门 → L1 受限沙箱执行。
+
+    执行栈与 HTTP `/v1/dify/run` 完全同源（compile_dify_yaml + service.dify.runner），
+    不引入第二套执行器；provider 本地选择（默认离线 mock），无需起 FastAPI 服务。
+    """
+
+    from corespine import LLMProvider
+
+    from ragspine.dify.api import compile_dify_yaml
+    from ragspine.dify.errors import DifyCompileError
+    from ragspine.service.dify.runner import (
+        DEFAULT_TIMEOUT_S,
+        DifyRunError,
+        DifyTimeoutError,
+        run_generated,
+    )
+    from ragspine.service.dify.safety import DifyUnsafeError
+    from ragspine.workflows.errors import WorkflowFormatError
+    from ragspine.workflows.formats import dump_dify_yaml, load_workflow
+
+    path = Path(args.path)
+    if not path.exists():
+        print(f"error: 文件不存在：{path}", file=sys.stderr)
+        return 2
+    try:
+        inputs = json.loads(args.inputs)
+    except json.JSONDecodeError as exc:
+        print(f"error: --inputs 不是合法 JSON：{exc}", file=sys.stderr)
+        return 2
+    if not isinstance(inputs, dict):
+        print('error: --inputs 必须是 JSON object，如 \'{"query": "hello"}\'', file=sys.stderr)
+        return 2
+
+    provider: LLMProvider
+    if args.provider == "anthropic":
+        # 真实 Claude：SDK 延迟 import（缺 [llm] extra 或 key 时由 provider 自身报错）。
+        from ragspine.agent.llm_provider import AnthropicProvider
+
+        provider = AnthropicProvider()
+    else:
+        provider = MockProvider()
+
+    try:
+        source = dump_dify_yaml(load_workflow(path))
+        compiled = compile_dify_yaml(source, analyze=False, emit_node_traces=True)
+    except WorkflowFormatError as exc:
+        print(f"error: 工作流格式无效（{exc.code}）：{exc}", file=sys.stderr)
+        return 1
+    except DifyCompileError as exc:
+        print(f"error: 编译失败（{exc.code}）：{exc}", file=sys.stderr)
+        return 1
+
+    timeout_s = DEFAULT_TIMEOUT_S if args.timeout is None else args.timeout
+    try:
+        result = run_generated(compiled.code, inputs, provider, timeout_s=timeout_s)
+    except DifyUnsafeError as exc:
+        # L0 静态闸：不支持节点 / tool 占位骨架 / 越权 import 一律在执行前被拒。
+        print(f"error: L0 安全门拒绝执行（{exc.code}）：{exc}", file=sys.stderr)
+        return 1
+    except (DifyRunError, DifyTimeoutError) as exc:
+        # 执行失败也把已执行节点的 trace（runner 净化后附在 context）给到用户。
+        _print_node_trace_summary(exc.context.get("node_traces"))
+        print(f"error: 执行失败（{exc.code}）：{exc}", file=sys.stderr)
+        return 1
+
+    node_traces = result.pop("__node_traces__", None)
+    payload = {"result": result, "node_traces": node_traces}
+    print(json.dumps(payload, ensure_ascii=False, indent=2, default=repr))
+    _print_node_trace_summary(node_traces)
+    return 0
+
+
+def _port_available(host: str, port: int) -> bool:
+    """端口预检：能 bind 即视为可用（占用时确定性报错，而非留给 uvicorn 晚失败）。"""
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        try:
+            probe.bind((host, port))
+        except OSError:
+            return False
+    return True
+
+
+def _open_browser_when_ready(url: str, *, host: str, port: int, timeout_s: float = 10.0) -> None:
+    """轮询端口就绪后恰好打开一次浏览器；超时放弃（服务本身不受影响）。"""
+
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection((host, port), timeout=0.5):
+                break
+        except OSError:
+            time.sleep(0.1)
+    else:
+        return
+    webbrowser.open(url)
+
+
+def _serve_app(app: object, *, host: str, port: int) -> None:
+    """真正阻塞的服务启动（可测性 seam：测试 monkeypatch 本函数即可不真起端口）。"""
+
+    import uvicorn
+
+    uvicorn.run(cast(Any, app), host=host, port=port)
+
+
+def _cmd_workflow_serve(args: argparse.Namespace) -> int:
+    """本地一键打开 Studio：解析工作流 → 注册 launch session → 起 API + Studio。
+
+    host 固定 127.0.0.1（PRD 要求，不提供 --host）。URL/query string 只带不透明
+    token，工作流内容、文件路径、凭据永不进入。serve 绝不改动
+    RAGSPINE_DIFY_RUN_ENABLED——打开图形不等于开启执行。
+    """
+
+    from ragspine.workflows.catalog import load_builtin_catalog
+    from ragspine.workflows.errors import WorkflowError
+    from ragspine.workflows.formats import dump_dify_yaml, load_workflow
+
+    try:
+        # [service] extra 延迟 import：未装 fastapi/uvicorn 时其它子命令照常可用。
+        from ragspine.service.api.app import create_app
+        from ragspine.service.config import ServiceConfig
+        from ragspine.service.studio.launch import LaunchSessionRegistry
+    except ImportError:
+        print(
+            'error: workflow serve 需要 [service] extra，请先安装：pip install "rag-spine[service]"',
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        if _is_workflow_file_argument(args.source):
+            path = Path(args.source)
+            if not path.exists():
+                print(f"error: 文件不存在：{path}", file=sys.stderr)
+                return 2
+            workflow: dict[str, object] = load_workflow(path)
+            name = path.stem
+        else:
+            template = load_builtin_catalog().get(args.source)
+            workflow = template.workflow
+            name = template.name
+        yaml_text = dump_dify_yaml(workflow)
+    except WorkflowError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    host = "127.0.0.1"
+    port: int = args.port
+    if not _port_available(host, port):
+        print(
+            f"error: 端口 {port} 已被占用，请用 --port 指定其它端口。",
+            file=sys.stderr,
+        )
+        return 2
+
+    registry = LaunchSessionRegistry()
+    session = registry.register(name=name, yaml=yaml_text)
+    app = create_app(ServiceConfig.from_env(), launch_sessions=registry)
+    url = f"http://{host}:{port}/studio/?launch={session.session_id}"
+    print(f"服务监听：http://{host}:{port}")
+    print(f"Studio（已自动加载「{name}」）：{url}")
+    print("工作流执行默认关闭（RAGSPINE_DIFY_RUN_ENABLED 显式开启才放行）；serve 不改动该配置。")
+    if args.open:
+        threading.Thread(
+            target=_open_browser_when_ready,
+            args=(url,),
+            kwargs={"host": host, "port": port},
+            daemon=True,
+        ).start()
+    _serve_app(app, host=host, port=port)
     return 0
 
 
@@ -634,10 +857,51 @@ def _build_parser() -> argparse.ArgumentParser:
     p_workflow_show.set_defaults(func=_cmd_workflow_show)
 
     p_workflow_preview = workflow_sub.add_parser(
-        "preview", help="输出一个内置模板的版本化只读流程图 JSON"
+        "preview", help="输出内置模板或本地工作流文件的版本化只读流程图 JSON"
     )
-    p_workflow_preview.add_argument("template_id", help="catalog template id")
+    p_workflow_preview.add_argument(
+        "source", help="catalog template id，或本地 .json/.yaml/.yml/.toml 工作流文件路径"
+    )
     p_workflow_preview.set_defaults(func=_cmd_workflow_preview)
+
+    p_workflow_run = workflow_sub.add_parser(
+        "run", help="本地一次性执行工作流文件（L0 安全门 + 受限沙箱），输出结果与节点 trace"
+    )
+    p_workflow_run.add_argument("path", help="本地 .json/.yaml/.yml/.toml 工作流文件路径")
+    p_workflow_run.add_argument(
+        "--inputs",
+        default="{}",
+        help='工作流输入，JSON object 字符串（如 \'{"query": "hello"}\'，默认 {}）',
+    )
+    p_workflow_run.add_argument(
+        "--provider",
+        choices=["mock", "anthropic"],
+        default="mock",
+        help="mock=离线确定性（默认）；anthropic=真实 Claude（需装 [llm] + key）",
+    )
+    p_workflow_run.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help="执行超时秒数（默认 10s，与 HTTP 执行面同源）",
+    )
+    p_workflow_run.set_defaults(func=_cmd_workflow_run)
+
+    p_workflow_serve = workflow_sub.add_parser(
+        "serve",
+        help="本地起 API + Studio 并自动加载工作流（需 [service] extra；host 固定 127.0.0.1）",
+    )
+    p_workflow_serve.add_argument(
+        "source", help="catalog template id，或本地 .json/.yaml/.yml/.toml 工作流文件路径"
+    )
+    p_workflow_serve.add_argument(
+        "--port", type=int, default=8000, help="监听端口（默认 8000；被占用时确定性报错）"
+    )
+    p_workflow_serve.add_argument(
+        "--open", action="store_true", help="服务就绪后自动打开浏览器（恰好一次）"
+    )
+    p_workflow_serve.set_defaults(func=_cmd_workflow_serve)
 
     return parser
 

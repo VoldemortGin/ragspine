@@ -1,8 +1,8 @@
 # PRD — Orchestration Compatibility: Dify / n8n ingress, the Studio console & external-API shape cloning
 
 > **status:** in progress (Dify compiler+runner, per-node trace, n8n↔Dify conversion, Studio editor,
-> and Dify/n8n **API shape clones** are implemented; the 1,000-template catalog and preview v1 are implemented
-> in the 0.11 source worktree but not yet released; installed-package local run/serve/open remains incomplete)
+> and Dify/n8n **API shape clones** are implemented; the 1,000-template catalog, preview v1 and the local
+> preview/run/serve/open loop are implemented in the 0.11 source worktree but not yet released)
 > · **created:** 2026-07-12 · **last audited:** 2026-07-17
 > · **methodology:** TDD (parse/convert conformance + API-shape tests first)
 > Living backlog — the ingress surfaces and console features tracked here land incrementally; carries no
@@ -60,7 +60,7 @@ Status is audited against code, focused tests, and the installed PyPI artifact:
 | **Dify format** | YAML/JSON/TOML → pure-Python compiler + static analyzer | [x] | `src/ragspine/dify/` + `workflows/formats.py` (ADR 0013) |
 | | analyze / compile / run + async job endpoints | [x] | `service/api/routes.py` (ADR 0014) |
 | | safe execution L0 static gate / L1 sandbox / L2 subprocess in the source tree | [x] | `service/dify/{safety,runner}.py` |
-| | L2 subprocess from an installed wheel | [~] | runner resolves `scripts/run_dify_workflow.py`, but the wheel does not currently include that repository script |
+| | L2 subprocess from an installed wheel | [x] | package module `ragspine.service.dify.run_dify_workflow`; runner prefers the installed entry and keeps the repository script as fallback |
 | | **per-node execution trace** (status/timing/IO, privacy-gated) | [x] | `dify/codegen/emitter.py` + `service/dify/tracing.py` |
 | **n8n format** | n8n JSON ↔ Dify DSL bidirectional lossless conversion | [x] | `src/ragspine/n8n/` |
 | | `POST /v1/n8n/convert` · `POST /v1/n8n/run` | [x] | `service/api/routes.py` |
@@ -73,21 +73,21 @@ Status is audited against code, focused tests, and the installed PyPI artifact:
 | **Workflow catalog / local DX** | bounded JSON/YAML/TOML input normalization | [x] | `workflows/formats.py`; CLI analyze/compile accept all four file suffixes |
 | | natural-language/explicit-template `workflow create`, plus `list` and `show` | [x] | PyPI 0.10 exposes the commands; YAML/JSON output is tested |
 | | 1,000-template generated catalog, integrity/source policy, semantic matching | [~] | implemented and tested in the 0.11 worktree; PyPI 0.10 still contains 7 templates |
-| | `workflow preview <template-id>` graph-only preview v1 | [~] | implemented in the 0.11 worktree; not on PyPI and does not accept a local file |
+| | `workflow preview <template-id>` graph-only preview v1 | [~] | implemented in the 0.11 worktree; not on PyPI |
 | | catalog/detail/scaffold HTTP APIs with preview v1 | [~] | implemented and tested in the 0.11 worktree; release pending |
 | | static website export and browser graph preview for 1,000 templates | [x] | `scripts/export_workflow_catalog.py`; deployed at `rag-spine.org/workflows` |
-| | preview an arbitrary local JSON/YAML/TOML workflow | [ ] | no CLI path; `preview` accepts only a catalog ID |
-| | one-shot `workflow run <file>` with inputs and node traces | [ ] | no CLI subcommand; only the HTTP execution surface exists |
-| | `workflow serve <file> --open`: start local service, open Studio, auto-load file | [ ] | no serve/open command and no Studio bootstrap/deep-link contract |
+| | preview an arbitrary local JSON/YAML/TOML workflow | [x] | `cli/main.py` `workflow preview` accepts local file paths and catalog IDs through the same preview v1 projection |
+| | one-shot `workflow run <file>` with inputs and node traces | [x] | `cli/main.py` `workflow run <file> --inputs <json>` — same compiler + L0 gate + L1 sandbox (`service/dify/runner.py`), prints result JSON + node traces |
+| | `workflow serve <file> --open`: start local service, open Studio, auto-load file | [x] | `cli/main.py` `workflow serve <file-or-template-id>` — 127.0.0.1-only, deterministic port report, packaged Studio, `webbrowser` opened exactly once; registers the file as a launch session (`service/studio/launch.py`) |
 | **Studio console** | React Flow editor: Dify workflow ⇄ canvas lossless round-trip | [x] | `studio/` |
 | | execution visualization (node badges/timing/edge highlight/IO) | [x] | `studio/src/pages/workflows/` |
 | | undo/redo · copy-paste · multi-select · inline `{{#var#}}` autocomplete | [x] | `studio/` |
 | | drag-to-add node picker · canvas search · snap grid · templates | [x] | `studio/` |
 | | JSON/YAML/TOML import; Dify YAML and n8n JSON export | [x] | `studio/src/pages/workflows/modals/` |
-| | installed-package delivery and one-command bootstrap | [~] | service can mount a prebuilt `RAGSPINE_STUDIO_DIR`; `studio/dist` is not shipped in the wheel |
-| | automatically load the CLI-selected file without exposing its path/content in the URL | [ ] | App starts from browser `localStorage`; no launch-session or deep-link ingress |
+| | installed-package asset delivery and lookup | [x] | `studio/dist` ships as `ragspine/service/studio_dist`; the service uses that package-relative path by default and keeps `RAGSPINE_STUDIO_DIR` as an override |
+| | automatically load the CLI-selected file without exposing its path/content in the URL | [x] | opaque bounded `?launch=<token>` → `GET /v1/launch-sessions/{id}` (`service/api/routes.py`) → `studio/src/launch.ts` imports into the canvas; no launch param ⇒ `localStorage` bootstrap unchanged |
 | **Extended nodes** | 5 nodes (http-request, variable-aggregator/-assigner, document-extractor, loop) — **canvas + forms + variable inference** | [x] | `studio/src/workflow/registry.ts` + `forms/` |
-| | same 5 nodes — **compile/execute (parse/ir/codegen/runner)** | [ ] | `src/ragspine/dify/` — **next** |
+| | same 5 nodes — **compile/execute (parse/ir/codegen/runner)** | [x] | `src/ragspine/dify/` (ir/codegen) + `service/dify/` (runner); tests in `tests/dify/test_p9_extended_nodes.py` + `tests/service/dify/test_http_client.py` |
 | **Release** | 0.11 source version, tests, README, catalog and preview implementation | [~] | present in source; no tag or distribution artifact |
 | | PyPI `rag-spine==0.11.0` and clean-install smoke | [ ] | PyPI latest is 0.10.0 as of 2026-07-17 |
 
@@ -117,8 +117,10 @@ Status is audited against code, focused tests, and the installed PyPI artifact:
 
 ## Remaining backlog / next steps
 
-- **P0 — installed local-workflow loop.** Complete the user journey without requiring a source checkout,
-  Node/pnpm, environment-variable assembly, manual YAML import, or a second terminal.
+- **P0 — installed local-workflow loop.** **Done in source (2026-07-16)** — preview/run/serve/auto-load are
+  implemented and tested in the worktree per the sub-bullets below; the multi-OS clean-install proof
+  (spaces / non-ASCII paths) rides the 0.11 release gate. Complete the user journey without requiring a source
+  checkout, Node/pnpm, environment-variable assembly, manual YAML import, or a second terminal.
   - `ragspine workflow preview <file-or-template-id>` accepts JSON/YAML/TOML files and catalog IDs, normalizes
     both through the same preview v1 projection, and remains display-only.
   - `ragspine workflow run <file> --inputs <json>` reuses the existing compiler, L0/L1/L2 runner, trace shape,
@@ -134,14 +136,15 @@ Status is audited against code, focused tests, and the installed PyPI artifact:
   `uv`-environment smoke for `create/list/show/preview`, verify the 1,000-template count, exercise Studio launch,
   and prove L2 subprocess execution from the wheel. Publish only after those installed-artifact checks pass;
   then verify PyPI metadata and mark the release rows `[x]`.
-- **P0 — `[backend]` execute the 5 extended nodes.** The frontend can author http-request /
-  variable-aggregator / variable-assigner / document-extractor / loop today, but the backend lowers them to
-  `UnsupportedNode` (L0 gate rejects at run). Needed: parse/ir/codegen/runner support.
-  - `variable-aggregator` (first-non-null), `document-extractor` (str/list→text) — pure compute, direct codegen.
-  - `loop` — container subgraph, reuse the `iteration` lower/codegen skeleton + break-condition eval.
-  - `variable-assigner` (v2 items) — writes conversation/loop variables; **no session in single-shot execution**
-    → decide between a same-run variable pool vs. keeping it Unsupported with a clear "conversation variables
-    unsupported" error.
+- **P0 — `[backend]` execute the 5 extended nodes.** **Done (2026-07-16)** — all five compile and execute
+  end-to-end (ir/codegen/runner; tests in `tests/dify/test_p9_extended_nodes.py` +
+  `tests/service/dify/test_http_client.py`).
+  - `variable-aggregator` (first-non-null; group mode emits `<group>.output`), `document-extractor`
+    (str/list→text) — pure compute, direct codegen.
+  - `loop` — container subgraph on the `iteration` skeleton; bounded `for` (loop_count clamped to ≤100, no
+    while), break conditions evaluated after each round, loop variables accumulate in the same context.
+  - `variable-assigner` (v2 items + v1 compat) — **same-run variable pool** (decision taken): conversation
+    defaults seeded at `run_workflow` start, writes immediately visible to downstream `{{#conversation.x#}}`.
   - `http-request` — **security-sensitive, default off** (`RAGSPINE_DIFY_HTTP_ENABLED=false`): L0 gate rejects
     when disabled; when enabled, the runner injects a controlled urllib client (forced timeout ≤30s, http/https
     only, no non-http redirect, 1MB body cap) — **generated code never imports a network module** (import
@@ -156,13 +159,13 @@ Status is audited against code, focused tests, and the installed PyPI artifact:
 
 | Area | Done | Partial | Pending |
 |---|---:|---:|---:|
-| Dify compiler / API clone | 7 | 1 | 0 |
+| Dify compiler / API clone | 8 | 0 | 0 |
 | n8n format / API clone | 5 | 0 | 0 |
-| Workflow catalog / local DX | 3 | 3 | 3 |
-| Studio console | 5 | 1 | 1 |
-| Extended nodes | 1 | 0 | 1 |
+| Workflow catalog / local DX | 6 | 3 | 0 |
+| Studio console | 7 | 0 | 0 |
+| Extended nodes | 2 | 0 | 0 |
 | Release | 0 | 1 | 1 |
-| **Total** | **21** | **6** | **6** |
+| **Total** | **28** | **4** | **1** |
 
 ## Out of scope
 

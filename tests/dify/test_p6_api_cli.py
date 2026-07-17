@@ -81,6 +81,42 @@ def test_analyze_facade(fixtures_dir: Path) -> None:
     assert any(s.rule_id == "PARALLEL_001" for s in suggestions)
 
 
+# 含 custom-note 画布便签 + 缺 data.type 节点的最小完整 DSL（Dify 能导出的即合法输入）。
+_TOLERANT_DSL = """\
+app:
+  mode: workflow
+  name: tolerant-demo
+workflow:
+  graph:
+    nodes:
+      - id: start_1
+        type: custom
+        data: {type: start, title: 开始, variables: []}
+      - id: note_1
+        type: custom-note
+        data: {title: '', text: 画布便签, theme: yellow}
+      - id: mystery_1
+        type: custom
+        data: {title: 神秘节点}
+      - id: end_1
+        type: custom
+        data: {type: end, title: 结束, outputs: []}
+    edges:
+      - {source: start_1, target: mystery_1, sourceHandle: source}
+      - {source: mystery_1, target: end_1, sourceHandle: source}
+"""
+
+
+def test_analyze_tolerates_note_and_typeless_nodes() -> None:
+    """便签不进 IR、缺类型节点归一为不支持骨架：analyze / compile 全链路成功，不整体失败。"""
+    suggestions = analyze(_TOLERANT_DSL)
+    assert isinstance(suggestions, list)
+    result = compile_dify_yaml(_TOLERANT_DSL)
+    assert {n.id for n in result.ir.graph.nodes} == {"start_1", "mystery_1", "end_1"}
+    # 缺类型节点出现在不支持警告清单里（骨架钩子 + warning，而非 error）。
+    assert any("mystery_1" in w and "缺少节点类型" in w for w in result.code.warnings)
+
+
 def test_compiled_code_runs_end_to_end(fixtures_dir: Path) -> None:
     """端到端铁律：fixture → compile → exec → run_workflow(Inputs, MockProvider) 离线跑通。"""
     result = compile_dify_yaml(fixtures_dir / "seq.yml")
@@ -117,6 +153,17 @@ def test_cli_analyze_prints_suggestions(capsys: pytest.CaptureFixture[str]) -> N
     assert rc == 0
     out = capsys.readouterr().out
     assert "PARALLEL_001" in out
+
+
+def test_cli_analyze_tolerates_typeless_nodes(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """回归：`ragspine dify analyze` 对含 custom-note / 缺 data.type 节点的导出不整体失败。"""
+    path = tmp_path / "tolerant.yml"
+    path.write_text(_TOLERANT_DSL, encoding="utf-8")
+    rc = main(["dify", "analyze", str(path)])
+    assert rc == 0
+    assert "分析失败" not in capsys.readouterr().err
 
 
 def test_cli_compile_missing_file(capsys: pytest.CaptureFixture[str]) -> None:

@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/service/
-verified-against: c3562b7ef6edde5ca9300d1c6abfcd1069cd0907
+verified-against: 6831b2a523b83f406a47ff1259a6eacb1abc9029
 ---
 
 # service — agent contract
@@ -29,6 +29,12 @@ the bounded offline fallback and returns the same preview contract. Preview proj
 node/edge identity, labels, geometry, containment, and branch labels—never prompts, provider config,
 variables, or credentials. `ServiceConfig.workflow_matcher` is constructed during app lifespan, stored
 on `app.state`, and obtained through DI; unavailable semantic matching falls back to the lexical matcher.
+
+`studio/launch.py` backs the read-only launch-session endpoint `GET /v1/launch-sessions/{id}`:
+an in-memory, bounded (FIFO, max 8), thread-safe registry populated by the 127.0.0.1-only CLI
+`workflow serve` and read back by the Studio frontend via an opaque `secrets.token_urlsafe` token.
+It never executes a workflow and its contents (name/YAML) never enter observability traces or logs;
+unknown/overlong/non-token ids get an identical 404.
 
 `conversation.py` is the **W6c multi-turn skeleton (opt-in, programmatic)**: `ConversationMemory` (bounded,
 stores only the prior turn's home entity-code + period — non-sensitive) + `resolve_followup` (deterministic

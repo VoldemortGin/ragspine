@@ -16,7 +16,9 @@ from ragspine.dify.codegen.naming import NameTable
 from ragspine.dify.ir.model import (
     AnswerNode,
     CodeNode,
+    DocumentExtractorNode,
     EndNode,
+    HttpRequestNode,
     IRNode,
     KnowledgeRetrievalNode,
     Literal,
@@ -28,6 +30,8 @@ from ragspine.dify.ir.model import (
     ToolNode,
     UnsupportedNode,
     Value,
+    VariableAggregatorNode,
+    VariableAssignerNode,
     VarRef,
 )
 
@@ -86,9 +90,17 @@ def emit_node(node: IRNode, names: NameTable) -> list[str]:
         return _emit_tool(node, names)
     if isinstance(node, TemplateTransformNode):
         return _emit_template_transform(node)
+    if isinstance(node, VariableAggregatorNode):
+        return _emit_variable_aggregator(node, names)
+    if isinstance(node, VariableAssignerNode):
+        return _emit_assigner(node)
+    if isinstance(node, DocumentExtractorNode):
+        return _emit_document_extractor(node, names)
+    if isinstance(node, HttpRequestNode):
+        return _emit_http_request(node, names)
     if isinstance(node, UnsupportedNode):
         return _emit_unsupported(node, names)
-    # if-else / iteration 由 emitter 在控制流层处理（需图结构/子图递归）；其余兜底注释。
+    # if-else / iteration / loop 由 emitter 在控制流层处理（需图结构/子图递归）；其余兜底注释。
     return [f"# 节点 {node.id}（{node.kind}）由控制流层处理。"]
 
 
@@ -352,11 +364,194 @@ def _emit_template_transform(node: TemplateTransformNode) -> list[str]:
     ]
 
 
+def _emit_variable_aggregator(
+    node: VariableAggregatorNode, names: NameTable
+) -> list[str]:
+    """variable-aggregator → 首个已产出且非 None 的候选值（Dify first-non-null 语义）。
+
+    「已产出」按 _ctx 键存在判定：未走到的分支不写 _ctx，其候选自然跳过；产出为 None
+    也跳过；空串等 falsy 值算有效产出（非真值判定）。候选按声明序精确取节点输出键
+    （不做嵌套字段展开）。分组模式每组独立聚合，输出字段 '<组名>.output'。
+    """
+    var = names.var(node.id)
+    targets: list[tuple[str, tuple[VarRef, ...]]]
+    if node.groups:
+        targets = [(f"{g.name}.output", g.items) for g in node.groups]
+    else:
+        targets = [("output", node.items)]
+    lines = [f"# variable-aggregator: {node.id} —— 取首个已产出且非 None 的候选"]
+    for field_name, refs in targets:
+        keys = ", ".join(f"({r.node_id!r}, {r.field!r})" for r in refs)
+        if len(refs) == 1:
+            keys += ","
+        lines += [
+            f"_agg_{var} = None",
+            f"for _agg_key_{var} in ({keys}):",
+            f"    if _agg_key_{var} in _ctx and _ctx[_agg_key_{var}] is not None:",
+            f"        _agg_{var} = _ctx[_agg_key_{var}]",
+            "        break",
+            f"_ctx[({node.id!r}, {field_name!r})] = _agg_{var}",
+        ]
+    return lines
+
+
+def _emit_assigner(node: VariableAssignerNode) -> list[str]:
+    """assigner → 变量池就地写入：_ctx[目标键] = _assign_op(当前值, 操作, 取值)。
+
+    目标键即下游读取键（conversation 变量 ('conversation', 名)、loop 变量 (循环节点 id, 名)），
+    同一次运行内写后即可见。_assign_op 为模块级 helper（emit_assign_op_helper）。
+    """
+    lines = [f"# assigner: {node.id} —— 同一次运行内变量池写入"]
+    for item in node.items:
+        key = f"({item.target.node_id!r}, {item.target.field!r})"
+        value = value_expr(item.value) if item.value is not None else "None"
+        lines.append(
+            f"_ctx[{key}] = _assign_op(_ctx.get({key}), {item.operation!r}, {value})"
+        )
+    return lines
+
+
+def _emit_document_extractor(
+    node: DocumentExtractorNode, names: NameTable
+) -> list[str]:
+    """document-extractor → 纯计算 str/list→text（受限沙箱零文件 I/O）。
+
+    运行期按值类型分派：list/tuple → 逐项 _doc_text 输出 array[string]，
+    其余 → 单个 text（对齐 Dify 单文件 text / 多文件 array[string] 输出形状）。
+    """
+    var = names.var(node.id)
+    src = f"_doc_in_{var}"
+    return [
+        f"# document-extractor: {node.id} —— 纯计算 str/list→text（沙箱无文件 I/O）",
+        f"{src} = {value_expr(node.source)}",
+        f"if isinstance({src}, (list, tuple)):",
+        f"    _ctx[({node.id!r}, 'text')] = [_doc_text(_it) for _it in {src}]",
+        "else:",
+        f"    _ctx[({node.id!r}, 'text')] = _doc_text({src})",
+    ]
+
+
+def _emit_http_request(node: HttpRequestNode, names: NameTable) -> list[str]:
+    """http-request → 组装 request dict，经 _dify_http 槽位调用（不 import 网络模块）。
+
+    受控客户端由受信 runner 在 RAGSPINE_DIFY_HTTP_ENABLED=1 时注入；未启用时 L0 闸拒跑，
+    独立运行未注入时 _dify_http 抛清晰错误。输出 status_code / body / headers。
+    """
+    var = names.var(node.id)
+    req = f"_http_req_{var}"
+    resp = f"_http_resp_{var}"
+    body = value_expr(node.body) if node.body is not None else "None"
+    return [
+        f"# http-request: {node.id} —— 受控 HTTP 客户端（默认禁用，runner 注入）",
+        f"{req} = {{",
+        f"    'method': {node.method!r},",
+        f"    'url': {value_expr(node.url)},",
+        f"    'headers': {value_expr(node.headers)},",
+        f"    'params': {value_expr(node.params)},",
+        f"    'body_type': {node.body_type!r},",
+        f"    'body': {body},",
+        f"    'ssl_verify': {node.ssl_verify!r},",
+        f"    'timeout_s': {node.timeout_s!r},",
+        "}",
+        f"{resp} = _dify_http({req})",
+        f"_ctx[({node.id!r}, 'status_code')] = {resp}['status_code']",
+        f"_ctx[({node.id!r}, 'body')] = {resp}['body']",
+        f"_ctx[({node.id!r}, 'headers')] = {resp}['headers']",
+    ]
+
+
+def emit_assign_op_helper() -> list[str]:
+    """assigner 的模块级就地运算 helper（over-write/clear/append/extend/算术/裁剪）。"""
+    return [
+        "def _assign_op(current: Any, operation: str, value: Any) -> Any:",
+        '    """变量池就地运算：按 assigner 操作符对当前值应用一次写入，返回新值。"""',
+        "    if operation in ('over-write', 'set'):",
+        "        return value",
+        "    if operation == 'clear':",
+        "        if isinstance(current, str):",
+        "            return ''",
+        "        if isinstance(current, bool):",
+        "            return False",
+        "        if isinstance(current, (int, float)):",
+        "            return 0",
+        "        if isinstance(current, dict):",
+        "            return {}",
+        "        return []",
+        "    if operation == 'append':",
+        "        if isinstance(current, list):",
+        "            return [*current, value]",
+        "        return [value] if current in (None, '') else [current, value]",
+        "    if operation == 'extend':",
+        "        _items = list(value) if isinstance(value, (list, tuple)) else [value]",
+        "        if isinstance(current, list):",
+        "            return [*current, *_items]",
+        "        return _items if current in (None, '') else [current, *_items]",
+        "    if operation == 'remove-first':",
+        "        return current[1:] if isinstance(current, list) else current",
+        "    if operation == 'remove-last':",
+        "        return current[:-1] if isinstance(current, list) else current",
+        "    if operation == '+=':",
+        "        return _as_num(current) + _as_num(value)",
+        "    if operation == '-=':",
+        "        return _as_num(current) - _as_num(value)",
+        "    if operation == '*=':",
+        "        return _as_num(current) * _as_num(value)",
+        "    if operation == '/=':",
+        "        return _as_num(current) / _as_num(value)",
+        "    raise ValueError(f'未知 assigner 操作：{operation!r}')",
+        "",
+    ]
+
+
+def emit_doc_text_helper() -> list[str]:
+    """document-extractor 的模块级转文本 helper（纯计算，零 I/O）。"""
+    return [
+        "def _doc_text(value: Any) -> str:",
+        '    """纯计算转文本：str 原样、bytes 解码、dict 取 text/content 字段、其余 str()。"""',
+        "    if value is None:",
+        "        return ''",
+        "    if isinstance(value, str):",
+        "        return value",
+        "    if isinstance(value, bytes):",
+        "        return value.decode('utf-8', 'replace')",
+        "    if isinstance(value, dict):",
+        "        for _key in ('text', 'content'):",
+        "            _v = value.get(_key)",
+        "            if isinstance(_v, str):",
+        "                return _v",
+        "    return str(value)",
+        "",
+    ]
+
+
+def emit_http_client_slot() -> list[str]:
+    """http-request 的模块级受控客户端槽位（默认 None=禁用；受信 runner 按需注入）。"""
+    return [
+        "# http-request 受控客户端槽位：默认 None（禁用）。由受信 runner 在环境变量",
+        "# RAGSPINE_DIFY_HTTP_ENABLED=1 时注入受控 urllib 客户端（超时 ≤30s / 响应 1MB 上限 /",
+        "# 仅 http(s)）；生成代码自身不 import 任何网络模块，独立运行未注入时调用即抛清晰错误。",
+        "_HTTP_CLIENT: Any = None",
+        "",
+        "def _dify_http(request: dict[str, Any]) -> dict[str, Any]:",
+        '    """经受控客户端执行一次 HTTP 请求；未启用（未注入客户端）时拒绝并说明开启方式。"""',
+        "    if _HTTP_CLIENT is None:",
+        "        raise RuntimeError(",
+        "            'http-request 节点默认禁用：需设置环境变量 RAGSPINE_DIFY_HTTP_ENABLED=1 '",
+        "            '并经 ragspine 受控 runner 执行（由其注入受控 HTTP 客户端）。'",
+        "        )",
+        "    return _HTTP_CLIENT(request)",
+        "",
+    ]
+
+
 def _emit_unsupported(node: UnsupportedNode, names: NameTable) -> list[str]:
-    """不支持的节点 → 调用 emitter 注入的钩子函数（带 NotImplementedError 骨架）。"""
+    """不支持的节点 → 调用 emitter 注入的钩子函数（带 NotImplementedError 骨架）。
+
+    显示用 node.kind：node_type 非空时即其本身，缺失类型时回退 "unsupported"。
+    """
     var = names.var(node.id)
     return [
-        f"# {node.node_type}: {node.id} —— 未支持，调用骨架钩子（产可运行骨架，运行到此会抛 NotImplementedError）",
+        f"# {node.kind}: {node.id} —— 未支持，调用骨架钩子（产可运行骨架，运行到此会抛 NotImplementedError）",
         f"_ctx[({node.id!r}, 'output')] = _hook_{var}(_ctx)",
     ]
 
@@ -370,13 +565,13 @@ def emit_hook_function(node: UnsupportedNode, names: NameTable) -> list[str]:
         '    """未支持的 Dify 节点占位钩子——请在此补全真实实现。',
         "",
         f"    节点 id：{node.id}",
-        f"    节点类型：{node.node_type}（ragspine.dify 暂未内建代码生成，留钩子）",
+        f"    节点类型：{node.kind}（ragspine.dify 暂未内建代码生成，留钩子）",
         f"    原始配置：{detail}",
         "",
         "    家族建议：http-request 用标准库 urllib / 你的 HTTP 客户端；knowledge-retrieval",
         "    接 ragspine 的检索通路；tool / 插件按你的工具实现接入。补全后删除下面的 raise。",
         '    """',
         "    raise NotImplementedError("
-        + repr(f"{node.node_type} 节点 {node.id} 尚未实现，请在 _hook_{var} 中补全")
+        + repr(f"{node.kind} 节点 {node.id} 尚未实现，请在 _hook_{var} 中补全")
         + ")",
     ]

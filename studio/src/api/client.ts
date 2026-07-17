@@ -248,3 +248,25 @@ export function scaffoldWorkflow(
     ...(signal !== undefined ? { signal } : {}),
   });
 }
+
+/* ---------------------------- Launch sessions -------------------------- */
+
+/** Workflow preloaded by `ragspine workflow serve <file> --open`. */
+export interface LaunchSessionPayload {
+  id: string;
+  name: string;
+  yaml: string;
+}
+
+export function fetchLaunchSession(
+  id: string,
+  signal?: AbortSignal,
+): Promise<LaunchSessionPayload> {
+  return request<LaunchSessionPayload>(
+    `/v1/launch-sessions/${encodeURIComponent(id)}`,
+    {
+      method: 'GET',
+      ...(signal !== undefined ? { signal } : {}),
+    },
+  );
+}

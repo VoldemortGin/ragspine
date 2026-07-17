@@ -10,6 +10,7 @@ from fastapi import Request
 from ragspine.agent.llm_provider import LLMProvider
 from ragspine.service.config import ServiceConfig
 from ragspine.service.faq.faq_cache import FAQCache
+from ragspine.service.studio.launch import LaunchSessionRegistry
 from ragspine.service.tasks.task_queue import TaskQueue
 from ragspine.workflows.matching import TemplateMatcher
 
@@ -32,3 +33,7 @@ def get_queue(request: Request) -> TaskQueue:
 
 def get_workflow_matcher(request: Request) -> TemplateMatcher:
     return cast(TemplateMatcher, request.app.state.workflow_matcher)
+
+
+def get_launch_sessions(request: Request) -> LaunchSessionRegistry:
+    return cast(LaunchSessionRegistry, request.app.state.launch_sessions)

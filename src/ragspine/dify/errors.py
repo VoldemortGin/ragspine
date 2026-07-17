@@ -24,11 +24,12 @@ class UnsupportedAppMode(DifyCompileError):
 
 
 class UnsupportedNodeType(DifyCompileError):
-    """遇到尚未建模的节点类型（lower 段无法归一到任何 IRNode 子类）。
+    """节点类型无法归一时的公开错误类型（当前编译管线已不再抛出，保留兼容）。
 
-    注意：http-request / tool / knowledge-retrieval 等「留钩子」的节点【不】走此异常——
-    它们被显式建模为 UnsupportedNode、生成带 NotImplementedError 的骨架函数 + warning，
-    产出可运行骨架而非整体失败。本异常只在节点类型【完全未知 / 无法归一】时抛出。
+    宽容原则：Dify 平台能导出的工作流即视为合法输入。http-request / 插件等「留钩子」节点、
+    类型完全未知的节点、乃至缺失 data.type 的节点，lower 段都归一为 UnsupportedNode、
+    生成带 NotImplementedError 的可运行骨架 + warning，不整体失败。本类型作为公开异常
+    API 保留（上层可能 import / 捕获），当前管线内没有抛出点。
     """
 
     code = "dify.unsupported_node"

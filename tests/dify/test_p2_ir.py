@@ -8,7 +8,7 @@ from collections.abc import Callable
 import pytest
 
 from ragspine.dify.codegen.emitter import generate_code
-from ragspine.dify.errors import CyclicGraph, UnsupportedNodeType
+from ragspine.dify.errors import CyclicGraph
 from ragspine.dify.ir.lower import lower_to_ir
 from ragspine.dify.ir.model import (
     IfElseNode,
@@ -221,7 +221,10 @@ workflow:
 
 
 def test_unsupported_node_becomes_hook() -> None:
-    """http-request 等未建模类型 → UnsupportedNode（留钩子），不抛 UnsupportedNodeType。"""
+    """list-operator 等未建模类型 → UnsupportedNode（留钩子），不抛 UnsupportedNodeType。
+
+    P9 后 http-request 已真实建模，本用例改用仍未建模的 list-operator 保持覆盖面。
+    """
     dsl = """
 app:
   mode: workflow
@@ -231,27 +234,56 @@ workflow:
     nodes:
       - id: start_1
         data: {type: start, title: 开始, variables: []}
-      - id: http_1
+      - id: lo_1
         data:
-          type: http-request
-          title: 调外部API
-          method: get
-          url: https://example.com
+          type: list-operator
+          title: 列表过滤
+          filter_by: {enabled: true, conditions: []}
       - id: end_1
         data: {type: end, title: 结束, outputs: []}
     edges:
-      - {source: start_1, target: http_1, sourceHandle: source}
-      - {source: http_1, target: end_1, sourceHandle: source}
+      - {source: start_1, target: lo_1, sourceHandle: source}
+      - {source: lo_1, target: end_1, sourceHandle: source}
 """
     ir = lower_to_ir(parse_dify_yaml(dsl))
-    hook = ir_node(ir, "http_1")
+    hook = ir_node(ir, "lo_1")
     assert isinstance(hook, UnsupportedNode)
-    assert hook.node_type == "http-request"
-    assert hook.kind == "http-request"
+    assert hook.node_type == "list-operator"
+    assert hook.kind == "list-operator"
 
 
-def test_node_missing_type_raises() -> None:
-    """节点完全缺 data.type → UnsupportedNodeType（无法归一，硬错）。"""
+def test_custom_note_is_structural_not_executable() -> None:
+    """顶层 type=custom-note 的画布便签（data 无 type）不进 IR、不产钩子，关联边一并剔除。"""
+    dsl = """
+app:
+  mode: workflow
+  name: note-demo
+workflow:
+  graph:
+    nodes:
+      - id: start_1
+        type: custom
+        data: {type: start, title: 开始, variables: []}
+      - id: note_1
+        type: custom-note
+        data: {title: '', text: 这是一条画布便签, theme: blue, width: 240, height: 88}
+      - id: end_1
+        type: custom
+        data: {type: end, title: 结束, outputs: []}
+    edges:
+      - {source: start_1, target: end_1, sourceHandle: source}
+      - {source: note_1, target: end_1, sourceHandle: source}
+"""
+    ir = lower_to_ir(parse_dify_yaml(dsl))
+    assert {n.id for n in ir.graph.nodes} == {"start_1", "end_1"}
+    # 便签的关联边同步剔除，不留悬空边（否则拓扑排序会炸）。
+    assert {(e.source, e.target) for e in ir.graph.edges} == {("start_1", "end_1")}
+    assert generate_code(ir).warnings == ()
+
+
+def test_node_missing_type_becomes_unsupported_skeleton() -> None:
+    """data 与顶层均无有效类型（顶层 "custom" 是 React Flow 容器类型，不算语义类型）
+    → 归一 UnsupportedNode 骨架 + warning，不整体失败（Dify 能导出的即合法输入）。"""
     dsl = """
 app:
   mode: workflow
@@ -259,11 +291,34 @@ workflow:
   graph:
     nodes:
       - id: mystery
+        type: custom
         data: {title: 无类型}
     edges: []
 """
-    with pytest.raises(UnsupportedNodeType):
-        lower_to_ir(parse_dify_yaml(dsl))
+    ir = lower_to_ir(parse_dify_yaml(dsl))
+    node = ir_node(ir, "mystery")
+    assert isinstance(node, UnsupportedNode)
+    assert node.node_type == ""
+    assert node.kind == "unsupported"
+    code = generate_code(ir)
+    assert any("mystery" in w and "缺少节点类型" in w for w in code.warnings)
+
+
+def test_top_level_semantic_type_fallback() -> None:
+    """data.type 缺失但顶层 type 是可用的语义类型（非 "custom" 容器）→ 宽容回退使用。"""
+    dsl = """
+app:
+  mode: workflow
+workflow:
+  graph:
+    nodes:
+      - id: tt_1
+        type: template-transform
+        data: {title: 模板, template: hello, variables: []}
+    edges: []
+"""
+    ir = lower_to_ir(parse_dify_yaml(dsl))
+    assert ir_node(ir, "tt_1").kind == "template-transform"
 
 
 def ir_node(ir: WorkflowIR, node_id: str):  # type: ignore[no-untyped-def]

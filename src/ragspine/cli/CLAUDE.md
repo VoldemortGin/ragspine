@@ -16,6 +16,11 @@ A thin argparse wrapper over the zero-SDK offline core — **never** shells out 
   - `ask` — mirrors `scripts/ask.py`: `FactStore` from `--db`, `MockProvider` by default
     (`anthropic` only with the `[llm]` extra + key, lazy-imported), prints answer + sources.
   - `version` — `importlib.metadata.version("rag-spine")`.
+  - `workflow serve <file-or-template-id> [--port N] [--open]` — starts the API + packaged
+    Studio on `127.0.0.1` (fixed, no `--host`) and auto-loads the selected workflow via an
+    opaque launch-session token (`/studio/?launch=<token>`; contents/paths/credentials never
+    enter the URL). Needs the `[service]` extra — fastapi/uvicorn are lazy-imported, missing
+    extra is an honest stderr error + exit 2. Never touches `RAGSPINE_DIFY_RUN_ENABLED`.
 
 ## Invariants
 
@@ -32,5 +37,6 @@ A thin argparse wrapper over the zero-SDK offline core — **never** shells out 
 
 ## Out of scope (not yet)
 
-- No `serve` / `worker` / `demo` / `topology` subcommands — they need the `[service]` extra
-  or shipped `scripts/`, which breaks "self-contained on the zero-SDK offline core".
+- No `worker` / `demo` / `topology` subcommands — they need shipped `scripts/`, which breaks
+  "self-contained on the zero-SDK offline core". (`workflow serve` *is* provided: it needs the
+  `[service]` extra but keeps the core self-contained via lazy import + honest error.)

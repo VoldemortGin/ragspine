@@ -33,7 +33,12 @@ from typing import Any, cast
 from corespine import CorespineError, LLMProvider
 
 from ragspine.dify.codegen.emitter import GeneratedCode
-from ragspine.service.dify.safety import ALLOWED_IMPORT_ROOTS, assert_runnable
+from ragspine.service.dify.http_client import build_http_client
+from ragspine.service.dify.safety import (
+    ALLOWED_IMPORT_ROOTS,
+    assert_runnable,
+    http_enabled,
+)
 from ragspine.service.dify.tracing import sanitize_node_traces
 
 # 默认执行超时（秒）。ServiceConfig.dify_run_timeout_s 可覆盖。
@@ -137,6 +142,11 @@ def _exec_in_sandbox(
         # 自身拿不到 time——不在 import 白名单，独立运行时计时回落 0.0）。
         if "_TRACE_CLOCK" in module.__dict__:
             module.__dict__["_TRACE_CLOCK"] = time.perf_counter
+        # 生成代码声明了 _HTTP_CLIENT 槽位（http-request 节点）→ 仅在环境变量显式开启时
+        # 注入受控 urllib 客户端（超时 ≤30s / 仅 http(s) / 重定向护栏 / 响应 1MB 上限）。
+        # 未开启时 L0 闸已拒跑；此处再验一遍属纵深防御——槽位保持 None，误触即抛清晰错误。
+        if "_HTTP_CLIENT" in module.__dict__ and http_enabled():
+            module.__dict__["_HTTP_CLIENT"] = build_http_client()
         run_workflow = module.__dict__.get("run_workflow")
         inputs_cls = module.__dict__.get("Inputs")
         if not callable(run_workflow) or inputs_cls is None:
@@ -243,7 +253,7 @@ def _run_subprocess(
     *,
     timeout_s: float,
 ) -> dict[str, Any]:
-    """L2 子进程隔离：spawn scripts/run_dify_workflow.py，stdin 喂 spec，硬超时 SIGKILL。
+    """L2 子进程隔离：spawn 包内执行入口，stdin 喂 spec，硬超时 SIGKILL。
 
     子进程内自建 provider（provider_config）、施加 Linux rlimit、走 L1 受限沙箱执行。父进程
     用 communicate(timeout) 等待；超时 -> kill()（POSIX 即 SIGKILL）-> DifyTimeoutError。
@@ -268,11 +278,7 @@ def _run_subprocess(
         "rlimit_as_bytes": _SUBPROCESS_RLIMIT_AS_BYTES,
         **provider_config,
     }
-    # 仓库根 = runner.py 上溯 4 层（本文件在 src/ragspine/service/dify/ 下，parents[4] 即仓库根，
-    # parents[3] 只到 src 层）。脚本 run_dify_workflow.py 在仓库根的 scripts 目录下。早前误用
-    # parents[3] 令路径落到 src 层下的 scripts 子目录（无此文件）-> 子进程 python 打不开脚本 ->
-    # 退出码 2；这条只在 Linux 真子进程路径触发，macOS 回落 L1 遮蔽了它。
-    script = Path(__file__).resolve().parents[4] / "scripts" / "run_dify_workflow.py"
+    script = _resolve_subprocess_script()
     # 子进程 cwd 设为进程私有 tmp：honor「在临时目录里跑」的 L1 chdir(tmp) 语义，但隔离在
     # 子进程内、不污染父进程 cwd。脚本经自身 __file__ 锚定项目根，不依赖 cwd，故安全。
     with tempfile.TemporaryDirectory(prefix="dify-wf-") as tmp:
@@ -320,3 +326,15 @@ def _run_subprocess(
             **extra,
         )
     return cast("dict[str, Any]", parsed.get("result", {}))
+
+
+def _resolve_subprocess_script() -> Path:
+    """优先定位 wheel 内 L2 入口，源码树仓库脚本仅作兼容回退。"""
+    packaged = Path(__file__).with_name("run_dify_workflow.py")
+    if packaged.is_file():
+        return packaged
+
+    source = Path(__file__).resolve().parents[4] / "scripts" / "run_dify_workflow.py"
+    if source.is_file():
+        return source
+    raise DifyRunError("找不到 Dify 工作流子进程入口")

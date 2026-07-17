@@ -32,6 +32,8 @@ from ragspine.retrieval.vector.persistence_policy import make_persistence_policy
 from ragspine.retrieval.vector.store import make_vector_store
 from ragspine.storage.fact_store import FactStore, SqliteFactStore
 
+_PACKAGED_STUDIO_DIR = Path(__file__).resolve().with_name("studio_dist")
+
 
 @dataclass(frozen=True)
 class ServiceConfig:
@@ -64,7 +66,7 @@ class ServiceConfig:
     dify_run_enabled: bool = False           # /v1/dify/run 执行开关（信任边界）；默认关，env 显式开
     dify_run_timeout_s: float = 10.0         # /v1/dify/run 单次执行超时上限（秒）
     dify_run_isolation: str = "inprocess"    # "inprocess"(L1) | "subprocess"(L2，Linux setrlimit，跨平台回落 L1)
-    studio_dir: str = ""                     # Studio 前端静态产物目录；""=不启用（不挂 /studio）
+    studio_dir: str = str(_PACKAGED_STUDIO_DIR)  # Studio 目录；默认 wheel 内置，""=显式禁用
     dify_public_apps: str = ""               # dify 公共 API app 注册表："key1=/path/a.yml;key2=/path/b.yml"（; 分条目、首个 = 分 key/路径）；""=未配置 -> /v1/workflows/* 一律 401
     n8n_api_key: str | None = None           # n8n 公共 API key；None=未启用，/api/v1/* 一律 401
     n8n_store_path: str = "data/n8n_store"   # n8n workflow/execution 文件存储根目录

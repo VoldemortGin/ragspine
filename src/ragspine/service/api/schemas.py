@@ -170,6 +170,17 @@ class DifyRunResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Studio launch-session（CLI `workflow serve` 注册 → 前端凭不透明 token 自动加载）
+# ---------------------------------------------------------------------------
+class LaunchSessionResponse(BaseModel):
+    """契约冻结：恰好 {id, name, yaml} 三键，yaml 为 Dify DSL YAML 文本；无 request_id。"""
+
+    id: str
+    name: str
+    yaml: str
+
+
+# ---------------------------------------------------------------------------
 # 管线拓扑导出（pipeline/topology → Studio 可视化）
 # ---------------------------------------------------------------------------
 class TopologyNodeInfo(BaseModel):

@@ -17,14 +17,9 @@ from ragspine.dify.ir.model import (
     IterationNode,
     KnowledgeRetrievalNode,
     LLMNode,
-    UnsupportedNode,
     WorkflowIR,
 )
 from ragspine.dify.optimize.suggestion import Category, Severity, Suggestion
-
-# I/O 重型的 UnsupportedNode 种类（每项一次外部调用，是并行/缓存的主要对象）。
-# P7 后 knowledge-retrieval / tool 已是真实 IR 节点，这里只剩仍留钩子的 http-request。
-_IO_UNSUPPORTED: frozenset[str] = frozenset({"http-request"})
 
 
 @dataclass(frozen=True)
@@ -41,20 +36,23 @@ class OptimizeEnv:
 
 
 def _is_heavy(node: IRNode) -> bool:
-    """重型节点：llm / code / iteration / 检索 / 工具 / 参数抽取，或 I/O 型 UnsupportedNode。"""
-    if node.kind in (
+    """重型节点：llm / code / iteration / 检索 / 工具 / 参数抽取 / http 请求。
+
+    按 kind 判定：P9 后 http-request 已是真实 IR 节点（HttpRequestNode.kind ==
+    'http-request'）；形状不支持而落 UnsupportedNode 的 http 节点其 kind 同为
+    node_type（'http-request'），两者天然被同一判据覆盖。
+    """
+    return node.kind in (
         "llm", "code", "iteration",
-        "knowledge-retrieval", "tool", "parameter-extractor",
-    ):
-        return True
-    return isinstance(node, UnsupportedNode) and node.node_type in _IO_UNSUPPORTED
+        "knowledge-retrieval", "tool", "parameter-extractor", "http-request",
+    )
 
 
 def _is_io_heavy(node: IRNode) -> bool:
-    """I/O 重型节点：llm / 检索 / 工具，或 I/O 型 UnsupportedNode（迭代体内是否值得并行的判定）。"""
-    if node.kind in ("llm", "knowledge-retrieval", "tool", "parameter-extractor"):
-        return True
-    return isinstance(node, UnsupportedNode) and node.node_type in _IO_UNSUPPORTED
+    """I/O 重型节点：llm / 检索 / 工具 / http 请求（迭代体内是否值得并行的判定）。"""
+    return node.kind in (
+        "llm", "knowledge-retrieval", "tool", "parameter-extractor", "http-request",
+    )
 
 
 def _body_nodes(node: IterationNode) -> tuple[IRNode, ...]:
@@ -199,15 +197,14 @@ def rule_bottle_001(ir: WorkflowIR, env: OptimizeEnv) -> list[Suggestion]:
 
 
 def rule_bottle_002(ir: WorkflowIR, env: OptimizeEnv) -> list[Suggestion]:
-    """迭代节点体内含同步 HTTP 节点（UnsupportedNode node_type='http-request'）：
-    每轮迭代一次同步 HTTP，是按项放大的串行瓶颈。"""
+    """迭代节点体内含同步 HTTP 节点（kind='http-request'，含真实 HttpRequestNode 与
+    形状不支持而留钩子的 UnsupportedNode）：每轮迭代一次同步 HTTP，是按项放大的串行瓶颈。"""
     out: list[Suggestion] = []
     for node in ir.graph.nodes:
         if not isinstance(node, IterationNode):
             continue
         has_http = any(
-            isinstance(inner, UnsupportedNode) and inner.node_type == "http-request"
-            for inner in _body_nodes(node)
+            inner.kind == "http-request" for inner in _body_nodes(node)
         )
         if has_http:
             out.append(Suggestion(

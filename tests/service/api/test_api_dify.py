@@ -293,23 +293,75 @@ def test_dify_run_static_gate_rejects_unsupported_node_without_exec(tmp_path):
     assert "NotImplementedError" in err["message"] or "骨架" in err["message"]
 
 
-def test_dify_run_import_allowlist_via_unsupported_http_node(tmp_path):
-    # http-request 节点同样生成 NotImplementedError 骨架 + warning -> L0 闸 422（未执行）。
+def test_dify_run_import_allowlist_via_unsupported_node(tmp_path):
+    # list-operator 等未建模节点生成 NotImplementedError 骨架 + warning -> L0 闸 422（未执行）。
     # 这条间接验证「越权能力的节点不会被跑」——与单元层的 import 白名单互补。
-    http_yaml = (
+    # （P9 后 http-request 已真实建模，改用仍未建模的 list-operator 保持覆盖面。）
+    unsupported_yaml = (
         'app:\n  mode: workflow\n  name: x\nkind: app\nversion: "0.1.5"\n'
         "workflow:\n  graph:\n    nodes:\n"
         "      - id: start_1\n        data: {type: start, title: s, variables: []}\n"
-        "      - id: http_1\n        data: {type: http-request, title: h}\n"
+        "      - id: lo_1\n        data: {type: list-operator, title: l}\n"
         "      - id: end_1\n        data: {type: end, title: e, outputs: []}\n"
         "    edges:\n"
-        "      - {source: start_1, target: http_1, sourceHandle: source}\n"
-        "      - {source: http_1, target: end_1, sourceHandle: source}\n"
+        "      - {source: start_1, target: lo_1, sourceHandle: source}\n"
+        "      - {source: lo_1, target: end_1, sourceHandle: source}\n"
     )
     client = _make_client(tmp_path, run_enabled=True)
-    resp = client.post("/v1/dify/run", json={"yaml": http_yaml, "inputs": {}})
+    resp = client.post("/v1/dify/run", json={"yaml": unsupported_yaml, "inputs": {}})
     assert resp.status_code == 422
     assert resp.json()["error"]["type"] == "dify.unsafe"
+
+
+# ---------------------------------------------------------------------------
+# HTTP GATE — http-request 节点安全默认关（RAGSPINE_DIFY_HTTP_ENABLED）
+# ---------------------------------------------------------------------------
+HTTP_NODE_YAML = (
+    'app:\n  mode: workflow\n  name: x\nkind: app\nversion: "0.1.5"\n'
+    "workflow:\n  graph:\n    nodes:\n"
+    "      - id: start_1\n        data: {type: start, title: s, variables: []}\n"
+    "      - id: http_1\n"
+    "        data: {type: http-request, title: h, method: get, url: 'http://example.com/api'}\n"
+    "      - id: end_1\n"
+    "        data: {type: end, title: e, outputs: [{variable: body, value_selector: [http_1, body]}]}\n"
+    "    edges:\n"
+    "      - {source: start_1, target: http_1, sourceHandle: source}\n"
+    "      - {source: http_1, target: end_1, sourceHandle: source}\n"
+)
+
+
+def test_dify_run_http_node_rejected_when_http_disabled(tmp_path, monkeypatch):
+    # http-request 已真实建模（无 warning），但 HTTP 出网默认关：L0 闸 3 拒 -> 422（未执行）。
+    monkeypatch.delenv("RAGSPINE_DIFY_HTTP_ENABLED", raising=False)
+    client = _make_client(tmp_path, run_enabled=True)
+    resp = client.post("/v1/dify/run", json={"yaml": HTTP_NODE_YAML, "inputs": {}})
+    assert resp.status_code == 422
+    err = resp.json()["error"]
+    assert err["type"] == "dify.unsafe"
+    # 错误信息明确说明开启方式。
+    assert "RAGSPINE_DIFY_HTTP_ENABLED" in err["message"]
+
+
+def test_dify_run_http_node_executes_when_enabled_with_controlled_client(
+    tmp_path, monkeypatch
+):
+    # 显式开启 + 假客户端（测试禁止真实网络）：runner 注入生效，端到端 200。
+    monkeypatch.setenv("RAGSPINE_DIFY_HTTP_ENABLED", "true")
+    from ragspine.service.dify import runner as dify_runner
+
+    def fake_build_http_client():
+        def _client(request):
+            assert request["method"] == "get"
+            assert request["url"] == "http://example.com/api"
+            return {"status_code": 200, "body": "pong", "headers": {"X-Fake": "1"}}
+
+        return _client
+
+    monkeypatch.setattr(dify_runner, "build_http_client", fake_build_http_client)
+    client = _make_client(tmp_path, run_enabled=True)
+    resp = client.post("/v1/dify/run", json={"yaml": HTTP_NODE_YAML, "inputs": {}})
+    assert resp.status_code == 200
+    assert resp.json()["result"]["body"] == "pong"
 
 
 def test_dify_run_timeout(tmp_path):

@@ -51,9 +51,31 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      # studio/dist 被 git 忽略但通过 hatch force-include 打进 wheel
+      # （ragspine/service/studio_dist/），发布前必须现场构建。
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build Studio (bundled into wheel)
+        run: |
+          pnpm --dir studio install --frozen-lockfile
+          pnpm --dir studio build
       - name: Build sdist + wheel
         run: |
           python -m pip install -U build
           python -m build
+      - name: Verify Studio assets inside wheel
+        run: |
+          python - <<'EOF'
+          import glob, sys, zipfile
+          wheel = glob.glob("dist/*.whl")[0]
+          names = zipfile.ZipFile(wheel).namelist()
+          assert any(n == "ragspine/service/studio_dist/index.html" for n in names), names[:20]
+          assert any(n == "ragspine/service/dify/run_dify_workflow.py" for n in names)
+          print(f"OK: Studio + L2 assets present in {wheel}")
+          EOF
       - name: Publish to PyPI (Trusted Publishing / OIDC)
         uses: pypa/gh-action-pypi-publish@release/v1

@@ -8,6 +8,7 @@ Submodules:
     dify/ — Dify 编译产物的服务端安全执行层（L0 静态闸 + 受限 runner）。
     n8n_public/ — n8n 公共 REST API 形状克隆（/api/v1/* + /webhook/*）：文件存储层 + 路由层。
     faq/ — SME 审核型 FAQ 短路缓存。
+    studio/ — Studio launch-session 域：CLI `workflow serve` 注册 → 前端凭不透明 token 自动加载。
     tasks/ — 异步任务队列抽象 + worker 端 ingestion job。
     config.py — 服务层运行时配置（env RAGSPINE_*）与资源/provider 装配。
     conversation.py — opt-in 多轮会话记忆（W6c）：跟进/指代；每轮重过 security gate + isolation。

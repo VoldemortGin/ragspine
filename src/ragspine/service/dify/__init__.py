@@ -8,6 +8,8 @@ Submodules:
     safety.py — L0 静态安全闸（warnings 拒跑 + import 白名单 AST 校验）。
     runner.py — 受限执行 runner（L1 受限 builtins in-process / L2 subprocess 隔离）。
     tracing.py — node trace 采集净化：生成模块的 _NODE_TRACES 原始记录 → JSON-safe 的对外 trace 列表。
+    http_client.py — 受控 HTTP 客户端：http-request 节点的唯一出网面（超时钳制/仅 http(s)/体积上限）。
+    run_dify_workflow.py — L2 子进程隔离入口：stdin JSON spec → 独立进程执行 → stdout JSON 结果。
 """
 
 from ragspine import _lazy_submodules

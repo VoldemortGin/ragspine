@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import {
@@ -9,6 +9,7 @@ import {
   ServerHealthIndicator,
   cn,
 } from './components';
+import { applyLaunchSession, parseLaunchSessionId } from './launch';
 import { JobsPage } from './pages/JobsPage';
 import { PlaygroundPage } from './pages/PlaygroundPage';
 import { PipelinePage } from './pages/pipeline/PipelinePage';
@@ -36,6 +37,8 @@ function isPageId(value: unknown): value is PageId {
 }
 
 function loadInitialPage(): PageId {
+  // A CLI launch session always lands on the workflow editor.
+  if (parseLaunchSessionId(window.location.search) !== null) return 'workflows';
   try {
     const stored = localStorage.getItem(PAGE_STORAGE_KEY);
     if (isPageId(stored)) return stored;
@@ -68,6 +71,10 @@ const PAGES: Record<PageId, () => ReactNode> = {
 export function App() {
   const [page, setPage] = useState<PageId>(loadInitialPage);
   const [visited, setVisited] = useState<ReadonlySet<PageId>>(() => new Set([loadInitialPage()]));
+
+  useEffect(() => {
+    void applyLaunchSession();
+  }, []);
 
   const navigate = useCallback((next: PageId) => {
     setPage(next);

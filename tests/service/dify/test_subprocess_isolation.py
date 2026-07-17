@@ -5,20 +5,19 @@
 """
 
 import json
-import os
 import subprocess
 import sys
-
-import rootutils
-
-ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
+from pathlib import Path
 
 from ragspine.agent.llm_provider import MockProvider
 from ragspine.dify.api import compile_dify_yaml
-from ragspine.service.dify.runner import run_workflow_isolated
+from ragspine.service.dify import runner as runner_module
+from ragspine.service.dify.runner import _resolve_subprocess_script, run_workflow_isolated
 
+ROOT_DIR = Path(__file__).resolve().parents[3]
 FIXTURES = ROOT_DIR / "tests" / "dify" / "fixtures"
 SCRIPT = ROOT_DIR / "scripts" / "run_dify_workflow.py"
+PACKAGE_MODULE = "ragspine.service.dify.run_dify_workflow"
 
 
 def _spec(name: str, *, emit_node_traces: bool = False, **overrides) -> dict:
@@ -50,6 +49,15 @@ def _run_script(spec: dict) -> dict:
     return json.loads(proc.stdout)
 
 
+def _run_module(spec: dict) -> dict:
+    proc = subprocess.run(
+        [sys.executable, "-m", PACKAGE_MODULE],
+        input=json.dumps(spec), capture_output=True, text=True, timeout=30,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return json.loads(proc.stdout)
+
+
 # ---------------------------------------------------------------------------
 # 子进程脚本直跑（跨平台）
 # ---------------------------------------------------------------------------
@@ -57,6 +65,29 @@ def test_subprocess_script_runs_clean_workflow():
     out = _run_script(_spec("seq.yml"))
     assert out["ok"] is True
     assert "result" in out["result"]
+
+
+def test_packaged_subprocess_module_runs_clean_workflow():
+    out = _run_module(_spec("seq.yml"))
+    assert out["ok"] is True
+    assert "result" in out["result"]
+
+
+def test_subprocess_resolver_prefers_packaged_module():
+    expected = Path(runner_module.__file__).with_name("run_dify_workflow.py")
+
+    assert _resolve_subprocess_script() == expected
+    assert expected.is_file()
+
+
+def test_subprocess_resolver_falls_back_to_source_script(tmp_path, monkeypatch):
+    runner = tmp_path / "src" / "ragspine" / "service" / "dify" / "runner.py"
+    source_script = tmp_path / "scripts" / "run_dify_workflow.py"
+    source_script.parent.mkdir()
+    source_script.touch()
+    monkeypatch.setattr(runner_module, "__file__", str(runner))
+
+    assert _resolve_subprocess_script() == source_script
 
 
 def test_subprocess_script_rejects_unsafe_via_l0():

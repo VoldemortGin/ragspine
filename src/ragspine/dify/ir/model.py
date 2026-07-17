@@ -332,6 +332,148 @@ class IterationNode(IRNode):
 
 
 @dataclass(frozen=True)
+class AggregatorGroup:
+    """variable-aggregator 分组模式的一组：组名 + 组内候选引用（按声明序取首个非空）。"""
+
+    name: str
+    items: tuple[VarRef, ...] = ()
+
+
+@dataclass(frozen=True)
+class VariableAggregatorNode(IRNode):
+    """variable-aggregator 节点：多分支变量聚合，取首个已产出且非 None 的候选值。
+
+    items: 基础模式的候选引用（按声明序）。
+    groups: 分组模式（advanced_settings.group_enabled）——每组独立聚合，输出字段
+        '<组名>.output'；基础模式输出字段 'output'。
+    语义对齐 Dify 上游 first-non-null：未执行分支（运行期无产出）与产出 None 都跳过；
+    空串等 falsy 值【算】有效产出（非真值判定）。
+    """
+
+    items: tuple[VarRef, ...] = ()
+    groups: tuple[AggregatorGroup, ...] = ()
+
+    @property
+    def kind(self) -> str:
+        return "variable-aggregator"
+
+    def inputs(self) -> tuple[Value, ...]:
+        out: list[Value] = list(self.items)
+        for group in self.groups:
+            out.extend(group.items)
+        return tuple(out)
+
+
+@dataclass(frozen=True)
+class AssignItem:
+    """variable-assigner（Dify assigner v2）的一条赋值：目标变量 + 操作 + 取值。
+
+    target: 写入目标——conversation 变量为 VarRef('conversation', 名)，loop 变量为
+        VarRef(循环节点 id, 变量名)（与下游 {{#conversation.x#}} 读取键一致）。
+    operation: over-write/set/clear/append/extend/remove-first/remove-last/+=/-=/*=//=。
+    value: 取值（input_type constant → Literal，variable → VarRef）；clear/remove-* 无值 → None。
+    """
+
+    target: VarRef
+    operation: str
+    value: Value | None = None
+
+
+@dataclass(frozen=True)
+class VariableAssignerNode(IRNode):
+    """assigner 节点（Dify Variable Assigner v2）：向变量池写值。
+
+    单发执行没有跨请求会话——conversation 变量落成【同一次运行内】的变量池：
+    run_workflow 开头按 conversation_variables 声明种默认值（WorkflowIR.conversation_defaults），
+    本节点在池内就地读改写，下游 {{#conversation.x#}} 立即可见；loop 变量同理写回循环节点键。
+    """
+
+    items: tuple[AssignItem, ...] = ()
+
+    @property
+    def kind(self) -> str:
+        return "assigner"
+
+    def inputs(self) -> tuple[Value, ...]:
+        return tuple(i.value for i in self.items if i.value is not None)
+
+
+@dataclass(frozen=True)
+class DocumentExtractorNode(IRNode):
+    """document-extractor 节点：文件/文本变量 → 纯文本（纯计算，零文件 I/O）。
+
+    受限沙箱刻意没有文件系统能力，故按 PRD 收窄为 str/list→text 纯计算：字符串原样输出，
+    列表逐项转文本输出列表（对齐 Dify 单文件 text / 多文件 array[string] 的输出形状，
+    单/多按运行期值类型判定）。真实文件抽取留给上传通道接 ragspine.extraction 后再接入。
+    """
+
+    source: Value = field(default_factory=lambda: Literal(None))
+    is_array_file: bool = False
+
+    @property
+    def kind(self) -> str:
+        return "document-extractor"
+
+    def inputs(self) -> tuple[Value, ...]:
+        return (self.source,)
+
+
+@dataclass(frozen=True)
+class HttpRequestNode(IRNode):
+    """http-request 节点：经受控客户端发一次 HTTP 请求（安全默认关）。
+
+    生成代码【不】import 任何网络模块——只调用模块级 _dify_http 槽位；受控 urllib 客户端由
+    受信 runner 在环境变量 RAGSPINE_DIFY_HTTP_ENABLED=1 时注入（强制超时 ≤30s、响应 1MB
+    上限、仅 http/https、重定向不得离开 http(s)）。未启用时 L0 静态闸直接拒跑
+    （GeneratedCode.requires_http），独立运行未注入时调用即抛清晰错误。
+    输出字段：status_code / body / headers。
+    """
+
+    method: str = "get"
+    url: TemplateValue = field(default_factory=lambda: TemplateValue(()))
+    headers: TemplateValue = field(default_factory=lambda: TemplateValue(()))
+    params: TemplateValue = field(default_factory=lambda: TemplateValue(()))
+    body_type: str = "none"
+    body: TemplateValue | None = None
+    timeout_s: float | None = None
+    ssl_verify: bool = True
+
+    @property
+    def kind(self) -> str:
+        return "http-request"
+
+    def inputs(self) -> tuple[Value, ...]:
+        base: list[Value] = [self.url, self.headers, self.params]
+        if self.body is not None:
+            base.append(self.body)
+        return tuple(base)
+
+
+@dataclass(frozen=True)
+class LoopNode(IRNode):
+    """loop 节点：带退出条件的循环容器（区别于 iteration 的按数组逐项映射）。
+
+    body: 内层子图。每轮在【同一】上下文里顺序执行——写入跨轮累积、循环后对下游可见
+        （区别于 iteration 每项独立拷贝的隔离语义）。
+    loop_count: 最大轮数护栏（lower 段钳制到 [0, 100]，对齐 Dify 画布上限，杜绝死循环；
+        编译产物是有界 for，无 while 死循环面）。
+    break_expr / break_refs: 退出条件（每轮体执行完后判定，满足即 break——对齐 Dify 上游
+        「先跑本轮、后判退出」语义）；无条件则跑满 loop_count 轮。
+    loop_vars: 循环变量 (名, 初值)——进循环前种到 (循环节点 id, 名)，assigner 可就地改写，
+        循环结束后保留终值供下游引用。
+    """
+
+    body: WorkflowIR | None = None
+    loop_count: int = 10
+    break_expr: str | None = None
+    break_refs: tuple[VarRef, ...] = ()
+    loop_vars: tuple[tuple[str, Value], ...] = ()
+
+    def inputs(self) -> tuple[Value, ...]:
+        return tuple(v for _, v in self.loop_vars)
+
+
+@dataclass(frozen=True)
 class UnsupportedNode(IRNode):
     """尚未建模/不支持的节点（http-request/tool/knowledge-retrieval/插件等）。
 
@@ -389,12 +531,16 @@ class WorkflowIR:
     graph: 节点图。
     topo_order: 节点 id 的一个合法拓扑序（Kahn）。
     parallel_layers: 拓扑分层——同层节点彼此无依赖、可并发；层间有序。
+    conversation_defaults: 会话变量 (名, 默认值)（Dify workflow.conversation_variables）。
+        单发执行没有跨请求会话——落成同一次运行内的变量池：run_workflow 开头种默认值，
+        assigner 节点就地改写，{{#conversation.x#}} 引用即读该池。
     """
 
     mode: str
     graph: IRGraph
     topo_order: tuple[str, ...]
     parallel_layers: tuple[tuple[str, ...], ...]
+    conversation_defaults: tuple[tuple[str, Any], ...] = ()
 
     def node(self, node_id: str) -> IRNode:
         """按 id 取节点（不存在则 KeyError——程序错误，不静默）。"""

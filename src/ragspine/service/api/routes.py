@@ -5,6 +5,7 @@
 
 import hashlib
 import json
+import re
 from collections.abc import Iterator
 from datetime import date
 from typing import Annotated, Any, cast
@@ -28,6 +29,7 @@ from ragspine.pipeline.topology import agent_topology, service_topology
 from ragspine.service.api.dependencies import (
     get_config,
     get_faq_cache,
+    get_launch_sessions,
     get_provider,
     get_queue,
     get_workflow_matcher,
@@ -49,6 +51,7 @@ from ragspine.service.api.schemas import (
     IngestStructuredJobRequest,
     JobStatusResponse,
     JobSubmitResponse,
+    LaunchSessionResponse,
     N8nConvertRequest,
     N8nConvertResponse,
     N8nRunRequest,
@@ -75,6 +78,7 @@ from ragspine.service.config import (
     validate_ingest_path,
 )
 from ragspine.service.faq.faq_cache import FAQCache
+from ragspine.service.studio.launch import LaunchSessionRegistry
 from ragspine.service.tasks.task_queue import TaskQueue
 from ragspine.workflows.matching import LexicalTemplateMatcher, TemplateMatcher
 
@@ -95,6 +99,7 @@ ProviderDep = Annotated[LLMProvider, Depends(get_provider)]
 FAQCacheDep = Annotated[FAQCache, Depends(get_faq_cache)]
 QueueDep = Annotated[TaskQueue, Depends(get_queue)]
 WorkflowMatcherDep = Annotated[TemplateMatcher, Depends(get_workflow_matcher)]
+LaunchSessionsDep = Annotated[LaunchSessionRegistry, Depends(get_launch_sessions)]
 
 _WORKFLOW_LEXICAL_FALLBACK = LexicalTemplateMatcher()
 _WORKFLOW_MATCHER_FALLBACK_WARNING = (
@@ -736,6 +741,35 @@ def workflow_scaffold(
         requirements=[_workflow_requirement_info(item) for item in result.requirements],
         source=_workflow_source_metadata(result.source),
     )
+
+
+# ---------------------------------------------------------------------------
+# Studio launch-session（只读）：CLI `workflow serve` 注册，前端凭不透明 token 取回
+# ---------------------------------------------------------------------------
+# 合法 launch-session id：secrets.token_urlsafe 字符集（URL-safe base64），有界 ≤64。
+_LAUNCH_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+@router.get("/v1/launch-sessions/{session_id}", response_model=None)
+def get_launch_session(
+    session_id: str,
+    launch_sessions: LaunchSessionsDep,
+) -> LaunchSessionResponse | JSONResponse:
+    """只读取回一次 launch session：{id, name, yaml}。
+
+    不执行工作流、不落 trace、不 log 内容（隐私不变量：session 内容绝不进
+    observability）；未知/超长/非 token 字符的 id 一律同形 404、不回显。
+    """
+    if _LAUNCH_SESSION_ID_RE.fullmatch(session_id) is None:
+        return _error_response(
+            404, type_="LaunchSessionNotFound", message="launch session not found"
+        )
+    session = launch_sessions.get(session_id)
+    if session is None:
+        return _error_response(
+            404, type_="LaunchSessionNotFound", message="launch session not found"
+        )
+    return LaunchSessionResponse(id=session.session_id, name=session.name, yaml=session.yaml)
 
 
 # ---------------------------------------------------------------------------

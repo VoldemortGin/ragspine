@@ -10,20 +10,25 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 from ragspine.dify.codegen import nodes as node_emit
 from ragspine.dify.codegen.fold import FoldPlan, detect_answer_question_folds
 from ragspine.dify.codegen.naming import NameTable
 from ragspine.dify.ir.model import (
+    DocumentExtractorNode,
+    HttpRequestNode,
     IfElseNode,
     IRNode,
     IterationNode,
     KnowledgeRetrievalNode,
+    LoopNode,
     ParameterExtractorNode,
     StartNode,
     ToolNode,
     UnsupportedNode,
+    VariableAssignerNode,
     VarRef,
     WorkflowIR,
 )
@@ -33,12 +38,17 @@ INDENT = "    "
 
 @dataclass(frozen=True)
 class GeneratedCode:
-    """生成结果（frozen）：可 exec 的源码 + 入口名 + 收集到的 import + 警告列表。"""
+    """生成结果（frozen）：可 exec 的源码 + 入口名 + 收集到的 import + 警告列表。
+
+    requires_http: 源码含 http-request 节点（经 _dify_http 槽位出网）。安全默认关——
+    L0 静态闸（service.dify.safety）据此在 RAGSPINE_DIFY_HTTP_ENABLED 未显式开启时拒跑。
+    """
 
     source: str
     entrypoint: str = "run_workflow"
     imports: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
+    requires_http: bool = False
 
 
 def generate_code(
@@ -77,7 +87,20 @@ def _has_nested_reference(ir: WorkflowIR) -> bool:
                 return True
             if node.body is not None and _has_nested_reference(node.body):
                 return True
+        if isinstance(node, LoopNode):
+            if any("." in ref.field for ref in node.break_refs):
+                return True
+            if node.body is not None and _has_nested_reference(node.body):
+                return True
     return False
+
+
+def _walk_nodes(ir: WorkflowIR) -> Iterator[IRNode]:
+    """遍历工作流全部节点（含 iteration / loop 子图内层节点）。"""
+    for node in ir.graph.nodes:
+        yield node
+        if isinstance(node, (IterationNode, LoopNode)) and node.body is not None:
+            yield from _walk_nodes(node.body)
 
 
 class _Emitter:
@@ -108,13 +131,14 @@ class _Emitter:
     def build(self) -> GeneratedCode:
         # 先展平 body（这一步会把按需 import 如 ThreadPoolExecutor 收进 self.imports）。
         body = self._emit_body()
+        helpers = self._emit_node_helpers()
         hooks = self._emit_hooks()
         constants = self._emit_module_constants()
         trace_block = self._emit_trace_module_block()
         inputs_cls = self._emit_inputs_class()
         prelude = self._emit_prelude()
         source = "\n".join(
-            [*prelude, "", *constants, *trace_block, *inputs_cls, "", *hooks,
+            [*prelude, "", *constants, *trace_block, *inputs_cls, "", *helpers, *hooks,
              *self._emit_run_workflow(body)]
         )
         source = source.rstrip("\n") + "\n"
@@ -123,7 +147,27 @@ class _Emitter:
             entrypoint="run_workflow",
             imports=tuple(sorted(self.imports)),
             warnings=tuple(self.warnings),
+            requires_http=any(
+                isinstance(n, HttpRequestNode) for n in _walk_nodes(self.ir)
+            ),
         )
+
+    def _emit_node_helpers(self) -> list[str]:
+        """按需的模块级运行期 helper（对应节点存在才注入，含 iteration/loop 子图内层）。
+
+        assigner → _assign_op（变量池就地运算）；document-extractor → _doc_text（纯计算转
+        文本）；http-request → _HTTP_CLIENT 槽位 + _dify_http（受控客户端由受信 runner 注入，
+        生成代码自身不 import 任何网络模块）。无对应节点时零注入，生成源码字节不变。
+        """
+        nodes_all = list(_walk_nodes(self.ir))
+        lines: list[str] = []
+        if any(isinstance(n, VariableAssignerNode) for n in nodes_all):
+            lines.extend(node_emit.emit_assign_op_helper())
+        if any(isinstance(n, DocumentExtractorNode) for n in nodes_all):
+            lines.extend(node_emit.emit_doc_text_helper())
+        if any(isinstance(n, HttpRequestNode) for n in nodes_all):
+            lines.extend(node_emit.emit_http_client_slot())
+        return lines
 
     def _emit_module_constants(self) -> list[str]:
         """按需的可改模块常量：knowledge-retrieval / 问答折叠用到的库路径（默认离线空库）。"""
@@ -281,6 +325,15 @@ class _Emitter:
             "    _ctx: dict[tuple[str, str], Any] = {}",
             "    _result: dict[str, Any] = {}",
         ]
+        if self.ir.conversation_defaults:
+            head.append(
+                "    # 会话变量池（单发执行无跨请求会话 → 同一次运行内）：按声明序种默认值，"
+            )
+            head.append(
+                "    # assigner 节点就地改写，{{#conversation.x#}} 引用即读该池。"
+            )
+            for name, default in self.ir.conversation_defaults:
+                head.append(f"    _ctx[('conversation', {name!r})] = {default!r}")
         if self.emit_node_traces:
             head.append("    _NODE_TRACES.clear()")
         head.append("")
@@ -461,6 +514,8 @@ class _Emitter:
             return node_emit.emit_answer_question_fold(plan, self.names)
         if isinstance(node, IterationNode):
             return self._emit_iteration(node)
+        if isinstance(node, LoopNode):
+            return self._emit_loop(node)
         if isinstance(node, KnowledgeRetrievalNode):
             self.imports.add(
                 "from ragspine.retrieval.link.narrative_link import build_narrative_retriever"
@@ -474,8 +529,9 @@ class _Emitter:
                 f"占位 _tool_{self.names.var(node.id)}（带 NotImplementedError），请补全工具逻辑。"
             )
         if isinstance(node, UnsupportedNode):
+            reason = f"类型 {node.node_type}" if node.node_type else "缺少节点类型 data.type"
             self.warnings.append(
-                f"节点 {node.id}（类型 {node.node_type}）未支持：已生成带 "
+                f"节点 {node.id}（{reason}）未支持：已生成带 "
                 f"NotImplementedError 的骨架钩子 _hook_{self.names.var(node.id)}，请补全。"
             )
         return node_emit.emit_node(node, self.names)
@@ -529,8 +585,40 @@ class _Emitter:
             )
         return lines
 
+    def _emit_loop(self, node: LoopNode) -> list[str]:
+        """loop → 有界 for 循环（无 while 死循环面），体内节点在【同一】_ctx 顺序执行。
+
+        与 iteration 的区别（对齐 model.py LoopNode docstring）：不做每项隔离拷贝——写入
+        跨轮累积、循环结束后终值保留供下游引用。进循环前把 loop_vars 初值种到
+        (循环节点 id, 名)；每轮体执行【完后】判 break 条件（break_expr），满足即 break；
+        无条件则跑满 loop_count 轮（lower 段已钳制 [0, 100]）。
+        """
+        var = self.names.var(node.id)
+        lines = [
+            f"# loop: {node.id} —— 有界 {node.loop_count} 轮；体内写入跨轮累积，终值供下游引用"
+        ]
+        for name, value in node.loop_vars:
+            lines.append(
+                f"_ctx[({node.id!r}, {name!r})] = {node_emit.value_expr(value)}"
+            )
+        lines.append(f"for _loop_round_{var} in range({node.loop_count}):")
+        body_lines: list[str] = []
+        if node.body is not None:
+            body_lines.extend(self._emit_subgraph(node.body))
+        if node.break_expr is not None:
+            body_lines.append("# 退出条件（每轮体执行完后判定，满足即 break）")
+            body_lines.append(f"if {node.break_expr}:")
+            body_lines.append(f"{INDENT}break")
+        has_stmt = any(
+            ln.strip() and not ln.strip().startswith("#") for ln in body_lines
+        )
+        if not has_stmt:
+            body_lines.append("pass")
+        lines.extend(f"{INDENT}{ln}" if ln else "" for ln in body_lines)
+        return lines
+
     def _emit_subgraph(self, sub: WorkflowIR) -> list[str]:
-        """展平一个 iteration 子图（按拓扑序逐节点；子图内不再递归并行/分支，保持简单）。"""
+        """展平一个 iteration / loop 子图（按拓扑序逐节点；子图内不再递归并行/分支，保持简单）。"""
         out: list[str] = []
         for nid in sub.topo_order:
             out.extend(node_emit.emit_node(sub.node(nid), self.names))
