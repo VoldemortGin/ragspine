@@ -25,7 +25,7 @@ from ragspine.agent.intent import (
 from ragspine.agent.llm_provider import LLMProvider, iter_text_chunks
 from ragspine.agent.query_transform import make_adaptive_decomposer
 from ragspine.common.observability import emit_trace, new_request_id
-from ragspine.pipeline.topology import agent_topology, service_topology
+from ragspine.pipeline.topology import agent_topology, retriever_topology, service_topology
 from ragspine.service.api.dependencies import (
     get_config,
     get_faq_cache,
@@ -1064,19 +1064,21 @@ def dify_run_async(
 # ---------------------------------------------------------------------------
 # 管线拓扑导出（供 Studio 可视化；静态派生，零执行、零重资源）
 # ---------------------------------------------------------------------------
-_TOPOLOGY_SCOPES = ("agent", "service")
+_TOPOLOGY_SCOPES = ("agent", "retriever", "service")
 
 
 @router.get("/v1/topology", response_model=None)
 def get_topology(request: Request, scope: str = "agent") -> TopologyResponse | JSONResponse:
-    """按 scope 导出静态管线拓扑：agent（请求流）| service（服务层）。
+    """按 scope 导出静态管线拓扑：agent（完整请求流）| retriever（默认检索骨架）| service（服务层）。
 
-    agent scope 刻意【不】打开 narrative retriever（重操作）——narrative_retriever=None，
-    拓扑如实反映"无叙事分支"的装配；service scope 从 app.state 反射（duck-typed）。
+    agent / retriever scope 使用轻量哨兵描述完整参考架构，不实例化检索资源；
+    service scope 从 app.state 反射（duck-typed）。
     """
     request_id = new_request_id()
     if scope == "agent":
-        graph = agent_topology()
+        graph = agent_topology(narrative_retriever=object())
+    elif scope == "retriever":
+        graph = retriever_topology(object())
     elif scope == "service":
         graph = service_topology(request.app)
     else:

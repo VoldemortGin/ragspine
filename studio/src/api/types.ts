@@ -154,7 +154,7 @@ export interface AskResponse {
 
 /* ------------------------------- Topology ------------------------------ */
 
-export type TopologyScope = 'agent' | 'service';
+export type TopologyScope = 'agent' | 'retriever' | 'service';
 
 export type TopologyNodeKind =
   | 'stage'

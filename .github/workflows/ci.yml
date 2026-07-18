@@ -36,3 +36,49 @@ jobs:
         run: bash scripts/ci.sh
         env:
           PYTHON: python
+
+  deploy-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Compose configurations
+        run: |
+          docker compose -f deploy/compose.yaml config --quiet
+          RAGSPINE_TAG=0.11.0 docker compose \
+            -f deploy/compose.yaml \
+            -f deploy/compose.prod.yaml \
+            config --quiet
+      - name: Validate Helm chart
+        uses: azure/setup-helm@v4
+      - run: |
+          helm lint deploy/helm/ragspine
+          helm template ragspine deploy/helm/ragspine >/dev/null
+          helm template ragspine deploy/helm/ragspine \
+            --set ingress.enabled=true \
+            --set ingress.tls.enabled=true \
+            --set ingress.tls.secretName=ragspine-tls >/dev/null
+      - name: Build and start the self-hosted stack
+        run: docker compose -f deploy/compose.yaml up -d --build
+      - name: Verify API and Studio
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8000/healthz >/dev/null; then
+              break
+            fi
+            if [ "$attempt" = 30 ]; then
+              docker compose -f deploy/compose.yaml logs
+              exit 1
+            fi
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:8000/studio/ >/dev/null
+          curl --fail --silent http://127.0.0.1:8000/v1/ask \
+            -H 'content-type: application/json' \
+            -d '{"question":"中国内地FY2024的REVENUE是多少"}' \
+            | python -c 'import json,sys; result=json.load(sys.stdin); assert result["answer"]'
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose -f deploy/compose.yaml logs
+      - name: Stop stack
+        if: always()
+        run: docker compose -f deploy/compose.yaml down -v

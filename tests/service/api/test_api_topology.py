@@ -1,4 +1,4 @@
-"""/v1/topology 拓扑导出接口测试：agent/service 两种 scope + 非法 scope 错误形状。"""
+"""/v1/topology 拓扑导出接口测试：三种 scope + 非法 scope 错误形状。"""
 
 import os
 
@@ -50,10 +50,25 @@ def test_topology_agent_scope(client):
     body = resp.json()
     assert body["title"] == "Agent request flow"
     _assert_graph_shape(body)
-    # 不打开 narrative retriever（重操作）——叙事分支节点如实不出现
     node_ids = {n["id"] for n in body["nodes"]}
-    assert "parse" in node_ids
-    assert "retrieve" not in node_ids
+    assert {"parse", "tool_loop", "retrieve", "narrative_answer"} <= node_ids
+    route_labels = {
+        edge["label"]
+        for edge in body["edges"]
+        if edge["src"] == "route"
+    }
+    assert {"route=structured", "route=narrative", "route=composite"} <= route_labels
+
+
+def test_topology_retriever_scope(client):
+    resp = client.get("/v1/topology", params={"scope": "retriever"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["title"] == "HybridRetriever sub-pipeline"
+    _assert_graph_shape(body)
+    node_ids = {n["id"] for n in body["nodes"]}
+    assert {"prefilter", "bm25", "rrf", "top_k"} <= node_ids
+    assert "vector" not in node_ids
 
 
 def test_topology_service_scope(client):
@@ -72,5 +87,5 @@ def test_topology_invalid_scope_400(client):
     assert resp.status_code == 400
     err = resp.json()["error"]
     assert err["type"] == "InvalidScope"
-    assert err["message"]
+    assert "agent, retriever, service" in err["message"]
     assert err["request_id"]

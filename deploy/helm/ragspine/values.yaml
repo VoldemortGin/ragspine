@@ -155,3 +155,6 @@ ingress:
   className: ""
   host: ragspine.local
   annotations: {}
+  tls:
+    enabled: false
+    secretName: ""

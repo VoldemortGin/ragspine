@@ -13,6 +13,7 @@
 |---|---|
 | `deploy/Dockerfile` | 多阶段、uv 驱动；装 `ragspine[service,vector]` ＋ 内置 Studio Web UI 静态产物。**一个镜像两种角色**，server/worker 仅 command 不同。 |
 | `deploy/compose.yaml` | `app`（server）+ `worker` + `redis`，默认离线；`postgres` / `qdrant` 两个 profile 选择性接入。 |
+| `deploy/compose.prod.yaml` | 生产覆盖层：禁用本地 build，强制使用带版本号的 GHCR 镜像。 |
 | `deploy/.env.example` | 所有 `RAGSPINE_*` 变量 + LLM key 占位符，离线安全默认（拷为 `deploy/.env` 用）。 |
 | `deploy/.dockerignore` | 裁剪构建上下文（排除 `tests/` / venv / 缓存 / `.git` / `*.egg-info`）。 |
 
@@ -167,8 +168,9 @@ GitHub Release** 时用**同一个 `deploy/Dockerfile`** 自动 build + push：
 生产环境改用 GHCR 镜像（不本地 build）：
 
 ```bash
-# compose：覆盖 image，并去掉 build（或直接在生产 compose 里写死 image）
-RAGSPINE_TAG=0.3.0 docker compose -f deploy/compose.yaml up   # 若已把 image 指向 GHCR
+# compose：生产覆盖层要求显式版本号，禁止 latest 漂移
+RAGSPINE_TAG=0.11.0 docker compose \
+  -f deploy/compose.yaml -f deploy/compose.prod.yaml up -d
 
 # helm：把 chart 的镜像指到 GHCR
 helm install ragspine deploy/helm/ragspine \
@@ -177,7 +179,5 @@ helm install ragspine deploy/helm/ragspine \
   --set image.pullPolicy=IfNotPresent
 ```
 
-> compose 的 `app`/`worker` 仍写着 `image: ragspine:local` + `build:`（开发默认）；生产用
-> GHCR 时以一个不含 `build:`、`image:` 指向 `ghcr.io/voldemortgin/ragspine:<版本>` 的
-> override compose 覆盖即可（`docker compose -f compose.yaml -f compose.prod.yaml up`），
-> 此处不预置该 override 文件以免与开发默认相互干扰。
+`compose.prod.yaml` 只覆盖 `app`/`worker` 的构建来源，其余健康检查、持久卷、Redis 与安全默认
+全部继承开发 Compose。`RAGSPINE_TAG` 未设置时配置阶段即失败，避免生产环境意外追随 `latest`。

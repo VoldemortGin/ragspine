@@ -18,7 +18,7 @@ import type { TopologyFlowNode } from './layout';
 import { domainTint } from './palette';
 import { TopologyNodeView } from './TopologyNodeView';
 
-const SCOPES: TopologyScope[] = ['agent', 'service'];
+const SCOPES: TopologyScope[] = ['agent', 'retriever', 'service'];
 
 const nodeTypes = { topology: TopologyNodeView };
 

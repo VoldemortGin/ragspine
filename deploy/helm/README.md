@@ -93,6 +93,16 @@ helm install ragspine deploy/helm/ragspine --set qdrant.enabled=true
 | `persistence.*` | sqlite 库 + 上传落在 `/var/lib/ragspine` 的共享 PVC | `enabled: true` |
 | `ingress.*` | server Service 暴露到 host | `enabled: false` |
 
+TLS 可直接绑定已有 Secret：
+
+```bash
+helm upgrade --install ragspine deploy/helm/ragspine \
+  --set ingress.enabled=true \
+  --set ingress.host=ragspine.example.com \
+  --set ingress.tls.enabled=true \
+  --set ingress.tls.secretName=ragspine-tls
+```
+
 `RAGSPINE_DB_PATH` 等 sqlite 路径固定指向共享 PVC 的 `/var/lib/ragspine`（与 compose 一致）。
 注意 `ReadWriteOnce` 时 server 与 worker 须同节点（kind 单节点满足）；多节点请用 `ReadWriteMany`
 或外部后端（pgvector）。
