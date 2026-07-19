@@ -35,6 +35,7 @@ import {
   useCopy,
 } from '../../components';
 import { TemplatesModal } from './modals/TemplatesModal';
+import { ReadinessModal } from './modals/ReadinessModal';
 import type { LibraryEntry } from './model/library';
 import { workflowDeploymentReadiness } from './model/templates';
 import { describeApiError, formatUpdatedAt, slugify, useDismiss } from './shared';
@@ -62,10 +63,21 @@ function SaveIndicator() {
   );
 }
 
-function DeploymentReadinessBadge() {
+function DeploymentReadinessBadge({ onClick }: { onClick: () => void }) {
   const base = useEditorStore((state) => state.base);
   const readiness = workflowDeploymentReadiness(base);
-  if (readiness === null) return null;
+  if (readiness === null) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label="Check workflow readiness"
+        className="rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"
+      >
+        <Badge variant="neutral">Check readiness</Badge>
+      </button>
+    );
+  }
   const variant =
     readiness.kind === 'ready'
       ? 'success'
@@ -73,9 +85,16 @@ function DeploymentReadinessBadge() {
         ? 'danger'
         : 'warn';
   return (
-    <Badge variant={variant} title={readiness.detail}>
-      {readiness.label}
-    </Badge>
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label="Check workflow readiness"
+      className="rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"
+    >
+      <Badge variant={variant} title={`${readiness.detail} · Click to check current workflow`}>
+        {readiness.label}
+      </Badge>
+    </button>
   );
 }
 
@@ -457,9 +476,12 @@ export function Toolbar({
   const getYaml = useEditorStore((s) => s.getYaml);
   const setAnalysis = useEditorStore((s) => s.setAnalysis);
   const analysis = useEditorStore((s) => s.analysis);
+  const base = useEditorStore((s) => s.base);
   const [analyzing, setAnalyzing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [readinessOpen, setReadinessOpen] = useState(false);
+  const deploymentFallback = workflowDeploymentReadiness(base);
 
   const analyze = () => {
     setAnalyzing(true);
@@ -483,7 +505,7 @@ export function Toolbar({
       className="flex h-12 shrink-0 items-center gap-2 overflow-x-auto overflow-y-hidden border-b border-white/10 px-3"
     >
       <WorkflowSwitcher />
-      <DeploymentReadinessBadge />
+      <DeploymentReadinessBadge onClick={() => setReadinessOpen(true)} />
       <Button
         variant="ghost"
         size="sm"
@@ -582,6 +604,12 @@ export function Toolbar({
 
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <TemplatesModal open={templatesOpen} onClose={() => setTemplatesOpen(false)} />
+      <ReadinessModal
+        open={readinessOpen}
+        onClose={() => setReadinessOpen(false)}
+        getYaml={getYaml}
+        fallback={deploymentFallback}
+      />
     </div>
   );
 }

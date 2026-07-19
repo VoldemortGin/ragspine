@@ -24,6 +24,7 @@ import type {
   TopologyScope,
   WorkflowScaffoldRequest,
   WorkflowScaffoldResponse,
+  WorkflowReadinessResponse,
   WorkflowTemplateDetail,
   WorkflowTemplateListResponse,
 } from './types';
@@ -293,6 +294,18 @@ export function scaffoldWorkflow(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+    ...(signal !== undefined ? { signal } : {}),
+  });
+}
+
+export function checkWorkflowReadiness(
+  yaml: string,
+  signal?: AbortSignal,
+): Promise<WorkflowReadinessResponse> {
+  return request<WorkflowReadinessResponse>('/v1/workflow-readiness', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ yaml }),
     ...(signal !== undefined ? { signal } : {}),
   });
 }

@@ -323,3 +323,32 @@ export interface WorkflowScaffoldResponse {
   requirements: WorkflowTemplateRequirement[];
   source: WorkflowTemplateSource | null;
 }
+
+export type WorkflowReadinessStatus = 'ready' | 'blocked';
+export type WorkflowReadinessCheckStatus = 'passed' | 'blocked' | 'not_run';
+
+export interface WorkflowReadinessCheck {
+  status: WorkflowReadinessCheckStatus;
+  code?: string;
+}
+
+export interface WorkflowReadinessStartInput {
+  name: string;
+  label: string;
+  type: string;
+  required: boolean;
+}
+
+export interface WorkflowReadinessResponse {
+  request_id: string;
+  schema_version: number;
+  status: WorkflowReadinessStatus;
+  checks: {
+    format: WorkflowReadinessCheck;
+    compile: WorkflowReadinessCheck;
+    runnable: WorkflowReadinessCheck;
+  };
+  start_inputs: WorkflowReadinessStartInput[];
+  warnings: string[];
+  requirements: WorkflowTemplateRequirement[];
+}

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   ApiError,
+  checkWorkflowReadiness,
   getWorkflowTemplate,
   listWorkflowTemplates,
   scaffoldWorkflow,
@@ -21,6 +22,39 @@ afterEach(() => {
 });
 
 describe('workflow catalog client', () => {
+  it('posts the current workflow to readiness and forwards cancellation', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        request_id: 'req-ready',
+        schema_version: 1,
+        status: 'ready',
+        checks: {
+          format: { status: 'passed' },
+          compile: { status: 'passed' },
+          runnable: { status: 'passed' },
+        },
+        start_inputs: [],
+        warnings: [],
+        requirements: [],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+
+    const response = await checkWorkflowReadiness('app: {}', controller.signal);
+
+    expect(response.status).toBe('ready');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/v1/workflow-readiness',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ yaml: 'app: {}' }),
+        signal: controller.signal,
+      }),
+    );
+  });
+
   it('lists metadata with GET and forwards cancellation', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
