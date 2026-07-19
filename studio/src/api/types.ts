@@ -285,6 +285,10 @@ export interface WorkflowTemplateSummary {
 
 export interface WorkflowTemplateListResponse {
   request_id: string;
+  total: number;
+  offset: number;
+  limit: number;
+  next_offset: number | null;
   templates: WorkflowTemplateSummary[];
 }
 

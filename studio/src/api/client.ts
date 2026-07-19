@@ -215,13 +215,61 @@ export function convertN8n(
 
 /* ------------------------- Workflow template catalog ------------------ */
 
-export function listWorkflowTemplates(
+const MAX_WORKFLOW_TEMPLATE_PAGES = 100;
+
+function invalidPagination(message: string): ApiError {
+  return new ApiError(message, 0, 'invalid_pagination');
+}
+
+export async function listWorkflowTemplates(
   signal?: AbortSignal,
 ): Promise<WorkflowTemplateListResponse> {
-  return request<WorkflowTemplateListResponse>('/v1/workflow-templates', {
-    method: 'GET',
-    ...(signal !== undefined ? { signal } : {}),
-  });
+  let path = '/v1/workflow-templates';
+  let firstPage: WorkflowTemplateListResponse | undefined;
+  const templates: WorkflowTemplateListResponse['templates'] = [];
+  const seenOffsets = new Set<number>([0]);
+
+  for (let pageCount = 0; pageCount < MAX_WORKFLOW_TEMPLATE_PAGES; pageCount += 1) {
+    const page = await request<WorkflowTemplateListResponse>(path, {
+      method: 'GET',
+      ...(signal !== undefined ? { signal } : {}),
+    });
+    firstPage ??= page;
+    templates.push(...page.templates);
+
+    const nextOffset = page.next_offset;
+    if (nextOffset === null || nextOffset === undefined) {
+      return {
+        ...firstPage,
+        next_offset: null,
+        templates,
+      };
+    }
+    if (!Number.isSafeInteger(nextOffset) || nextOffset < 0) {
+      throw invalidPagination('Template catalog returned an invalid next offset.');
+    }
+    if (seenOffsets.has(nextOffset)) {
+      throw invalidPagination('Template catalog repeated a page offset.');
+    }
+
+    const limit = page.limit;
+    const total = page.total;
+    if (!Number.isSafeInteger(limit) || limit <= 0) {
+      throw invalidPagination('Template catalog returned an invalid page limit.');
+    }
+    if (!Number.isSafeInteger(total) || total < 0) {
+      throw invalidPagination('Template catalog returned an invalid total.');
+    }
+    const totalPages = Math.ceil(total / limit);
+    if (pageCount + 1 >= totalPages || templates.length >= total) {
+      throw invalidPagination('Template catalog pagination exceeded its declared total.');
+    }
+
+    seenOffsets.add(nextOffset);
+    path = `/v1/workflow-templates?offset=${nextOffset}&limit=${limit}`;
+  }
+
+  throw invalidPagination('Template catalog exceeded the page limit.');
 }
 
 export function getWorkflowTemplate(
