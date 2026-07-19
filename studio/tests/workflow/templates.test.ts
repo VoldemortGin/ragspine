@@ -20,10 +20,11 @@ import {
   templateCompatibilityLabel,
   templateRequirementLabels,
   templateSourceView,
+  workflowDeploymentReadiness,
   workflowTemplateCategories,
   workflowTemplatePlatforms,
 } from '../../src/pages/workflows/model/templates';
-import { parseWorkflowYaml } from '../../src/workflow/convert';
+import { parseWorkflowYaml, serializeWorkflowYaml } from '../../src/workflow/convert';
 import { detectN8nWorkflow } from '../../src/workflow/n8n';
 
 const WORKFLOW_OBJECT: Record<string, unknown> = {
@@ -226,18 +227,77 @@ describe('workflow catalog helpers', () => {
       template_id: null,
       confidence: 0.72,
       matcher: 'lexical',
-      warnings: [],
+      warnings: ['archetype=structured_extraction'],
       compatibility: {
         format: 'dify',
         dsl_version: '0.6.0',
-        status: 'supported',
+        status: 'runnable',
       },
-      requirements: [],
+      requirements: [
+        { kind: 'llm_provider', name: 'langgenius/openai/openai', required: true },
+      ],
       source: null,
     };
     const creatable = scaffoldToCreatableTemplate(response, 'A paper RAG workflow');
     expect(creatable.name).toBe('Structured catalog workflow');
-    expect(parseWorkflowYaml(creatable.yaml).version).toBe('0.6.0');
+    const workflow = parseWorkflowYaml(creatable.yaml);
+    expect(workflow.version).toBe('0.6.0');
+    expect(workflow.docPassthrough['x-ragspine-scaffold']).toEqual({
+      request_id: 'req-2',
+      origin: 'generated',
+      template_id: null,
+      confidence: 0.72,
+      matcher: 'lexical',
+      warnings: ['archetype=structured_extraction'],
+      compatibility: {
+        format: 'dify',
+        dsl_version: '0.6.0',
+        status: 'runnable',
+      },
+      requirements: [
+        { kind: 'llm_provider', name: 'langgenius/openai/openai', required: true },
+      ],
+      source: null,
+    });
+    const reloaded = parseWorkflowYaml(serializeWorkflowYaml(workflow));
+    expect(reloaded.docPassthrough['x-ragspine-scaffold']).toEqual(
+      workflow.docPassthrough['x-ragspine-scaffold'],
+    );
+    expect(workflowDeploymentReadiness(reloaded)).toMatchObject({
+      kind: 'needs-provider',
+      label: 'Needs provider',
+    });
+  });
+
+  it('derives ready and blocked deployment states from persisted scaffold metadata', () => {
+    const readyResponse: WorkflowScaffoldResponse = {
+      request_id: 'req-ready',
+      workflow: WORKFLOW_OBJECT,
+      origin: 'template',
+      template_id: 'ready-template',
+      confidence: 1,
+      matcher: 'explicit',
+      warnings: [],
+      compatibility: { format: 'dify', dsl_version: '0.6.0', status: 'runnable' },
+      requirements: [],
+      source: null,
+    };
+    const blockedResponse: WorkflowScaffoldResponse = {
+      ...readyResponse,
+      request_id: 'req-blocked',
+      compatibility: { format: 'dify', dsl_version: '0.6.0', status: 'blocked' },
+    };
+
+    expect(
+      workflowDeploymentReadiness(
+        parseWorkflowYaml(scaffoldToCreatableTemplate(readyResponse, 'ready').yaml),
+      ),
+    ).toMatchObject({ kind: 'ready', label: 'Ready' });
+    expect(
+      workflowDeploymentReadiness(
+        parseWorkflowYaml(scaffoldToCreatableTemplate(blockedResponse, 'blocked').yaml),
+      ),
+    ).toMatchObject({ kind: 'blocked', label: 'Blocked' });
   });
 
   it('accepts legacy YAML only when canonical workflow JSON is absent', () => {

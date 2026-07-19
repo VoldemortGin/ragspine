@@ -2,11 +2,14 @@
 
 import type {
   WorkflowScaffoldResponse,
+  WorkflowTemplateCompatibility,
   WorkflowTemplateDetail,
+  WorkflowTemplateRequirement,
   WorkflowTemplateSource,
   WorkflowTemplateSummary,
 } from '../../../api/types';
 import { parseWorkflowYaml, serializeWorkflowYaml } from '../../../workflow/convert';
+import type { StudioWorkflow } from '../../../workflow/types';
 import { createTemplateWorkflow } from './template';
 
 export interface CreatableWorkflowTemplate {
@@ -29,6 +32,26 @@ export interface WorkflowTemplateSourceView {
   licenseStatus: string;
   httpsUrl: string | null;
 }
+
+export interface WorkflowDeploymentReadiness {
+  kind: 'ready' | 'needs-provider' | 'needs-setup' | 'blocked';
+  label: 'Ready' | 'Needs provider' | 'Needs setup' | 'Blocked';
+  detail: string;
+}
+
+interface WorkflowScaffoldMetadata {
+  request_id: string;
+  origin: WorkflowScaffoldResponse['origin'];
+  template_id: string | null;
+  confidence: number;
+  matcher: string;
+  warnings: string[];
+  compatibility: WorkflowTemplateCompatibility;
+  requirements: WorkflowTemplateRequirement[];
+  source: WorkflowTemplateSource | null;
+}
+
+const SCAFFOLD_METADATA_KEY = 'x-ragspine-scaffold';
 
 export const TEMPLATE_PROVENANCE_NOTICE =
   'Spine-authored equivalent · upstream reference only · config not redistributed';
@@ -316,5 +339,62 @@ export function scaffoldToCreatableTemplate(
   const yaml = workflowDocumentText(response);
   const parsed = parseWorkflowYaml(yaml);
   const name = safeString(parsed.name) || fallbackWorkflowName(description);
-  return { name, yaml };
+  const metadata: WorkflowScaffoldMetadata = {
+    request_id: safeString(response.request_id),
+    origin: response.origin === 'template' ? 'template' : 'generated',
+    template_id: safeString(response.template_id) || null,
+    confidence:
+      typeof response.confidence === 'number' && Number.isFinite(response.confidence)
+        ? response.confidence
+        : 0,
+    matcher: safeString(response.matcher),
+    warnings: safeStrings(response.warnings),
+    compatibility: normalizeCompatibility(response.compatibility),
+    requirements: normalizeRequirements(response.requirements),
+    source: normalizeSource(response.source),
+  };
+  const workflow: StudioWorkflow = {
+    ...parsed,
+    docPassthrough: {
+      ...parsed.docPassthrough,
+      [SCAFFOLD_METADATA_KEY]: metadata,
+    },
+  };
+  return { name, yaml: serializeWorkflowYaml(workflow) };
+}
+
+/** Deployment state persisted inside scaffold-created workflow YAML. */
+export function workflowDeploymentReadiness(
+  workflow: StudioWorkflow,
+): WorkflowDeploymentReadiness | null {
+  const raw = workflow.docPassthrough[SCAFFOLD_METADATA_KEY];
+  if (!isRecord(raw)) return null;
+
+  const compatibility = normalizeCompatibility(raw['compatibility']);
+  const requirements = normalizeRequirements(raw['requirements']).filter(
+    (requirement) => requirement.required,
+  );
+  const warnings = safeStrings(raw['warnings']);
+  const context = [
+    `Origin: ${safeString(raw['origin']) || 'unknown'}`,
+    `Compatibility: ${compatibility.status || 'unknown'}`,
+    ...(warnings.length > 0 ? [`Warnings: ${warnings.join('; ')}`] : []),
+  ];
+  const status = compatibility.status.toLocaleLowerCase();
+  if (status !== 'runnable' && status !== 'supported' && status !== 'compatible') {
+    return { kind: 'blocked', label: 'Blocked', detail: context.join(' · ') };
+  }
+  if (requirements.length === 0) {
+    return { kind: 'ready', label: 'Ready', detail: context.join(' · ') };
+  }
+
+  const requirementNames = requirements.map((requirement) => requirementLabel(requirement));
+  const detail = [...context, `Requires: ${requirementNames.join(', ')}`].join(' · ');
+  const providerOnly = requirements.every((requirement) => {
+    const kind = requirement.kind.toLocaleLowerCase();
+    return kind.includes('provider') || kind === 'model';
+  });
+  return providerOnly
+    ? { kind: 'needs-provider', label: 'Needs provider', detail }
+    : { kind: 'needs-setup', label: 'Needs setup', detail };
 }

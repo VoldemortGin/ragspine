@@ -36,6 +36,7 @@ import {
 } from '../../components';
 import { TemplatesModal } from './modals/TemplatesModal';
 import type { LibraryEntry } from './model/library';
+import { workflowDeploymentReadiness } from './model/templates';
 import { describeApiError, formatUpdatedAt, slugify, useDismiss } from './shared';
 import { useEditorStore } from './store';
 
@@ -58,6 +59,23 @@ function SaveIndicator() {
         {saveState === 'saved' ? 'Saved' : 'Saving…'}
       </span>
     </span>
+  );
+}
+
+function DeploymentReadinessBadge() {
+  const base = useEditorStore((state) => state.base);
+  const readiness = workflowDeploymentReadiness(base);
+  if (readiness === null) return null;
+  const variant =
+    readiness.kind === 'ready'
+      ? 'success'
+      : readiness.kind === 'blocked'
+        ? 'danger'
+        : 'warn';
+  return (
+    <Badge variant={variant} title={readiness.detail}>
+      {readiness.label}
+    </Badge>
   );
 }
 
@@ -465,6 +483,7 @@ export function Toolbar({
       className="flex h-12 shrink-0 items-center gap-2 overflow-x-auto overflow-y-hidden border-b border-white/10 px-3"
     >
       <WorkflowSwitcher />
+      <DeploymentReadinessBadge />
       <Button
         variant="ghost"
         size="sm"
