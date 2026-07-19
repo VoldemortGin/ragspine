@@ -59,6 +59,7 @@ _CURATED: dict[str, str] = {
     "READINESS_SCHEMA_VERSION": "readiness",
     "WorkflowReadiness": "readiness",
     "check_workflow": "readiness",
+    "check_workflow_document": "readiness",
 }
 
 __all__ = list(_CURATED)

@@ -61,6 +61,8 @@ from ragspine.service.api.schemas import (
     TopologyNodeInfo,
     TopologyResponse,
     WorkflowCompatibilityInfo,
+    WorkflowReadinessRequest,
+    WorkflowReadinessResponse,
     WorkflowRequirementInfo,
     WorkflowScaffoldRequest,
     WorkflowScaffoldResponse,
@@ -740,6 +742,35 @@ def workflow_scaffold(
         compatibility=_workflow_compatibility_info(result.compatibility),
         requirements=[_workflow_requirement_info(item) for item in result.requirements],
         source=_workflow_source_metadata(result.source),
+    )
+
+
+@router.post("/v1/workflow-readiness", response_model=None)
+def workflow_readiness(
+    req: WorkflowReadinessRequest,
+) -> WorkflowReadinessResponse | JSONResponse:
+    """Run the same compile + L0 readiness preflight used by `workflow check`."""
+
+    from ragspine.workflows.errors import WorkflowFormatError
+    from ragspine.workflows.formats import parse_workflow
+    from ragspine.workflows.readiness import check_workflow_document
+
+    request_id = new_request_id()
+    try:
+        workflow_yaml = _dify_document_yaml(req)
+        workflow = parse_workflow(workflow_yaml, format="yaml")
+    except WorkflowFormatError:
+        return _workflow_format_response(request_id)
+
+    readiness = check_workflow_document(workflow)
+    emit_trace(
+        request_id=request_id,
+        op="workflow_readiness",
+        status=readiness.report["status"],
+        n_warnings=len(cast(list[object], readiness.report["warnings"])),
+    )
+    return WorkflowReadinessResponse.model_validate(
+        {"request_id": request_id, **readiness.report}
     )
 
 

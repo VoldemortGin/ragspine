@@ -17,8 +17,10 @@ from ragspine.service.api.app import create_app  # noqa: E402
 from ragspine.service.config import ServiceConfig  # noqa: E402
 from ragspine.service.faq.faq_cache import FAQCache  # noqa: E402
 from ragspine.service.tasks.task_queue import FakeQueue  # noqa: E402
+from ragspine.workflows.formats import load_workflow  # noqa: E402
 from ragspine.workflows.matching import EmbeddingTemplateMatcher  # noqa: E402
 from ragspine.workflows.model import TemplateMatch, WorkflowTemplate  # noqa: E402
+from ragspine.workflows.readiness import check_workflow_document  # noqa: E402
 
 
 class _SemanticMatcher:
@@ -60,6 +62,49 @@ def _templates(client: TestClient) -> list[dict[str, object]]:
     assert body["request_id"]
     assert body["templates"]
     return body["templates"]
+
+
+def test_workflow_readiness_matches_shared_cli_domain_service(client: TestClient) -> None:
+    source = ROOT_DIR / "tests" / "dify" / "fixtures" / "seq.yml"
+    workflow = load_workflow(source)
+
+    response = client.post("/v1/workflow-readiness", json={"workflow": workflow})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body.pop("request_id")
+    assert body == check_workflow_document(workflow).report
+    assert body["status"] == "ready"
+
+
+def test_workflow_readiness_returns_blocked_report_and_accepts_legacy_yaml(
+    client: TestClient,
+) -> None:
+    source = ROOT_DIR / "tests" / "dify" / "fixtures" / "agent_tool.yml"
+    yaml_text = source.read_text(encoding="utf-8")
+
+    response = client.post("/v1/workflow-readiness", json={"yaml": yaml_text})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "blocked"
+    assert body["checks"]["runnable"] == {
+        "status": "blocked",
+        "code": "dify.unsafe",
+    }
+    assert body["warnings"]
+
+
+def test_workflow_readiness_uses_standard_document_errors(client: TestClient) -> None:
+    malformed = client.post("/v1/workflow-readiness", json={"yaml": "app: ["})
+    both = client.post(
+        "/v1/workflow-readiness",
+        json={"workflow": {}, "yaml": "app: {}"},
+    )
+
+    assert malformed.status_code == 400
+    assert malformed.json()["error"]["type"] == "workflow.format"
+    assert both.status_code == 422
 
 
 def test_workflow_template_list_is_metadata_only(client: TestClient) -> None:

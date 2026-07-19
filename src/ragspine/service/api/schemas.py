@@ -314,6 +314,20 @@ class WorkflowTemplateDetailResponse(WorkflowTemplateInfo):
     preview: dict[str, JsonValue]
 
 
+class WorkflowReadinessRequest(_DifyDocumentRequest):
+    """Canonical workflow object (preferred) or legacy YAML for readiness preflight."""
+
+
+class WorkflowReadinessResponse(BaseModel):
+    request_id: str
+    schema_version: int
+    status: Literal["ready", "blocked"]
+    checks: dict[str, dict[str, JsonValue]]
+    start_inputs: list[dict[str, JsonValue]] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    requirements: list[WorkflowRequirementInfo] = Field(default_factory=list)
+
+
 class WorkflowScaffoldRequest(BaseModel):
     """只允许语义描述与 catalog 选择；客户端不能注入 provider/I/O 能力。"""
 

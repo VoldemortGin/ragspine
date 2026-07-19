@@ -96,28 +96,48 @@ def _requirements(workflow: dict[str, object]) -> list[dict[str, object]]:
     ]
 
 
+def _format_blocked() -> WorkflowReadiness:
+    return WorkflowReadiness(
+        report={
+            "schema_version": READINESS_SCHEMA_VERSION,
+            "status": "blocked",
+            "checks": {
+                "format": {"status": "blocked", "code": "workflow.format"},
+                "compile": {"status": "not_run"},
+                "runnable": {"status": "not_run"},
+            },
+            "start_inputs": [],
+            "warnings": [],
+            "requirements": [],
+        },
+        workflow_yaml=None,
+    )
+
+
+def check_workflow_document(workflow: dict[str, object]) -> WorkflowReadiness:
+    """Compile and L0-check one canonical workflow mapping without executing it."""
+
+    try:
+        workflow_yaml = dump_dify_yaml(workflow)
+    except WorkflowFormatError:
+        return _format_blocked()
+    return _check_normalized_workflow(workflow, workflow_yaml)
+
+
 def check_workflow(path: str | Path) -> WorkflowReadiness:
     """Normalize, compile, and L0-check one existing workflow without executing it."""
 
     try:
         workflow = load_workflow(path)
-    except WorkflowFormatError as exc:
-        return WorkflowReadiness(
-            report={
-                "schema_version": READINESS_SCHEMA_VERSION,
-                "status": "blocked",
-                "checks": {
-                    "format": {"status": "blocked", "code": exc.code},
-                    "compile": {"status": "not_run"},
-                    "runnable": {"status": "not_run"},
-                },
-                "start_inputs": [],
-                "warnings": [],
-                "requirements": [],
-            },
-            workflow_yaml=None,
-        )
-    workflow_yaml = dump_dify_yaml(workflow)
+    except WorkflowFormatError:
+        return _format_blocked()
+    return check_workflow_document(workflow)
+
+
+def _check_normalized_workflow(
+    workflow: dict[str, object],
+    workflow_yaml: str,
+) -> WorkflowReadiness:
     try:
         compiled = compile_dify_yaml(workflow_yaml, analyze=False)
     except DifyCompileError as exc:
@@ -167,4 +187,9 @@ def check_workflow(path: str | Path) -> WorkflowReadiness:
     return WorkflowReadiness(report=ready_report, workflow_yaml=workflow_yaml)
 
 
-__all__ = ["READINESS_SCHEMA_VERSION", "WorkflowReadiness", "check_workflow"]
+__all__ = [
+    "READINESS_SCHEMA_VERSION",
+    "WorkflowReadiness",
+    "check_workflow",
+    "check_workflow_document",
+]
