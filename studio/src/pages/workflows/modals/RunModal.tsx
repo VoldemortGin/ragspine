@@ -21,6 +21,7 @@ import {
   IconX,
   JsonView,
   Modal,
+  Select,
   Spinner,
   TextArea,
   TextInput,
@@ -31,6 +32,14 @@ import type { StartVariable } from '../../../workflow/types';
 import { formatElapsedMs, loadRunHistory } from '../model/execution';
 import type { RunHistoryEntry } from '../model/execution';
 import { loadRunInputs, saveRunInputs } from '../model/library';
+import {
+  initializeRunInputs,
+  parseRunInputsJson,
+  serializeRunInputs,
+  startInputKind,
+  startInputOptions,
+  validateRunInputs,
+} from '../model/runInputs';
 import { ApiErrorCallout, FormHint, formatUpdatedAt } from '../shared';
 import { useEditorStore } from '../store';
 
@@ -44,7 +53,7 @@ export interface RunModalProps {
   onFoldChange: (v: boolean) => void;
 }
 
-function toDraft(value: unknown): string {
+function controlDraft(value: unknown): string {
   if (typeof value === 'string') return value;
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   try {
@@ -290,7 +299,10 @@ export function RunModal({
   const resetRun = useEditorStore((s) => s.resetRun);
   const selectSingleNode = useEditorStore((s) => s.selectSingleNode);
 
-  const [values, setValues] = useState<Record<string, string>>({});
+  const [inputs, setInputs] = useState<Record<string, unknown>>({});
+  const [rawOpen, setRawOpen] = useState(false);
+  const [rawDraft, setRawDraft] = useState('{}');
+  const [rawError, setRawError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [history, setHistory] = useState<RunHistoryEntry[]>([]);
   const [viewing, setViewing] = useState<RunHistoryEntry | null>(null);
@@ -304,13 +316,11 @@ export function RunModal({
     setViewing(null);
     setFieldErrors({});
     setHistory(loadRunHistory(workflowId));
-    const stored = loadRunInputs(workflowId);
-    const drafts: Record<string, string> = {};
-    for (const variable of startVariables) {
-      const value = stored[variable.variable];
-      if (value !== undefined) drafts[variable.variable] = toDraft(value);
-    }
-    setValues(drafts);
+    const initialInputs = initializeRunInputs(startVariables, loadRunInputs(workflowId));
+    setInputs(initialInputs);
+    setRawDraft(serializeRunInputs(initialInputs));
+    setRawError(null);
+    setRawOpen(false);
     // Intentionally keyed on `open` only: props are read at open time.
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -325,32 +335,17 @@ export function RunModal({
   };
 
   const submit = () => {
-    const errors: Record<string, string> = {};
-    const inputs: Record<string, unknown> = {};
-    for (const variable of startVariables) {
-      const raw = values[variable.variable] ?? '';
-      if (raw.trim() === '') {
-        if (variable.required === true) errors[variable.variable] = 'This field is required.';
-        continue; // skip empty non-required values
-      }
-      if (variable.type === 'number') {
-        const num = Number(raw.trim());
-        if (!Number.isFinite(num)) {
-          errors[variable.variable] = 'Must be a valid number.';
-          continue;
-        }
-        inputs[variable.variable] = num;
-      } else {
-        inputs[variable.variable] = raw;
-      }
-    }
-    if (Object.keys(errors).length > 0) {
-      setFieldErrors(errors);
+    if (rawError !== null) return;
+    const validated = validateRunInputs(startVariables, inputs);
+    if (Object.keys(validated.errors).length > 0) {
+      setFieldErrors(validated.errors);
       return;
     }
     setFieldErrors({});
-    saveRunInputs(workflowId, inputs);
-    startRun(mode, inputs);
+    setInputs(validated.inputs);
+    setRawDraft(serializeRunInputs(validated.inputs));
+    saveRunInputs(workflowId, validated.inputs);
+    startRun(mode, validated.inputs);
   };
 
   let footer: ReactNode;
@@ -421,9 +416,13 @@ export function RunModal({
                 <div className="space-y-3">
                   {startVariables.map((variable) => {
                     const key = variable.variable;
-                    const value = values[key] ?? '';
-                    const setValue = (next: string) => {
-                      setValues((prev) => ({ ...prev, [key]: next }));
+                    const kind = startInputKind(variable);
+                    const value = inputs[key];
+                    const setValue = (next: unknown) => {
+                      const updated = { ...inputs, [key]: next };
+                      setInputs(updated);
+                      setRawDraft(serializeRunInputs(updated));
+                      setRawError(null);
                       setFieldErrors((prev) => {
                         if (!(key in prev)) return prev;
                         const rest = { ...prev };
@@ -433,6 +432,29 @@ export function RunModal({
                     };
                     const label =
                       variable.label !== undefined && variable.label !== '' ? variable.label : key;
+                    if (kind === 'boolean') {
+                      return (
+                        <div key={key}>
+                          <div className="mb-1.5 flex items-baseline gap-1 text-xs font-medium text-zinc-400">
+                            {label}
+                            {variable.required === true && (
+                              <span className="text-indigo-400">*</span>
+                            )}
+                          </div>
+                          <Checkbox
+                            aria-label={label}
+                            checked={value === true}
+                            label={value === true ? 'True' : 'False'}
+                            onChange={(e) => setValue(e.target.checked)}
+                          />
+                          {fieldErrors[key] !== undefined && (
+                            <div className="mt-1 text-[11px] leading-4 text-red-400">
+                              {fieldErrors[key]}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
                     return (
                       <Field
                         key={key}
@@ -440,24 +462,73 @@ export function RunModal({
                         required={variable.required === true}
                         error={fieldErrors[key]}
                       >
-                        {variable.type === 'paragraph' ? (
+                        {kind === 'paragraph' ? (
                           <TextArea
                             rows={4}
-                            value={value}
+                            value={controlDraft(value)}
                             onChange={(e) => setValue(e.target.value)}
                           />
-                        ) : variable.type === 'number' ? (
+                        ) : kind === 'number' ? (
                           <TextInput
                             type="number"
-                            value={value}
+                            value={controlDraft(value)}
                             onChange={(e) => setValue(e.target.value)}
                           />
+                        ) : kind === 'select' ? (
+                          <Select
+                            value={controlDraft(value)}
+                            onChange={(e) => setValue(e.target.value)}
+                          >
+                            <option value="">Select an option</option>
+                            {startInputOptions(variable).map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </Select>
                         ) : (
-                          <TextInput value={value} onChange={(e) => setValue(e.target.value)} />
+                          <TextInput
+                            value={controlDraft(value)}
+                            onChange={(e) => setValue(e.target.value)}
+                          />
                         )}
                       </Field>
                     );
                   })}
+                  <div className="border-t border-white/10 pt-3">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      aria-expanded={rawOpen}
+                      onClick={() => setRawOpen((value) => !value)}
+                    >
+                      Advanced JSON
+                    </Button>
+                    {rawOpen && (
+                      <Field
+                        label="Complete inputs object"
+                        error={rawError ?? undefined}
+                      >
+                        <TextArea
+                          aria-label="Advanced inputs JSON"
+                          className="font-mono text-xs"
+                          rows={8}
+                          value={rawDraft}
+                          onChange={(event) => {
+                            const next = event.target.value;
+                            setRawDraft(next);
+                            const parsed = parseRunInputsJson(next);
+                            setRawError(parsed.error);
+                            if (parsed.inputs !== null) {
+                              setInputs(parsed.inputs);
+                              setFieldErrors({});
+                            }
+                          }}
+                        />
+                      </Field>
+                    )}
+                  </div>
                 </div>
               )}
               <Checkbox
