@@ -15,7 +15,12 @@ from ragspine.workflows.model import (
     WorkflowCompatibility,
     WorkflowRequirement,
 )
-from ragspine.workflows.planner import DIFY_DSL_VERSION, generate_dify_yaml, normalize_description
+from ragspine.workflows.planner import (
+    DIFY_DSL_VERSION,
+    make_blueprint,
+    normalize_description,
+    render_blueprint,
+)
 
 
 def scaffold_workflow(
@@ -79,7 +84,8 @@ def scaffold_workflow(
                 source=selected.source,
             )
 
-    generated_yaml = generate_dify_yaml(normalized)
+    blueprint = make_blueprint(normalized)
+    generated_yaml = render_blueprint(blueprint)
     return ScaffoldResult(
         yaml=generated_yaml,
         workflow=parse_workflow(generated_yaml, format="yaml"),
@@ -87,7 +93,7 @@ def scaffold_workflow(
         template_id=None,
         confidence=0.0,
         matcher=resolved_matcher.name if reuse else "disabled",
-        warnings=(),
+        warnings=(f"archetype={blueprint.archetype}",),
         requirements=(
             WorkflowRequirement(
                 kind="llm_provider", name="langgenius/openai/openai", required=True

@@ -1,9 +1,9 @@
-"""Constrained deterministic fallback renderer for Dify DSL 0.6.0.
+"""Constrained deterministic renderer for Dify DSL 0.6.0.
 
-The fallback intentionally supports one safe blueprint only: start -> llm ->
-end.  User text is encoded as a JSON string (valid YAML scalar), so newlines,
-Unicode, document markers, template-like text, and ``${...}`` cannot alter the
-document structure.
+Strong, bounded intent signals select one of a small set of runnable graph
+archetypes.  Ambiguous requests fall back to start -> llm -> end.  User text is
+encoded as data, so newlines, Unicode, document markers, template-like text,
+and ``${...}`` cannot alter the document structure.
 """
 
 from __future__ import annotations
@@ -11,11 +11,56 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from importlib.resources import files
+from typing import Literal
 
 from ragspine.workflows.errors import WorkflowInputError
+from ragspine.workflows.formats import dump_dify_yaml, parse_workflow
 
 MAX_DESCRIPTION_CHARS = 4096
 DIFY_DSL_VERSION = "0.6.0"
+WorkflowArchetype = Literal[
+    "generic_fallback",
+    "structured_extraction",
+    "urgency_route",
+]
+
+_STRUCTURED_EXTRACTION_SIGNALS = (
+    "extract structured fields",
+    "extract structured data",
+    "structured extraction",
+    "structured information extraction",
+    "field extraction",
+    "结构化抽取",
+    "结构化提取",
+    "抽取字段",
+    "提取字段",
+    "字段抽取",
+)
+_URGENCY_SIGNALS = (
+    "urgency",
+    "urgent",
+    "priority",
+    "emergency",
+    "severity",
+    "紧急度",
+    "紧急程度",
+    "紧急",
+    "优先级",
+    "严重程度",
+)
+_ROUTE_SIGNALS = (
+    "route",
+    "routing",
+    "dispatch",
+    "路由",
+    "分流",
+    "派发",
+)
+_ARCHETYPE_ASSETS = {
+    "structured_extraction": "structured-information-extraction.yml",
+    "urgency_route": "conditional-response-routing.yml",
+}
 
 
 @dataclass(frozen=True)
@@ -30,13 +75,14 @@ class WorkflowInput:
 
 @dataclass(frozen=True)
 class WorkflowBlueprint:
-    """The only model-independent graph the fallback renderer accepts."""
+    """One model-independent graph selected by the constrained planner."""
 
     name: str
     goal: str
     input_name: str = "input"
     output_name: str = "result"
     inputs: tuple[WorkflowInput, ...] = ()
+    archetype: WorkflowArchetype = "generic_fallback"
 
 
 def normalize_description(description: str) -> str:
@@ -67,11 +113,18 @@ def make_blueprint(description: str) -> WorkflowBlueprint:
     goal = _neutralize_template_markers(raw_goal)
     one_line = " ".join(goal.split())
     name = one_line[:80].rstrip() or "Generated workflow"
-    return WorkflowBlueprint(name=name, goal=goal)
+    return WorkflowBlueprint(
+        name=name,
+        goal=goal,
+        archetype=_select_archetype(raw_goal),
+    )
 
 
 def render_blueprint(blueprint: WorkflowBlueprint) -> str:
-    """Render a fixed Dify graph, structurally escaping every dynamic scalar."""
+    """Render the selected fixed graph, escaping every dynamic scalar."""
+
+    if blueprint.archetype != "generic_fallback":
+        return _render_archetype(blueprint)
 
     inputs = _validated_inputs(blueprint)
     output_name_value = _validated_variable(blueprint.output_name, label="output_name")
@@ -277,6 +330,36 @@ def _yaml_scalar(value: str) -> str:
     """JSON strings are valid YAML double-quoted scalars."""
 
     return json.dumps(value, ensure_ascii=False)
+
+
+def _select_archetype(description: str) -> WorkflowArchetype:
+    """Select only on explicit phrases; conflicting signals are ambiguous."""
+
+    folded = description.casefold()
+    extraction = any(signal in folded for signal in _STRUCTURED_EXTRACTION_SIGNALS)
+    routing = any(signal in folded for signal in _URGENCY_SIGNALS) and any(
+        signal in folded for signal in _ROUTE_SIGNALS
+    )
+    if extraction == routing:
+        return "generic_fallback"
+    return "structured_extraction" if extraction else "urgency_route"
+
+
+def _render_archetype(blueprint: WorkflowBlueprint) -> str:
+    """Render a curated graph shape while keeping request text data-only."""
+
+    asset = _ARCHETYPE_ASSETS[blueprint.archetype]
+    source = files("ragspine.workflows.templates").joinpath(asset).read_text(encoding="utf-8")
+    document = parse_workflow(source, format="yaml")
+    app = document.get("app")
+    if not isinstance(app, dict):  # pragma: no cover - packaged invariant
+        raise WorkflowInputError(f"workflow archetype {blueprint.archetype!r} 缺少 app")
+    app["name"] = blueprint.name
+    app["description"] = (
+        "Spine-authored controlled archetype. "
+        f"Requested goal: {blueprint.goal}"
+    )
+    return dump_dify_yaml(document)
 
 
 def _neutralize_template_markers(value: str) -> str:
