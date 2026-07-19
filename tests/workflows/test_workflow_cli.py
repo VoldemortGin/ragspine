@@ -12,6 +12,7 @@ from importlib import import_module
 from pathlib import Path
 
 import pytest
+import yaml
 
 from ragspine.cli import main
 
@@ -572,6 +573,160 @@ def test_run_non_object_inputs_is_usage_error(
 def test_run_missing_file_is_honest_error(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["workflow", "run", "no-such-flow.yml"]) == 2
     assert "文件不存在" in capsys.readouterr().err
+
+
+def test_package_creates_a_deployable_directory_without_secrets(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    output = tmp_path / "packaged"
+
+    rc = main(
+        [
+            "workflow",
+            "package",
+            str(DIFY_FIXTURES / "seq.yml"),
+            "--output",
+            str(output),
+        ]
+    )
+
+    assert rc == 0
+    assert {path.name for path in output.iterdir()} == {
+        "workflow.yml",
+        "compose.yaml",
+        ".env.example",
+        ".gitignore",
+    }
+    compose = (output / "compose.yaml").read_text(encoding="utf-8")
+    compose_document = yaml.safe_load(compose)
+    assert compose_document["services"]["app"]["image"] == (
+        "ghcr.io/voldemortgin/ragspine:${RAGSPINE_TAG:?}"
+    )
+    environment = compose_document["services"]["app"]["environment"]
+    assert environment == {
+        "RAGSPINE_PROVIDER": "mock",
+        "RAGSPINE_DIFY_RUN_ENABLED": "true",
+        "RAGSPINE_DIFY_PUBLIC_APPS": (
+            "${RAGSPINE_APP_KEY:?}=/app/workflows/workflow.yml"
+        ),
+    }
+    assert "ghcr.io/voldemortgin/ragspine:${RAGSPINE_TAG:?}" in compose
+    assert "./workflow.yml:/app/workflows/workflow.yml:ro" in compose
+    assert "RAGSPINE_DIFY_RUN_ENABLED: \"true\"" in compose
+    assert "RAGSPINE_PROVIDER: mock" in compose
+    assert "RAGSPINE_APP_KEY" in compose
+    assert "=/app/workflows/workflow.yml" in compose
+    assert "RAGSPINE_TAG=latest" in (output / ".env.example").read_text(encoding="utf-8")
+    assert "RAGSPINE_APP_KEY=" in (output / ".env.example").read_text(encoding="utf-8")
+    assert (output / ".gitignore").read_text(encoding="utf-8") == ".env\n"
+    combined = "\n".join(
+        path.read_text(encoding="utf-8") for path in output.iterdir()
+    )
+    assert "sk-" not in combined
+    assert "created" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "broken.yml",
+        str(DIFY_FIXTURES / "agent_tool.yml"),
+    ],
+)
+def test_package_rejects_invalid_or_unsafe_workflow_without_partial_directory(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    source: str,
+) -> None:
+    if source == "broken.yml":
+        workflow = tmp_path / source
+        workflow.write_text("app: not-a-workflow\n", encoding="utf-8")
+    else:
+        workflow = Path(source)
+    output = tmp_path / "packaged"
+
+    rc = main(["workflow", "package", str(workflow), "-o", str(output)])
+
+    assert rc == 2
+    assert not output.exists()
+    assert "error:" in capsys.readouterr().err
+
+
+def test_package_rejects_existing_directory_unless_force(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    output = tmp_path / "packaged"
+    output.mkdir()
+    sentinel = output / "keep.txt"
+    sentinel.write_text("keep", encoding="utf-8")
+
+    assert (
+        main(
+            [
+                "workflow",
+                "package",
+                str(DIFY_FIXTURES / "agent_tool.yml"),
+                "-o",
+                str(output),
+                "--force",
+            ]
+        )
+        == 2
+    )
+    assert sentinel.read_text(encoding="utf-8") == "keep"
+
+    assert (
+        main(["workflow", "package", str(DIFY_FIXTURES / "seq.yml"), "-o", str(output)])
+        == 2
+    )
+    assert sentinel.read_text(encoding="utf-8") == "keep"
+
+    assert (
+        main(
+            [
+                "workflow",
+                "package",
+                str(DIFY_FIXTURES / "seq.yml"),
+                "-o",
+                str(output),
+                "--force",
+            ]
+        )
+        == 0
+    )
+    assert not sentinel.exists()
+    assert (output / "workflow.yml").is_file()
+    assert "已存在" in capsys.readouterr().err
+
+
+def test_package_force_rejects_symlink_without_touching_target(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    target = tmp_path / "target"
+    target.mkdir()
+    sentinel = target / "keep.txt"
+    sentinel.write_text("keep", encoding="utf-8")
+    output = tmp_path / "packaged"
+    try:
+        output.symlink_to(target, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlink creation unavailable")
+
+    rc = main(
+        [
+            "workflow",
+            "package",
+            str(DIFY_FIXTURES / "seq.yml"),
+            "-o",
+            str(output),
+            "--force",
+        ]
+    )
+
+    assert rc == 2
+    assert output.is_symlink()
+    assert sentinel.read_text(encoding="utf-8") == "keep"
+    assert "链接" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("command", ["show", "preview"])

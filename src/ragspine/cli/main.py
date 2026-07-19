@@ -22,6 +22,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import socket
 import stat
 import sys
@@ -31,7 +32,7 @@ import unicodedata
 import webbrowser
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from tempfile import TemporaryDirectory, mkstemp
+from tempfile import TemporaryDirectory, mkdtemp, mkstemp
 from typing import Any, Literal, cast
 
 from ragspine.agent.agent import AgentResult, answer_question
@@ -660,6 +661,99 @@ def _cmd_workflow_run(args: argparse.Namespace) -> int:
     return 0
 
 
+_PACKAGE_COMPOSE = """services:
+  app:
+    image: ghcr.io/voldemortgin/ragspine:${RAGSPINE_TAG:?}
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      RAGSPINE_PROVIDER: mock
+      RAGSPINE_DIFY_RUN_ENABLED: "true"
+      RAGSPINE_DIFY_PUBLIC_APPS: "${RAGSPINE_APP_KEY:?}=/app/workflows/workflow.yml"
+    volumes:
+      - ./workflow.yml:/app/workflows/workflow.yml:ro
+"""
+
+_PACKAGE_ENV_EXAMPLE = """RAGSPINE_TAG=latest
+RAGSPINE_APP_KEY=
+"""
+
+
+def _publish_package_directory(staging: Path, output: Path, *, force: bool) -> None:
+    """Atomically publish staging, optionally replacing one real directory."""
+
+    from ragspine.workflows.errors import WorkflowInputError
+
+    try:
+        before = output.lstat()
+    except FileNotFoundError:
+        staging.replace(output)
+        return
+    if stat.S_ISLNK(before.st_mode) or not stat.S_ISDIR(before.st_mode):
+        raise WorkflowInputError(f"拒绝覆盖链接或非目录: {output}")
+    if not force:
+        raise WorkflowInputError(f"输出目录已存在: {output}")
+
+    identity = (before.st_dev, before.st_ino)
+    current = output.lstat()
+    if (
+        stat.S_ISLNK(current.st_mode)
+        or not stat.S_ISDIR(current.st_mode)
+        or (current.st_dev, current.st_ino) != identity
+    ):
+        raise WorkflowInputError(f"输出目录在打包期间被替换: {output}")
+
+    backup = Path(mkdtemp(prefix=f".{output.name}.backup.", dir=output.parent))
+    backup.rmdir()
+    output.replace(backup)
+    try:
+        staging.replace(output)
+    except Exception:
+        backup.replace(output)
+        raise
+    shutil.rmtree(backup)
+
+
+def _cmd_workflow_package(args: argparse.Namespace) -> int:
+    """Preflight one workflow and publish a self-contained Compose package."""
+
+    from ragspine.dify.api import compile_dify_yaml
+    from ragspine.dify.errors import DifyCompileError
+    from ragspine.service.dify.safety import DifyUnsafeError, assert_runnable
+    from ragspine.workflows.errors import WorkflowError, WorkflowInputError
+    from ragspine.workflows.formats import dump_dify_yaml, load_workflow
+
+    source = Path(args.source)
+    output = Path(args.output)
+    try:
+        if not source.is_file():
+            raise WorkflowInputError(f"workflow 文件不存在：{source}")
+        workflow_yaml = dump_dify_yaml(load_workflow(source))
+        compiled = compile_dify_yaml(workflow_yaml, analyze=False)
+        assert_runnable(compiled.code)
+        if not output.parent.is_dir():
+            raise WorkflowInputError(f"输出目录的父目录不存在: {output.parent}")
+        with TemporaryDirectory(prefix=f".{output.name}.", dir=output.parent) as temporary:
+            staging = Path(temporary)
+            _write_new_workflow(staging / "workflow.yml", workflow_yaml, force=False)
+            _write_new_workflow(staging / "compose.yaml", _PACKAGE_COMPOSE, force=False)
+            _write_new_workflow(
+                staging / ".env.example", _PACKAGE_ENV_EXAMPLE, force=False
+            )
+            _write_new_workflow(staging / ".gitignore", ".env\n", force=False)
+            _publish_package_directory(staging, output, force=args.force)
+    except (WorkflowError, DifyCompileError, DifyUnsafeError) as exc:
+        print(f"error: workflow package 失败（{exc.code}）：{exc}", file=sys.stderr)
+        return 2
+    except OSError as exc:
+        print(f"error: workflow package 输出失败: {exc}", file=sys.stderr)
+        return 2
+
+    print(f"created {output}")
+    return 0
+
+
 def _port_available(host: str, port: int) -> bool:
     """端口预检：能 bind 即视为可用（占用时确定性报错，而非留给 uvicorn 晚失败）。"""
 
@@ -887,6 +981,21 @@ def _build_parser() -> argparse.ArgumentParser:
         help="执行超时秒数（默认 10s，与 HTTP 执行面同源）",
     )
     p_workflow_run.set_defaults(func=_cmd_workflow_run)
+
+    p_workflow_package = workflow_sub.add_parser(
+        "package",
+        help="校验现有工作流并生成可用 Docker Compose 启动的部署目录",
+    )
+    p_workflow_package.add_argument(
+        "source", help="本地 .json/.yaml/.yml/.toml 工作流文件路径"
+    )
+    p_workflow_package.add_argument(
+        "-o", "--output", required=True, help="新部署目录（默认拒绝覆盖）"
+    )
+    p_workflow_package.add_argument(
+        "--force", action="store_true", help="安全替换已存在的普通目录（仍拒绝链接）"
+    )
+    p_workflow_package.set_defaults(func=_cmd_workflow_package)
 
     p_workflow_serve = workflow_sub.add_parser(
         "serve",
