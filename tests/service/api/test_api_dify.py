@@ -207,6 +207,7 @@ def test_dify_legacy_yaml_document_uses_same_one_mib_byte_limit(client):
 @pytest.mark.parametrize(
     "path",
     [
+        "/v1/workflow-package",
         "/v1/workflow-readiness",
         "/v1/workflow-scaffold",
         "/v1/dify/analyze",

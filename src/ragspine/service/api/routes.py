@@ -61,6 +61,7 @@ from ragspine.service.api.schemas import (
     TopologyNodeInfo,
     TopologyResponse,
     WorkflowCompatibilityInfo,
+    WorkflowPackageRequest,
     WorkflowReadinessRequest,
     WorkflowReadinessResponse,
     WorkflowRequirementInfo,
@@ -771,6 +772,62 @@ def workflow_readiness(
     )
     return WorkflowReadinessResponse.model_validate(
         {"request_id": request_id, **readiness.report}
+    )
+
+
+@router.post("/v1/workflow-package", response_model=None)
+def workflow_package(req: WorkflowPackageRequest) -> Response | JSONResponse:
+    """Build the same bounded deploy bundle as `workflow package`, without filesystem writes."""
+
+    from ragspine.workflows.errors import WorkflowFormatError
+    from ragspine.workflows.formats import parse_workflow
+    from ragspine.workflows.packaging import (
+        package_workflow_document,
+        workflow_package_zip,
+    )
+
+    request_id = new_request_id()
+    try:
+        workflow_yaml = _dify_document_yaml(req)
+        workflow = parse_workflow(workflow_yaml, format="yaml")
+    except WorkflowFormatError:
+        return _workflow_format_response(request_id)
+
+    package = package_workflow_document(workflow)
+    if not package.ready:
+        payload = ErrorResponse(
+            error={
+                "type": "workflow.readiness_blocked",
+                "message": "workflow readiness blocked",
+                "request_id": request_id,
+                "readiness": package.readiness.report,
+            }
+        )
+        return JSONResponse(status_code=422, content=payload.model_dump())
+    try:
+        archive = workflow_package_zip(package)
+    except ValueError:
+        return _error_response(
+            413,
+            type_="workflow.package_too_large",
+            message="workflow package exceeds output limit",
+            request_id=request_id,
+        )
+
+    emit_trace(
+        request_id=request_id,
+        op="workflow_package",
+        n_files=len(package.files),
+        n_bytes=len(archive),
+    )
+    return Response(
+        content=archive,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": 'attachment; filename="ragspine-deploy.zip"',
+            "Cache-Control": "no-store",
+            "X-Request-ID": request_id,
+        },
     )
 
 

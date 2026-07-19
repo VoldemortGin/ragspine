@@ -690,25 +690,6 @@ def _cmd_workflow_check(args: argparse.Namespace) -> int:
     return 0 if status == "ready" else 1
 
 
-_PACKAGE_COMPOSE = """services:
-  app:
-    image: ghcr.io/voldemortgin/ragspine:${RAGSPINE_TAG:?}
-    restart: unless-stopped
-    ports:
-      - "8000:8000"
-    environment:
-      RAGSPINE_PROVIDER: mock
-      RAGSPINE_DIFY_RUN_ENABLED: "true"
-      RAGSPINE_DIFY_PUBLIC_APPS: "${RAGSPINE_APP_KEY:?}=/app/workflows/workflow.yml"
-    volumes:
-      - ./workflow.yml:/app/workflows/workflow.yml:ro
-"""
-
-_PACKAGE_ENV_EXAMPLE = """RAGSPINE_TAG=latest
-RAGSPINE_APP_KEY=
-"""
-
-
 def _publish_package_directory(staging: Path, output: Path, *, force: bool) -> None:
     """Atomically publish staging, optionally replacing one real directory."""
 
@@ -748,6 +729,7 @@ def _cmd_workflow_package(args: argparse.Namespace) -> int:
     """Preflight one workflow and publish a self-contained Compose package."""
 
     from ragspine.workflows.errors import WorkflowError, WorkflowInputError
+    from ragspine.workflows.packaging import package_workflow_readiness
     from ragspine.workflows.readiness import check_workflow
 
     source = Path(args.source)
@@ -755,20 +737,15 @@ def _cmd_workflow_package(args: argparse.Namespace) -> int:
     try:
         if not source.is_file():
             raise WorkflowInputError("workflow 文件不存在或不可读")
-        readiness = check_workflow(source)
-        if readiness.report["status"] != "ready" or readiness.workflow_yaml is None:
+        package = package_workflow_readiness(check_workflow(source))
+        if not package.ready:
             raise WorkflowInputError("workflow readiness blocked")
-        workflow_yaml = readiness.workflow_yaml
         if not output.parent.is_dir():
             raise WorkflowInputError(f"输出目录的父目录不存在: {output.parent}")
         with TemporaryDirectory(prefix=f".{output.name}.", dir=output.parent) as temporary:
             staging = Path(temporary)
-            _write_new_workflow(staging / "workflow.yml", workflow_yaml, force=False)
-            _write_new_workflow(staging / "compose.yaml", _PACKAGE_COMPOSE, force=False)
-            _write_new_workflow(
-                staging / ".env.example", _PACKAGE_ENV_EXAMPLE, force=False
-            )
-            _write_new_workflow(staging / ".gitignore", ".env\n", force=False)
+            for name, content in package.files:
+                _write_new_workflow(staging / name, content.decode("utf-8"), force=False)
             _publish_package_directory(staging, output, force=args.force)
     except WorkflowError as exc:
         print(f"error: workflow package 失败（{exc.code}）：{exc}", file=sys.stderr)

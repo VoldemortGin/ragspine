@@ -25,6 +25,7 @@ from ragspine.workflows.matching import TemplateMatcher, make_template_matcher
 
 _WORKFLOW_JSON_PATHS = frozenset(
     {
+        "/v1/workflow-package",
         "/v1/workflow-readiness",
         "/v1/workflow-scaffold",
         "/v1/dify/analyze",

@@ -1,9 +1,12 @@
 /** On-demand readiness preflight for the current workflow. */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
-import { checkWorkflowReadiness } from '../../../api/client';
+import {
+  checkWorkflowReadiness,
+  downloadWorkflowPackage,
+} from '../../../api/client';
 import type { WorkflowReadinessResponse } from '../../../api/types';
 import {
   Badge,
@@ -39,12 +42,17 @@ export function ReadinessModal({
 }: ReadinessModalProps) {
   const [state, setState] = useState<ReadinessState>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
+  const [downloadError, setDownloadError] = useState<unknown>(null);
+  const [downloading, setDownloading] = useState(false);
+  const downloadController = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!open) return;
     const controller = new AbortController();
     let active = true;
     setState({ status: 'loading' });
+    setDownloadError(null);
+    setDownloading(false);
     let yaml: string;
     try {
       yaml = getYaml();
@@ -62,6 +70,8 @@ export function ReadinessModal({
     return () => {
       active = false;
       controller.abort();
+      downloadController.current?.abort();
+      downloadController.current = null;
     };
     // Read the current YAML only when opened or explicitly retried.
   }, [attempt, open]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -99,7 +109,54 @@ export function ReadinessModal({
           </Button>
         </div>
       )}
-      {state.status === 'done' && <ReadinessResult response={state.response} />}
+      {state.status === 'done' && (
+        <div className="space-y-4">
+          <ReadinessResult response={state.response} />
+          {downloadError !== null && <ApiErrorCallout error={downloadError} />}
+          {state.response.status === 'ready' && (
+            <Button
+              variant="primary"
+              loading={downloading}
+              onClick={() => {
+                const controller = new AbortController();
+                downloadController.current?.abort();
+                downloadController.current = controller;
+                setDownloading(true);
+                setDownloadError(null);
+                let yaml: string;
+                try {
+                  yaml = getYaml();
+                } catch (error) {
+                  setDownloadError(error);
+                  setDownloading(false);
+                  return;
+                }
+                void downloadWorkflowPackage(yaml, controller.signal)
+                  .then((archive) => {
+                    if (controller.signal.aborted) return;
+                    const url = URL.createObjectURL(archive);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = 'ragspine-deploy.zip';
+                    link.click();
+                    URL.revokeObjectURL(url);
+                  })
+                  .catch((error: unknown) => {
+                    if (!controller.signal.aborted) setDownloadError(error);
+                  })
+                  .finally(() => {
+                    if (downloadController.current === controller) {
+                      downloadController.current = null;
+                      setDownloading(false);
+                    }
+                  });
+              }}
+            >
+              Download deploy bundle
+            </Button>
+          )}
+        </div>
+      )}
     </Modal>
   );
 }

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ApiError,
   checkWorkflowReadiness,
+  downloadWorkflowPackage,
   getWorkflowTemplate,
   listWorkflowTemplates,
   scaffoldWorkflow,
@@ -51,6 +52,39 @@ describe('workflow catalog client', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ yaml: 'app: {}' }),
         signal: controller.signal,
+      }),
+    );
+  });
+
+  it('downloads a deploy bundle and preserves package API errors', async () => {
+    const archive = new Blob(['zip'], { type: 'application/zip' });
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(archive, { status: 200 }))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            error: {
+              type: 'workflow.readiness_blocked',
+              message: 'workflow readiness blocked',
+            },
+          },
+          422,
+        ),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(downloadWorkflowPackage('app: {}')).resolves.toEqual(archive);
+    await expect(downloadWorkflowPackage('blocked')).rejects.toMatchObject({
+      status: 422,
+      type: 'workflow.readiness_blocked',
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/v1/workflow-package',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ yaml: 'app: {}' }),
       }),
     );
   });

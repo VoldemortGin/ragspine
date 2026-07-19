@@ -310,6 +310,26 @@ export function checkWorkflowReadiness(
   });
 }
 
+export async function downloadWorkflowPackage(
+  yaml: string,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  let response: Response;
+  try {
+    response = await fetch('/v1/workflow-package', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ yaml }),
+      ...(signal !== undefined ? { signal } : {}),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Network request failed';
+    throw new ApiError(message, 0, 'network_error');
+  }
+  if (!response.ok) throw await toApiError(response);
+  return response.blob();
+}
+
 /* ---------------------------- Launch sessions -------------------------- */
 
 /** Workflow preloaded by `ragspine workflow serve <file> --open`. */

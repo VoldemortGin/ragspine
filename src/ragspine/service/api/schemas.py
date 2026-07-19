@@ -328,6 +328,10 @@ class WorkflowReadinessResponse(BaseModel):
     requirements: list[WorkflowRequirementInfo] = Field(default_factory=list)
 
 
+class WorkflowPackageRequest(_DifyDocumentRequest):
+    """Canonical workflow object (preferred) or legacy YAML to package."""
+
+
 class WorkflowScaffoldRequest(BaseModel):
     """只允许语义描述与 catalog 选择；客户端不能注入 provider/I/O 能力。"""
 

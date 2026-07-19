@@ -5,6 +5,8 @@ import os
 import socket
 from collections.abc import Sequence
 from dataclasses import replace
+from io import BytesIO
+from zipfile import ZipFile
 
 import pytest
 import rootutils
@@ -105,6 +107,37 @@ def test_workflow_readiness_uses_standard_document_errors(client: TestClient) ->
     assert malformed.status_code == 400
     assert malformed.json()["error"]["type"] == "workflow.format"
     assert both.status_code == 422
+
+
+def test_workflow_package_downloads_cli_equivalent_zip(client: TestClient) -> None:
+    workflow = load_workflow(ROOT_DIR / "tests" / "dify" / "fixtures" / "seq.yml")
+
+    response = client.post("/v1/workflow-package", json={"workflow": workflow})
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    assert response.headers["content-disposition"] == 'attachment; filename="ragspine-deploy.zip"'
+    assert response.headers["cache-control"] == "no-store"
+    with ZipFile(BytesIO(response.content)) as archive:
+        assert archive.namelist() == [
+            "workflow.yml",
+            "compose.yaml",
+            ".env.example",
+            ".gitignore",
+        ]
+
+
+def test_workflow_package_blocked_returns_report_without_zip(client: TestClient) -> None:
+    workflow = load_workflow(ROOT_DIR / "tests" / "dify" / "fixtures" / "agent_tool.yml")
+
+    response = client.post("/v1/workflow-package", json={"workflow": workflow})
+
+    assert response.status_code == 422
+    assert response.headers["content-type"].startswith("application/json")
+    error = response.json()["error"]
+    assert error["type"] == "workflow.readiness_blocked"
+    assert error["readiness"]["status"] == "blocked"
+    assert error["readiness"]["warnings"]
 
 
 def test_workflow_template_list_is_metadata_only(client: TestClient) -> None:
