@@ -575,6 +575,33 @@ def test_run_missing_file_is_honest_error(capsys: pytest.CaptureFixture[str]) ->
     assert "文件不存在" in capsys.readouterr().err
 
 
+def test_workflow_check_prints_only_stable_json_and_uses_readiness_exit_codes(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(["workflow", "check", str(DIFY_FIXTURES / "seq.yml")]) == 0
+    ready = capsys.readouterr()
+    assert json.loads(ready.out)["status"] == "ready"
+    assert "ready" in ready.err
+
+    assert main(["workflow", "check", str(DIFY_FIXTURES / "agent_tool.yml")]) == 1
+    blocked = capsys.readouterr()
+    assert json.loads(blocked.out)["status"] == "blocked"
+    assert "blocked" in blocked.err
+
+
+def test_workflow_check_missing_secret_shaped_path_is_opaque_usage_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    secret = "sk-super-secret-value-123456.yml"
+
+    assert main(["workflow", "check", secret]) == 2
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "error:" in captured.err
+    assert secret not in captured.err
+
+
 def test_package_creates_a_deployable_directory_without_secrets(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -727,6 +754,36 @@ def test_package_force_rejects_symlink_without_touching_target(
     assert output.is_symlink()
     assert sentinel.read_text(encoding="utf-8") == "keep"
     assert "链接" in capsys.readouterr().err
+
+
+def test_package_reuses_workflow_readiness_preflight(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    readiness_module = import_module("ragspine.workflows.readiness")
+    real_check = readiness_module.check_workflow
+    checked: list[Path] = []
+
+    def recording_check(path: str | Path):
+        checked.append(Path(path))
+        return real_check(path)
+
+    monkeypatch.setattr(readiness_module, "check_workflow", recording_check)
+    output = tmp_path / "packaged"
+
+    assert (
+        main(
+            [
+                "workflow",
+                "package",
+                str(DIFY_FIXTURES / "seq.yml"),
+                "-o",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    assert checked == [DIFY_FIXTURES / "seq.yml"]
 
 
 @pytest.mark.parametrize("command", ["show", "preview"])

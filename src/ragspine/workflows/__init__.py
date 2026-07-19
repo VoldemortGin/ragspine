@@ -13,6 +13,7 @@ Submodules:
     model.py — 模板、来源、兼容性与脚手架结果值类型。
     planner.py — 安全的通用 Dify 工作流后备生成器。
     preview.py — 版本化、隐私最小化的只读流程图预览契约与生成器。
+    readiness.py — 工作流格式、编译与 L0 可运行性预检。
     scaffold.py — 模板复用与后备生成的脚手架编排门面。
     source_policy.py — 外部模板来源、许可证与重写策略的发布期安全门。
     templates/ — 内置目录元数据与 Spine 原创 Dify DSL 模板资源。
@@ -55,6 +56,9 @@ _CURATED: dict[str, str] = {
     "WorkflowPreviewEdge": "preview",
     "WorkflowPreviewError": "preview",
     "build_workflow_preview": "preview",
+    "READINESS_SCHEMA_VERSION": "readiness",
+    "WorkflowReadiness": "readiness",
+    "check_workflow": "readiness",
 }
 
 __all__ = list(_CURATED)

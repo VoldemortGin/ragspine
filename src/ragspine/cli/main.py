@@ -661,6 +661,35 @@ def _cmd_workflow_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_workflow_check(args: argparse.Namespace) -> int:
+    """Print the stable readiness JSON for one local workflow."""
+
+    from ragspine.workflows.readiness import check_workflow
+
+    source = Path(args.source)
+    try:
+        opened = source.lstat()
+    except OSError:
+        print("error: workflow 文件不可读", file=sys.stderr)
+        return 2
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    attributes = getattr(opened, "st_file_attributes", 0)
+    if (
+        source.suffix.lower() not in _WORKFLOW_FILE_SUFFIXES
+        or stat.S_ISLNK(opened.st_mode)
+        or not stat.S_ISREG(opened.st_mode)
+        or (reparse_flag and attributes & reparse_flag)
+    ):
+        print("error: workflow 文件必须是受支持的普通非链接文件", file=sys.stderr)
+        return 2
+
+    result = check_workflow(source)
+    print(json.dumps(result.report, ensure_ascii=False, indent=2, sort_keys=True))
+    status = result.report["status"]
+    print(f"workflow readiness: {status}", file=sys.stderr)
+    return 0 if status == "ready" else 1
+
+
 _PACKAGE_COMPOSE = """services:
   app:
     image: ghcr.io/voldemortgin/ragspine:${RAGSPINE_TAG:?}
@@ -718,20 +747,18 @@ def _publish_package_directory(staging: Path, output: Path, *, force: bool) -> N
 def _cmd_workflow_package(args: argparse.Namespace) -> int:
     """Preflight one workflow and publish a self-contained Compose package."""
 
-    from ragspine.dify.api import compile_dify_yaml
-    from ragspine.dify.errors import DifyCompileError
-    from ragspine.service.dify.safety import DifyUnsafeError, assert_runnable
     from ragspine.workflows.errors import WorkflowError, WorkflowInputError
-    from ragspine.workflows.formats import dump_dify_yaml, load_workflow
+    from ragspine.workflows.readiness import check_workflow
 
     source = Path(args.source)
     output = Path(args.output)
     try:
         if not source.is_file():
-            raise WorkflowInputError(f"workflow 文件不存在：{source}")
-        workflow_yaml = dump_dify_yaml(load_workflow(source))
-        compiled = compile_dify_yaml(workflow_yaml, analyze=False)
-        assert_runnable(compiled.code)
+            raise WorkflowInputError("workflow 文件不存在或不可读")
+        readiness = check_workflow(source)
+        if readiness.report["status"] != "ready" or readiness.workflow_yaml is None:
+            raise WorkflowInputError("workflow readiness blocked")
+        workflow_yaml = readiness.workflow_yaml
         if not output.parent.is_dir():
             raise WorkflowInputError(f"输出目录的父目录不存在: {output.parent}")
         with TemporaryDirectory(prefix=f".{output.name}.", dir=output.parent) as temporary:
@@ -743,7 +770,7 @@ def _cmd_workflow_package(args: argparse.Namespace) -> int:
             )
             _write_new_workflow(staging / ".gitignore", ".env\n", force=False)
             _publish_package_directory(staging, output, force=args.force)
-    except (WorkflowError, DifyCompileError, DifyUnsafeError) as exc:
+    except WorkflowError as exc:
         print(f"error: workflow package 失败（{exc.code}）：{exc}", file=sys.stderr)
         return 2
     except OSError as exc:
@@ -981,6 +1008,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="执行超时秒数（默认 10s，与 HTTP 执行面同源）",
     )
     p_workflow_run.set_defaults(func=_cmd_workflow_run)
+
+    p_workflow_check = workflow_sub.add_parser(
+        "check",
+        help="输出工作流格式、编译与 L0 可运行性 readiness JSON",
+    )
+    p_workflow_check.add_argument(
+        "source", help="本地 .json/.yaml/.yml/.toml 工作流文件路径"
+    )
+    p_workflow_check.set_defaults(func=_cmd_workflow_check)
 
     p_workflow_package = workflow_sub.add_parser(
         "package",
