@@ -16,12 +16,58 @@ from ragspine.agent.llm_provider import (
 )
 from ragspine.service.config import (
     PathNotAllowedError,
+    RetrievalPreset,
+    RetrievalProfile,
     ServiceConfig,
     build_provider,
+    make_retrieval_preset,
     open_fact_store,
     open_narrative_retriever,
     validate_ingest_path,
 )
+
+
+def test_local_retrieval_profiles_are_typed_offline_presets():
+    economy = make_retrieval_preset(RetrievalProfile.ECONOMY)
+    balanced = make_retrieval_preset(RetrievalProfile.BALANCED)
+    quality = make_retrieval_preset(RetrievalProfile.QUALITY)
+
+    assert economy == RetrievalPreset(
+        retrieval_mode="economy",
+        embedding="none",
+        vector_store="none",
+        reranker="none",
+        postprocessor="none",
+    )
+    assert balanced == RetrievalPreset(
+        retrieval_mode="hybrid",
+        embedding="deterministic",
+        vector_store="in_process",
+        reranker="none",
+        postprocessor="none",
+    )
+    assert quality == RetrievalPreset(
+        retrieval_mode="hybrid",
+        embedding="onnx",
+        vector_store="in_process",
+        reranker="cross_encoder",
+        postprocessor="mmr,lost_in_middle,compress",
+    )
+
+
+def test_local_retrieval_profile_allows_explicit_typed_overrides():
+    default = make_retrieval_preset(RetrievalProfile.BALANCED)
+    overridden = make_retrieval_preset(
+        RetrievalProfile.BALANCED,
+        embedding="none",
+        vector_store="none",
+    )
+
+    assert overridden.embedding == "none"
+    assert overridden.vector_store == "none"
+    assert overridden.retrieval_mode == "hybrid"
+    assert default.embedding == "deterministic"
+    assert default.vector_store == "in_process"
 
 
 def test_from_env_defaults_when_empty():

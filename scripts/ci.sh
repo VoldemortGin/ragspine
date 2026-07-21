@@ -32,7 +32,12 @@ echo "==> [4/8] ruff lint (style + import order + dead code)"
 "$PY" -m ruff check src/ragspine
 
 echo "==> [5/8] test suite (excludes gpu + docling + network — the bulk; filterwarnings=error + beartype runtime contracts active)"
-"$PY" -m pytest tests/ -q -m "not gpu and not docling and not network"
+# The 1,000-file catalog exporter is intentionally isolated: after PDF/OCR native
+# libraries have raised the main process footprint, APFS copies become pathologically
+# slow. A fresh process keeps the same contract deterministic and cuts minutes from CI.
+"$PY" -m pytest tests/workflows/test_workflow_catalog_export.py -q
+"$PY" -m pytest tests/ -q -m "not gpu and not docling and not network" \
+  --ignore=tests/workflows/test_workflow_catalog_export.py
 
 echo "==> [6/8] docling extractor tests (own process — isolates 3rd-party ML nondeterminism)"
 # `[pdf-docling]` is an optional extra; on a lean gate (no docling installed) every docling

@@ -7,6 +7,7 @@
 
 Submodules:
     main.py — argparse 子命令分发（quickstart / ask / version）；公开入口 main()。
+    serve.py — 本地 workspace 的 loopback API + Studio 启动装配。
     ask.py — 单条提问 CLI 逻辑（意图解析 → tool-use 循环 → 确定值 + 血缘）。
     ingest.py — 结构化入库生产 CLI 逻辑（xlsx/pptx/pdf -> fact_store）。
     ingest_narrative.py — 叙事语料批量入库 CLI 逻辑（文件夹/文件 -> 块库）。

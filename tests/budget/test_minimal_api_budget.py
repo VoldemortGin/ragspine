@@ -12,7 +12,7 @@ ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpa
 
 import ragspine
 
-EXPECTED = ("FactStore", "Fact", "MockProvider", "answer_question")
+EXPECTED = ("RAGSpine", "FactStore", "Fact", "MockProvider", "answer_question")
 
 
 def test_root_all_is_exactly_the_minimal_four():

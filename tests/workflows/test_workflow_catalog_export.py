@@ -50,7 +50,9 @@ def exported_web_root(
 
 def _copy_export(exported_web_root: Path, tmp_path: Path) -> Path:
     web_root = tmp_path / "web"
-    shutil.copytree(exported_web_root, web_root)
+    # Contents, not source metadata, are the contract. Avoid copy2's chmod/chflags
+    # round-trips for 1,000 generated files; they dominate the full local gate on APFS.
+    shutil.copytree(exported_web_root, web_root, copy_function=shutil.copyfile)
     return web_root
 
 

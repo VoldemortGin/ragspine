@@ -8,8 +8,10 @@ Submodules:
     cli/ — 控制台 CLI 入口（ragspine 命令）：quickstart / ask / version 子命令。
     common/ — 跨域基础原语：company profile、敏感度、glossary、可观测性。
     dify/ — Dify 工作流 YAML → 纯 Python 编译器 + 静态优化建议器（parse/IR/codegen/optimize）。
+    diagnostics/ — 渐进配置、有效值来源与零网络环境诊断。
     eval/ — Q&A 与抽取评测 harness，含基线回归门禁。
     extraction/ — 文档 → 冻结的 StyledGrid IR：抽取器、PDF 分诊、颜色语义、双通道校验。
+    facade.py — 稳定的高层 RAGSpine / IngestResult 导入入口。
     fixtures/ — 合成 fixture / ground-truth 生成器（确定性、硬编码），tests 与 scripts 共用。
     graph/ — GraphRAG 域（W7）：确定性结构关系图 + GraphStore 缝 + 叙事 GraphRAG 骨架。
     ingestion/ — IR/文本 → 各类存储：结构化事实、叙事块、人工复核队列。
@@ -17,6 +19,7 @@ Submodules:
     pipeline/ — 管线拓扑导出：从真实装配派生静态 PipelineGraph（Mermaid/DOT/JSON）。
     retrieval/ — 叙事 RAG：切块、BM25 词法、向量、listwise 精排、agent 接入。
     service/ — HTTP 服务层：ServiceConfig、FastAPI app、任务队列、FAQ 短路缓存。
+    session.py — 本地 workspace 生命周期、统一摄取与提问 facade 实现。
     storage/ — sqlite 存储层：数值事实表（fact_metric），全程保留来源 lineage。
     workflows/ — 自然语言工作流脚手架：模板目录、语义匹配、Dify DSL 生成与格式转换。
 """
@@ -75,7 +78,7 @@ def _lazy_submodules(
 
 _submodule_getattr, _submodule_dir = _lazy_submodules(__name__, __path__)
 
-# 上手宪法（ADR 0012 rule 3）：包根仅 curated 暴露这 4 个「最小可用 API」名字。
+# 分层 API（ADR 0019）：包根暴露 1 个高层 facade + 4 个低层原语。
 # 仍走惰性解析——`import ragspine` 不急切 import 任何子模块，首次访问某名字时才拉起其源模块。
 _CURATED: dict[str, tuple[str, str]] = {
     "FactStore": ("storage.fact_store", "FactStore"),
@@ -83,9 +86,10 @@ _CURATED: dict[str, tuple[str, str]] = {
     "Fact": ("storage.fact_store", "Fact"),
     "MockProvider": ("agent.llm_provider", "MockProvider"),
     "answer_question": ("agent.agent", "answer_question"),
+    "RAGSpine": ("facade", "RAGSpine"),
 }
 
-__all__ = ("FactStore", "Fact", "MockProvider", "answer_question")
+__all__ = ("RAGSpine", "FactStore", "Fact", "MockProvider", "answer_question")
 
 # 包版本(对齐 corespine / spineagent;PyPI 分发名 rag-spine,源码/未装时回落)。
 # module 级赋值 → ragspine.__version__ 直接命中 __dict__,不走下面的惰性 __getattr__。

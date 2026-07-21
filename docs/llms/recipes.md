@@ -6,6 +6,31 @@
 
 ---
 
+## 0 · 用户资料到答案（推荐高层入口）
+
+```python
+from ragspine import RAGSpine
+
+with RAGSpine.local(".ragspine", profile="balanced") as rag:
+    report = rag.ingest("./documents")
+    result = rag.ask("今年收入为什么增长？")
+    print(report.summary)
+    print(result.answer, result.sources)
+```
+
+等价 CLI：
+
+```bash
+ragspine ingest ./documents --workspace .ragspine --profile balanced
+ragspine ask --workspace .ragspine --profile balanced "今年收入为什么增长？"
+ragspine doctor
+ragspine serve --workspace .ragspine --open
+```
+
+`serve` 需要 `[service]`，但使用内联队列，不要求 Redis。
+
+---
+
 ## 1 · 建 HybridRetriever 检索（纯 BM25 模式）
 
 不注入 embedding 后端 = 纯 BM25 + RRF（精简默认）。

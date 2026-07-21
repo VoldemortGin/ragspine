@@ -15,6 +15,7 @@ Submodules:
     preview.py — 版本化、隐私最小化的只读流程图预览契约与生成器。
     readiness.py — 工作流格式、编译与 L0 可运行性预检。
     scaffold.py — 模板复用与后备生成的脚手架编排门面。
+    packaging.py — 已有工作流的本地部署目录打包。
     source_policy.py — 外部模板来源、许可证与重写策略的发布期安全门。
     templates/ — 内置目录元数据与 Spine 原创 Dify DSL 模板资源。
 """

@@ -87,9 +87,8 @@ def _print_report(report: IngestReport) -> None:
         print(f"    警告: {w}")
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = _build_parser().parse_args(argv)
-
+def run(args: argparse.Namespace) -> int:
+    """Execute ingestion from an already-parsed shared CLI namespace."""
     for db_path in (args.db, args.mapping_db, args.queue_db):
         _ensure_parent(db_path)
 
@@ -128,6 +127,10 @@ def main(argv: list[str] | None = None) -> int:
 
     _print_report(report)
     return 1 if report.status == "failed" else 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    return run(_build_parser().parse_args(argv))
 
 
 if __name__ == "__main__":

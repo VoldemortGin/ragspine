@@ -108,9 +108,10 @@ fixtures: ## Regenerate the synthetic demo fixtures (deterministic)
 
 .PHONY: docs
 docs: ## Build the static API-reference site from docstrings (pdoc → docs/site, nginx-ready)
-	@# Enumerate every submodule explicitly: the package uses lazy PEP 562 submodule
-	@# access, so a bare `pdoc ragspine` only emits the top page — feed pdoc the full list.
-	find src/ragspine -name '*.py' | sed 's|^src/||; s|/__init__\.py$$||; s|\.py$$||; s|/|.|g' \
+	@# Enumerate leaf modules explicitly. Lazy package __init__ modules are navigation
+	@# indexes, not API definitions; passing both them and leaves makes pdoc add every
+	@# module twice and emits hundreds of misleading duplicate-module warnings.
+	find src/ragspine -name '*.py' ! -name '__init__.py' | sed 's|^src/||; s|\.py$$||; s|/|.|g' \
 		| sort -u | tr '\n' '\0' | xargs -0 $(PYTHON) -m pdoc -o docs/site
 	@echo "API docs → docs/site/  (deploy: point nginx 'root' at $(abspath docs/site))"
 

@@ -9,7 +9,9 @@
 - 无参 / 未知选项 —— argparse 以非零退出（不静默吞）。
 """
 
+import argparse
 import os
+from importlib import import_module
 
 import pytest
 import rootutils
@@ -23,6 +25,7 @@ from ragspine.storage.fact_store import Fact, SqliteFactStore
 # ---------------------------------------------------------------------------
 # quickstart：headline 离线演示
 # ---------------------------------------------------------------------------
+
 
 def test_quickstart_runs_offline_and_shows_found_with_provenance(capsys):
     """quickstart 退出 0，输出含一个具体命中值及其来源（doc/locator 片段）。"""
@@ -51,31 +54,45 @@ def test_quickstart_shows_honest_not_found_refusal(capsys):
 # ask：镜像 scripts/ask.py 的离线问答
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def tiny_fact_db(tmp_path):
     """建一个仅含一条 ACME_CN FY2024 REVENUE 事实的临时 fact 库，返回路径。"""
     db_path = tmp_path / "facts.db"
     store = SqliteFactStore(db_path)
     store.init_schema()
-    store.upsert_facts([
-        Fact(
-            metric_code="REVENUE", entity="ACME_CN", geography="CN",
-            channel="TOTAL", period_type="FY", period="2024",
-            value=1320.0, unit="USD_M",
-            source_doc_id="ACME_FY2024_Results.pptx",
-            source_locator="slide=6,table=1,row=2,col=3",
-        )
-    ])
+    store.upsert_facts(
+        [
+            Fact(
+                metric_code="REVENUE",
+                entity="ACME_CN",
+                geography="CN",
+                channel="TOTAL",
+                period_type="FY",
+                period="2024",
+                value=1320.0,
+                unit="USD_M",
+                source_doc_id="ACME_FY2024_Results.pptx",
+                source_locator="slide=6,table=1,row=2,col=3",
+            )
+        ]
+    )
     store.close()
     return db_path
 
 
 def test_ask_found_prints_value_and_source(capsys, tiny_fact_db):
     """ask 命中：mock provider 给出确定值 + 来源血缘。"""
-    rc = main([
-        "ask", "中国内地FY2024的REVENUE是多少",
-        "--db", str(tiny_fact_db), "--provider", "mock",
-    ])
+    rc = main(
+        [
+            "ask",
+            "中国内地FY2024的REVENUE是多少",
+            "--db",
+            str(tiny_fact_db),
+            "--provider",
+            "mock",
+        ]
+    )
     assert rc == 0
     out = capsys.readouterr().out
     assert "1320" in out
@@ -84,10 +101,16 @@ def test_ask_found_prints_value_and_source(capsys, tiny_fact_db):
 
 def test_ask_not_found_refuses(capsys, tiny_fact_db):
     """ask 未命中：坦白拒答，不编造数字。"""
-    rc = main([
-        "ask", "中国内地FY2030的REVENUE是多少",
-        "--db", str(tiny_fact_db), "--provider", "mock",
-    ])
+    rc = main(
+        [
+            "ask",
+            "中国内地FY2030的REVENUE是多少",
+            "--db",
+            str(tiny_fact_db),
+            "--provider",
+            "mock",
+        ]
+    )
     assert rc == 0
     out = capsys.readouterr().out
     assert "查不到" in out
@@ -106,6 +129,7 @@ def test_ask_missing_db_is_honest_error(capsys, tmp_path):
 # version
 # ---------------------------------------------------------------------------
 
+
 def test_version_prints_version_string(capsys):
     """version 退出 0，打印一个非空的版本号（形如 X.Y...）。"""
     rc = main(["version"])
@@ -120,6 +144,7 @@ def test_version_prints_version_string(capsys):
 # 无参 / 未知选项
 # ---------------------------------------------------------------------------
 
+
 def test_no_args_exits_nonzero(capsys):
     """不带子命令：argparse 报错并非零退出（不静默成功）。"""
     with pytest.raises(SystemExit) as exc:
@@ -132,3 +157,56 @@ def test_unknown_option_exits_nonzero(capsys):
     with pytest.raises(SystemExit) as exc:
         main(["--definitely-invalid"])
     assert exc.value.code != 0
+
+
+def test_ingest_is_a_known_command_and_dispatches_without_workflow_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`ragspine ingest` reaches the ingestion runner, never implicit workflow create."""
+    facade_module = import_module("ragspine.facade")
+    received: list[tuple[str, bool, str | None]] = []
+
+    class FakeRAGSpine:
+        @classmethod
+        def local(cls, workspace: str, *, profile: object) -> "FakeRAGSpine":
+            assert workspace == "my-kb"
+            assert str(profile) == "RetrievalProfile.ECONOMY"
+            return cls()
+
+        def __enter__(self) -> "FakeRAGSpine":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def ingest(self, source: str, *, dry_run: bool, valid_as_of: str | None):
+            received.append((source, dry_run, valid_as_of))
+            return argparse.Namespace(
+                summary="ok", failed=False, structured_reports=(), narrative_report=None
+            )
+
+    monkeypatch.setattr(facade_module, "RAGSpine", FakeRAGSpine)
+    rc = main(
+        [
+            "ingest",
+            "report.xlsx",
+            "--workspace",
+            "my-kb",
+            "--valid-as-of",
+            "2026-07-21",
+            "--dry-run",
+        ]
+    )
+
+    assert rc == 0
+    assert received == [("report.xlsx", True, "2026-07-21")]
+
+
+def test_ingest_help_is_discoverable(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc:
+        main(["ingest", "--help"])
+
+    assert exc.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "workspace" in help_text
+    assert "--dry-run" in help_text

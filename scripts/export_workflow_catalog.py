@@ -391,9 +391,11 @@ def _atomic_write(destination: Path, payload: bytes) -> None:
             delete=False,
         ) as handle:
             temporary = Path(handle.name)
+            # These files are reproducible release artifacts, not transactional user data.
+            # Closing the sibling temporary before os.replace preserves atomic visibility;
+            # an fsync per file made the 1,000-template export take several minutes on
+            # APFS and offered no useful recovery guarantee beyond re-running the export.
             handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
         os.chmod(temporary, 0o644)
         os.replace(temporary, destination)
         temporary = None

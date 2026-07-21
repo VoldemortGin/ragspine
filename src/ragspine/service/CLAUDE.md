@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/service/
-verified-against: f87a1df341d2ecd2a0b6d8da9a52708e4c9bd3da
+verified-against: a525f998dbcdefa8619b8c436919454ad296c17a
 ---
 
 # service — agent contract
@@ -18,6 +18,9 @@ narrative-ingest job payload into `ingest_narrative(chunker=make_chunker(...))`,
 small-to-big chunking is a config switch, ADR 0018), FAQ short-circuit cache, and the **Dify workflow service**
 (`dify/` — L0 static gate + L1/L2 safe execution; ADR 0014): endpoints
 `/v1/dify/{analyze,compile,run,run/jobs}` reuse the app factory / DI / RQ queue.
+The high-level local facade selects retrieval through `RetrievalProfile` and the frozen
+`RetrievalPreset`: `economy` is lexical-only, `balanced` adds deterministic in-process vectors,
+and `quality` opts into ONNX embeddings, cross-encoder reranking, and post-processing.
 The L2 subprocess entry ships inside the wheel (`dify/run_dify_workflow.py`, `python -m`-able;
 repo `scripts/` copy is a source-tree fallback). `dify/http_client.py` is the guarded client the
 runner injects for http-request nodes — default-off (`RAGSPINE_DIFY_HTTP_ENABLED`), stdlib-only,

@@ -9,7 +9,7 @@
 [![PyPI](https://img.shields.io/pypi/v/rag-spine.svg)](https://pypi.org/project/rag-spine/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
-![Tests](https://img.shields.io/badge/tests-2273%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-3901%20collected-brightgreen)
 [![Docs](https://img.shields.io/badge/docs-rag--spine.org-2dd4bf)](https://rag-spine.org)
 
 ---
@@ -158,6 +158,45 @@ VIRTUAL_ENV="$(pwd)/.venv" uv pip install -e ".[dev,service,vector]"
 
 ```bash
 ragspine quickstart    # one FOUND answer (with provenance) + one honest "not found" — proves anti-fabrication in seconds
+```
+
+**Use your own documents — one workspace, no repository scripts:**
+
+```bash
+ragspine ingest ./documents --workspace .ragspine
+ragspine ask --workspace .ragspine "What changed and why?"
+```
+
+The same high-level path is available from Python. The local default is offline and
+uses the existing guarded agent path; advanced stores/providers remain available
+through the lower-level APIs.
+
+```python
+from ragspine import RAGSpine
+
+with RAGSpine.local(".ragspine") as rag:
+    report = rag.ingest("./documents")
+    result = rag.ask("What changed and why?")
+    print(report.summary)
+    print(result.answer, result.sources)
+```
+
+Choose a coherent retrieval preset instead of wiring individual backends:
+
+```python
+RAGSpine.local(".ragspine", profile="economy")   # BM25, smallest/offline
+RAGSpine.local(".ragspine", profile="balanced")  # deterministic hybrid, offline
+RAGSpine.local(".ragspine", profile="quality")   # ONNX + rerank; install model extras
+```
+
+Inspect or progressively expand configuration, then launch the workspace locally
+without Redis:
+
+```bash
+ragspine config init --profile balanced
+ragspine config show --config ragspine.toml --effective
+ragspine doctor --config ragspine.toml
+ragspine serve --workspace .ragspine --open   # requires rag-spine[service]
 ```
 
 **1. End-to-end demo on synthetic data — offline, no API key:**

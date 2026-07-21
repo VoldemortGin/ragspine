@@ -44,7 +44,9 @@ from ragspine.workflows.matching import TemplateMatcher
 # 分发名（PEP 621 [project] name = "rag-spine"，import 名仍是 ragspine）。
 _DIST_NAME = "rag-spine"
 
-_KNOWN_COMMANDS = frozenset({"ask", "dify", "quickstart", "version", "workflow"})
+_KNOWN_COMMANDS = frozenset(
+    {"ask", "config", "dify", "doctor", "ingest", "quickstart", "serve", "version", "workflow"}
+)
 _WINDOWS_RESERVED_NAMES = frozenset(
     {
         "CON",
@@ -110,7 +112,14 @@ def _cmd_quickstart(args: argparse.Namespace) -> int:
 
 def _cmd_ask(args: argparse.Namespace) -> int:
     """单条提问：从 --db 建 FactStore、选 provider、跑 answer_question、打印答案 + 来源。"""
-    db_path = Path(args.db)
+    if args.workspace is not None:
+        from ragspine.facade import RAGSpine, RetrievalProfile
+
+        with RAGSpine.local(args.workspace, profile=RetrievalProfile(args.profile)) as rag:
+            _print_result(rag.ask(args.question))
+        return 0
+
+    db_path = Path(args.db or DEFAULT_FACT_DB)
     if not db_path.exists():
         print(
             f"error: fact 库不存在：{db_path}\n"
@@ -136,6 +145,103 @@ def _cmd_ask(args: argparse.Namespace) -> int:
         store.close()
 
     _print_result(result)
+    return 0
+
+
+def _cmd_ingest(args: argparse.Namespace) -> int:
+    """Ingest user-owned documents through the high-level workspace facade."""
+    from ragspine.facade import RAGSpine, RetrievalProfile
+
+    with RAGSpine.local(args.workspace, profile=RetrievalProfile(args.profile)) as rag:
+        result = rag.ingest(args.source, dry_run=args.dry_run, valid_as_of=args.valid_as_of)
+    print(result.summary)
+    for structured_report in result.structured_reports:
+        print(
+            f"  {structured_report.source_doc_id}: structured={structured_report.status} "
+            f"facts={structured_report.n_facts_ingested} "
+            f"review={structured_report.n_enqueued_review}"
+        )
+        for warning in structured_report.warnings:
+            print(f"    warning: {warning}")
+        if structured_report.error:
+            print(
+                f"error: {structured_report.source_doc_id}: {structured_report.error}",
+                file=sys.stderr,
+            )
+    if result.narrative_report is not None:
+        for narrative_report in result.narrative_report.files:
+            print(
+                f"  {narrative_report.doc_id}: narrative={narrative_report.status} "
+                f"chunks={narrative_report.n_chunks} "
+                f"skipped_pages={narrative_report.n_skipped_pages}"
+            )
+            for warning in narrative_report.warnings:
+                print(f"    warning: {warning}")
+            if narrative_report.error:
+                print(
+                    f"error: {narrative_report.doc_id}: {narrative_report.error}",
+                    file=sys.stderr,
+                )
+    if not result.failed and not args.dry_run:
+        print(f'next: ragspine ask --workspace {args.workspace} "your question"')
+    return 1 if result.failed else 0
+
+
+def _cmd_doctor(args: argparse.Namespace) -> int:
+    """Inspect effective configuration and local capabilities without network access."""
+    from ragspine.diagnostics.config import ConfigError
+    from ragspine.diagnostics.doctor import run_doctor
+
+    try:
+        report = run_doctor(config_path=args.config)
+    except (ConfigError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    if args.json:
+        print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
+    else:
+        for finding in report.findings:
+            mark = {"info": "ok", "warning": "warning", "error": "error"}[finding.severity]
+            print(f"[{mark}] {finding.message}")
+            if finding.remediation:
+                print(f"  fix: {finding.remediation}")
+    return 0 if report.ok else 1
+
+
+def _cmd_config_init(args: argparse.Namespace) -> int:
+    from ragspine.diagnostics.config import ConfigError, init_config
+
+    try:
+        target = init_config(args.path, profile=args.profile, force=args.force)
+    except (ConfigError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(f"created {target}")
+    print(f"next: ragspine config show --config {target} --effective")
+    return 0
+
+
+def _cmd_config_show(args: argparse.Namespace) -> int:
+    from ragspine.diagnostics.config import ConfigError, load_effective_config
+
+    try:
+        config = load_effective_config(args.config)
+    except (ConfigError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps(config.to_dict(), ensure_ascii=False, indent=2))
+    return 0
+
+
+def _cmd_serve(args: argparse.Namespace) -> int:
+    from ragspine.cli.serve import LocalServeError, serve_local
+
+    try:
+        url = serve_local(args.workspace, port=args.port, open_browser=args.open)
+    except (LocalServeError, ValueError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(f"Studio: {url}")
     return 0
 
 
@@ -874,12 +980,51 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_quick.set_defaults(func=_cmd_quickstart)
 
+    p_ingest = sub.add_parser(
+        "ingest",
+        help="统一入库：文档 → 本地双通道 workspace",
+    )
+    p_ingest.add_argument("source", help="待入库的文档或目录")
+    p_ingest.add_argument(
+        "--workspace",
+        default=".ragspine",
+        help="workspace 目录（默认 .ragspine）",
+    )
+    p_ingest.add_argument(
+        "--profile",
+        choices=["economy", "balanced", "quality"],
+        default="economy",
+        help="检索预设（默认 economy；quality 需要额外模型依赖）",
+    )
+    p_ingest.add_argument(
+        "--valid-as-of",
+        default=None,
+        help="本批事实的业务日期（ISO，如 2025-12-31）",
+    )
+    p_ingest.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="只跑抽取并产报告，绝不写库 / 队列",
+    )
+    p_ingest.set_defaults(func=_cmd_ingest)
+
     p_ask = sub.add_parser("ask", help="单条提问（默认离线 mock，确定性）")
     p_ask.add_argument("question", help="用户问题，如：中国内地FY2024的REVENUE是多少")
     p_ask.add_argument(
         "--db",
-        default=str(DEFAULT_FACT_DB),
+        default=None,
         help="fact_metric sqlite 路径（默认 data/fact_metric.db）",
+    )
+    p_ask.add_argument(
+        "--profile",
+        choices=["economy", "balanced", "quality"],
+        default="economy",
+        help="workspace 检索预设",
+    )
+    p_ask.add_argument(
+        "--workspace",
+        default=None,
+        help="由 `ragspine ingest` 创建的 workspace 目录",
     )
     p_ask.add_argument(
         "--provider",
@@ -888,6 +1033,36 @@ def _build_parser() -> argparse.ArgumentParser:
         help="mock=离线确定性（默认）；anthropic=真实 Claude（需装 [llm] + key）",
     )
     p_ask.set_defaults(func=_cmd_ask)
+
+    p_doctor = sub.add_parser("doctor", help="离线检查依赖、配置、密钥与路径")
+    p_doctor.add_argument("--config", default=None, help="可选 TOML 配置路径")
+    p_doctor.add_argument("--json", action="store_true", help="输出机器可读 JSON")
+    p_doctor.set_defaults(func=_cmd_doctor)
+
+    p_config = sub.add_parser("config", help="初始化或查看渐进式配置")
+    config_sub = p_config.add_subparsers(dest="config_command", metavar="<subcommand>")
+    config_sub.required = True
+    p_config_init = config_sub.add_parser("init", help="生成最小 TOML 配置")
+    p_config_init.add_argument("--path", default="ragspine.toml", help="输出路径")
+    p_config_init.add_argument(
+        "--profile",
+        choices=["economy", "balanced", "quality", "offline", "service"],
+        default="economy",
+    )
+    p_config_init.add_argument("--force", action="store_true", help="覆盖已有普通文件")
+    p_config_init.set_defaults(func=_cmd_config_init)
+    p_config_show = config_sub.add_parser("show", help="显示最终生效配置及来源")
+    p_config_show.add_argument("--config", default=None, help="可选 TOML 配置路径")
+    p_config_show.add_argument(
+        "--effective", action="store_true", help="显示 profile/file/env 合并结果"
+    )
+    p_config_show.set_defaults(func=_cmd_config_show)
+
+    p_serve = sub.add_parser("serve", help="无 Redis 启动本地 API 与 Studio")
+    p_serve.add_argument("--workspace", default=".ragspine", help="workspace 目录")
+    p_serve.add_argument("--port", type=int, default=8000, help="监听端口（默认 8000）")
+    p_serve.add_argument("--open", action="store_true", help="就绪后自动打开浏览器")
+    p_serve.set_defaults(func=_cmd_serve)
 
     p_ver = sub.add_parser("version", help="打印分发版本号")
     p_ver.set_defaults(func=_cmd_version)
@@ -990,18 +1165,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "check",
         help="输出工作流格式、编译与 L0 可运行性 readiness JSON",
     )
-    p_workflow_check.add_argument(
-        "source", help="本地 .json/.yaml/.yml/.toml 工作流文件路径"
-    )
+    p_workflow_check.add_argument("source", help="本地 .json/.yaml/.yml/.toml 工作流文件路径")
     p_workflow_check.set_defaults(func=_cmd_workflow_check)
 
     p_workflow_package = workflow_sub.add_parser(
         "package",
         help="校验现有工作流并生成可用 Docker Compose 启动的部署目录",
     )
-    p_workflow_package.add_argument(
-        "source", help="本地 .json/.yaml/.yml/.toml 工作流文件路径"
-    )
+    p_workflow_package.add_argument("source", help="本地 .json/.yaml/.yml/.toml 工作流文件路径")
     p_workflow_package.add_argument(
         "-o", "--output", required=True, help="新部署目录（默认拒绝覆盖）"
     )

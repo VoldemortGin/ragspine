@@ -10,7 +10,9 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
+from enum import Enum
 from pathlib import Path
+from typing import Literal
 
 from corespine import CorespineError, RateLimitedProvider, env_key, load_from_env
 
@@ -34,42 +36,132 @@ from ragspine.storage.fact_store import FactStore, SqliteFactStore
 
 _PACKAGED_STUDIO_DIR = Path(__file__).resolve().with_name("studio_dist")
 
+RetrievalModeSpec = Literal["economy", "hybrid"]
+EmbeddingSpec = Literal["none", "deterministic", "onnx"]
+VectorStoreSpec = Literal["none", "in_process"]
+RerankerSpec = Literal["none", "cross_encoder"]
+PostprocessorSpec = Literal["none", "mmr,lost_in_middle,compress"]
+
+
+class RetrievalProfile(str, Enum):
+    """Named local retrieval trade-offs, from leanest to highest quality."""
+
+    ECONOMY = "economy"
+    BALANCED = "balanced"
+    QUALITY = "quality"
+
+
+@dataclass(frozen=True)
+class RetrievalPreset:
+    """Validated retrieval settings consumed by local narrative assembly."""
+
+    retrieval_mode: RetrievalModeSpec
+    embedding: EmbeddingSpec
+    vector_store: VectorStoreSpec
+    reranker: RerankerSpec
+    postprocessor: PostprocessorSpec
+
+    def with_overrides(
+        self,
+        *,
+        retrieval_mode: RetrievalModeSpec | None = None,
+        embedding: EmbeddingSpec | None = None,
+        vector_store: VectorStoreSpec | None = None,
+        reranker: RerankerSpec | None = None,
+        postprocessor: PostprocessorSpec | None = None,
+    ) -> "RetrievalPreset":
+        """Return a new preset with only explicitly supplied fields replaced."""
+        return RetrievalPreset(
+            retrieval_mode=retrieval_mode or self.retrieval_mode,
+            embedding=embedding or self.embedding,
+            vector_store=vector_store or self.vector_store,
+            reranker=reranker or self.reranker,
+            postprocessor=postprocessor or self.postprocessor,
+        )
+
+
+_LOCAL_RETRIEVAL_PRESETS = {
+    RetrievalProfile.ECONOMY: RetrievalPreset(
+        retrieval_mode="economy",
+        embedding="none",
+        vector_store="none",
+        reranker="none",
+        postprocessor="none",
+    ),
+    RetrievalProfile.BALANCED: RetrievalPreset(
+        retrieval_mode="hybrid",
+        embedding="deterministic",
+        vector_store="in_process",
+        reranker="none",
+        postprocessor="none",
+    ),
+    RetrievalProfile.QUALITY: RetrievalPreset(
+        retrieval_mode="hybrid",
+        embedding="onnx",
+        vector_store="in_process",
+        reranker="cross_encoder",
+        postprocessor="mmr,lost_in_middle,compress",
+    ),
+}
+
+
+def make_retrieval_preset(
+    profile: RetrievalProfile | str = RetrievalProfile.ECONOMY,
+    *,
+    retrieval_mode: RetrievalModeSpec | None = None,
+    embedding: EmbeddingSpec | None = None,
+    vector_store: VectorStoreSpec | None = None,
+    reranker: RerankerSpec | None = None,
+    postprocessor: PostprocessorSpec | None = None,
+) -> RetrievalPreset:
+    """Resolve a named local profile and apply explicit, typed overrides."""
+    selected = profile if isinstance(profile, RetrievalProfile) else RetrievalProfile(profile)
+    return _LOCAL_RETRIEVAL_PRESETS[selected].with_overrides(
+        retrieval_mode=retrieval_mode,
+        embedding=embedding,
+        vector_store=vector_store,
+        reranker=reranker,
+        postprocessor=postprocessor,
+    )
+
 
 @dataclass(frozen=True)
 class ServiceConfig:
     db_path: str
     chunk_db_path: str | None = None
     mapping_db_path: str | None = None
-    queue_db_path: str | None = None        # ReviewQueue（SME 复核）路径——非 job 队列
+    queue_db_path: str | None = None  # ReviewQueue（SME 复核）路径——非 job 队列
     manifest_db_path: str | None = None
     redis_url: str = "redis://localhost:6379/0"
-    provider_type: str = "mock"             # "mock" | "anthropic"
+    provider_type: str = "mock"  # "mock" | "anthropic"
     model: str = DEFAULT_ANTHROPIC_MODEL
     base_url: str | None = None
-    retrieval_mode: str = "auto"            # 批次2.2④ 检索模式预设: "auto"/"hybrid"/"vector"(默认,embedding按下方配置装配,字节不变) | "economy"/"bm25"/"lexical"(零embedding成本,纯BM25关键词检索)
-    embedding: str = "auto"                 # "auto"(装[embed-onnx]→真语义ONNX,否则纯BM25) | "none" | "onnx" | "deterministic" | "openai"
-    workflow_matcher: str = "auto"           # workflow scaffold: "auto" | "none" | "onnx"
-    reranker: str = "none"                  # "none"(不重排,默认行为不变) | "cross_encoder"(本地[rerank]) | "colbert"(晚交互MaxSim,[colbert]) | "splade"(学习稀疏,[splade]) | "auto"(装[rerank]即用,否则不重排)
-    query_decompose: str = "none"           # W6a 查询分解(opt-in): "none"(不分解,默认字节不变) | "llm"(注入provider的LLM多跳分解)
-    corrective: str = "none"                 # W6b 纠错检索(opt-in): "none"(默认,返回base本身字节不变) | "crag"(有界确定性 grade→act 环)
-    postprocessor: str = "none"              # W8 后检索链(opt-in): "none"(默认,不挂链字节不变) | "mmr"/"lost_in_middle"/"compress" | 逗号成链如"mmr,lost_in_middle"
-    query_transform: str = "none"            # W9 查询变换(opt-in,需注入provider): "none"(默认返回base字节不变) | "hyde" | "rag_fusion" | "step_back"
-    adaptive: str = "none"                   # W9 Adaptive-RAG 复杂度路由(opt-in): "none"(默认不路由字节不变) | "heuristic"(确定性分类) | "llm"
-    chunker: str = "none"                   # 批次2.2 follow-up 切块策略(ingest,opt-in): "none"(默认内置chunk_document,字节不变) | "parent_child"/"small_to_big"(父子small-to-big) | "layout"/"laws"/"qa"/"book"/"sentence_window"/"semantic"
-    vector_store: str = "none"              # "none" | "in_process" | "sqlite_vec"（后者需 [vector]）
-    persistence_policy: str = "default"     # "default"(隔离优先) | "persist_everything"
-    reference_date: str | None = None       # ISO "YYYY-MM-DD" or None
-    faq_source: str | None = None           # FAQ JSON 文件路径；None -> 空缓存
+    retrieval_mode: str = "auto"  # 批次2.2④ 检索模式预设: "auto"/"hybrid"/"vector"(默认,embedding按下方配置装配,字节不变) | "economy"/"bm25"/"lexical"(零embedding成本,纯BM25关键词检索)
+    embedding: str = "auto"  # "auto"(装[embed-onnx]→真语义ONNX,否则纯BM25) | "none" | "onnx" | "deterministic" | "openai"
+    workflow_matcher: str = "auto"  # workflow scaffold: "auto" | "none" | "onnx"
+    reranker: str = "none"  # "none"(不重排,默认行为不变) | "cross_encoder"(本地[rerank]) | "colbert"(晚交互MaxSim,[colbert]) | "splade"(学习稀疏,[splade]) | "auto"(装[rerank]即用,否则不重排)
+    query_decompose: str = "none"  # W6a 查询分解(opt-in): "none"(不分解,默认字节不变) | "llm"(注入provider的LLM多跳分解)
+    corrective: str = "none"  # W6b 纠错检索(opt-in): "none"(默认,返回base本身字节不变) | "crag"(有界确定性 grade→act 环)
+    postprocessor: str = "none"  # W8 后检索链(opt-in): "none"(默认,不挂链字节不变) | "mmr"/"lost_in_middle"/"compress" | 逗号成链如"mmr,lost_in_middle"
+    query_transform: str = "none"  # W9 查询变换(opt-in,需注入provider): "none"(默认返回base字节不变) | "hyde" | "rag_fusion" | "step_back"
+    adaptive: str = "none"  # W9 Adaptive-RAG 复杂度路由(opt-in): "none"(默认不路由字节不变) | "heuristic"(确定性分类) | "llm"
+    chunker: str = "none"  # 批次2.2 follow-up 切块策略(ingest,opt-in): "none"(默认内置chunk_document,字节不变) | "parent_child"/"small_to_big"(父子small-to-big) | "layout"/"laws"/"qa"/"book"/"sentence_window"/"semantic"
+    vector_store: str = "none"  # "none" | "in_process" | "sqlite_vec"（后者需 [vector]）
+    persistence_policy: str = "default"  # "default"(隔离优先) | "persist_everything"
+    reference_date: str | None = None  # ISO "YYYY-MM-DD" or None
+    faq_source: str | None = None  # FAQ JSON 文件路径；None -> 空缓存
     allowed_upload_root: str | None = None  # ingestion 路径必须落在此根内
     company_profile_path: str | None = None
-    tokens_per_minute: int = 0               # >0 时用 corespine RateLimitedProvider 主动 TPM 限流;0=不限
-    dify_run_enabled: bool = False           # /v1/dify/run 执行开关（信任边界）；默认关，env 显式开
-    dify_run_timeout_s: float = 10.0         # /v1/dify/run 单次执行超时上限（秒）
-    dify_run_isolation: str = "inprocess"    # "inprocess"(L1) | "subprocess"(L2，Linux setrlimit，跨平台回落 L1)
+    tokens_per_minute: int = 0  # >0 时用 corespine RateLimitedProvider 主动 TPM 限流;0=不限
+    dify_run_enabled: bool = False  # /v1/dify/run 执行开关（信任边界）；默认关，env 显式开
+    dify_run_timeout_s: float = 10.0  # /v1/dify/run 单次执行超时上限（秒）
+    dify_run_isolation: str = (
+        "inprocess"  # "inprocess"(L1) | "subprocess"(L2，Linux setrlimit，跨平台回落 L1)
+    )
     studio_dir: str = str(_PACKAGED_STUDIO_DIR)  # Studio 目录；默认 wheel 内置，""=显式禁用
-    dify_public_apps: str = ""               # dify 公共 API app 注册表："key1=/path/a.yml;key2=/path/b.yml"（; 分条目、首个 = 分 key/路径）；""=未配置 -> /v1/workflows/* 一律 401
-    n8n_api_key: str | None = None           # n8n 公共 API key；None=未启用，/api/v1/* 一律 401
-    n8n_store_path: str = "data/n8n_store"   # n8n workflow/execution 文件存储根目录
+    dify_public_apps: str = ""  # dify 公共 API app 注册表："key1=/path/a.yml;key2=/path/b.yml"（; 分条目、首个 = 分 key/路径）；""=未配置 -> /v1/workflows/* 一律 401
+    n8n_api_key: str | None = None  # n8n 公共 API key；None=未启用，/api/v1/* 一律 401
+    n8n_store_path: str = "data/n8n_store"  # n8n workflow/execution 文件存储根目录
 
     # 历史 env 键别名 -> 字段名。corespine load_from_env 默认按 PREFIX_FIELDNAME
     # 推导键名，与这三个不规则旧键冲突；构造时把旧键改写到规范键以保持向后兼容。

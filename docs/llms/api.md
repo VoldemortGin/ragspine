@@ -1,17 +1,31 @@
 # api —— 使用者主要入口的真实签名 + 契约
 
-> 所有签名经 `inspect.signature` 对真实代码核对（ragspine 0.1.2）。按子系统分节。深层结构：
-> 顶层 `import ragspine` 只 curated 暴露 4 个名字（`FactStore` / `Fact` / `MockProvider` /
-> `answer_question`），其余按惰性子模块点到底（如 `ragspine.retrieval.lexical.retrieval.HybridRetriever`）。
+> 所有签名经真实代码核对（ragspine 0.12.0）。顶层 `import ragspine` curated 暴露
+> 高层 `RAGSpine` facade，以及 `FactStore` / `Fact` / `MockProvider` / `answer_question`
+> 四个底层原语；其余按惰性子模块点到底。
 
 ## 0 · 顶层 curated（最小可用 API）
 
 ```python
-from ragspine import FactStore, Fact, MockProvider, answer_question
+from ragspine import RAGSpine, FactStore, Fact, MockProvider, answer_question
 ```
 
 `import ragspine` 不急切 import 任何子模块；首次访问某名字才拉起其源模块（PEP 562 惰性）。
 缺可选 extra 不影响 `import ragspine`，只有真正用到的那条链才拉对应依赖。
+
+```python
+class RAGSpine:
+    @classmethod
+    def local(workspace=".ragspine", *, provider=None,
+              profile="economy", retrieval=None) -> RAGSpine: ...
+    def ingest(self, source, *, dry_run=False, valid_as_of=None) -> IngestResult: ...
+    def ask(self, question: str) -> AgentResult: ...
+    def close(self) -> None: ...
+```
+
+`profile` 为 `economy`（纯 BM25）、`balanced`（离线 deterministic hybrid）或
+`quality`（ONNX + cross-encoder + post-processing，需要模型 extras）。workspace
+固定保存 `knowledge.db`、`mapping.db`、`review.db`，并支持 context manager。
 
 ---
 
