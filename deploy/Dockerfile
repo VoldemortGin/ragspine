@@ -108,7 +108,10 @@ COPY config/ ./config/
 COPY data/ ./data/
 
 # Studio Web UI 静态产物（RAGSPINE_STUDIO_DIR 指向此处，FastAPI 挂载到 /studio；只读即可）。
-COPY --from=studio-builder /studio/dist /opt/ragspine/studio
+# Vite writes directly to the package path (relative to /studio):
+# /src/ragspine/service/studio_dist. Keep the container copy source aligned
+# with studio/vite.config.ts and the wheel's force-included asset location.
+COPY --from=studio-builder /src/ragspine/service/studio_dist /opt/ragspine/studio
 
 # 命名卷挂载点（sqlite 库 + 上传目录）；先建目录 + 改属主，命名卷首次创建即继承该属主。
 RUN mkdir -p /var/lib/ragspine/uploads \
