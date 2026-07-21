@@ -76,6 +76,27 @@ def test_balanced_profile_drives_offline_narrative_ask(tmp_path):
     assert result.sources[0]["doc"] == "review.txt"
 
 
+def test_balanced_preset_exposes_the_plan_used_by_the_facade(tmp_path):
+    """The public preset spelling resolves once and drives runtime assembly."""
+    from ragspine import RAGSpine
+
+    with RAGSpine.local(tmp_path / "knowledge-base", preset="balanced") as rag:
+        assert rag.retrieval.retrieval_mode == "hybrid"
+        assert rag.retrieval.embedding == "deterministic"
+        assert rag.retrieval.vector_store == "in_process"
+        assert rag.effective_plan.config.profile == "balanced"
+        assert rag.effective_plan.config.retrieval.embedding == "deterministic"
+        assert rag.effective_plan.source_for("profile") == "preset"
+
+
+def test_preset_rejects_the_legacy_profile_spelling(tmp_path):
+    """Two names for the same selection are rejected instead of guessed."""
+    from ragspine import RAGSpine
+
+    with pytest.raises(ValueError, match="preset.*profile"):
+        RAGSpine.local(tmp_path / "knowledge-base", preset="balanced", profile="quality")
+
+
 def test_explicit_retrieval_preset_overrides_named_profile(tmp_path):
     """Advanced callers can replace a profile without untyped configuration maps."""
     from ragspine import RAGSpine

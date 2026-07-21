@@ -3,11 +3,13 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from ragspine.agent.agent import AgentResult, answer_question
 from ragspine.agent.intent import ROUTE_NARRATIVE, RuleIntentParser
 from ragspine.agent.llm_provider import AnthropicProvider, LLMProvider, MockProvider
-from ragspine.config import RAGSpineConfig
+from ragspine.config import EffectivePlan, RAGSpineConfig, SourceEntry, resolve_config
+from ragspine.config.resolution import PresetName
 from ragspine.extraction.color.color_semantics import MappingRegistry
 from ragspine.graph.config import GraphMode, normalize_graph_mode
 from ragspine.ingestion.narrative.narrative_ingest import (
@@ -29,6 +31,29 @@ from ragspine.storage.fact_store import SqliteFactStore
 _STRUCTURED_SUFFIXES = frozenset({".xlsx", ".xlsm", ".pptx", ".pdf", ".docx", ".docm"})
 _NARRATIVE_SUFFIXES = frozenset({".pptx", ".pdf", ".docx", ".docm", ".txt"})
 _SUPPORTED_SUFFIXES = _STRUCTURED_SUFFIXES | _NARRATIVE_SUFFIXES
+
+
+def _replace_plan_config(
+    plan: EffectivePlan,
+    config: RAGSpineConfig,
+    *,
+    prefix: str | None = None,
+    paths: set[str] | None = None,
+) -> EffectivePlan:
+    """Reflect an explicit legacy runtime override in an immutable effective plan."""
+    overridden = paths or set()
+    sources = tuple(
+        SourceEntry(
+            path=entry.path,
+            source=(
+                "config"
+                if entry.path in overridden or (prefix is not None and entry.path.startswith(prefix))
+                else entry.source
+            ),
+        )
+        for entry in plan.sources
+    )
+    return EffectivePlan(config=config, sources=sources)
 
 
 @dataclass(frozen=True)
@@ -81,6 +106,7 @@ class RAGSpine:
         retrieval: RetrievalPreset | None = None,
         graph: GraphMode | str = "off",
         _config: RAGSpineConfig | None = None,
+        _effective_plan: EffectivePlan | None = None,
     ):
         resolved = _config or RAGSpineConfig()
         storage = resolved.storage
@@ -100,6 +126,7 @@ class RAGSpine:
         self.provider = provider or MockProvider()
         self.retrieval = retrieval or make_retrieval_preset()
         self.graph = normalize_graph_mode(graph)
+        self._effective_plan = _effective_plan or resolve_config(config=resolved)
         self._closed = False
         self._initialize_workspace()
 
@@ -109,30 +136,63 @@ class RAGSpine:
         workspace: str | Path = ".ragspine",
         *,
         provider: LLMProvider | None = None,
+        preset: str | None = None,
         profile: RetrievalProfile | str | None = None,
         retrieval: RetrievalPreset | None = None,
         graph: GraphMode | str | None = None,
         config: RAGSpineConfig | Mapping[str, object] | None = None,
     ) -> "RAGSpine":
         """Open an offline workspace from strict config plus optional legacy overrides."""
-        resolved = (
-            RAGSpineConfig()
-            if config is None
-            else config
-            if isinstance(config, RAGSpineConfig)
-            else RAGSpineConfig.model_validate(config)
-        )
-        if profile is not None:
-            preset = make_retrieval_preset(profile)
-        else:
-            preset = make_retrieval_preset(
-                resolved.profile,
-                retrieval_mode=resolved.retrieval.retrieval_mode,
-                embedding=resolved.retrieval.embedding,
-                vector_store=resolved.retrieval.vector_store,
-                reranker=resolved.retrieval.reranker,
-                postprocessor=resolved.retrieval.postprocessor,
+        if preset is not None and profile is not None:
+            raise ValueError("preset and legacy profile cannot be supplied together")
+
+        resolution_input: RAGSpineConfig | Mapping[str, object] | None = config
+        if profile is not None and config is not None:
+            # Legacy ``profile=`` historically replaced config-level retrieval
+            # overrides wholesale.  Keep that boundary contract while the new
+            # ``preset=`` spelling follows resolve_config's layered semantics.
+            payload = (
+                config.model_dump(mode="python", exclude_unset=True)
+                if isinstance(config, RAGSpineConfig)
+                else dict(config)
             )
+            payload.pop("profile", None)
+            payload.pop("retrieval", None)
+            resolution_input = payload
+        plan = resolve_config(
+            preset=cast("PresetName | None", preset),
+            profile=cast(
+                "PresetName | None",
+                profile.value if isinstance(profile, RetrievalProfile) else profile,
+            ),
+            config=resolution_input,
+        )
+        resolved = plan.config
+        assembled_retrieval = make_retrieval_preset(
+            resolved.profile,
+            retrieval_mode=resolved.retrieval.retrieval_mode,
+            embedding=resolved.retrieval.embedding,
+            vector_store=resolved.retrieval.vector_store,
+            reranker=resolved.retrieval.reranker,
+            postprocessor=resolved.retrieval.postprocessor,
+        )
+        if retrieval is not None:
+            resolved = resolved.model_copy(
+                update={"retrieval": resolved.retrieval.model_copy(update={
+                    "retrieval_mode": retrieval.retrieval_mode,
+                    "embedding": retrieval.embedding,
+                    "vector_store": retrieval.vector_store,
+                    "reranker": retrieval.reranker,
+                    "postprocessor": retrieval.postprocessor,
+                })}
+            )
+            plan = _replace_plan_config(plan, resolved, prefix="retrieval.")
+            assembled_retrieval = retrieval
+        if graph is not None:
+            resolved = resolved.model_copy(
+                update={"graph": resolved.graph.model_copy(update={"mode": normalize_graph_mode(graph)})}
+            )
+            plan = _replace_plan_config(plan, resolved, paths={"graph.mode"})
         selected_provider = provider
         if selected_provider is None:
             generation = resolved.generation
@@ -145,10 +205,16 @@ class RAGSpine:
         return cls(
             workspace,
             provider=selected_provider,
-            retrieval=retrieval or preset,
-            graph=graph if graph is not None else resolved.graph.mode,
+            retrieval=assembled_retrieval,
+            graph=resolved.graph.mode,
             _config=resolved,
+            _effective_plan=plan,
         )
+
+    @property
+    def effective_plan(self) -> EffectivePlan:
+        """Return the immutable configuration plan used to assemble this facade."""
+        return self._effective_plan
 
     def __enter__(self) -> "RAGSpine":
         self._ensure_open()
