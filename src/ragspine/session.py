@@ -1,11 +1,13 @@
 """High-level, offline-first facade for a local RAGSpine workspace."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 from ragspine.agent.agent import AgentResult, answer_question
 from ragspine.agent.intent import ROUTE_NARRATIVE, RuleIntentParser
-from ragspine.agent.llm_provider import LLMProvider, MockProvider
+from ragspine.agent.llm_provider import AnthropicProvider, LLMProvider, MockProvider
+from ragspine.config import RAGSpineConfig
 from ragspine.extraction.color.color_semantics import MappingRegistry
 from ragspine.graph.config import GraphMode, normalize_graph_mode
 from ragspine.ingestion.narrative.narrative_ingest import (
@@ -78,13 +80,23 @@ class RAGSpine:
         provider: LLMProvider | None = None,
         retrieval: RetrievalPreset | None = None,
         graph: GraphMode | str = "off",
+        _config: RAGSpineConfig | None = None,
     ):
+        resolved = _config or RAGSpineConfig()
+        storage = resolved.storage
         self.workspace = Path(workspace)
         self.workspace.mkdir(parents=True, exist_ok=True)
-        self.db_path = self.workspace / "knowledge.db"
-        self.mapping_db_path = self.workspace / "mapping.db"
-        self.review_db_path = self.workspace / "review.db"
-        self.graph_db_path = self.workspace / "graph.db"
+        self.db_path = self.workspace / storage.knowledge_db
+        self.mapping_db_path = self.workspace / storage.mapping_db
+        self.review_db_path = self.workspace / storage.review_db
+        self.graph_db_path = self.workspace / storage.graph_db
+        self.graph_max_communities = resolved.graph.max_communities
+        self.allowed_upload_root = (
+            Path(resolved.security.allowed_upload_root).resolve()
+            if resolved.security.allowed_upload_root is not None
+            else None
+        )
+        self.reference_date = resolved.generation.reference_date
         self.provider = provider or MockProvider()
         self.retrieval = retrieval or make_retrieval_preset()
         self.graph = normalize_graph_mode(graph)
@@ -97,16 +109,45 @@ class RAGSpine:
         workspace: str | Path = ".ragspine",
         *,
         provider: LLMProvider | None = None,
-        profile: RetrievalProfile | str = RetrievalProfile.ECONOMY,
+        profile: RetrievalProfile | str | None = None,
         retrieval: RetrievalPreset | None = None,
-        graph: GraphMode | str = "off",
+        graph: GraphMode | str | None = None,
+        config: RAGSpineConfig | Mapping[str, object] | None = None,
     ) -> "RAGSpine":
-        """Open an offline workspace using a named or explicitly supplied preset."""
+        """Open an offline workspace from strict config plus optional legacy overrides."""
+        resolved = (
+            RAGSpineConfig()
+            if config is None
+            else config
+            if isinstance(config, RAGSpineConfig)
+            else RAGSpineConfig.model_validate(config)
+        )
+        if profile is not None:
+            preset = make_retrieval_preset(profile)
+        else:
+            preset = make_retrieval_preset(
+                resolved.profile,
+                retrieval_mode=resolved.retrieval.retrieval_mode,
+                embedding=resolved.retrieval.embedding,
+                vector_store=resolved.retrieval.vector_store,
+                reranker=resolved.retrieval.reranker,
+                postprocessor=resolved.retrieval.postprocessor,
+            )
+        selected_provider = provider
+        if selected_provider is None:
+            generation = resolved.generation
+            if generation.provider_type == "anthropic":
+                selected_provider = AnthropicProvider(
+                    model=generation.model, base_url=generation.base_url
+                )
+            else:
+                selected_provider = MockProvider(reference_date=generation.reference_date)
         return cls(
             workspace,
-            provider=provider,
-            retrieval=retrieval or make_retrieval_preset(profile),
-            graph=graph,
+            provider=selected_provider,
+            retrieval=retrieval or preset,
+            graph=graph if graph is not None else resolved.graph.mode,
+            _config=resolved,
         )
 
     def __enter__(self) -> "RAGSpine":
@@ -131,9 +172,11 @@ class RAGSpine:
             and wants_global_graph(question)
             and RuleIntentParser().parse(question).route == ROUTE_NARRATIVE
         ):
-            graph_result = WorkspaceGraphRuntime(self.graph_db_path, self.provider).answer_global(
-                question
-            )
+            graph_result = WorkspaceGraphRuntime(
+                self.graph_db_path,
+                self.provider,
+                max_communities=self.graph_max_communities,
+            ).answer_global(question)
             if graph_result is not None:
                 return graph_result
         store = SqliteFactStore(self.db_path)
@@ -153,6 +196,7 @@ class RAGSpine:
                     question,
                     store,
                     self.provider,
+                    reference_date=self.reference_date,
                     narrative_retriever=retriever,
                 )
         finally:
@@ -220,9 +264,25 @@ class RAGSpine:
         path = Path(source)
         if not path.exists():
             raise FileNotFoundError(f"source does not exist: {path}")
-        candidates = (
+        if self.allowed_upload_root is not None:
+            resolved_path = path.resolve()
+            if not resolved_path.is_relative_to(self.allowed_upload_root):
+                raise ValueError(
+                    f"source is outside allowed_upload_root: {self.allowed_upload_root}"
+                )
+        raw_candidates = (
             [path] if path.is_file() else sorted(item for item in path.rglob("*") if item.is_file())
         )
+        candidates: list[Path] = []
+        for candidate in raw_candidates:
+            resolved_candidate = candidate.resolve(strict=True)
+            if self.allowed_upload_root is not None and not resolved_candidate.is_relative_to(
+                self.allowed_upload_root
+            ):
+                raise ValueError(
+                    f"source is outside allowed_upload_root: {self.allowed_upload_root}"
+                )
+            candidates.append(resolved_candidate)
         supported = [item for item in candidates if item.suffix.lower() in _SUPPORTED_SUFFIXES]
         if path.is_file() and not supported:
             supported_text = ", ".join(sorted(_SUPPORTED_SUFFIXES))

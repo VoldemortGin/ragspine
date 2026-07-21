@@ -7,6 +7,7 @@ Submodules:
     agent/ — agent 编排：意图解析、安全门、tool-use 循环、LLM provider 抽象。
     cli/ — 控制台 CLI 入口（ragspine 命令）：quickstart / ask / version 子命令。
     common/ — 跨域基础原语：company profile、敏感度、glossary、可观测性。
+    config/ — 高层 workspace 的严格嵌套配置与 JSON Schema。
     dify/ — Dify 工作流 YAML → 纯 Python 编译器 + 静态优化建议器（parse/IR/codegen/optimize）。
     diagnostics/ — 渐进配置、有效值来源与零网络环境诊断。
     eval/ — Q&A 与抽取评测 harness，含基线回归门禁。

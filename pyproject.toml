@@ -48,6 +48,9 @@ dependencies = [
     # 的静态半边互补。守护式 import（见 src/ragspine/__init__.py）使其缺失时仍可离线运行，
     # 但列为核心依赖以保证零警告门默认开启。
     "beartype>=0.18",
+    # High-level RAGSpineConfig is a base-install boundary contract: strict nested
+    # validation + JSON Schema without importing FastAPI or any provider SDK.
+    "pydantic>=2.0",
 ]
 
 [project.urls]

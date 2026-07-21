@@ -30,7 +30,6 @@ _GLOBAL_CUES = (
     "common risk",
     "common theme",
 )
-_MAX_COMMUNITIES = 20
 _ANSWER_SYSTEM = (
     "你是 GraphRAG 全局问答器。根据带来源的社区合成摘要回答问题。"
     "摘要是合成材料而非权威事实；不得添加材料中没有的事实或数字。"
@@ -57,9 +56,14 @@ class WorkspaceGraphRuntime:
     document id and locator, and only those stamped values are persisted and exposed.
     """
 
-    def __init__(self, path: str | Path, provider: LLMProvider) -> None:
+    def __init__(
+        self, path: str | Path, provider: LLMProvider, *, max_communities: int = 20
+    ) -> None:
         self.path = str(path)
         self.provider = provider
+        if not 1 <= max_communities <= 100:
+            raise ValueError("max_communities must be between 1 and 100")
+        self.max_communities = max_communities
         self._init_schema()
 
     def _connect(self) -> sqlite3.Connection:
@@ -166,7 +170,7 @@ class WorkspaceGraphRuntime:
             sorted(
                 pipeline.detect_communities(graph),
                 key=lambda item: (-item.relation_count, item.id),
-            )[:_MAX_COMMUNITIES]
+            )[: self.max_communities]
         )
         summaries = tuple(pipeline.summarizer.summarize(item, graph) for item in communities)
         if not summaries:
