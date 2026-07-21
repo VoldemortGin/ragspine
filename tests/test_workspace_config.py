@@ -6,6 +6,78 @@ import pytest
 from pydantic import ValidationError
 
 
+@pytest.mark.parametrize(
+    ("preset", "recipe"),
+    [
+        (
+            "economy",
+            {
+                "retrieval_mode": "economy",
+                "embedding": "none",
+                "vector_store": "none",
+                "reranker": "none",
+                "postprocessor": "none",
+            },
+        ),
+        (
+            "balanced",
+            {
+                "retrieval_mode": "hybrid",
+                "embedding": "deterministic",
+                "vector_store": "in_process",
+                "reranker": "none",
+                "postprocessor": "none",
+            },
+        ),
+        (
+            "quality",
+            {
+                "retrieval_mode": "hybrid",
+                "embedding": "onnx",
+                "vector_store": "in_process",
+                "reranker": "cross_encoder",
+                "postprocessor": "mmr,lost_in_middle,compress",
+            },
+        ),
+    ],
+)
+def test_resolve_config_returns_stable_immutable_preset_recipe(preset, recipe):
+    from ragspine.config import EffectivePlan, resolve_config
+
+    plan = resolve_config(preset=preset)
+
+    assert isinstance(plan, EffectivePlan)
+    assert plan.config.profile == preset
+    assert plan.config.retrieval.model_dump() == recipe
+    with pytest.raises(ValidationError, match="frozen"):
+        plan.config.profile = "economy"
+    with pytest.raises(ValidationError, match="frozen"):
+        plan.sources = ()
+
+
+def test_resolve_config_records_a_source_for_every_effective_leaf():
+    from ragspine.config import resolve_config
+
+    plan = resolve_config(
+        preset="balanced",
+        config={"retrieval": {"embedding": "none", "vector_store": "none"}},
+    )
+
+    assert set(plan.source_map) == set(plan.leaf_values)
+    assert plan.source_for("profile") == "preset"
+    assert plan.source_for("retrieval.retrieval_mode") == "preset"
+    assert plan.source_for("retrieval.embedding") == "config"
+    assert plan.source_for("retrieval.vector_store") == "config"
+    assert plan.source_for("graph.mode") == "default"
+
+
+def test_resolve_config_rejects_preset_with_legacy_profile():
+    from ragspine.config import resolve_config
+
+    with pytest.raises(ValueError, match="preset.*profile"):
+        resolve_config(preset="balanced", profile="quality")
+
+
 def test_config_rejects_unknown_root_and_nested_keys():
     from ragspine.config import RAGSpineConfig
 
