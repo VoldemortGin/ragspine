@@ -4,8 +4,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ragspine.agent.agent import AgentResult, answer_question
+from ragspine.agent.intent import ROUTE_NARRATIVE, RuleIntentParser
 from ragspine.agent.llm_provider import LLMProvider, MockProvider
 from ragspine.extraction.color.color_semantics import MappingRegistry
+from ragspine.graph.config import GraphMode, normalize_graph_mode
 from ragspine.ingestion.narrative.narrative_ingest import (
     NarrativeIngestReport,
     ingest_narrative,
@@ -75,14 +77,17 @@ class RAGSpine:
         *,
         provider: LLMProvider | None = None,
         retrieval: RetrievalPreset | None = None,
+        graph: GraphMode | str = "off",
     ):
         self.workspace = Path(workspace)
         self.workspace.mkdir(parents=True, exist_ok=True)
         self.db_path = self.workspace / "knowledge.db"
         self.mapping_db_path = self.workspace / "mapping.db"
         self.review_db_path = self.workspace / "review.db"
+        self.graph_db_path = self.workspace / "graph.db"
         self.provider = provider or MockProvider()
         self.retrieval = retrieval or make_retrieval_preset()
+        self.graph = normalize_graph_mode(graph)
         self._closed = False
         self._initialize_workspace()
 
@@ -94,12 +99,14 @@ class RAGSpine:
         provider: LLMProvider | None = None,
         profile: RetrievalProfile | str = RetrievalProfile.ECONOMY,
         retrieval: RetrievalPreset | None = None,
+        graph: GraphMode | str = "off",
     ) -> "RAGSpine":
         """Open an offline workspace using a named or explicitly supplied preset."""
         return cls(
             workspace,
             provider=provider,
             retrieval=retrieval or make_retrieval_preset(profile),
+            graph=graph,
         )
 
     def __enter__(self) -> "RAGSpine":
@@ -116,6 +123,19 @@ class RAGSpine:
     def ask(self, question: str) -> AgentResult:
         """Answer from this workspace using the existing guarded agent path."""
         self._ensure_open()
+        if self.graph == "auto":
+            from ragspine.graph.runtime import WorkspaceGraphRuntime, wants_global_graph
+
+        if (
+            self.graph == "auto"
+            and wants_global_graph(question)
+            and RuleIntentParser().parse(question).route == ROUTE_NARRATIVE
+        ):
+            graph_result = WorkspaceGraphRuntime(self.graph_db_path, self.provider).answer_global(
+                question
+            )
+            if graph_result is not None:
+                return graph_result
         store = SqliteFactStore(self.db_path)
         store.init_schema()
         config = ServiceConfig(
@@ -184,6 +204,13 @@ class RAGSpine:
                 narrative_report = ingest_narrative(
                     list[str | Path](narrative_paths), chunk_store, dry_run=dry_run
                 )
+                if not dry_run and self.graph == "auto":
+                    from ragspine.graph.runtime import WorkspaceGraphRuntime
+
+                    WorkspaceGraphRuntime(self.graph_db_path, self.provider).index_chunks(
+                        chunk_store.iter_chunks(),
+                        doc_ids={path.name for path in narrative_paths},
+                    )
             finally:
                 chunk_store.close()
 
