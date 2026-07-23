@@ -35,7 +35,12 @@ from ragspine.ingestion.narrative.narrative_extract import (
 )
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
 from ragspine.retrieval.chunking.chunker import Chunker
-from ragspine.retrieval.chunking.chunking import DocumentMeta, chunk_document
+from ragspine.retrieval.chunking.chunking import (
+    DEFAULT_CHUNK_CHARS,
+    DEFAULT_OVERLAP_CHARS,
+    DocumentMeta,
+    chunk_document,
+)
 
 # 模块级 home 公司 profile（沿用 glossary/intent/query_tools 的 env-aware 装载模式，
 # 测试可 monkeypatch 它演示运行期换部署）。敏感度分级器从 _PROFILE.sensitivity 取规则。
@@ -125,6 +130,8 @@ def ingest_narrative(
     meta_by_doc: dict[str, dict[str, Any]] | None = None,
     dry_run: bool = False,
     chunker: Chunker | None = None,
+    max_chars: int = DEFAULT_CHUNK_CHARS,
+    overlap_chars: int = DEFAULT_OVERLAP_CHARS,
 ) -> NarrativeIngestReport:
     """批量叙事入库编排，返回逐文件汇总报告。
 
@@ -155,7 +162,16 @@ def ingest_narrative(
         _ensure_registry(registry)
         for path in _resolve_inputs(inputs):
             report.files.append(
-                _ingest_one(path, store, registry, meta_by_doc, dry_run, chunker)
+                _ingest_one(
+                    path,
+                    store,
+                    registry,
+                    meta_by_doc,
+                    dry_run,
+                    chunker,
+                    max_chars,
+                    overlap_chars,
+                )
             )
     finally:
         registry.close()
@@ -173,6 +189,8 @@ def _ingest_one(
     meta_by_doc: dict[str, dict[str, Any]],
     dry_run: bool,
     chunker: Chunker | None = None,
+    max_chars: int = DEFAULT_CHUNK_CHARS,
+    overlap_chars: int = DEFAULT_OVERLAP_CHARS,
 ) -> FileReport:
     """单文件：hash 比对 -> 抽取 -> 切块 -> 写入；任何异常落进 failed 报告。"""
     doc_id = path.name
@@ -218,9 +236,19 @@ def _ingest_one(
     # 切块：默认 None 走内置 chunk_document（字节级零行为变化）；注入了 Chunker 缝（如父子 small-to-big
     # 预设）则用之——window_text/parent_locator 等字段随块经 replace_doc_chunks 持久化。
     chunks = (
-        chunker.chunk(doc.to_text(), doc_meta)
+        chunker.chunk(
+            doc.to_text(),
+            doc_meta,
+            max_chars=max_chars,
+            overlap_chars=overlap_chars,
+        )
         if chunker is not None
-        else chunk_document(doc.to_text(), doc_meta)
+        else chunk_document(
+            doc.to_text(),
+            doc_meta,
+            max_chars=max_chars,
+            overlap_chars=overlap_chars,
+        )
     )
     rep.n_chunks = len(chunks)
     rep.status = STATUS_INGESTED

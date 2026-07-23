@@ -192,3 +192,162 @@ def test_ingest_routes_text_to_narrative_channel(tmp_path):
     assert result.narrative_report is not None
     assert result.narrative_report.files[0].n_chunks == 1
     assert not result.failed
+
+
+def test_parent_child_config_expands_a_child_hit_to_its_parent_context(tmp_path):
+    """The high-level indexing choice changes real ingest and generation behavior."""
+    from ragspine import RAGSpine
+
+    source = tmp_path / "review.txt"
+    source.write_text(
+        "# 营收\n营收增长来自渠道扩张。\n毛利改善来自产品组合。\n# 风险\n汇率仍有波动。",
+        encoding="utf-8",
+    )
+    config = {
+        "indexing": {"chunker": "parent_child", "max_chars": 16, "overlap_chars": 0}
+    }
+
+    with RAGSpine.local(tmp_path / "knowledge-base", config=config) as rag:
+        rag.ingest(source)
+        result = rag.ask("营收为什么增长？")
+
+    assert "营收增长来自渠道扩张" in result.answer_plain
+    assert "毛利改善来自产品组合" in result.answer_plain
+    assert result.sources
+    assert result.sources[0]["doc"] == "review.txt"
+    assert any(source["locator"].endswith("#para1-2") for source in result.sources)
+
+
+def test_reopen_refuses_to_query_with_an_incompatible_indexing_contract(tmp_path):
+    """A workspace never silently reuses chunks built with another contract."""
+    from ragspine import RAGSpine
+    from ragspine.config import ReindexRequiredError
+
+    workspace = tmp_path / "knowledge-base"
+    source = tmp_path / "review.txt"
+    source.write_text("# 营收\n营收增长来自渠道扩张。\n毛利改善。", encoding="utf-8")
+    parent_child = {
+        "indexing": {"chunker": "parent_child", "max_chars": 16, "overlap_chars": 0}
+    }
+
+    with RAGSpine.local(workspace, config=parent_child) as rag:
+        rag.ingest(source)
+
+    with RAGSpine.local(workspace) as rag:
+        with pytest.raises(ReindexRequiredError, match=r"chunking.*ragspine ingest.*--reindex"):
+            rag.ask("营收为什么增长？")
+
+
+def test_reopen_refuses_incremental_ingest_with_an_incompatible_contract(tmp_path):
+    """Compatibility is checked before an incremental writer can mutate the index."""
+    from ragspine import RAGSpine
+    from ragspine.config import ReindexRequiredError
+
+    workspace = tmp_path / "knowledge-base"
+    first = tmp_path / "first.txt"
+    second = tmp_path / "second.txt"
+    first.write_text("First narrative.", encoding="utf-8")
+    second.write_text("Second narrative.", encoding="utf-8")
+    parent_child = {"indexing": {"chunker": "parent_child"}}
+    with RAGSpine.local(workspace, config=parent_child) as rag:
+        rag.ingest(first)
+
+    with RAGSpine.local(workspace) as incompatible:
+        with pytest.raises(ReindexRequiredError, match="chunking"):
+            incompatible.ingest(second)
+
+    with RAGSpine.local(workspace, config=parent_child) as compatible:
+        assert compatible.ask("Why did the first narrative change?").sources[0]["doc"] == "first.txt"
+
+
+def test_structured_only_ingest_ignores_narrative_index_contract_mismatch(tmp_path):
+    """A narrative fingerprint never blocks an independent structured writer."""
+    from ragspine import RAGSpine
+
+    workspace = tmp_path / "knowledge-base"
+    narrative = tmp_path / "review.txt"
+    workbook = tmp_path / "financials.xlsx"
+    narrative.write_text("Revenue improved after channel expansion.", encoding="utf-8")
+    _make_financial_workbook(workbook)
+
+    with RAGSpine.local(workspace) as rag:
+        rag.ingest(narrative)
+
+    with RAGSpine.local(
+        workspace, config={"indexing": {"chunker": "parent_child"}}
+    ) as incompatible_for_narrative:
+        result = incompatible_for_narrative.ingest(workbook)
+
+    assert result.narrative_report is None
+    assert len(result.structured_reports) == 1
+    assert result.structured_reports[0].status == "ok"
+    assert result.structured_reports[0].n_facts_ingested >= 1
+
+
+def test_parent_child_context_survives_a_compatible_reopen(tmp_path):
+    """Reopening reconstructs parent context from the persisted public workspace."""
+    from ragspine import RAGSpine
+
+    workspace = tmp_path / "knowledge-base"
+    source = tmp_path / "review.txt"
+    source.write_text(
+        "# 营收\n营收增长来自渠道扩张。\n毛利改善来自产品组合。", encoding="utf-8"
+    )
+    config = {
+        "indexing": {"chunker": "parent_child", "max_chars": 16, "overlap_chars": 0}
+    }
+    with RAGSpine.local(workspace, config=config) as rag:
+        rag.ingest(source)
+
+    with RAGSpine.local(workspace, config=config) as reopened:
+        result = reopened.ask("营收为什么增长？")
+
+    assert "毛利改善来自产品组合" in result.answer_plain
+    assert any(source["locator"].endswith("#para1-2") for source in result.sources)
+
+
+def test_dry_run_does_not_claim_the_workspace_index_contract(tmp_path):
+    """A preview leaves the workspace available for a different real contract."""
+    from ragspine import RAGSpine
+
+    workspace = tmp_path / "knowledge-base"
+    source = tmp_path / "review.txt"
+    source.write_text("Revenue improved after channel expansion.", encoding="utf-8")
+    parent_child = {
+        "indexing": {"chunker": "parent_child", "max_chars": 16, "overlap_chars": 0}
+    }
+
+    with RAGSpine.local(workspace, config=parent_child) as preview:
+        report = preview.ingest(source, dry_run=True)
+        assert report.narrative_report is not None
+        assert report.narrative_report.dry_run is True
+        assert report.narrative_report.files[0].n_chunks > 0
+
+    with RAGSpine.local(workspace) as real:
+        report = real.ingest(source)
+        result = real.ask("Why did revenue improve?")
+
+    assert report.narrative_report is not None
+    assert report.narrative_report.files[0].status == "ingested"
+    assert result.sources[0]["doc"] == "review.txt"
+
+
+def test_explicit_default_indexing_is_equivalent_to_zero_configuration(tmp_path):
+    """Naming the canonical default does not change public ingest or ask results."""
+    from ragspine import RAGSpine
+
+    source = tmp_path / "review.txt"
+    source.write_text("Revenue improved after channel expansion.", encoding="utf-8")
+    with RAGSpine.local(tmp_path / "implicit") as implicit:
+        implicit_report = implicit.ingest(source)
+        implicit_result = implicit.ask("Why did revenue improve?")
+    with RAGSpine.local(
+        tmp_path / "explicit",
+        config={"indexing": {"chunker": "none", "max_chars": 480, "overlap_chars": 80}},
+    ) as explicit:
+        explicit_report = explicit.ingest(source)
+        explicit_result = explicit.ask("Why did revenue improve?")
+
+    assert implicit_report.summary == explicit_report.summary
+    assert implicit_result.answer_plain == explicit_result.answer_plain
+    assert implicit_result.sources == explicit_result.sources

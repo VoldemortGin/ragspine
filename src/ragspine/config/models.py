@@ -31,6 +31,30 @@ class RetrievalConfig(_StrictModel):
     postprocessor: Literal["none", "mmr,lost_in_middle,compress"] | None = None
 
 
+class IndexingConfig(_StrictModel):
+    """Persisted narrative chunking contract for a workspace index."""
+
+    chunker: Literal[
+        "none",
+        "default",
+        "layout",
+        "parent_child",
+        "sentence_window",
+        "semantic",
+        "laws",
+        "qa",
+        "book",
+    ] = "none"
+    max_chars: int = Field(default=480, ge=1)
+    overlap_chars: int = Field(default=80, ge=0)
+
+    @model_validator(mode="after")
+    def _overlap_is_smaller_than_chunk(self) -> "IndexingConfig":
+        if self.overlap_chars >= self.max_chars:
+            raise ValueError("overlap_chars must be smaller than max_chars")
+        return self
+
+
 class GraphConfig(_StrictModel):
     """Workspace GraphRAG selection and bounded query budget."""
 
@@ -79,6 +103,7 @@ class RAGSpineConfig(_StrictModel):
     """One validated configuration boundary for :meth:`RAGSpine.local`."""
 
     profile: Literal["economy", "balanced", "quality"] = "economy"
+    indexing: IndexingConfig = Field(default_factory=IndexingConfig)
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     graph: GraphConfig = Field(default_factory=GraphConfig)
     generation: GenerationConfig = Field(default_factory=GenerationConfig)
@@ -105,6 +130,7 @@ class RAGSpineConfig(_StrictModel):
 __all__ = [
     "GenerationConfig",
     "GraphConfig",
+    "IndexingConfig",
     "RAGSpineConfig",
     "RetrievalConfig",
     "SecurityConfig",

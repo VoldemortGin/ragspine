@@ -1,5 +1,7 @@
 """Resolve user configuration into one immutable, source-attributed plan."""
 
+import hashlib
+import json
 from collections.abc import Mapping
 from typing import Literal
 
@@ -51,6 +53,7 @@ class EffectivePlan(BaseModel):
 
     config: RAGSpineConfig
     sources: tuple[SourceEntry, ...]
+    index_fingerprint: str
 
     @property
     def source_map(self) -> dict[str, ConfigSource]:
@@ -90,6 +93,16 @@ def _explicit_paths(value: Mapping[str, object], prefix: str = "") -> set[str]:
         else:
             paths.add(path)
     return paths
+
+
+def _index_fingerprint(config: RAGSpineConfig) -> str:
+    """Hash only the versioned settings that determine persisted chunk meaning."""
+    contract = {
+        "schema": "ragspine-index-v1",
+        "chunking": config.indexing.model_dump(mode="json"),
+    }
+    encoded = json.dumps(contract, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def resolve_config(
@@ -148,7 +161,11 @@ def resolve_config(
         else:
             source = "default"
         sources.append(SourceEntry(path=path, source=source))
-    return EffectivePlan(config=effective, sources=tuple(sources))
+    return EffectivePlan(
+        config=effective,
+        sources=tuple(sources),
+        index_fingerprint=_index_fingerprint(effective),
+    )
 
 
 __all__ = ["ConfigSource", "EffectivePlan", "PresetName", "SourceEntry", "resolve_config"]

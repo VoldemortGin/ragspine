@@ -1,5 +1,7 @@
 """Strict public configuration contract for the high-level workspace facade."""
 
+import sqlite3
+from contextlib import closing
 from datetime import date
 
 import pytest
@@ -71,6 +73,93 @@ def test_resolve_config_records_a_source_for_every_effective_leaf():
     assert plan.source_for("graph.mode") == "default"
 
 
+def test_default_indexing_contract_is_explicit_and_fingerprint_stable():
+    """Implicit and explicit defaults describe the same persisted index."""
+    from ragspine.config import resolve_config
+
+    implicit = resolve_config()
+    explicit = resolve_config(
+        config={"indexing": {"chunker": "none", "max_chars": 480, "overlap_chars": 80}}
+    )
+
+    assert implicit.config.indexing == explicit.config.indexing
+    assert implicit.config.indexing.chunker == "none"
+    assert implicit.index_fingerprint == explicit.index_fingerprint
+    assert len(implicit.index_fingerprint) == 64
+
+
+@pytest.mark.parametrize(
+    "indexing",
+    [
+        {"chunker": "parent_child"},
+        {"max_chars": 481},
+        {"overlap_chars": 79},
+    ],
+)
+def test_each_indexing_setting_changes_the_fingerprint(indexing):
+    from ragspine.config import resolve_config
+
+    assert resolve_config(config={"indexing": indexing}).index_fingerprint != (
+        resolve_config().index_fingerprint
+    )
+
+
+def test_runtime_only_retrieval_settings_do_not_change_the_index_fingerprint():
+    from ragspine.config import resolve_config
+
+    baseline = resolve_config(preset="balanced")
+    runtime_override = resolve_config(
+        preset="balanced", config={"retrieval": {"postprocessor": "mmr,lost_in_middle,compress"}}
+    )
+
+    assert baseline.index_fingerprint == runtime_override.index_fingerprint
+
+
+def test_legacy_narrative_index_accepts_only_the_historical_default_contract(tmp_path):
+    """An unlabelled old index is inferable only as the historical 480/80 default."""
+    from ragspine.config import ReindexRequiredError, resolve_config
+    from ragspine.config.workspace import WorkspaceIndexMetadata
+
+    db_path = tmp_path / "knowledge.db"
+    with closing(sqlite3.connect(db_path)) as connection, connection:
+        connection.execute("CREATE TABLE narrative_chunk (chunk_id TEXT NOT NULL)")
+        connection.execute("INSERT INTO narrative_chunk VALUES ('legacy#c0')")
+
+    metadata = WorkspaceIndexMetadata(db_path, tmp_path)
+    metadata.init_schema()
+    metadata.assert_compatible(resolve_config())
+    with pytest.raises(ReindexRequiredError, match="chunking"):
+        metadata.assert_compatible(
+            resolve_config(config={"indexing": {"chunker": "parent_child"}})
+        )
+
+
+def test_claim_never_overwrites_a_different_fingerprint_after_stale_validation(
+    tmp_path, monkeypatch
+):
+    """record performs its own transactional CAS instead of trusting an earlier assertion."""
+    from ragspine.config import ReindexRequiredError, resolve_config
+    from ragspine.config.workspace import WorkspaceIndexMetadata
+
+    db_path = tmp_path / "knowledge.db"
+    metadata = WorkspaceIndexMetadata(db_path, tmp_path)
+    metadata.init_schema()
+    first = resolve_config()
+    second = resolve_config(config={"indexing": {"chunker": "parent_child"}})
+    metadata.claim(first)
+
+    # Model the stale-check window in the former assert-then-upsert implementation.
+    monkeypatch.setattr(metadata, "assert_compatible", lambda _plan: None)
+    with pytest.raises(ReindexRequiredError, match="chunking"):
+        metadata.claim(second)
+
+    with closing(sqlite3.connect(db_path)) as connection:
+        stored = connection.execute(
+            "SELECT fingerprint FROM ragspine_index_metadata WHERE singleton = 1"
+        ).fetchone()
+    assert stored == (first.index_fingerprint,)
+
+
 def test_resolve_config_rejects_preset_with_legacy_profile():
     from ragspine.config import resolve_config
 
@@ -112,13 +201,14 @@ def test_config_rejects_values_outside_its_literal_contract(payload, field):
         RAGSpineConfig.model_validate(payload)
 
 
-def test_config_json_schema_describes_all_five_domains_and_enums():
+def test_config_json_schema_describes_all_six_domains_and_enums():
     from ragspine.config import RAGSpineConfig
 
     schema = RAGSpineConfig.model_json_schema()
 
     assert set(schema["properties"]) == {
         "profile",
+        "indexing",
         "retrieval",
         "graph",
         "generation",
@@ -130,12 +220,24 @@ def test_config_json_schema_describes_all_five_domains_and_enums():
     definitions = schema["$defs"]
     assert set(definitions) >= {
         "RetrievalConfig",
+        "IndexingConfig",
         "GraphConfig",
         "GenerationConfig",
         "SecurityConfig",
         "StorageConfig",
     }
     assert definitions["GraphConfig"]["properties"]["mode"]["enum"] == ["off", "auto"]
+    assert definitions["IndexingConfig"]["properties"]["chunker"]["enum"] == [
+        "none",
+        "default",
+        "layout",
+        "parent_child",
+        "sentence_window",
+        "semantic",
+        "laws",
+        "qa",
+        "book",
+    ]
 
 
 def test_local_maps_config_profile_overrides_and_graph(tmp_path):

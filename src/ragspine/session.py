@@ -10,6 +10,7 @@ from ragspine.agent.intent import ROUTE_NARRATIVE, RuleIntentParser
 from ragspine.agent.llm_provider import AnthropicProvider, LLMProvider, MockProvider
 from ragspine.config import EffectivePlan, RAGSpineConfig, SourceEntry, resolve_config
 from ragspine.config.resolution import PresetName
+from ragspine.config.workspace import WorkspaceIndexMetadata
 from ragspine.extraction.color.color_semantics import MappingRegistry
 from ragspine.graph.config import GraphMode, normalize_graph_mode
 from ragspine.ingestion.narrative.narrative_ingest import (
@@ -19,6 +20,7 @@ from ragspine.ingestion.narrative.narrative_ingest import (
 from ragspine.ingestion.review.review_queue import ReviewQueue
 from ragspine.ingestion.structured.ingestion import IngestReport, ingest_file
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
+from ragspine.retrieval.chunking.chunker import make_chunker
 from ragspine.service.config import (
     RetrievalPreset,
     RetrievalProfile,
@@ -53,7 +55,11 @@ def _replace_plan_config(
         )
         for entry in plan.sources
     )
-    return EffectivePlan(config=config, sources=sources)
+    return EffectivePlan(
+        config=config,
+        sources=sources,
+        index_fingerprint=plan.index_fingerprint,
+    )
 
 
 @dataclass(frozen=True)
@@ -123,10 +129,12 @@ class RAGSpine:
             else None
         )
         self.reference_date = resolved.generation.reference_date
+        self.indexing = resolved.indexing
         self.provider = provider or MockProvider()
         self.retrieval = retrieval or make_retrieval_preset()
         self.graph = normalize_graph_mode(graph)
         self._effective_plan = _effective_plan or resolve_config(config=resolved)
+        self._index_metadata = WorkspaceIndexMetadata(self.db_path, self.workspace)
         self._closed = False
         self._initialize_workspace()
 
@@ -230,6 +238,7 @@ class RAGSpine:
     def ask(self, question: str) -> AgentResult:
         """Answer from this workspace using the existing guarded agent path."""
         self._ensure_open()
+        self._index_metadata.assert_compatible(self._effective_plan)
         if self.graph == "auto":
             from ragspine.graph.runtime import WorkspaceGraphRuntime, wants_global_graph
 
@@ -281,6 +290,15 @@ class RAGSpine:
         structured_paths = [path for path in paths if path.suffix.lower() in _STRUCTURED_SUFFIXES]
         narrative_paths = [path for path in paths if path.suffix.lower() in _NARRATIVE_SUFFIXES]
 
+        # The fingerprint describes only the narrative chunk index.  Purely
+        # structured ingestion is independent of that contract, while mixed
+        # inputs must still fail before either channel can mutate its store.
+        if narrative_paths:
+            if dry_run:
+                self._index_metadata.assert_compatible(self._effective_plan)
+            else:
+                self._index_metadata.claim(self._effective_plan)
+
         structured_reports: list[IngestReport] = []
         if structured_paths:
             store = SqliteFactStore(self.db_path)
@@ -312,7 +330,12 @@ class RAGSpine:
             chunk_store.init_schema()
             try:
                 narrative_report = ingest_narrative(
-                    list[str | Path](narrative_paths), chunk_store, dry_run=dry_run
+                    list[str | Path](narrative_paths),
+                    chunk_store,
+                    dry_run=dry_run,
+                    chunker=make_chunker(self.indexing.chunker),
+                    max_chars=self.indexing.max_chars,
+                    overlap_chars=self.indexing.overlap_chars,
                 )
                 if not dry_run and self.graph == "auto":
                     from ragspine.graph.runtime import WorkspaceGraphRuntime
@@ -323,7 +346,6 @@ class RAGSpine:
                     )
             finally:
                 chunk_store.close()
-
         return IngestResult(tuple(structured_reports), narrative_report)
 
     def _resolve_sources(self, source: str | Path) -> list[Path]:
@@ -370,6 +392,7 @@ class RAGSpine:
         queue = ReviewQueue(self.review_db_path)
         try:
             store.init_schema()
+            self._index_metadata.init_schema()
             registry.init_schema()
             queue.init_schema()
         finally:
