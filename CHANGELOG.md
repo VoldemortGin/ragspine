@@ -16,6 +16,8 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ### Changed
 
+- **Breaking**: RAGSpine now requires Python 3.14 exclusively (`>=3.14,<3.15`). Python 3.11–3.13
+  users stay on 0.11.0. Toolchain (ruff/mypy), CI matrices, and Docker images target 3.14.
 - The package-root API now exposes the `RAGSpine` facade alongside the four original primitives.
 - Installed users can complete ingestion, querying, and local visualization without repository scripts.
 
