@@ -37,7 +37,7 @@ Docs describing code carry `covers:` + `verified-against:` frontmatter;
 - **Make:** common commands are wrapped in the repo-root `Makefile` — `make help` lists them
   (`make install` · `make ci` · `make test` · `make demo` · `make lint` · `make fmt` ·
   `make drift` · `make hooks` · `make serve`/`make worker` · `make ask Q="…"`). Override the
-  interpreter with `make <t> PYTHON=python3.12`. The raw commands below remain the source of truth.
+  interpreter with `make <t> PYTHON=python3.14`. The raw commands below remain the source of truth.
 - **Setup:** `uv venv .venv` then `VIRTUAL_ENV="$(pwd)/.venv" uv pip install -e ".[dev,service,vector]"`
   (the `VIRTUAL_ENV=` prefix is required so `uv` targets this venv, not a system Python).
   Extras: `[pdf]` `[ocr]` `[llm]` `[embed]`.

@@ -8,7 +8,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/rag-spine.svg)](https://pypi.org/project/rag-spine/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
-![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+![Python](https://img.shields.io/badge/python-3.14-blue)
 ![Tests](https://img.shields.io/badge/tests-3901%20collected-brightgreen)
 [![Docs](https://img.shields.io/badge/docs-rag--spine.org-2dd4bf)](https://rag-spine.org)
 

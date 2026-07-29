@@ -231,7 +231,7 @@ def _executed_traces(traces: list[dict[str, Any]]) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # run 摘要 LRU（进程内，挂 app.state；按 api_key 归属隔离）
 # ---------------------------------------------------------------------------
-def _run_store(request: Request) -> "OrderedDict[str, dict[str, Any]]":
+def _run_store(request: Request) -> OrderedDict[str, dict[str, Any]]:
     store = getattr(request.app.state, "dify_public_runs", None)
     if store is None:
         store = OrderedDict()

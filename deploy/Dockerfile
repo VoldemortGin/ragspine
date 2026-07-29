@@ -16,10 +16,10 @@
 
 # ---------------------------------------------------------------------------
 # builder：用官方 uv 二进制把项目（含 [service,vector,dify] extra）装进独立 venv。
-# builder 与 runtime 同一基础镜像（python:3.12-slim-bookworm），保证 /opt/venv 里的
-# 解释器符号链接（/usr/local/bin/python3.12）在 runtime 阶段依然存在、venv 可直接用。
+# builder 与 runtime 同一基础镜像（python:3.14-slim-bookworm），保证 /opt/venv 里的
+# 解释器符号链接（/usr/local/bin/python3.14）在 runtime 阶段依然存在、venv 可直接用。
 # ---------------------------------------------------------------------------
-FROM python:3.12-slim-bookworm AS builder
+FROM python:3.14-slim-bookworm AS builder
 
 # 从官方 uv 镜像取静态二进制（无需 pip 装 uv）。
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
@@ -41,7 +41,7 @@ COPY src/ ./src/
 # --no-sources：忽略 pyproject 的 [tool.uv.sources]（开发用的本地 path/editable，如
 # corespine 指向工作区同级目录），容器内改从 PyPI 装 corespine（已发 >=0.1.1）——否则
 # uv 会去找容器里不存在的 file:///corespine 而 build 失败。
-RUN uv venv /opt/venv --python /usr/local/bin/python3.12 \
+RUN uv venv /opt/venv --python /usr/local/bin/python3.14 \
  && VIRTUAL_ENV=/opt/venv uv pip install --no-cache --no-sources ".[service,vector,dify]"
 
 # ---------------------------------------------------------------------------
@@ -67,7 +67,7 @@ RUN pnpm build
 # ---------------------------------------------------------------------------
 # runtime：拷 venv + 脚本运行所需的运行时文件，配置全走 RAGSPINE_* 环境变量。
 # ---------------------------------------------------------------------------
-FROM python:3.12-slim-bookworm AS runtime
+FROM python:3.14-slim-bookworm AS runtime
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

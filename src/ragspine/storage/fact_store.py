@@ -143,7 +143,7 @@ class Fact:
         channel: str = "TOTAL",
         geography: str = "",
         **extra: object,
-    ) -> "Fact":
+    ) -> Fact:
         """Keyword-only 建造器：免受 10 个位置字段顺序之扰，只按名字传。
 
         位置构造器 `Fact(metric_code, entity, geography, channel, period_type, period,
@@ -273,9 +273,9 @@ class FactStore(Protocol):
     def set_review_status(self, dim_key: str, status: str) -> int: ...
 
     @staticmethod
-    def dim_key_for(fact: "Fact") -> str: ...
+    def dim_key_for(fact: Fact) -> str: ...
 
-    def get_by_dim_key(self, dim_key: str) -> "Fact | None": ...
+    def get_by_dim_key(self, dim_key: str) -> Fact | None: ...
 
     def close(self) -> None: ...
 
@@ -504,7 +504,7 @@ class SqliteFactStore:
         return cur.rowcount
 
     @staticmethod
-    def dim_key_for(fact: "Fact") -> str:
+    def dim_key_for(fact: Fact) -> str:
         """从类型化身份列算该 Fact 的 dim_key（storage-only 自然键的公开取值口）。
 
         applier 需要 dim_key 才能 set_review_status / get_by_dim_key，但 dim_key
@@ -512,7 +512,7 @@ class SqliteFactStore:
         """
         return _compute_dim_key(fact)
 
-    def get_by_dim_key(self, dim_key: str) -> "Fact | None":
+    def get_by_dim_key(self, dim_key: str) -> Fact | None:
         """按 dim_key 取事实（不论 review_status），不存在返回 None。
 
         applier 据此读当前状态 / 校正血缘戳做幂等判断。
@@ -546,7 +546,7 @@ class SqliteFactStore:
         return tuple(values)
 
     @staticmethod
-    def _from_row(row: sqlite3.Row) -> "Fact":
+    def _from_row(row: sqlite3.Row) -> Fact:
         # 只用 Fact 的持久化字段名（基础 + v2/时效/更正血缘）从 row 取值；
         # dim_key 是 storage-only（喂进 Fact 会 TypeError），dimensions 由
         # __post_init__ 重新派生——二者都不回灌进构造。

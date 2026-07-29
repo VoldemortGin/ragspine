@@ -4,7 +4,7 @@ version = "0.12.0"
 description = "Framework-free backend RAG: deterministic dual-channel retrieval + agent orchestration with built-in anti-fabrication and source provenance."
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.11"
+requires-python = ">=3.14,<3.15"
 authors = [{ name = "lin han", email = "voldemort22@126.com" }]
 keywords = [
     "rag",
@@ -24,8 +24,7 @@ classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Text Processing :: Indexing",
@@ -43,7 +42,7 @@ dependencies = [
     # Workflow/Dify wire formats are a base CLI promise: safe YAML parsing and
     # serialization must work after a plain `uv add rag-spine`.
     "PyYAML>=6.0",
-    # company profile TOML 读取：requires-python >= 3.11，用 stdlib tomllib，无需第三方 tomli。
+    # company profile TOML 读取：requires-python >= 3.14，用 stdlib tomllib，无需第三方 tomli。
     # 运行时类型契约（ADR 0004 质量门）：import 期对全包注解强制执行，与 mypy --strict
     # 的静态半边互补。守护式 import（见 src/ragspine/__init__.py）使其缺失时仍可离线运行，
     # 但列为核心依赖以保证零警告门默认开启。
@@ -71,8 +70,8 @@ dev = [
     # API 参考站构建（make docs，pdoc 从 docstring + 类型注解生成静态 HTML，MIT/Unlicense）。
     "pdoc>=14",
     # 可选 lint / type-check（scripts/lint.sh，目前为非阻塞信息性步骤）。
-    "ruff>=0.6",
-    "mypy>=1.11",
+    "ruff>=0.14",
+    "mypy>=1.18",
     # 打包 / 发布工具（make build：python -m build；twine check/upload 到 PyPI）。
     "build>=1.2",
     "twine>=5.0",
@@ -282,13 +281,17 @@ filterwarnings = [
     "error",
     "ignore:Using `httpx` with `starlette.testclient`",     # starlette TestClient（第三方）
     "ignore:This field is deprecated. Use `generate_page_images",  # docling 管线（第三方）
+    # qdrant-client local 模式（第三方，py3.14 起可见）：persistence.py 用
+    # `with sqlite3.connect(":memory:")` 探测 THREADSAFE——sqlite3 上下文管理器只管事务
+    # 不关连接，泄漏的临时连接在 GC 终结时触发 unraisable ResourceWarning。
+    "ignore:Exception ignored while finalizing database connection:pytest.PytestUnraisableExceptionWarning",
 ]
 
 # Lint config exists so cleanup is incremental and consistent; the CI gate does NOT yet
 # block on ruff (the extracted codebase predates linting — see scripts/lint.sh).
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py314"
 # src 布局：把 src/ 标为第一方根，isort（I 规则）才能正确把 `import ragspine` 归到一方分组。
 src = ["src"]
 
@@ -302,7 +305,7 @@ ignore = ["E501", "UP042"]
 # Strict static typing on the library (ADR 0004 quality bar: "no warnings = qualified").
 # Gate: `mypy ragspine` (ci.sh). tests/ + scripts/ are intentionally out of scope.
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.14"
 files = ["src/ragspine"]
 strict = true
 

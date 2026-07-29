@@ -1,7 +1,7 @@
 # RAGSpine — common dev / CI-CD commands.
 #
 # `make` or `make help` lists every target. Targets honour the project venv by default;
-# override the interpreter with:  make test PYTHON=python3.12
+# override the interpreter with:  make test PYTHON=python3.14
 #
 # Always run from the repo root (the scripts anchor on .project-root).
 

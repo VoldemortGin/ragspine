@@ -129,7 +129,7 @@ class PipelineGraph:
         ]
         return {"title": self.title, "nodes": nodes, "edges": edges}
 
-    def merge(self, other: "PipelineGraph", *, group: str | None = None) -> "PipelineGraph":
+    def merge(self, other: PipelineGraph, *, group: str | None = None) -> PipelineGraph:
         """并入 other：节点按 id 去重（first wins），边全保留；标题取 self。
 
         发射顺序：self 的节点/边在前，other 新增的在后（确定）。给定 group 时，
