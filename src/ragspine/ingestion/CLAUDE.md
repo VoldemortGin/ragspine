@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/ingestion/
-verified-against: 2322fbdc39d771831030b08854a12b331b5b5355
+verified-against: 09315c8dca30bee14529986fca99a8b77122339e
 ---
 
 # ingestion — agent contract
@@ -18,8 +18,9 @@ default + lazy-`httpx` `HttpConnector` / `NotionConnector` (behind `[connectors]
 `bridge.ingest_from_connector` that carries `RawDoc` lineage end-to-end into the `FactStore`),
 `structured/` (fact ingestion + idempotent batch manifest ledger), `narrative/` (document chunk
 ingestion + extraction; sources: `.pptx` / `.pdf` / `.docx` / `.docm` + `.txt` plain text —
-`ingest_narrative(..., chunker=)` routes chunking through the retrieval `Chunker` seam, default `None` →
-built-in `chunk_document` **byte-identical**; injecting `make_chunker("parent_child")` lands children with
+`ingest_narrative(..., chunker=, max_chars=, overlap_chars=)` routes chunking through the retrieval
+`Chunker` seam — size/overlap pass through to it, defaults `DEFAULT_CHUNK_CHARS` / `DEFAULT_OVERLAP_CHARS`;
+default `chunker=None` → built-in `chunk_document` **byte-identical**; injecting `make_chunker("parent_child")` lands children with
 `window_text` / `parent_locator` that `ChunkStore` now persists for store-level small-to-big, ADR 0018),
 `review/` (SME human review-queue state machine).
 

@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/pipeline/
-verified-against: cab1d56
+verified-against: 09315c8dca30bee14529986fca99a8b77122339e
 ---
 
 # pipeline — agent contract
