@@ -149,7 +149,7 @@ class RAGSpine:
         retrieval: RetrievalPreset | None = None,
         graph: GraphMode | str | None = None,
         config: RAGSpineConfig | Mapping[str, object] | None = None,
-    ) -> RAGSpine:
+    ) -> "RAGSpine":
         """Open an offline workspace from strict config plus optional legacy overrides."""
         if preset is not None and profile is not None:
             raise ValueError("preset and legacy profile cannot be supplied together")
@@ -224,7 +224,7 @@ class RAGSpine:
         """Return the immutable configuration plan used to assemble this facade."""
         return self._effective_plan
 
-    def __enter__(self) -> RAGSpine:
+    def __enter__(self) -> "RAGSpine":
         self._ensure_open()
         return self
 

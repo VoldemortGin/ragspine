@@ -69,7 +69,7 @@ class RetrievalPreset:
         vector_store: VectorStoreSpec | None = None,
         reranker: RerankerSpec | None = None,
         postprocessor: PostprocessorSpec | None = None,
-    ) -> RetrievalPreset:
+    ) -> "RetrievalPreset":
         """Return a new preset with only explicitly supplied fields replaced."""
         return RetrievalPreset(
             retrieval_mode=retrieval_mode or self.retrieval_mode,
@@ -175,7 +175,7 @@ class ServiceConfig:
     _DB_PATH_FALLBACK = "data/fact_metric.db"
 
     @classmethod
-    def from_env(cls, env: Mapping[str, str] | None = None) -> ServiceConfig:
+    def from_env(cls, env: Mapping[str, str] | None = None) -> "ServiceConfig":
         """从 RAGSPINE_* 环境变量装配配置。
 
         规则字段交由 corespine load_from_env（PREFIX_FIELDNAME）；三个不规则旧键

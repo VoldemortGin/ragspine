@@ -95,11 +95,11 @@ class FAQCache:
                     self._index[key] = item
 
     @classmethod
-    def empty(cls) -> FAQCache:
+    def empty(cls) -> "FAQCache":
         return cls([])
 
     @classmethod
-    def from_file(cls, path: str | Path) -> FAQCache:
+    def from_file(cls, path: str | Path) -> "FAQCache":
         """从 JSON 加载：{"items":[...]} 或顶层 [...]；aliases list→tuple。"""
         data = json.loads(Path(path).read_text(encoding="utf-8"))
         raw_items = data["items"] if isinstance(data, dict) else data

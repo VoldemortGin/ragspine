@@ -7,7 +7,7 @@
 #
 # Usage:
 #   scripts/ci.sh                 # use ./.venv if present, else system `python`
-#   PYTHON=python3.14 scripts/ci.sh
+#   PYTHON=python3.12 scripts/ci.sh
 #
 set -euo pipefail
 cd "$(dirname "$0")/.."

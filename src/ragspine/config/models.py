@@ -49,7 +49,7 @@ class IndexingConfig(_StrictModel):
     overlap_chars: int = Field(default=80, ge=0)
 
     @model_validator(mode="after")
-    def _overlap_is_smaller_than_chunk(self) -> IndexingConfig:
+    def _overlap_is_smaller_than_chunk(self) -> "IndexingConfig":
         if self.overlap_chars >= self.max_chars:
             raise ValueError("overlap_chars must be smaller than max_chars")
         return self
@@ -111,7 +111,7 @@ class RAGSpineConfig(_StrictModel):
     storage: StorageConfig = Field(default_factory=StorageConfig)
 
     @model_validator(mode="after")
-    def _coherent_retrieval(self) -> RAGSpineConfig:
+    def _coherent_retrieval(self) -> "RAGSpineConfig":
         profile_mode = "economy" if self.profile == "economy" else "hybrid"
         profile_embedding = {
             "economy": "none",
