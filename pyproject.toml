@@ -197,6 +197,18 @@ vector = [
 graph = [
     "networkx>=3.0",
 ]
+# 表格结构识别（TSR）视觉后端（extraction/tables/adapters/tatr.py）。实测定位：pdfspine
+#   `strategy="text"` 的表格【检出】已够用（FinTabNet.c 召回 79.6% / 精确率 100%），瓶颈在
+#   检出之后的网格重建（仅在框对的表上 GriTS_Top 0.233），故只接 TATR 的 TSR 那一半。
+#   torch/transformers/pillow 全部在适配器内延迟 import，缺 extra 给友好报错；默认 spec 为
+#   None＝关，既有抽取路径字节不变。CI 精简门默认【不装】本 extra，故
+#   tests/conformance/test_table_structure.py 的 tatr 参数由 importorskip 跳过。
+#   注意：所选 checkpoint 的许可需自行对照 ADR 0009 的 ≤Apache-2.0 门确认后再上默认路径。
+tsr = [
+    "torch>=2.0",
+    "transformers>=4.40",
+    "pillow>=10.0",
+]
 # MS GraphRAG artifacts（parquet）双向互通（ragspine/compat/graphrag.py）。GraphRAG 没有公开
 #   Python API，其对外契约实为 `graphrag index` 产出的 parquet 工件，故互通在工件层做。
 #   pandas（BSD-3）+ pyarrow（Apache-2.0）均过 ADR 0009 的 ≤Apache-2.0 许可门；两者仅在
@@ -328,6 +340,6 @@ module = [
     "sentence_transformers.*", "fastembed.*", "docling.*", "pdfspine.*", "docspine.*", "pptspine.*", "rq.*", "redis.*",
     "pptx.*", "markdown.*", "reportlab.*", "rootutils.*", "sqlite_vec.*", "pg8000.*",
     "qdrant_client.*", "yaml", "numpy.*", "torch.*", "networkx.*", "opentelemetry.*",
-    "pandas.*", "pyarrow.*",
+    "pandas.*", "pyarrow.*", "transformers.*", "PIL.*",
 ]
 ignore_missing_imports = true

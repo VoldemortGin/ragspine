@@ -4,6 +4,31 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ## [Unreleased]
 
+### Added
+
+- **`TableStructureRecognizer` seam** (`extraction/tables/`): given an already-detected table
+  region plus its text-layer words, produce a cell grid (rows / columns / spans). Motivated by a
+  2026-08 measurement on FinTabNet.c (150 pages / 186 gold tables): pdfspine's `strategy="text"`
+  table **detection** is already good (79.6% recall, 100% precision — all 148 detections hit a gold
+  table), while the **grid reconstruction** is what collapses (GriTS_Top 0.233 even on correctly
+  located tables). The seam therefore deliberately does *not* do table detection.
+  Cell *text* is never produced by this seam — a digital PDF's text layer is exact, so callers pull
+  content from it by cell coordinates rather than letting a model read characters
+  (the structure/content split that 2026 SOTA work such as DELTA also adopts).
+  Five-part shape matching the family's other seams: Protocol + offline deterministic default
+  (`GridStructureRecognizer`, word-centroid clustering, zero third-party deps) +
+  `make_table_structure_recognizer` factory + `RAGSPINE_TABLE_STRUCTURE` env selection +
+  parameterized conformance. **Default `None` = off**, so the existing extraction path is
+  byte-identical; returning `None` means "no opinion" and the caller keeps its own grid — the seam
+  never fabricates an empty grid to look like it answered.
+- **TATR vision backend** (`extraction/tables/adapters/tatr.py`, new `[tsr]` extra): wraps
+  Microsoft's Table Transformer structure-recognition model. Only its TSR half is used — detection
+  stays with pdfspine — which saves one model's inference and removes an error source. Pixel
+  coordinates are converted back to PDF points and clamped into the caller's region, so its output
+  coordinate system matches the deterministic default exactly. torch/transformers/pillow are
+  lazy-imported behind the extra with a friendly error when missing. The chosen checkpoint's licence
+  must be checked against ADR 0009's ≤Apache-2.0 gate before promoting it to a default path.
+
 ## [0.13.0] - 2026-08-03
 
 ### Added

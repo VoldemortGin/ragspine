@@ -15,7 +15,9 @@ Documents → a frozen StyledGrid IR. `extractors/` (xlsx / pptx / pdf, style- &
 color-aware; **`.docx` via pure-Rust `docspine`, `docspine_extractor`, W3b** — tables →
 `StyledGrid`, body paragraphs → narrative segments; **`.pptx` *richer-merges* opt-in via pure-Rust
 `pptspine`, `pptspine_extractor`, W3c** — default `.pptx` stays python-pptx `pptx_styled`),
-`routing/` (per-page PDF triage), `color/` (color-semantics
+`routing/` (per-page PDF triage), `tables/` (the `TableStructureRecognizer` seam:
+already-detected table region + text-layer words → cell grid; **default `None` = off**, so the
+extraction path stays byte-identical), `color/` (color-semantics
 registry), `verification/` (dual-channel cross-check → review queue), `registry.py`
 (the `mime → Extractor` dispatch seam: a `@runtime_checkable` `Extractor` Protocol —
 `extract(path) → list[StyledGrid]` — + `get_extractor(mime)` / `register_extractor`
@@ -32,6 +34,14 @@ over the existing `extract_grids` impls).
   each fact's `extractor_version`, so a swapped parser (pdfspine → docling / pdfplumber / …)
   stays distinguishable in provenance. Swap a parser without touching the ingest call site,
   and test the ingestion path offline with a fake — no pdfspine / Docling needed.
+
+- **Table *detection* is not this seam's job.** Measured 2026-08 on FinTabNet.c (150 pages / 186
+  gold tables): pdfspine `strategy="text"` detects at **79.6% recall / 100% precision**, while grid
+  reconstruction on correctly-located tables scores **GriTS_Top 0.233**. So `tables/` only takes a
+  region and returns a grid; swapping in a vision backend replaces the weak half, not the working one.
+- **The structure seam never emits cell text.** It returns coordinates only; content comes from the
+  PDF text layer by cell bbox. Letting a vision model read characters would inject errors into a
+  channel that is already at PyMuPDF parity — the structure/content split is deliberate.
 
 ## Read before editing
 
