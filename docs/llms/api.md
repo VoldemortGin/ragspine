@@ -340,3 +340,57 @@ def emit_trace(logger: logging.Logger | None = None, **fields: object) -> None
 `emit_trace` 先过 corespine `InProcessPrivacyTraceSink`：载荷含禁词键（answer / value / text /
 content / prompt / completion / chunk / chunk_text / body，大小写不敏感、精确键名）会**直接抛
 `TraceError`、绝不落盘**。只应传非敏感元数据（route / 状态计数 / 分数 / 耗时 / token 用量）。
+
+---
+
+## 7 · compat（第三方框架形状适配器，opt-in）
+
+薄适配层，只做签名/工件翻译，绝不重写检索或编排逻辑。语义对不齐处一律在 docstring 明说。
+
+### 7.1 OpenAI Chat Completions —— `ragspine.service.api.openai_public`（需 [service]）
+
+生态事实标准。`create_app()` 已自动挂载，无需额外配置：
+
+```
+POST /v1/chat/completions   # blocking + stream=true（SSE，`data: [DONE]` 收尾）
+GET  /v1/models
+```
+
+请求/响应为 OpenAI 官方形状，故 `openai` SDK / Open WebUI / LangChain 的 OpenAI-compatible
+provider 可零改动直连。`messages` 映射：最后一条 `user` 为问题，其前 `user`/`assistant` 轮次为
+history；客户端 `system` 消息**被刻意忽略**（系统提示服务端受控，防提示注入）。
+
+**溯源保留**：顶层非标准字段 `ragspine = {request_id, route, sources}`（流式挂末帧）。OpenAI
+客户端忽略未知字段，故不破坏兼容。`usage` 是字符数近似，不伪装成 tokenizer 计数。
+
+### 7.2 LightRAG 形状 —— `ragspine.compat.lightrag`
+
+```python
+from ragspine.compat.lightrag import LightRAG, QueryParam
+
+rag = LightRAG(working_dir="./ws")          # LightRAG 特有 kwargs 容忍并忽略
+rag.insert("一段材料")                       # 或 list[str]；落成内容寻址 .txt 后走正规摄入
+answer = rag.query("问题", param=QueryParam(mode="hybrid"))   # -> str（LightRAG 签名）
+result = rag.query_with_sources("问题")      # -> AgentResult（保住 route + sources）
+```
+
+`mode` 五档（`local` / `global` / `hybrid` / `naive` / `mix`）映射为「是否允许走图路径」：
+`naive`/`local` 关图，其余开图。**与 LightRAG 召回口径不等价**——RAGSpine 图层用确定性连通分量
+而非 Leiden 分层社区。`initialize_storages()` 是幂等 no-op；`ainsert`/`aquery` 是同步实现的
+直接包装（引擎本身同步，不引入伪并发）。
+
+### 7.3 MS GraphRAG parquet 工件 —— `ragspine.compat.graphrag`（需 [graphrag-compat]）
+
+```python
+from ragspine.compat.graphrag import export_graphrag_artifacts, import_graphrag_artifacts
+
+import_graphrag_artifacts("./graphrag_output", store)          # 别人的图 -> GraphStore
+export_graphrag_artifacts(store, "./out", seeds=["ACME"])      # 我们的图 -> 别人的工具
+```
+
+GraphRAG 无公开 Python API，其对外契约实为 `graphrag index` 的 parquet 布局，故互通在工件层做。
+读 `entities` / `relationships` / `text_units`（前两者缺失即 `FileNotFoundError`）。
+
+**跨边界不变量**：导入项经 `text_units` 回溯血缘（回溯不到则退回工件自身，**绝不留空**），并戳
+`derived=model-derived` + `verified=unverified`；导出走 `GraphStore.subgraph`，RESTRICTED 节点
+在存储层即被剔除，不可能写进给外部工具的文件。节点/边按 id 升序写出，重复导出逐字节一致。

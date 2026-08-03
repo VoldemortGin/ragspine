@@ -197,6 +197,15 @@ vector = [
 graph = [
     "networkx>=3.0",
 ]
+# MS GraphRAG artifacts（parquet）双向互通（ragspine/compat/graphrag.py）。GraphRAG 没有公开
+#   Python API，其对外契约实为 `graphrag index` 产出的 parquet 工件，故互通在工件层做。
+#   pandas（BSD-3）+ pyarrow（Apache-2.0）均过 ADR 0009 的 ≤Apache-2.0 许可门；两者仅在
+#   compat 模块内延迟 import，缺 extra 给友好报错——默认安装不因这条互通路径变重。
+#   CI 精简门默认【不装】本 extra，故 tests/compat/test_graphrag_parquet.py 由 importorskip 跳过。
+graphrag-compat = [
+    "pandas>=2.0",
+    "pyarrow>=14.0",
+]
 # 可插拔 trace 出口（TraceSink 缝 B1 的真实 adapter）：把隐私安全 trace 扇出到 OpenTelemetry。
 # opentelemetry-api/sdk（Apache-2.0，permissive，过 ADR 0009 的 ≤Apache-2.0 许可门），纯 Python、零服务。
 # 延迟 import（OtelTraceSink.__init__ / _load_otel 内）：不装也能 import 核心、跑零依赖
@@ -319,5 +328,6 @@ module = [
     "sentence_transformers.*", "fastembed.*", "docling.*", "pdfspine.*", "docspine.*", "pptspine.*", "rq.*", "redis.*",
     "pptx.*", "markdown.*", "reportlab.*", "rootutils.*", "sqlite_vec.*", "pg8000.*",
     "qdrant_client.*", "yaml", "numpy.*", "torch.*", "networkx.*", "opentelemetry.*",
+    "pandas.*", "pyarrow.*",
 ]
 ignore_missing_imports = true

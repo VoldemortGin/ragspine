@@ -26,6 +26,17 @@ repo `scripts/` copy is a source-tree fallback). `dify/http_client.py` is the gu
 runner injects for http-request nodes — default-off (`RAGSPINE_DIFY_HTTP_ENABLED`), stdlib-only,
 timeout-clamped, 1MB response cap, http(s)-only redirects; generated code never imports networking.
 
+The **OpenAI Chat Completions clone** (`api/openai_public.py`, self-contained like `dify_public.py`;
+`app.py` only `include_router`) exposes `POST /v1/chat/completions` (blocking + SSE) and
+`GET /v1/models` in the official OpenAI shape so unmodified OpenAI-compatible clients can treat
+RAGSpine as a model. It reuses the `/v1/ask` guard chain (FAQ short-circuit → `answer_question`)
+rather than reimplementing it, and inherits **guard-before-stream**. `messages` map to
+`question` (last `user` turn) + `history` (earlier `user`/`assistant` turns); client `system`
+messages are dropped — the system prompt is server-controlled (prompt-injection boundary).
+Provenance rides a non-standard top-level `ragspine` field (`request_id`/`route`/`sources`) on the
+blocking body and on the final stream chunk; `usage` is a documented character-count approximation,
+never a fabricated tokenizer count.
+
 The separate **offline workflow catalog/scaffolder** is configuration-only and never executes a
 workflow: `GET /v1/workflow-templates` returns metadata-only pages (`offset`, `limit <= 100`,
 `total`, `next_offset`) with a page-specific weak ETag and public `max-age=300,

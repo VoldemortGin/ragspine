@@ -32,6 +32,7 @@
 | `[colpali]` | fastembed | ColPali 视觉文档检索（page-as-image 晚交互，GPU） |
 | `[vector]` | sqlite-vec, pg8000, qdrant-client | 持久化 `VectorStore`：sqlite-vec / pgvector / qdrant |
 | `[graph]` | networkx | 持久化 `GraphStore`（GraphRAG 关系图后端） |
+| `[graphrag-compat]` | pandas, pyarrow | 读写 MS GraphRAG 的 parquet 工件（双向互通） |
 | `[all]` | 上述全部（自引用聚合） | 一键装齐功能依赖（不含 dev） |
 | `[dev]` | pytest, ruff, mypy, build, twine … | 测试 + 构建 |
 
