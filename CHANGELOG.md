@@ -4,6 +4,8 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-08-03
+
 ### Added
 
 - **OpenAI Chat Completions compatibility** (`service/api/openai_public.py`): `POST /v1/chat/completions`
@@ -60,6 +62,7 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 - The package-root API now exposes the `RAGSpine` facade alongside the four original primitives.
 - Installed users can complete ingestion, querying, and local visualization without repository scripts.
 
-[Unreleased]: https://github.com/VoldemortGin/ragspine/compare/v0.12.1...HEAD
+[Unreleased]: https://github.com/VoldemortGin/ragspine/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/VoldemortGin/ragspine/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/VoldemortGin/ragspine/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/VoldemortGin/ragspine/compare/v0.11.0...v0.12.0
