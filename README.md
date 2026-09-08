@@ -4,6 +4,10 @@
 > and agent orchestration, with **anti-fabrication** and **source provenance** built in —
 > no Dify, no LangGraph, no DSL. Just composable Python.
 
+## Spine 家族 / Spine family
+
+本仓库是 Spine 家族的成员之一（角色：L1 引擎）。家族全部成员、分层、依赖方向、依赖形式与当前差距见 [`docs/spine-family.md`](docs/spine-family.md)；该文件在每个家族仓库中的副本内容相同，真源在家族根目录 `~/startup/spine/docs/spine-family.md`，用根目录 `make family-doc-sync` 同步。
+
 > **🤖 给 AI / LLM:** 用本库前先读 [`llms.txt`](llms.txt)（精简索引）与 [`docs/llms/`](docs/llms/)（完整 API / recipes / 陷阱）；`pip install` 后这些文档随包位于 `site-packages/ragspine/_llms/`。
 
 [![PyPI](https://img.shields.io/pypi/v/rag-spine.svg)](https://pypi.org/project/rag-spine/)

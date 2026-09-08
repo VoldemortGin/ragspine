@@ -1,5 +1,7 @@
 # CLAUDE.md — RAGSpine
 
+> 家族关系与依赖：先读 [`docs/spine-family.md`](docs/spine-family.md)（每仓副本相同，真源在家族根目录）。
+
 Working contract for AI coding sessions (and humans) on this repo. Read `README.md` for the
 full pitch; this file is the operational guide.
 

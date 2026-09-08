@@ -48,6 +48,7 @@
   deterministic embedding + InProcessVectorStore + FakeQueue，逐个实跑过并附真实输出）。**照抄改写用这篇。**
 - [gotchas.md](docs/llms/gotchas.md) —— 易错点：pip 名 `rag-spine` 但 import `ragspine`、
   各能力装对应 extra、GPU 自适应、向量后端别名、消费 corespine（隐私 trace 拒正文、统一异常）。**别踩坑读这篇。**
+- [docs/spine-family.md](docs/spine-family.md) —— Spine 家族成员、分层、依赖方向与实际依赖形式（非本包 API，跨仓关系用）。
 
 ## 30 秒离线 hello-world（确定性 embedding + InProcessVectorStore，可直接运行）
 
