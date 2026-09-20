@@ -358,3 +358,17 @@ answers do not regress. Authored PDFs through the full chain cite `edges.0: PLAN
 fixed a blocking provider bug unrelated to the proofs (strict response schemas must list every
 declared property, `a0a0d18`) and left two retrieval follow-ups: diagram members are recalled
 only when the question carries a node-label word, and Chinese queries have no lexical channel.
+
+**Follow-up status** (branch `fix/visual-recall-and-gates`, after this ADR's real run). Three
+of the defects that run exposed are closed: (1) the diagram-recall gap — ADR 0012's guaranteed
+chart seat is generalised in `adapters/answer_service.select_context` to one seat per citable
+visual kind (chart with an explicit value / diagram with a labelled node / formula with a linear
+form) found within `2 * top_k`, so a proved diagram no longer depends on a node-label word in the
+question; (2) the prose number gate counted a list's `1. 2. 3.` enumerators as figures and
+abstained a correct numbered answer — line- and sentence-start enumeration markers are now
+excluded in `answers/verify.prose_grounded`, numbers inside an item stay gated; (3) the strict
+response-schema contract that BUG-A broke now has an offline guard over all nine
+`response_model` classes (`tests/enterprise_pdf_rag/adapters/test_strict_response_schemas.py`).
+Still open: Chinese queries have no lexical channel (BM25 tokenisation is Latin-only, RRF
+degrades to the vector channel alone), and the partition still labels heading text lines as
+`DIAGRAM` / `FORMULA` (the proofs reject them correctly; only the kind counts are polluted).

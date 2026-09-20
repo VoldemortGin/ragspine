@@ -4,6 +4,31 @@
 
 > 阅读顺序：先看下方“恢复开发记录”；后续旧暂停快照保留作证据，不能作为实时发布或服务状态。
 
+## 视觉对象保底席位与散文门修正（2026-09-21，分支 `fix/visual-recall-and-gates`，未合并 `main`）
+
+> 修 ADR 0015 真实验证暴露的三个缺陷（下节"遗留 1b"的 ①③⑤）；代码提交 `48e3547`，本文档提交在其后；复测证据在本机 `data/validation/`（`data/*` 为 git 忽略，与此前各轮相同）。
+
+**做了什么**（最小改动，TDD）：
+
+1. **视觉对象保底席位**（`adapters/answer_service.py::select_context`）：把 ADR 0012 的"已验证图表保底席位"推广为"每类可引用视觉对象各至多一席"——CHART 有显式值、DIAGRAM 有 ≥1 个带 label 的 node、FORMULA 有 `linear`；只看 fused 前 `2*top_k` 且不在 `top_k` 内的候选，从末位向前让座、**不让已持有可引用视觉对象的席位**，pending / 无 label 的不补、窗口外不补，只 resolve 仍缺类别的候选（`member_texts` 供 kind）。`processing/index_text.py` 的 Diagram 投影核对过：`reading_order` 含全部 node label，无需改。
+2. **散文数字门放行行首 / 句首枚举标记**（`answers/verify.py::prose_grounded`，`_ENUMERATOR_RE`）：`1.` / `2)` / `3、` / `(4)` / `第 5` / `Step 6` 在行首或句首（ASCII 句末标点后需空白，避免把 `17.5.` 的 `5.` 当序号；CJK 全角标点后不需要）视为序号剔除；正文里的金额 / 百分比 / 年份规则不变。
+3. **strict 响应 schema 离线守卫**（`tests/enterprise_pdf_rag/adapters/test_strict_response_schemas.py`）：参数化遍历 8 个 `complete_json` / `complete_text_json` 调用点的 9 个 `response_model`（`ModelAnswer`、`PageMetadataDTO`、`PageLayoutDTO`、`Image/Diagram/FormulaObservationsDTO`、`VisualDescriptionDTO`、`ChartObservationsDTO`、`FigureDescriptionDTO`），对 `_response_schema` 实际发出的 schema 断言：所有 properties 都在 `required`、`additionalProperties: false`、无 `prefixItems/oneOf/allOf/...` 等不支持关键字、`$ref` 只指 `#/$defs/`；另有 BUG-A 形状回归（pydantic 原始 schema 漏 `row/col/header`，发出的 schema 列全且可空）与"守卫对松散模型确实报错"的反例。9 个模型现状全部满足，无需改模型。
+
+**离线验证**：`pytest tests/enterprise_pdf_rag -q` **1015 passed**（新增 seat 3 例 + verify 2 例 + schema 守卫 11 例）；`mypy` 493 文件零错误；`ruff check` / `ruff format` 改动文件通过；`check_conformance` / `check_architecture` / `check_schema`（9 份契约）/ `check_drift` 通过；`check_doc_drift` 23 tracked / 0 stale（`src/enterprise_pdf_rag/CLAUDE.md` bump 到 `48e3547`）。
+
+**真实复测**（AIA legacy store `231c904c…`，8768 / 3200 按下节 stop / start 命令重启 15 s 就绪，证据 `data/validation/generic-chat-2026-09-21/visual-recall/`，8 例全 200）：
+
+| 用例 | 期望 | 结果 |
+| --- | --- | --- |
+| `d1-p6-three-stages`（"What are the three stages of the agency technology investment?"） | answered，引用三个 `nodes.<id>.label` | ✅ answered，3 条 `diagram_node`（`node-foundation` / `node-growth` / `node-intelligence`），Diagram 成员融合名次 vector 10 / lexical 26，**靠保底席位进第 10 席**（此前答的是 p5 的 `quote`） |
+| `d1b-p6-numbered-list`（"List the three stages … as a numbered list."） | 编号列表回答 answered | ✅ answered，正文 `1. Foundation: 100% Digitalised Agency / 2. Growth: … / 3. Intelligence: …`，3 条 `diagram_node`，`1. 2. 3.` 未被散文门拦下（`100%` 由 label claim 接地），Diagram 同样第 10 席（vector 7 / lexical 25） |
+| `d4-zh-p6`（"代理人科技投入的三个阶段分别是什么？"） | 此前 abstained | ✅ answered，3 条 `diagram_node`；BM25 仍全 null（中文无词面通道，未修），Diagram 靠 vector 11 名 + 保底席位进第 10 席 |
+| `d2-p6-growth-stage` | 不回归 | ✅ answered（cache 回放），`nodes.node-growth.label` |
+| ISSUE-2 三问（`b-donut-p18` / `b2-donut-rephrased` / `n-no-title`） | 不回归：p18 donut 72% / 28% | ✅ 全部 answered（cache 回放），`points.point-agency.value = 72%`（b2 另含 28%） |
+| ROE 控制组（`a-roe-control`） | 不回归 | ✅ answered（cache 回放），`quote` `record Operating ROE of 17.5%` |
+
+**遗留**：中文查询无词面通道（1b ②）与 partition 把标题行判成 Diagram / Formula（1b ④）未动；`request_fingerprint` 未变（`SYSTEM_RULES` 未改），四个回放用例 `cache_hit: true`、`llm_live_calls: 0`，本轮真实调用 4 次（d1 / d1b / d4 各 1 次，d2 之前已缓存）——d2 首次在旧代码下也已进席，故回放成立；席位让座规则在 `top_k` 很小（如 2）时可能让出第 1 席，`AnswerRequest` 默认 `top_k=10`，v1 接受。
+
 ## Diagram 与 Formula 可检索（2026-09-21，分支 `feat/visual-objects`，ADR 0015）
 
 > 本节只讲 Diagram / Formula 两类视觉对象；表格网格（ADR 0014）与更下方各节的状态不受影响。
@@ -61,7 +86,7 @@ bash scripts/ci.sh                                              # 唯一完整�
 
 **遗留**
 1. AIA 发布已迁移到 `231c904c…`（policy v5，190 成员）；`data/ingestion` 两个合成表快照仍是 v2，要吃到 Diagram/Formula 能力必须 `requalify`（仅 Diagram）或重跑 `semantics`，再 `index` → `publish`。
-1b. 真实验证新暴露：① Diagram 召回偏弱（d1/d4 未进 10 席，只有问题带 node label 词面才召回；图表当年靠 ADR 0012 的保底席位解决，Diagram 可能需要同等待遇）；② 中文查询无词面通道（BM25 全 null，RRF 退化单通道）；③ 散文数字门把 `1. 2. 3.` 列表序号当证据外数字整体拒答；④ 真实 partition 会把标题文本行判成 Diagram/Formula（资格侧正确拒绝或只产纯 base token，但会污染 kinds 统计）；⑤ `ModelAnswer` 等 6 个 `response_model` 的 strict-schema 契约仍无离线守卫（建议加参数化 schema 校验）。
+1b. 真实验证新暴露：① Diagram 召回偏弱（d1/d4 未进 10 席，只有问题带 node label 词面才召回；图表当年靠 ADR 0012 的保底席位解决，Diagram 可能需要同等待遇）——**已修（分支 `fix/visual-recall-and-gates`，见上方"视觉对象保底席位与散文门修正"节）**；② 中文查询无词面通道（BM25 全 null，RRF 退化单通道）——未修；③ 散文数字门把 `1. 2. 3.` 列表序号当证据外数字整体拒答——**已修（同上）**；④ 真实 partition 会把标题文本行判成 Diagram/Formula（资格侧正确拒绝或只产纯 base token，但会污染 kinds 统计）——未修；⑤ `ModelAnswer` 等 `response_model` 的 strict-schema 契约仍无离线守卫——**已修（同上，9 个模型参数化守卫）**。
 2. `SYSTEM_RULES` 又变了（新增 diagram/formula 两句）→ `request_fingerprint` 变 → 旧回答缓存全部 miss（预期）。
 3. 三份契约 JSON 仍无生成脚本，`check_schema.py` 只做全等比对、没有 `--write`；本次三份（`rag-chat-v1` / `aia-processing-v1` / `document-catalog-v1`）是手工重生成的。
 4. 回答路径重证成本再叠一层：Diagram 每次 `resolve` 重算 crop 几何、Formula 每次重开 PDF 重新观测（与 ADR 0014 的表格重证并存），v1 接受。

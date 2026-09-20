@@ -53,6 +53,32 @@ All notable changes to RAGSpine are documented here. This project follows Semant
   read-only over a saved processing id. Snapshots published earlier still parse, mount and resolve
   unchanged.
 
+### Fixed
+
+- **A proved diagram or formula gets the same guaranteed prompt seat a chart has**
+  (`enterprise_pdf_rag`, ADR 0012 generalised for ADR 0015): the AIA p6 three-stage pathway was
+  qualified and indexed but never entered the ten prompt seats for "What are the three stages of
+  the agency technology investment?", so the model answered from p5 prose instead.
+  `adapters/answer_service.select_context` now keeps one seat per citable visual kind — a chart
+  with an explicit value, a diagram with a labelled node, a formula with a linear form — for the
+  first such member found within `2 * top_k` but outside `top_k`; seats are given up from the
+  last one backward and never from a seat already holding a citable visual object, pending or
+  label-only objects are never promoted, and only members of a still-missing kind in the window
+  are resolved. The diagram index projection was confirmed to carry every node label.
+- **A numbered list no longer trips the prose number gate** (`answers/verify.prose_grounded`):
+  `1.` / `2)` / `3、` / `(4)` / `第 5` / `Step 6` at the start of a line or a sentence are
+  enumeration markers, not figures, so a list-shaped answer with verified claims is answered
+  instead of abstaining on "numbers outside verified claims". A number inside an item's body
+  (amount, percentage, year) is gated exactly as before, and a decimal that ends a sentence is
+  never mistaken for a marker.
+- **Strict response schemas are guarded offline** (`tests/enterprise_pdf_rag/adapters/
+  test_strict_response_schemas.py`): the ADR 0015 validation hit a provider-side HTTP 400 on every
+  chat because an optional `ModelClaim` field left `required` incomplete (`a0a0d18`), which no
+  offline test could see. A parametrised guard now walks the exact schema `_response_schema`
+  sends for all nine `response_model` classes used at `complete_json` / `complete_text_json`
+  call sites and enforces the strict-mode rules (every property required, `additionalProperties:
+  false`, no unsupported composition keywords, `$ref`s local to `$defs`).
+
 ## [0.14.0] - 2026-09-21
 
 ### Added
