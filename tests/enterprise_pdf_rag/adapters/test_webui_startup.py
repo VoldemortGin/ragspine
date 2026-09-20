@@ -74,6 +74,71 @@ def test_start_refuses_a_pid_record_for_an_unrelated_live_process(
     assert path.read_text() == original
 
 
+def _without_lsof(monkeypatch: pytest.MonkeyPatch, *, proc_cwd: str | None) -> None:
+    """Shape a Linux CI runner: no ``lsof`` binary; ``/proc/<pid>/cwd`` readable or absent."""
+    real_run = cast(Callable[..., object], subprocess.run)
+
+    def run(argv: list[str], **kwargs: object) -> object:
+        if Path(argv[0]).name == "lsof":
+            raise FileNotFoundError(argv[0])
+        return real_run(argv, **kwargs)
+
+    def readlink(path: str, *args: object, **kwargs: object) -> str:
+        if proc_cwd is None or not path.startswith("/proc/"):
+            raise OSError(path)
+        return proc_cwd
+
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    monkeypatch.setattr(os, "readlink", readlink)
+
+
+def test_unrelated_live_process_is_refused_when_lsof_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _project(tmp_path)
+    namespace = runpy.run_path(str(root / "scripts/enterprise_pdf_rag/webui_preview.py"))
+    process_cwd = cast(Callable[[int], Path | None], namespace["process_cwd"])
+    matching_process = cast(Callable[[str, object], bool], namespace["matching_process"])
+    record_type = cast(Callable[..., object], namespace["ProcessRecord"])
+    record = record_type(pid=os.getpid(), marker="enterprise_pdf_rag.adapters.http.app")
+
+    _without_lsof(monkeypatch, proc_cwd=None)
+    assert process_cwd(os.getpid()) is None
+    with pytest.raises(SystemExit, match="does not match this project"):
+        matching_process("api", record)
+
+    # Linux exposes the working directory under /proc; a foreign cwd is still refused.
+    _without_lsof(monkeypatch, proc_cwd=str(tmp_path / "elsewhere"))
+    assert process_cwd(os.getpid()) == tmp_path / "elsewhere"
+    with pytest.raises(SystemExit, match="does not match this project"):
+        matching_process("api", record)
+    _without_lsof(monkeypatch, proc_cwd=str(root))
+    assert process_cwd(os.getpid()) == root
+
+
+def test_process_cwd_reads_the_lsof_listing_when_proc_is_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _project(tmp_path)
+    namespace = runpy.run_path(str(root / "scripts/enterprise_pdf_rag/webui_preview.py"))
+    process_cwd = cast(Callable[[int], Path | None], namespace["process_cwd"])
+    seen: list[list[str]] = []
+
+    def run(argv: list[str], **_kwargs: object) -> SimpleNamespace:
+        seen.append(argv)
+        return SimpleNamespace(returncode=0, stdout=f"p{os.getpid()}\nfcwd\nn{root}\n")
+
+    def no_proc(path: str, *args: object, **kwargs: object) -> str:
+        raise FileNotFoundError(path)
+
+    monkeypatch.setattr(os, "readlink", no_proc)
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    monkeypatch.setattr(subprocess, "run", run)
+    assert process_cwd(os.getpid()) == root
+    assert seen == [["/usr/sbin/lsof", "-a", "-p", str(os.getpid()), "-d", "cwd", "-Fn"]]
+
+
 def test_explicit_missing_vendor_runtime_is_not_replaced_by_another_python(
     tmp_path: Path,
 ) -> None:

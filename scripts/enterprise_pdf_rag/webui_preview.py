@@ -4,6 +4,7 @@ import argparse
 import fcntl
 import json
 import os
+import shutil
 import signal
 import socket
 import subprocess
@@ -72,6 +73,30 @@ def process_marker(name: ProcessName) -> str:
     return "enterprise_pdf_rag.adapters.http.app" if name == "api" else str(GATE.parent)
 
 
+def process_cwd(pid: int) -> Path | None:
+    """Working directory of a live process; ``None`` when unreadable, which never matches.
+
+    Linux exposes it under ``/proc`` with no extra tool; macOS has no ``/proc``, so fall
+    back to ``lsof`` (not on the default PATH there, hence the ``/usr/sbin`` location).
+    """
+    with suppress(OSError):
+        return Path(os.readlink(f"/proc/{pid}/cwd"))
+    lsof = shutil.which("lsof") or "/usr/sbin/lsof"
+    try:
+        listing = subprocess.run(
+            [lsof, "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    for line in listing.stdout.splitlines():
+        if line.startswith("n"):
+            return Path(line[1:])
+    return None
+
+
 def matching_process(name: ProcessName, record: ProcessRecord) -> bool:
     check = subprocess.run(
         ["/bin/ps", "-p", str(record.pid), "-o", "args="],
@@ -81,14 +106,8 @@ def matching_process(name: ProcessName, record: ProcessRecord) -> bool:
     )
     if check.returncode:
         return False
-    cwd = subprocess.run(
-        ["/usr/sbin/lsof", "-a", "-p", str(record.pid), "-d", "cwd", "-Fn"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
     if (
-        f"n{ROOT}" not in cwd.stdout.splitlines()
+        process_cwd(record.pid) != ROOT
         or record.marker != process_marker(name)
         or record.marker not in check.stdout
     ):

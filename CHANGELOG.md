@@ -2,27 +2,6 @@
 
 All notable changes to RAGSpine are documented here. This project follows Semantic Versioning.
 
-## [Unreleased]
-
-### Added
-
-- **`enterprise_pdf_rag` page-level automatic metadata and pre-filters** (enterprise_pdf_rag
-  ADR 0013): a `page_metadata` processing stage — one text-only model call per page returns
-  title / section / page type / language / periods / regions, each kept only when it quotes the
-  page's spans verbatim (dropped with a diagnostic otherwise); periods normalise
-  deterministically (`1H26` / `2026年上半年` → `1H2026`, `FY24` → `FY2024`, `Q1 2025` →
-  `Q1-2025`, bare year → `Y2026`); document metadata (cover title, report period, years,
-  region vocabulary) is a zero-model fold recomputed on load. `enterprise-pdf-rag metadata`
-  annotates a saved draft or release; `ingest --stage semantics` runs the stage too and
-  `--stage metadata` runs it alone. Index text policy v4 prepends
-  `display_title | page_title | section` above the ADR 0012 projection (descriptions and
-  evidence unchanged; older snapshots keep scoring what they embedded). `rag-chat-v1` gains
-  optional `filters` (`periods` / `regions`, derived from the question when omitted; cover
-  and agenda pages never enter the candidates; starved filters are relaxed and reported as
-  `filters_applied` / `filters_relaxed`), citations gain `page_title`, `/v1/models` and
-  `/v1/documents` show the verified display title, and an unnamed document is routed by
-  distinctive cover-title words and years across mounted documents.
-
 ## [0.14.0] - 2026-09-21
 
 ### Added
@@ -89,6 +68,23 @@ All notable changes to RAGSpine are documented here. This project follows Semant
   per member that entered the prompt, so retrieval behaviour is readable from a response. The
   contract name is unchanged.
 
+- **`enterprise_pdf_rag` page-level automatic metadata and pre-filters** (enterprise_pdf_rag
+  ADR 0013): a `page_metadata` processing stage — one text-only model call per page returns
+  title / section / page type / language / periods / regions, each kept only when it quotes the
+  page's spans verbatim (dropped with a diagnostic otherwise); periods normalise
+  deterministically (`1H26` / `2026年上半年` → `1H2026`, `FY24` → `FY2024`, `Q1 2025` →
+  `Q1-2025`, bare year → `Y2026`); document metadata (cover title, report period, years,
+  region vocabulary) is a zero-model fold recomputed on load. `enterprise-pdf-rag metadata`
+  annotates a saved draft or release; `ingest --stage semantics` runs the stage too and
+  `--stage metadata` runs it alone. Index text policy v4 prepends
+  `display_title | page_title | section` above the ADR 0012 projection (descriptions and
+  evidence unchanged; older snapshots keep scoring what they embedded). `rag-chat-v1` gains
+  optional `filters` (`periods` / `regions`, derived from the question when omitted; cover
+  and agenda pages never enter the candidates; starved filters are relaxed and reported as
+  `filters_applied` / `filters_relaxed`), citations gain `page_title`, `/v1/models` and
+  `/v1/documents` show the verified display title, and an unnamed document is routed by
+  distinctive cover-title words and years across mounted documents.
+
 ### Fixed
 
 - **Prose number gate no longer rejects restated years / periods** (enterprise_pdf_rag
@@ -98,6 +94,10 @@ All notable changes to RAGSpine are documented here. This project follows Semant
   the user's question, or equals a number in the evidence text the verified claims cite (span
   quote, table cell text, chart period / category labels and source display). Any other number
   still abstains the whole answer; zero verified claims and the `decide` order are unchanged.
+- **`scripts/enterprise_pdf_rag/webui_preview.py` no longer requires `lsof`**: a recorded PID's
+  working directory is read from `/proc/<pid>/cwd` on Linux and from `lsof` only where `/proc` is
+  absent (macOS); an unreadable directory never matches, so unrelated processes are still refused
+  instead of crashing on a runner without `lsof`.
 
 ### Changed
 
