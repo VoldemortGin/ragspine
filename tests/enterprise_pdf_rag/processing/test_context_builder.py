@@ -253,10 +253,13 @@ def test_table_block_lists_cells_with_content_state() -> None:
     assert cells["c-3"].content_state is CellContentState.UNAVAILABLE
     assert cells["c-3"].col_span == 2
     rendered = block.prompt_text()
-    assert "table rows=2 cols=2" in rendered
+    assert "table rows=2 cols=2 grid=pending" in rendered
     assert "cells.c-1 (0,0): Revenue" in rendered
     assert "cells.c-2 (0,1): <BLANK>" in rendered
     assert "cells.c-3 (1,0): <UNAVAILABLE>" in rendered
+    # An unproved grid prints no relations, so none can be cited.
+    assert block.grid_verification is Verification.PENDING
+    assert not any("row=" in line for line in rendered.splitlines())
 
 
 def test_kind_mismatch_and_unsupported_ir_are_refused() -> None:
@@ -331,7 +334,10 @@ def test_published_native_table_member_yields_citable_cell_evidence(
     assert len(value.source_span_ids) == 1 and value.bbox == (120.0, 86.0, 220.0, 113.0)
     blank = by_position[(2, 1)]
     assert blank.content_state is CellContentState.BLANK and blank.source_span_ids == ()
+    assert block.grid_verification is Verification.VERIFIED
+    assert all(cell.verification is Verification.VERIFIED for cell in block.cells)
     rendered = block.prompt_text()
-    assert f"cells.{value.cell_id} (1,1): 1,234" in rendered
-    assert f"cells.{blank.cell_id} (2,1): <BLANK>" in rendered
+    # The 1pt rules prove the grid but no header band, so no cell carries a header.
+    assert f"cells.{value.cell_id} (1,1): 1,234 row=1 col=1 header=<NONE>" in rendered
+    assert f"cells.{blank.cell_id} (2,1): <BLANK> row=2 col=1 header=<NONE>" in rendered
     assert "verification=verified" in rendered.splitlines()[0]

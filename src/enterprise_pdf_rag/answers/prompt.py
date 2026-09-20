@@ -21,6 +21,9 @@ class ModelClaim(BaseModel):
     kind: Literal["quote", "cell", "chart_value"]
     field_path: str
     text: str
+    row: int | None = None
+    col: int | None = None
+    header: str | None = None
 
 
 class ModelAnswer(BaseModel):
@@ -46,7 +49,11 @@ SYSTEM_RULES: Final[str] = (
     "`member_id` and one path printed in that block: kind `quote` uses `fragments.<span_id>` "
     "and `text` is a verbatim substring of that line; kind `cell` uses `cells.<cell_id>` and "
     "`text` is exactly the cell content; kind `chart_value` uses `points.<point_id>.value` "
-    "and `text` is the displayed value with its unit, for example `15%`.\n"
+    "and `text` is the displayed value with its unit, for example `15%`. "
+    "A `cell` claim may also carry `row`, `col` and `header`, copied exactly from the "
+    '`row=\u2026 col=\u2026 header="\u2026"` suffix printed after that cell; only cells in a block whose '
+    "table line says `grid=verified` print that suffix, and `header` must be one of the quoted "
+    "header texts, verbatim. Never add row, col or header to a cell that prints none.\n"
     "2. Never calculate, add, subtract, average, convert, round, estimate or combine periods. "
     "A value printed as <UNAVAILABLE>, <BLANK> or <NONE> cannot be cited or inferred.\n"
     "3. Every number in `answer` must also appear in the `text` of one of your claims.\n"

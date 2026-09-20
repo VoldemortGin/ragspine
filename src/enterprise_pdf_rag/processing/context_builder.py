@@ -14,7 +14,7 @@ from enterprise_pdf_rag.documents.models import Bounds
 from enterprise_pdf_rag.figures.models import ChartIR, TextField, ValueKind, Verification
 from enterprise_pdf_rag.processing.models import ObjectKind
 from enterprise_pdf_rag.processing.retrieval import RetrievalContext
-from enterprise_pdf_rag.processing.table_models import CellContentState, TableIR
+from enterprise_pdf_rag.processing.table_models import CellContentState, TableCell, TableIR
 from enterprise_pdf_rag.processing.typed_ir import GroupIR, ListIR, ObservedText, TextIR
 
 
@@ -44,6 +44,15 @@ class SpanEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class HeaderRef:
+    """A proved header cell that heads another cell along one axis (ADR 0014)."""
+
+    cell_id: str
+    text: str
+    axis: str
+
+
+@dataclass(frozen=True, slots=True)
 class CellEvidence:
     cell_id: str
     row: int
@@ -54,6 +63,8 @@ class CellEvidence:
     text: str | None
     content_state: CellContentState
     source_span_ids: tuple[str, ...]
+    verification: Verification = Verification.PENDING
+    headers: tuple[HeaderRef, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +94,7 @@ class ContextBlock:
     col_count: int = 0
     grammar: str | None = None
     chart_fields: tuple[ChartFieldEvidence, ...] = ()
+    grid_verification: Verification = Verification.PENDING
 
     def prompt_text(self) -> str:
         """Deterministic rendering; every citable path appears verbatim as a line prefix."""
@@ -107,13 +119,20 @@ class ContextBlock:
                     f"unit={fields[prefix + '.unit'].text} value={value}"
                 )
         elif self.kind is BlockKind.TABLE:
-            lines.append(f"table rows={self.row_count} cols={self.col_count}")
+            lines.append(
+                f"table rows={self.row_count} cols={self.col_count} "
+                f"grid={self.grid_verification.value}"
+            )
             for cell in self.cells:
                 if cell.content_state is CellContentState.PRESENT:
                     shown = cell.text if cell.text is not None else "<UNAVAILABLE>"
                 else:
                     shown = f"<{cell.content_state.name}>"
-                lines.append(f"cells.{cell.cell_id} ({cell.row},{cell.col}): {shown}")
+                line = f"cells.{cell.cell_id} ({cell.row},{cell.col}): {shown}"
+                if self.grid_verification is Verification.VERIFIED:
+                    header = " | ".join(f'"{ref.text}"' for ref in cell.headers) or "<NONE>"
+                    line += f" row={cell.row} col={cell.col} header={header}"
+                lines.append(line)
         else:
             lines.extend(f"fragments.{span.source_span_id}: {span.text}" for span in self.spans)
             lines.extend(
@@ -160,6 +179,42 @@ def _chart_fields(chart: ChartIR) -> tuple[ChartFieldEvidence, ...]:
     return tuple(fields)
 
 
+def _header_cells(ir: TableIR) -> tuple[tuple[TableCell, str], ...]:
+    """PRESENT cells lying in a proved header row ("row") or proved header column ("col")."""
+    if ir.grid_evidence is None:
+        return ()
+    rows = ir.grid_evidence.proved_header_rows()
+    cols = ir.grid_evidence.proved_header_cols()
+    found: list[tuple[TableCell, str]] = []
+    for cell in ir.cells:
+        if cell.content_state is not CellContentState.PRESENT or cell.text is None:
+            continue
+        if cell.row in rows:
+            found.append((cell, "row"))
+        if cell.col in cols:
+            found.append((cell, "col"))
+    return tuple(found)
+
+
+def _headers_for(
+    cell: TableCell, headers: Sequence[tuple[TableCell, str]]
+) -> tuple[HeaderRef, ...]:
+    """Header cells spanning this cell's column (row headers) or its row (column headers).
+
+    A header cell never heads itself, and a header only heads what comes after it.
+    """
+    refs: list[HeaderRef] = []
+    for header, axis in headers:
+        if header.cell_id == cell.cell_id or header.text is None:
+            continue
+        if axis == "row":
+            if header.col <= cell.col < header.col + header.col_span and header.row < cell.row:
+                refs.append(HeaderRef(header.cell_id, header.text, "row"))
+        elif header.row <= cell.row < header.row + header.row_span and header.col < cell.col:
+            refs.append(HeaderRef(header.cell_id, header.text, "col"))
+    return tuple(refs)
+
+
 def build_context_block(context: RetrievalContext) -> ContextBlock:
     """Project one hydrated member into a block; unsupported or mismatched kinds are refused."""
     ir = context.ir
@@ -182,8 +237,9 @@ def build_context_block(context: RetrievalContext) -> ContextBlock:
     if isinstance(ir, TableIR):
         if member.kind is not ObjectKind.TABLE:
             raise ValueError("Retrieval member kind does not match its typed IR")
-        # The inferred grid is pinned PENDING; what a table member verifies is its
-        # literal transcription, exactly like text members.
+        # Transcription verification (description) and grid verification (ir) are
+        # separate facts.
+        headers = _header_cells(ir)
         return ContextBlock(
             *common,
             BlockKind.TABLE,
@@ -202,11 +258,14 @@ def build_context_block(context: RetrievalContext) -> ContextBlock:
                     cell.text,
                     cell.content_state,
                     cell.source_span_ids,
+                    cell.verification,
+                    _headers_for(cell, headers),
                 )
                 for cell in ir.cells
             ),
             row_count=ir.row_count,
             col_count=ir.col_count,
+            grid_verification=ir.verification,
         )
     if isinstance(ir, ChartIR):
         if member.kind is not ObjectKind.CHART:

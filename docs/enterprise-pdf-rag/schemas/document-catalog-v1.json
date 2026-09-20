@@ -65,6 +65,57 @@
         "title": "AssetRef",
         "type": "object"
       },
+      "CellBorderEvidence": {
+        "properties": {
+          "bottom": {
+            "items": {
+              "$ref": "#/$defs/SegmentRef"
+            },
+            "title": "Bottom",
+            "type": "array"
+          },
+          "left": {
+            "items": {
+              "$ref": "#/$defs/SegmentRef"
+            },
+            "title": "Left",
+            "type": "array"
+          },
+          "merge_proof": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/MergeProof"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "right": {
+            "items": {
+              "$ref": "#/$defs/SegmentRef"
+            },
+            "title": "Right",
+            "type": "array"
+          },
+          "top": {
+            "items": {
+              "$ref": "#/$defs/SegmentRef"
+            },
+            "title": "Top",
+            "type": "array"
+          }
+        },
+        "required": [
+          "top",
+          "bottom",
+          "left",
+          "right"
+        ],
+        "title": "CellBorderEvidence",
+        "type": "object"
+      },
       "CellContentState": {
         "enum": [
           "present",
@@ -679,6 +730,59 @@
         "title": "FormulaIR",
         "type": "object"
       },
+      "GridEvidence": {
+        "description": "Why this grid is a source fact: every boundary is a real ruling in the page drawings.",
+        "properties": {
+          "cols": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Cols",
+            "type": "array"
+          },
+          "headers": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/HeaderEvidence"
+            },
+            "title": "Headers",
+            "type": "array"
+          },
+          "producer": {
+            "default": "ruled-grid-structure-v1",
+            "title": "Producer",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "ruling_digest": {
+            "title": "Ruling Digest",
+            "type": "string"
+          },
+          "segment_count": {
+            "title": "Segment Count",
+            "type": "integer"
+          },
+          "tolerance": {
+            "title": "Tolerance",
+            "type": "number"
+          }
+        },
+        "required": [
+          "rows",
+          "cols",
+          "ruling_digest",
+          "segment_count",
+          "tolerance"
+        ],
+        "title": "GridEvidence",
+        "type": "object"
+      },
       "GroupIR": {
         "properties": {
           "child_object_ids": {
@@ -719,6 +823,88 @@
         ],
         "title": "GroupIR",
         "type": "object"
+      },
+      "HeaderEvidence": {
+        "properties": {
+          "cols": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Cols",
+            "type": "array"
+          },
+          "fills": {
+            "default": [],
+            "items": {
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Fills",
+            "type": "array"
+          },
+          "kind": {
+            "$ref": "#/$defs/HeaderEvidenceKind"
+          },
+          "rows": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "segments": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/SegmentRef"
+            },
+            "title": "Segments",
+            "type": "array"
+          },
+          "strength": {
+            "$ref": "#/$defs/HeaderStrength"
+          }
+        },
+        "required": [
+          "kind",
+          "strength",
+          "rows",
+          "cols"
+        ],
+        "title": "HeaderEvidence",
+        "type": "object"
+      },
+      "HeaderEvidenceKind": {
+        "enum": [
+          "ruling_thick",
+          "fill",
+          "font_bold",
+          "first_row_rule"
+        ],
+        "title": "HeaderEvidenceKind",
+        "type": "string"
+      },
+      "HeaderStrength": {
+        "enum": [
+          "proved",
+          "heuristic"
+        ],
+        "title": "HeaderStrength",
+        "type": "string"
       },
       "ImageIR": {
         "properties": {
@@ -827,12 +1013,36 @@
           "description": {
             "$ref": "#/$defs/AssetRef"
           },
+          "grid_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Grid Scope"
+          },
           "ir": {
             "$ref": "#/$defs/AssetRef"
           },
           "object_id": {
             "title": "Object Id",
             "type": "string"
+          },
+          "ruling_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ruling Digest"
           },
           "scope": {
             "default": "literal-source-transcription-v1",
@@ -867,6 +1077,31 @@
           "source_svg"
         ],
         "title": "LiteralQualification",
+        "type": "object"
+      },
+      "MergeProof": {
+        "description": "Interior grid boundaries a merged cell spans, each proved free of rulings inside it.",
+        "properties": {
+          "interior_cols": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Interior Cols",
+            "type": "array"
+          },
+          "interior_rows": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Interior Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "interior_rows",
+          "interior_cols"
+        ],
+        "title": "MergeProof",
         "type": "object"
       },
       "NumericObservation": {
@@ -1085,6 +1320,65 @@
         "title": "RetrievalMember",
         "type": "object"
       },
+      "SegmentRef": {
+        "description": "A ruling piece in ``page.get_drawings()``: which path/item/edge, and its endpoints.",
+        "properties": {
+          "edge": {
+            "title": "Edge",
+            "type": "string"
+          },
+          "item_index": {
+            "title": "Item Index",
+            "type": "integer"
+          },
+          "p0": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "P0",
+            "type": "array"
+          },
+          "p1": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "P1",
+            "type": "array"
+          },
+          "path_index": {
+            "title": "Path Index",
+            "type": "integer"
+          },
+          "thickness": {
+            "title": "Thickness",
+            "type": "number"
+          }
+        },
+        "required": [
+          "path_index",
+          "item_index",
+          "edge",
+          "p0",
+          "p1",
+          "thickness"
+        ],
+        "title": "SegmentRef",
+        "type": "object"
+      },
       "SlotState": {
         "enum": [
           "origin",
@@ -1232,6 +1526,17 @@
             "title": "Bbox",
             "type": "array"
           },
+          "border": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/CellBorderEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "cell_id": {
             "title": "Cell Id",
             "type": "string"
@@ -1312,6 +1617,17 @@
             },
             "title": "Diagnostics",
             "type": "array"
+          },
+          "grid_evidence": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/GridEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "object_id": {
             "title": "Object Id",

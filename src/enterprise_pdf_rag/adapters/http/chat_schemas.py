@@ -74,6 +74,11 @@ class ClaimCitationOut(BoundaryModel):
     chart_citation: FieldCitation | None
     # The verified title of the cited page, when its metadata stage found one (ADR 0013).
     page_title: str | None = None
+    # The cell's proved grid position and header, when the table's grid re-proved (ADR 0014).
+    row: int | None = None
+    col: int | None = None
+    header: str | None = None
+    header_cell_id: str | None = None
 
     @classmethod
     def from_domain(cls, citation: ClaimCitation) -> "ClaimCitationOut":
@@ -87,6 +92,10 @@ class ClaimCitationOut(BoundaryModel):
             quote=citation.quote,
             chart_citation=citation.chart_citation,
             page_title=citation.page_title,
+            row=citation.row,
+            col=citation.col,
+            header=citation.header,
+            header_cell_id=citation.header_cell_id,
         )
 
 

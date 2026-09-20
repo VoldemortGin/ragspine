@@ -244,6 +244,13 @@ def test_answer_carries_verified_citations_and_provenance(
         assert citation["field_path"] == f"fragments.{span_id}"
         assert citation["evidence_ids"] == [span_id] and citation["quote"] == text
         assert citation["bbox"] is not None and citation["chart_citation"] is None
+        # A quote carries no grid relations; the four fields are always present (ADR 0014).
+        assert [citation[name] for name in ("row", "col", "header", "header_cell_id")] == [
+            None,
+            None,
+            None,
+            None,
+        ]
         assert (envelope["llm_live_calls"], envelope["cache_hit"]) == (1, False)
         # Every prompt member reports how each channel ranked it (ADR 0012).
         ranks = envelope["member_ranks"]

@@ -32,6 +32,7 @@ from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
     publish_generic_document,
     resolve_table_member,
 )
+from tests.enterprise_pdf_rag.adapters.test_pdf_ingestion import MULTI_HEADER_TABLE
 
 _QUERY = "revenue expense ratio"
 
@@ -235,9 +236,11 @@ def test_generic_pdf_native_table_is_indexed_description_only_under_policy_v2(
     assert tuple(cell.text for cell in context.ir.cells) == (*table_text.split("\n"), "")
     block = build_context_block(context)
     assert block.kind is BlockKind.TABLE and block.verification is Verification.VERIFIED
+    assert block.grid_verification is Verification.VERIFIED
     value = next(cell for cell in block.cells if cell.text == "1,234")
     assert (value.row, value.col) == (1, 1) and len(value.source_span_ids) == 1
-    assert f"cells.{value.cell_id} (1,1): 1,234" in block.prompt_text()
+    # All rules are 1pt, so the grid proves but no header band does.
+    assert f"cells.{value.cell_id} (1,1): 1,234 row=1 col=1 header=<NONE>" in block.prompt_text()
     assert len(calls) == 3
 
 
@@ -320,3 +323,31 @@ def test_generic_pdf_table_grid_receipt_must_bind_the_proved_rulings(
         _reprove_table_grid(
             pdf, strip_grid_evidence(table), receipt, page_index=page_index, spans=spans
         )
+
+
+def test_generic_pdf_multi_header_table_publishes_with_proved_headers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    published = publish_generic_document(
+        tmp_path,
+        monkeypatch,
+        filename="meridian-semiannual.pdf",
+        label=DOCUMENT_LABEL,
+        page_count=3,
+        embedder=OfflineDescriptionEmbedder(),
+        table_page=MULTI_HEADER_TABLE,
+    )
+    context = resolve_table_member(published)
+    table = context.ir
+    assert isinstance(table, TableIR) and table.grid_evidence is not None
+    assert table.verification is Verification.VERIFIED
+    # The 2pt rule under row 1 closes a two-row header; both rows are proved.
+    assert table.grid_evidence.proved_header_rows() == frozenset({0, 1})
+
+    block = build_context_block(context)
+    value = next(cell for cell in block.cells if (cell.row, cell.col) == (2, 1))
+    assert tuple(ref.text for ref in value.headers) == ("Group", "Value")
+    assert (
+        f'cells.{value.cell_id} (2,1): 1,234 row=2 col=1 header="Group" | "Value"'
+        in block.prompt_text()
+    )
