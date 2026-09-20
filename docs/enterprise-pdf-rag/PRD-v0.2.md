@@ -470,11 +470,11 @@ P1 使用经授权的代表样本冻结金标、样本拆分、数值容差和 S
 ### 7.1 工程质量门
 
 使用锁定工具链；make fmt 仅作本地写入 cleanup，顺序为 Ruff check 的 safe fix → Ruff format，不启用 unsafe fixes。
-./ci.sh 是唯一只读工程质量门，执行 ruff format --check、ruff check --no-fix 和 mypy strict（py312）；禁止 fix、exit-zero 或忽略失败退出码。
+bash scripts/ci.sh 是唯一只读工程质量门，执行 ruff format --check、ruff check --no-fix 和 mypy strict（py312）；禁止 fix、exit-zero 或忽略失败退出码。
 运行 architecture dependency、schema compatibility、drift guard 和公开契约测试，防止 domain 被 SDK 侵入。
 pytest 将 warnings 作为 error，必须实际收集且运行测试（收集数量大于 0），核心 gate 不允许静默全 skip。
 不得靠全局 ignore、无依据 noqa、降低检查等级、unsafe 自动修复或 LLM 手工格式化来取得绿灯。
-./ci.sh 包含当前阶段全部必需的离线测试及预置本地真实 adapter suites；数据库、服务与校验过的模型提前就绪，执行时不访问外网或下载依赖/模型。
+bash scripts/ci.sh 包含当前阶段全部必需的离线测试及预置本地真实 adapter suites；数据库、服务与校验过的模型提前就绪，执行时不访问外网或下载依赖/模型。
 live provider 的真实能力与质量资格单列受控验收证据，不构成第二套日常 CI，也不成为每次工程门的付费外网依赖；离线与真实 adapter suite 不能相互冒充。
 只在 green 后重构，并回跑受影响契约；不为私有实现细节编写脆弱的镜像测试。
 

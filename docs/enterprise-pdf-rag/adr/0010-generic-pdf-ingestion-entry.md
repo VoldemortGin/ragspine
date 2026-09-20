@@ -6,11 +6,11 @@ Status: Accepted
 
 The product accepts arbitrary PDF documents. AIA is a fixed acceptance corpus, not the platform's input identity or a global twenty-page limit. Existing source manifests preserve every source page; processing manifests select downstream pages. The current CLI binds ingestion and processing to the AIA profile and activates discovery pointers.
 
-The user requested `scripts/ingest.py`, usable with a standard installed Python package as well as local uv. This slice adds an entry point, not a second extraction/model/index implementation. It does not claim arbitrary-document QA qualification.
+The user requested `scripts/enterprise_pdf_rag/ingest.py`, usable with a standard installed Python package as well as local uv. This slice adds an entry point, not a second extraction/model/index implementation. It does not claim arbitrary-document QA qualification.
 
 ## Decision
 
-Expose `enterprise-pdf-rag ingest --pdf FILE [--pages all|1-3,5] [--output-dir PARENT] [--stage source|layout|semantics] [--max-live-calls N]`. `scripts/ingest.py` delegates to that public package command, with no path injection, uv subprocess, AIA constants, or duplicated ingestion business logic.
+Expose `enterprise-pdf-rag ingest --pdf FILE [--pages all|1-3,5] [--output-dir PARENT] [--stage source|layout|semantics] [--max-live-calls N]`. `scripts/enterprise_pdf_rag/ingest.py` delegates to that public package command, with no path injection, uv subprocess, AIA constants, or duplicated ingestion business logic.
 
 The public adapter `ingest_pdf` composes the existing pdfspine source extractor, source asset store, selected-page processing pipeline, model layout and independent semantic branches. Its default is `source`, zero model calls. Canonical source observations are saved for the selected pages; layout and semantic processing remain explicitly deferred. No retrieval index or model-generated summary substitutes for missing semantics.
 
@@ -38,4 +38,4 @@ Public-script and package-API tests use distinct authored PDFs, including a docu
 
 This does not add a generic web document catalog, upload endpoint, automatic serving of arbitrary ingested documents, unrestricted chat, universal chart qualification, or a new index implementation. Those capabilities require separate integration and acceptance. Non-PDF formats remain outside the current approved PRD.
 
-Update (2026-09-19): the explicit follow-up workflow now exists as `qualify`/`index`/`publish` in `adapters/draft_publication.py` and the CLI, working by returned store/processing ids. Offline end-to-end coverage in `tests/adapters/test_generic_publication_e2e.py` runs ingest→qualify→index→publish→retrieval on a non-AIA authored PDF, while a real local-embedder `index` still requires the managed tunnel and remains uncovered. This is a qualification/index/publication entry, not a general RAG answering chain; OpenAI-compatible chat still only does source review.
+Update (2026-09-19): the explicit follow-up workflow now exists as `qualify`/`index`/`publish` in `adapters/draft_publication.py` and the CLI, working by returned store/processing ids. Offline end-to-end coverage in `tests/enterprise_pdf_rag/adapters/test_generic_publication_e2e.py` runs ingest→qualify→index→publish→retrieval on a non-AIA authored PDF, while a real local-embedder `index` still requires the managed tunnel and remains uncovered. This is a qualification/index/publication entry, not a general RAG answering chain; OpenAI-compatible chat still only does source review.

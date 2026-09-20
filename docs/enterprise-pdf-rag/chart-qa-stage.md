@@ -14,7 +14,7 @@ The first source-backed numeric query slice is active for a single donut grammar
 
 ## Frozen gold scope
 
-[`chart-qa-gold-v1.json`](../benchmarks/aia-2026-interim/chart-qa-gold-v1.json) binds the AIA source digest and physical page 18 region `[18, 155, 250, 338]` in top-left PDF points. The assistant independently reviewed the native SVG crop, source text sidecar and deterministic render. This benchmark review is not a production qualification receipt.
+[`chart-qa-gold-v1.json`](../../benchmarks/enterprise-pdf-rag/aia-2026-interim/chart-qa-gold-v1.json) binds the AIA source digest and physical page 18 region `[18, 155, 250, 338]` in top-left PDF points. The assistant independently reviewed the native SVG crop, source text sidecar and deterministic render. This benchmark review is not a production qualification receipt.
 
 The reviewed explicit observations are:
 
@@ -38,7 +38,7 @@ For a persisted run, invoke the same adapter with explicit paths; it never searc
 
 ```bash
 python -m enterprise_pdf_rag.adapters.chart_qa_evaluation \
-  --gold benchmarks/aia-2026-interim/chart-qa-gold-v1.json \
+  --gold benchmarks/enterprise-pdf-rag/aia-2026-interim/chart-qa-gold-v1.json \
   --observations /path/to/captured-observations.json \
   --output-root /path/to/processing-run
 ```

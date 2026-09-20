@@ -47,8 +47,8 @@ uv run --locked enterprise-pdf-rag ingest-aia
 预览脚本使用项目 `.venv` 启动后端，并从 `PATH` 发现已有 Python 3.12 / Open WebUI 0.6.5 解释器；也可以用 `OPEN_WEBUI_PYTHON=/path/to/environment/bin/python` 指定。只检查安装元数据，不导入 vendor 应用探测环境，不安装、更新或下载 vendor 依赖。
 
 ```sh
-./scripts/start.sh
-uv run --locked python scripts/webui_preview.py status
+./scripts/enterprise_pdf_rag/start.sh
+uv run --locked python scripts/enterprise_pdf_rag/webui_preview.py status
 ```
 
 `start.sh` 通过脚本位置定位项目，使用绝对路径调用时不要求当前目录在仓库内。它复用 `webui_preview.py` 这套管理，要求已有前 20 页发布产物的 `current-processing`，不重跑 ingestion、embedding 或模型请求。已记录的 API/WebUI 只有在 PID 命令、工作目录、模型 profile、当前快照及 HTTP 健康检查一致时才复用；重复执行不创建新进程。脚本会打印当前快照、所有入口和可从任意目录执行的状态/停止命令。
@@ -58,7 +58,7 @@ uv run --locked python scripts/webui_preview.py status
 ```sh
 uv venv --python 3.12 data/open-webui-runtime
 uv pip install --python data/open-webui-runtime/bin/python 'open-webui==0.6.5'
-OPEN_WEBUI_PYTHON="$PWD/data/open-webui-runtime/bin/python" ./scripts/start.sh
+OPEN_WEBUI_PYTHON="$PWD/data/open-webui-runtime/bin/python" ./scripts/enterprise_pdf_rag/start.sh
 ```
 
 缺少处理数据时须先恢复已有 `data/output/aia-2026-interim/` 资产，或按 README 显式执行处理流程。没有有效数据时启动命令不会生成演示数据替代。脚本不主动 source `~/.zshrc`、不读取 `.env`，不会将上游模型凭证传给厂商进程。
@@ -88,7 +88,7 @@ tail -f data/open-webui-preview/webui.log
 停止时只会向 PID 记录中、命令标记和工作目录仍匹配本项目的进程发送 `SIGTERM`：
 
 ```sh
-uv run --locked python scripts/webui_preview.py stop
+uv run --locked python scripts/enterprise_pdf_rag/webui_preview.py stop
 ```
 
 停止命令保留隔离数据。若 PID 记录失效、服务不健康或仍固定到另一个快照，启动会明确拒绝；先查看日志并使用现有 `stop` 清理本项目记录，再运行 `start.sh`。端口由未登记进程占用时不会杀掉它，也不会尝试另起一组进程绕过。
@@ -98,7 +98,7 @@ uv run --locked python scripts/webui_preview.py stop
 内部创作的 10/15 两柱 fixture 仅保留给测试与显式回归，不是业务验收，也不会在默认 AIA profile 中出现：
 
 ```sh
-uv run --locked python scripts/webui_preview.py start --profile offline-demo
+uv run --locked python scripts/enterprise_pdf_rag/webui_preview.py start --profile offline-demo
 ```
 
 该模式的唯一模型为 `enterprise-pdf-rag-offline-demo-v1`，问题集合和证据固定。它不能替代真实 AIA 来源 ingestion 或财报问答验证。
@@ -111,7 +111,7 @@ Open WebUI 只连接本地 API，并收到固定占位 key；启动器构造完�
 
 ## 官方 0.11.3 目标配置
 
-`deployment/open-webui/compose.yaml` 固定官方 Open WebUI 0.11.3 slim 镜像 digest，并运行相同 gate。AIA 后端只读挂载预先生成的 `data/output/aia-2026-interim/`；必须先在主机完成 `ingest-aia`。后端和 WebUI 只通过内部 Compose 网络通信，对主机只暴露 loopback 端口；WebUI 数据使用私有 volume，不挂载主机 HOME、Docker socket 或全局配置。 Compose 要求把 `AIA_REVIEW_UID` / `AIA_REVIEW_GID` 设为产物所有者的数字 UID/GID，以读取权限为 `0600` 的内容寻址对象；缺变量或缺产物目录都会显式失败，不创建空来源或回退合成 demo。
+`deploy/enterprise-pdf-rag/open-webui/compose.yaml` 固定官方 Open WebUI 0.11.3 slim 镜像 digest，并运行相同 gate。AIA 后端只读挂载预先生成的 `data/output/aia-2026-interim/`；必须先在主机完成 `ingest-aia`。后端和 WebUI 只通过内部 Compose 网络通信，对主机只暴露 loopback 端口；WebUI 数据使用私有 volume，不挂载主机 HOME、Docker socket 或全局配置。 Compose 要求把 `AIA_REVIEW_UID` / `AIA_REVIEW_GID` 设为产物所有者的数字 UID/GID，以读取权限为 `0600` 的内容寻址对象；缺变量或缺产物目录都会显式失败，不创建空来源或回退合成 demo。
 
 [官方 v0.11.3 Dockerfile](https://github.com/open-webui/open-webui/blob/v0.11.3/Dockerfile#L43) 的运行时基于 Python 3.11；[该版本项目元数据](https://github.com/open-webui/open-webui/blob/v0.11.3/pyproject.toml#L122-L130) 声明支持 Python 3.11/3.12。复制进镜像的 standalone `webui_gate.py` 已按 Python 3.11 grammar 静态解析通过，所用标准库也均存在于 3.11；这项静态检查不替代尚未进行的镜像构建和容器启动。
 
@@ -120,25 +120,25 @@ Open WebUI 只连接本地 API，并收到固定占位 key；启动器构造完�
 ```sh
 export AIA_REVIEW_UID="$(id -u)" AIA_REVIEW_GID="$(id -g)"
 docker compose --env-file /dev/null \
-  -f deployment/open-webui/compose.yaml config --quiet
+  -f deploy/enterprise-pdf-rag/open-webui/compose.yaml config --quiet
 ```
 
 当前机器没有可用 Docker daemon，因此以下正式启动步骤尚未在本机执行。具备 daemon 后，应先停止 0.6.5 预览以释放相同端口，再执行：
 
 ```sh
-uv run --locked python scripts/webui_preview.py stop
+uv run --locked python scripts/enterprise_pdf_rag/webui_preview.py stop
 export AIA_REVIEW_UID="$(id -u)" AIA_REVIEW_GID="$(id -g)"
 docker compose --env-file /dev/null \
-  -f deployment/open-webui/compose.yaml up --build -d
+  -f deploy/enterprise-pdf-rag/open-webui/compose.yaml up --build -d
 docker compose --env-file /dev/null \
-  -f deployment/open-webui/compose.yaml ps
+  -f deploy/enterprise-pdf-rag/open-webui/compose.yaml ps
 ```
 
 停止 Compose 服务：
 
 ```sh
 docker compose --env-file /dev/null \
-  -f deployment/open-webui/compose.yaml down
+  -f deploy/enterprise-pdf-rag/open-webui/compose.yaml down
 ```
 
 在构建、健康检查和真实浏览器来源审阅全部成功前，不应把 0.11.3 标为已验证运行。

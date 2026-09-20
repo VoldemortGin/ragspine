@@ -115,4 +115,4 @@
 
 本盘点记录的是 pdfspine 可观察结果与少量人工视觉核对，不是财务审计、图表 gold 或字段资格凭据。标题、单位、年份、数值和图元即使在同一区域，也不能仅凭文本相同或空间接近认定属于同一 series。任何 ChartIR、自然语言描述或 embedding 之前仍需同一 native SVG、同一 source revision、字段 occurrence 和独立资格流程的完整绑定。
 
-机器可读的候选和 bbox 位于 `benchmarks/aia-2026-interim/manifest.json`。逐页原始计数、所选页 span/drawing 记录和 pdfspine 渲染图在被 Git 忽略的 `data/aia-inventory/`，只作为本地复核材料。
+机器可读的候选和 bbox 位于 `benchmarks/enterprise-pdf-rag/aia-2026-interim/manifest.json`。逐页原始计数、所选页 span/drawing 记录和 pdfspine 渲染图在被 Git 忽略的 `data/aia-inventory/`，只作为本地复核材料。

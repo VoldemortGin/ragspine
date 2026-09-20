@@ -1,8 +1,40 @@
 # Claude 交接：通用文档 RAG 与公开样本验收
 
-更新时间：2026-09-19
+更新时间：2026-09-20
 
 > 阅读顺序：先看下方“恢复开发记录”；后续旧暂停快照保留作证据，不能作为实时发布或服务状态。
+
+## 并入 rag-spine 记录（2026-09-20）
+
+本项目已作为**独立顶层包**并入 rag-spine 仓库（`/Users/linhan/startup/spine/ragspine`，分支 `merge/enterprise-pdf-rag`），import 名仍是 `enterprise_pdf_rag`，不在 `ragspine.*` 命名空间下；决定、被拒方案与待办见 rag-spine 的 [ADR 0021](../adr/0021-merge-enterprise-pdf-rag-as-sibling-package.md)。四个提交：
+
+| 提交 | 含义 |
+|---|---|
+| `0f8499c` | `git subtree` 导入：enterprise-pdf-rag 完整历史进入 `_incoming/enterprise-pdf-rag/`，原提交可 `git log --follow` 追溯 |
+| `8ce3301` | 依赖与工具链全部升到最新，`requires-python>=3.12` 与 pdfspine 对齐 |
+| `95f607e` | 纯格式：ruff 0.16 全仓 format，无行为改动 |
+| `407849e` | 重排合并：搬到最终目录、单一 `pyproject.toml`、ruff/mypy 按目录分级 scope、一次 pytest 合跑、`scripts/ci.sh` 第 9 步接入四个 check 脚本 |
+
+新路径速查（均相对 rag-spine 仓库根；文中 `src/enterprise_pdf_rag/...` 与 `data/...` 写法不变）：
+
+| 原仓库 | rag-spine |
+|---|---|
+| `src/enterprise_pdf_rag/` | `src/enterprise_pdf_rag/`（不变） |
+| `tests/` | `tests/enterprise_pdf_rag/`（自带 `conftest.py` 的 no_network 守卫） |
+| `scripts/*.py`、`scripts/start.sh` | `scripts/enterprise_pdf_rag/` |
+| `configs/settings.yaml` | `config/enterprise-pdf-rag/settings.yaml` |
+| `benchmarks/aia-2026-interim/` | `benchmarks/enterprise-pdf-rag/aia-2026-interim/` |
+| `deployment/open-webui/` | `deploy/enterprise-pdf-rag/open-webui/` |
+| `docs/`（ADR、PRD、schemas、samples、本文件） | `docs/enterprise-pdf-rag/` |
+| `CLAUDE.md`、`AGENTS.md` | `src/enterprise_pdf_rag/CLAUDE.md`、`src/enterprise_pdf_rag/AGENTS.md`（rag-spine“每个模块一份 CLAUDE.md”约定） |
+| `./ci.sh`、`.github/workflows/ci.yml` | `bash scripts/ci.sh`（rag-spine 的 GitHub Actions 为手动触发，本地门是唯一真源；旧 workflow 未并入） |
+| `data/` | `data/`（运行现场以 APFS 克隆带入，仍 gitignore） |
+
+门的跑法（在 rag-spine 仓库根）：`bash scripts/ci.sh` 全门——第 5 步一次 pytest 同时收集两套测试，第 9 步顺序运行 `scripts/enterprise_pdf_rag/check_conformance.py .`、`check_architecture.py`、`check_schema.py`、`check_drift.py`；单跑本包 `.venv/bin/python -m pytest tests/enterprise_pdf_rag -q`；文档漂移 `.venv/bin/python scripts/check_doc_drift.py --quiet`（`src/enterprise_pdf_rag/CLAUDE.md` 带 `covers` 头，改包内代码后要把它的 `verified-against` bump 到新 HEAD）。
+
+原仓库 `/Users/linhan/startup/enterprise-pdf-rag` 的 `merge/into-ragspine` 分支是并入前快照（HEAD `03357a4`），`data/` 原件（output、validation、samples、current 指针等）保留在那里，不要清理；rag-spine 侧的 `data/` 是其克隆。本文件及 `docs/enterprise-pdf-rag/` 下其余文档中的 `./ci.sh`、`scripts/xxx.py`、`tests/adapters/...`、`benchmarks/aia-...`、`deployment/` 等路径已按上表改写；仅“历史暂停快照 / 前 5 分钟”里以 `cd /Users/linhan/startup/enterprise-pdf-rag` 开头的命令块保留原仓库布局。
+
+并入后已知待办（详见 ADR 0021）：`httpx` 与 `httpx2` 选型待统一；`fastapi/uvicorn` 同时在 base 与 `[service]` extra；`deploy/enterprise-pdf-rag/open-webui/backend.Dockerfile` 仍 `uv sync --locked`，容器内会找不到 `[tool.uv.sources]` 指向的本地 `../corespine`，需改 `--no-sources` 或等价方案，尚未验证。下一步的通用服务挂载与自然语言回答链改在 rag-spine 上实现（见下方“当前后续工作顺序”第 2、3 项）。
 
 ## 恢复开发记录（2026-09-19）
 
@@ -14,21 +46,21 @@
 
 离线 ASGI/transport 测试覆盖 query-only 一次调用、启动/读取零调用、缺失/部分/远端配置、服务失败、错模型/维度、context 回填、财务拒答及 launcher 凭证隔离。正式门通过后已按 owned stop/start 切换现有服务，active `.venv` 使用官方 pdfspine 0.11.0。恰好一次真实 query embedding 搜索返回 5 条命中，context、p18 typed lookup（72%、verified、字段引用）、确定性来源审阅聊天、API 状态和 UI/config 均 200；LLM、rerank、新文档 embedding 调用数为 0。运行与完整原始响应保存在 `data/validation/rollout-search-2026-09-19/`。两个 runner 退出后的独立只读检查确认 managed tunnel 和 owned API/WebUI 持续运行，marker/cwd 匹配；API 保留 embedding key，WebUI 与相关日志无该 key。原始 PDF 和两个 current 指针摘要前后相同，未推广第 20 页。完整通用自然语言回答、任意 PDF 的 UI 选择/发布仍未实现。
 
-通用 `ingest --pdf ... --pages ... --stage ...` 入口与 `scripts/ingest.py` 薄封装已落地，首轮离线行为测试通过：完整 source 按 SHA 隔离、选页范围取真实页数、禁用 AIA 布局修正、共享调用预算、缓存可回放、始终 draft/no-index/no-activation。结果的 `retrieval_status` 明确 `not_ready`；这不是通用聊天已完成。独立只读 review 发现的共享 Table adapter 20 页上限已修复，第 21 页原生 table 的 merge/来源 span 回归由入口实现任务完成 RED→GREEN；AIA 专用入口仍保持 1–20 页范围。SDK [官方 PyPI 0.11.0](https://pypi.org/project/pdfspine/0.11.0/) 已发布；main/tag 指向 `5a1f22e`，[release run 35473565983](https://github.com/VoldemortGin/pdfspine/actions/runs/35473565983) 成功，5 wheels + sdist，并已完成 fresh Python 3.12 官方 pip 的 paint-profile API 检查。RAG 正式 `pyproject.toml` 与 `uv.lock` 已精确锁定 `pdfspine==0.11.0`，官方包独立环境完整 `./ci.sh` 639 tests 通过（22.90s，格式 227 files、strict mypy 201 files、schema/architecture/drift 全绿）。fresh Python 3.12 plain `pip install .`、`pip check`、checkout 外 noneditable ingest/script/profile/render/app factory/HTTP 与 CI 的 installed smoke 步骤均通过；证据 `data/validation/generic-ingest-official/summary.json`。这些是本机验证，尚不代表 GitHub Linux CI 或真实 Databricks 部署。官方 macOS wheel 对真实样本第 18/20 页 native SVG 字节与候选一致，paint-profile API 完整；证据 `data/validation/official-sdk-0.11-source-check.json`，未用此代替 RAG 的 profile digest 序列化验证或 Linux 真 PDF 验收。以下“尚未发布/先修 viewBox/主动暂停”的条目是恢复前状态，不能重复执行或据此回滚。执行发布与激活前须检查对应任务的最终证据及当前 git/tag/PyPI/current 指针，不因本记录自动激活第 20 页。
+通用 `ingest --pdf ... --pages ... --stage ...` 入口与 `scripts/enterprise_pdf_rag/ingest.py` 薄封装已落地，首轮离线行为测试通过：完整 source 按 SHA 隔离、选页范围取真实页数、禁用 AIA 布局修正、共享调用预算、缓存可回放、始终 draft/no-index/no-activation。结果的 `retrieval_status` 明确 `not_ready`；这不是通用聊天已完成。独立只读 review 发现的共享 Table adapter 20 页上限已修复，第 21 页原生 table 的 merge/来源 span 回归由入口实现任务完成 RED→GREEN；AIA 专用入口仍保持 1–20 页范围。SDK [官方 PyPI 0.11.0](https://pypi.org/project/pdfspine/0.11.0/) 已发布；main/tag 指向 `5a1f22e`，[release run 35473565983](https://github.com/VoldemortGin/pdfspine/actions/runs/35473565983) 成功，5 wheels + sdist，并已完成 fresh Python 3.12 官方 pip 的 paint-profile API 检查。RAG 正式 `pyproject.toml` 与 `uv.lock` 已精确锁定 `pdfspine==0.11.0`，官方包独立环境完整 `bash scripts/ci.sh` 639 tests 通过（22.90s，格式 227 files、strict mypy 201 files、schema/architecture/drift 全绿）。fresh Python 3.12 plain `pip install .`、`pip check`、checkout 外 noneditable ingest/script/profile/render/app factory/HTTP 与 CI 的 installed smoke 步骤均通过；证据 `data/validation/generic-ingest-official/summary.json`。这些是本机验证，尚不代表 GitHub Linux CI 或真实 Databricks 部署。官方 macOS wheel 对真实样本第 18/20 页 native SVG 字节与候选一致，paint-profile API 完整；证据 `data/validation/official-sdk-0.11-source-check.json`，未用此代替 RAG 的 profile digest 序列化验证或 Linux 真 PDF 验收。以下“尚未发布/先修 viewBox/主动暂停”的条目是恢复前状态，不能重复执行或据此回滚。执行发布与激活前须检查对应任务的最终证据及当前 git/tag/PyPI/current 指针，不因本记录自动激活第 20 页。
 
-通用 draft 的资格 / description-only 索引 / 发布入口已落地，按 `ingest` 返回的 store 根和 `processing_id` 工作，不再写死 AIA 文件名/页数/来源 SHA。新模块 `src/enterprise_pdf_rag/adapters/draft_publication.py`：`qualify_draft` 只读、零模型（`ProcessingStore.load` + `validate_processing_source` + 资格谓词统计）；`index_draft`（显式注入 embedder）用 description-only `ProcessingRetrieval.build` → `save_draft` 产新不可变 snapshot，`export_processing_review(update_current=False)` 不切指针，标题反映实际文档；`publish_draft(activate_source=True)` 原子切 `current-processing`，可选切 `current-manifest`，未 `index` 的 draft 抛 `ValueError`，内容寻址幂等。三 Boundary 模型 `DraftQualification/DraftIndex/DraftPublication` 把 ingest 的 `not_ready` 依次推进为 `qualified; indexing pending → indexed; publication pending → ready`。`processing_retrieval.py` 抽出模块级 `eligibility(record)` 由 `build` 与资格共用，行为不变。CLI 新增 `qualify|index|publish`（共享 `--source-store/--processing-store/--processing-id`，`index` 有 `--document-label`，`publish` 有 `--activate-source/--no-activate-source` 默认激活）；`index` 仅用生产 `LocalEmbeddingAdapter(load_local_model_config("embedding"))`，离线替身仅测试注入不暴露 flag；错误 → `{"error": ...}` + 退出码 1，fail closed。离线 E2E `tests/adapters/test_generic_publication_e2e.py` 用非 AIA 程序化三页财务 PDF `meridian-semiannual.pdf` 走 ingest→qualify→index（`OfflineDescriptionEmbedder`，dims 64）→publish→`search`/`resolve`，命中带 snapshot_id/member_id、retrieval snapshot 的 `scope.source_manifest_id` 与 ingest 一致，另有 `cli.main` 三命令 JSON 状态推进 smoke；单元测试见 `tests/adapters/test_draft_publication.py`。阶段完成后 `./ci.sh` 全绿（≥660 tests，最终数字以 `./ci.sh` 为准）。真实冒烟（本机）：对真实 AIA store `data/output/aia-2026-interim`（processing 在 `pages-001-020`）的 `current-processing` `a7384f0c…` 只读 `qualify` 得 eligible=189、skipped=52（stage 未完 43、image 7、diagram 2）、chart=9、kinds Text163/List11/Group6/Chart9，与既有 189 vectors 一致；在 scratchpad 完整副本上 `publish` 两次幂等回到同一 `a7384f0c`（member_count 189、dims [2560]、retrieval snapshot `f59d2308…`、source_activated true、status ready）。**未覆盖项**：真实 `index` 未能在本地 embedder 上运行（`scripts/with_local_models.py` 报 `TunnelConfigurationError: Missing or invalid setting: LOCAL_MODELS_SSH_HOST`，当前 shell 无隧道配置），真实链路 index 需隧道环境；通用 `ingest` 亦从未对真实 PDF 跑过（`data/ingestion/` 不存在）。冒烟前后 `git status --short data/` 为空、两个 current 指针 shasum 不变；全部改动仍未 commit。这只是资格/索引/发布入口，**不等于通用 RAG 回答链完成**，OpenAI-compatible chat 仍只有来源审阅。
+通用 draft 的资格 / description-only 索引 / 发布入口已落地，按 `ingest` 返回的 store 根和 `processing_id` 工作，不再写死 AIA 文件名/页数/来源 SHA。新模块 `src/enterprise_pdf_rag/adapters/draft_publication.py`：`qualify_draft` 只读、零模型（`ProcessingStore.load` + `validate_processing_source` + 资格谓词统计）；`index_draft`（显式注入 embedder）用 description-only `ProcessingRetrieval.build` → `save_draft` 产新不可变 snapshot，`export_processing_review(update_current=False)` 不切指针，标题反映实际文档；`publish_draft(activate_source=True)` 原子切 `current-processing`，可选切 `current-manifest`，未 `index` 的 draft 抛 `ValueError`，内容寻址幂等。三 Boundary 模型 `DraftQualification/DraftIndex/DraftPublication` 把 ingest 的 `not_ready` 依次推进为 `qualified; indexing pending → indexed; publication pending → ready`。`processing_retrieval.py` 抽出模块级 `eligibility(record)` 由 `build` 与资格共用，行为不变。CLI 新增 `qualify|index|publish`（共享 `--source-store/--processing-store/--processing-id`，`index` 有 `--document-label`，`publish` 有 `--activate-source/--no-activate-source` 默认激活）；`index` 仅用生产 `LocalEmbeddingAdapter(load_local_model_config("embedding"))`，离线替身仅测试注入不暴露 flag；错误 → `{"error": ...}` + 退出码 1，fail closed。离线 E2E `tests/enterprise_pdf_rag/adapters/test_generic_publication_e2e.py` 用非 AIA 程序化三页财务 PDF `meridian-semiannual.pdf` 走 ingest→qualify→index（`OfflineDescriptionEmbedder`，dims 64）→publish→`search`/`resolve`，命中带 snapshot_id/member_id、retrieval snapshot 的 `scope.source_manifest_id` 与 ingest 一致，另有 `cli.main` 三命令 JSON 状态推进 smoke；单元测试见 `tests/enterprise_pdf_rag/adapters/test_draft_publication.py`。阶段完成后 `bash scripts/ci.sh` 全绿（≥660 tests，最终数字以 `bash scripts/ci.sh` 为准）。真实冒烟（本机）：对真实 AIA store `data/output/aia-2026-interim`（processing 在 `pages-001-020`）的 `current-processing` `a7384f0c…` 只读 `qualify` 得 eligible=189、skipped=52（stage 未完 43、image 7、diagram 2）、chart=9、kinds Text163/List11/Group6/Chart9，与既有 189 vectors 一致；在 scratchpad 完整副本上 `publish` 两次幂等回到同一 `a7384f0c`（member_count 189、dims [2560]、retrieval snapshot `f59d2308…`、source_activated true、status ready）。**未覆盖项**：真实 `index` 未能在本地 embedder 上运行（`scripts/enterprise_pdf_rag/with_local_models.py` 报 `TunnelConfigurationError: Missing or invalid setting: LOCAL_MODELS_SSH_HOST`，当前 shell 无隧道配置），真实链路 index 需隧道环境；通用 `ingest` 亦从未对真实 PDF 跑过（`data/ingestion/` 不存在）。冒烟前后 `git status --short data/` 为空、两个 current 指针 shasum 不变；全部改动仍未 commit。这只是资格/索引/发布入口，**不等于通用 RAG 回答链完成**，OpenAI-compatible chat 仍只有来源审阅。
 
 可复制 API 请求和完整能力边界见 [测试与入库指南](testing-and-ingestion.md)。
 
 ## 当前后续工作顺序
 
-本轮 RAG 改动保持未 commit / 未 push；已发布的是 SDK 0.11.0。不要根据下方历史清单再次发布同一版本、重做已修复的 SVG smoke，或回退正式 lock。当前可测试范围以 [测试与入库指南](testing-and-ingestion.md) 为准。
+本轮 RAG 改动保持未 commit / 未 push；已发布的是 SDK 0.11.0。（2026-09-20 补记：这些改动已在原仓库以 `03357a4` 提交，并随上方四个提交并入 rag-spine；此后的工作在 rag-spine 仓库进行。）不要根据下方历史清单再次发布同一版本、重做已修复的 SVG smoke，或回退正式 lock。当前可测试范围以 [测试与入库指南](testing-and-ingestion.md) 为准。
 
 优先按用户的通用文档目标推进：
 
-1. （已完成 2026-09-19）为通用 `ingest_pdf` 的 draft 建立明确的资格、description-only 索引和发布入口，按返回的 store/manifest ID 工作，避免再写死 AIA 文件名、页数或来源 SHA。入口 `src/enterprise_pdf_rag/adapters/draft_publication.py` 与 CLI `qualify|index|publish`；证据见离线 E2E `tests/adapters/test_generic_publication_e2e.py`、单元 `tests/adapters/test_draft_publication.py` 及上方恢复记录的真实 `qualify`/`publish` 冒烟（eligible=189、幂等回到 `a7384f0c`）。真实 embedder `index` 需隧道，属未覆盖。
-2. **（下一步）** 接入文档目录/选择与通用服务挂载，保持不可变 source/retrieval snapshot、损坏证据拒绝、无隐式模型调用及配置隔离。消费 `DraftPublication` 的 `source_store`/`processing_store`/`current_processing_id`，用它们构造 `create_processing_router(sources, outputs, processing_id, embedder=)` 的 store 与 ID，替换 app factory 里写死的 AIA store 根。
-3. 在上述证据链上实现自然语言检索回答，并独立验收普通文本、表格、图表的引用与拒答。当前 OpenAI-compatible chat 仍只有来源审阅，不能称为通用 RAG 聊天。
+1. （已完成 2026-09-19）为通用 `ingest_pdf` 的 draft 建立明确的资格、description-only 索引和发布入口，按返回的 store/manifest ID 工作，避免再写死 AIA 文件名、页数或来源 SHA。入口 `src/enterprise_pdf_rag/adapters/draft_publication.py` 与 CLI `qualify|index|publish`；证据见离线 E2E `tests/enterprise_pdf_rag/adapters/test_generic_publication_e2e.py`、单元 `tests/enterprise_pdf_rag/adapters/test_draft_publication.py` 及上方恢复记录的真实 `qualify`/`publish` 冒烟（eligible=189、幂等回到 `a7384f0c`）。真实 embedder `index` 需隧道，属未覆盖。
+2. **（下一步，在 rag-spine 上实现）** 接入文档目录/选择与通用服务挂载，保持不可变 source/retrieval snapshot、损坏证据拒绝、无隐式模型调用及配置隔离。消费 `DraftPublication` 的 `source_store`/`processing_store`/`current_processing_id`，用它们构造 `create_processing_router(sources, outputs, processing_id, embedder=)` 的 store 与 ID，替换 `src/enterprise_pdf_rag/adapters/http/app.py` app factory 里写死的 AIA store 根；实现与测试落在 `src/enterprise_pdf_rag/adapters/` 与 `tests/enterprise_pdf_rag/adapters/`。
+3. **（在 rag-spine 上实现）** 在上述证据链上实现自然语言检索回答：复用 `ragspine.retrieval` 的 `HybridRetriever` / rerank 与 `ragspine.agent` 的反捏造编排消费已发布的 retrieval snapshot（描述向量与 snapshot_id/member_id 回填），而不是在本包内再写一套检索；保持本包的不可变快照、损坏证据拒绝与拒答边界，以及 ragspine 的 anti-fabrication / provenance 不变量。并独立验收普通文本、表格、图表的引用与拒答。当前 OpenAI-compatible chat 仍只有来源审阅，不能称为通用 RAG 聊天。
 4. 第 20 页 v2 属于独立的待完成验收：仍未新增描述 embedding、未运行新 runtime 38-case 真 API 验收、未激活。若继续该切片，沿 ADR 0009 的独立评测和 atomic activation 门推进，不把两个样本事实当成通用图表能力。
 5. 准备提交/推送时再次核对用户授权与实际工作树，运行既有完整门；GitHub Linux CI 和 Databricks 部署只有实际执行后才能标记完成。
 
@@ -66,7 +98,7 @@ sed -n '1,240p' docs/adr/0009-source-qualified-expense-ratio-bar-lookup.md
 
 - Python 3.12；本地使用 `uv`，Databricks 预期通过普通 `pip install .` 安装。
 - 遵循 ADR + TDD。
-- Ruff 可安全修复及格式化；`./ci.sh` 是唯一离线、只读的完整质量门。
+- Ruff 可安全修复及格式化；`bash scripts/ci.sh` 是唯一离线、只读的完整质量门。
 - 领域层仅用 stdlib、immutable 数据和 `Protocol`；外部 SDK 位于 adapters。
 - `pdfspine` 是唯一 PDF parser。
 - 普通迭代不得触发 LLM。
@@ -93,9 +125,9 @@ sed -n '1,240p' docs/adr/0009-source-qualified-expense-ratio-bar-lookup.md
 - 新增独立 `PointPeriodInterpretation`，与 category 共享源 occurrence。
 - 已保留字段引用、原页汇率 footer 引用和 description normalization receipt。
 - v1 donut 行为保持不变。
-- ADR：`docs/adr/0009-source-qualified-expense-ratio-bar-lookup.md`
-- 阶段说明：`docs/chart-qa-bar-stage.md`
-- Gold：`benchmarks/aia-2026-interim/chart-qa-bar-gold-v1.json`
+- ADR：`docs/enterprise-pdf-rag/adr/0009-source-qualified-expense-ratio-bar-lookup.md`
+- 阶段说明：`docs/enterprise-pdf-rag/chart-qa-bar-stage.md`
+- Gold：`benchmarks/enterprise-pdf-rag/aia-2026-interim/chart-qa-bar-gold-v1.json`
 - 已实现新 source profile、stroke/bar proof、8-lineage、存储 resolver、immutable draft/append/independent targets、v2 capture/evaluator。
 - 两组交叉只读 review 均无阻塞问题。
 
@@ -106,7 +138,7 @@ sed -n '1,240p' docs/adr/0009-source-qualified-expense-ratio-bar-lookup.md
 - 运行候选完整门必须使用：
 
 ```bash
-UV_PROJECT_ENVIRONMENT=/Users/linhan/startup/enterprise-pdf-rag/data/validation/chart-qa-venv UV_NO_SYNC=true ./ci.sh
+UV_PROJECT_ENVIRONMENT=/Users/linhan/startup/enterprise-pdf-rag/data/validation/chart-qa-venv UV_NO_SYNC=true bash scripts/ci.sh
 ```
 
 - 原因：避免 `uv` 按旧 lock 将 SDK 降级。
@@ -142,7 +174,7 @@ UV_PROJECT_ENVIRONMENT=/Users/linhan/startup/enterprise-pdf-rag/data/validation/
 - 现有服务未重启，current 未切换；未新增 LLM、embedding 或 rerank 调用。
 - `current-processing` 文件 SHA-256：`c98a31f23ee1d54111352d8dfa290e0aa68e383a26aaa435ac48a3b3767f6baf`
 - Review 文件：`data/output/aia-2026-interim/pages-001-020/review.html`
-- 只使用 `scripts/start.sh` / `scripts/webui_preview.py` 的已有 owned-process 管理；不得 kill 外部服务。
+- 只使用 `scripts/enterprise_pdf_rag/start.sh` / `scripts/enterprise_pdf_rag/webui_preview.py` 的已有 owned-process 管理；不得 kill 外部服务。
 
 ## 第 20 页候选证据
 
@@ -164,7 +196,7 @@ UV_PROJECT_ENVIRONMENT=/Users/linhan/startup/enterprise-pdf-rag/data/validation/
 3. 确认 SDK exact-main CI 全部成功；创建 annotated `v0.11.0` tag，必须准确指向 `5a1f22e` 并 push。
 4. 等既有 `release.yml` 完成 5 wheels + sdist + PyPI；禁止 force，也禁止本地 twine 绕过检查。
 5. 验证官方 PyPI 0.11.0；精确升级 RAG 的 `pyproject.toml` 和 `uv.lock`。
-6. 运行 `make fmt`、完整 `./ci.sh`、fresh Python 3.12 plain-pip smoke，以及 checkout 外 smoke。
+6. 运行 `make fmt`、完整 `bash scripts/ci.sh`、fresh Python 3.12 plain-pip smoke，以及 checkout 外 smoke。
 7. 仅在上述全部通过后，用既有本地 embedding 配置调用一次新 description embedding；保持同 fingerprint、2560 维，原样复用 189 个旧 vectors，最终为 190。
 8. 禁止新增 LLM 或 rerank 调用。
 9. 执行 draft/save/source-aware independent targets，并跑真实 v2 gold 19 cases 与 v1 旧 19 cases 回归；旧 runtime 的 v1 此前 19 cases 已通过，新 runtime 合计 38 cases 尚未实跑。

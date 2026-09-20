@@ -45,7 +45,7 @@ It must accompany an answer as context, but it does not prove that two displayed
 
 ## Versioned gold plan
 
-Create `benchmarks/aia-2026-interim/chart-qa-bar-gold-v1.json` after the v2 DTO is frozen. Do not edit `chart-qa-gold-v1.json` or reuse its report identity.
+Create `benchmarks/enterprise-pdf-rag/aia-2026-interim/chart-qa-bar-gold-v1.json` after the v2 DTO is frozen. Do not edit `chart-qa-gold-v1.json` or reuse its report identity.
 
 Positive cases:
 
@@ -75,10 +75,10 @@ The evaluator must report answer precision and positive coverage, business refus
 
 After the production v2 DTO is frozen, the independent evaluation owner should add only new versioned files:
 
-- `benchmarks/aia-2026-interim/chart-qa-bar-gold-v1.json`;
+- `benchmarks/enterprise-pdf-rag/aia-2026-interim/chart-qa-bar-gold-v1.json`;
 - `src/enterprise_pdf_rag/adapters/chart_qa_v2_capture.py`;
 - `src/enterprise_pdf_rag/adapters/chart_qa_v2_evaluation.py`;
-- `tests/adapters/test_chart_qa_v2_capture.py`;
-- `tests/adapters/test_chart_qa_v2_evaluation.py`.
+- `tests/enterprise_pdf_rag/adapters/test_chart_qa_v2_capture.py`;
+- `tests/enterprise_pdf_rag/adapters/test_chart_qa_v2_evaluation.py`.
 
 The v2 tools must require caller-supplied gold, target and output paths and must not search a source checkout at import time. They must write a distinct content-addressed evaluation directory, preserve captured API bytes, and make no model or embedding call. Production domain, API, resolver, promotion and source-proof files remain owned by their respective implementation owners.

@@ -6,11 +6,11 @@ covers: src/enterprise_pdf_rag/adapters/pdfspine_figure.py, src/enterprise_pdf_r
 
 | Behavior | Observed red | Observed green |
 | --- | --- | --- |
-| Real PDF → readable SVG/source anchors | `pytest tests/adapters/test_pdfspine_figure.py` failed importing the absent parser | Same test passed after the pdfspine-only adapter |
-| SVG two branches → retrieval → ChartIR context | `pytest tests/adapters/test_demo.py` failed importing absent runtime | The source PDF, explicit 10/15 values, same binding and populated field evidence passed |
+| Real PDF → readable SVG/source anchors | `pytest tests/enterprise_pdf_rag/adapters/test_pdfspine_figure.py` failed importing the absent parser | Same test passed after the pdfspine-only adapter |
+| SVG two branches → retrieval → ChartIR context | `pytest tests/enterprise_pdf_rag/adapters/test_demo.py` failed importing absent runtime | The source PDF, explicit 10/15 values, same binding and populated field evidence passed |
 | Review HTML contains a real inline SVG | CLI entry test failed because XML serialization emitted `ns0:svg` | Default-namespace serialization rendered `<svg>` and the entry test passed |
 | Invalid HTTP query fails at boundary | Whitespace query reached embedder and raised ValueError | Strict Pydantic validation returns 422; string-to-number coercion is rejected |
-| Domain eligibility | See ADR 0002 and `tests/figures/test_pipeline.py` | Qualified same-source pairs pass; missing/contradictory/unqualified evidence fails closed |
+| Domain eligibility | See ADR 0002 and `tests/enterprise_pdf_rag/figures/test_pipeline.py` | Qualified same-source pairs pass; missing/contradictory/unqualified evidence fails closed |
 
 The HTTP harness uses `httpx2.ASGITransport`, avoiding a deprecated Starlette TestClient/AnyIO alias; warnings are not suppressed. Beartype remains enabled, including tests. The environment uses the real released pdfspine 0.10.0 wheel. No alternate PDF parser or model was invoked by the offline figure pipeline or test gate.
 
@@ -20,7 +20,7 @@ Executed manual smoke commands from README:
 - AIA physical page 10, bounds `(30,120,310,330)`: produced 7 anchored source elements, `pending`; clipPath and two compound-path limitations were reported. This is a diagnostic, not a production completeness verdict.
 - In-process HTTP: ingest 201, search/context 200, cross-snapshot 409, malformed requests 422.
 
-The final verification command is `./ci.sh`. Its outcome should be reported from the actual latest run rather than from this static document.
+The final verification command is `bash scripts/ci.sh`. Its outcome should be reported from the actual latest run rather than from this static document.
 
 Independent review found two qualification gaps: equal-text wrong occurrences and mismatched bundle figure/source metadata. Both received failing regression tests before correction. A separate trusted fixture adapter now records exact occurrences independently of the two producers; source receipt tampering and absent receipts fail. The adapter test first failed on its absent implementation, then passed with explicit source registration.
 

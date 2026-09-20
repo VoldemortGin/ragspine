@@ -69,6 +69,8 @@
 
 另有 `dify_debug/`（第三方 Dify 源码，调试用）与 `var/`，不是家族成员，本文不覆盖。
 
+`ragspine/` 仓内另含 **sibling package `enterprise_pdf_rag`**（2026-09-20 由独立仓库 `~/startup/enterprise-pdf-rag` 经 git subtree 并入，同一个 `pyproject.toml`、独立 import 名、不在 `ragspine.*` 下；决定见 ragspine `docs/adr/0021`）。它不是独立成员仓，不单列一行；原仓库保留为并入前快照（分支 `merge/into-ragspine`）。
+
 ---
 
 ## 3. 分层与依赖方向图
@@ -229,6 +231,7 @@ L0 底座     corespine (deps=[])        ocrspine (crate, 零依赖)
   全是 PyPI 约束 + 延迟 import（uv.lock 三者实解 0.4.0）。**不依赖 spineagent**（只在 `dify/codegen/spineagent.py:65` 生成代码字符串）。
   全仓无任何 `git+…@rev`。
 - **被谁依赖**：spinestudio（唯一真消费者，12 imports）；examples（.venv）。
+- **同仓 sibling package `enterprise_pdf_rag`**（2026-09-20 并入）：财务 PDF 可追溯 RAG 后端——CAS 不可变快照 + 证据链 + 来源资格化 chart QA。共用 `pyproject.toml`，console script `enterprise-pdf-rag`，硬依赖 `pdfspine>=0.11.0`（非延迟 import）；代码 `src/enterprise_pdf_rag/`、文档 `docs/enterprise-pdf-rag/`、契约 `src/enterprise_pdf_rag/CLAUDE.md`。ragspine 的 `HybridRetriever`/rerank/agent 尚未接入它的回答链（ragspine ADR 0021 待办）。
 - **家族相关文档在哪**：`llms.txt:12-14,21-24`、`docs/llms/overview.md:73-87`（"与 corespine 的关系"，6 条缝逐条列出；L87 坦白 path override）、
   `docs/llms/gotchas.md:54-57`（`make_vector_store` 用自己的 entry-point，**不是** `corespine.Registry`）。
   **`ragspine/CLAUDE.md` 一个字不提家族 / corespine**。

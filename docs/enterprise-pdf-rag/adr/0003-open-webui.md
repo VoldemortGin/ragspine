@@ -8,7 +8,7 @@ Open WebUI permission flags alone do not enforce the PDF-entry boundary: adminis
 
 The official target version is pinned; an already installed older version may be used only as a separately labelled compatibility preview. No global dependency or VM installation is part of this change. If an engine is unavailable, report actual startup limits instead of claiming a running target container. Existing services and profiles remain untouched.
 
-Validate the backend protocol and deployment gate using offline behavioral TDD, then `./ci.sh`. Exercise a real local Open WebUI page when an existing isolated runtime permits it. Do not rerun paid LLM connectivity checks or download embedding/rerank models.
+Validate the backend protocol and deployment gate using offline behavioral TDD, then `bash scripts/ci.sh`. Exercise a real local Open WebUI page when an existing isolated runtime permits it. Do not rerun paid LLM connectivity checks or download embedding/rerank models.
 
 Official references checked:
 
@@ -21,7 +21,7 @@ The existing frontend/backend production limitations in ADRs 0001 and 0002 remai
 
 The environment builder constructs the full child environment instead of copying the parent. It disables python-dotenv loading and puts SQLite, static assets, caches and the session secret in the private data directory. The installed vendor's `static` directory is not used as writable storage. Source-based official containers report their version through `/app/package.json`; pip installations use distribution metadata. The two versions remain explicitly distinguished.
 
-The OpenAI subset has a separate reviewed contract, `docs/schemas/openai-demo-v1.json`; the existing figure API contract remains unchanged. The deployment gate responds to exact read-only tool/channel discovery with empty capability lists, without calling vendor tool-server discovery. Uploads, built-in document retrieval, tools and configuration writes still fail before vendor code runs, including for an admin session.
+The OpenAI subset has a separate reviewed contract, `docs/enterprise-pdf-rag/schemas/openai-demo-v1.json`; the existing figure API contract remains unchanged. The deployment gate responds to exact read-only tool/channel discovery with empty capability lists, without calling vendor tool-server discovery. Uploads, built-in document retrieval, tools and configuration writes still fail before vendor code runs, including for an admin session.
 
 TDD evidence: model discovery first returned 404; stream requests first returned 422; unguarded attachment/tool inputs first reached the vendor; UI discovery first returned 403. The corresponding tests now verify model/response/SSE contracts, rejection before SSE headers, rejection before vendor execution and explicit empty disabled-capability discovery. The environment test verifies that upstream credentials, unrelated database/object-storage settings and model-download settings are not inherited. Actual running version and deployment verification are recorded separately in the usage documentation.
 

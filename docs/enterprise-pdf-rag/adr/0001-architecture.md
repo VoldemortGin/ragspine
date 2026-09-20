@@ -27,6 +27,6 @@ LLM connectivity is a separate explicit `llm-smoke` command reading only process
 
 ## Validation
 
-Implement observable behaviors one at a time using red → green → refactor. The single read-only ./ci.sh gate uses the locked toolchain, Ruff, strict mypy, architecture/schema/drift checks and offline warnings-as-errors tests. No commit, push or deployment is authorized by this milestone.
+Implement observable behaviors one at a time using red → green → refactor. The single read-only bash scripts/ci.sh gate uses the locked toolchain, Ruff, strict mypy, architecture/schema/drift checks and offline warnings-as-errors tests. No commit, push or deployment is authorized by this milestone.
 
 Run focused offline tests during TDD, then the full gate after substantial changes and at phase completion. Live LLM tests remain an explicit separate command, reserved for major releases or material model-call-flow changes. Routine implementation, configuration and sanitization changes use transport substitutes, never automatic paid calls. The initial authorized connectivity probe is complete and must not be repeatedly invoked as a general regression test. Connectivity does not constitute the later chart golden-set quality acceptance.

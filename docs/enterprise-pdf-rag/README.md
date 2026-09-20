@@ -4,13 +4,13 @@ Python 3.12 / uv 文档 RAG 后端，目标是为不同 PDF 提供可追溯的�
 
 样本为 AIA 官网公开可查的《2026 Interim Results Presentation》（2026 年 8 月 20 日），来源是 [AIA 官方业绩与报告页](https://www.aia.com/en/investor-relations/overview/results-presentations)及[官方 PDF](https://www.aia.com/content/dam/group-wise/en/docs/investor-relations/2026/AIA%20Group%202026%20Interim%20Results%20Analyst%20Presentation%20Final.pdf)，并非私有客户数据。原 PDF 不随公共仓库发布。2026-09-19 已核对官方页面、PDF 封面日期和 71 页页数；本地文件身份仍由下文 SHA-256 固定。
 
-**现在可以测试** Open WebUI 来源/处理结果审阅、原文 API、已发布描述索引的在线语义搜索与证据回填，以及第 18 页已取得资格的结构化 ChartQA。2026-09-19 已在官方 pdfspine 0.11.0 环境受控重启并完成一次真实本地查询向量搜索，返回 5 条命中且回填保持同一快照；普通自然语言财务聊天仍返回 422。具体入口、请求、凭证要求和通用 RAG 的剩余条件见 [测试与入库指南](docs/testing-and-ingestion.md)。界面可打开不代表 RAG 全链路通过。
+**现在可以测试** Open WebUI 来源/处理结果审阅、原文 API、已发布描述索引的在线语义搜索与证据回填，以及第 18 页已取得资格的结构化 ChartQA。2026-09-19 已在官方 pdfspine 0.11.0 环境受控重启并完成一次真实本地查询向量搜索，返回 5 条命中且回填保持同一快照；普通自然语言财务聊天仍返回 422。具体入口、请求、凭证要求和通用 RAG 的剩余条件见 [测试与入库指南](testing-and-ingestion.md)。界面可打开不代表 RAG 全链路通过。
 
 当前验收样本是 AIA Group 报告。页面布局、typed IR、独立描述和资格回执分别保存；模型产物初始为 **pending**，成功保存不等于独立验证。只有逐字原文投影或具有完整字段资格的描述可以进入真实本地 embedding；ChartIR 和 SVG 不进入 embedding。`text.json` 仍是 pdfspine 原文观测。每页/对象是否已完成、失败或尚未运行，以处理 manifest 和实际文件为准。
 
-本次实际产物覆盖 **20 页、241 个对象，241 份 IR 和 241 份描述/来源转录**。189 份描述投影保持原样复用，其中 180 份证明原文转录，9 份证明图表标签。第 18 页 Distribution Mix 的一个图表另已取得 **2 个显式百分比的数值关系资格**，支持受限查值和有序百分点差；其他图表不因此获准数值回答。独立真实 API 评测的 19 个正例、拒答和证据损坏案例通过，仍不代表完整 P5 或通用财务问答完成。初始加工结果见 [加工验收记录](docs/processing-run-2026-09-19.md)，新增资格与限制见 [ChartQA 阶段说明](docs/chart-qa-stage.md)。
+本次实际产物覆盖 **20 页、241 个对象，241 份 IR 和 241 份描述/来源转录**。189 份描述投影保持原样复用，其中 180 份证明原文转录，9 份证明图表标签。第 18 页 Distribution Mix 的一个图表另已取得 **2 个显式百分比的数值关系资格**，支持受限查值和有序百分点差；其他图表不因此获准数值回答。独立真实 API 评测的 19 个正例、拒答和证据损坏案例通过，仍不代表完整 P5 或通用财务问答完成。初始加工结果见 [加工验收记录](processing-run-2026-09-19.md)，新增资格与限制见 [ChartQA 阶段说明](chart-qa-stage.md)。
 
-本地继续使用 uv；独立的 Python 3.12 环境可直接 `python -m pip install .` 安装完整后端运行依赖，包括 pdfspine、SVG renderer 和来源字形验证所需的 FontTools。`pdf` / `processing` extras 保留为空兼容别名，无需额外选择。安装后用 `enterprise-pdf-rag serve` 启动已有 API，并通过 `APP_ROOT_DIR` / `APP_DATA_DIR` 指定源码目录以外的工作区与持久数据。Open WebUI 仍是单独安装和隔离的服务，不随本包安装。环境条件、可复制命令及 Databricks 平台区别见 [部署说明](docs/databricks-deployment.md)；本地安装验证不代表已在 Databricks 部署。
+本地继续使用 uv；独立的 Python 3.12 环境可直接 `python -m pip install .` 安装完整后端运行依赖，包括 pdfspine、SVG renderer 和来源字形验证所需的 FontTools。`pdf` / `processing` extras 保留为空兼容别名，无需额外选择。安装后用 `enterprise-pdf-rag serve` 启动已有 API，并通过 `APP_ROOT_DIR` / `APP_DATA_DIR` 指定源码目录以外的工作区与持久数据。Open WebUI 仍是单独安装和隔离的服务，不随本包安装。环境条件、可复制命令及 Databricks 平台区别见 [部署说明](databricks-deployment.md)；本地安装验证不代表已在 Databricks 部署。
 
 ## 通用 PDF 入库
 
@@ -19,12 +19,12 @@ Python 3.12 / uv 文档 RAG 后端，目标是为不同 PDF 提供可追溯的�
 ```sh
 enterprise-pdf-rag ingest --pdf /path/to/document.pdf --pages 1-3,5
 # 仓库中的薄封装使用同一组参数
-python scripts/ingest.py --pdf /path/to/document.pdf --pages all
+python scripts/enterprise_pdf_rag/ingest.py --pdf /path/to/document.pdf --pages all
 ```
 
 默认 `--stage source --max-live-calls 0`，不需要模型凭证，保存完整 PDF 的来源资产，并为选择的物理页生成 Canonical 原文观测。`--pages` 不截断原始 PDF 或来源页缓存。输出默认在 `APP_DATA_DIR/ingestion/<PDF-SHA256>/{source,processing}`；用 `--output-dir <父目录>` 可修改父目录。结果 JSON 返回 store 路径、source/processing ID、实际页数、选页、阶段状态和审阅路径，明确 `activated: false`、`indexed: false`；不会修改当前 AIA 发布或把新 PDF 自动接入 Open WebUI。
 
-可显式选择 `--stage layout` 或 `--stage semantics`，使用同一套既有布局和独立语义分支；两者即使预算为 0 也须提供模型配置以定位缓存，正预算会调用配置的模型。该入口解除 AIA 文件身份和 20 页上限，但现有来源适配器仍对旋转页、非默认 CropBox 等未验证坐标场景明确拒绝。缓存、安装后 Python API、能力限制与后续 RAG 验收条件见 [测试与入库指南](docs/testing-and-ingestion.md) 和 [ADR 0010](docs/adr/0010-generic-pdf-ingestion-entry.md)。
+可显式选择 `--stage layout` 或 `--stage semantics`，使用同一套既有布局和独立语义分支；两者即使预算为 0 也须提供模型配置以定位缓存，正预算会调用配置的模型。该入口解除 AIA 文件身份和 20 页上限，但现有来源适配器仍对旋转页、非默认 CropBox 等未验证坐标场景明确拒绝。缓存、安装后 Python API、能力限制与后续 RAG 验收条件见 [测试与入库指南](testing-and-ingestion.md) 和 [ADR 0010](adr/0010-generic-pdf-ingestion-entry.md)。
 
 入库产出的 draft 由三条独立命令按上面返回的 store 根和 `processing_id` 推进，不写死 AIA 身份：
 
@@ -45,7 +45,7 @@ uv sync --locked --extra pdf
 uv run --locked enterprise-pdf-rag ingest-aia
 ```
 
-输入固定为 `data/samples/aia-group-2026-interim-results-presentation.pdf`，SHA-256 必须为 `df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e`。PDF 不随公共仓库分发；下载位置与来源见 [样本说明](docs/samples/aia-report.md)，[71 页盘点](docs/samples/aia-2026-interim-inventory.md) 和 [基准 manifest](benchmarks/aia-2026-interim/manifest.json)。不匹配的文件在解析前拒绝；缺页或失败有明确诊断，不静默遗漏。
+输入固定为 `data/samples/aia-group-2026-interim-results-presentation.pdf`，SHA-256 必须为 `df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e`。PDF 不随公共仓库分发；下载位置与来源见 [样本说明](samples/aia-report.md)，[71 页盘点](samples/aia-2026-interim-inventory.md) 和 [基准 manifest](../../benchmarks/enterprise-pdf-rag/aia-2026-interim/manifest.json)。不匹配的文件在解析前拒绝；缺页或失败有明确诊断，不静默遗漏。
 
 全部输出在 `data/output/aia-2026-interim/`，不使用项目根的 `output/`：
 
@@ -92,7 +92,7 @@ uv run --locked enterprise-pdf-rag index-aia-processing \
   --processing-id <processing-id> --query "Distribution Mix chart" --limit 5
 ```
 
-该命令要求独立的 `EMBEDDING_BASE_URL/MODEL/API_KEY` 和 `RERANK_BASE_URL/MODEL/API_KEY`，仅允许本机回环服务；远端模型经项目管理的 SSH 隧道接入。`scripts/with_local_models.py` 可把运行时读取的服务 key 仅传给子进程，具体主机配置不入库。不会继承云端 LLM key 或回退为 hash embedding。向量、描述、IR、源 SVG、资格和原始两支属于同一固定检索 snapshot，任何缺失或失配都拒绝。
+该命令要求独立的 `EMBEDDING_BASE_URL/MODEL/API_KEY` 和 `RERANK_BASE_URL/MODEL/API_KEY`，仅允许本机回环服务；远端模型经项目管理的 SSH 隧道接入。`scripts/enterprise_pdf_rag/with_local_models.py` 可把运行时读取的服务 key 仅传给子进程，具体主机配置不入库。不会继承云端 LLM key 或回退为 hash embedding。向量、描述、IR、源 SVG、资格和原始两支属于同一固定检索 snapshot，任何缺失或失配都拒绝。
 
 每次验收另存 `retrieval-evaluations/<内容标识>/` 下的 `retrieval-example.json` 和 `retrieval-validation.json`，记录模型配置来源、维度、完整召回候选、cosine/重排分数、命中对象的审阅路径和金融 guard 检查。早期直接放在 run 目录的失败记录保留，不被后续验收覆盖。`coverage.json` 分开统计 IR/描述保存、仅转录资格、仅标签资格与数值关系资格；某个字段 unavailable 不会被总对象数量掩盖。
 
@@ -101,19 +101,19 @@ uv run --locked enterprise-pdf-rag index-aia-processing \
 本机已有 Open WebUI **0.6.5** 时，可启动隔离兼容预览：
 
 ```sh
-./scripts/start.sh
-uv run --locked python scripts/webui_preview.py status
+./scripts/enterprise_pdf_rag/start.sh
+uv run --locked python scripts/enterprise_pdf_rag/webui_preview.py status
 # 停止本项目的两个进程，保留数据
-uv run --locked python scripts/webui_preview.py stop
+uv run --locked python scripts/enterprise_pdf_rag/webui_preview.py stop
 ```
 
-`start.sh` 可通过其绝对路径从任意目录执行。它读取现有 `current-processing`，要求已发布的前 20 页产物；复用属于本项目且服务同一快照的健康进程，打印界面、审阅、日志和停止方式。缺依赖或数据时明确退出，不安装依赖、不处理 PDF、不调用模型。先用 `uv sync --locked --extra pdf` 准备项目环境；Open WebUI 解释器从 `PATH` 中发现，或用 `OPEN_WEBUI_PYTHON=/path/to/environment/bin/python ./scripts/start.sh` 明确指定已有 Python 3.12 / Open WebUI 0.6.5 环境。脚本不读取个人 shell 配置或 `.env`，厂商进程仍使用隔离白名单环境。
+`start.sh` 可通过其绝对路径从任意目录执行。它读取现有 `current-processing`，要求已发布的前 20 页产物；复用属于本项目且服务同一快照的健康进程，打印界面、审阅、日志和停止方式。缺依赖或数据时明确退出，不安装依赖、不处理 PDF、不调用模型。先用 `uv sync --locked --extra pdf` 准备项目环境；Open WebUI 解释器从 `PATH` 中发现，或用 `OPEN_WEBUI_PYTHON=/path/to/environment/bin/python ./scripts/enterprise_pdf_rag/start.sh` 明确指定已有 Python 3.12 / Open WebUI 0.6.5 环境。脚本不读取个人 shell 配置或 `.env`，厂商进程仍使用隔离白名单环境。
 
 打开 [Open WebUI](http://127.0.0.1:8767)，选择 `AIA 2026 中期业绩 — 原文审阅 / 语义待验证`，输入 `查看当前文件` 或 `查看第25页`。API 在 `127.0.0.1:8766`；[来源浏览](http://127.0.0.1:8766/v1/aia/review) 提供原始资产与逐页入口。回答固定到已保存的 manifest，不调用模型、不使用合成数值回退。已有处理批次时，`查看当前文件` 显示实际处理统计并链接前 20 页产物；71 页来源浏览仍独立保留。
 
 Open WebUI 的内置上传、PDF 解析、RAG、工具和后台自动生成被部署边界阻断。厂商进程使用私有数据库、静态资产、缓存和最小环境，拿不到上游 API key。默认业务 profile 是 `aia-source-review`。启动前需完成上述真实文件 ingestion；缺源资产会失败，不会自动切 demo。
 
-隔离容器固定官方 **0.11.3-slim** 镜像摘要；本机无可用 Docker daemon，容器尚未实际运行。启动方式、版本区别、限制和已知旧版首次启动静态资产副作用见 [Open WebUI 使用说明](docs/open-webui.md)。不安装或修改全局依赖。
+隔离容器固定官方 **0.11.3-slim** 镜像摘要；本机无可用 Docker daemon，容器尚未实际运行。启动方式、版本区别、限制和已知旧版首次启动静态资产副作用见 [Open WebUI 使用说明](open-webui.md)。不安装或修改全局依赖。
 
 ## 来源 API
 
@@ -137,7 +137,7 @@ Open WebUI 的内置上传、PDF 解析、RAG、工具和后台自动生成被�
 uv run --locked --no-sync enterprise-pdf-rag chart-qa --request query.json
 ```
 
-`query.json` 必须指定 `kind: "chart"`、实际 `processing_id` / `snapshot_id` / `member_id`、`operation`、`series`、`period`、`unit` 及带 `point_id` / `category` 的 `points`。`lookup` 接受一个点；`percentage_point_difference` 接受两个有序点，结果单位为 `percentage_points`，不会伪造原文 display。请求不能提交数值、verified 标志或任意公式。旧标签资格快照仍拒绝数值查询；不可用证据与跨快照错误也不会回退到摘要。具体资格前提、独立金标和未完成的 PRD 门见 [ChartQA 阶段说明](docs/chart-qa-stage.md)。
+`query.json` 必须指定 `kind: "chart"`、实际 `processing_id` / `snapshot_id` / `member_id`、`operation`、`series`、`period`、`unit` 及带 `point_id` / `category` 的 `points`。`lookup` 接受一个点；`percentage_point_difference` 接受两个有序点，结果单位为 `percentage_points`，不会伪造原文 display。请求不能提交数值、verified 标志或任意公式。旧标签资格快照仍拒绝数值查询；不可用证据与跨快照错误也不会回退到摘要。具体资格前提、独立金标和未完成的 PRD 门见 [ChartQA 阶段说明](chart-qa-stage.md)。
 
 ## 显式合成回归示例
 
@@ -146,7 +146,7 @@ uv run --locked --no-sync enterprise-pdf-rag chart-qa --request query.json
 ```sh
 uv run --locked enterprise-pdf-rag demo --mode offline-demo --output data/output/demo
 # 仅在明确需要检查合成UI回归时使用；需先停止当前预览
-uv run --locked python scripts/webui_preview.py start --profile offline-demo
+uv run --locked python scripts/enterprise_pdf_rag/webui_preview.py start --profile offline-demo
 ```
 
 这个独立测试链覆盖同 SVG 的 ChartIR/description 配对、仅 description 的 demo token-hash embedding、固定 snapshot 回填和字段证据。这一合成链与真实 AIA 处理/本地模型配置分离；hash 向量不代表语义检索。保守的单页提取命令仍保留：
@@ -159,16 +159,16 @@ uv run --locked enterprise-pdf-rag extract \
 
 ## 开发与验收
 
-2026-09-19 正式依赖已锁定公开 PyPI `pdfspine==0.11.0`，完整 `./ci.sh` 通过 639 tests；独立 Python 3.12 的普通 pip 安装、`pip check` 和 checkout 外 smoke 通过。本机验证不代表 GitHub Linux CI 或 Databricks 部署已经完成。
+2026-09-19 正式依赖已锁定公开 PyPI `pdfspine==0.11.0`，完整 `bash scripts/ci.sh` 通过 639 tests；独立 Python 3.12 的普通 pip 安装、`pip check` 和 checkout 外 smoke 通过。本机验证不代表 GitHub Linux CI 或 Databricks 部署已经完成。
 
 ```sh
-uv run --locked pytest tests/documents  # TDD 先跑相关测试
+uv run --locked pytest tests/enterprise_pdf_rag/documents  # TDD 先跑相关测试
 make fmt                              # 本地安全修复与格式化，会写文件
-./ci.sh                               # 唯一完整、只读、离线工程门
+bash scripts/ci.sh                               # 唯一完整、只读、离线工程门
 ```
 
-重大改动后和阶段收尾必须运行完整 `./ci.sh`：Ruff、strict mypy、纯领域架构、版本化 schema、文档漂移、单元及离线集成测试，warnings 当作错误。测试不连接网络；真实语料测试在本地样本存在时执行，公共仓库不包含 PDF。协议与失败契约仍有独立小型离线 fixtures。
+重大改动后和阶段收尾必须运行完整 `bash scripts/ci.sh`：Ruff、strict mypy、纯领域架构、版本化 schema、文档漂移、单元及离线集成测试，warnings 当作错误。测试不连接网络；真实语料测试在本地样本存在时执行，公共仓库不包含 PDF。协议与失败契约仍有独立小型离线 fixtures。
 
 真实 LLM 测试只在大版本或模型调用流程实质变化时显式触发，普通改动使用 transport 替身。来源 ingestion 不需要 LLM；前 20 页的视觉语义加工则使用有预算、可缓存的实际模型请求。已有 `llm-smoke` 仅验证连接；从环境读取 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL`，不读取 `.env`、不打印密钥，也不证明图表质量。本地 embedding/rerank 使用独立配置，未配置时拒绝，不继承云端 LLM。
 
-架构和范围见 [ADR 0001](docs/adr/0001-architecture.md)、[图表链 ADR 0002](docs/adr/0002-figure-pipeline.md)、[UI ADR 0003](docs/adr/0003-open-webui.md)、[真实来源 ADR 0004](docs/adr/0004-aia-source-review.md)、[前 20 页 ADR 0005](docs/adr/0005-first-twenty-pages-processing.md)、[其他视觉 ADR 0006](docs/adr/0006-non-chart-visual-semantics.md)、[独立安装 ADR 0007](docs/adr/0007-installable-runtime.md)、[PRD v0.2](docs/PRD-v0.2.md)。PDF、密钥、运行产物、虚拟环境与本地 IDE 配置不进入公共仓库。
+架构和范围见 [ADR 0001](adr/0001-architecture.md)、[图表链 ADR 0002](adr/0002-figure-pipeline.md)、[UI ADR 0003](adr/0003-open-webui.md)、[真实来源 ADR 0004](adr/0004-aia-source-review.md)、[前 20 页 ADR 0005](adr/0005-first-twenty-pages-processing.md)、[其他视觉 ADR 0006](adr/0006-non-chart-visual-semantics.md)、[独立安装 ADR 0007](adr/0007-installable-runtime.md)、[PRD v0.2](PRD-v0.2.md)。PDF、密钥、运行产物、虚拟环境与本地 IDE 配置不进入公共仓库。

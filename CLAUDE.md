@@ -16,6 +16,7 @@ dependency is a `Protocol`, so the core imports zero SDKs and runs offline.
 
 ```
 src/ragspine/{common, extraction, ingestion, storage, retrieval, agent, eval, service}
+src/enterprise_pdf_rag/{core, documents, figures, processing, adapters, resources}   # sibling package — ADR 0021
 ```
 
 See the "Architecture" tree in `README.md` for what lives where and the request flow.
@@ -28,6 +29,9 @@ Full convention in `docs/README.md`. Short version:
 - **This file** — the always-on routing table. Keep it small; no content lives here.
 - `src/ragspine/<domain>/CLAUDE.md` — per-domain contract, auto-loaded in that subtree.
 - `src/ragspine/<domain>/docs/*.md` — deep dives, pulled by grep / explicit read.
+- `src/enterprise_pdf_rag/CLAUDE.md` (+ `AGENTS.md`) — contract of the sibling package
+  `enterprise_pdf_rag` (traceable financial-PDF RAG backend, ADR 0021); its handoff / PRD /
+  ADR 0001–0010 / schemas live in `docs/enterprise-pdf-rag/`.
 - `docs/` — cross-cutting: `architecture.md`, `invariants.md`, `glossary.md`, `adr/`.
 - `docs/generated/` — script-produced (API ref, indexes); git-ignored, never hand-edited.
 

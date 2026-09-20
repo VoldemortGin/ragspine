@@ -14,14 +14,14 @@ export EMBEDDING_REMOTE_PORT='28002'
 export RERANK_LOCAL_PORT='39001'
 export RERANK_REMOTE_PORT='28001'
 
-uv run --locked python scripts/local_model_tunnel.py start
-uv run --locked python scripts/local_model_tunnel.py status
+uv run --locked python scripts/enterprise_pdf_rag/local_model_tunnel.py start
+uv run --locked python scripts/enterprise_pdf_rag/local_model_tunnel.py status
 ```
 
 SSH 以参数数组启动，不经 shell 展开；它启用 `BatchMode`、`ExitOnForwardFailure` 和 keepalive，并把两条转发都绑定在 `127.0.0.1`。脚本不会读取或传送模型 API key。PID 与日志写入已被 Git 忽略的 `data/local-models/`，其中也不保存 key。停止时会核对 PID 的 SSH 命令、两个端口映射与目标主机，只终止仍匹配本项目配置的进程：
 
 ```sh
-uv run --locked python scripts/local_model_tunnel.py stop
+uv run --locked python scripts/enterprise_pdf_rag/local_model_tunnel.py stop
 ```
 
 ## 进程配置
@@ -61,8 +61,8 @@ export RERANK_MODEL='<served rerank model name>'
 export EMBEDDING_REMOTE_CONTAINER='<embedding container name>'
 export RERANK_REMOTE_CONTAINER='<rerank container name>'
 
-uv run --locked python scripts/with_local_models.py -- \
-  uv run --locked python scripts/local_model_smoke.py
+uv run --locked python scripts/enterprise_pdf_rag/with_local_models.py -- \
+  uv run --locked python scripts/enterprise_pdf_rag/local_model_smoke.py
 ```
 
 launcher 先确认本项目 PID 记录中的隧道仍在运行，再通过捕获的 SSH stdout 只读取得两个容器的 `VLLM_API_KEY`，随即把它们注入被 `exec` 替换后的单一子进程环境。key 不进入参数、终端输出、日志、PID 文件或磁盘。子进程环境按白名单重建，不继承无关的云凭据；需要云端图表模型的命令可显式传入现有 `OPENAI_API_KEY`、`OPENAI_BASE_URL` 和本次选择的 `OPENAI_MODEL`，但这些变量同样不得写入仓库。
@@ -72,9 +72,9 @@ launcher 先确认本项目 PID 记录中的隧道仍在运行，再通过捕获
 六个模型变量已安全注入当前子进程时，可运行一次合成探针：
 
 ```sh
-uv run --locked python scripts/local_model_smoke.py
+uv run --locked python scripts/enterprise_pdf_rag/local_model_smoke.py
 ```
 
-它各发一个短请求，只输出 embedding fingerprint、向量维度和 rerank 候选索引，不输出 key、向量、provider body 或候选正文。该命令不是默认测试或 CI 的一部分，不会重试，也不能证明模型对财报语义的质量。默认 `./ci.sh` 始终离线，使用 transport fake 验证请求与严格响应边界。
+它各发一个短请求，只输出 embedding fingerprint、向量维度和 rerank 候选索引，不输出 key、向量、provider body 或候选正文。该命令不是默认测试或 CI 的一部分，不会重试，也不能证明模型对财报语义的质量。默认 `bash scripts/ci.sh` 始终离线，使用 transport fake 验证请求与严格响应边界。
 
 云端图表理解使用独立的 `OPENAI_API_KEY`、`OPENAI_BASE_URL` 与 `OPENAI_MODEL`。需要时只给对应受控子进程显式设置；不得把云端 key 或本地模型 key 互相复用或写入全局 shell 配置。

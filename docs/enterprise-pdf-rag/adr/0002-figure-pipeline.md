@@ -40,5 +40,5 @@ producer 的 execution mode 显式记录；本切片未实现独立的生产来�
 
 每次按 red → green → refactor 完成一个行为，不先写满全部测试；通过项目锁定环境执行。
 
-已保留首个公开用例导入失败及后续错源、未验证字段、描述错配、SVG 来源映射、跨 snapshot、估计值与数字歧义的 red → green 过程。独立审查发现的伪造 bundle 来源与同名文字 occurrence 替换也各有先失败、修复后通过的公开用例测试；当前 `tests/figures/test_pipeline.py` 为 53 个离线行为测试。
-通过锁定环境的 Ruff safe fixes/format 与 `mypy --strict` 检查；完整工程只读门由 `./ci.sh` 统一执行。
+已保留首个公开用例导入失败及后续错源、未验证字段、描述错配、SVG 来源映射、跨 snapshot、估计值与数字歧义的 red → green 过程。独立审查发现的伪造 bundle 来源与同名文字 occurrence 替换也各有先失败、修复后通过的公开用例测试；当前 `tests/enterprise_pdf_rag/figures/test_pipeline.py` 为 53 个离线行为测试。
+通过锁定环境的 Ruff safe fixes/format 与 `mypy --strict` 检查；完整工程只读门由 `bash scripts/ci.sh` 统一执行。

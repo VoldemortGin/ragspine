@@ -85,7 +85,7 @@ curl --fail-with-body http://127.0.0.1:8766/v1/processing/context \
 
 app factory 在启动时读取既有独立配置，不读 `.env`，不在启动时连接模型。只接受 `127.0.0.1`、`localhost`、`::1` 的 HTTP(S) 地址；需要远端模型时使用已有受管 SSH 隧道。不要把云 LLM key 或任意远端 URL 填进 embedding 设置。模型 fingerprint 和向量维度必须与已发布索引一致，不能启动时重建或替换索引。
 
-通过现有安全配置方式将上述三项环境变量提供给启动器，再运行 `./scripts/start.sh`。启动器仅将 `EMBEDDING_*` 传给 API 子进程，厂商 Open WebUI 环境不继承它们。已有健康进程会被复用；修改代码或配置后，要通过已有 owned-process `stop` / `start` 流程受控重启才能生效，不能以一次 `start` 输出推断配置已经更新。具体命令见 [Open WebUI 使用说明](open-webui.md)。
+通过现有安全配置方式将上述三项环境变量提供给启动器，再运行 `./scripts/enterprise_pdf_rag/start.sh`。启动器仅将 `EMBEDDING_*` 传给 API 子进程，厂商 Open WebUI 环境不继承它们。已有健康进程会被复用；修改代码或配置后，要通过已有 owned-process `stop` / `start` 流程受控重启才能生效，不能以一次 `start` 输出推断配置已经更新。具体命令见 [Open WebUI 使用说明](open-webui.md)。
 
 缺少、部分缺少或无效配置时，来源读取继续工作，search 返回 503；服务连接/响应失败返回 503，不自动重试。错 snapshot、损坏证据或不匹配的模型/维度会被拒绝，不回退合成向量。当前 HTTP 搜索为 cosine 排序，已有 CLI 的 rerank 验收不等于在线搜索含 rerank。该回环配置限制尚未在 Databricks 网络部署中验收，安装通过也不能代替部署通过。
 
@@ -106,11 +106,11 @@ export EMBEDDING_REMOTE_CONTAINER='<existing embedding container>'
 export RERANK_REMOTE_CONTAINER='<existing rerank container>'
 export OPEN_WEBUI_PYTHON='/path/to/python3.12-with-open-webui-0.6.5'
 
-.venv/bin/python scripts/local_model_tunnel.py status
+.venv/bin/python scripts/enterprise_pdf_rag/local_model_tunnel.py status
 # 仅在确认没有运行中的本项目隧道、也没有 stale PID 记录时启动
-.venv/bin/python scripts/local_model_tunnel.py start
-.venv/bin/python scripts/with_local_models.py -- \
-  env OPEN_WEBUI_PYTHON="$OPEN_WEBUI_PYTHON" ./scripts/start.sh
+.venv/bin/python scripts/enterprise_pdf_rag/local_model_tunnel.py start
+.venv/bin/python scripts/enterprise_pdf_rag/with_local_models.py -- \
+  env OPEN_WEBUI_PYTHON="$OPEN_WEBUI_PYTHON" ./scripts/enterprise_pdf_rag/start.sh
 ```
 
 已有健康隧道时跳过 `start`；stale PID 或被占用端口须先核对所属进程，不能删除记录来跳过所有权检查。`with_local_models.py` 的现有契约需要两组模型配置并只读取得两组 key，但不会调用任一推断接口；启动器仍只把 embedding 配置传给 API，WebUI 没有上游 key。wrapper 退出不停止长期运行的受管服务。修改配置需要先用现有 `webui_preview.py stop` 停止本项目旧进程，再启动新进程；不能凭模型发现 200 判定配置已更新。
@@ -125,7 +125,7 @@ enterprise-pdf-rag ingest --pdf /path/to/document.pdf --pages all \
   --output-dir /path/to/ingestion-output --stage source --max-live-calls 0
 ```
 
-仓库内等价入口为 `uv run --locked enterprise-pdf-rag ingest ...`，或者在已安装包的 Python 环境中执行 `python scripts/ingest.py ...`。从 checkout 外运行时遵守既有安装契约：`APP_ROOT_DIR` 指向存在的工作目录，`APP_DATA_DIR` 可指定持久数据目录；相对输入和 `--output-dir` 相对命令当前工作目录解析。不要把脚本所在目录当成输入路径基准。
+仓库内等价入口为 `uv run --locked enterprise-pdf-rag ingest ...`，或者在已安装包的 Python 环境中执行 `python scripts/enterprise_pdf_rag/ingest.py ...`。从 checkout 外运行时遵守既有安装契约：`APP_ROOT_DIR` 指向存在的工作目录，`APP_DATA_DIR` 可指定持久数据目录；相对输入和 `--output-dir` 相对命令当前工作目录解析。不要把脚本所在目录当成输入路径基准。
 
 ```sh
 APP_ROOT_DIR=/existing/workdir APP_DATA_DIR=/existing/workdir/data \
@@ -188,7 +188,7 @@ enterprise-pdf-rag publish --source-store <src> --processing-store <proc> --proc
 
 ### 离线验证 vs 真实验证
 
-离线 E2E `tests/adapters/test_generic_publication_e2e.py` 已用非 AIA 程序化三页财务 PDF `meridian-semiannual.pdf` 覆盖 ingest→qualify→index（`OfflineDescriptionEmbedder`，dims 64）→publish→`search`/`resolve`：命中带 snapshot_id/member_id，retrieval snapshot 的 `scope.source_manifest_id` 与 ingest 一致，另有 `cli.main` 三命令 JSON 状态推进 smoke；单元测试见 `tests/adapters/test_draft_publication.py`，`./ci.sh` 随此全绿。真实 `qualify`/`publish` 已对真实 AIA store（`data/output/aia-2026-interim`）只读跑通并幂等（eligible=189、`publish` 回到同一 `a7384f0c`、dims [2560]）。但真实 `index` 需要本地 embedder，当前 shell 无隧道配置（`scripts/with_local_models.py` 报 `TunnelConfigurationError: Missing or invalid setting: LOCAL_MODELS_SSH_HOST`），真实链路 index 仍未覆盖，须在项目受管 SSH 隧道环境运行；通用 `ingest` 亦从未对真实 PDF 跑过。
+离线 E2E `tests/enterprise_pdf_rag/adapters/test_generic_publication_e2e.py` 已用非 AIA 程序化三页财务 PDF `meridian-semiannual.pdf` 覆盖 ingest→qualify→index（`OfflineDescriptionEmbedder`，dims 64）→publish→`search`/`resolve`：命中带 snapshot_id/member_id，retrieval snapshot 的 `scope.source_manifest_id` 与 ingest 一致，另有 `cli.main` 三命令 JSON 状态推进 smoke；单元测试见 `tests/enterprise_pdf_rag/adapters/test_draft_publication.py`，`bash scripts/ci.sh` 随此全绿。真实 `qualify`/`publish` 已对真实 AIA store（`data/output/aia-2026-interim`）只读跑通并幂等（eligible=189、`publish` 回到同一 `a7384f0c`、dims [2560]）。但真实 `index` 需要本地 embedder，当前 shell 无隧道配置（`scripts/enterprise_pdf_rag/with_local_models.py` 报 `TunnelConfigurationError: Missing or invalid setting: LOCAL_MODELS_SSH_HOST`），真实链路 index 仍未覆盖，须在项目受管 SSH 隧道环境运行；通用 `ingest` 亦从未对真实 PDF 跑过。
 
 ## 通用性与完整 RAG 的完成条件
 
