@@ -59,9 +59,11 @@ calls a provider; and `TableIR` / `TableCell.verification` are pinned `PENDING` 
    credential, provider body or path.
 
 4. **Hybrid retrieval** (`adapters/hybrid_search.py`). The vector channel is the mount's pinned
-   cosine index; the lexical channel is BM25 over the same embedded description texts
-   (`LexicalIndex`, content-addressed by snapshot id and scoring parameters, cached per
-   process); fusion is reciprocal rank fusion. Exactly
+   cosine index; the lexical channel is BM25 over the same embedded index texts
+   ([ADR 0012](0012-chart-index-text-and-retrieval-seats.md); a description text for every member
+   except a chart with citable values, which is projected) — `LexicalIndex`, content-addressed by
+   snapshot id and scoring parameters, cached per process; fusion is reciprocal rank fusion.
+   Exactly
    `ragspine.retrieval.lexical.retrieval.{tokenize, bm25_scores, rrf_fuse}` and
    `ragspine.retrieval.rerank.listwise_rerank.{ListwiseJudge, listwise_rerank}` are reused.
    Rerank is opt-in per request through an injected judge and off by default; a request that
@@ -179,11 +181,17 @@ calls a provider; and `TableIR` / `TableCell.verification` are pinned `PENDING` 
   literal qualification checks of Decision 7; canonical-vs-canonical checks, `table_models.py`,
   `pdfspine_tables.py` and the chart geometry are untouched. The offline stub rounds to six
   decimals so the suite reproduces the real shape.
-- **ISSUE-2, chart recall.** Chart members embed only a short description, so the lexical and
-  vector channels favour long text: the page-18 donut was not in the top-6 for a question that
-  named the chart but not its categories, with or without rerank. Candidate directions — add
-  period / category aliases to chart descriptions, or weight chart members on the query side —
-  are undecided.
+- **ISSUE-2, chart recall — resolved by [ADR 0012](0012-chart-index-text-and-retrieval-seats.md).**
+  The attribution recorded here first ("chart members embed only a short description, so the
+  channels favour long text") is wrong and is corrected there. Measured, the cause was four
+  specific things: a chart's index text was its *title alone* (`Distribution Mix`, two tokens), so
+  BM25 ranked the page-18 donut 1st while the vector channel left it 13–20th; RRF with `k = 60`
+  caps a single-channel hit at `1/61`, below any ordinary paragraph both channels find;
+  `channel_limit = 20` sat on that vector rank and `top_k = 6` cut the resulting fused rank ≥ 7
+  (the cached prompt contained zero chart blocks); and rerank scored a concatenation of those same
+  index texts instead of the evidence blocks. ADR 0012 indexes charts by a projection of their
+  qualified IR, widens the defaults to 10 / 50, feeds the reranker evidence blocks and reserves one
+  conditional seat for a citable chart.
 - **ISSUE-3, the prose gate treated years as numbers — resolved (rag-spine 0.14.0).** "in 1H
   2026 was 17.5%" abstained because `2026` was not inside a verified claim's text. The gate
   (`answers/verify.py::prose_grounded`) now grounds a prose number when it (a) equals a verified

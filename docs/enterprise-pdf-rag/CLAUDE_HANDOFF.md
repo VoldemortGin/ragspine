@@ -45,7 +45,7 @@
 1. `adapters/http/webui_gate.py` 只认 `aia-2026-interim-source-review-v1` / `enterprise-pdf-rag-offline-demo-v1`，Open WebUI 网关不能前置 `document-catalog` 模式（另一 agent 正在加 `document-catalog` profile，未完成）。
 2. `JsonCompletionClient` 以 `retry_failed=False` 构造：真实调用失败会被缓存回放，删 `<ingestion_root>/model-cache/requests/<fingerprint>.json` 才能重试。
 3. 自然语言问答没有冻结 gold 集（只有 chart-qa v1/bar 两套）。
-4. 真实 embedder 的 `index`、真实答案模型的 chat、`APP_LEGACY_DOCUMENT_ROOTS` 挂真实 AIA 发布——已于 2026-09-20 做过一轮（18 用例，反捏造守住），结论与遗留（ISSUE-2 图表召回、ISSUE-3 散文门年份（已于 0.14.0 解决）、信封无 `request_fingerprint`、`visual_semantics` 无专属回归）见下方“真实模型验收”。
+4. 真实 embedder 的 `index`、真实答案模型的 chat、`APP_LEGACY_DOCUMENT_ROOTS` 挂真实 AIA 发布——已于 2026-09-20 做过一轮（18 用例，反捏造守住），结论与遗留（ISSUE-2 图表召回**已解决**（[ADR 0012](adr/0012-chart-index-text-and-retrieval-seats.md)，分支 `feat/chart-index-text`，待合并 `main`）、ISSUE-3 散文门年份（已于 0.14.0 解决）、信封无 `request_fingerprint`、`visual_semantics` 无专属回归）见下方“真实模型验收”。原先把 ISSUE-2 归因为“短描述词面弱于长文本”是错的，真实原因是图表索引文本只有标题 + RRF 单通道上限 + `channel_limit`/`top_k` 切点 + reranker 输入不是证据块；真实重建与复测见下方“ISSUE-2 修复后的真实重建与复测”与 `data/validation/generic-chat-2026-09-20/aia-after-issue2/`。
 5. `deploy/enterprise-pdf-rag/open-webui/backend.Dockerfile` 未复验（ADR 0021）。
 6. 第 20 页 v2 独立验收（第 4 项）未动。
 7. 完整 `bash scripts/ci.sh` 未在本工作树整体跑绿；全部改动未 commit / 未 push。
@@ -90,12 +90,63 @@ AIA 前 20 页（model `enterprise-pdf-rag/df902346791b`，189 成员）：
 **BUG-1（已修复，同 session，代码未 commit）**：根因——prompt 用 `json.dumps` 全精度渲染 canonical bbox（如 `42.400000000000006`），模型回传最短小数（`42.4` / `308` / `20`），下游多处严格 `<=` 判“模型区域框 ⊇ canonical 图元”时差 6e-15 即失败；离线 stub sender 原样回传 float，所以从未暴露。修法——新增纯模块 `src/enterprise_pdf_rag/processing/geometry.py`（stdlib）：`COORDINATE_TOLERANCE = 1e-6`，`contains(outer, inner, *, tolerance)` 外框每边放宽 tol、内框保持非退化；替换 6 处“模型外框 vs canonical 内框”比较：`adapters/source_objects.py` ×2、`adapters/object_processing.py`、`processing/table_transcription.py`（`_inside` 删除；`_center_inside` 是 canonical vs canonical，不动）、`adapters/literal_qualification.py`（index / resolve 复核须与生产者一致）、`adapters/visual_semantics.py`（`_inside` 委托）、`processing/service.py::validate_partition`。不动 `table_models.py`、`pdfspine_tables.py`（本有 0.5pt 容差）、`figures/` 与 donut / bar 几何族。1e-6 的理由：float 渲染噪声 <1e-12 pt，真实版面偏移 ≫1e-3 pt，两侧各留 ≥3 个数量级，差 0.5pt 的越界 span 仍拒绝。不做边界规范化的理由：prompt 无固定精度、改 prompt 会改 request fingerprint、canonical 不能舍入（内容寻址）、snap 不覆盖表格网格与 diagram 节点。测试：新 `tests/enterprise_pdf_rag/processing/test_geometry.py`，`test_source_objects` / `test_table_transcription` / `test_partition` / `test_object_stages` 各加 “tolerates model-rendered float noise but not real overreach” 用例；离线 stub sender `_extent` 改为 `round(v, 6)` 模拟真实回传，e2e 4 个用例修前红、修后绿。全包 **758 passed**（752 + 6）、mypy 447 files 零错误、四个 check 与 doc-drift 通过。真实复验：新合成 PDF sha `3f7233e3…`（`generic-after-fix/`）`ingest` failed_stage_count=0、8 对象全部 succeeded、43.5s；`qualify` eligible=8 / skipped=0（Table 1 + Text 7）；`index` member_count=8、dims [2560]；`publish` ready。AIA 前 20 页只读 `qualify` 修前修后 JSON 逐字节一致（189/52）。
 
 **验收遗留**（已同步进 ADR 0011 follow-ups）：
-- ISSUE-2 图表召回：图表成员只嵌入短描述，词面弱于长文本，top-6 未召回 p.18 donut；候选方向：图表描述加入 period / 类别别名，或对 chart 成员做 query 侧加权，待定。
+- ISSUE-2 图表召回——**已解决**（[ADR 0012](adr/0012-chart-index-text-and-retrieval-seats.md)，分支 `feat/chart-index-text`，两个代码提交 `7c57e4b` / `0efbc60`，待合并 `main`）。**归因更正**：不是“短描述词面弱于长文本”——实测是图表的索引文本只有标题（`Distribution Mix`，2 个 token），BM25 已把 p.18 donut 排第 1、向量通道却给 13–20 名，RRF(k=60) 下单通道命中上限只有 1/61，`channel_limit=20` 正卡在其向量名次上，融合名次 ≥7 被 `top_k=6` 切掉（逐字节复核 model-cache：prompt 里零图表块），而 reranker 拿到的是同一份分词拼接的索引文本而不是证据块。修法四条：图表按已资格化 IR 的投影建索引（policy v3）、默认 `top_k`/`channel_limit` 改 10/50、reranker 读证据块、图表保底席位 + `member_ranks` 可观测。真实重建与复测见下方“ISSUE-2 修复后的真实重建与复测（2026-09-20）”，证据 `data/validation/generic-chat-2026-09-20/aia-after-issue2/`。
 - ISSUE-3 散文数值门把年份当数字——**已解决（rag-spine 0.14.0，用户拍板）**：`answers/verify.py::prose_grounded` 现在放行三类数字：(a) 属于某条已验证 claim 的 text / value；(b) 逐字出现在用户问题（`AnswerRequest.question`）里；(c) 出现在已验证 claim 所引用证据的原文中（span quote、表格 cell 原文、图表 claim 的 period / category 标签与 source_display，即 `ClaimCitation.quote`）。其余数字仍整体拒答，零验证 claim 的处理不变，`decide` 顺序不变；用例见 `tests/enterprise_pdf_rag/answers/test_verify.py` 与 `test_answer_service.py`。
 - `AnswerEnvelope` 不含 `request_fingerprint`，排障时无法直接定位 `model-cache/requests/<fp>.json`。
 - `visual_semantics.py` 的 4 个 `contains` 调用点无专属回归测试。
 - `ingest` 的 layout 阶段每页 1 次真实 LLM 调用，纯文本页也一样（设计内）。
 - `webui_gate.py` 的 `document-catalog` profile 另一 agent 进行中，**未完成**。
+
+**ISSUE-2 修复后的真实重建与复测（2026-09-20）**
+
+分支 `feat/chart-index-text`（索引侧 `7c57e4b`、查询侧 `0efbc60`，均未合并 `main`）；决定、被拒方案与代价见 [ADR 0012](adr/0012-chart-index-text-and-retrieval-seats.md)。环境与上节相同（答案模型 `gpt-5.6-luna` 用 shell 里既有的 `OPENAI_BASE_URL` / `OPENAI_API_KEY`；embedding / rerank 经项目受管隧道到本机 39002 / 39001），密钥与主机一律不写。查询侧现值：`AnswerRequest` 默认 `top_k=10`、`channel_limit=50`（上文“阶段 2”里记的 6 / 20 是当时的历史快照，不改）。
+
+重建（AIA 前 20 页，`data/output/aia-2026-interim`）：
+
+| 步骤 | 结果 |
+| --- | --- |
+| `qualify` | eligible=189 / skipped=52 / chart=9，与修前一致（投影不改资格） |
+| `index`（真实 Qwen3-Embedding-4B，2560 维，fingerprint `local-http/Qwen/Qwen3-Embedding-4B`） | 40s；新 processing `da1065fc0bd6d378e1116fe6b74d0edfdc9dc06321d8ccdf526ee102b8d7763f`、新 snapshot `53e08ad418392651ffd9b79e41154c30769f9d0d99c48f1237c747d81357110a`，189 成员，policy `source-transcription-and-scoped-chart-qualification-v3` |
+| `publish` | 只切 `current-processing`（`a7384f0c…` → `da1065fc…`）；`current-manifest` 不变，旧快照文件保留，旧 manifest `f59d230869d5` 仍可 load |
+
+指针与对象数前后对照（证据 `pointers-before.txt` / `pointers-after.txt`）：
+
+| | before（14:19:42Z） | after（14:21:32Z） |
+| --- | --- | --- |
+| `current-processing` 内容 | `a7384f0c…caa8d5` | `da1065fc…7763f` |
+| `current-processing` 文件 shasum | `c98a31f2…6baf` | `e75de189…d55b` |
+| `current-manifest` 内容 | `e702bf1c…7129f` | 不变 |
+| `current-manifest` 文件 shasum | `af5eb57f…4871` | 不变 |
+| processing objects / source objects | 4320 / 147 | 4543 / 147 |
+
+预览重启（8768 + 3200，同一套 env，16s 后挂上新快照）：
+
+```sh
+# stop
+ENTERPRISE_PREVIEW_STATE_DIR=$PWD/data/open-webui-catalog ENTERPRISE_API_PORT=8768 \
+  ENTERPRISE_WEBUI_PORT=3200 .venv/bin/python scripts/enterprise_pdf_rag/webui_preview.py \
+  stop --profile document-catalog
+
+# start（OPENAI_API_KEY / OPENAI_BASE_URL 来自 shell，不写入文档）
+set -a; source data/local-models/local-models.env; set +a
+ENTERPRISE_PREVIEW_STATE_DIR=$PWD/data/open-webui-catalog ENTERPRISE_API_PORT=8768 \
+  ENTERPRISE_WEBUI_PORT=3200 ENTERPRISE_WEBUI_AUTH=1 ENABLE_SIGNUP=False \
+  APP_INGESTION_DIR=$PWD/data/ingestion-webui \
+  APP_LEGACY_DOCUMENT_ROOTS="[\"$PWD/data/output/aia-2026-interim/pages-001-020\"]" \
+  ./scripts/enterprise_pdf_rag/start.sh --profile document-catalog
+```
+
+HTTP 复测（证据 `data/validation/generic-chat-2026-09-20/aia-after-issue2/`，含五个原始响应、`qualify-before.json`、`index.json`、`publish.json`、`summary.json`）；`member_ranks` 取信封里 p.18 donut 那条（融合名次均为第 5，都在新 `top_k=10` 内，未用到保底席位）：
+
+| # | 问题 / 参数 | 结果 | donut 的 `member_ranks` | 耗时 |
+| --- | --- | --- | --- | --- |
+| b | “In the 1H26 Distribution Mix chart, what percentage of VONB came from Agency?” | 200 answered，1 claim，p.18 `points.point-agency.value = 72%` | lexical 1 / vector 17 / 融合第 5 | 13.8s |
+| b2 | b 改写为含 Partnerships | 200 answered，2 claims：`points.point-agency.value = 72%`、`points.point-partnerships.value = 28%` | lexical 1 / vector 17 / 融合第 5 | 14.1s |
+| n | “Agency share of VONB 1H26”（不含标题，修前 BM25=0） | 200 answered，p.18 `points.point-agency.value = 72%` | lexical 1 / vector 24 / 融合第 5 | 13.4s |
+| b3 | b + `rerank=true` | 200 answered，同 b | lexical 1 / vector 17 / 融合第 5 | **52.3s** |
+| a | 控制组 “record Operating ROE in 1H 2026?” | 200 answered，p.4 `fragments.<span>` 逐字 “record Operating ROE of 17.5%”，与修前一致 | vector 2 / lexical 3 | 13.2s |
+
+b3 的 52s 是已知代价、不是回归：reranker 现在读证据块，因此要 `resolve` 全部 fused 候选（≤ `2 × channel_limit` = 100 个），AIA 上每次 `resolve` ≈0.8s（`manifest()` 重载校验 ~5000 个资产摘要 + 两次 `load_retrieval` 解析 189×2560 维索引）。rerank 保持默认关、按请求 opt-in。另：`member_texts()` 在 AIA 上 ≈0.58s，所以保底席位逻辑只在需要时惰性调用一次。
 
 ## 并入 rag-spine 记录（2026-09-20）
 

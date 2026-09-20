@@ -1,6 +1,6 @@
 ---
 covers: src/enterprise_pdf_rag/
-verified-against: 2334978
+verified-against: 0efbc60
 ---
 
 # enterprise_pdf_rag — agent contract
@@ -18,7 +18,8 @@ the same `pyproject.toml` — import name unchanged, not under `ragspine.*`
    them.
 3. [ADR 0009](../../docs/enterprise-pdf-rag/adr/0009-source-qualified-expense-ratio-bar-lookup.md),
    [ADR 0010](../../docs/enterprise-pdf-rag/adr/0010-generic-pdf-ingestion-entry.md),
-   [ADR 0011](../../docs/enterprise-pdf-rag/adr/0011-document-catalog-and-verified-answer-chain.md)
+   [ADR 0011](../../docs/enterprise-pdf-rag/adr/0011-document-catalog-and-verified-answer-chain.md),
+   [ADR 0012](../../docs/enterprise-pdf-rag/adr/0012-chart-index-text-and-retrieval-seats.md)
    and [PRD v0.2](../../docs/enterprise-pdf-rag/PRD-v0.2.md) define scope; the full list is
    [`docs/enterprise-pdf-rag/adr/`](../../docs/enterprise-pdf-rag/adr/).
 4. [`testing-and-ingestion.md`](../../docs/enterprise-pdf-rag/testing-and-ingestion.md) — what is
@@ -38,7 +39,8 @@ core/         settings leaf + shared value types (no I/O)
 documents/    pure document model — stdlib immutable values + Protocols only
 figures/      pure figure/chart pipeline — same rule; same-SVG two branches, snapshot binding
 processing/   pure page-processing / qualification logic; context_builder.py (evidence blocks
-              for the prompt), table_transcription.py (literal table transcription rule)
+              for the prompt), table_transcription.py (literal table transcription rule),
+              index_text.py (chart index-text projection both retrieval channels score)
 answers/      pure answer chain — ports.py (MountedDocument), models.py, prompt.py (strict
               model output schema), verify.py (claim re-read); stdlib + pydantic only
 adapters/     every SDK and I/O: pdfspine, http/ (FastAPI app factory; documents.py + chat.py
@@ -89,7 +91,12 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   failed claims are dropped, and any number in the prose outside a verified claim abstains the
   whole answer (ADR 0011). One model call per answer; nothing is derived or retried.
 - **Same-SVG two branches, snapshot binding, no-summary-fallback** — hard invariants of the
-  figure chain (ADR 0002). Only natural-language descriptions are embedded.
+  figure chain (ADR 0002). What gets embedded is the **index text** of
+  `processing/index_text.py`: the natural-language description for text / list / group / table
+  members, and for a chart a deterministic projection of its already-qualified IR (title, period,
+  grammar, per-point category / series / explicit value), falling back to the description when the
+  chart has no citable value (ADR 0012). Both retrieval channels score that same string; the raw
+  branch is never embedded.
 - **Immutable, content-addressed snapshots** — `publish_draft` switches `current-*` pointers
   atomically and is idempotent; corrupted evidence is refused, never repaired. A mount re-reads
   its pinned manifest on every request and refuses drift.

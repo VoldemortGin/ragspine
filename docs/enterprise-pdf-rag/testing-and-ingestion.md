@@ -1,6 +1,6 @@
 # 测试与通用 PDF 入库
 
-本文区分已运行的服务、通用入库草稿和完整产品验收。2026-09-19 已在官方 pdfspine 0.11.0 环境通过完整离线门（639 tests）、独立 Python 3.12 plain-pip 安装及 checkout 外 smoke，并受控重启 API/WebUI。实际在线验收包含一次真实 query embedding 搜索、5 条命中、同 snapshot context 回填、第 18 页带引用的 72% 查值和来源审阅聊天；界面可达本身不作为完整 RAG 通过依据。2026-09-20 新增与 `aia-source-review` 并存的 `document-catalog` 服务模式（多文档目录、按文档检索、证据链上的自然语言回答），已离线实现并测试，并在真实 Qwen3 embedder / reranker 与真实答案模型上做过一轮 18 用例验收（AIA 发布 + 合成 PDF，证据 `data/validation/generic-chat-2026-09-20/`）；结果、修复的 BUG-1 与遗留（ISSUE-2 图表召回、ISSUE-3 散文门年份——后者已于 0.14.0 解决）只以 [交接文档](CLAUDE_HANDOFF.md) 为准，本文不重述。
+本文区分已运行的服务、通用入库草稿和完整产品验收。2026-09-19 已在官方 pdfspine 0.11.0 环境通过完整离线门（639 tests）、独立 Python 3.12 plain-pip 安装及 checkout 外 smoke，并受控重启 API/WebUI。实际在线验收包含一次真实 query embedding 搜索、5 条命中、同 snapshot context 回填、第 18 页带引用的 72% 查值和来源审阅聊天；界面可达本身不作为完整 RAG 通过依据。2026-09-20 新增与 `aia-source-review` 并存的 `document-catalog` 服务模式（多文档目录、按文档检索、证据链上的自然语言回答），已离线实现并测试，并在真实 Qwen3 embedder / reranker 与真实答案模型上做过一轮 18 用例验收（AIA 发布 + 合成 PDF，证据 `data/validation/generic-chat-2026-09-20/`）；结果、修复的 BUG-1 与遗留（ISSUE-3 散文门年份已于 0.14.0 解决）只以 [交接文档](CLAUDE_HANDOFF.md) 为准，本文不重述；ISSUE-2 已由 [ADR 0012](adr/0012-chart-index-text-and-retrieval-seats.md) 解决（索引投影 policy v3 + 查询默认 10/50 + reranker 读证据块 + 图表保底席位），真实重建与复测见交接文档。
 
 ## 现在能测什么
 
@@ -189,6 +189,8 @@ enterprise-pdf-rag publish --source-store <src> --processing-store <proc> --proc
 
 三命令错误统一输出 `{"error": ...}` 并以退出码 1 fail closed。完整生命周期为 ingest 的 `not_ready` → `qualified; indexing pending` → `indexed; publication pending` → `ready`。
 
+`index` 对图表成员嵌入的不是描述文本而是已资格化 IR 的**投影文本**（policy `source-transcription-and-scoped-chart-qualification-v3`，[ADR 0012](adr/0012-chart-index-text-and-retrieval-seats.md)；无可引用值的图表仍回退描述，其余成员不变）；2026-09-20 之前发布的快照要重新 `index` + `publish` 才受益，旧快照照常可挂载、可回答。
+
 ### 离线验证 vs 真实验证
 
 离线 E2E `tests/enterprise_pdf_rag/adapters/test_generic_publication_e2e.py` 已用非 AIA 程序化三页财务 PDF `meridian-semiannual.pdf` 覆盖 ingest→qualify→index（`OfflineDescriptionEmbedder`，dims 64）→publish→`search`/`resolve`：命中带 snapshot_id/member_id，retrieval snapshot 的 `scope.source_manifest_id` 与 ingest 一致，另有 `cli.main` 三命令 JSON 状态推进 smoke；单元测试见 `tests/enterprise_pdf_rag/adapters/test_draft_publication.py`，`bash scripts/ci.sh` 随此全绿。真实 `qualify`/`publish` 已对真实 AIA store（`data/output/aia-2026-interim`）只读跑通并幂等（eligible=189、`publish` 回到同一 `a7384f0c`、dims [2560]）。但真实 `index` 需要本地 embedder，当前 shell 无隧道配置（`scripts/enterprise_pdf_rag/with_local_models.py` 报 `TunnelConfigurationError: Missing or invalid setting: LOCAL_MODELS_SSH_HOST`），真实链路 index 仍未覆盖，须在项目受管 SSH 隧道环境运行；通用 `ingest` 亦从未对真实 PDF 跑过。
@@ -286,12 +288,14 @@ curl --fail-with-body http://127.0.0.1:8766/v1/chat/completions \
         "field_path": "fragments.<span_id>", "evidence_ids": ["<span_id>"],
         "bbox": [x0, y0, x1, y1], "quote": "<verbatim span text>", "chart_citation": null}]}],
     "rejected": [],
+    "member_ranks": [{"member_id": "<member_id>", "fused_score": 0.0320,
+      "vector_rank": 2, "lexical_rank": 3, "vector_score": 0.5708, "bm25_score": 10.197}],
     "llm_live_calls": 1, "cache_hit": false
   }
 }
 ```
 
-`claims[].kind` ∈ `quote` / `cell` / `chart_value`；图表值的 `text` 是来源显示串（如 `72%`）、`value` 是十进制字符串、`unit` 是单位，正文引用写作 `[n] p.N points.<point_id>.value = 72% (svg #<element>, …)`。`citations[].kind` 是证据块类型（`text`/`list`/`group`/`table`/`chart`），`page_index` 为 0-based（正文 `p.N` 为 1-based），`field_path` 是 `fragments.<span_id>` / `cells.<cell_id>` / `points.<point_id>.value`，`evidence_ids` 是来源 span 或 SVG 元素 id，`chart_citation` 只有图表值有。`rejected[]` 列出被逐条剔除的 claim（`claim_id`/`member_id`/`field_path`/`text`/`reason`/`detail`），供审计。`llm_live_calls` 是本次真实模型调用数（0 或 1），`cache_hit` 表示指纹命中缓存回放。
+`claims[].kind` ∈ `quote` / `cell` / `chart_value`；图表值的 `text` 是来源显示串（如 `72%`）、`value` 是十进制字符串、`unit` 是单位，正文引用写作 `[n] p.N points.<point_id>.value = 72% (svg #<element>, …)`。`citations[].kind` 是证据块类型（`text`/`list`/`group`/`table`/`chart`），`page_index` 为 0-based（正文 `p.N` 为 1-based），`field_path` 是 `fragments.<span_id>` / `cells.<cell_id>` / `points.<point_id>.value`，`evidence_ids` 是来源 span 或 SVG 元素 id，`chart_citation` 只有图表值有。`rejected[]` 列出被逐条剔除的 claim（`claim_id`/`member_id`/`field_path`/`text`/`reason`/`detail`），供审计。`member_ranks[]` 是可选字段（[ADR 0012](adr/0012-chart-index-text-and-retrieval-seats.md)），每个进入 prompt 的成员一条、按 `member_ids` 顺序给出该成员在两个通道与融合后的名次：`fused_score`（RRF 分数）、`vector_rank` / `lexical_rank`（只被一个通道命中时另一个为 `null`）、`vector_score`（余弦）、`bm25_score`；用于排查召回问题，不影响回答。`llm_live_calls` 是本次真实模型调用数（0 或 1），`cache_hit` 表示指纹命中缓存回放。
 
 拒答也是 200：信封 `status` 为 `abstained`，`content` 为 `无法基于已验证证据回答 (<abstain_reason>): <abstain_detail>`，`claims` 为空。判定顺序：无检索命中或预算内无证据块 → `no_relevant_member`；模型自报 abstain → `model_declined`；模型输出不合 schema/截断 → `model_output_invalid`；逐条校验失败的 claim 进入 `rejected`；零验证 claim → 取第一条 rejected 的原因（否则 `no_verified_claim`）；散文里的数字既不属于已验证 claim 的 text / value、也不逐字出现在用户问题里、也不在已验证 claim 所引用证据原文（span quote / cell 原文 / 图表 period、category 标签与 source_display）中 → 整体 `claim_not_in_evidence`（0.14.0 起；此前任何不在 claim 内的数字都拒答）。图表类 refusal（`value_unavailable`、`period_mismatch` 等）与 ChartQA 同名。
 
@@ -317,10 +321,10 @@ curl --fail-with-body http://127.0.0.1:8766/v1/chat/completions \
 
 离线（默认门，零网络）：`tests/enterprise_pdf_rag/adapters/test_document_catalog.py`、`test_documents_http.py`、`test_hybrid_search.py`、`test_chat_http.py`，`tests/enterprise_pdf_rag/answers/`（store 桥 `store_mounted_document.py` + 脚本化 LLM `fake_llm.py`），`processing/test_context_builder.py`、`processing/test_table_transcription.py`，以及 e2e / draft publication / pdf ingestion 里新增的程序化表格页用例。它们用程序化 PDF、`OfflineDescriptionEmbedder` 和脚本化模型输出，证明契约、状态码、恰好一次模型调用、逐字段校验与拒答策略。
 
-需真实模型：真实本地 embedder 的 `index` 与在线 search（隧道）、真实答案模型的合成与校验、`APP_LEGACY_DOCUMENT_ROOTS` 挂载真实 AIA 发布后的检索 / 引用 / 拒答验收。2026-09-20 已做一轮（18 用例，无证据外数字进入 answered 回答；图表召回 ISSUE-2 待定，散文门年份 ISSUE-3 已于 0.14.0 解决），结论只以 [交接文档](CLAUDE_HANDOFF.md) 为准，本文不作宣称；它是一轮验收，不是冻结金标集。
+需真实模型：真实本地 embedder 的 `index` 与在线 search（隧道）、真实答案模型的合成与校验、`APP_LEGACY_DOCUMENT_ROOTS` 挂载真实 AIA 发布后的检索 / 引用 / 拒答验收。2026-09-20 已做一轮（18 用例，无证据外数字进入 answered 回答；散文门年份 ISSUE-3 已于 0.14.0 解决），结论只以 [交接文档](CLAUDE_HANDOFF.md) 为准，本文不作宣称；它是一轮验收，不是冻结金标集。图表召回 ISSUE-2 已由 [ADR 0012](adr/0012-chart-index-text-and-retrieval-seats.md) 解决（索引投影 policy v3 + 查询默认 10/50 + reranker 读证据块 + 图表保底席位），真实重建与复测见交接文档。
 
 ## 通用性与完整 RAG 的完成条件
 
 产品目标面向不同文档。AIA 的公开来源、SHA、前 20 页 gold 和数值资格只是一个可复现的验收样本；它们不应该成为任意 PDF 入库的文件名、页数或业务规则前置条件。当前 API 的 `/v1/aia/*` 路径、来源审阅 model ID 和默认存储仍属于这一兼容 profile。
 
-通用入库的来源资产保存、layout/semantics、description 资格、embedding 索引、发布/服务挂载、自然语言回答是不同阶段。只有来源入库成功时，不能宣称新文档已可检索或聊天。截至 2026-09-20，这条链的每一段都有代码与离线测试：证据与资格链（含逐字转写 `VERIFIED` 的 TABLE 成员）、显式 `qualify`/`index`/`publish`、`document-catalog` 模式的按文档服务入口、hybrid 检索 → 一次模型调用 → 逐字段校验的回答链，以及文本 / 表格单元格 / 图表值的正例、拒答、引用与损坏证据用例（[ADR 0011](adr/0011-document-catalog-and-verified-answer-chain.md)）。尚未完成的是：真实模型上的持续验收（2026-09-20 已做一轮，结论与遗留 ISSUE-2 / ISSUE-3 见 [交接文档](CLAUDE_HANDOFF.md)，本文不替它下结论）、自然语言问答的冻结金标集、Open WebUI 网关对 `document-catalog` 模式的接入、`backend.Dockerfile` 复验，以及第 20 页 v2 的独立验收。在这些完成前，不能称通用聊天已验收。
+通用入库的来源资产保存、layout/semantics、description 资格、embedding 索引、发布/服务挂载、自然语言回答是不同阶段。只有来源入库成功时，不能宣称新文档已可检索或聊天。截至 2026-09-20，这条链的每一段都有代码与离线测试：证据与资格链（含逐字转写 `VERIFIED` 的 TABLE 成员）、显式 `qualify`/`index`/`publish`、`document-catalog` 模式的按文档服务入口、hybrid 检索 → 一次模型调用 → 逐字段校验的回答链，以及文本 / 表格单元格 / 图表值的正例、拒答、引用与损坏证据用例（[ADR 0011](adr/0011-document-catalog-and-verified-answer-chain.md)）。图表召回 ISSUE-2 已由 [ADR 0012](adr/0012-chart-index-text-and-retrieval-seats.md) 解决（索引投影 policy v3 + 查询默认 10/50 + reranker 读证据块 + 图表保底席位），真实重建与复测见交接文档。尚未完成的是：真实模型上的持续验收（2026-09-20 已做一轮，结论与遗留见 [交接文档](CLAUDE_HANDOFF.md)，本文不替它下结论）、自然语言问答的冻结金标集、Open WebUI 网关对 `document-catalog` 模式的接入、`backend.Dockerfile` 复验，以及第 20 页 v2 的独立验收。在这些完成前，不能称通用聊天已验收。
