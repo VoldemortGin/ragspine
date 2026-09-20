@@ -16,8 +16,13 @@ from enterprise_pdf_rag.adapters.http.schemas import (
     SearchRequest,
     SearchResponse,
 )
+from enterprise_pdf_rag.adapters.local_models import LocalEmbeddingAdapter
 from enterprise_pdf_rag.adapters.processing_runtime import PROCESSING_OUTPUT
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
+from enterprise_pdf_rag.adapters.providers import (
+    ProviderConfigurationError,
+    load_local_model_config,
+)
 from enterprise_pdf_rag.adapters.runtime import create_runtime
 from enterprise_pdf_rag.core.settings import get_settings
 from enterprise_pdf_rag.figures.models import ExecutionMode, FailureCode, FigureError
@@ -82,5 +87,11 @@ def create_configured_app() -> FastAPI:
             if (PROCESSING_OUTPUT / "current-processing").is_file()
             else None
         )
-        return create_aia_app(LocalDocumentStore(AIA_OUTPUT), processing=processing)
+        try:
+            embedder = LocalEmbeddingAdapter(load_local_model_config("embedding"))
+        except ProviderConfigurationError:
+            embedder = None
+        return create_aia_app(
+            LocalDocumentStore(AIA_OUTPUT), processing=processing, embedder=embedder
+        )
     return create_app(mode=ExecutionMode(configured))

@@ -97,8 +97,8 @@ class PdfspineTableAdapter:
     def _validate_input(pdf: bytes, *, page: PageInput, item: LayoutObject) -> None:
         if sha256(pdf).hexdigest() != page.source_sha256:
             raise ValueError("PDF bytes do not match the PageInput source SHA-256")
-        if not 0 <= page.page_index < 20:
-            raise ValueError("Table adapter only accepts selected physical pages 1-20")
+        if page.page_index < 0:
+            raise ValueError("Table source page index must be nonnegative")
         if item.kind is not ObjectKind.TABLE:
             raise ValueError("Table adapter requires a Table layout object")
         x0, y0, x1, y1 = item.bbox

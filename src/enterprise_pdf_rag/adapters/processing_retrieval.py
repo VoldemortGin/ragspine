@@ -5,7 +5,10 @@ from math import sqrt
 
 from pydantic import TypeAdapter
 
-from enterprise_pdf_rag.adapters.chart_publication import validate_chart_member
+from enterprise_pdf_rag.adapters.chart_member_validation import (
+    uses_displayed_bar_policy,
+    validate_retrieval_chart_member,
+)
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.literal_qualification import validate_literal_member
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
@@ -47,6 +50,29 @@ _POLICY = "source-transcription-and-scoped-chart-qualification-v1"
 _INDEX = "immutable-cosine-index-v1"
 
 
+def eligibility(record: ObjectProcessingRecord) -> tuple[bool, str | None]:
+    """Kind and stage-completeness predicate shared by build and draft qualification."""
+    if record.kind not in (
+        ObjectKind.TEXT,
+        ObjectKind.LIST,
+        ObjectKind.GROUP,
+        ObjectKind.CHART,
+    ):
+        return False, f"{record.kind.value} objects are not retrievable"
+    stages = {stage.stage: stage for stage in record.stages}
+    required = (
+        ("qualified_ir", "qualified_description", "qualification", "svg")
+        if record.kind is ObjectKind.CHART
+        else ("ir", "description", "qualification", "svg")
+    )
+    if any(
+        name not in stages or stages[name].state is not StageState.SUCCEEDED
+        for name in required
+    ):
+        return False, "required qualification stages are incomplete"
+    return True, None
+
+
 class ProcessingRetrieval:
     def __init__(
         self,
@@ -66,12 +92,8 @@ class ProcessingRetrieval:
         members: list[RetrievalMember] = []
         entries: list[IndexEntry] = []
         for page_index, record in records:
-            if record.kind not in (
-                ObjectKind.TEXT,
-                ObjectKind.LIST,
-                ObjectKind.GROUP,
-                ObjectKind.CHART,
-            ):
+            eligible, _ = eligibility(record)
+            if not eligible:
                 continue
             stages = {stage.stage: stage for stage in record.stages}
             required = (
@@ -79,11 +101,6 @@ class ProcessingRetrieval:
                 if record.kind is ObjectKind.CHART
                 else ("ir", "description", "qualification", "svg")
             )
-            if any(
-                name not in stages or stages[name].state is not StageState.SUCCEEDED
-                for name in required
-            ):
-                continue
             refs = tuple(stages[name].artifact for name in required)
             if any(ref is None for ref in refs):
                 raise ValueError("Eligible stages lack their actual artifacts")
@@ -97,7 +114,18 @@ class ProcessingRetrieval:
             lineage: tuple[AssetRef, ...] = ()
             if record.kind is ObjectKind.CHART:
                 lineage_stages: tuple[str, ...] = ("ir", "description", "model_view")
-                if "source_paint_proof" in stages:
+                if uses_displayed_bar_policy(self.outputs.assets.get(qualification)):
+                    lineage_stages = (
+                        "ir",
+                        "description",
+                        "description_raw",
+                        "model_view",
+                        "normalized_description",
+                        "normalization_receipt",
+                        "source_paint_proof",
+                        "page_context_proof",
+                    )
+                elif "source_paint_proof" in stages:
                     lineage_stages += ("source_paint_proof",)
                 raw_refs = tuple(stages.get(name) for name in lineage_stages)
                 if any(
@@ -267,7 +295,7 @@ class ProcessingRetrieval:
         LiteralQualification | FigureQualification,
     ]:
         if member.kind is ObjectKind.CHART:
-            return validate_chart_member(
+            return validate_retrieval_chart_member(
                 self.sources, self.outputs.assets, scope, member
             )
         return self._literal(scope, member)
@@ -283,7 +311,7 @@ def resolve_processing_context(
     plan, _ = outputs.load_retrieval(publication)
     member = resolve_member(plan, hit)
     if member.kind is ObjectKind.CHART:
-        chart, chart_description, chart_receipt = validate_chart_member(
+        chart, chart_description, chart_receipt = validate_retrieval_chart_member(
             sources, outputs.assets, plan.scope, member
         )
         return RetrievalContext(

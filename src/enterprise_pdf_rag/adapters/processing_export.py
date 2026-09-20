@@ -10,8 +10,13 @@ from pathlib import Path
 
 from pydantic import TypeAdapter
 
+from enterprise_pdf_rag.adapters.bar_publication import parse_displayed_bar_receipt
+from enterprise_pdf_rag.adapters.chart_member_validation import (
+    uses_displayed_bar_policy,
+)
 from enterprise_pdf_rag.adapters.chart_publication import parse_chart_receipt
 from enterprise_pdf_rag.adapters.chart_qa_evaluation import read_evaluation
+from enterprise_pdf_rag.adapters.chart_qa_v2_evaluation import read_bar_evaluation
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.http.processing_schemas import ProcessingEnvelope
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
@@ -134,7 +139,7 @@ def _retrieval_records(run: Path) -> str:
     )
 
 
-def _chart_qa_records(run: Path) -> str:
+def _chart_qa_records(run: Path, manifest: ProcessingManifest) -> str:
     links = []
     for folder in sorted((run / "chart-qa-evaluations").glob("*")):
         if re.fullmatch(r"[0-9a-f]{64}", folder.name) is None:
@@ -145,10 +150,25 @@ def _chart_qa_records(run: Path) -> str:
         links.append(
             f'<li>受限 ChartQA {state}: <a href="{base}/report.json">独立评测</a> · <a href="{base}/observations.json">实际 HTTP 回答与拒答</a> · <a href="{base}/gold.json">来源金标</a></li>'
         )
+    for folder in sorted((run / "chart-qa-v2-evaluations").glob("*")):
+        if re.fullmatch(r"[0-9a-f]{64}", folder.name) is None:
+            continue
+        if manifest.retrieval is None:
+            raise ValueError(
+                "Displayed lookup evaluation requires a pinned retrieval release"
+            )
+        report_v2 = read_bar_evaluation(
+            folder, processing_id=run.name, snapshot_id=manifest.retrieval.snapshot_id
+        )
+        base = "chart-qa-v2-evaluations/" + folder.name
+        state = "通过" if report_v2.passed else "未通过"
+        links.append(
+            f'<li>柱状图显示值查值 {state}: <a href="{base}/report.json">独立评测与分层拒答统计</a> · <a href="{base}/observations.json">实际 HTTP 回答与拒答</a> · <a href="{base}/gold.json">来源金标</a> · <a href="{base}/targets.json">独立验证的快照和证据</a></li>'
+        )
     if not links:
         return ""
     return (
-        '<h2 id="chart-qa">可追溯数值查询</h2><p>仅验收已资格图表的显式百分比 lookup 和有序百分点差;不代表完整 P5 或任意财务问答。</p><ul>'
+        '<h2 id="chart-qa">可追溯数值查询</h2><p>v1 仅验收已资格环形图的显式百分比查值与同口径百分点差; v2 柱状图仅显示值查值,拒绝跨期计算、箭头和高度估值。不代表完整 P5 或任意财务问答。</p><ul>'
         + "".join(links)
         + "</ul>"
     )
@@ -173,6 +193,7 @@ def _coverage(
                     "source_transcription_qualified",
                     "labels_only_qualified",
                     "numeric_qualified",
+                    "displayed_lookup_qualified",
                     "qualification_unavailable",
                 )
             }
@@ -189,15 +210,18 @@ def _coverage(
             elif kind is not ObjectKind.CHART:
                 key = "source_transcription_qualified"
             else:
-                receipt = parse_chart_receipt(
-                    outputs.assets.get(qualification.artifact)
-                )
-                key = (
-                    "labels_only_qualified"
-                    if receipt.qualification.semantic_scope
-                    == "figure-source-labels-only-v1"
-                    else "numeric_qualified"
-                )
+                payload = outputs.assets.get(qualification.artifact)
+                if uses_displayed_bar_policy(payload):
+                    parse_displayed_bar_receipt(payload)
+                    key = "displayed_lookup_qualified"
+                else:
+                    receipt = parse_chart_receipt(payload)
+                    key = (
+                        "labels_only_qualified"
+                        if receipt.qualification.semantic_scope
+                        == "figure-source-labels-only-v1"
+                        else "numeric_qualified"
+                    )
             row[key] = int(row[key]) + 1
         rows.append(row)
     columns = (
@@ -208,6 +232,7 @@ def _coverage(
         "source_transcription_qualified",
         "labels_only_qualified",
         "numeric_qualified",
+        "displayed_lookup_qualified",
         "qualification_unavailable",
     )
     header = (
@@ -218,6 +243,7 @@ def _coverage(
         "仅原文转录资格",
         "仅标签资格",
         "数值关系资格",
+        "仅显示值查值资格",
         "未获资格",
     )
     table = "<table><tr>" + "".join(f"<th>{name}</th>" for name in header) + "</tr>"
@@ -230,7 +256,7 @@ def _coverage(
         )
         + "</table>"
     )
-    table += "<p>IR/描述数量只统计真实保存的产物,其中字段可能仍 unknown/PENDING。仅标签资格不等于数值 QA 资格; 原始图表推断保留供审阅,检索投影屏蔽未验证数值关系。</p>"
+    table += "<p>IR/描述数量只统计真实保存的产物,其中字段可能仍 unknown/PENDING。仅标签资格不等于数值 QA 资格; 原始图表推断保留供审阅,检索投影屏蔽未验证数值关系。柱状图显示值查值资格只允许读取原文明确值,不支持跨期计算、箭头或柱高估值。</p>"
     return table, json.dumps(rows, ensure_ascii=False, indent=2)
 
 
@@ -240,6 +266,7 @@ def export_processing_review(
     snapshot_id: str,
     *,
     update_current: bool = True,
+    title: str = "前 20 页处理审阅",
 ) -> Path:
     manifest = outputs.load(snapshot_id)
     source = sources.load(manifest.scope.source_manifest_id)
@@ -280,12 +307,12 @@ def export_processing_review(
         + coverage
         + '<p><a href="manifest.json">不可变 processing manifest</a> · <a href="coverage.json">分类型覆盖与资格统计</a></p>'
         + _retrieval_records(run)
-        + _chart_qa_records(run)
+        + _chart_qa_records(run, manifest)
         + "<ol>"
         + "".join(links)
         + "</ol>"
     )
-    rendered = _html("前 20 页处理审阅", body)
+    rendered = _html(title, body)
     (run / "review.html").write_text(rendered, encoding="utf-8")
     if not update_current:
         return run / "review.html"

@@ -1,19 +1,30 @@
 """Executable evidence slice and conservative PDF source diagnostics."""
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
 import uvicorn
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from enterprise_pdf_rag.adapters.aia_ingestion import AIA_OUTPUT, ingest_aia
 from enterprise_pdf_rag.adapters.chart_qa import StoredChartResolver
+from enterprise_pdf_rag.adapters.chart_qa_displayed import StoredDisplayResolver
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
+from enterprise_pdf_rag.adapters.draft_publication import (
+    index_draft,
+    publish_draft,
+    qualify_draft,
+)
 from enterprise_pdf_rag.adapters.http.app import create_configured_app
 from enterprise_pdf_rag.adapters.http.chart_qa_schemas import (
     ChartQueryRequest,
     ChartQueryResponse,
+)
+from enterprise_pdf_rag.adapters.http.chart_qa_v2_schemas import (
+    DisplayedChartQueryRequest,
+    DisplayedChartQueryResponse,
 )
 from enterprise_pdf_rag.adapters.http.document_schemas import DocumentSnapshotResponse
 from enterprise_pdf_rag.adapters.http.schemas import (
@@ -21,6 +32,8 @@ from enterprise_pdf_rag.adapters.http.schemas import (
     ExtractionResponse,
     HitSchema,
 )
+from enterprise_pdf_rag.adapters.local_models import LocalEmbeddingAdapter
+from enterprise_pdf_rag.adapters.pdf_ingestion import ingest_pdf
 from enterprise_pdf_rag.adapters.pdfspine_document import PdfspineDocumentAdapter
 from enterprise_pdf_rag.adapters.pdfspine_figure import PdfspineFigureParser
 from enterprise_pdf_rag.adapters.processing_runtime import (
@@ -30,9 +43,16 @@ from enterprise_pdf_rag.adapters.processing_runtime import (
     process_aia_semantics,
 )
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.adapters.providers import OpenAICompatibleSmoke, load_llm_config
+from enterprise_pdf_rag.adapters.providers import (
+    OpenAICompatibleSmoke,
+    load_llm_config,
+    load_local_model_config,
+)
 from enterprise_pdf_rag.adapters.review import write_review
 from enterprise_pdf_rag.adapters.runtime import create_runtime
+from enterprise_pdf_rag.figures.chart_qa.displayed_service import (
+    DisplayedChartQAService,
+)
 from enterprise_pdf_rag.figures.chart_qa.service import ChartQAService
 from enterprise_pdf_rag.figures.models import ExecutionMode
 
@@ -47,6 +67,65 @@ class _ServerOptions(BaseModel):
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="enterprise-pdf-rag")
     commands = parser.add_subparsers(dest="command", required=True)
+    ingest = commands.add_parser(
+        "ingest",
+        help="Ingest any PDF into an immutable draft; default source stage makes no model calls",
+    )
+    ingest.add_argument("--pdf", type=Path, required=True)
+    ingest.add_argument(
+        "--pages",
+        default="all",
+        help="Downstream physical pages: all or 1-3,5; the complete PDF source is always extracted and saved",
+    )
+    ingest.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Parent output directory; default APP_DATA_DIR/ingestion, with isolated document SHA directories",
+    )
+    ingest.add_argument(
+        "--stage",
+        choices=["source", "layout", "semantics"],
+        default="source",
+        help="source is offline; layout/semantics require OPENAI_API_KEY, OPENAI_BASE_URL and OPENAI_MODEL even for cache-only replay",
+    )
+    ingest.add_argument(
+        "--max-live-calls",
+        type=int,
+        default=0,
+        help="Explicit shared model-call budget for layout/semantics; default 0 is cache-only. No embedding, reranking or activation.",
+    )
+    qualify = commands.add_parser(
+        "qualify",
+        help="Diagnose retrievable members in a saved draft by store paths and processing id; no models or activation",
+    )
+    qualify.add_argument("--source-store", type=Path, required=True)
+    qualify.add_argument("--processing-store", type=Path, required=True)
+    qualify.add_argument("--processing-id", required=True)
+    index = commands.add_parser(
+        "index",
+        help="Embed a saved draft's eligible descriptions on the local service into a new immutable snapshot; no activation",
+    )
+    index.add_argument("--source-store", type=Path, required=True)
+    index.add_argument("--processing-store", type=Path, required=True)
+    index.add_argument("--processing-id", required=True)
+    index.add_argument(
+        "--document-label",
+        default=None,
+        help="Optional title for the review; defaults to the source manifest filename",
+    )
+    publish = commands.add_parser(
+        "publish",
+        help="Publish an indexed draft: switch current-processing and, by default, activate the source manifest; no models",
+    )
+    publish.add_argument("--source-store", type=Path, required=True)
+    publish.add_argument("--processing-store", type=Path, required=True)
+    publish.add_argument("--processing-id", required=True)
+    publish.add_argument(
+        "--activate-source",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Also switch current-manifest so the whole document becomes discoverable; on by default",
+    )
     serve = commands.add_parser(
         "serve", help="Serve the explicitly configured API; no ingestion or model calls"
     )
@@ -157,10 +236,74 @@ def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     arguments = parser.parse_args(argv)
     try:
-        if arguments.command == "chart-qa":
-            request = ChartQueryRequest.model_validate_json(
-                arguments.request.read_bytes()
+        if arguments.command == "ingest":
+            ingested = ingest_pdf(
+                pdf=arguments.pdf,
+                pages=arguments.pages,
+                output_dir=arguments.output_dir,
+                stage=arguments.stage,
+                max_live_calls=arguments.max_live_calls,
             )
+            sys.stdout.write(ingested.model_dump_json(indent=2) + "\n")
+            return 0
+        if arguments.command == "qualify":
+            try:
+                qualified = qualify_draft(
+                    source_store=arguments.source_store,
+                    processing_store=arguments.processing_store,
+                    processing_id=arguments.processing_id,
+                )
+            except (ValueError, FileNotFoundError) as error:
+                sys.stdout.write(json.dumps({"error": str(error)}, indent=2) + "\n")
+                return 1
+            sys.stdout.write(qualified.model_dump_json(indent=2) + "\n")
+            return 0
+        if arguments.command == "index":
+            try:
+                indexed_draft = index_draft(
+                    source_store=arguments.source_store,
+                    processing_store=arguments.processing_store,
+                    processing_id=arguments.processing_id,
+                    embedder=LocalEmbeddingAdapter(
+                        load_local_model_config("embedding")
+                    ),
+                    document_label=arguments.document_label,
+                )
+            except (ValueError, FileNotFoundError) as error:
+                sys.stdout.write(json.dumps({"error": str(error)}, indent=2) + "\n")
+                return 1
+            sys.stdout.write(indexed_draft.model_dump_json(indent=2) + "\n")
+            return 0
+        if arguments.command == "publish":
+            try:
+                published = publish_draft(
+                    source_store=arguments.source_store,
+                    processing_store=arguments.processing_store,
+                    processing_id=arguments.processing_id,
+                    activate_source=arguments.activate_source,
+                )
+            except (ValueError, FileNotFoundError) as error:
+                sys.stdout.write(json.dumps({"error": str(error)}, indent=2) + "\n")
+                return 1
+            sys.stdout.write(published.model_dump_json(indent=2) + "\n")
+            return 0
+        if arguments.command == "chart-qa":
+            request: ChartQueryRequest | DisplayedChartQueryRequest = TypeAdapter(
+                ChartQueryRequest | DisplayedChartQueryRequest
+            ).validate_json(arguments.request.read_bytes())
+            if isinstance(request, DisplayedChartQueryRequest):
+                displayed_service = DisplayedChartQAService(
+                    StoredDisplayResolver(
+                        LocalDocumentStore(arguments.source_store),
+                        ProcessingStore(arguments.processing_store),
+                        processing_id=request.processing_id,
+                    )
+                )
+                displayed_response = DisplayedChartQueryResponse.from_domain(
+                    displayed_service.answer(request.to_domain())
+                )
+                sys.stdout.write(displayed_response.model_dump_json(indent=2) + "\n")
+                return 0
             service = ChartQAService(
                 StoredChartResolver(
                     LocalDocumentStore(arguments.source_store),

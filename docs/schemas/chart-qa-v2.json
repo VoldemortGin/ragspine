@@ -1,0 +1,868 @@
+{
+  "DisplayedChartQueryRequest": {
+    "$defs": {
+      "PointSelectorInput": {
+        "additionalProperties": false,
+        "properties": {
+          "point_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Point Id",
+            "type": "string"
+          },
+          "category": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Category",
+            "type": "string"
+          }
+        },
+        "required": [
+          "point_id",
+          "category"
+        ],
+        "title": "PointSelectorInput",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": "chart-qa-v2",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "kind": {
+        "const": "chart",
+        "title": "Kind",
+        "type": "string"
+      },
+      "processing_id": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Processing Id",
+        "type": "string"
+      },
+      "snapshot_id": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Snapshot Id",
+        "type": "string"
+      },
+      "member_id": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Member Id",
+        "type": "string"
+      },
+      "operation": {
+        "const": "lookup",
+        "title": "Operation",
+        "type": "string"
+      },
+      "series": {
+        "maxLength": 256,
+        "minLength": 1,
+        "title": "Series",
+        "type": "string"
+      },
+      "period": {
+        "maxLength": 128,
+        "minLength": 1,
+        "title": "Period",
+        "type": "string"
+      },
+      "unit": {
+        "maxLength": 32,
+        "minLength": 1,
+        "title": "Unit",
+        "type": "string"
+      },
+      "points": {
+        "items": {
+          "$ref": "#/$defs/PointSelectorInput"
+        },
+        "maxItems": 1,
+        "minItems": 1,
+        "title": "Points",
+        "type": "array"
+      }
+    },
+    "required": [
+      "schema_version",
+      "kind",
+      "processing_id",
+      "snapshot_id",
+      "member_id",
+      "operation",
+      "series",
+      "period",
+      "unit",
+      "points"
+    ],
+    "title": "DisplayedChartQueryRequest",
+    "type": "object"
+  },
+  "DisplayedChartQueryResponse": {
+    "$defs": {
+      "AnswerValue": {
+        "properties": {
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Value"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          },
+          "value_kind": {
+            "$ref": "#/$defs/ValueKind"
+          },
+          "raw_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Display"
+          },
+          "verification": {
+            "$ref": "#/$defs/Verification"
+          },
+          "confidence": {
+            "$ref": "#/$defs/Confidence"
+          }
+        },
+        "required": [
+          "value",
+          "unit",
+          "value_kind",
+          "raw_display",
+          "verification",
+          "confidence"
+        ],
+        "title": "AnswerValue",
+        "type": "object"
+      },
+      "Confidence": {
+        "properties": {
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          }
+        },
+        "required": [
+          "score",
+          "method"
+        ],
+        "title": "Confidence",
+        "type": "object"
+      },
+      "DescriptionNormalizationCitation": {
+        "description": "Audit provenance only; repairing duplicate IDs does not qualify a fact.",
+        "properties": {
+          "binding": {
+            "$ref": "#/$defs/SvgBinding"
+          },
+          "receipt_id": {
+            "title": "Receipt Id",
+            "type": "string"
+          },
+          "raw_response_sha256": {
+            "title": "Raw Response Sha256",
+            "type": "string"
+          },
+          "original_typed_description_artifact_id": {
+            "title": "Original Typed Description Artifact Id",
+            "type": "string"
+          },
+          "normalized_description_artifact_id": {
+            "title": "Normalized Description Artifact Id",
+            "type": "string"
+          },
+          "rule_version": {
+            "title": "Rule Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "binding",
+          "receipt_id",
+          "raw_response_sha256",
+          "original_typed_description_artifact_id",
+          "normalized_description_artifact_id",
+          "rule_version"
+        ],
+        "title": "DescriptionNormalizationCitation",
+        "type": "object"
+      },
+      "DisplayedInputClaim": {
+        "properties": {
+          "point_id": {
+            "title": "Point Id",
+            "type": "string"
+          },
+          "series": {
+            "title": "Series",
+            "type": "string"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "period": {
+            "title": "Period",
+            "type": "string"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Value"
+          },
+          "value_kind": {
+            "$ref": "#/$defs/ValueKind"
+          },
+          "raw_display": {
+            "title": "Raw Display",
+            "type": "string"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/$defs/RoleFieldCitation"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
+          "period_interpretation": {
+            "$ref": "#/$defs/PointPeriodInterpretation"
+          }
+        },
+        "required": [
+          "point_id",
+          "series",
+          "category",
+          "period",
+          "unit",
+          "value",
+          "value_kind",
+          "raw_display",
+          "citations",
+          "period_interpretation"
+        ],
+        "title": "DisplayedInputClaim",
+        "type": "object"
+      },
+      "DisplayedRefusalReason": {
+        "enum": [
+          "unqualified_member",
+          "unsupported_operation",
+          "unsupported_grammar",
+          "unknown_point",
+          "value_unavailable",
+          "series_mismatch",
+          "category_mismatch",
+          "period_mismatch",
+          "unit_mismatch",
+          "unsupported_value_kind",
+          "unsupported_precision",
+          "insufficient_evidence"
+        ],
+        "title": "DisplayedRefusalReason",
+        "type": "string"
+      },
+      "Evidence": {
+        "properties": {
+          "element_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Element Ids",
+            "type": "array"
+          },
+          "verification": {
+            "$ref": "#/$defs/Verification"
+          },
+          "confidence": {
+            "$ref": "#/$defs/Confidence"
+          }
+        },
+        "required": [
+          "element_ids",
+          "verification",
+          "confidence"
+        ],
+        "title": "Evidence",
+        "type": "object"
+      },
+      "EvidenceKind": {
+        "enum": [
+          "native_element",
+          "source_text_observation"
+        ],
+        "title": "EvidenceKind",
+        "type": "string"
+      },
+      "FieldCitation": {
+        "properties": {
+          "field_path": {
+            "title": "Field Path",
+            "type": "string"
+          },
+          "chart_ir_artifact_id": {
+            "title": "Chart Ir Artifact Id",
+            "type": "string"
+          },
+          "svg_artifact_id": {
+            "title": "Svg Artifact Id",
+            "type": "string"
+          },
+          "svg_digest": {
+            "title": "Svg Digest",
+            "type": "string"
+          },
+          "qualification_id": {
+            "title": "Qualification Id",
+            "type": "string"
+          },
+          "occurrences": {
+            "items": {
+              "$ref": "#/$defs/SvgElement"
+            },
+            "title": "Occurrences",
+            "type": "array"
+          }
+        },
+        "required": [
+          "field_path",
+          "chart_ir_artifact_id",
+          "svg_artifact_id",
+          "svg_digest",
+          "qualification_id",
+          "occurrences"
+        ],
+        "title": "FieldCitation",
+        "type": "object"
+      },
+      "PageContextCitation": {
+        "properties": {
+          "source_manifest_id": {
+            "title": "Source Manifest Id",
+            "type": "string"
+          },
+          "source_text_sha256": {
+            "title": "Source Text Sha256",
+            "type": "string"
+          },
+          "source_span_id": {
+            "title": "Source Span Id",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/$defs/SourceAnchor"
+          },
+          "text_range": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "integer"
+              }
+            ],
+            "title": "Text Range",
+            "type": "array"
+          },
+          "verification": {
+            "$ref": "#/$defs/Verification"
+          },
+          "confidence": {
+            "$ref": "#/$defs/Confidence"
+          },
+          "scope": {
+            "const": "page_context",
+            "default": "page_context",
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_manifest_id",
+          "source_text_sha256",
+          "source_span_id",
+          "text",
+          "source",
+          "text_range",
+          "verification",
+          "confidence"
+        ],
+        "title": "PageContextCitation",
+        "type": "object"
+      },
+      "PointPeriodInterpretation": {
+        "properties": {
+          "binding": {
+            "$ref": "#/$defs/SvgBinding"
+          },
+          "raw_chart_ir_artifact_id": {
+            "title": "Raw Chart Ir Artifact Id",
+            "type": "string"
+          },
+          "point_id": {
+            "title": "Point Id",
+            "type": "string"
+          },
+          "raw_field_path": {
+            "title": "Raw Field Path",
+            "type": "string"
+          },
+          "literal": {
+            "title": "Literal",
+            "type": "string"
+          },
+          "evidence": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "rule_version": {
+            "title": "Rule Version",
+            "type": "string"
+          },
+          "verification": {
+            "$ref": "#/$defs/Verification"
+          },
+          "confidence": {
+            "$ref": "#/$defs/Confidence"
+          }
+        },
+        "required": [
+          "binding",
+          "raw_chart_ir_artifact_id",
+          "point_id",
+          "raw_field_path",
+          "literal",
+          "evidence",
+          "rule_version",
+          "verification",
+          "confidence"
+        ],
+        "title": "PointPeriodInterpretation",
+        "type": "object"
+      },
+      "QueryStatus": {
+        "enum": [
+          "answered",
+          "abstained"
+        ],
+        "title": "QueryStatus",
+        "type": "string"
+      },
+      "RoleFieldCitation": {
+        "properties": {
+          "role": {
+            "$ref": "#/$defs/SemanticRole"
+          },
+          "raw_chart_ir_artifact_id": {
+            "title": "Raw Chart Ir Artifact Id",
+            "type": "string"
+          },
+          "raw_field_path": {
+            "title": "Raw Field Path",
+            "type": "string"
+          },
+          "citation": {
+            "$ref": "#/$defs/FieldCitation"
+          }
+        },
+        "required": [
+          "role",
+          "raw_chart_ir_artifact_id",
+          "raw_field_path",
+          "citation"
+        ],
+        "title": "RoleFieldCitation",
+        "type": "object"
+      },
+      "SemanticRole": {
+        "enum": [
+          "series",
+          "category",
+          "period",
+          "unit",
+          "value"
+        ],
+        "type": "string"
+      },
+      "SourceAnchor": {
+        "properties": {
+          "source_revision": {
+            "title": "Source Revision",
+            "type": "string"
+          },
+          "document_sha256": {
+            "title": "Document Sha256",
+            "type": "string"
+          },
+          "page_index": {
+            "title": "Page Index",
+            "type": "integer"
+          },
+          "bbox": {
+            "maxItems": 4,
+            "minItems": 4,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Bbox",
+            "type": "array"
+          },
+          "coordinate_frame": {
+            "default": "page-top-left",
+            "title": "Coordinate Frame",
+            "type": "string"
+          },
+          "rotation": {
+            "default": 0,
+            "title": "Rotation",
+            "type": "integer"
+          },
+          "transform": {
+            "default": [
+              1.0,
+              0.0,
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            "maxItems": 6,
+            "minItems": 6,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Transform",
+            "type": "array"
+          }
+        },
+        "required": [
+          "source_revision",
+          "document_sha256",
+          "page_index",
+          "bbox"
+        ],
+        "title": "SourceAnchor",
+        "type": "object"
+      },
+      "SvgBinding": {
+        "properties": {
+          "figure_id": {
+            "title": "Figure Id",
+            "type": "string"
+          },
+          "source_revision": {
+            "title": "Source Revision",
+            "type": "string"
+          },
+          "svg_artifact_id": {
+            "title": "Svg Artifact Id",
+            "type": "string"
+          },
+          "svg_digest": {
+            "title": "Svg Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "figure_id",
+          "source_revision",
+          "svg_artifact_id",
+          "svg_digest"
+        ],
+        "title": "SvgBinding",
+        "type": "object"
+      },
+      "SvgElement": {
+        "properties": {
+          "element_id": {
+            "title": "Element Id",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "anchor": {
+            "$ref": "#/$defs/SourceAnchor"
+          },
+          "evidence_kind": {
+            "$ref": "#/$defs/EvidenceKind",
+            "default": "native_element"
+          },
+          "source_span_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Span Id"
+          },
+          "text_range": {
+            "anyOf": [
+              {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "integer"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Text Range"
+          }
+        },
+        "required": [
+          "element_id",
+          "text",
+          "anchor"
+        ],
+        "title": "SvgElement",
+        "type": "object"
+      },
+      "ValueKind": {
+        "enum": [
+          "explicit",
+          "derived",
+          "estimated",
+          "unavailable"
+        ],
+        "title": "ValueKind",
+        "type": "string"
+      },
+      "Verification": {
+        "enum": [
+          "verified",
+          "pending",
+          "rejected"
+        ],
+        "title": "Verification",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": "chart-qa-v2",
+        "default": "chart-qa-v2",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "semantic_scope": {
+        "const": "source_display_only",
+        "default": "source_display_only",
+        "title": "Semantic Scope",
+        "type": "string"
+      },
+      "processing_id": {
+        "title": "Processing Id",
+        "type": "string"
+      },
+      "snapshot_id": {
+        "title": "Snapshot Id",
+        "type": "string"
+      },
+      "member_id": {
+        "title": "Member Id",
+        "type": "string"
+      },
+      "operation": {
+        "const": "lookup",
+        "default": "lookup",
+        "title": "Operation",
+        "type": "string"
+      },
+      "status": {
+        "$ref": "#/$defs/QueryStatus"
+      },
+      "answer": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/AnswerValue"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "inputs": {
+        "items": {
+          "$ref": "#/$defs/DisplayedInputClaim"
+        },
+        "title": "Inputs",
+        "type": "array"
+      },
+      "page_context": {
+        "items": {
+          "$ref": "#/$defs/PageContextCitation"
+        },
+        "title": "Page Context",
+        "type": "array"
+      },
+      "description_normalization": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/DescriptionNormalizationCitation"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "calculation_receipt": {
+        "default": null,
+        "title": "Calculation Receipt",
+        "type": "null"
+      },
+      "refusal_reason": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/DisplayedRefusalReason"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "processing_id",
+      "snapshot_id",
+      "member_id",
+      "status",
+      "answer",
+      "inputs",
+      "page_context",
+      "description_normalization",
+      "refusal_reason"
+    ],
+    "title": "DisplayedChartQueryResponse",
+    "type": "object"
+  },
+  "ChartQueryErrorResponse": {
+    "$defs": {
+      "ChartQueryErrorDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "enum": [
+              "pin_conflict",
+              "invalid_evidence",
+              "unavailable_evidence"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ChartQueryErrorDetail",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "error": {
+        "$ref": "#/$defs/ChartQueryErrorDetail"
+      }
+    },
+    "required": [
+      "error"
+    ],
+    "title": "ChartQueryErrorResponse",
+    "type": "object"
+  }
+}

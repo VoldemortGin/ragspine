@@ -1,14 +1,42 @@
 # enterprise-pdf-rag
 
-Python 3.12 / uv 财务 PDF RAG 后端。当前业务范围是**单份真实 AIA 2026 中期业绩演示报告的前 20 页加工与证据审阅**。原始 PDF、全部 71 页的原生 SVG 和文本位置作为来源缓存保存；语义处理只选择物理第 1–20 页。
+Python 3.12 / uv 文档 RAG 后端，目标是为不同 PDF 提供可追溯的来源提取、结构化处理、检索和问答。**AIA 是当前公开验收样本，不是产品限定的客户或文档类型。** 当前已验收的真实处理范围仍是这份报告的物理第 1–20 页；完整通用 RAG 尚未完成。原始 PDF、全部 71 页的原生 SVG 和文本位置作为来源缓存保存。
 
-这是 AIA Group 报告。页面布局、typed IR、独立描述和资格回执分别保存；模型产物初始为 **pending**，成功保存不等于独立验证。只有逐字原文投影或具有完整字段资格的描述可以进入真实本地 embedding；ChartIR 和 SVG 不进入 embedding。`text.json` 仍是 pdfspine 原文观测。每页/对象是否已完成、失败或尚未运行，以处理 manifest 和实际文件为准。
+样本为 AIA 官网公开可查的《2026 Interim Results Presentation》（2026 年 8 月 20 日），来源是 [AIA 官方业绩与报告页](https://www.aia.com/en/investor-relations/overview/results-presentations)及[官方 PDF](https://www.aia.com/content/dam/group-wise/en/docs/investor-relations/2026/AIA%20Group%202026%20Interim%20Results%20Analyst%20Presentation%20Final.pdf)，并非私有客户数据。原 PDF 不随公共仓库发布。2026-09-19 已核对官方页面、PDF 封面日期和 71 页页数；本地文件身份仍由下文 SHA-256 固定。
+
+**现在可以测试** Open WebUI 来源/处理结果审阅、原文 API、已发布描述索引的在线语义搜索与证据回填，以及第 18 页已取得资格的结构化 ChartQA。2026-09-19 已在官方 pdfspine 0.11.0 环境受控重启并完成一次真实本地查询向量搜索，返回 5 条命中且回填保持同一快照；普通自然语言财务聊天仍返回 422。具体入口、请求、凭证要求和通用 RAG 的剩余条件见 [测试与入库指南](docs/testing-and-ingestion.md)。界面可打开不代表 RAG 全链路通过。
+
+当前验收样本是 AIA Group 报告。页面布局、typed IR、独立描述和资格回执分别保存；模型产物初始为 **pending**，成功保存不等于独立验证。只有逐字原文投影或具有完整字段资格的描述可以进入真实本地 embedding；ChartIR 和 SVG 不进入 embedding。`text.json` 仍是 pdfspine 原文观测。每页/对象是否已完成、失败或尚未运行，以处理 manifest 和实际文件为准。
 
 本次实际产物覆盖 **20 页、241 个对象，241 份 IR 和 241 份描述/来源转录**。189 份描述投影保持原样复用，其中 180 份证明原文转录，9 份证明图表标签。第 18 页 Distribution Mix 的一个图表另已取得 **2 个显式百分比的数值关系资格**，支持受限查值和有序百分点差；其他图表不因此获准数值回答。独立真实 API 评测的 19 个正例、拒答和证据损坏案例通过，仍不代表完整 P5 或通用财务问答完成。初始加工结果见 [加工验收记录](docs/processing-run-2026-09-19.md)，新增资格与限制见 [ChartQA 阶段说明](docs/chart-qa-stage.md)。
 
 本地继续使用 uv；独立的 Python 3.12 环境可直接 `python -m pip install .` 安装完整后端运行依赖，包括 pdfspine、SVG renderer 和来源字形验证所需的 FontTools。`pdf` / `processing` extras 保留为空兼容别名，无需额外选择。安装后用 `enterprise-pdf-rag serve` 启动已有 API，并通过 `APP_ROOT_DIR` / `APP_DATA_DIR` 指定源码目录以外的工作区与持久数据。Open WebUI 仍是单独安装和隔离的服务，不随本包安装。环境条件、可复制命令及 Databricks 平台区别见 [部署说明](docs/databricks-deployment.md)；本地安装验证不代表已在 Databricks 部署。
 
-## 处理选定文件
+## 通用 PDF 入库
+
+安装包后可直接运行以下命令；仓库开发环境也可在命令前加 `uv run --locked`：
+
+```sh
+enterprise-pdf-rag ingest --pdf /path/to/document.pdf --pages 1-3,5
+# 仓库中的薄封装使用同一组参数
+python scripts/ingest.py --pdf /path/to/document.pdf --pages all
+```
+
+默认 `--stage source --max-live-calls 0`，不需要模型凭证，保存完整 PDF 的来源资产，并为选择的物理页生成 Canonical 原文观测。`--pages` 不截断原始 PDF 或来源页缓存。输出默认在 `APP_DATA_DIR/ingestion/<PDF-SHA256>/{source,processing}`；用 `--output-dir <父目录>` 可修改父目录。结果 JSON 返回 store 路径、source/processing ID、实际页数、选页、阶段状态和审阅路径，明确 `activated: false`、`indexed: false`；不会修改当前 AIA 发布或把新 PDF 自动接入 Open WebUI。
+
+可显式选择 `--stage layout` 或 `--stage semantics`，使用同一套既有布局和独立语义分支；两者即使预算为 0 也须提供模型配置以定位缓存，正预算会调用配置的模型。该入口解除 AIA 文件身份和 20 页上限，但现有来源适配器仍对旋转页、非默认 CropBox 等未验证坐标场景明确拒绝。缓存、安装后 Python API、能力限制与后续 RAG 验收条件见 [测试与入库指南](docs/testing-and-ingestion.md) 和 [ADR 0010](docs/adr/0010-generic-pdf-ingestion-entry.md)。
+
+入库产出的 draft 由三条独立命令按上面返回的 store 根和 `processing_id` 推进，不写死 AIA 身份：
+
+```sh
+enterprise-pdf-rag qualify --source-store <src> --processing-store <proc> --processing-id <id>
+enterprise-pdf-rag index   --source-store <src> --processing-store <proc> --processing-id <id>
+enterprise-pdf-rag publish --source-store <src> --processing-store <proc> --processing-id <id>
+```
+
+`qualify` 只读统计资格，零模型；`index` 用生产本地 embedding 构建 description-only 检索快照并产新不可变 snapshot，不切指针（`--document-label` 可覆盖审阅标题）；`publish` 原子切 `current-processing`，默认同时激活来源 manifest（`--no-activate-source` 只切 processing），未 `index` 的 draft 拒绝，内容寻址幂等。检索状态依次为 `not_ready → qualified; indexing pending → indexed; publication pending → ready`。这是资格/索引/发布入口，不等于通用 RAG 回答链已完成。
+
+## 公开验收样本的来源处理
 
 所有命令从仓库根目录运行：
 
@@ -98,7 +126,7 @@ Open WebUI 的内置上传、PDF 解析、RAG、工具和后台自动生成被�
 - `GET /v1/models`、`POST /v1/chat/completions`：受限原文/处理状态审阅，支持非流式与 SSE。
 - `GET /v1/processing/status`、`GET /v1/processing/manifest`：固定处理批次的实际状态和完整依赖。
 - `GET /v1/processing/review/review.html`：本批次逐对象 SVG / IR / 描述 / 诊断。
-- `POST /v1/processing/search`、`POST /v1/processing/context`：固定 snapshot 的描述检索与无模型证据回填；缺索引/服务配置明确拒绝。
+- `POST /v1/processing/search`、`POST /v1/processing/context`：固定 snapshot 的描述检索与无模型证据回填。新 app factory 从独立 `EMBEDDING_*` 配置注入 query embedder；缺少/无效配置或服务失败返回 503，启动不调用模型。本轮实际在线搜索与同 snapshot 回填已通过；HTTP 搜索使用 cosine 排序，不执行 rerank 或 LLM。context 可按已有有效 hit 回填，不调用模型。
 - `POST /v1/queries`：结构化 ChartQA。仅在固定 member 的来源数值资格通过后，支持显式百分比查值与同图、同系列、同期间的百分点差；每个字段保留 SVG/来源 occurrence 引用。
 
 未知模型、越界页、错 snapshot、缺源证据或财务推断请求均明确拒绝。已有持久源资产、不可变 manifest 和本地原子指针；生产级多存储 CAS 发布、ACL/撤回、并发调度与完整财务 QA 尚未实现。
@@ -130,6 +158,8 @@ uv run --locked enterprise-pdf-rag extract \
 ```
 
 ## 开发与验收
+
+2026-09-19 正式依赖已锁定公开 PyPI `pdfspine==0.11.0`，完整 `./ci.sh` 通过 639 tests；独立 Python 3.12 的普通 pip 安装、`pip check` 和 checkout 外 smoke 通过。本机验证不代表 GitHub Linux CI 或 Databricks 部署已经完成。
 
 ```sh
 uv run --locked pytest tests/documents  # TDD 先跑相关测试

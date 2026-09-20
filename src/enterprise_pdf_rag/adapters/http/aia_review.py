@@ -43,6 +43,7 @@ from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.source_publication import validate_processing_source
 from enterprise_pdf_rag.documents.aia import AIA_SPEC
 from enterprise_pdf_rag.documents.models import DocumentSnapshot, DocumentSpec
+from enterprise_pdf_rag.figures.ports import EmbeddingPort
 
 
 def _ensure_source(snapshot: DocumentSnapshot, spec: DocumentSpec) -> None:
@@ -68,6 +69,7 @@ def create_aia_app(
     *,
     spec: DocumentSpec = AIA_SPEC,
     processing: ProcessingStore | None = None,
+    embedder: EmbeddingPort | None = None,
 ) -> FastAPI:
     snapshot = store.load_current()
     _ensure_source(snapshot, spec)
@@ -81,7 +83,9 @@ def create_aia_app(
     if processed is not None and processing is not None:
         if processed[1].scope.source_manifest_id != snapshot.manifest_id:
             raise ValueError("Processing belongs to another source snapshot")
-        app.include_router(create_processing_router(store, processing, processed[0]))
+        app.include_router(
+            create_processing_router(store, processing, processed[0], embedder=embedder)
+        )
 
     @app.exception_handler(ValueError)
     @app.exception_handler(OSError)

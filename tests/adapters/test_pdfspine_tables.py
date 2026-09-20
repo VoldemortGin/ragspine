@@ -21,9 +21,11 @@ EXPECTED_SHA256 = "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f08
 P20_SENSITIVITY_CANDIDATE = (654.0, 125.0, 934.0, 466.0)
 
 
-def _table_pdf() -> bytes:
+def _table_pdf(*, page_index: int = 0) -> bytes:
     document = pdfspine.open()
     try:
+        for _ in range(page_index):
+            document.new_page(width=300, height=180)
         page = document.new_page(width=300, height=180)
         for start, end in (
             ((20, 20), (220, 20)),
@@ -41,24 +43,27 @@ def _table_pdf() -> bytes:
         document.close()
 
 
-def _page_input(pdf: bytes) -> PageInput:
-    extracted = PdfspineDocumentAdapter().extract_document(pdf).pages[0]
+def _page_input(pdf: bytes, *, page_index: int = 0) -> PageInput:
+    extracted = PdfspineDocumentAdapter().extract_document(pdf).pages[page_index]
     svg = extracted.native_svg.encode()
     digest = sha256(pdf).hexdigest()
     return PageInput(
         "a" * 64,
         digest,
-        0,
+        page_index,
         extracted.width,
         extracted.height,
         AssetRef(sha256(svg).hexdigest(), "image/svg+xml", len(svg)),
-        TextSidecar("source-text-v1", digest, 0, extracted.text_spans),
+        TextSidecar("source-text-v1", digest, page_index, extracted.text_spans),
     )
 
 
-def test_native_typed_slots_preserve_merge_and_exact_source_occurrences() -> None:
-    pdf = _table_pdf()
-    page = _page_input(pdf)
+@pytest.mark.parametrize("page_index", [0, 20])
+def test_native_typed_slots_preserve_merge_and_exact_source_occurrences(
+    page_index: int,
+) -> None:
+    pdf = _table_pdf(page_index=page_index)
+    page = _page_input(pdf, page_index=page_index)
     item = LayoutObject(
         "table-object",
         ObjectKind.TABLE,
@@ -74,7 +79,7 @@ def test_native_typed_slots_preserve_merge_and_exact_source_occurrences() -> Non
     table = result.table
     assert table.source.source_revision == page.source_sha256
     assert table.source.document_sha256 == page.source_sha256
-    assert table.source.page_index == 0
+    assert table.source.page_index == page_index
     assert table.source.bbox == (20.0, 20.0, 220.0, 120.0)
     assert table.verification is Verification.PENDING
     assert (table.row_count, table.col_count) == (2, 2)
@@ -91,7 +96,10 @@ def test_native_typed_slots_preserve_merge_and_exact_source_occurrences() -> Non
     assert {source for cell in table.cells for source in cell.source_span_ids} == {
         span.span_id for span in page.text.spans
     }
-    assert any("pdfspine/0.10.0" in diagnostic for diagnostic in result.diagnostics)
+    assert any(
+        f"pdfspine/{pdfspine.__version__}" in diagnostic
+        for diagnostic in result.diagnostics
+    )
     assert any("source=native" in diagnostic for diagnostic in result.diagnostics)
 
 
@@ -165,5 +173,5 @@ def test_real_p20_sensitivity_region_reports_native_grid_unavailable() -> None:
 
     assert result.table is None
     assert result.diagnostics == (
-        "pdfspine/0.10.0 native lines found 1 page table(s) and 0 exact region match(es); typed table unavailable.",
+        f"pdfspine/{pdfspine.__version__} native lines found 1 page table(s) and 0 exact region match(es); typed table unavailable.",
     )

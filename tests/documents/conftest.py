@@ -27,7 +27,7 @@ def prepared_source(tmp_path: Path) -> tuple[LocalDocumentStore, DocumentSpec]:
         0,
         (0.0, 0.0, 100.0, 100.0),
     )
-    svg = '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><path d="M0 0L1 1"/></svg>'
+    svg = '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><path d="M0 0L1 1"/></svg>'
     span = TextSpan("page-0-span-0", "Observed source title", (1.0, 1.0, 90.0, 20.0))
 
     class Extractor:

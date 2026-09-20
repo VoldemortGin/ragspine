@@ -154,6 +154,62 @@ def test_serialized_proof_is_rebuilt_not_trusted_as_an_approval() -> None:
     assert verify_source_paint_proof(source, prepared=prepared, proof=proof) == proof
 
 
+def test_reviewed_sdk_upgrade_revalidates_the_entire_old_proof_identity() -> None:
+    source, prepared, _ = glyph_source()
+    current = build_source_paint_proof(source, prepared=prepared)
+    old = replace(
+        current,
+        producer=current.producer.replace("pdfspine/0.11.0;", "pdfspine/0.10.0;"),
+    )
+
+    assert verify_source_paint_proof(source, prepared=prepared, proof=old) == old
+    for changed in (
+        replace(old, producer=old.producer.replace("0.10.0", "0.9.0")),
+        replace(old, trace_digest="0" * 64),
+        replace(old, glyphs=(replace(old.glyphs[0], character="9"), *old.glyphs[1:])),
+        replace(
+            old,
+            glyphs=(
+                replace(old.glyphs[0], clips=((0.0, 0.0, 1.0, 1.0),)),
+                *old.glyphs[1:],
+            ),
+        ),
+    ):
+        with pytest.raises(
+            ValueError, match="source_paint_proof_revalidation_mismatch"
+        ):
+            verify_source_paint_proof(source, prepared=prepared, proof=changed)
+
+
+def test_legacy_proof_cannot_bypass_a_missing_trusted_source_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, prepared, _ = glyph_source()
+    current = build_source_paint_proof(source, prepared=prepared)
+    old = replace(
+        current,
+        producer=current.producer.replace("pdfspine/0.11.0;", "pdfspine/0.10.0;"),
+    )
+    source_paint._build_source_paint_proof.cache_clear()
+    monkeypatch.setattr(pdfspine.Page, "get_paint_profile", None)
+    with pytest.raises(ValueError, match="trusted_paint_profile_unavailable"):
+        verify_source_paint_proof(source, prepared=prepared, proof=old)
+
+
+def test_legacy_vector_fill_rule_is_revalidated_without_tolerance() -> None:
+    source, prepared, _, _ = authored_donut()
+    current = build_source_paint_proof(source, prepared=prepared)
+    old = replace(
+        current,
+        producer=current.producer.replace("pdfspine/0.11.0;", "pdfspine/0.10.0;"),
+    )
+    changed = replace(
+        old, vectors=(replace(old.vectors[0], fill_rule="nonzero"), *old.vectors[1:])
+    )
+    with pytest.raises(ValueError, match="source_paint_proof_revalidation_mismatch"):
+        verify_source_paint_proof(source, prepared=prepared, proof=changed)
+
+
 def test_replay_fill_rule_disagreement_cannot_pass_paint_closure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

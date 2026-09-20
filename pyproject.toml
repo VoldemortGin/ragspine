@@ -11,7 +11,7 @@ dependencies = [
     "jinja2",
     "fastapi",
     "uvicorn",
-    "pdfspine==0.10.0",
+    "pdfspine==0.11.0",
     "resvg-py==0.5.0",
     "fonttools==4.65.0",
 ]

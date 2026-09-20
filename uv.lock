@@ -135,7 +135,7 @@ requires-dist = [
     { name = "fastapi" },
     { name = "fonttools", specifier = "==4.65.0" },
     { name = "jinja2" },
-    { name = "pdfspine", specifier = "==0.10.0" },
+    { name = "pdfspine", specifier = "==0.11.0" },
     { name = "pydantic", specifier = ">=2.12,<3" },
     { name = "pydantic-settings", extras = ["yaml"], specifier = ">=2.2,<3" },
     { name = "resvg-py", specifier = "==0.5.0" },
@@ -416,18 +416,18 @@ wheels = [
 
 [[package]]
 name = "pdfspine"
-version = "0.10.0"
+version = "0.11.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "ocrspine-models" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/cc/04/96b291df2acafa298ce04040a8fb3e9b34fcd450bb38d5ee9e2b70609ed5/pdfspine-0.10.0.tar.gz", hash = "sha256:aa2c5c213c1630a63db76977dd00cb03e9fc2a77b0e9b0c47e6df5974e59a6d7", size = 5179126 }
+sdist = { url = "https://files.pythonhosted.org/packages/cb/f6/abd4ad2e79b3f19c8b147209eaa0b06b444e3978cd732200d43144a0cad6/pdfspine-0.11.0.tar.gz", hash = "sha256:6d8fce45353479293b2b7e73ae000e7add635c3cd9857138a38e3703dbd8af2b", size = 5199337 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e1/c9/f3d64c26341b7352ec9e434e7724bd4b5040f9c0618cd04308c8029318ee/pdfspine-0.10.0-cp311-abi3-macosx_10_12_x86_64.whl", hash = "sha256:f824301fe93c05e122242b23ce4093a600ba9e4e655c7568426171cc15ad39a3", size = 12092233 },
-    { url = "https://files.pythonhosted.org/packages/d4/eb/c51666cd645c44708c1040654227105e91a8b75bf06c37469a7ae1537324/pdfspine-0.10.0-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:53072add8ec1cd747a967c44b08de257b8773081ee5ab4693909511c52645686", size = 11207571 },
-    { url = "https://files.pythonhosted.org/packages/11/91/38777fe04fe0ed05c619ecd25a5ee9d25768be5e6663d2b20bc086a4bbd5/pdfspine-0.10.0-cp311-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:475ad59802b0ef49a65e5670fca82bf9c8c47bef07f4c5899f4c8a9bd170b8a8", size = 12470409 },
-    { url = "https://files.pythonhosted.org/packages/8b/50/839f8933acf84509ecf7833e62fa13da7c6dfca3feb14c9e75ba2bcb34d4/pdfspine-0.10.0-cp311-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:fecfa85bb5286b669042f43304c8b2bc7d2dd1c0347413beba99eabf2a091eaf", size = 11367722 },
-    { url = "https://files.pythonhosted.org/packages/34/ec/aa3c4ff5839fc46dd10d339676ad3a28f2847fd6cba6f8c08500392c50a4/pdfspine-0.10.0-cp311-abi3-win_amd64.whl", hash = "sha256:6d8e9c2cb835d23a97d0053683866299cf1fc61d04a9027b3f59ce77f7870a94", size = 12550526 },
+    { url = "https://files.pythonhosted.org/packages/e1/60/8d9d0eb3c737d9cd577170b6e63168f64b39cca39edababd986ec49e3842/pdfspine-0.11.0-cp311-abi3-macosx_10_12_x86_64.whl", hash = "sha256:83705c7f1ca7de3c9baebfcabf29f7e83254a5860c0ec85e1f3ffad4cfb88997", size = 12140471 },
+    { url = "https://files.pythonhosted.org/packages/7d/55/7b9995c1f4d3b8ddc76973583fec249cc6551a20b91728f5265e2dc1e0c3/pdfspine-0.11.0-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:0b636ded26787651f14f84c0960ca7f9a33a4b193b206650abfbe8788d945834", size = 11257949 },
+    { url = "https://files.pythonhosted.org/packages/f7/37/24424ce60c8a1fac5b302b4ec88307bf8bff96bf27548d62f81d6fc540f9/pdfspine-0.11.0-cp311-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:23975eafc1679d607562839dec477101348910ba2ece858b01833445fb58b273", size = 12532384 },
+    { url = "https://files.pythonhosted.org/packages/53/62/03aad501af64143c2c69b3620f72fa5b8197f8fd16090619c2ae9efcfd67/pdfspine-0.11.0-cp311-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:c6f9b3270bdee0d5d08dabe748226f01f9cd53598b33aa89cf6e20cc614764b1", size = 11416653 },
+    { url = "https://files.pythonhosted.org/packages/a2/cb/bb71918c812a2bdd459525b82c80e553d88cad29d071a16a81da189806cb/pdfspine-0.11.0-cp311-abi3-win_amd64.whl", hash = "sha256:39c4dce3d5221c634f47dccb508cfff4f5244fd0b8a99861cc594887862577b1", size = 12606292 },
 ]
 
 [[package]]

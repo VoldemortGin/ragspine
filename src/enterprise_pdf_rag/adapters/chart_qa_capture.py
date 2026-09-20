@@ -87,7 +87,7 @@ def capture_chart_qa(
     required = {case.request.target for case in gold.cases}
     if set(targets.targets) != required:
         raise ValueError("Capture targets must exactly cover the gold target names")
-    send = _post if transport is None else transport
+    send = post_chart_query if transport is None else transport
     results: list[ObservedCase] = []
     for case in gold.cases:
         target = targets.targets[case.request.target]
@@ -119,7 +119,7 @@ def capture_chart_qa(
                 )
             )
         else:
-            error_class = _error_class(status, response_payload)
+            error_class = classify_query_error(status, response_payload)
             results.append(
                 ObservedCase(
                     case_id=case.case_id,
@@ -133,7 +133,7 @@ def capture_chart_qa(
     )
 
 
-def _error_class(status: int, payload: bytes) -> str:
+def classify_query_error(status: int, payload: bytes) -> str:
     if status in {409, 503}:
         return _ErrorBody.model_validate_json(
             payload, strict=True, extra="forbid"
@@ -146,7 +146,9 @@ def _error_class(status: int, payload: bytes) -> str:
     return f"http_{status}"
 
 
-def _post(target: CaptureTarget, payload: bytes) -> tuple[int, bytes]:
+def post_chart_query(target: CaptureTarget, payload: bytes) -> tuple[int, bytes]:
+    """POST only to a validated loopback target, with no redirect/retry handling."""
+    target = CaptureTarget.model_validate_json(target.model_dump_json(), strict=True)
     parsed = urlsplit(target.endpoint)
     assert parsed.hostname is not None and parsed.port is not None
     connection = http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=30)
@@ -166,7 +168,7 @@ def _post(target: CaptureTarget, payload: bytes) -> tuple[int, bytes]:
         connection.close()
 
 
-def _write_output(path: Path, payload: bytes) -> None:
+def write_capture_output(path: Path, payload: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         if path.read_bytes() != payload:
@@ -198,7 +200,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     observations = capture_chart_qa(
         arguments.gold.read_bytes(), arguments.targets.read_bytes()
     )
-    _write_output(
+    write_capture_output(
         arguments.output,
         observations.model_dump_json(exclude_none=False).encode(),
     )

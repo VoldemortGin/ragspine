@@ -2,13 +2,14 @@
 
 ## 当前范围
 
-默认界面用于审阅唯一选定的 AIA Group 2026 中期业绩演示文稿。来源层显示 pdfspine 保存的原始 PDF、71 页 native SVG 与文字观测，并固定到同一份不可变 manifest。处理层仅覆盖物理第 1–20 页：241 个对象均已保存 typed IR 和独立描述或逐字原文 projection，其中 180 个来源转录和 9 个无数字图表标签可以进入 description-only 检索；图表数值关系资格仍为 0。其余推断保持 `pending`，界面不会把标签命中当作已验证财务答案。
+当前兼容预览固定到 AIA Group 2026 中期业绩演示文稿这一公开验收样本；项目目标是通用文档 RAG，当前界面尚不能上传、选择或切换任意 PDF。实际可测范围和请求见 [测试与入库指南](testing-and-ingestion.md)。默认界面用于审阅该样本。来源层显示 pdfspine 保存的原始 PDF、71 页 native SVG 与文字观测，并固定到同一份不可变 manifest。处理层仅覆盖物理第 1–20 页：241 个对象均已保存 typed IR 和独立描述或逐字原文 projection，其中 180 个来源转录和 9 个无数字图表标签可以进入 description-only 检索；第 18 页 Distribution Mix 已取得 2 个数值关系资格。其余推断保持 `pending`，界面不会把标签命中当作已验证财务答案。
 
 | 部分 | 状态 | 已验证范围 |
 | --- | --- | --- |
 | AIA 来源 ingestion | 已实跑 | 固定 SHA-256、71 页完整覆盖、原 PDF、native SVG、文字 sidecar、第 25 页选区和 pending 状态文件已落盘 |
-| 物理第 1–20 页处理 | 已实跑 | 241 个对象、241 份 typed IR、241 份描述；29 个 Chart 均有独立双支，180 个来源转录、9 个仅标签资格、0 个数值关系资格 |
+| 物理第 1–20 页处理 | 已实跑 | 241 个对象、241 份 typed IR、241 份描述；29 个 Chart 均有独立双支，180 个来源转录、早期 9 个仅标签资格；当前其中第 18 页 donut 已增加 2 个数值关系资格 |
 | 本地检索与证据回填 | 已实跑 | 189 个合格描述、2560 维真实向量、固定 snapshot 检索与同 snapshot hydrate；金融 guard 拒绝仅转录和仅标签范围的数值问答 |
+| HTTP 语义 search 与 context | 已实跑 | 官方 pdfspine 0.11.0 环境受控重启后，一次真实 query embedding 返回 5 条命中，context 保持同 snapshot；缺少/无效配置或服务失败为 503；不调用 rerank/LLM |
 | OpenAI 兼容来源审阅后端 | 离线测试通过 | 唯一来源审阅模型、普通 completion、SSE、错误 snapshot、未知问题和缺失证据 fail closed |
 | Open WebUI 0.6.5 兼容预览 | 已实跑 | 隔离数据目录、真实浏览器、唯一 AIA 来源模型、71 页身份、第 25 页引用与 pending 提示；不能代表 0.11.3 兼容性 |
 | Open WebUI 0.11.3 官方目标 | 仅配置 | Compose 配置可静态校验；当前机器没有可用 Docker daemon，镜像未构建、容器未启动、页面未验证 |
@@ -62,7 +63,7 @@ OPEN_WEBUI_PYTHON="$PWD/data/open-webui-runtime/bin/python" ./scripts/start.sh
 
 缺少处理数据时须先恢复已有 `data/output/aia-2026-interim/` 资产，或按 README 显式执行处理流程。没有有效数据时启动命令不会生成演示数据替代。脚本不主动 source `~/.zshrc`、不读取 `.env`，不会将上游模型凭证传给厂商进程。
 
-`status` 应显示以下两个 URL 均为 HTTP 200：
+`status` 的以下 HTTP 200 仅证明模型发现/UI 服务可达，不证明语义检索、模型回答或完整 RAG 通过：
 
 - API 模型发现：<http://127.0.0.1:8766/v1/models>
 - WebUI 配置探针：<http://127.0.0.1:8767/api/config>

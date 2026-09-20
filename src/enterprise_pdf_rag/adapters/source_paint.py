@@ -36,6 +36,10 @@ from enterprise_pdf_rag.adapters.donut_geometry import (
 from enterprise_pdf_rag.adapters.figure_reasoning import PreparedFigure, prepare_figure
 from enterprise_pdf_rag.adapters.pdfspine_document import _PageText, _spans
 from enterprise_pdf_rag.adapters.pdfspine_svg import crop_native_svg
+from enterprise_pdf_rag.adapters.source_profile import (
+    SourceProfileReceipt,
+    read_source_profile,
+)
 from enterprise_pdf_rag.documents.models import AssetRef, Bounds, TextSidecar, TextSpan
 from enterprise_pdf_rag.processing.models import PageInput
 
@@ -569,21 +573,150 @@ def _check_glyph_visibility(
             raise ValueError("source_glyph_occluded_by_other_text")
 
 
-@lru_cache(maxsize=8)
-def _build_source_paint_proof(
-    pdf: bytes, prepared: PreparedFigure, producer: str
-) -> SourcePaintProof:
-    """Read one pinned page; prove glyph shapes without changing existing assets."""
+def _matched_glyph_roles(
+    prepared: PreparedFigure,
+    events: tuple[_ReplayEvent, ...],
+    native_paths: tuple[_NativePath, ...],
+    event_clips: dict[int, tuple[Bounds, ...]],
+) -> tuple[GlyphPaintProof, ...]:
+    roles = []
+    texts: dict[str, list[str]] = defaultdict(list)
+    used: set[str] = set()
+    for event in events:
+        if event.kind != "text":
+            continue
+        payload = event.payload
+        for index, glyph in enumerate(_GLYPHS.validate_python(payload["glyphs"])):
+            character, _, mapper_gid, origin, _, trm = glyph
+            transformed = _transform(event.matrix, origin)
+            span = _span_for(transformed, prepared.paint_text_spans)
+            if span is None:
+                continue
+            texts[span.span_id].append(character)
+            if not _intersects(span.bbox, prepared.svg.source.bbox):
+                continue
+            if (
+                len(character) != 1
+                or payload["alpha"] != 255
+                or payload["render_mode"] != 0
+            ):
+                raise ValueError("unsupported_source_text_mode")
+            font_bytes = event.font_buffer
+            if event.font_format != "TrueType" or font_bytes is None:
+                raise ValueError("embedded_truetype_outline_required")
+            font = _font_reader(font_bytes)
+            try:
+                cmap = TypeAdapter(dict[int, str]).validate_python(
+                    dict(font.getBestCmap() or {}), strict=True
+                )
+                order = TypeAdapter(list[str]).validate_python(
+                    font.getGlyphOrder(), strict=True
+                )
+                name = cmap.get(ord(character))
+                if (
+                    name is None
+                    and mapper_gid is not None
+                    and 0 < mapper_gid < len(order)
+                ):
+                    name = order[mapper_gid]
+                if name is None:
+                    raise ValueError("font_glyph_resolution_failed")
+                pen = _OutlinePen(
+                    TypeAdapter(int).validate_python(
+                        _sdk_attribute(font["head"], "unitsPerEm"), strict=True
+                    )
+                )
+                font.getGlyphSet()[name].draw(pen)
+            finally:
+                font.close()
+            if not pen.commands:
+                if not character.isspace():
+                    raise ValueError("visible_source_character_without_outline")
+                continue
+            matrix = _compose(
+                event.matrix,
+                _MATRIX.validate_python(tuple(_rounded(v) for v in trm)),
+            )
+            color = f"#{TypeAdapter(int).validate_python(payload['fill_color'], strict=True):06x}"
+            matched = tuple(
+                path
+                for path in native_paths
+                if path.commands == tuple(pen.commands)
+                and path.matrix == matrix
+                and path.fill == color
+                and path.opacity == 1
+                and path.stroke == "none"
+                and path.clips == event_clips[event.sequence]
+            )
+            if len(matched) != 1 or matched[0].reference in used:
+                raise ValueError("source_glyph_outline_does_not_match_native_svg")
+            path = matched[0]
+            used.add(path.reference)
+            if _intersects(path.bounds, prepared.svg.source.bbox):
+                roles.append(
+                    GlyphPaintProof(
+                        character,
+                        sha256(font_bytes).hexdigest(),
+                        name,
+                        event.sequence,
+                        index,
+                        span.span_id,
+                        path.reference,
+                        matrix,
+                        path.bounds,
+                        path.clips,
+                    )
+                )
+    for span in prepared.paint_text_spans:
+        if (
+            _intersects(span.bbox, prepared.svg.source.bbox)
+            and "".join(texts[span.span_id]).strip() != span.text.strip()
+        ):
+            raise ValueError("source_span_text_differs_from_recorded_glyphs")
+    return tuple(roles)
+
+
+def _source_clip_map(events: tuple[_ReplayEvent, ...]) -> dict[int, tuple[Bounds, ...]]:
+    clips: tuple[Bounds, ...] = ()
+    stack: list[tuple[Bounds, ...]] = []
+    result: dict[int, tuple[Bounds, ...]] = {}
+    for event in events:
+        if event.kind == "save":
+            stack.append(clips)
+        elif event.kind == "restore":
+            if not stack:
+                raise ValueError("unbalanced_source_clip_stack")
+            clips = stack.pop()
+        elif event.kind == "clip":
+            clips = (*clips, _rectangle(_source_commands(event.payload), event.matrix))
+        result[event.sequence] = clips
+    if stack:
+        raise ValueError("unbalanced_source_clip_stack")
+    return result
+
+
+@dataclass(frozen=True, slots=True)
+class _SourcePaintTrace:
+    source_hash: str
+    native_paths: tuple[_NativePath, ...]
+    events: tuple[_ReplayEvent, ...]
+    glyphs: tuple[GlyphPaintProof, ...]
+    profile: SourceProfileReceipt
+    source_spans: tuple[TextSpan, ...]
+
+
+def _read_source_trace(pdf: bytes, prepared: PreparedFigure) -> _SourcePaintTrace:
+    """Reconstruct pinned source observations and prove glyphs before chart grammar."""
     source_hash = sha256(pdf).hexdigest()
     if not pdf.startswith(b"%PDF-"):
         raise ValueError("source_pdf_header_required")
     if source_hash != prepared.svg.source.document_sha256:
         raise ValueError("source_pdf_digest_mismatch")
-    roles = []
-    texts: dict[str, list[str]] = defaultdict(list)
-    used: set[str] = set()
     with pdfspine.open(stream=pdf, filetype="pdf") as document:
         page = document[prepared.svg.source.page_index]
+        profile = read_source_profile(
+            page, source_sha256=source_hash, page_index=prepared.svg.source.page_index
+        )
         if page.rotation != 0 or page.annot_xrefs():
             raise ValueError("source_rotation_or_annotation_visibility_unsupported")
         native = page.get_svg_image(text_as_path=False)
@@ -648,100 +781,34 @@ def _build_source_paint_proof(
         ):
             raise ValueError("source_text_or_metadata_differs_from_pinned_pdf")
         events = _source_events(page)
-        vectors, event_clips = _vector_roles(
-            events, native_paths, prepared.svg.source.bbox
-        )
-        for event in events:
-            if event.kind != "text":
-                continue
-            payload = event.payload
-            for index, glyph in enumerate(_GLYPHS.validate_python(payload["glyphs"])):
-                character, _, mapper_gid, origin, _, trm = glyph
-                transformed = _transform(event.matrix, origin)
-                span = _span_for(transformed, prepared.paint_text_spans)
-                if span is None:
-                    continue
-                texts[span.span_id].append(character)
-                if not _intersects(span.bbox, prepared.svg.source.bbox):
-                    continue
-                if (
-                    len(character) != 1
-                    or payload["alpha"] != 255
-                    or payload["render_mode"] != 0
-                ):
-                    raise ValueError("unsupported_source_text_mode")
-                font_bytes = event.font_buffer
-                if event.font_format != "TrueType" or font_bytes is None:
-                    raise ValueError("embedded_truetype_outline_required")
-                font = _font_reader(font_bytes)
-                try:
-                    cmap = TypeAdapter(dict[int, str]).validate_python(
-                        dict(font.getBestCmap() or {}), strict=True
-                    )
-                    order = TypeAdapter(list[str]).validate_python(
-                        font.getGlyphOrder(), strict=True
-                    )
-                    name = cmap.get(ord(character))
-                    if (
-                        name is None
-                        and mapper_gid is not None
-                        and 0 < mapper_gid < len(order)
-                    ):
-                        name = order[mapper_gid]
-                    if name is None:
-                        raise ValueError("font_glyph_resolution_failed")
-                    pen = _OutlinePen(
-                        TypeAdapter(int).validate_python(
-                            _sdk_attribute(font["head"], "unitsPerEm"), strict=True
-                        )
-                    )
-                    font.getGlyphSet()[name].draw(pen)
-                finally:
-                    font.close()
-                if not pen.commands:
-                    if not character.isspace():
-                        raise ValueError("visible_source_character_without_outline")
-                    continue
-                matrix = _compose(
-                    event.matrix,
-                    _MATRIX.validate_python(tuple(_rounded(v) for v in trm)),
-                )
-                color = f"#{TypeAdapter(int).validate_python(payload['fill_color'], strict=True):06x}"
-                matched = tuple(
-                    path
-                    for path in native_paths
-                    if path.commands == tuple(pen.commands)
-                    and path.matrix == matrix
-                    and path.fill == color
-                    and path.opacity == 1
-                    and path.stroke == "none"
-                    and path.clips == event_clips[event.sequence]
-                )
-                if len(matched) != 1 or matched[0].reference in used:
-                    raise ValueError("source_glyph_outline_does_not_match_native_svg")
-                path = matched[0]
-                used.add(path.reference)
-                if _intersects(path.bounds, prepared.svg.source.bbox):
-                    roles.append(
-                        GlyphPaintProof(
-                            character,
-                            sha256(font_bytes).hexdigest(),
-                            name,
-                            event.sequence,
-                            index,
-                            span.span_id,
-                            path.reference,
-                            matrix,
-                            path.bounds,
-                            path.clips,
-                        )
-                    )
-    for span in prepared.paint_text_spans:
-        if (
-            _intersects(span.bbox, prepared.svg.source.bbox)
-            and "".join(texts[span.span_id]).strip() != span.text.strip()
-        ):
-            raise ValueError("source_span_text_differs_from_recorded_glyphs")
+    roles = _matched_glyph_roles(
+        prepared, events, native_paths, _source_clip_map(events)
+    )
+    return _SourcePaintTrace(
+        source_hash, native_paths, events, roles, profile, source_spans
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class SourcePaintRevalidation:
+    proof: SourcePaintProof
+    profile: SourceProfileReceipt
+    validator: str
+
+
+@lru_cache(maxsize=8)
+def _build_source_paint_proof(
+    pdf: bytes, prepared: PreparedFigure, producer: str, validator: str
+) -> SourcePaintRevalidation:
+    """Read one pinned page; prove glyph shapes without changing existing assets."""
+    trace = _read_source_trace(pdf, prepared)
+    source_hash, native_paths, events, roles = (
+        trace.source_hash,
+        trace.native_paths,
+        trace.events,
+        trace.glyphs,
+    )
+    vectors, _ = _vector_roles(events, native_paths, prepared.svg.source.bbox)
     _check_glyph_visibility(native_paths, tuple(roles), vectors)
     proven_refs = tuple(role.native_path_ref for role in roles) + tuple(
         role.native_path_ref for role in vectors
@@ -753,7 +820,7 @@ def _build_source_paint_proof(
     }
     if len(set(proven_refs)) != len(proven_refs) or set(proven_refs) != target_refs:
         raise ValueError("source_paint_closure_incomplete")
-    return SourcePaintProof(
+    proof = SourcePaintProof(
         source_hash,
         prepared.svg.source.page_index,
         prepared.view.native_svg_digest,
@@ -782,6 +849,17 @@ def _build_source_paint_proof(
             ).encode()
         ).hexdigest(),
     )
+    return SourcePaintRevalidation(proof, trace.profile, validator)
+
+
+def _producer(prepared: PreparedFigure, sdk_version: str) -> str:
+    return f"pdfspine/{sdk_version};fonttools/{version('fonttools')};source-replay-font-closure-v2;{prepared.view.renderer_fingerprint}"
+
+
+def _validator_identity() -> str:
+    return (
+        f"pdfspine/{pdfspine.__version__};trusted-profile-v1;legacy-0.10.0-to-0.11.0-v1"
+    )
 
 
 def build_source_paint_proof(
@@ -792,14 +870,26 @@ def build_source_paint_proof(
     The key contains the actual PDF bytes, complete prepared SVG/view/sidecar and
     rule/SDK/font/renderer identities. A proof JSON or caller status is not a key.
     """
-    producer = f"pdfspine/{pdfspine.__version__};fonttools/{version('fonttools')};source-replay-font-closure-v2;{prepared.view.renderer_fingerprint}"
-    return _build_source_paint_proof(pdf, prepared, producer)
+    return _build_source_paint_proof(
+        pdf, prepared, _producer(prepared, pdfspine.__version__), _validator_identity()
+    ).proof
+
+
+def revalidate_source_paint_proof(
+    pdf: bytes, *, prepared: PreparedFigure, proof: SourcePaintProof
+) -> SourcePaintRevalidation:
+    producer = _producer(prepared, pdfspine.__version__)
+    if pdfspine.__version__ == "0.11.0" and proof.producer == _producer(
+        prepared, "0.10.0"
+    ):
+        producer = proof.producer
+    verified = _build_source_paint_proof(pdf, prepared, producer, _validator_identity())
+    if verified.proof != proof:
+        raise ValueError("source_paint_proof_revalidation_mismatch")
+    return verified
 
 
 def verify_source_paint_proof(
     pdf: bytes, *, prepared: PreparedFigure, proof: SourcePaintProof
 ) -> SourcePaintProof:
-    verified = build_source_paint_proof(pdf, prepared=prepared)
-    if verified != proof:
-        raise ValueError("source_paint_proof_revalidation_mismatch")
-    return verified
+    return revalidate_source_paint_proof(pdf, prepared=prepared, proof=proof).proof

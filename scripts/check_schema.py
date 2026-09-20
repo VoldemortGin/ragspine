@@ -10,6 +10,10 @@ from enterprise_pdf_rag.adapters.http.chart_qa_schemas import (
     ChartQueryRequest,
     ChartQueryResponse,
 )
+from enterprise_pdf_rag.adapters.http.chart_qa_v2_schemas import (
+    DisplayedChartQueryRequest,
+    DisplayedChartQueryResponse,
+)
 from enterprise_pdf_rag.adapters.http.document_schemas import (
     DocumentSnapshotResponse,
     PageTextResponse,
@@ -55,6 +59,11 @@ MODELS: tuple[type[BaseModel], ...] = (
 
 CONTRACTS: dict[str, tuple[type[BaseModel], ...]] = {
     "chart-qa-v1": (ChartQueryRequest, ChartQueryResponse, ChartQueryErrorResponse),
+    "chart-qa-v2": (
+        DisplayedChartQueryRequest,
+        DisplayedChartQueryResponse,
+        ChartQueryErrorResponse,
+    ),
     "figure-api-v1": MODELS,
     "aia-source-review-v1": (
         SourceChatRequest,

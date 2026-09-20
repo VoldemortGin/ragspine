@@ -8,7 +8,9 @@ from fastapi.responses import Response
 from pydantic import Field
 
 from enterprise_pdf_rag.adapters.chart_qa import StoredChartResolver
+from enterprise_pdf_rag.adapters.chart_qa_displayed import StoredDisplayResolver
 from enterprise_pdf_rag.adapters.chart_qa_evaluation import read_evaluation
+from enterprise_pdf_rag.adapters.chart_qa_v2_evaluation import read_bar_evaluation
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.http.chart_qa import create_chart_qa_router
 from enterprise_pdf_rag.adapters.http.processing_schemas import (
@@ -22,7 +24,11 @@ from enterprise_pdf_rag.adapters.processing_retrieval import (
     resolve_processing_context,
 )
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
+from enterprise_pdf_rag.adapters.providers import ProviderRequestError
 from enterprise_pdf_rag.adapters.source_publication import validate_processing_source
+from enterprise_pdf_rag.figures.chart_qa.displayed_service import (
+    DisplayedChartQAService,
+)
 from enterprise_pdf_rag.figures.chart_qa.service import ChartQAService
 from enterprise_pdf_rag.figures.ports import EmbeddingPort
 from enterprise_pdf_rag.processing.models import ProcessingManifest
@@ -101,7 +107,7 @@ def processing_summary(processing_id: str, manifest: ProcessingManifest) -> str:
     return (
         f"已保存 {state.source_page_count} 页源资产;本次处理物理页 {pages}。\n\n识别 {state.object_count} 个对象;实际保存 {state.ir_artifacts} 份 typed IR 与 {state.description_artifacts} 份独立描述/逐字原文 projection。失败阶段 {state.failed_stages},unavailable 阶段 {state.unavailable_stages},deferred 阶段 {state.deferred_stages}。\n\n模型推断不等于验证。当前获准数值 claim:{state.qualified_claim_count};原文转录不证明金融关系。\n\n[打开前20页处理结果与各对象 SVG / IR / 描述 / 诊断](http://127.0.0.1:8766/v1/processing/review/review.html)"
         + retrieval
-        + "\n\n已验证的受限数值查值/百分点差仅通过结构化 `POST /v1/queries` 执行;当前聊天仍用于来源和产物审阅,不开放任意金融问答。"
+        + "\n\n已验证的查询仅通过结构化 `POST /v1/queries` 执行:v1 环形图查值/同口径百分点差;v2 柱状图只读原文显示值,不做跨期计算。当前聊天仍用于来源和产物审阅,不开放任意金融问答。"
     )
 
 
@@ -118,7 +124,10 @@ def create_processing_router(
         create_chart_qa_router(
             ChartQAService(
                 StoredChartResolver(sources, outputs, processing_id=processing_id)
-            )
+            ),
+            displayed_service=DisplayedChartQAService(
+                StoredDisplayResolver(sources, outputs, processing_id=processing_id)
+            ),
         )
     )
     root = (outputs.root / "runs" / processing_id).resolve()
@@ -155,7 +164,7 @@ def create_processing_router(
         checked()
         if (
             re.fullmatch(
-                r"(?:review\.html|manifest\.json|coverage\.json|retrieval-(?:example|validation)\.json|retrieval-evaluations/[0-9a-f]{64}/(?:retrieval-(?:example|validation)|evaluation)\.json|retrieval-controls/[0-9a-f]{64}/controls\.json|chart-qa-evaluations/[0-9a-f]{64}/(?:gold|observations|report)\.json|page-\d{3}/(?:[a-z_.-]+\.(?:html|json)|objects/object-[0-9a-f]{20}/[a-z_-]+\.(?:html|json|svg|png)))",
+                r"(?:review\.html|manifest\.json|coverage\.json|retrieval-(?:example|validation)\.json|retrieval-evaluations/[0-9a-f]{64}/(?:retrieval-(?:example|validation)|evaluation)\.json|retrieval-controls/[0-9a-f]{64}/controls\.json|chart-qa-evaluations/[0-9a-f]{64}/(?:gold|observations|report)\.json|chart-qa-v2-evaluations/[0-9a-f]{64}/(?:gold|targets|observations|report)\.json|page-\d{3}/(?:[a-z_.-]+\.(?:html|json)|objects/object-[0-9a-f]{20}/[a-z_-]+\.(?:html|json|svg|png)))",
                 relative,
             )
             is None
@@ -165,6 +174,20 @@ def create_processing_router(
         if not target.is_relative_to(root) or not target.is_file():
             raise HTTPException(404, "Processing review artifact is unavailable")
         content = target.read_bytes()
+        if relative.startswith("chart-qa-v2-evaluations/"):
+            try:
+                if pinned.retrieval is None:
+                    raise ValueError("Missing retrieval release")
+                read_bar_evaluation(
+                    target.parent,
+                    processing_id=processing_id,
+                    snapshot_id=pinned.retrieval.snapshot_id,
+                )
+            except (OSError, ValueError):
+                raise HTTPException(
+                    409,
+                    "Displayed ChartQA evaluation evidence is missing or inconsistent",
+                ) from None
         if relative.startswith("chart-qa-evaluations/"):
             try:
                 read_evaluation(target.parent)
@@ -205,7 +228,12 @@ def create_processing_router(
                 503, "Local query embedding is not configured; no substitute"
             )
         engine = ProcessingRetrieval(sources, outputs, embedder)
-        hits = engine.search(manifest.retrieval, body.query, limit=body.limit)
+        try:
+            hits = engine.search(manifest.retrieval, body.query, limit=body.limit)
+        except ProviderRequestError:
+            raise HTTPException(
+                503, "Local query embedding failed; no retry or substitute"
+            ) from None
         return ProcessingSearchResponse(
             processing_id=processing_id,
             snapshot_id=manifest.retrieval.snapshot_id,

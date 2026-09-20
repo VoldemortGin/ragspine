@@ -258,6 +258,14 @@ def start(
         }
         if name == "api":
             environment["APP_EXECUTION_MODE"] = profile
+            if profile == "aia-source-review":
+                for setting in (
+                    "EMBEDDING_BASE_URL",
+                    "EMBEDDING_MODEL",
+                    "EMBEDDING_API_KEY",
+                ):
+                    if setting in os.environ:
+                        environment[setting] = os.environ[setting]
         with (STATE / f"{name}.log").open("ab") as log:
             process = subprocess.Popen(
                 command,

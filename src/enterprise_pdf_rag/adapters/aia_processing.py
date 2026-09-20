@@ -38,13 +38,20 @@ class ProcessingPipeline:
         self,
         sources: LocalDocumentStore,
         outputs: ProcessingStore,
-        partitioner: PagePartitioner,
+        partitioner: PagePartitioner | None,
         object_processor: ObjectProcessor | None,
+        *,
+        normalize_layout: bool = True,
+        activate: bool = True,
+        producer: str = "aia-processing-v1",
     ) -> None:
         self.sources = sources
         self.outputs = outputs
         self.partitioner = partitioner
         self.object_processor = object_processor
+        self.normalize_layout = normalize_layout
+        self.activate = activate
+        self.producer = producer
 
     def run(
         self, source_manifest_id: str, *, selected_page_indices: tuple[int, ...]
@@ -70,8 +77,8 @@ class ProcessingPipeline:
             )
             canonical = self._canonical(page)
             partition_stage, partition = self._partition(page, canonical)
-            raw_partition_stage = partition_stage
-            if partition is not None:
+            raw_partition_stage = partition_stage if self.normalize_layout else None
+            if partition is not None and self.normalize_layout:
                 partition_stage, partition = self._normalize(
                     page, partition_stage, partition
                 )
@@ -86,9 +93,10 @@ class ProcessingPipeline:
                 )
             )
         manifest = ProcessingManifest(
-            "processing-v1", scope, "aia-processing-v1", tuple(pages)
+            "processing-v1", scope, self.producer, tuple(pages)
         )
-        return self.outputs.publish(manifest, sources=self.sources), manifest
+        save = self.outputs.publish if self.activate else self.outputs.save_draft
+        return save(manifest, sources=self.sources), manifest
 
     def _canonical(self, page: PageInput) -> StageOutcome:
         canonical = canonical_page(page)
@@ -113,6 +121,14 @@ class ProcessingPipeline:
     def _partition(
         self, page: PageInput, canonical: StageOutcome
     ) -> tuple[StageOutcome, PagePartition | None]:
+        if self.partitioner is None:
+            return StageOutcome(
+                "partition",
+                stage_fingerprint("partition", "source-only-v1", (canonical.artifact,)),
+                StageState.DEFERRED,
+                "source-only-v1",
+                diagnostic="Source stage only: layout and object semantics have not run.",
+            ), None
         fingerprint = stage_fingerprint(
             "partition",
             self.partitioner.fingerprint,

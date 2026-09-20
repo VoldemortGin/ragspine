@@ -166,3 +166,77 @@ def test_status_refuses_a_missing_current_pointer_even_with_healthy_owned_pids(
     with pytest.raises(SystemExit, match="current-processing"):
         main()
     assert (state / "processes.json").is_file()
+
+
+def test_launcher_passes_embedding_settings_only_to_api_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from types import FunctionType
+
+    root = _project(tmp_path)
+    python = root / ".venv/bin/python"
+    python.parent.mkdir(parents=True)
+    python.symlink_to(sys.executable)
+    namespace = runpy.run_path(str(root / "scripts/webui_preview.py"))
+    start_function = cast(FunctionType, namespace["start"])
+    captured: list[dict[str, str]] = []
+
+    def current_processing_id(*, required: bool) -> str:
+        return "a" * 64
+
+    def preview_python() -> Path:
+        return Path(sys.executable)
+
+    def ready(_profile: str, _processing_id: str | None) -> bool:
+        return True
+
+    def ignore(*_args: object) -> None:
+        pass
+
+    @contextmanager
+    def listener(*_args: object) -> Iterator[SimpleNamespace]:
+        yield SimpleNamespace(setsockopt=ignore, bind=ignore)
+
+    def spawn(
+        _command: list[str], *, env: dict[str, str], **_kwargs: object
+    ) -> SimpleNamespace:
+        captured.append(env)
+        return SimpleNamespace(pid=10000 + len(captured))
+
+    for name, value in {
+        "EMBEDDING_BASE_URL": "http://127.0.0.1:9999/v1",
+        "EMBEDDING_MODEL": "test-model",
+        "EMBEDDING_API_KEY": "embedding-child-secret",
+        "OPENAI_API_KEY": "llm-must-not-pass",
+        "RERANK_API_KEY": "rerank-must-not-pass",
+        "AWS_SECRET_ACCESS_KEY": "aws-must-not-pass",
+    }.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setitem(
+        start_function.__globals__, "current_processing_id", current_processing_id
+    )
+    monkeypatch.setitem(start_function.__globals__, "preview_python", preview_python)
+    monkeypatch.setitem(start_function.__globals__, "ready", ready)
+    monkeypatch.setattr("socket.socket", listener)
+    monkeypatch.setattr(subprocess, "Popen", spawn)
+    start_function()
+    assert len(captured) == 2
+    api, webui = captured
+    assert api["EMBEDDING_API_KEY"] == "embedding-child-secret"
+    assert api["EMBEDDING_MODEL"] == "test-model"
+    assert api["EMBEDDING_BASE_URL"] == "http://127.0.0.1:9999/v1"
+    assert not any(name.startswith("EMBEDDING_") for name in webui)
+    for child in captured:
+        assert "OPENAI_API_KEY" not in child
+        assert "RERANK_API_KEY" not in child
+        assert "AWS_SECRET_ACCESS_KEY" not in child
+    output = capsys.readouterr()
+    retained = (
+        output.out
+        + output.err
+        + "".join(
+            path.read_text() for path in (root / "data/open-webui-preview").glob("*.*")
+        )
+    )
+    assert "embedding-child-secret" not in retained
+    assert "llm-must-not-pass" not in retained

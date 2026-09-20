@@ -13,8 +13,9 @@ def test_twenty_page_scope_does_not_claim_seventy_one_processed_pages() -> None:
     scope = ProcessingScope("a" * 64, "b" * 64, 71, tuple(range(20)))
     assert scope.physical_pages == tuple(range(1, 21))
     assert scope.source_page_count == 71
+    assert ProcessingScope("a" * 64, "b" * 64, 71, (0, 20)).physical_pages == (1, 21)
     with pytest.raises(ValueError, match="selected"):
-        ProcessingScope("a" * 64, "b" * 64, 71, (0, 20))
+        ProcessingScope("a" * 64, "b" * 64, 71, (0, 71))
     with pytest.raises(ValueError, match="unique"):
         ProcessingScope("a" * 64, "b" * 64, 71, (0, 0))
 

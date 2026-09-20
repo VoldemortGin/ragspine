@@ -41,10 +41,12 @@ class ProcessingScope:
         selected = self.selected_page_indices
         if len(set(selected)) != len(selected) or tuple(sorted(selected)) != selected:
             raise ValueError("Selected pages must be unique and ordered")
-        if not selected or any(
-            not 0 <= index < min(20, self.source_page_count) for index in selected
+        if (
+            self.source_page_count <= 0
+            or not selected
+            or any(not 0 <= index < self.source_page_count for index in selected)
         ):
-            raise ValueError("This processing phase only permits selected pages 1-20")
+            raise ValueError("Processing selected pages must exist in the source")
 
     @property
     def physical_pages(self) -> tuple[int, ...]:
@@ -65,7 +67,7 @@ class PageInput:
         if (
             self.text.source_sha256 != self.source_sha256
             or self.text.page_index != self.page_index
-            or not 0 <= self.page_index < 20
+            or self.page_index < 0
         ):
             raise ValueError("Page input is outside the selected source or scope")
         if not all(
