@@ -1,6 +1,6 @@
 ---
 covers: src/enterprise_pdf_rag/
-verified-against: 268aedb
+verified-against: a0a0d18
 ---
 
 # enterprise_pdf_rag — agent contract
@@ -21,7 +21,8 @@ the same `pyproject.toml` — import name unchanged, not under `ragspine.*`
    [ADR 0011](../../docs/enterprise-pdf-rag/adr/0011-document-catalog-and-verified-answer-chain.md),
    [ADR 0012](../../docs/enterprise-pdf-rag/adr/0012-chart-index-text-and-retrieval-seats.md),
    [ADR 0013](../../docs/enterprise-pdf-rag/adr/0013-page-metadata-and-prefilters.md),
-   [ADR 0014](../../docs/enterprise-pdf-rag/adr/0014-ruled-table-grid-proof.md)
+   [ADR 0014](../../docs/enterprise-pdf-rag/adr/0014-ruled-table-grid-proof.md),
+   [ADR 0015](../../docs/enterprise-pdf-rag/adr/0015-diagram-and-formula-retrievable.md)
    and [PRD v0.2](../../docs/enterprise-pdf-rag/PRD-v0.2.md) define scope; the full list is
    [`docs/enterprise-pdf-rag/adr/`](../../docs/enterprise-pdf-rag/adr/).
 4. [`testing-and-ingestion.md`](../../docs/enterprise-pdf-rag/testing-and-ingestion.md) — what is
@@ -43,8 +44,11 @@ figures/      pure figure/chart pipeline — same rule; same-SVG two branches, s
 processing/   pure page-processing / qualification logic; context_builder.py (evidence blocks
               for the prompt), table_transcription.py (literal table transcription rule),
               geometry.py + table_grid_proof.py (the ruled-grid proof: every boundary, cell
-              edge and merge bound to a real ruling — ADR 0014), index_text.py (contextual
-              header + chart projection both retrieval channels score), page_metadata.py /
+              edge and merge bound to a real ruling — ADR 0014), diagram_models.py +
+              diagram_description.py and formula_models.py + formula_rules.py (the model-free
+              diagram / formula proofs and their deterministic projections — ADR 0015),
+              index_text.py (contextual header + chart / diagram / formula projection both
+              retrieval channels score), page_metadata.py /
               periods.py / document_metadata.py (verbatim page metadata, deterministic period
               forms, zero-model document fold — ADR 0013)
 answers/      pure answer chain — ports.py (MountedDocument, MemberText), models.py
@@ -56,7 +60,10 @@ adapters/     every SDK and I/O: pdfspine, http/ (FastAPI app factory; documents
               (qualify / index / publish), page_metadata_extraction.py (page_metadata stage),
               document_catalog.py (scan / mount), hybrid_search.py (BM25 + RRF + opt-in
               rerank borrowed from ragspine), answer_service.py (one model call per answer),
-              chart QA v1/v2
+              diagram_geometry.py + diagram_qualification.py + diagram_publication.py and
+              pdfspine_formula.py + formula_qualification.py (the ADR 0015 proofs, receipts
+              and replays), visual_requalification.py (re-prove a saved snapshot's visual
+              objects from its stored branches), chart QA v1/v2
 resources/    packaged prompts / static data
 cli.py        enterprise-pdf-rag ingest|metadata|qualify|index|publish|serve|chart-qa|demo|extract|llm-smoke
               + AIA-sample-only ingest-aia|process-aia-layout|process-aia-semantics|index-aia-processing
@@ -106,13 +113,29 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   `col` / `header` citations open only for a verified grid, and `header` only names a header
   *proved* by a thick rule or a fill — never a font or first-row heuristic. An unruled, snapped
   or double-ruled table stays `PENDING`, and stays retrievable and citable by cell text.
+- **A retrievable diagram or formula is proved without a model** (ADR 0015) — `DIAGRAM` and
+  `FORMULA` objects reach the index only through a pure, replayable proof that runs beside (never
+  inside) the two model branches: a node label must equal its cited span verbatim and its bbox must
+  match a real painted frame, an edge needs a connector plus a filled arrowhead whose derived tip
+  lands in the target, and every span inside the object must be cited; a formula token quotes a
+  span substring under a tiling closure rule, a script is proved from the PDF's own `Ts` or marked
+  `derived` (`proof_level="literal"`, `PENDING`), and every drawn path inside the object must be
+  explained. One failed rule withholds the whole object with a verbatim diagnostic. Their
+  `qualified_description` is a deterministic template, never a second model pass, and every resolve
+  replays the proof from the pinned source. An `IMAGE` is still not retrievable.
+- **One text criterion for names and symbols** — `verify._exact` (whitespace folded, case kept) is
+  the single function behind the literal-transcription check, a cited table header (ADR 0014) and
+  every diagram / formula claim, so the verify side is never laxer than the qualification side.
+  Only cell *content* uses the case-folded `_norm`.
 - **Same-SVG two branches, snapshot binding, no-summary-fallback** — hard invariants of the
   figure chain (ADR 0002). What gets embedded is the **index text** of
   `processing/index_text.py`: the page's contextual header (`display_title | page_title |
   section`, ADR 0013) above the natural-language description for text / list / group / table
   members, and for a chart a deterministic projection of its already-qualified IR (title, period,
   grammar, per-point category / series / explicit value), falling back to the description when the
-  chart has no citable value (ADR 0012). Both retrieval channels score that same string; the raw
+  chart has no citable value (ADR 0012); a proved diagram projects its node labels in reading order
+  plus one `<from> -> <to>` per drawn edge, and a proved formula its readable and linear forms plus
+  every token text (policy v5, ADR 0015). Both retrieval channels score that same string; the raw
   branch is never embedded; description assets are never rewritten.
 - **Metadata is verbatim, automatic and never a hard gate** (ADR 0013) — every page-metadata
   value quotes its page spans (dropped otherwise, with a diagnostic); the model runs only at

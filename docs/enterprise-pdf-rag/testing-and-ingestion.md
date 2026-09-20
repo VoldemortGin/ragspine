@@ -15,7 +15,7 @@
 | `POST /v1/chat/completions`（`aia-source-review` 模式） | OpenAI 兼容的来源/状态审阅，支持 SSE | 普通财务问答返回 422；该模式不做 RAG 回答 |
 | `GET /v1/documents*`、`GET /v1/models`、`POST /v1/chat/completions`（`document-catalog` 模式） | 多文档目录与挂载状态、按文档检索/证据回填、证据链上的自然语言回答（逐字段引用或拒答） | 需另起 `APP_EXECUTION_MODE=document-catalog` 进程，见下文同名节；离线已实现并测试，真实模型验收结论见 [交接文档](CLAUDE_HANDOFF.md) |
 
-第 20 页 typed ChartQA v2 已有工作树实现和候选证据，但不能在新 runtime 验收、发布与激活之前当成当前在线能力。多文档目录/切换与证据链聊天已有离线实现和测试（`document-catalog` 模式），但只有真实模型验收后才能称为已验收；完整图表能力与通用 TableQA 仍未验收——TABLE 成员目前只放行逐字转写 `VERIFIED` 的表；划线表另外证明行列关系（[ADR 0014](adr/0014-ruled-table-grid-proof.md)：每条行/列边界、每个单元格四边、每处合并都要在该页 `get_drawings()` 的实际线段里找到证据，`row`/`col`/`header` 引用只对网格 `VERIFIED` 的表开放），无线表、吸附/双线边界仍只证明原文。
+第 20 页 typed ChartQA v2 已有工作树实现和候选证据，但不能在新 runtime 验收、发布与激活之前当成当前在线能力。多文档目录/切换与证据链聊天已有离线实现和测试（`document-catalog` 模式），但只有真实模型验收后才能称为已验收；完整图表能力与通用 TableQA 仍未验收——TABLE 成员目前只放行逐字转写 `VERIFIED` 的表；划线表另外证明行列关系（[ADR 0014](adr/0014-ruled-table-grid-proof.md)：每条行/列边界、每个单元格四边、每处合并都要在该页 `get_drawings()` 的实际线段里找到证据，`row`/`col`/`header` 引用只对网格 `VERIFIED` 的表开放），无线表、吸附/双线边界仍只证明原文。Diagram 与 Formula 成员自 [ADR 0015](adr/0015-diagram-and-formula-retrievable.md) 起可检索、可引用，前提是几何 / token 证明整体成立（任一规则失败则整对象不进索引并带逐字诊断）；Image 仍不可检索。
 
 本地 `8766` API 当前没有调用者 API key 校验。来源审阅、context、typed ChartQA 不需要 `OPENAI_API_KEY`。查询向量由后端使用独立的 `EMBEDDING_BASE_URL`、`EMBEDDING_MODEL`、`EMBEDDING_API_KEY`；客户端不提交这些凭证。Open WebUI 厂商进程仍拿不到 embedding/LLM/rerank key。
 
@@ -191,7 +191,7 @@ enterprise-pdf-rag publish --source-store <src> --processing-store <proc> --proc
 
 三命令错误统一输出 `{"error": ...}` 并以退出码 1 fail closed。完整生命周期为 ingest 的 `not_ready` → `qualified; indexing pending` → `indexed; publication pending` → `ready`。
 
-`index` 嵌入的是成员的**索引文本**：页级上下文头 `<display_title> | <page_title> | <section>`（缺省项省略）加一行 ADR 0012 的投影（图表为已资格化 IR 的投影，无可引用值的图表回退描述，其余成员为描述原文），policy `source-transcription-and-scoped-chart-qualification-v4`（[ADR 0013](adr/0013-page-metadata-and-prefilters.md)）。描述资产与引用原文不变。2026-09-21 之前发布的快照按各自 policy 门控（v3 只投影、更早只描述），照常可挂载、可回答；重新 `metadata` → `index` → `publish` 即迁移。
+`index` 嵌入的是成员的**索引文本**：页级上下文头 `<display_title> | <page_title> | <section>`（缺省项省略）加一行投影——图表为已资格化 IR 的投影（[ADR 0012](adr/0012-chart-index-text-and-retrieval-seats.md)），已证明的 Diagram 为"阅读序节点 label + 每条边 `A -> B`"、已证明的 Formula 为"readable + linear + 每个 token 文本"（[ADR 0015](adr/0015-diagram-and-formula-retrievable.md)），其余成员为描述原文，无可引用内容时一律回退描述，policy `source-transcription-and-scoped-chart-qualification-v5`。描述资产与引用原文不变。更早发布的快照按各自 policy 门控（v4 有上下文头无视觉投影、v3 只投影、更早只描述），照常可挂载、可回答；重新 `metadata` → `index` → `publish` 即迁移（Diagram / Formula 另需重跑 `semantics` 或见下文的重证脚本才会有 `qualified_*`）。
 
 ### 页级元数据命令（ADR 0013）
 
@@ -209,6 +209,29 @@ enterprise-pdf-rag metadata --source-store <src> --processing-store <proc> --pro
 - **prompt 口径**：`ContextBlock.prompt_text()` 的表格首行渲染 `table rows=<n> cols=<m> grid=verified|pending`；只有 `grid=verified` 的块才在每个单元格行尾追加 `row=<r> col=<c> header="…"`（无已证表头时 `header=<NONE>`）。断言写在 `tests/enterprise_pdf_rag/processing/test_context_builder.py`。
 - **claim 口径**：`ModelClaim` 的 `row` / `col` / `header` 是可选字段。`tests/enterprise_pdf_rag/answers/test_verify.py` 覆盖：非 `cell` claim 带这三个字段 → `MODEL_OUTPUT_INVALID`；网格 `PENDING` 的表上带这三个字段 → `CLAIM_NOT_IN_EVIDENCE`；`row`/`col` 与 IR 不符 → 拒；`header` 不是该单元格的**已证**表头 → 拒；表头比对折叠空白、保留大小写（与逐字转写同口径，不像单元格文本那样 casefold）。通过的引用带 `row` / `col` / `header` / `header_cell_id`，并把表头单元格 id 并入 `evidence_ids`。
 - **真实样本只读 smoke**：`test_pdfspine_tables.py::test_synthetic_ingestion_table_reproves_verified` 对 `data/ingestion/3f7233e3…` 的 page 2 重新提取，断言网格证明成立、cell id 与快照里的旧 `ir.json` 完全一致、而旧 `ir.json` 仍解析为 `PENDING`；`test_real_p20_sensitivity_region_reports_native_grid_unavailable` 对 AIA 第 20 页敏感度矩阵断言"检测阶段就没有表"，并在 `-s` 下打印该区域的线段计数作诊断。两者在样本缺失时 `skip`，都不下载任何东西。
+
+### Diagram 与 Formula 证明的测试口径（ADR 0015）
+
+两种视觉对象的资格校验都是无模型纯函数，离线可测；夹具里没有任何"反向登记证据"的捷径。
+
+- **版面夹具**：`tests/enterprise_pdf_rag/adapters/test_pdf_ingestion.py::authored_pdf` 增加 `diagram_page` / `diagram_caption` / `formula_page` / `formula_rule` 四个形参，与 `table_page` 互斥、都画在最后一页。`diagram_page=True` 用 pdfspine 真实画两个描边矩形（`DIAGRAM_NODES`）、一条连线（`DIAGRAM_LINE`）与一个填充三角（`DIAGRAM_ARROWHEAD`，`page.new_shape()` + `finish(closePath=True)`，因为 `draw_polyline` 没有 fill/closePath 形参）；`diagram_caption=True` 让桩 partition 把首行标题也塞进 Diagram 区域，用来触发覆盖规则 `object: uncited_source_span:<span_id>`。`formula_page=True` 画 `ROE = Net profit / Equity`（分数线 `FORMULA_RULE`）加一个小字号抬基线的 `x²`（**derived** 上标）；`formula_rule=False` 去掉分数线，用来断言"横线缺失 → 整对象不放行"。文字一律用内嵌字体（`embedded_font=True`），否则 SVG 会出 `<text>` 而被渲染侧拒绝。
+- **真 `Ts` 夹具**：pdfspine 的 `insert_text` 没有 rise 参数，写不出真正的 `Ts`，所以 `proof_level="full"` 的正例由 reportlab 写：`tests/enterprise_pdf_rag/adapters/formula_fixture.py::rise_formula_pdf(path, *, with_fraction=True)`（`setRise(5)`，与 `authored_pdf` 同为 240×160 页、同一份 `authored-donut-ascii.ttf`）。纯规则单测另有 `tests/enterprise_pdf_rag/processing/formula_observation_fixtures.py` 的 `run()` / `line()` / `observation()`，直接构造观测，不经 PDF。
+- **测试落点**：纯规则 `processing/test_formula_rules.py`、`processing/test_diagram_description.py`、`processing/test_index_text.py`、`processing/test_context_builder.py`；几何与观测 `adapters/test_diagram_geometry.py`、`adapters/test_diagram_qualification.py`、`adapters/test_pdfspine_formula.py`、`adapters/test_formula_qualification.py`；回执与重放 `adapters/test_diagram_publication.py`；claim 链 `answers/test_verify.py`（`fake_document.py` 提供 Diagram / Formula 的 `RetrievalContext` builder）；端到端 `adapters/test_generic_publication_e2e.py::test_generic_pdf_diagram_is_proven_indexed_and_cited_offline` / `…_owning_a_caption_is_not_proven_and_stays_out` 与 `adapters/test_formula_publication_e2e.py`（含"模型两路预算耗尽仍可资格化"与"reportlab 真 `Ts` 达到 full 级"两条）。
+- **真实样本只读 smoke**：`adapters/test_diagram_real_samples.py` 对 AIA 第 6 页三阶段图断言 nodes-only 放行（描述以 `Diagram with 3 nodes: Foundation: 100% Digitalised Agency; ` 开头、以 `No connecting edges.` 结尾），对第 5 页流程图断言逐字诊断 `node node-industry-leading-technology: empty_label_without_source_occurrence`；`adapters/test_formula_aia_smoke.py` 只断言脚本能只读跑完（该发布里 Formula 对象数为 0）。样本缺失时 `skip`，都不写 `data/`。
+
+```sh
+# 只读：对一个已保存 processing id 的每个 Formula 对象跑一遍证明，逐对象打印 JSON
+.venv/bin/python scripts/enterprise_pdf_rag/formula_smoke.py \
+  --source-store <src> --processing-store <proc> --processing-id <id>
+
+# 迁移：用快照里已落盘的 svg / ir / description / model_view 重证视觉对象，存成新 draft
+.venv/bin/python scripts/enterprise_pdf_rag/requalify_visual_objects.py \
+  --source-store <src> --processing-store <proc> --processing-id <id> --dry-run
+.venv/bin/python scripts/enterprise_pdf_rag/requalify_visual_objects.py \
+  --source-store <src> --processing-store <proc> --processing-id <id> --out <报告.json>
+```
+
+`requalify_visual_objects` 不调模型、不联网、不切指针：`--dry-run` 一个字节都不写，只打印每个对象的 `qualified` / `withheld` / `unchanged` 与逐字诊断；不带 `--dry-run` 时把重证结果存为**新的内容寻址 draft**（`draft_processing_id`），并把 `retrieval` 置空（成员集合变了，pinned plan 不再描述该快照），接着照常 `index` → `publish` 才会生效。它刻意不进 `semantic_objects` 的 stage 缓存，重跑产出逐字节相同。**它只重证 Diagram**（Formula 需要 pinned PDF 重新观测，留了同样的接口位）；想让 Formula 也有 `qualified_*`，只能重跑 `ingest --stage semantics`。
 
 ### 离线验证 vs 真实验证
 

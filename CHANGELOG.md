@@ -22,6 +22,36 @@ All notable changes to RAGSpine are documented here. This project follows Semant
   grid, with the header matched verbatim apart from whitespace. Unruled, snapped and
   double-ruled tables stay `PENDING`; they remain retrievable and citable by cell text, and every
   snapshot published earlier still parses, mounts and resolves unchanged.
+- **Diagrams and formulas become retrievable once their structure is proved from the source**
+  (`enterprise_pdf_rag`, ADR 0015): `DIAGRAM` and `FORMULA` objects used to stop at a
+  "no independent verifier" diagnostic (ADR 0006) and never reached the index, a context block or
+  a citation. A **model-free, replayable** proof now runs beside the two model branches over the
+  same pinned crop and, when it holds, writes `qualified_ir` / `qualified_description` /
+  `qualification`. For a diagram (`adapters/diagram_geometry.py` + `diagram_qualification.py`,
+  `processing/diagram_models.py` + `diagram_description.py`): every node label must equal its cited
+  span verbatim, every node bbox must match a real painted frame within 2pt, every edge needs a
+  connector leaving the source node plus a filled arrowhead whose derived tip lands in the target,
+  and every span inside the object must be cited — otherwise the whole object fails closed with a
+  verbatim diagnostic. A nodes-only diagram is admitted and prints no edge at all. For a formula
+  (`processing/formula_models.py` + `formula_rules.py`, `adapters/pdfspine_formula.py` +
+  `formula_qualification.py`): tokens quote span substrings under a tiling closure rule with
+  per-character bboxes, superscripts and subscripts are proved from the PDF's own `Ts` or marked
+  `derived`, fraction bars and radicals quote real `get_cdrawings()` paths, and every path inside
+  the object must be explained. A fully proved formula is `VERIFIED` (`proof_level="full"`); one
+  with a derived script is retrievable at `literal` level and stays `PENDING`. The description of
+  both is a deterministic template, never a second model pass. Index-text policy rises to
+  `source-transcription-and-scoped-chart-qualification-v5` (one new gate,
+  `VISUAL_PROJECTION_POLICIES`, shared by both kinds); answers may cite `nodes.<id>.label`,
+  `edges.<index>`, `formula.linear`, `formula.readable` and `tokens.<index>`, all compared
+  whitespace-folded with case kept (`_literal` was renamed `_exact` and now serves every such
+  check). `rag-chat-v1` gains `diagram` / `formula` block kinds and `diagram_node` / `diagram_edge`
+  / `formula` claim kinds; `processing_export` gains `diagram_structure_qualified` and
+  `formula_tokens_qualified` coverage columns. `scripts/enterprise_pdf_rag/requalify_visual_objects.py`
+  re-proves an already-published snapshot's diagrams from the branches it already stores (no model,
+  no pointer moved, `--dry-run` writes nothing) so a release can gain the capability without
+  re-running `semantics`, and `scripts/enterprise_pdf_rag/formula_smoke.py` runs the formula proof
+  read-only over a saved processing id. Snapshots published earlier still parse, mount and resolve
+  unchanged.
 
 ## [0.14.0] - 2026-09-21
 

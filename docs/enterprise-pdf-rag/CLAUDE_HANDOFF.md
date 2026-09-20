@@ -1,8 +1,72 @@
 # Claude 交接：通用文档 RAG 与公开样本验收
 
-更新时间：2026-09-20
+更新时间：2026-09-21
 
 > 阅读顺序：先看下方“恢复开发记录”；后续旧暂停快照保留作证据，不能作为实时发布或服务状态。
+
+## Diagram 与 Formula 可检索（2026-09-21，分支 `feat/visual-objects`，ADR 0015）
+
+> 本节只讲 Diagram / Formula 两类视觉对象；表格网格（ADR 0014）与更下方各节的状态不受影响。
+
+**分支与提交**：`feat/visual-objects`，在 `origin/main` 之上 —— `4e7ad5c`（Diagram 几何 + 逐字 span 证明）、`9a1b3f0`（Diagram 检索 / 引用 / verify，policy v5）、`b621df8`（Formula token IR 与无模型证明规则）、`e0266e4`（Formula 观测 / 资格 / 检索 / 引用）、`be6bc36`（合并 `origin/main` 的 ADR 0014）、`3a9cb11`（已发布快照的视觉对象重证脚本）、`a0a0d18`（真实验证暴露的 BUG-A 修复：strict 响应 schema 的 `required` 必须列全每个属性；AIA smoke 钉到迁移前 release id），外加本节的文档提交。
+
+**做了什么**（[ADR 0015](adr/0015-diagram-and-formula-retrievable.md)）：把 ADR 0006 里"视觉语义是模型推断、没有独立校验器"那条恒 `UNAVAILABLE` 的诊断，替换成**两条无模型、可重放的来源证明**，通过才产 `qualified_ir` / `qualified_description` / `qualification` 三个 stage 并放行检索。
+
+- **Diagram**：`adapters/diagram_geometry.py` 从对象自己的 crop SVG 里取形状（沿树合成 transform 得 page-top-left；跳过 `<image>`/`<text>`/字形路径而不是 raise），`adapters/diagram_qualification.py` 是规则本体 —— 每个 node 的 label 必须逐字等于它引用的 span（折叠空白、**保留大小写**）、bbox 必须对上**恰一个**真实矩形类填充/描边路径（裁到对象 bbox 后每边 ≤ 2pt）、引用的 span 必须落在 node bbox 内且只被引用一次；每条 edge 必须有"从源节点出发的连线 + 未被占用的填充三角（尖端落在目标、底边中点贴住连线端点 ≤ 3pt）"，且连线不得穿过第三个节点；对象 bbox 内**每个 span 都必须被引用**（漏节点的唯一确定性护栏）。任一条失败 → 整对象 `qualification=UNAVAILABLE` 且诊断逐字（`node <id>: <reason>` / `edge <i>: <reason>` / `object: <reason>`）。通过后 `processing/diagram_description.py` 用确定性模板产描述（`Diagram with 2 nodes and 1 edge: PLAN; BUILD. PLAN -> BUILD.`），**零模型**；模型描述原样留作 lineage。
+- **Formula**：`adapters/pdfspine_formula.py` 重开 pinned PDF 把证明要读的字段逐字抄成 `formula_observation`（span 的 `text_matrix`/`ctm`/`origin`/`size`/`flags` + 每字符 bbox + 翻转成 top-left 的路径），`processing/formula_rules.py` 是纯规则 —— token 只能引用 span 子串且必须满足 tiling 闭合（有序、不重叠、拼接 == 去空白的 span 全文）；上下标优先用 PDF 原文 `Ts`（`text_rise`）证明，证不了的排版式脚本按"字号比 ≤ 0.8 + 基线偏移"判为 `derived` 并落盘三项数值（pdfspine 的 superscript flag 只记录、永不判定）；分数线 / 根号必须引用真实路径，**对象 bbox 内任何解释不了的路径都是拒绝理由**。全 `text_rise` → `VERIFIED` + `proof_level="full"`；含 derived → `PENDING` + `"literal"`，两者都放行。`linear` 是 LaTeX 子集（符号保留 Unicode），`readable` 用固定连接词表，并在措辞上区分两种证明（`x 的 2 次方` vs `x 上标 2`）。
+- **检索与回答链**：`eligibility` 收 DIAGRAM / FORMULA（必需 stage 与图表同形），拒绝串分别是 `Diagram structure is not proven; only geometry-qualified diagrams are retrievable` 与 `Formula tokens are not source-proven; only proven formulas are retrievable`；索引文本 policy 升 **v5**（`source-transcription-and-scoped-chart-qualification-v5`，新增唯一门 `VISUAL_PROJECTION_POLICIES`，两类共用），Diagram 投影 = `diagram figure` + 阅读序 label + 每条边 `A -> B`，Formula 投影 = `readable` + `linear` + `formula` + 每个 token；context block 新增 `nodes.<id>.label` / `edges.<index>` / `formula.linear` / `formula.readable` / `tokens.<i>` 五条可引用路径；`ClaimKind` +3、`BlockKind` +2，`_PATH_PREFIX` 的值改成 tuple（FORMULA 要两个前缀）；**`_literal` 更名 `_exact`**，逐字转写、ADR 0014 的表头、以及这三类 claim 现在用同一个比对函数（折叠空白、保留大小写），verify 侧不再比资格侧宽松。
+- **迁移**：新增 `adapters/visual_requalification.py` + `scripts/enterprise_pdf_rag/requalify_visual_objects.py`，用**已发布快照自己存着的** `svg`/`ir`/`description`/`model_view` + 页 sidecar 重跑 Diagram 证明，存成新 draft（`retrieval=None`，之后 `index` → `publish`），不调模型、不切指针、`--dry-run` 一字节不写；刻意不进 `semantic_objects` 的 stage 缓存（自带 `visual-requalification-stage-v1` 指纹盐），重跑逐字节相同。**不走全量 `process-aia-semantics`** 的理由：会撞 p5 的 stage-cache（bbox 包含判定的容差自那次运行后变过）并丢掉 p18 donut 的数值资格。Formula 分支留了同样的接口位（它需要 pinned PDF 重新观测；AIA 发布里 0 个 Formula 对象）。
+
+**真实样本观察**（AIA 前 20 页，只读）：2 个 Diagram —— p6 三阶段堆叠图 nodes-only 放行（3 节点，描述 `Diagram with 3 nodes: Foundation: 100% Digitalised Agency; …; No connecting edges.`），p5 人工补入的流程图因 5 个 label 全空在 N2 被拒（诊断 `node node-industry-leading-technology: empty_label_without_source_occurrence`，根因是 partition 没把 6 个 span 归属给对象）；**0 个 Formula**（全 71 页 text 里 `=`、希腊字母、上标数字、`×÷√≈` 命中数全为 0），公式只能靠合成夹具验证；7 个 Image 仍不可检索（非目标）。`requalify_visual_objects` 对发布快照的结果：draft `2c819fd68cf397c7150ff86316609040fb1db2232218b7a6433c84d633c38660`，`qualify` 的 eligible 189 → **190**、skipped 52 → **51**、`Diagram structure is not proven…` 从 2 条降到 1 条。
+
+**如何验证**（全部从仓库根跑，离线、不碰 `data/`）：
+
+```sh
+.venv/bin/python -m pytest tests/enterprise_pdf_rag -q          # Diagram/Formula 全部离线用例
+.venv/bin/python -m pytest tests/enterprise_pdf_rag/adapters/test_diagram_real_samples.py \
+  tests/enterprise_pdf_rag/adapters/test_formula_aia_smoke.py \
+  tests/enterprise_pdf_rag/adapters/test_visual_requalification.py -q   # 真实样本只读 smoke
+.venv/bin/python scripts/check_doc_drift.py --quiet
+.venv/bin/python scripts/enterprise_pdf_rag/check_drift.py
+.venv/bin/python scripts/enterprise_pdf_rag/check_schema.py     # rag-chat-v1 / aia-processing-v1 / document-catalog-v1 已手工重生成
+bash scripts/ci.sh                                              # 唯一完整门
+```
+
+迁移与只读排查命令见[测试与入库指南](testing-and-ingestion.md)的“Diagram 与 Formula 证明的测试口径（ADR 0015）”节（`requalify_visual_objects.py --dry-run`、`formula_smoke.py`）。
+
+**真实验证（AIA legacy store + 合成 PDF，2026-09-21，证据 `data/validation/generic-chat-2026-09-21/visual-objects/`）**
+
+- **AIA 迁移**：`requalify_visual_objects.py` 对 `00d5c714…` 只重证两个 Diagram → draft `2c819fd6…`（p6 qualified 3 claims、p5 withheld，其余 239 个对象与 stage-cache 一字不动）；`index` → `231c904c…`（snapshot `2f35ca97…`，**190** 成员，2560 维，policy v5）；`publish` 把 `current-processing` 从 `00d5c714…` 切到 **`231c904c…`**（`current-manifest` 仍 `e702bf1c…`；shasum 见 `pointers-before.sha256` / `pointers-after-publish.sha256`）。8768 / 3200 用本文的 stop / start 命令重启，`/v1/documents` 显示 AIA `member_count = 190`，`api.log` 零 traceback。
+- **BUG-A（阻断级，已修 `a0a0d18`）**：重启后所有 chat 请求 503 `provider_http_400`——ADR 0014 给 `ModelClaim` 加的可选 `row/col/header` 让 `$defs.ModelClaim.required` 不全，OpenAI strict 结构化输出整单拒绝；离线 stub 从不校验 schema 所以门禁看不到。修在 `json_completion._schema_arrays`（对象 schema 的 `required = list(properties)`），其余 5 个 response model 本就满足、请求指纹不变；8 条粘性的 400 失败记录已从 `data/ingestion-webui/model-cache/requests/` 移出（其指纹随 schema 变化已不可复现）。
+- **HTTP 复测（AIA，8 例全 200）**：
+
+| 用例 | 期望 | 结果 |
+| --- | --- | --- |
+| `d2-p6-growth-stage`（"…what does the Growth stage stand for?"） | 引用 `nodes.node-growth.label` | ✅ answered，claim kind `diagram_node`，quote `Growth: Data-Driven Lead Generation` |
+| `d3-p6-order-not-inferred`（"Which stage comes after Foundation…"） | 不得产生 `diagram_edge`，nodes-only 不推断顺序 | ✅ Diagram 成员在 prompt 第 2 席，模型主动弃答（`model_declined: ambiguous`），零 `diagram_edge`、零被拒 claim |
+| `d1-p6-three-stages`（"What are the three stages of the agency technology investment?"） | 三个 `nodes.<id>.label` | ⚠ answered 但 Diagram 成员未进 10 席，模型用 p5 的三条技术支柱 span（`quote`）作答——召回问题，非捏造 |
+| `d4-zh-p6`（"代理人科技投入的三个阶段分别是什么？"） | 同上（中文） | ⚠ abstained：中文查询 BM25 全 null、Diagram 未进席；且答案里的 `1. 2. 3.` 编号被散文数字门当成证据外数字拦下（新发现的误拒） |
+| ISSUE-2 三问（`b-donut-p18` / `b2-donut-rephrased` / `n-no-title`） | 不回归：p18 donut 72% / 28% | ✅ 全部 answered，`chart_value` 引用 `points.point-agency.value = 72%`（b2 另含 28%） |
+| ROE 控制组（`a-roe-control`） | 不回归 | ✅ answered，`quote` 引用 p4 `record Operating ROE of 17.5%` |
+
+- **合成 PDF 真实链路（`ingest --stage semantics` → `metadata` → `qualify` → `index` → `publish` → 重启 → chat，`--output-dir data/ingestion-webui`）**：
+
+| PDF | partition 判定 | 资格 | chat 复测 |
+| --- | --- | --- | --- |
+| `synthetic/diagram.pdf`（`authored_pdf(diagram_page=True)`） | p3 绘制区判 Diagram ✅；p2 的标题文本行也被判成 Diagram | p3 **qualified / verified**（2 node + 1 verified edge，证明串含 `filled-arrowhead-tip`）；p2 withheld `object: no_native_shapes`（partition 误判，资格正确拒绝） | `s1`（"What comes after PLAN?"）✅ answered，`diagram_edge` 引用 `edges.0 = PLAN -> BUILD` |
+| `synthetic/formula.pdf`（`authored_pdf(formula_page=True)`） | p3 判 Formula ✅（真实 partition 把分数与 x² 合成**一个**对象）；p1/p2 标题行也被判成 Formula | p3 **literal / pending**（`linear = ROE = \frac{Net\ profit}{Equity} x^{2}`，1 个 fraction 绑 0.8pt 画线，`2` 为 `derived` 上标）；p1/p2 full（纯 base token，无结构） | `s2`（"How is ROE defined?"）✅ answered，`formula` 引用 `formula.linear` |
+| `synthetic/formula-rise.pdf`（reportlab 真 `Ts`） | p1 判 Formula ✅ | **full / verified**（`script_proof = text_rise`，`rise = 5.0`） | `s3` ✅ answered，`formula` 引用 `formula.linear` |
+
+`metadata` 三次均 0 次调用（semantics 阶段已产出页元数据，幂等）；catalog 不热加载，新发布文档要重启 8768 才出现在 `/v1/models`。只读 smoke（`test_diagram_real_samples.py` 钉 run `00d5c714…`、`test_visual_requalification.py` 钉迁移前 release id、`test_formula_aia_smoke.py`）在发布后仍绿。
+
+**遗留**
+1. AIA 发布已迁移到 `231c904c…`（policy v5，190 成员）；`data/ingestion` 两个合成表快照仍是 v2，要吃到 Diagram/Formula 能力必须 `requalify`（仅 Diagram）或重跑 `semantics`，再 `index` → `publish`。
+1b. 真实验证新暴露：① Diagram 召回偏弱（d1/d4 未进 10 席，只有问题带 node label 词面才召回；图表当年靠 ADR 0012 的保底席位解决，Diagram 可能需要同等待遇）；② 中文查询无词面通道（BM25 全 null，RRF 退化单通道）；③ 散文数字门把 `1. 2. 3.` 列表序号当证据外数字整体拒答；④ 真实 partition 会把标题文本行判成 Diagram/Formula（资格侧正确拒绝或只产纯 base token，但会污染 kinds 统计）；⑤ `ModelAnswer` 等 6 个 `response_model` 的 strict-schema 契约仍无离线守卫（建议加参数化 schema 校验）。
+2. `SYSTEM_RULES` 又变了（新增 diagram/formula 两句）→ `request_fingerprint` 变 → 旧回答缓存全部 miss（预期）。
+3. 三份契约 JSON 仍无生成脚本，`check_schema.py` 只做全等比对、没有 `--write`；本次三份（`rag-chat-v1` / `aia-processing-v1` / `document-catalog-v1`）是手工重生成的。
+4. 回答路径重证成本再叠一层：Diagram 每次 `resolve` 重算 crop 几何、Formula 每次重开 PDF 重新观测（与 ADR 0014 的表格重证并存），v1 接受。
+5. 未支持：贝塞尔连线、开口箭头、一体成型曲线箭头（p5 就是这种）、多行公式、`∑`/`∫` 的上下限语义、分组 / 泳道；Image 仍不可检索；p5 的正确修法在 partition，不在资格校验器。
+6. pdfspine 钉死 0.11.0：两条证明都逐值/逐字节比对它的输出，升级会让已存证明在挂载期被拒（不会静默错读），届时按 ADR 0015 末尾的升级流程走。
 
 ## 划线表格的网格来源证明（2026-09-20，分支 `feat/table-grid-proof`，ADR 0014）
 
