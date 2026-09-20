@@ -1,6 +1,6 @@
 """Public ``rag-chat-v1`` contract: OpenAI-compatible chat whose answers cite verified evidence."""
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field
 
@@ -18,11 +18,38 @@ from enterprise_pdf_rag.answers.models import (
     ClaimCitation,
     ClaimKind,
     FusedHit,
+    MemberFilters,
     RejectedClaim,
     VerifiedClaim,
 )
 from enterprise_pdf_rag.figures.chart_qa.models import FieldCitation
 from enterprise_pdf_rag.processing.context_builder import BlockKind
+
+_FilterValue = Annotated[str, Field(min_length=1, max_length=64)]
+
+
+class MemberFiltersIn(BoundaryModel):
+    """Explicit metadata pre-filters (ADR 0013); omitted, they are derived from the question.
+
+    ``periods`` take any printed form (``1H26``, ``FY2024``, ``2026``); a bare year matches
+    every period of that year. ``regions`` must match the document's own verified region
+    strings verbatim (case-insensitive). An empty object disables filtering.
+    """
+
+    periods: list[_FilterValue] = Field(default_factory=list, max_length=8)
+    regions: list[_FilterValue] = Field(default_factory=list, max_length=8)
+
+    def to_domain(self) -> MemberFilters:
+        return MemberFilters(tuple(self.periods), tuple(self.regions))
+
+
+class MemberFiltersOut(BoundaryModel):
+    periods: tuple[str, ...]
+    regions: tuple[str, ...]
+
+    @classmethod
+    def from_domain(cls, filters: MemberFilters) -> "MemberFiltersOut":
+        return cls(periods=filters.periods, regions=filters.regions)
 
 
 class RagChatRequest(BoundaryModel):
@@ -33,6 +60,7 @@ class RagChatRequest(BoundaryModel):
     # A document sha256 or a prefix of at least twelve hex digits; wins over ``model``.
     document: str | None = Field(default=None, pattern=r"^[0-9a-f]{12,64}$")
     rerank: bool = False
+    filters: MemberFiltersIn | None = None
 
 
 class ClaimCitationOut(BoundaryModel):
@@ -44,6 +72,8 @@ class ClaimCitationOut(BoundaryModel):
     bbox: tuple[float, float, float, float] | None
     quote: str
     chart_citation: FieldCitation | None
+    # The verified title of the cited page, when its metadata stage found one (ADR 0013).
+    page_title: str | None = None
 
     @classmethod
     def from_domain(cls, citation: ClaimCitation) -> "ClaimCitationOut":
@@ -56,6 +86,7 @@ class ClaimCitationOut(BoundaryModel):
             bbox=citation.bbox,
             quote=citation.quote,
             chart_citation=citation.chart_citation,
+            page_title=citation.page_title,
         )
 
 
@@ -138,6 +169,10 @@ class AnswerEnvelope(BoundaryModel):
     cache_hit: bool
     # One entry per prompt member, in ``member_ids`` order (added after rag-chat-v1 shipped).
     member_ranks: tuple[MemberRankOut, ...] = ()
+    # Metadata pre-filters that narrowed the candidates, and whether they had to be dropped
+    # because they left fewer candidates than prompt seats (ADR 0013).
+    filters_applied: MemberFiltersOut | None = None
+    filters_relaxed: bool = False
 
     @classmethod
     def from_domain(cls, result: AnswerResult) -> "AnswerEnvelope":
@@ -159,6 +194,10 @@ class AnswerEnvelope(BoundaryModel):
                 for member_id in result.member_ids
                 if member_id in by_member
             ),
+            filters_applied=None
+            if result.filters_applied is None
+            else MemberFiltersOut.from_domain(result.filters_applied),
+            filters_relaxed=result.filters_relaxed,
         )
 
 

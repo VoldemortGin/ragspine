@@ -7,7 +7,8 @@ and no company name is ever hardcoded.
 """
 
 import re
-from collections.abc import Iterable
+from collections import Counter
+from collections.abc import Collection, Iterable
 
 from enterprise_pdf_rag.answers.models import MemberFilters
 from enterprise_pdf_rag.processing.periods import find_periods, period_year
@@ -98,12 +99,32 @@ def derive_filters(question: str, region_vocabulary: Iterable[str]) -> MemberFil
     return MemberFilters(extract_periods(question), match_regions(question, region_vocabulary))
 
 
-def title_matches(question: str, title: str | None) -> bool:
-    """Does the question name this document? A distinctive title word or a CJK run must occur."""
+def title_tokens(title: str | None) -> frozenset[str]:
+    """The folded Latin words and CJK bigrams of a title that could identify a document."""
     if not title:
-        return False
-    for token in _LATIN.findall(title):
-        if token.casefold() not in _GENERIC and _mentions(question, token, exact_short_caps=False):
-            return True
+        return frozenset()
+    latin = {token.casefold() for token in _LATIN.findall(title)} - _GENERIC
+    cjk = {run[i : i + 2] for run in _CJK.findall(title) for i in range(len(run) - 1)}
+    return frozenset(latin | cjk)
+
+
+def shared_title_tokens(titles: Iterable[str | None]) -> frozenset[str]:
+    """Tokens that occur in more than one of the given titles."""
+    counts = Counter(token for title in titles for token in title_tokens(title))
+    return frozenset(token for token, count in counts.items() if count > 1)
+
+
+def title_matches(question: str, title: str | None, *, shared: Collection[str] = ()) -> bool:
+    """Does the question name this document? A distinctive title token must occur.
+
+    ``shared`` lists tokens other mounted titles also carry; they cannot tell documents
+    apart and are ignored.
+    """
     folded = fold(question)
-    return any(run[i : i + 2] in folded for run in _CJK.findall(title) for i in range(len(run) - 1))
+    for token in title_tokens(title) - set(shared):
+        if token.isascii():
+            if _mentions(question, token, exact_short_caps=False):
+                return True
+        elif token in folded:
+            return True
+    return False

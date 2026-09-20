@@ -19,7 +19,11 @@ from enterprise_pdf_rag.adapters.answer_service import (
     DependencyUnavailable,
     UnknownDocument,
 )
-from enterprise_pdf_rag.adapters.document_catalog import MountedCatalog, QueryEmbeddingUnavailable
+from enterprise_pdf_rag.adapters.document_catalog import (
+    CatalogEntry,
+    MountedCatalog,
+    QueryEmbeddingUnavailable,
+)
 from enterprise_pdf_rag.adapters.http.chat_schemas import (
     AnswerEnvelope,
     RagChatRequest,
@@ -35,6 +39,11 @@ from enterprise_pdf_rag.adapters.http.openai_schemas import (
 )
 from enterprise_pdf_rag.adapters.providers import ProviderRequestError
 from enterprise_pdf_rag.answers.models import AnswerRequest, AnswerResult, AnswerStatus, ClaimKind
+from enterprise_pdf_rag.answers.query_filters import (
+    extract_years,
+    shared_title_tokens,
+    title_matches,
+)
 from enterprise_pdf_rag.figures.chart_qa.models import ChartQueryError, QueryFailure
 
 MODEL_PREFIX = "enterprise-pdf-rag/"
@@ -73,12 +82,47 @@ def render_message(result: AnswerResult) -> str:
     return "\n".join(lines)
 
 
+def _route(mounted: MountedCatalog, question: str) -> str:
+    """Pick one mounted document from the question's title words and years (ADR 0013).
+
+    A document is a title candidate when the question names a word of its verified cover
+    title that no other mounted title shares, and a year candidate when a year in the
+    question is one it prints. Both signals present: their intersection. Exactly one
+    survivor is selected; anything else is a 422 that lists the candidates by display name.
+    """
+    entries = [
+        entry for entry in mounted.catalog.documents if entry.document_id in mounted.documents
+    ]
+    shared = shared_title_tokens(entry.display_title for entry in entries)
+    by_title = [
+        entry for entry in entries if title_matches(question, entry.display_title, shared=shared)
+    ]
+    years = set(extract_years(question))
+    by_year = [entry for entry in entries if years and years.intersection(entry.years)]
+    candidates: list[CatalogEntry]
+    if by_title and years:
+        candidates = [entry for entry in by_title if entry in by_year]
+    else:
+        candidates = by_title or by_year
+    if len(candidates) == 1:
+        return candidates[0].document_id
+    names = "; ".join(f"{entry.display_name} ({entry.document_id[:12]})" for entry in entries)
+    raise HTTPException(
+        422,
+        "Document selection required: several documents are mounted and the question "
+        f"names {'none' if not candidates else 'more than one'} of them; name one with "
+        f"`document` or a model id from /v1/models. Candidates: {names}",
+    )
+
+
 def _select(mounted: MountedCatalog, body: RagChatRequest) -> str | None:
     """Resolve the target document id; ``None`` leaves the choice to catalog uniqueness."""
     reference = body.document
     if reference is None:
         match = _MODEL_REFERENCE.match(body.model)
         if match is None:
+            if len(mounted.documents) > 1:
+                return _route(mounted, body.messages[-1].content)
             return None
         reference = match.group(1)
     entries = [
@@ -150,7 +194,7 @@ def create_chat_router(mounted: MountedCatalog, service: AnswerService | None) -
             data=tuple(
                 ModelInfo(
                     id=model_id(document_id),
-                    name=f"{document.entry.document_label or document_id} ({document_id[:12]})",
+                    name=f"{document.entry.display_name} ({document_id[:12]})",
                     owned_by="enterprise-pdf-rag/document-catalog",
                 )
                 for document_id, document in mounted.documents.items()
@@ -176,6 +220,7 @@ def create_chat_router(mounted: MountedCatalog, service: AnswerService | None) -
                 document_sha256=document_id,
                 rerank=body.rerank,
                 history=history,
+                filters=None if body.filters is None else body.filters.to_domain(),
             )
         except ValueError as error:
             raise HTTPException(422, str(error)) from None

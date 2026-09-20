@@ -160,9 +160,11 @@ class AnswerService:
         )
         applied: MemberFilters | None = None if filters.is_empty else filters
         allowed = candidate_members(members, applied)
-        relaxed = allowed is not None and len(allowed) < request.top_k
-        if relaxed:
-            # Fewer candidates than seats: the narrowing is dropped, and the result says so.
+        starved = allowed is not None and len(allowed) < request.top_k
+        # Fewer candidates than seats: the narrowing is dropped; when a filter was in play
+        # the result says so (the built-in cover / agenda exclusion is not reported).
+        relaxed = starved and applied is not None
+        if starved:
             allowed = None
         ranked = search.search(request.question, top_k=2 * request.top_k, allowed=allowed)
         fused, selected = select_context(document, ranked, request.top_k, members)

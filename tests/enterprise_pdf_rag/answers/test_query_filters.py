@@ -6,7 +6,9 @@ from enterprise_pdf_rag.answers.query_filters import (
     extract_periods,
     extract_years,
     match_regions,
+    shared_title_tokens,
     title_matches,
+    title_tokens,
 )
 
 _VOCABULARY = ("Hong Kong", "Thailand", "Mainland China", "中国内地", "Group")
@@ -50,3 +52,17 @@ def test_title_match_needs_a_distinctive_word_or_a_cjk_run() -> None:
     assert title_matches("友邦保险 上半年", "友邦保险控股有限公司 2026 中期业绩")
     assert not title_matches("平安 上半年", "友邦保险控股有限公司 2026 中期业绩")
     assert not title_matches("anything", None)
+    # Words two mounted titles share cannot route: only the distinctive ones count.
+    titles = ("Meridian 1H26 Hong Kong page 1", "Orion FY2024 Thailand page 1")
+    shared = shared_title_tokens(titles)
+    assert shared == {"page"}
+    assert title_matches("Orion on page 2", titles[1], shared=shared)
+    assert not title_matches("Orion on page 2", titles[0], shared=shared)
+    assert title_tokens("友邦保险 2026 中期业绩") == {
+        "友邦",
+        "邦保",
+        "保险",
+        "中期",
+        "期业",
+        "业绩",
+    }

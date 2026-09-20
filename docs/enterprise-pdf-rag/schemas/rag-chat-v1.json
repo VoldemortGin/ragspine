@@ -85,6 +85,34 @@
         "title": "ChatMessage",
         "type": "object"
       },
+      "MemberFiltersIn": {
+        "additionalProperties": false,
+        "description": "Explicit metadata pre-filters (ADR 0013); omitted, they are derived from the question.\n\n``periods`` take any printed form (``1H26``, ``FY2024``, ``2026``); a bare year matches\nevery period of that year. ``regions`` must match the document's own verified region\nstrings verbatim (case-insensitive). An empty object disables filtering.",
+        "properties": {
+          "periods": {
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Periods",
+            "type": "array"
+          },
+          "regions": {
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Regions",
+            "type": "array"
+          }
+        },
+        "title": "MemberFiltersIn",
+        "type": "object"
+      },
       "StreamOptions": {
         "additionalProperties": false,
         "properties": {
@@ -112,6 +140,17 @@
         ],
         "default": null,
         "title": "Document"
+      },
+      "filters": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MemberFiltersIn"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
       },
       "messages": {
         "items": {
@@ -220,6 +259,22 @@
           "document_sha256": {
             "title": "Document Sha256",
             "type": "string"
+          },
+          "filters_applied": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/MemberFiltersOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "filters_relaxed": {
+            "default": false,
+            "title": "Filters Relaxed",
+            "type": "boolean"
           },
           "llm_live_calls": {
             "title": "Llm Live Calls",
@@ -361,6 +416,18 @@
           "page_index": {
             "title": "Page Index",
             "type": "integer"
+          },
+          "page_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Page Title"
           },
           "quote": {
             "title": "Quote",
@@ -523,6 +590,31 @@
           "occurrences"
         ],
         "title": "FieldCitation",
+        "type": "object"
+      },
+      "MemberFiltersOut": {
+        "additionalProperties": false,
+        "properties": {
+          "periods": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Periods",
+            "type": "array"
+          },
+          "regions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Regions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "periods",
+          "regions"
+        ],
+        "title": "MemberFiltersOut",
         "type": "object"
       },
       "MemberRankOut": {
@@ -924,6 +1016,22 @@
             "title": "Document Sha256",
             "type": "string"
           },
+          "filters_applied": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/MemberFiltersOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "filters_relaxed": {
+            "default": false,
+            "title": "Filters Relaxed",
+            "type": "boolean"
+          },
           "llm_live_calls": {
             "title": "Llm Live Calls",
             "type": "integer"
@@ -1091,6 +1199,18 @@
             "title": "Page Index",
             "type": "integer"
           },
+          "page_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Page Title"
+          },
           "quote": {
             "title": "Quote",
             "type": "string"
@@ -1244,6 +1364,31 @@
           "occurrences"
         ],
         "title": "FieldCitation",
+        "type": "object"
+      },
+      "MemberFiltersOut": {
+        "additionalProperties": false,
+        "properties": {
+          "periods": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Periods",
+            "type": "array"
+          },
+          "regions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Regions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "periods",
+          "regions"
+        ],
+        "title": "MemberFiltersOut",
         "type": "object"
       },
       "MemberRankOut": {
