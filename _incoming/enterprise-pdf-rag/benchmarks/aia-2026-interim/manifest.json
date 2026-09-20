@@ -1,0 +1,142 @@
+{
+  "schema_version": "aia-figure-inventory-v1",
+  "status": "provisional_inventory_not_gold",
+  "model_assisted": false,
+  "source": {
+    "path": "data/samples/aia-group-2026-interim-results-presentation.pdf",
+    "sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+    "pages": 71,
+    "issuer": "AIA Group Limited",
+    "document": "2026 Interim Results Presentation"
+  },
+  "observation": {
+    "pdf_entry": "pdfspine",
+    "pdfspine_version": "0.10.0",
+    "coordinate_system": "top-left PDF points",
+    "page_size_points": [960.0, 540.0],
+    "full_page_inventory": "docs/samples/aia-2026-interim-inventory.md",
+    "ignored_working_data": "data/aia-inventory/"
+  },
+  "candidates": [
+    {
+      "id": "p25-interim-dividend-bars",
+      "priority": 1,
+      "page_number": 25,
+      "page_index": 24,
+      "bbox": [731.5, 145.0, 944.2, 385.0],
+      "chart_type_candidate": "two vertical bars",
+      "semantic_status": "provisional_human_observation_not_independently_verified",
+      "gold": false,
+      "title": {
+        "text": "Interim Dividend per share",
+        "bbox": [768.26, 150.1088, 909.7597, 162.4184]
+      },
+      "unit": {
+        "text": "(HK cents)",
+        "bbox": [809.9, 163.3088, 865.0338, 175.6184]
+      },
+      "labels": [
+        {"text": "49.00", "bbox": [777.17, 206.15, 807.326, 219.53]},
+        {"text": "53.90", "bbox": [869.86, 192.97, 900.016, 206.35]},
+        {"text": "1H25", "bbox": [777.86, 365.39, 806.48, 378.77]},
+        {"text": "1H26", "bbox": [871.63, 365.39, 900.25, 378.77]},
+        {"text": "+10%", "bbox": [819.72, 209.7738, 855.9713, 225.4284]}
+      ],
+      "drawing_observations": [
+        {"kind": "bar", "bbox": [775.37, 224.2, 808.852, 358.01]},
+        {"kind": "bar", "bbox": [869.12, 210.82, 902.602, 358.01]},
+        {"kind": "baseline", "bbox": [745.23, 358.01, 932.73, 358.01]}
+      ],
+      "risks": [
+        "The year-to-value and value-to-bar relationships are provisional visual associations, not independently qualified evidence.",
+        "The +10% callout uses compound path geometry; preserve the native SVG rather than reconstructing it from drawing observations."
+      ]
+    },
+    {
+      "id": "p10-agency-product-mix-donut",
+      "priority": 2,
+      "page_number": 10,
+      "page_index": 9,
+      "bbox": [690.0, 140.0, 945.0, 365.0],
+      "chart_type_candidate": "donut",
+      "semantic_status": "provisional_human_observation_not_independently_verified",
+      "gold": false,
+      "title_text": "High-quality Product Mix with Attractive Returns",
+      "scope_text": "Agency VONB 1H26",
+      "labels": [
+        {"text": "57%", "bbox": [757.87, 294.4662, 777.7644, 305.5716]},
+        {"text": "35%", "bbox": [822.55, 250.3262, 842.4444, 261.4316]},
+        {"text": "8%", "bbox": [780.82, 229.7362, 795.1944, 240.8416]},
+        {"text": "<1% Others", "bbox": [779.28, 200.3032, 837.4867, 212.0776]},
+        {"text": "Protection", "bbox": [856.54, 249.7432, 908.6747, 261.5176]},
+        {"text": "Tax-incentivised", "bbox": [705.79, 202.1432, 766.6022, 226.5176]},
+        {"text": "Par Savings(1)", "bbox": [704.16, 299.6832, 753.0297, 324.0576]}
+      ],
+      "risks": [
+        "Category-to-percentage pairing is provisional and cannot be established by duplicate text or proximity alone.",
+        "External labels and donut sectors require occurrence-level evidence before qualification."
+      ]
+    },
+    {
+      "id": "p10-vonb-bars",
+      "priority": 3,
+      "page_number": 10,
+      "page_index": 9,
+      "bbox": [30.0, 95.0, 305.0, 345.0],
+      "chart_type_candidate": "two vertical bars",
+      "semantic_status": "provisional_incomplete_values",
+      "gold": false,
+      "title_text": "VONB ($m)",
+      "labels": [
+        {"text": "937", "bbox": [226.32, 121.45, 246.432, 134.83]},
+        {"text": "1H25", "bbox": [86.016, 330.5688, 112.3354, 342.8784]},
+        {"text": "1H26", "bbox": [223.25, 330.5688, 249.5694, 342.8784]},
+        {"text": "+20%", "bbox": [146.38, 140.6662, 187.6884, 158.4616]}
+      ],
+      "risks": [
+        "The 1H25 value is not an explicit pdfspine text span and must not be derived from 937 and +20% as if it were source truth.",
+        "The callout contains compound geometry."
+      ]
+    },
+    {
+      "id": "p19-ev-equity-waterfall",
+      "priority": 4,
+      "page_number": 19,
+      "page_index": 18,
+      "bbox": [35.0, 95.0, 655.0, 480.0],
+      "chart_type_candidate": "waterfall",
+      "semantic_status": "provisional_hybrid_raster_vector",
+      "gold": false,
+      "title_text": "EV Equity Movement ($b)",
+      "observed_value_text": ["79.7", "+ 6.6", "+ 1.0", "( 0.3 )", "87.1", "( 1.9 )", "( 1.7 )", "83.4", "$3.6b"],
+      "image_placements": [
+        [57.6891, 225.9297, 92.368, 405.5679],
+        [358.035, 187.8901, 618.1872, 405.5679],
+        [132.6818, 186.4551, 242.5985, 226.5347],
+        [433.2728, 187.7751, 467.9517, 198.215],
+        [508.2705, 197.615, 543.0695, 207.2149],
+        [282.9173, 190.2951, 317.7162, 192.335]
+      ],
+      "risks": [
+        "pdfspine reports six image placements inside the chart region, so vector observations alone do not cover the visible waterfall.",
+        "Bridge order, subtotal roles and shareholder-return grouping are semantic claims requiring independent evidence."
+      ]
+    },
+    {
+      "id": "p25-total-dividend-trend",
+      "priority": 5,
+      "page_number": 25,
+      "page_index": 24,
+      "bbox": [350.0, 135.0, 725.0, 395.0],
+      "chart_type_candidate": "stacked annual bars with trend arrow",
+      "semantic_status": "provisional_missing_text_observations",
+      "gold": false,
+      "title_text": "Total Dividend per share (HK cents)",
+      "observed_text": ["33.00", "193.08", "Interim", "Final"],
+      "risks": [
+        "The visually rendered 2011-2025 year labels are absent from pdfspine text spans and therefore cannot be treated as extracted year fields.",
+        "The page contains 1,518 drawing items and 36 compound drawings; native SVG preservation is required."
+      ]
+    }
+  ]
+}

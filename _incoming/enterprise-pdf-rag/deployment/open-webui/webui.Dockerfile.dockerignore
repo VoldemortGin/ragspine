@@ -1,0 +1,6 @@
+**
+!src/
+!src/enterprise_pdf_rag/
+!src/enterprise_pdf_rag/adapters/
+!src/enterprise_pdf_rag/adapters/http/
+!src/enterprise_pdf_rag/adapters/http/webui_gate.py

@@ -1,0 +1,1121 @@
+{
+  "schema_version": "aia-first-20-region-candidates-v1",
+  "status": "manual_candidates_pending_not_gold",
+  "source": {
+    "sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+    "page_count": 71,
+    "selected_physical_pages": [
+      1,
+      20
+    ]
+  },
+  "coordinate_frame": "page-top-left-points",
+  "selection_rule": "source_span_ids are exact observed occurrence IDs whose bbox center lies in the reviewed candidate bbox; page_context_span_ids are page-level qualifiers and are never crop evidence.",
+  "candidates": [
+    {
+      "object_id": "aia-p005-chart-01-v1",
+      "page_number": 5,
+      "page_index": 4,
+      "bbox": [
+        662.0,
+        138.0,
+        931.0,
+        455.0
+      ],
+      "kind": "Chart",
+      "method": "manual-source-render-review",
+      "verification": "pending",
+      "gold": false,
+      "bbox_status": "provisional",
+      "source_span_ids": [
+        "span-v1-5d0b7709e402d504e0cb540bbd54565215cb5c80a26751c35f3ffd9bdb03edb9",
+        "span-v1-0620e21d5fabc8e3094a6e17e2a4035451e5add8a3d053ce36b0cb6dc5dc5dc7",
+        "span-v1-0ef7ad22da03b066381bb42414fe2d56fbb50fc54dc772bcc264e33495ce7cab",
+        "span-v1-56c39affaa0b7cd29cb955a74d1ed089411f17d3d1611476d57c64bbdd54191c",
+        "span-v1-67500b18e4cd9ac323d121c7ef0bc62fac68b8647b39eb183285c4bb5db1b917",
+        "span-v1-04e1f436bdcbae5ce3ae47393b22958663c092714603f7102bea1abefc37c2e6",
+        "span-v1-3664a550dd98e72435b2540fdba1573b7a177cc92bf6c4fb94f5a25c597d9f40",
+        "span-v1-dfd3c796fd7f782af2155d88b0e7b51fe1db78c0efd1df61bf0f82bb604c4dc7",
+        "span-v1-82f088c2821d49c7f7910cdb7ea94036e3ada8450040224d985d90e4c6d5731f",
+        "span-v1-ede66f450b6836203faa8f8f058daff343ad63e85f1d60c4982661e595f76edc",
+        "span-v1-b182d8c1456f4bf44d28db983473abc374c3addb2d13bbb71e820ef20a075c5c",
+        "span-v1-36e52d892de35f7635b81b9248ad23622e4b48efc66dfd27c03a32a98d88eaf1",
+        "span-v1-2e17a12a2c8ef5f07bf5b383807aef06fc787f20b946a268ff8b7c7750af2360"
+      ],
+      "page_context_span_ids": [],
+      "interpretation": "Provisional chart region from source-render review; chart grammar and source relationships remain unqualified.",
+      "completeness_gaps": [
+        "semantic_relationships_unverified",
+        "provisional_bbox_not_gold"
+      ],
+      "alternate_kind_candidate": null,
+      "native_table_status": null
+    },
+    {
+      "object_id": "aia-p006-chart-01-v1",
+      "page_number": 6,
+      "page_index": 5,
+      "bbox": [
+        30.0,
+        133.0,
+        298.0,
+        270.0
+      ],
+      "kind": "Chart",
+      "method": "manual-source-render-review",
+      "verification": "pending",
+      "gold": false,
+      "bbox_status": "provisional",
+      "source_span_ids": [
+        "span-v1-0c501b61e7a5e7cda9b498210c7684f8bb1f07ef14fede2298bd61bceb185b0e",
+        "span-v1-1ce37e2f5c8480229ed261a03a09b204bebcbddf5c165ffb6dbc00e1db9dcc37",
+        "span-v1-d752a602c25ffe2c961536d317be382222af498d0185e90b818a1d3e3fed1ac7",
+        "span-v1-1448a7faef22da3297ebd6ab9a89b807ac8911b311d9006276405eba2379ac38",
+        "span-v1-159f7c0bf796acf2c2a58a9aaf830c5e6a261bf087bd8050ef71cf2d8e708f02"
+      ],
+      "page_context_span_ids": [],
+      "interpretation": "Provisional chart region from source-render review; chart grammar and source relationships remain unqualified.",
+      "completeness_gaps": [
+        "semantic_relationships_unverified",
+        "provisional_bbox_not_gold"
+      ],
+      "alternate_kind_candidate": null,
+      "native_table_status": null
+    },
+    {
+      "object_id": "aia-p006-chart-02-v1",
+      "page_number": 6,
+      "page_index": 5,
+      "bbox": [
+        349.0,
+        277.0,
+        620.0,
+        463.0
+      ],
+      "kind": "Chart",
+      "method": "manual-source-render-review",
+      "verification": "pending",
+      "gold": false,
+      "bbox_status": "provisional",
+      "source_span_ids": [
+        "span-v1-113f1207036512d15171a5fca9bd3e41d232ea3d372a2d6453e0d6d95e13ecbe",
+        "span-v1-9497a80e2ea61b840ba34e645ca2794c2a6bdfb550ee70b6fa99e2e0dcb7fa44",
+        "span-v1-999a4fcb684b441a75cc9f745023e9e04edb5c64ca5d2afa134495f09e9f09fe",
+        "span-v1-833459648b12f30893d628b9ce65b4c930f0d0b12c3b5d12d134dae37256ab36",
+        "span-v1-0cea660b7f0e7591fc707fa2f626c3e8012c91b2d7ca3bc5389386196fb1d591",
+        "span-v1-417bb4853f17b699437a168f8ae3e2ff6b38549b40e45bd4e9b91f5d4957822c",
+        "span-v1-2522352ab2e9f8bbdb4e70d73205b254bcec0899c7f5753de6d26cbc9dc55992",
+        "span-v1-f26180803966226c5901406fa0cbf8fafc8513d28028c305e7382747168f3000",
+        "span-v1-0654900eef8dd582583671ad55b172bbfd7d09f370f48e5ec856b2c0d4e0f505",
+        "span-v1-808eb5f366e89510653582164cd0a5d7b2a06921f6bd7f26135b99bdc56e37cd",
+        "span-v1-3eea713cb84522dae956c54dbb6bda42aa9d0de6bd94c618456c240c678e6c62",
+        "span-v1-a89c567f625d629fcdf04d1a49d1d65be9fa384deeef2cbe01bf2fe1ffc2a107",
+        "span-v1-19c74a752aa484803876a519864eebd2477d6d85f3f0b6e420f10970401ff413"
+      ],
+      "page_context_span_ids": [],
+      "interpretation": "Provisional chart region from source-render review; chart grammar and source relationships remain unqualified.",
+      "completeness_gaps": [
+        "semantic_relationships_unverified",
+        "provisional_bbox_not_gold"
+      ],
+      "alternate_kind_candidate": null,
+      "native_table_status": null
+    },
+    {
+      "object_id": "aia-p007-chart-01-v1",
+      "page_number": 7,
+      "page_index": 6,
+      "bbox": [
+        55.0,
+        135.0,
+        435.0,
+        336.0
+      ],
+      "kind": "Chart",
+      "method": "manual-source-render-review",
+      "verification": "pending",
+      "gold": false,
+      "bbox_status": "provisional",
+      "source_span_ids": [
+        "span-v1-a2a318068b3d026d7feae79d7cafa36e60575375301eaf8889b77be3e7162adb",
+        "span-v1-0b992461c74517edf94992d2ffcb82e8a2567c0e721e25b56d742df3add24166",
+        "span-v1-cff00dd780e2f51874b6a40000c225a81bdd5915f8b8cff3ab97802dcef66c96",
+        "span-v1-f6fafeb33810698a869ca5ab92be04f7e283a84bf5cd8a6f3de5510c561445ed",
+        "span-v1-dcd350dde3a1b0ad0626d569e97ef95f1ebc851df8daaae60ec64c3bcd102975",
+        "span-v1-6889402f0fb5bca296d4a0b9629174e5d879285c326d3b42dbef219061bb10fa",
+        "span-v1-3bddd48c590207e9e0f2c246bcd03d6e5453c7eab1aa3357a5f2e9fd7b1c31ba",
+        "span-v1-ac26b67536c3f83658d930b59343af59a3e7ebda4d4e7880f56342e8d7a95108",
+        "span-v1-0c7230748f8777d3dfd2431850be9a4044219185185c246c53753b0c9003d470",
+        "span-v1-e57b329a7397d98ca84b26b94e740f2e5d9ac98f52bbbc90714f88e96bb8903e",
+        "span-v1-a8b2601fca7196fe7b705a190dc49362a553f7f343aa5539a5178aa4e9a45805"
+      ],
+      "page_context_span_ids": [],
+      "interpretation": "Provisional chart region from source-render review; chart grammar and source relationships remain unqualified.",
+      "completeness_gaps": [
+        "semantic_relationships_unverified",
+        "provisional_bbox_not_gold"
+      ],
+      "alternate_kind_candidate": null,
+      "native_table_status": null
+    },
+    {
+      "object_id": "aia-p007-chart-02-v1",
+      "page_number": 7,
+      "page_index": 6,
+      "bbox": [
+        510.0,
+        135.0,
+        895.0,
+        336.0
+      ],
+      "kind": "Chart",
+      "method": "manual-source-render-review",
+      "verification": "pending",
+      "gold": false,
+      "bbox_status": "provisional",
+      "source_span_ids": [
+        "span-v1-e7551d106c1631e3dc6e7c4c9da45905d1026f0354c5eb1431087ae000260829",
+        "span-v1-3b1e0e04e84d9699cd0ea0725868256029b5413de299f438c9e62d592c9b9614",
+        "span-v1-7137c54bc8e73ae2d829434284c67cd0c65104c148ab8ca035818001fd6df501",
+        "span-v1-7c599f208bf280349c08e9a4b08083ddd26042a260f7d57f15e9e324a3253567",
+        "span-v1-8288748deea1cd5dee0369400682aba766b0b65742b72ef5021eb13f8f0de3d1",
+        "span-v1-bf268f2f25f2d4d85c4d7ca79060d986ba0dfe7fc268499b86fe6b7f5535bb41",
+        "span-v1-4a9da33a7ba03d938cd1b776fb41e69a98854c2e43426d2902bc1bc1aba5e346",
+        "span-v1-352c42fea4896fbbea7c16f86bbea3b9d91d693e38324f788dc2307b17e18955",
+        "span-v1-6476d3f15479328eed531099c4bc5987a859c25c7c1156185e2bb009ff8d5df7",
+        "span-v1-c0725ed964b430b470a5e981f4de74d4fcd095e4b47671f90cbe4fbde4678218",
+        "span-v1-a21484fe2833cbcc5665c33883c57b9169dd7d1a59155fdf6f47d0aefe205029"
+      ],
+      "page_context_span_ids": [],
+      "interpretation": "Provisional chart region from source-render review; chart grammar and source relationships remain unqualified.",
+      "completeness_gaps": [
+        "semantic_relationships_unverified",
+        "provisional_bbox_not_gold"
+      ],
+      "alternate_kind_candidate": null,
+      "native_table_status": null
+    },
+    {
+      "object_id": "aia-p008-chart-01-v1",
+      "page_number": 8,
+      "page_index": 7,
+      "bbox": [
+        24.0,
+        112.0,
+        470.0,
+        447.0
+      ],
+      "kind": "Chart",
+      "method": "manual-source-render-review",
+      "verification": "pending",
+      "gold": false,
+      "bbox_status": "provisional",
+      "source_span_ids": [
+        "span-v1-6f47260d06342c209396807c77edbe418cd8223574790a4c16baf4d84b7de15d",
+        "span-v1-c1e224e99ea1824deca89408ddd3175c5281d6adc5c03b363af29f9cbfc0a0af",
+        "span-v1-952ccebe4d3874171e53b1bb6c145c9c5bb652eaa5b3b41ae66f469c5f3cfcfe",
+        "span-v1-db84ebc9e130de0a5714332e0a9dfdf11a7e294dac2fe2af41de58af2183a3e2",
+        "span-v1-828d810c3e6d0266a7b22147110e362c2dbca521b03725499ebcf04df6c9cacb",
+        "span-v1-ce66af9478bf335092e2edebe4604930af4723380cbe58eb2d158268c727f3d6",
+        "span-v1-9ed6b0b64aa3be89b62a084b6a93478022d0d707227f350b4b505f7bf4b42ee4",
+        "span-v1-b7630efe35210338ce8e68b9d8499ec5e2baca8485b63a3679ba18b78c3b6f68",
+        "span-v1-f05b81d4ccbcba495496f5d99ac63c4b0bd2b1ed3731f52841153f8755a05e84",
+        "span-v1-380f4e1f33ea8c16400be01e238d5dfaef7ec73d387240b5d98a90a54194a6bf",
+        "span-v1-9dd544ea86cb63546d73f001b37cb8dbd96b76dc7bf42747a443d65089963be8",
+        "span-v1-01ac99eba36c546e5820c108c16a66a306ddd1526d658274487ca4f8fd9ed769",
+        "span-v1-3a3d21b11ef7935f5e70589d13deb3a071d4a9f2b40e5f41edf25240cf655cf2",
+        "span-v1-b04dda52c4443a1a2b6bac975fc9d69f8f7aa5a4503b1de1a437aefd47771085",
+        "span-v1-77a3a1dd3497941a3f1696342ee14f79f102b621212449c822446b68d027883f",
+        "span-v1-57ea7d9bc34cf155bea78ef77344daff3fe49458b9b93e88d3114f32fcca87ae",
+        "span-v1-808df5f7e1645d21beb1796e1d9a9fff3af249841e8a643b80efa6531506e072",
+        "span-v1-ede8a684e5afe96d8c1fc0a877a22f4a3bbc31c0d2874d106a09bdc3ba9f814d",
+        "span-v1-fb9ce4bf84e8ef933c83d5729f91353e3375695c48c2141f9877ac6af1198655",
+        "span-v1-b251eda24aa108a437b4bffd82cc7e497be8165aef04c9217d1395efa3d6cb79",
+        "span-v1-ec7b7cf2cfdd4c5fc32dafb9401787aa137419988889b6dfe4ce23f2a7ae3d2d"
+      ],
+      "page_context_span_ids": [],
+      "interpretation": "Provisional chart region from source-render review; chart grammar and source relationships remain unqualified.",
+      "completeness_gaps": [
+        "semantic_relationships_unverified",
+        "provisional_bbox_not_gold"
+      ],
+      "alternate_kind_candidate": null,
+      "native_table_status": null
+    },
+    {
+      "object_id": "aia-p010-vonb-bars-v1",
+      "page_number": 10,
+      "page_index": 9,
+      "bbox": [
+        30.0,
+        95.0,
+        305.0,
+        345.0
+      ],
+      "kind": "Chart",
+      "method": "manual-source-render-review",
+      "verification": "pending",
+      "gold": false,
+      "bbox_status": "provisional",
+      "source_span_ids": [
+        "span-v1-b8697a9e517d03cb2a453128415c28451241202cccc20f03294ae97ba3732b79",
+        "span-v1-0f699380b9c3bbfa5f28b7a81aa4bc9ceb5a8a9b8fecebd23aa2b148856e2761",
+        "span-v1-607f6371690d2f95afc56dd362089cc82ba8960d753fec6522589ec4179d4d93",
+        "span-v1-37b80fcfb17822e914edeaa11883d121b97780115bea48e56d0018aecc020ee0",
+        "span-v1-69fb6e9128fa6befab034c5a00c742b329c3b1d8ae99e5be84ad3ce847da09b6"
+      ],
+      "page_context_span_ids": [],
+      "interpretation": "Provisional chart region from source-render review; chart grammar and source relationships remain unqualified.",
+      "completeness_gaps": [
+        "semantic_relationships_unverified",
+        "provisional_bbox_not_gold",
+        "base_period_value_absent_from_source_text"
+      ],
+      "alternate_kind_candidate": null,
+      "native_table_status": null
+    },
+    {
+      "object_id": "aia-p010-agency-vonb-bars-v1",
+      "page_number": 10,
+      "page_index": 9,
+      "bbox": [
+        342.0,
+        95.0,
+        638.0,
+        346.0
+      ],
+      "kind": "Chart",
+      "method": "manual-source-render-review",
+      "verification": "pending",
+      "gold": false,
+      "bbox_status": "provisional",
+      "source_span_ids": [
+        "span-v1-37617f236b8a7b0544f6620cb5d98ae54a98c90d83207354fc354abfc359cace",
+        "span-v1-fbcd3d9d0b756bb53ef5cd43decdb87691ce43d1057f5d932b9b910ada1322d8",
+        "span-v1-4f1fef37a641fcf26dfaf7e4b91209ee0c72206477fa6f159dfb8d8222910eef",
+        "span-v1-f4f8bdedcb946234da9052b9e5a2e90fc9276d72061180fd49d6446a1a35ac8a",
+        "span-v1-b1b4fd11c24c1ea468e609055cf563538229d7c8cf50bdf451f81695ceea6517",
+        "span-v1-96d35fe4eed4063a7b5f4e622b7febf50d853a04ff703572eca8aa992e325601"
+      ],
+      "page_context_span_ids": [],
+      "interpretation": "Provisional chart region from source-render review; chart grammar and source relationships remain unqualified.",
+      "completeness_gaps": [
+        "semantic_relationships_unverified",
+        "provisional_bbox_not_gold",
+        "visual_bbox_not_locked"
+      ],
+      "alternate_kind_candidate": null,
+      "native_table_status": null
+    },
+    {
+      "object_id": "aia-p010-product-mix-v1",
+      "page_number": 10,
+      "page_index": 9,
+      "bbox": [
+        690.0,
+        140.0,
+        945.0,
+        365.0
+      ],
+      "kind": "Chart",
+      "method": "manual-source-render-review",
+      "verification": "pending",
+      "gold": false,
+      "bbox_status": "provisional",
+      "source_span_ids": [
+        "span-v1-07c9f65afc36a463f7d690b773b4dfcf570b5ab2c20974b2fabd0d6c34808b00",
+        "span-v1-d3826e2670a6a3e0bc3085d88163039104adf199ab43aad6a52e45e3e2e9b1f7",
+        "span-v1-31fea5e6aa8bbe349bece4e8b4044fcbe103b5853f0346849cc04486c5f8acf2",
+        "span-v1-d710501d2955ef765ca1c5e8014e724f54b7e47ae19c20a759e754f233c38b7b",
+        "span-v1-ba247d5aa69ea791197e5d2b2ec00ea41e566310ac5752b8f5d25b9c2e290592",
+        "span-v1-06a0baae4654696da52ad916e495e68d65f662715410cf6c6eb95e42a164d8ae",
+        "span-v1-aabcd1ee9b946d22fddc26e1c7e506d6fe4988c10ccc8f865b2936efb7b3a4e3",
+        "span-v1-87840e26fb32e92248e19099e67f938ac012ac3052bca8e84fb1a787508062d2",
+        "span-v1-b9914d4fcc3084c8d8f7568f7bc3cb811a635a0c38c55cd3a3d39d08fa1fceb9",
+        "span-v1-1bfe5120304a191457b7048bb1425af74ea009e5dd0ca5add144b10b3ea405c3",
+        "span-v1-5d9cbaf566d2c6f632d51b88b41fd069bac12cad900df3f4bd15a9fc50d4677e",
+        "span-v1-680bb624e4016ce7bc8e3e4e80c58fe0d67e0cf9f9f3ca746c81bdd140351aab",
+        "span-v1-9b96eeae32eb9d3428d4156909525c0f4f54571688ba2c0505695a6f491595d7",
+        "span-v1-9b387f4290e81e41f1864782c85951fd1573c3c71a51b3f3682b889c5cc4e7e2",
+        "span-v1-f7b112791dcb80d93abd3748e9d3a6d5d0bc1ef94516cf3261e2007958c84d33"
+      ],
+      "page_context_span_ids": [],
+      "interpretation": "Provisional chart region from source-render review; chart grammar and source relationships remain unqualified.",
+      "completeness_gaps": [
+        "semantic_relationships_unverified",
+        "provisional_bbox_not_gold",
+        "external_label_pairing_unverified"
+      ],
+      "alternate_kind_candidate": null,
+      "native_table_status": null
+    },
+    {
+      "object_id": "aia-p011-chart-01-v1",
+      "page_number": 11,
+      "page_index": 10,
+      "bbox": [
+        20.0,
+        115.0,
+        309.0,
+        466.0
+      ],
+      "kind": "Chart",
+      "method": "manual-source-render-review",
+      "verification": "pending",
+      "gold": false,
+      "bbox_status": "provisional",
+      "source_span_ids": [
+        "span-v1-017655d9feb02c1d1bccb679bb090edddc8916fc98ada6be597f2f10387ea2d6",
+        "span-v1-ecb95ff81446e5f98cd6f866487ea5f6321a36e0ffb8f2f23a58f63dd9716312",
+        "span-v1-bd07a34e11e8c257d23593aa24d71b62d58cd93769071ec2c0144de9136a0dbf",
+        "span-v1-8c86bef51bf954650167aafeb7ce77719220c72665075f3045fdc6342c80b59f",
+        "span-v1-db39c23723629e23b540549bb0d391dcefbebe9f8a1557b6771e08974ff816ea",
+        "span-v1-52a4d90432cea1c2a77e9589de0811408c17bcfef40dd35dc50e466f1105b802",
+        "span-v1-a710d2e4a03201279bd532d2cc68462597365dce38164a534ad59bbb6c320229",
+        "span-v1-e77511e2a34639e9b3f0558f5d887020fbe6438a4b02a07c1caccea4b24cd996",
+        "span-v1-511c9748060fa4dc6b867943eefcba10ce213f062e265c8ca9d948d94d842862"
+      ],
+      "page_context_span_ids": [],
+      "interpretation": "Provisional chart region from source-render review; chart grammar and source relationships remain unqualified.",
+      "completeness_gaps": [
+        "semantic_relationships_unverified",
+        "provisional_bbox_not_gold"
+      ],
+      "alternate_kind_candidate": null,
+      "native_table_status": null
+    },
+    {
+      "object_id": "aia-p011-chart-02-v1",
+      "page_number": 11,
+      "page_index": 10,
+      "bbox": [
+        342.0,
+        355.0,
+        610.0,
+        480.0
+      ],
+      "kind": "Chart",
+      "method": "manual-source-render-review",
+      "verification": "pending",
+      "gold": false,
+      "bbox_status": "provisional",
+      "source_span_ids": [
+        "span-v1-d393641089e3d4ce6d1954425f8b0b44ce684c843456fdd1394c74a89acd8180",
+        "span-v1-8c268b12c6bc44ff2eac5ec89011c3c3fd33654505cbbc4edd37d1cc0269b3f2",
+        "span-v1-1f6afe579b854c157373ec0b124bb27e4f7bb7c2618ae17f4ab4e767141109f1",
+        "span-v1-e9a534679c635d3597a56cdaa4ebbe47fea4a5aeb9a5f17f0961689e0787ab13",
+        "span-v1-3bcf23bf308cd8df1ba70db84c708330b2070fe1368e9c29b8c466efd143317a",
+        "span-v1-10ebabf1a4db7b2705232cbb939d6a946204608d8e51af8cd6ea1971f9feaabf",
+        "span-v1-58068bdacc65174183b34734e6fafd662b51bf4fb59c0e75481f394a43bdd770",
+        "span-v1-87bba661a272323aa733d97d63f39b9b487d9439e8a48f6a9fed574a7a073a8c",
+        "span-v1-63692080e782023f60f3310c65eba00e58152623e78a390511d2902602b681a4",
+        "span-v1-4c9ccefdf88bb7d097d4c95db3c791ff9c439d94fc95629606b95468b0129932",
+        "span-v1-93f8361f2375175532af6168671dd30cc21c141606a9d1c55cfcbabd61d1049e",
+        "span-v1-cbecfaecb1c88382083380fdc2b68b23bb6563ee8f09375f743710106c021e44",
+        "span-v1-3f533d01b1e1a51fe5216782f3449a9d6548277d7ae4f534eca1518a3a6c632d"
+      ],
+      "page_context_span_ids": [],
+      "interpretation": "Provisional chart region from source-render review; chart grammar and source relationships remain unqualified.",
+      "completeness_gaps": [
+        "semantic_relationships_unverified",
+        "provisional_bbox_not_gold"
+      ],
+      "alternate_kind_candidate": null,
+      "native_table_status": null
+    },
+    {
+      "object_id": "aia-p011-chart-03-v1",
+      "page_number": 11,
+      "page_index": 10,
+      "bbox": [
+        653.0,
+        355.0,
+        920.0,
+        480.0
+      ],
+      "kind": "Chart",
+      "method": "manual-source-render-review",
+      "verification": "pending",
+      "gold": false,
+      "bbox_status": "provisional",
+      "source_span_ids": [
+        "span-v1-b464e03fdd9af24c4cce8f7b4db9c51af6cc58f45e272fd3df31910c37698bdb",
+        "span-v1-f0301fe5098ec720bb3f04a5c43d3ce522a5db5eb74c46298f244874ceaa06bc",
+        "span-v1-8eb35675fbad44f47b9e50a5cb5dd4f75f6a34ad678ad4525a1ee822256ae938",
+        "span-v1-61cc63fe0448d89cf64cff71acdd9d907dac2cf78611b0d02571cca969d8f77c",
+        "span-v1-0fa68dd569023954baa90c3855121e5cef7cfa950996d76c9ecfddd74ecf4db5",
+        "span-v1-355031319ef9e5cfb1d32c6d7f9166c49b13096d3aae6eb098bb46630affd6a9",
+        "span-v1-88a1c42e55fccd6812437ff5c630d44579b7f0beed7ae954b13e5bb54e172d5c",
+        "span-v1-9b286ef6166e1d8679df41b33bf508c5dd8aeab6d8d380249db26be37e19468b",
+        "span-v1-01d6b68a72f6757224d9e0ac41f72d24860a07b9b8fbeefaae9e67846fbff9f4"
+      ],
+      "page_context_span_ids": [],
+      "interpretation": "Provisional chart region from source-render review; chart grammar and source relationships remain unqualified.",
+      "completeness_gaps": [
+        "semantic_relationships_unverified",
+        "provisional_bbox_not_gold"
+      ],
+      "alternate_kind_candidate": null,
+      "native_table_status": null
+    },
+    {
+      "object_id": "aia-p012-chart-01-v1",
+      "page_number": 12,
+      "page_index": 11,
+      "bbox": [
+        48.0,
+        145.0,
+        306.0,
+        332.0
+      ],
+      "kind": "Chart",
+      "method": "manual-source-render-review",
+      "verification": "pending",
+      "gold": false,
+      "bbox_status": "provisional",
+      "source_span_ids": [
+        "span-v1-fcc320b8555faa14e6c69e2e9c3e1464da0d6319e60f52518928e5f45b2ed1a4",
+        "span-v1-505ef1dd2657ce2a3a3b523a02c8eacc01b2afa00d5186582f0caaaafac5a488",
+        "span-v1-23fd963861adce6f3ecb7b5ae8a9d9c8bba30bbb73c4ef6455e05a6a4dfa5c15",
+        "span-v1-af65218ee6fbcb75870fc6e95697a73d7378c53dbf1356394fa28f5675ebb30b"
+      ],
+      "page_context_span_ids": [],
+      "interpretation": "Provisional chart region from source-render review; chart grammar and source relationships remain unqualified.",
+      "completeness_gaps": [
+        "semantic_relationships_unverified",
+        "provisional_bbox_not_gold"
+      ],
+      "alternate_kind_candidate": null,
+      "native_table_status": null
+    },
+    {
+      "object_id": "aia-p012-chart-02-v1",
+      "page_number": 12,
+      "page_index": 11,
+      "bbox": [
+        498.0,
+        144.0,
+        934.0,
+        331.0
+      ],
+      "kind": "Chart",
+      "method": "manual-source-render-review",
+      "verification": "pending",
+      "gold": false,
+      "bbox_status": "provisional",
+      "source_span_ids": [
+        "span-v1-b5f6ba5b9250a48e91b60c66a44ba237b1afa0c501a45e4c18fb37f84d47637d",
+        "span-v1-008c94798142f9e70c7ad3a793cb2fc0a454f7594f44892e78ff7512e4ee306e",
+        "span-v1-197c9e448f7c4e0383b7dc6dcff6820d0d3caef1375a3a60cd619738600e5c95",
+        "span-v1-f0f2909500450d855ead8d1673064280e232b5222099c644d7479e2b121a8eb4",
+        "span-v1-2ce3e9a10e918a5adda98ce0dd250e0ba4d0d200732bef4db9c46f6bba55fe10",
+        "span-v1-7314567b0edded9ac6c3c5a1edac50936cc0f936e21a8d224d6deb5c25799ee6",
+        "span-v1-7bb5a29aa4026927134fb90e08edf6b82c7d558d73c929ec19741ab514462a80",
+        "span-v1-e8b270444e3324705b4324b2d61db63855349fa91098fc87daa1ed537b3850f7",
+        "span-v1-8c2c889a32e5f1fd609974984027e86f3fc378eaecd83a1538a98e201817cd5f",
+        "span-v1-97dda57121a3fd56c962a06a8e1062181f01ee42ac396539bc1ba66708514482",
+        "span-v1-0449e49e44e8c74f00f11ca7b6bde6afa58736fc0285222199df410e5ac12c28"
+      ],
+      "page_context_span_ids": [],
+      "interpretation": "Provisional chart region from source-render review; chart grammar and source relationships remain unqualified.",
+      "completeness_gaps": [
+        "semantic_relationships_unverified",
+        "provisional_bbox_not_gold"
+      ],
+      "alternate_kind_candidate": null,
+      "native_table_status": null
+    },
+    {
+      "object_id": "aia-p013-chart-01-v1",
+      "page_number": 13,
+      "page_index": 12,
+      "bbox": [
+        38.0,
+        176.0,
+        302.0,
+        335.0
+      ],
+      "kind": "Chart",
+      "method": "manual-source-render-review",
+      "verification": "pending",
+      "gold": false,
+      "bbox_status": "provisional",
+      "source_span_ids": [
+        "span-v1-d2d6bbb469011a3bf0d2bd8039f6ae6dfdf4387ce9fe35a10ac1a2be6eadf27e",
+        "span-v1-2bd9ea64108c660ceef37f78a3f12397b0949494d8f030d28c50993e8b9e5784",
+        "span-v1-04ab9192de081e3a7e2956e17aa86d35237cd057b78d2186d3952945d4c217f7",
+        "span-v1-2e73c3821a6849b8b6ce21ff8a4bed641d91f084703923f31aa01b1909192a85",
+        "span-v1-4e61ac07b28aacba2f93e00775bcb3215b68543cbd30841c80d1d71dbe777a66",
+        "span-v1-09d0227a8ec2b273b60fba2833b94646841f868095ec08d5b5f564b3fb396b13",
+        "span-v1-533d1a5a4b3f57a6c27bc72e2b79fd2b2db538be15be51a7961850ca4f770849"
+      ],
+      "page_context_span_ids": [],
+      "interpretation": "Provisional chart region from source-render review; chart grammar and source relationships remain unqualified.",
+      "completeness_gaps": [
+        "semantic_relationships_unverified",
+        "provisional_bbox_not_gold"
+      ],
+      "alternate_kind_candidate": null,
+      "native_table_status": null
+    },
+    {
+      "object_id": "aia-p013-chart-02-v1",
+      "page_number": 13,
+      "page_index": 12,
+      "bbox": [
+        350.0,
+        176.0,
+        612.0,
+        335.0
+      ],
+      "kind": "Chart",
+      "method": "manual-source-render-review",
+      "verification": "pending",
+      "gold": false,
+      "bbox_status": "provisional",
+      "source_span_ids": [
+        "span-v1-7abec79829ffebcb10f1487bfd083242801abd253679a21a6003f5963f1db2fc",
+        "span-v1-01c3b2e456af38d82169e95d94798e3ee230cc1a4a4ba970e4e085138cc6816b",
+        "span-v1-f0aa381a3b6c4fb2d303375f06bee337cccb273bdd45ad30ee13737f7bd75a8c",
+        "span-v1-23795bc01c0e7ce8d1a84f705fb3251f3352fc585c22641bac925c26d04cff21",
+        "span-v1-f5f218208cbe33d74cf240fb73cc828a3c23229bbda1b50e1f8e33755fb96529",
+        "span-v1-b15a4c87103fb52e9c4736f95c253c07d68ba035c0bd73ae40791b394f3b06e4",
+        "span-v1-c90d646d8da5ac24dc5574af2d4881dc00aebcad11f6103b24b2ac18d2d3d65b"
+      ],
+      "page_context_span_ids": [],
+      "interpretation": "Provisional chart region from source-render review; chart grammar and source relationships remain unqualified.",
+      "completeness_gaps": [
+        "semantic_relationships_unverified",
+        "provisional_bbox_not_gold"
+      ],
+      "alternate_kind_candidate": null,
+      "native_table_status": null
+    },
+    {
+      "object_id": "aia-p013-chart-03-v1",
+      "page_number": 13,
+      "page_index": 12,
+      "bbox": [
+        664.0,
+        176.0,
+        922.0,
+        335.0
+      ],
+      "kind": "Chart",
+      "method": "manual-source-render-review",
+      "verification": "pending",
+      "gold": false,
+      "bbox_status": "provisional",
+      "source_span_ids": [
+        "span-v1-dfd41723acb908a7e75945d98148d3ac004c7f5a5b4c6bf2a1e80ece453bf5c8",
+        "span-v1-d87952535cea150525202345b7c5bb6336e8edf67c81f5d8355965066c276e35",
+        "span-v1-a588670ab55c22cf386f6e13a2a282d906a3c4f1c0fa918fd830f77d749f92ca",
+        "span-v1-cb6413db345335dabae3483d4e8813ecd4c478a2d3c18ea38bfade39a0eba47c",
+        "span-v1-d96eb2a2d00d8d9e4a008d06bfeb1b98c2c073a527490be1dfe20eee7e57f59f",
+        "span-v1-4d7ba83f96312dbdd034d2392c60b04acf993f81cedb460c5a8adf8af3e27a01",
+        "span-v1-13e4df5b3541535393d402a65be2906637c7581e9bc254b58862c66346220a6f"
+      ],
+      "page_context_span_ids": [],
+      "interpretation": "Provisional chart region from source-render review; chart grammar and source relationships remain unqualified.",
+      "completeness_gaps": [
+        "semantic_relationships_unverified",
+        "provisional_bbox_not_gold"
+      ],
+      "alternate_kind_candidate": null,
+      "native_table_status": null
+    },
+    {
+      "object_id": "aia-p014-chart-01-v1",
+      "page_number": 14,
+      "page_index": 13,
+      "bbox": [
+        18.0,
+        91.0,
+        262.0,
+        334.0
+      ],
+      "kind": "Chart",
+      "method": "manual-source-render-review",
+      "verification": "pending",
+      "gold": false,
+      "bbox_status": "provisional",
+      "source_span_ids": [
+        "span-v1-933a9720a1070632feae8e12c1e6feaf37854d8607ce0e42c2356738f4d00d94",
+        "span-v1-e80cbfe0e2ff1399778b4bc2853c96cd384d215d37152a8ea433ece5a3388b37",
+        "span-v1-53a5d078a0b6bc452e8b3424737d6bc7eea2211339cdf17689346f41e1a98f86",
+        "span-v1-f1f1b349ea4700314ecadbfc872750064fd300538793c167c2cf371f7faede97"
+      ],
+      "page_context_span_ids": [],
+      "interpretation": "Provisional chart region from source-render review; chart grammar and source relationships remain unqualified.",
+      "completeness_gaps": [
+        "semantic_relationships_unverified",
+        "provisional_bbox_not_gold"
+      ],
+      "alternate_kind_candidate": null,
+      "native_table_status": null
+    },
+    {
+      "object_id": "aia-p015-chart-01-v1",
+      "page_number": 15,
+      "page_index": 14,
+      "bbox": [
+        110.0,
+        70.0,
+        434.0,
+        286.0
+      ],
+      "kind": "Chart",
+      "method": "manual-source-render-review",
+      "verification": "pending",
+      "gold": false,
+      "bbox_status": "provisional",
+      "source_span_ids": [
+        "span-v1-c3142253013e928503f6855e29d5e1a6f06dfac645843462b2caf31613765b05",
+        "span-v1-b7c9bac25df19ad67a08ebc461bbdf27fd5f0a55a7ebcbd15897382e7e7a24f7",
+        "span-v1-3ad4bb33573a2b93cd815bec71ca74602f7eb86624c6741f6e3200e82cbc8978"
+      ],
+      "page_context_span_ids": [],
+      "interpretation": "Provisional chart region from source-render review; chart grammar and source relationships remain unqualified.",
+      "completeness_gaps": [
+        "semantic_relationships_unverified",
+        "provisional_bbox_not_gold",
+        "year_glyphs_absent_from_source_text"
+      ],
+      "alternate_kind_candidate": null,
+      "native_table_status": null
+    },
+    {
+      "object_id": "aia-p015-chart-02-v1",
+      "page_number": 15,
+      "page_index": 14,
+      "bbox": [
+        602.0,
+        70.0,
+        925.0,
+        287.0
+      ],
+      "kind": "Chart",
+      "method": "manual-source-render-review",
+      "verification": "pending",
+      "gold": false,
+      "bbox_status": "provisional",
+      "source_span_ids": [
+        "span-v1-204d7779fa880f5346032e7a89ddaba0659623933507b5b0c5464c7d7f54d7db",
+        "span-v1-a88e00b13d9a41702dc18c5b0c5cb29f30e35fb91a2913a367bdc807ff2684b0"
+      ],
+      "page_context_span_ids": [],
+      "interpretation": "Provisional chart region from source-render review; chart grammar and source relationships remain unqualified.",
+      "completeness_gaps": [
+        "semantic_relationships_unverified",
+        "provisional_bbox_not_gold",
+        "year_glyphs_absent_from_source_text"
+      ],
+      "alternate_kind_candidate": null,
+      "native_table_status": null
+    },
+    {
+      "object_id": "aia-p015-chart-03-v1",
+      "page_number": 15,
+      "page_index": 14,
+      "bbox": [
+        112.0,
+        295.0,
+        434.0,
+        490.0
+      ],
+      "kind": "Chart",
+      "method": "manual-source-render-review",
+      "verification": "pending",
+      "gold": false,
+      "bbox_status": "provisional",
+      "source_span_ids": [
+        "span-v1-64d9e7e5276c70775edeea668afdfb15843ae979b2bf8f7a277db817dd35a093",
+        "span-v1-b107d0480efca5f5601d565f402ed8baa1437bb1647af2cba5e3411e85b6bd73"
+      ],
+      "page_context_span_ids": [],
+      "interpretation": "Provisional chart region from source-render review; chart grammar and source relationships remain unqualified.",
+      "completeness_gaps": [
+        "semantic_relationships_unverified",
+        "provisional_bbox_not_gold",
+        "year_glyphs_absent_from_source_text"
+      ],
+      "alternate_kind_candidate": null,
+      "native_table_status": null
+    },
+    {
+      "object_id": "aia-p015-chart-04-v1",
+      "page_number": 15,
+      "page_index": 14,
+      "bbox": [
+        602.0,
+        295.0,
+        926.0,
+        490.0
+      ],
+      "kind": "Chart",
+      "method": "manual-source-render-review",
+      "verification": "pending",
+      "gold": false,
+      "bbox_status": "provisional",
+      "source_span_ids": [
+        "span-v1-b794a4f2cc72a565b0330c0d67c1ad2bab4ad1865b66c071a47c322b60a3cde3",
+        "span-v1-cb6a24c9886b2fd86ca95c1605635cabbe69190dc469328bdf8e5a75fcd3e8c7",
+        "span-v1-e30ba3159a9afdd7f49e615d7b1baa9217c804f811cf06f45bdc538647a6b79d",
+        "span-v1-c0714b124baaf1686077940a690cf842810312578b26f134662b54ba5fddb161"
+      ],
+      "page_context_span_ids": [],
+      "interpretation": "Provisional chart region from source-render review; chart grammar and source relationships remain unqualified.",
+      "completeness_gaps": [
+        "semantic_relationships_unverified",
+        "provisional_bbox_not_gold",
+        "year_glyphs_absent_from_source_text"
+      ],
+      "alternate_kind_candidate": null,
+      "native_table_status": null
+    },
+    {
+      "object_id": "aia-p018-distribution-mix-v1",
+      "page_number": 18,
+      "page_index": 17,
+      "bbox": [
+        18.0,
+        155.0,
+        250.0,
+        338.0
+      ],
+      "kind": "Chart",
+      "method": "manual-source-render-review",
+      "verification": "pending",
+      "gold": false,
+      "bbox_status": "locked",
+      "source_span_ids": [
+        "span-v1-767d90bd03000b831674d8d1d92f99f4ae20e0341ede34308acfef4a4bc3c437",
+        "span-v1-6b8bc8c537f5ba5a89bef00b50c6b8bf0836e42822cf7e0d22a4ac49d5950562",
+        "span-v1-00040e841ad83784adf59e0b61cfc534df5a2421f22942f880dfc9fe596b8bc5",
+        "span-v1-d856ac85a06f9dc2c11dd862274311f1b345e50c74c55b7a2a654aca8ea85bf0",
+        "span-v1-9fd27629407bd510066e907bf59fa219055b681f9b9c85e9e243a4f7ac7fe080",
+        "span-v1-be81b0d4736ec5089a0e4e7ffaabd7e6d0ff1ac273217aeb4500d894a14eeafa",
+        "span-v1-187596dcb78d4803df436ea8c6dcb64065f49c77131dce373d10758324c47d3b"
+      ],
+      "page_context_span_ids": [],
+      "interpretation": "Provisional chart region from source-render review; chart grammar and source relationships remain unqualified.",
+      "completeness_gaps": [
+        "semantic_relationships_unverified",
+        "provisional_bbox_not_gold",
+        "right_edge_adjacent_span_excluded"
+      ],
+      "alternate_kind_candidate": null,
+      "native_table_status": null
+    },
+    {
+      "object_id": "aia-p018-chart-02-v1",
+      "page_number": 18,
+      "page_index": 17,
+      "bbox": [
+        245.0,
+        155.0,
+        469.0,
+        345.0
+      ],
+      "kind": "Chart",
+      "method": "manual-source-render-review",
+      "verification": "pending",
+      "gold": false,
+      "bbox_status": "provisional",
+      "source_span_ids": [
+        "span-v1-056a06b0d24932d574a504b32ba9c793cce7704dbde1a0b9af81f53f1f649254",
+        "span-v1-8db25eb4fb79e1fede17dfbf81a0847a1d3c28b38acaab2970747394a1b53547",
+        "span-v1-c4f7b8d6afd63dccdf59e54d6270f71c01452d7fc093272777f81c4551c5c7eb",
+        "span-v1-c47ad3bc5858db25716294efe55361267827089036debb89eca88366cb47385d",
+        "span-v1-cbf9fe64bef139253edc81f267c6b93d8e67f2d6894f123c8d5caafdc3bb4750",
+        "span-v1-e4efa999e72d60a822d8984c4ba1ba00c651a9c7cccf7705c5a0e410f4291f9c",
+        "span-v1-6b7c53d1a5c8d4cc3d6908b6be16cf48848d4b74d6968967ac0e3f537aa8d86e",
+        "span-v1-34c623924f14d0a1b2c4e2f1c4814788e030766f21139b091d2143809020ae0f",
+        "span-v1-57febdec8c2ba9b470498becc7bcf69a90889daa6665c0eccffb8d44258d5717",
+        "span-v1-1237c5accf2248637f9620f15eccb75723bc7f2ff016cc58c9f0a89484791d86",
+        "span-v1-6968decd93265684d774ca2d3da51e08d9feb42907719b69bd31da98d22480e2",
+        "span-v1-f3c30ea40b0b6e3b587a0aeb6eb2054465d588cb14566b6cbe276db5d40a45ce"
+      ],
+      "page_context_span_ids": [],
+      "interpretation": "Provisional chart region from source-render review; chart grammar and source relationships remain unqualified.",
+      "completeness_gaps": [
+        "semantic_relationships_unverified",
+        "provisional_bbox_not_gold"
+      ],
+      "alternate_kind_candidate": null,
+      "native_table_status": null
+    },
+    {
+      "object_id": "aia-p018-chart-03-v1",
+      "page_number": 18,
+      "page_index": 17,
+      "bbox": [
+        537.0,
+        126.0,
+        873.0,
+        376.0
+      ],
+      "kind": "Chart",
+      "method": "manual-source-render-review",
+      "verification": "pending",
+      "gold": false,
+      "bbox_status": "provisional",
+      "source_span_ids": [
+        "span-v1-e26f5419ec449e848f7e18c27d19b9d77ff700ded1715395a179a524171f8473",
+        "span-v1-3579f8b2ba7548912529307469325055f07545b1dabda3a375003ec3b2fff9b0",
+        "span-v1-b63e8700f16dcefef15f7dcca26f60de3feb4fb9be2560b9015505e2a49af00b",
+        "span-v1-091ce04f0aba48cb4cc126dd8d85b8431c7da1336e2d0685cd704d314841241b",
+        "span-v1-f43fc9f8c497f09f2b11e1db171b72cff9307d96f7ce048f62e4090e7f219150",
+        "span-v1-26095a4e535ffe5ca7b6c219c60e2f8797e6bac26e73725be6cf05aad01cd11d",
+        "span-v1-079d28d006b88471237185a9de24757e73cc4888cb31ef6ebc392f5e9ce0b634",
+        "span-v1-ff4d261495fb367431bf7ed896ffaea637eede8f28861cba418c1b855a3c9f52",
+        "span-v1-c5d2ca35efce6933e9158565251c4d2d250deaf2ef06a8f0bb5a9090a7ccb2c5",
+        "span-v1-b38a1ff96bab671eb7be68792ae4a7ca3e4edd06bcbf18fc8c081dd94e8e4edd",
+        "span-v1-dbfd560ee6ac79cf05cc2352ad9b54d0eb6454d9157b84e9781251eb063b4e2d",
+        "span-v1-0f9eb882b71a9230c771d4cf39292201916be9d1026081263c6cb6f0abf4939b",
+        "span-v1-9e734d176a640c38559d737f4a5d1e6cc5d0736c172fb4762f9548b63b55ddf1",
+        "span-v1-e40f2cbfd77d47902c7977d0384b195b4dda55bc4f53f4b1cd4e44bd58908049",
+        "span-v1-6038d54c51c899bca508917cb83c871167c9b3d6fe7ea8a8bb52b9c8dd4460bd",
+        "span-v1-def866b62ae4c43e95dbffafb1ee6de210826313f861d6582ac5f2a91308c362",
+        "span-v1-d06ec051fc05ed59e743caa600cd026ab1c29ec241b0b0d1121f5e20b998399c",
+        "span-v1-3019389b0c8b9b914d67d51d2465a6e66167ea4cdd610fc8017fb774a71724d3",
+        "span-v1-7e6d16459afc08a8a1c6d0e2230238ebc93ab2064d1381ebc951417e08c9f92c"
+      ],
+      "page_context_span_ids": [],
+      "interpretation": "Provisional chart region from source-render review; chart grammar and source relationships remain unqualified.",
+      "completeness_gaps": [
+        "semantic_relationships_unverified",
+        "provisional_bbox_not_gold"
+      ],
+      "alternate_kind_candidate": null,
+      "native_table_status": null
+    },
+    {
+      "object_id": "aia-p019-ev-equity-waterfall-v1",
+      "page_number": 19,
+      "page_index": 18,
+      "bbox": [
+        35.0,
+        95.0,
+        655.0,
+        480.0
+      ],
+      "kind": "Chart",
+      "method": "manual-source-render-review",
+      "verification": "pending",
+      "gold": false,
+      "bbox_status": "provisional",
+      "source_span_ids": [
+        "span-v1-88b97167496f547f706b6b4834df8e1c9da1d7c87a169274b80e59ab3fbfacb7",
+        "span-v1-c1473a39072c35a61b960432cfdfc53030ab766f18e8f82c09d3ed16f1ff1f6a",
+        "span-v1-88344d080903361221cac3442679468cc7a8287691ad367ee09247d735022b8d",
+        "span-v1-b705dc68532158c02838ce1a2fffb95db95ea2d265e51e0b0c7af6ee13a8d614",
+        "span-v1-1c29fa2fbc0b131bb19410a5ab59f57e3ca95d50f81cad3ed4e4f4ab913cac2e",
+        "span-v1-f461665c8d823432a460c6de2747b9365bd8cf95c59823ea859792dec656cbff",
+        "span-v1-e8c4b1337e56e2ca54e39dba72ff6e4fe13130a9e85a29308a41f019e43ed2af",
+        "span-v1-131e996c8349dc644aa372eaf3022d0b1fe391dc7d7aedd3ddac602c1dc57e7f",
+        "span-v1-62ca4d68920c486c563e13d8cf73afeac55d1ad9d03d7be0fcec09481003c9ad",
+        "span-v1-187f9650cd0906934e5e71d891afb8991d1d955d4fd26357c07dfea21db0e602",
+        "span-v1-8ecdd737cc087ec9e53996d8a9eb7e471d5e1e39f08f0c03aa769fbbf1ad3c3b",
+        "span-v1-d616a21f9214374f594e1e2479e0980c339f156c46e585e734ffb19074f9e7d9",
+        "span-v1-a1c1f49dfd08ab30629f4cb8ce2cd66034863f1d6edacf1d9464b85cc9b56413",
+        "span-v1-5e7e9f9e1a3dd9e0fec74c43765bbc6d2c8e1c700df719434076e285aa2c0897",
+        "span-v1-432ca82b96e68395a0a4058437fabd182b9571f2efb5670a0d336e430732a3ee",
+        "span-v1-4d26b4e32e399c2a37486e684c8f1d86748831690a13b8f1e1e844c3bc96e328",
+        "span-v1-a6a019c7677a1b8e486ac88ad32137f429179dc6babc55b8c267e4deb994b2a1",
+        "span-v1-36c4b93ee8e0eb1336a8a80f1132133cec07c510a7d91897664adf8b71445e13",
+        "span-v1-4d22a7ffc4e1ff9e1b88881bbc8234862b886299b585bccad19da393707329f8",
+        "span-v1-dcf97c0a9b8a77cdfc6bfc1bff76ac436c99d6aed121d60ab5ebb235bafbc272",
+        "span-v1-ebf5a7612499464c7c1a89446b866b471f19474c5b7b5cd3d8c9b3a85783a11d",
+        "span-v1-6e866be3344270e16bfb02e44032a41f23467c9bfafa4fcaefe655bad210e2e3",
+        "span-v1-5c37a51381bb19c2812c5dd280cc59152c5f2857cae5b0963f8b5f98848e6d70",
+        "span-v1-383c155365c2f63e702c364fe98c2a03baa8d5e27c1cd37a3d0d941c645d4905",
+        "span-v1-ad8dca47729f7ac52becdd1a48acd9a814ad4a3dee4ad83c8d2f186bb406050c",
+        "span-v1-9b58aeea32c369dbe428e72c06d1b8fea3c20308dfcaba728f15a2bbd0338e90",
+        "span-v1-11c61dc9ce31fa9fec7217a318e187f300d92b8ba8eb06e477dae0a250a4aea5",
+        "span-v1-6860da7667d352dcfdc7873ae85a036b46d83b9b6090858ed512eb7682766ca2",
+        "span-v1-4b7387698c4bf87e1bfb447b8877ad77f4a458d0739e33fd4af691b94ea20857",
+        "span-v1-f249f384b56ccbc10570773adc0ef8cbced3199d2beaf3dec4b41183923fb5fa",
+        "span-v1-a3423ce0f18efc2069179838c04a85be52b866e50c01740a967b33c940d6e88c",
+        "span-v1-d2776ad019b737b52fd55e8a3a2cc8772ad6e2723425d3628dd07609812d65c2",
+        "span-v1-55b045c1d2ab597014d8fbfe878f5222587bae0f2c9e86e5440a048a48cb3f84",
+        "span-v1-3ece982fb5da16b885adee800d585d7c4e6e39bd778bf1dad318406f03d540be",
+        "span-v1-a1e9dc5c2a803dda059579cd3b4c78d3588bf3efe47a3fc8f24666138054e60f",
+        "span-v1-1e8d5c5930de58f92a60ce6cc5219e3ab49fb77d513657ddc4e7aafb44d8b295",
+        "span-v1-6d1048a75bcdaf96e8945d7dd8b3f3dadc0f3fb22d5ebe5c7ab70525bf0b3077",
+        "span-v1-9be421468b504a76732b5408117e54d45ec75c3fbb07630ab0da86da914fba80",
+        "span-v1-d1a13b44adf9491f7847089562919feca3fb19361c6a23ba8a17298b7c093b9d",
+        "span-v1-b787375444e1338cd20e040dd49fd38fb4d060d51cf300c65d89f3f41a86d984",
+        "span-v1-e3302c5ca50e14faaca8ac1bf89ba696aa26db970228ebcea23d278d495a20cd"
+      ],
+      "page_context_span_ids": [],
+      "interpretation": "Provisional chart region from source-render review; chart grammar and source relationships remain unqualified.",
+      "completeness_gaps": [
+        "semantic_relationships_unverified",
+        "provisional_bbox_not_gold",
+        "six_raster_placements_inside_region"
+      ],
+      "alternate_kind_candidate": null,
+      "native_table_status": null
+    },
+    {
+      "object_id": "aia-p020-chart-01-v1",
+      "page_number": 20,
+      "page_index": 19,
+      "bbox": [
+        27.0,
+        103.0,
+        311.0,
+        449.0
+      ],
+      "kind": "Chart",
+      "method": "manual-source-render-review",
+      "verification": "pending",
+      "gold": false,
+      "bbox_status": "provisional",
+      "source_span_ids": [
+        "span-v1-d056185bb26afa322793882618f6f6f4abf6a84ddccf105442ccdf50cf2997cb",
+        "span-v1-a14885a2783f14bdb43d0de37ec540d8f0dc26df60ce36b9f82d415d116866ee",
+        "span-v1-6f56df78b8dd90f1c01a716c4c4e51f64cad2a573b657279ecf6aa60ff88367a",
+        "span-v1-15c127f5c2a8ba16400972723f47969661d082f20260ce1ad70b663732990074",
+        "span-v1-f821372a59a95878e9004ad59b1c0e10d959b7684bc2c80973a65df04a9269f2",
+        "span-v1-5129e7832f90dd49818ad73967cdf2579f0c5d56406c48d129f8f0179262c961",
+        "span-v1-56fb9eb29f22063283b7495ba79c02085da7578cd7935d63570d3c4bb74e2bd5",
+        "span-v1-d05fb27f973d58e3f1ebbf9b05fd59eb8f4534be7b950b315cd930df613da1b7",
+        "span-v1-f7b198487e00a2578cc09d5ce4ed55354d5a8dfc520c91e27cda8732c48d6c4f",
+        "span-v1-a49f0d47912659f05c190166f6c541506ff57a9a59f927dc1b835c99168fa174",
+        "span-v1-061f5507370b44471738a03907820c5460061a18cd3ca8092a15cad1e6ef0b2d",
+        "span-v1-5516c838f17efcfba51bf14075a2cd9c1a24a3aa2087a3133c31b33d784b06f8",
+        "span-v1-3a82d5cc73250fb403b290439248349f5908734e739cc2650bcfdabf733b9e06",
+        "span-v1-328de77b67a19595d135411d9809a99c1fe2c20dbe65548b2cb2d434b9179b7c"
+      ],
+      "page_context_span_ids": [
+        "span-v1-9b44bfcfdf164e62ef5c99ff01eb0c1b208b14683752387048faca10c05c2765",
+        "span-v1-6be7d04e59b4a148b55975083c652e458ddba6762996882168473d4ab9facb0b"
+      ],
+      "interpretation": "Provisional chart region from source-render review; chart grammar and source relationships remain unqualified.",
+      "completeness_gaps": [
+        "semantic_relationships_unverified",
+        "provisional_bbox_not_gold"
+      ],
+      "alternate_kind_candidate": null,
+      "native_table_status": null
+    },
+    {
+      "object_id": "aia-p020-chart-02-v1",
+      "page_number": 20,
+      "page_index": 19,
+      "bbox": [
+        354.0,
+        161.0,
+        612.0,
+        315.0
+      ],
+      "kind": "Chart",
+      "method": "manual-source-render-review",
+      "verification": "pending",
+      "gold": false,
+      "bbox_status": "provisional",
+      "source_span_ids": [
+        "span-v1-c1ee48e82d5eeaa8631ca3f29ee6270c57e12d57a75dbbb8daefc8a6e4a0eb96",
+        "span-v1-ecca50969a74ff23f54e5eda247e682748d9f724c2a3542de82deef9ab828cf0",
+        "span-v1-5eab08500a5a7df4c524445510b2e7747d59ce99ae6a314e4b807c08e48eb84c",
+        "span-v1-62f1d8011070786ce44e61939189ef7241afcfaa9cd51c52dd3da2442c024b1d",
+        "span-v1-179c4eea426e0f447b68de2a1b5722d79ec1ec459ba7d17f80779cb7fb06fe6e",
+        "span-v1-40edd1f26d1f94a2c5222a25cac8b1c9c460b9013133261066d0c92a366f3a40"
+      ],
+      "page_context_span_ids": [
+        "span-v1-9b44bfcfdf164e62ef5c99ff01eb0c1b208b14683752387048faca10c05c2765",
+        "span-v1-6be7d04e59b4a148b55975083c652e458ddba6762996882168473d4ab9facb0b"
+      ],
+      "interpretation": "Provisional chart region from source-render review; chart grammar and source relationships remain unqualified.",
+      "completeness_gaps": [
+        "semantic_relationships_unverified",
+        "provisional_bbox_not_gold"
+      ],
+      "alternate_kind_candidate": null,
+      "native_table_status": null
+    },
+    {
+      "object_id": "aia-p020-chart-03-v1",
+      "page_number": 20,
+      "page_index": 19,
+      "bbox": [
+        354.0,
+        324.0,
+        612.0,
+        474.0
+      ],
+      "kind": "Chart",
+      "method": "manual-source-render-review",
+      "verification": "pending",
+      "gold": false,
+      "bbox_status": "provisional",
+      "source_span_ids": [
+        "span-v1-1cf8ebb7629156af6b39570a37475feaeaac5aab00881f158bf9488c50214ce2",
+        "span-v1-739c5313de515648c319a64c9851be810723220e303c51083a47414465aa2eec",
+        "span-v1-68b89127f62e1c6bbb2d331cf4e4b73797cc4e3deecc09702b1ae9eeddf9a307",
+        "span-v1-42f127a24b8e5c6d4f3d8d4a280dd868dec16f14ecad8372f640ad71d6d3c389",
+        "span-v1-c5800dd7bae1bfd0ec237b19fe67ab14101791baecfd6b5c582d22367a313c5c",
+        "span-v1-d39d67c3c67a3805174ce9ffcd8cc1ce910e3254b6a2a4e6aef07e7d6cdd223a",
+        "span-v1-4f269a4b8b1632bd879fe540ff981a8c830eebd2251b579c70138038c92f75d7"
+      ],
+      "page_context_span_ids": [
+        "span-v1-9b44bfcfdf164e62ef5c99ff01eb0c1b208b14683752387048faca10c05c2765",
+        "span-v1-6be7d04e59b4a148b55975083c652e458ddba6762996882168473d4ab9facb0b"
+      ],
+      "interpretation": "Provisional chart region from source-render review; chart grammar and source relationships remain unqualified.",
+      "completeness_gaps": [
+        "semantic_relationships_unverified",
+        "provisional_bbox_not_gold"
+      ],
+      "alternate_kind_candidate": null,
+      "native_table_status": null
+    },
+    {
+      "object_id": "aia-p020-sensitivity-scenarios-v1",
+      "page_number": 20,
+      "page_index": 19,
+      "bbox": [
+        654.0,
+        104.0,
+        934.0,
+        466.0
+      ],
+      "kind": "Group",
+      "method": "root-source-render-review",
+      "verification": "pending",
+      "gold": false,
+      "bbox_status": "provisional",
+      "source_span_ids": [
+        "span-v1-a3a64d6562836705176c740ab4a41bc2a09234bb236a22ef8831efd5fd7ec305",
+        "span-v1-d9a3ff725f406f285f8b7a57ec15d07c1e58eadf8b14d0a8c4b142df931ec931",
+        "span-v1-f6b6ecbb502b95f7cb395ab594256d33569294880565722bacd4c8da7fb5745c",
+        "span-v1-739d835da008657c5afab8c6926e8e3b9b9e48d7f2616765e0dd1d679909db4b",
+        "span-v1-4edc81ad9a99c9bc03b913527712bdb33e726eede1680af2421e00b4d3258d90",
+        "span-v1-39050d3fc38c57f81fedbc285c38a49014120f5dff677eca3902dcfbedb1cf18",
+        "span-v1-929f7d7d18f5f3c709302c54de5512b600e1b167994b6c254ada42b6d7d9563e",
+        "span-v1-157398c5e553f252da892c9da75fb4e8c769eb191d1cfd098d69d82f3b16b89f",
+        "span-v1-c76fbef1d4c4c82d3e46f2121a0ce38e5811269a8010414c90d9f77345dbb167",
+        "span-v1-992577acd8619c1f5b5fb70bd034df04f19ccba3c94d73c89697940841329479",
+        "span-v1-be28c8236f6e7ea15ef1cffaf9d28a38c78b39b167ede4134b2b2626e6a6d482",
+        "span-v1-b4235abda8e41d16eb5fc290ed25e38ce780527ffa53991afbd3296c9614bf1f",
+        "span-v1-e53d84b3ddc51423d8958dace5e6b878623b99aec1345679e2d83df728e115be",
+        "span-v1-4f9f99364578c87c4808da0a017a594c4bd65b80af9352516f24a8b6a48930d1"
+      ],
+      "page_context_span_ids": [
+        "span-v1-9b44bfcfdf164e62ef5c99ff01eb0c1b208b14683752387048faca10c05c2765",
+        "span-v1-6be7d04e59b4a148b55975083c652e458ddba6762996882168473d4ab9facb0b"
+      ],
+      "interpretation": "Provisional sensitivity KPI/scenario group with four observed rows and two observed factor headings; relationships remain unqualified.",
+      "completeness_gaps": [
+        "semantic_relationships_unverified",
+        "provisional_bbox_not_gold",
+        "native_typed_cell_grid_unavailable",
+        "no_explicit_grid_observed_in_source_render"
+      ],
+      "alternate_kind_candidate": "Table",
+      "native_table_status": "unavailable"
+    }
+  ]
+}

@@ -1,0 +1,343 @@
+{
+  "ChatRequest": {
+    "$defs": {
+      "ChatMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "role": {
+            "enum": [
+              "system",
+              "user",
+              "assistant"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "content": {
+            "maxLength": 16000,
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "content"
+        ],
+        "title": "ChatMessage",
+        "type": "object"
+      },
+      "StreamOptions": {
+        "additionalProperties": false,
+        "properties": {
+          "include_usage": {
+            "default": false,
+            "title": "Include Usage",
+            "type": "boolean"
+          }
+        },
+        "title": "StreamOptions",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "model": {
+        "title": "Model",
+        "type": "string"
+      },
+      "messages": {
+        "items": {
+          "$ref": "#/$defs/ChatMessage"
+        },
+        "maxItems": 32,
+        "minItems": 1,
+        "title": "Messages",
+        "type": "array"
+      },
+      "stream": {
+        "default": false,
+        "title": "Stream",
+        "type": "boolean"
+      },
+      "stream_options": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/StreamOptions"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "snapshot_id": {
+        "default": "webui-demo-v1",
+        "title": "Snapshot Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "model",
+      "messages"
+    ],
+    "title": "ChatRequest",
+    "type": "object"
+  },
+  "ModelList": {
+    "$defs": {
+      "ModelInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "default": "enterprise-pdf-rag-offline-demo-v1",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "default": "Offline demo — authored PDF figure evidence only",
+            "title": "Name",
+            "type": "string"
+          },
+          "object": {
+            "const": "model",
+            "default": "model",
+            "title": "Object",
+            "type": "string"
+          },
+          "created": {
+            "default": 0,
+            "title": "Created",
+            "type": "integer"
+          },
+          "owned_by": {
+            "default": "enterprise-pdf-rag/offline-demo",
+            "title": "Owned By",
+            "type": "string"
+          }
+        },
+        "title": "ModelInfo",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "object": {
+        "const": "list",
+        "default": "list",
+        "title": "Object",
+        "type": "string"
+      },
+      "data": {
+        "items": {
+          "$ref": "#/$defs/ModelInfo"
+        },
+        "title": "Data",
+        "type": "array"
+      }
+    },
+    "required": [
+      "data"
+    ],
+    "title": "ModelList",
+    "type": "object"
+  },
+  "CompletionResponse": {
+    "$defs": {
+      "ChatMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "role": {
+            "enum": [
+              "system",
+              "user",
+              "assistant"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "content": {
+            "maxLength": 16000,
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "content"
+        ],
+        "title": "ChatMessage",
+        "type": "object"
+      },
+      "CompletionChoice": {
+        "additionalProperties": false,
+        "properties": {
+          "index": {
+            "default": 0,
+            "title": "Index",
+            "type": "integer"
+          },
+          "message": {
+            "$ref": "#/$defs/ChatMessage"
+          },
+          "finish_reason": {
+            "const": "stop",
+            "default": "stop",
+            "title": "Finish Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "CompletionChoice",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "title": "Id",
+        "type": "string"
+      },
+      "object": {
+        "const": "chat.completion",
+        "default": "chat.completion",
+        "title": "Object",
+        "type": "string"
+      },
+      "created": {
+        "title": "Created",
+        "type": "integer"
+      },
+      "model": {
+        "default": "enterprise-pdf-rag-offline-demo-v1",
+        "title": "Model",
+        "type": "string"
+      },
+      "choices": {
+        "items": {
+          "$ref": "#/$defs/CompletionChoice"
+        },
+        "title": "Choices",
+        "type": "array"
+      }
+    },
+    "required": [
+      "id",
+      "created",
+      "choices"
+    ],
+    "title": "CompletionResponse",
+    "type": "object"
+  },
+  "CompletionChunk": {
+    "$defs": {
+      "CompletionDelta": {
+        "additionalProperties": false,
+        "properties": {
+          "role": {
+            "anyOf": [
+              {
+                "const": "assistant",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Role"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Content"
+          }
+        },
+        "title": "CompletionDelta",
+        "type": "object"
+      },
+      "StreamChoice": {
+        "additionalProperties": false,
+        "properties": {
+          "index": {
+            "default": 0,
+            "title": "Index",
+            "type": "integer"
+          },
+          "delta": {
+            "$ref": "#/$defs/CompletionDelta"
+          },
+          "finish_reason": {
+            "anyOf": [
+              {
+                "const": "stop",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Finish Reason"
+          }
+        },
+        "required": [
+          "delta"
+        ],
+        "title": "StreamChoice",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "title": "Id",
+        "type": "string"
+      },
+      "object": {
+        "const": "chat.completion.chunk",
+        "default": "chat.completion.chunk",
+        "title": "Object",
+        "type": "string"
+      },
+      "created": {
+        "title": "Created",
+        "type": "integer"
+      },
+      "model": {
+        "default": "enterprise-pdf-rag-offline-demo-v1",
+        "title": "Model",
+        "type": "string"
+      },
+      "choices": {
+        "items": {
+          "$ref": "#/$defs/StreamChoice"
+        },
+        "title": "Choices",
+        "type": "array"
+      },
+      "usage": {
+        "default": null,
+        "title": "Usage",
+        "type": "null"
+      }
+    },
+    "required": [
+      "id",
+      "created",
+      "choices"
+    ],
+    "title": "CompletionChunk",
+    "type": "object"
+  }
+}

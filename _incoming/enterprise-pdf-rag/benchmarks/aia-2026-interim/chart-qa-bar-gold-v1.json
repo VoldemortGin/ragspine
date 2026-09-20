@@ -1,0 +1,707 @@
+{
+  "schema_version": "chart-qa-bar-gold-v1",
+  "source_manifest_id": "e702bf1c3ee251d04b51be448a95f50990a99f289c5d87bf2b5d0ae9ec57129f",
+  "corpus": {
+    "name": "AIA 2026 Interim Results Presentation",
+    "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+    "source_page_count": 71,
+    "selected_physical_pages": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20
+    ]
+  },
+  "scope": {
+    "grammar": "bar",
+    "series": "Expense Ratio",
+    "global_period": null,
+    "unit": "%",
+    "allowed_operations": [
+      "lookup"
+    ],
+    "qualification_required": "displayed-percent-bar-lookup-v1",
+    "semantic_scope": "source_display_only",
+    "period_rule": "point-category-period-v1"
+  },
+  "figure": {
+    "object_id": "layout-object-v1:50365bbe30728f288c8199778fbd66c13f877c6ec61ddeae612d4188c81b3388",
+    "region_id": "layout-object-v1:50365bbe30728f288c8199778fbd66c13f877c6ec61ddeae612d4188c81b3388",
+    "page_index": 19,
+    "physical_page_number": 20,
+    "bbox": [
+      354.0,
+      324.0,
+      612.0,
+      474.0
+    ],
+    "coordinate_frame": "page-top-left-points",
+    "page_text_sidecar_sha256": "549e178a0d775262fe8981797497cfbdeeccac2110fdae01172e02779c833e3f",
+    "region_source_text_sha256": "1e5e1598e256d461209e714687cc6076fcf8f83dd703529457b22936a37d6878",
+    "native_crop_svg_sha256": "268639ae163b261fa285e3d52fe83ffe3f5d742c08b71735ab52f881ab967ed9",
+    "structured_svg_sha256": "125e9f9a3962c2f4691590c689e22faa9752573ad767f83f591cb399d4eae893",
+    "source_render_sha256": "081bd55058c5264244b4d5d41a7547deca7752a36a178339d99c5772c4fde6bd"
+  },
+  "review": {
+    "method": "independent-source-sidecar-and-structured-svg; C source review and exact occurrence transcription",
+    "status": "assistant_source_reviewed",
+    "review_date": "2026-09-19",
+    "authority_excludes": [
+      "API responses",
+      "model-derived ChartIR values",
+      "generated response fixtures",
+      "normalization as numeric qualification"
+    ],
+    "notes": [
+      "Two displayed values only; no chart-global period.",
+      "1H25 has no displayed value; bar height, axis break and (130) bps relation are not qualified.",
+      "Exact JSON coordinate floats come from the saved source sidecar; no rounding tolerance.",
+      "Numeric admission additionally requires the trusted PDF profile and complete paint/association proof."
+    ]
+  },
+  "facts": [
+    {
+      "point_id": "point-1h24",
+      "category": "1H24",
+      "value": "8.2",
+      "raw_display": "8.2%",
+      "value_kind": "explicit",
+      "evidence": {
+        "series": {
+          "source_span_id": "span-v1-d39d67c3c67a3805174ce9ffcd8cc1ce910e3254b6a2a4e6aef07e7d6cdd223a",
+          "observation_id": "obs-8e6e6085f04460d1",
+          "text": "Expense Ratio",
+          "start": 0,
+          "end": 13,
+          "bbox": [
+            441.89,
+            331.67708,
+            517.8775519999998,
+            344.01344
+          ]
+        },
+        "category": {
+          "source_span_id": "span-v1-68b89127f62e1c6bbb2d331cf4e4b73797cc4e3deecc09702b1ae9eeddf9a307",
+          "observation_id": "obs-22d5f0ea5d01dffb",
+          "text": "1H24",
+          "start": 0,
+          "end": 4,
+          "bbox": [
+            389.74,
+            453.5952,
+            414.9256,
+            465.3696
+          ]
+        },
+        "period": {
+          "source_span_id": "span-v1-68b89127f62e1c6bbb2d331cf4e4b73797cc4e3deecc09702b1ae9eeddf9a307",
+          "observation_id": "obs-22d5f0ea5d01dffb",
+          "text": "1H24",
+          "start": 0,
+          "end": 4,
+          "bbox": [
+            389.74,
+            453.5952,
+            414.9256,
+            465.3696
+          ]
+        },
+        "value": {
+          "source_span_id": "span-v1-1cf8ebb7629156af6b39570a37475feaeaac5aab00881f158bf9488c50214ce2",
+          "observation_id": "obs-a0386c33e67df7bf",
+          "text": "8.2",
+          "start": 0,
+          "end": 3,
+          "bbox": [
+            390.5,
+            359.5132,
+            414.52399999999994,
+            371.2876
+          ]
+        },
+        "unit": {
+          "source_span_id": "span-v1-1cf8ebb7629156af6b39570a37475feaeaac5aab00881f158bf9488c50214ce2",
+          "observation_id": "obs-c1f606698748add2",
+          "text": "%",
+          "start": 3,
+          "end": 4,
+          "bbox": [
+            390.5,
+            359.5132,
+            414.52399999999994,
+            371.2876
+          ]
+        }
+      }
+    },
+    {
+      "point_id": "point-1h26",
+      "category": "1H26",
+      "value": "6.9",
+      "raw_display": "6.9%",
+      "value_kind": "explicit",
+      "evidence": {
+        "series": {
+          "source_span_id": "span-v1-d39d67c3c67a3805174ce9ffcd8cc1ce910e3254b6a2a4e6aef07e7d6cdd223a",
+          "observation_id": "obs-8e6e6085f04460d1",
+          "text": "Expense Ratio",
+          "start": 0,
+          "end": 13,
+          "bbox": [
+            441.89,
+            331.67708,
+            517.8775519999998,
+            344.01344
+          ]
+        },
+        "category": {
+          "source_span_id": "span-v1-c5800dd7bae1bfd0ec237b19fe67ab14101791baecfd6b5c582d22367a313c5c",
+          "observation_id": "obs-12d0a5df768619e5",
+          "text": "1H26",
+          "start": 0,
+          "end": 4,
+          "bbox": [
+            545.98,
+            453.5952,
+            571.1655999999999,
+            465.3696
+          ]
+        },
+        "period": {
+          "source_span_id": "span-v1-c5800dd7bae1bfd0ec237b19fe67ab14101791baecfd6b5c582d22367a313c5c",
+          "observation_id": "obs-12d0a5df768619e5",
+          "text": "1H26",
+          "start": 0,
+          "end": 4,
+          "bbox": [
+            545.98,
+            453.5952,
+            571.1655999999999,
+            465.3696
+          ]
+        },
+        "value": {
+          "source_span_id": "span-v1-739c5313de515648c319a64c9851be810723220e303c51083a47414465aa2eec",
+          "observation_id": "obs-8c89fdacce9173c0",
+          "text": "6.9",
+          "start": 0,
+          "end": 3,
+          "bbox": [
+            549.74,
+            375.5232,
+            573.764,
+            387.2976
+          ]
+        },
+        "unit": {
+          "source_span_id": "span-v1-739c5313de515648c319a64c9851be810723220e303c51083a47414465aa2eec",
+          "observation_id": "obs-3835121580a40694",
+          "text": "%",
+          "start": 3,
+          "end": 4,
+          "bbox": [
+            549.74,
+            375.5232,
+            573.764,
+            387.2976
+          ]
+        }
+      }
+    }
+  ],
+  "page_context": {
+    "source_span_id": "span-v1-6be7d04e59b4a148b55975083c652e458ddba6762996882168473d4ab9facb0b",
+    "text": "Expense ratio comparatives and two-year changes are shown on an actual exchange rate basis",
+    "bbox": [
+      24.96,
+      510.7812,
+      321.1157599999999,
+      518.5416
+    ],
+    "text_range": [
+      0,
+      90
+    ]
+  },
+  "normalization": {
+    "rule_version": "duplicate-evidence-normalization-v1",
+    "raw_response_sha256": "2700709593ca37fd4908df689003bc88693a346d9714c1dfe7d9e9a1ce61a339",
+    "original_typed_description_artifact_id": "description-v2:58fa3b18b82d6bbaaa2ab4fc0b125bbded88f859ae2f0e4fed6b5846165d2253"
+  },
+  "cases": [
+    {
+      "case_id": "lookup-1h24",
+      "case_class": "positive",
+      "request": {
+        "target": "qualified",
+        "operation": "lookup",
+        "series": "Expense Ratio",
+        "period": "1H24",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-1h24",
+            "category": "1H24"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "answered",
+        "http_status": 200,
+        "reason_class": null,
+        "value": "8.2",
+        "unit": "%",
+        "value_kind": "explicit",
+        "raw_display": "8.2%",
+        "verification": "verified",
+        "confidence_score": null,
+        "confidence_method": "source-qualified explicit display; no cross-period calculation",
+        "fact_ids": [
+          "point-1h24"
+        ]
+      }
+    },
+    {
+      "case_id": "lookup-1h26",
+      "case_class": "positive",
+      "request": {
+        "target": "qualified",
+        "operation": "lookup",
+        "series": "Expense Ratio",
+        "period": "1H26",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-1h26",
+            "category": "1H26"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "answered",
+        "http_status": 200,
+        "reason_class": null,
+        "value": "6.9",
+        "unit": "%",
+        "value_kind": "explicit",
+        "raw_display": "6.9%",
+        "verification": "verified",
+        "confidence_score": null,
+        "confidence_method": "source-qualified explicit display; no cross-period calculation",
+        "fact_ids": [
+          "point-1h26"
+        ]
+      }
+    },
+    {
+      "case_id": "missing-1h25",
+      "case_class": "hard_negative",
+      "request": {
+        "target": "qualified",
+        "operation": "lookup",
+        "series": "Expense Ratio",
+        "period": "1H25",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-1h25",
+            "category": "1H25"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "abstained",
+        "http_status": 200,
+        "reason_class": "value_unavailable"
+      }
+    },
+    {
+      "case_id": "wrong-series",
+      "case_class": "hard_negative",
+      "request": {
+        "target": "qualified",
+        "operation": "lookup",
+        "series": "VONB Margin",
+        "period": "1H24",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-1h24",
+            "category": "1H24"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "abstained",
+        "http_status": 200,
+        "reason_class": "series_mismatch"
+      }
+    },
+    {
+      "case_id": "swapped-category",
+      "case_class": "hard_negative",
+      "request": {
+        "target": "qualified",
+        "operation": "lookup",
+        "series": "Expense Ratio",
+        "period": "1H24",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-1h24",
+            "category": "1H26"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "abstained",
+        "http_status": 200,
+        "reason_class": "category_mismatch"
+      }
+    },
+    {
+      "case_id": "global-period-assumption",
+      "case_class": "hard_negative",
+      "request": {
+        "target": "qualified",
+        "operation": "lookup",
+        "series": "Expense Ratio",
+        "period": "1H24-1H26",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-1h24",
+            "category": "1H24"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "abstained",
+        "http_status": 200,
+        "reason_class": "period_mismatch"
+      }
+    },
+    {
+      "case_id": "wrong-unit",
+      "case_class": "hard_negative",
+      "request": {
+        "target": "qualified",
+        "operation": "lookup",
+        "series": "Expense Ratio",
+        "period": "1H24",
+        "unit": "bps",
+        "points": [
+          {
+            "point_id": "point-1h24",
+            "category": "1H24"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "abstained",
+        "http_status": 200,
+        "reason_class": "unit_mismatch"
+      }
+    },
+    {
+      "case_id": "arrow-not-a-point",
+      "case_class": "hard_negative",
+      "request": {
+        "target": "qualified",
+        "operation": "lookup",
+        "series": "Expense Ratio",
+        "period": "1H24",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "arrow-130bps",
+            "category": "1H24"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "abstained",
+        "http_status": 200,
+        "reason_class": "unknown_point"
+      }
+    },
+    {
+      "case_id": "cross-period-difference",
+      "case_class": "unsupported",
+      "request": {
+        "target": "qualified",
+        "operation": "percentage_point_difference",
+        "series": "Expense Ratio",
+        "period": "1H24",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-1h24",
+            "category": "1H24"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "transport_error",
+        "http_status": 422,
+        "reason_class": "invalid_request"
+      }
+    },
+    {
+      "case_id": "height-estimation",
+      "case_class": "unsupported",
+      "request": {
+        "target": "qualified",
+        "operation": "estimate_from_height",
+        "series": "Expense Ratio",
+        "period": "1H24",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-1h24",
+            "category": "1H24"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "transport_error",
+        "http_status": 422,
+        "reason_class": "invalid_request"
+      }
+    },
+    {
+      "case_id": "ratio",
+      "case_class": "unsupported",
+      "request": {
+        "target": "qualified",
+        "operation": "ratio",
+        "series": "Expense Ratio",
+        "period": "1H24",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-1h24",
+            "category": "1H24"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "transport_error",
+        "http_status": 422,
+        "reason_class": "invalid_request"
+      }
+    },
+    {
+      "case_id": "old-labels-only",
+      "case_class": "hard_negative",
+      "request": {
+        "target": "old_labels",
+        "operation": "lookup",
+        "series": "Expense Ratio",
+        "period": "1H24",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-1h24",
+            "category": "1H24"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "abstained",
+        "http_status": 200,
+        "reason_class": "unqualified_member"
+      }
+    },
+    {
+      "case_id": "wrong-snapshot",
+      "case_class": "hard_negative",
+      "request": {
+        "target": "wrong_snapshot",
+        "operation": "lookup",
+        "series": "Expense Ratio",
+        "period": "1H24",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-1h24",
+            "category": "1H24"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "transport_error",
+        "http_status": 409,
+        "reason_class": "pin_conflict"
+      }
+    },
+    {
+      "case_id": "missing-raw-branch",
+      "case_class": "hard_negative",
+      "request": {
+        "target": "missing_artifact",
+        "operation": "lookup",
+        "series": "Expense Ratio",
+        "period": "1H24",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-1h24",
+            "category": "1H24"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "transport_error",
+        "http_status": 503,
+        "reason_class": "unavailable"
+      }
+    },
+    {
+      "case_id": "estimated-point",
+      "case_class": "hard_negative",
+      "request": {
+        "target": "estimated",
+        "operation": "lookup",
+        "series": "Expense Ratio",
+        "period": "1H24",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-1h24",
+            "category": "1H24"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "transport_error",
+        "http_status": 409,
+        "reason_class": "invalid_evidence"
+      }
+    },
+    {
+      "case_id": "changed-value",
+      "case_class": "hard_negative",
+      "request": {
+        "target": "wrong_value",
+        "operation": "lookup",
+        "series": "Expense Ratio",
+        "period": "1H24",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-1h24",
+            "category": "1H24"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "transport_error",
+        "http_status": 409,
+        "reason_class": "invalid_evidence"
+      }
+    },
+    {
+      "case_id": "neighbor-occurrence",
+      "case_class": "hard_negative",
+      "request": {
+        "target": "wrong_source",
+        "operation": "lookup",
+        "series": "Expense Ratio",
+        "period": "1H24",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-1h24",
+            "category": "1H24"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "transport_error",
+        "http_status": 409,
+        "reason_class": "invalid_evidence"
+      }
+    },
+    {
+      "case_id": "altered-paint",
+      "case_class": "hard_negative",
+      "request": {
+        "target": "wrong_paint",
+        "operation": "lookup",
+        "series": "Expense Ratio",
+        "period": "1H24",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-1h24",
+            "category": "1H24"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "transport_error",
+        "http_status": 409,
+        "reason_class": "invalid_evidence"
+      }
+    },
+    {
+      "case_id": "unsupported-profile",
+      "case_class": "hard_negative",
+      "request": {
+        "target": "unsupported_profile",
+        "operation": "lookup",
+        "series": "Expense Ratio",
+        "period": "1H24",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-1h24",
+            "category": "1H24"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "transport_error",
+        "http_status": 409,
+        "reason_class": "invalid_evidence"
+      }
+    }
+  ],
+  "thresholds": {
+    "answer_precision": "1",
+    "positive_answer_coverage": "1",
+    "citation_exactness": "1",
+    "citation_coverage": "1",
+    "period_role_exactness": "1",
+    "page_context_exactness": "1",
+    "normalization_provenance_exactness": "1",
+    "hard_negative_escape_rate": "0"
+  },
+  "minimum_positive_cases": 2,
+  "adversarial_response_mutations": [
+    "wrong number/sign/unit/raw display",
+    "global-period role or raw-field path",
+    "source occurrence swap/bbox/range/page/revision",
+    "wrong member/snapshot/source manifest",
+    "missing or invented normalization lineage",
+    "non-null numeric confidence or pending verification",
+    "all-abstain and missing/duplicate observations"
+  ]
+}

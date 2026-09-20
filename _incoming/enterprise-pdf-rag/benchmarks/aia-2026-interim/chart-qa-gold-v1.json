@@ -1,0 +1,726 @@
+{
+  "schema_version": "chart-qa-gold-v1",
+  "corpus": {
+    "name": "AIA Group 2026 Interim Results Presentation",
+    "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+    "source_page_count": 71,
+    "selected_physical_pages": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20
+    ]
+  },
+  "scope": {
+    "grammar": "donut",
+    "series": "VONB",
+    "period": "1H26",
+    "unit": "%",
+    "allowed_operations": [
+      "lookup",
+      "percentage_point_difference"
+    ],
+    "qualification_required": "independent-source-explicit-percentage-v1"
+  },
+  "figure": {
+    "object_id": "layout-object-v1:23696d47e6598f4ff6644d9ba1e5ef8d641eb78b161c600b5ceb1181301b2fa0",
+    "region_id": "aia-p018-distribution-mix-v1",
+    "page_index": 17,
+    "physical_page_number": 18,
+    "bbox": [
+      18.0,
+      155.0,
+      250.0,
+      338.0
+    ],
+    "coordinate_frame": "page-top-left-points",
+    "native_crop_svg_sha256": "67648815fe4a1f371316e888e8dc104a36818148cb2afde1d79b682a2b7bd0e4",
+    "structured_svg_sha256": "8fd7547859f7da5ad97c29f317b383cceaae66d6be8529357aa468127ee9846e",
+    "source_render_sha256": "f9253f9df43adffaad424be8a801b4d8850407676f2e138458b945db4ac9ca20",
+    "page_text_sidecar_sha256": "bb29f9840333aa46c6d4981183a0f94ee01894782085ef73aa860a7d639cb48a",
+    "region_source_text_sha256": "fc2e4c148b4186c46042057cbf26917755f8ad8290c86ab07f84bd2dd022e04a"
+  },
+  "review": {
+    "method": "independent-assistant-native-svg-source-sidecar-and-render-review-v1",
+    "status": "assistant_source_reviewed",
+    "review_date": "2026-09-19",
+    "authority_excludes": [
+      "model ChartIR",
+      "model description",
+      "model confidence"
+    ],
+    "notes": [
+      "The labels and values are explicit source text occurrences in the locked region.",
+      "The two percentage values sum to 100; that arithmetic is a consistency check, not the source of either value.",
+      "Qualification of donut mark-to-label relationships remains a production admission concern and is not granted by this fixture alone.",
+      "This assistant review defines benchmark truth only; it does not authorize a production qualification receipt."
+    ]
+  },
+  "facts": [
+    {
+      "point_id": "point-agency",
+      "category": "Agency",
+      "value": "72",
+      "raw_display": "72%",
+      "value_kind": "explicit",
+      "evidence": {
+        "series": {
+          "source_span_id": "span-v1-d856ac85a06f9dc2c11dd862274311f1b345e50c74c55b7a2a654aca8ea85bf0",
+          "observation_id": "obs-714a8afa9b25a4e8",
+          "text": "VONB",
+          "start": 0,
+          "end": 4,
+          "bbox": [
+            110.9,
+            260.485,
+            136.856,
+            270.52
+          ]
+        },
+        "period": {
+          "source_span_id": "span-v1-9fd27629407bd510066e907bf59fa219055b681f9b9c85e9e243a4f7ac7fe080",
+          "observation_id": "obs-fbf7ce0f8d4c54ca",
+          "text": "1H26",
+          "start": 0,
+          "end": 4,
+          "bbox": [
+            113.06,
+            271.285,
+            134.597,
+            281.32
+          ]
+        },
+        "category": {
+          "source_span_id": "span-v1-be81b0d4736ec5089a0e4e7ffaabd7e6d0ff1ac273217aeb4500d894a14eeafa",
+          "observation_id": "obs-e04c9209162ec7fe",
+          "text": "Agency",
+          "start": 0,
+          "end": 6,
+          "bbox": [
+            24.216,
+            260.5132,
+            62.09472000000002,
+            272.2876
+          ]
+        },
+        "value": {
+          "source_span_id": "span-v1-767d90bd03000b831674d8d1d92f99f4ae20e0341ede34308acfef4a4bc3c437",
+          "observation_id": "obs-867ffed1c4f36f65",
+          "text": "72",
+          "start": 0,
+          "end": 2,
+          "bbox": [
+            73.992,
+            262.1232,
+            95.13983999999999,
+            273.8976
+          ]
+        },
+        "unit": {
+          "source_span_id": "span-v1-767d90bd03000b831674d8d1d92f99f4ae20e0341ede34308acfef4a4bc3c437",
+          "observation_id": "obs-a1fdc4fa54d4c990",
+          "text": "%",
+          "start": 2,
+          "end": 3,
+          "bbox": [
+            73.992,
+            262.1232,
+            95.13983999999999,
+            273.8976
+          ]
+        }
+      }
+    },
+    {
+      "point_id": "point-partnerships",
+      "category": "Partnerships",
+      "value": "28",
+      "raw_display": "28%",
+      "value_kind": "explicit",
+      "evidence": {
+        "series": {
+          "source_span_id": "span-v1-d856ac85a06f9dc2c11dd862274311f1b345e50c74c55b7a2a654aca8ea85bf0",
+          "observation_id": "obs-714a8afa9b25a4e8",
+          "text": "VONB",
+          "start": 0,
+          "end": 4,
+          "bbox": [
+            110.9,
+            260.485,
+            136.856,
+            270.52
+          ]
+        },
+        "period": {
+          "source_span_id": "span-v1-9fd27629407bd510066e907bf59fa219055b681f9b9c85e9e243a4f7ac7fe080",
+          "observation_id": "obs-fbf7ce0f8d4c54ca",
+          "text": "1H26",
+          "start": 0,
+          "end": 4,
+          "bbox": [
+            113.06,
+            271.285,
+            134.597,
+            281.32
+          ]
+        },
+        "category": {
+          "source_span_id": "span-v1-00040e841ad83784adf59e0b61cfc534df5a2421f22942f880dfc9fe596b8bc5",
+          "observation_id": "obs-1e331eb95357dd25",
+          "text": "Partnerships",
+          "start": 1,
+          "end": 13,
+          "bbox": [
+            185.35,
+            261.9832,
+            249.85048000000003,
+            273.7576
+          ]
+        },
+        "value": {
+          "source_span_id": "span-v1-6b8bc8c537f5ba5a89bef00b50c6b8bf0836e42822cf7e0d22a4ac49d5950562",
+          "observation_id": "obs-1ea67b56630bcbb6",
+          "text": "28",
+          "start": 0,
+          "end": 2,
+          "bbox": [
+            156.1,
+            260.6332,
+            177.24784,
+            272.4076
+          ]
+        },
+        "unit": {
+          "source_span_id": "span-v1-6b8bc8c537f5ba5a89bef00b50c6b8bf0836e42822cf7e0d22a4ac49d5950562",
+          "observation_id": "obs-e754a259b050b30e",
+          "text": "%",
+          "start": 2,
+          "end": 3,
+          "bbox": [
+            156.1,
+            260.6332,
+            177.24784,
+            272.4076
+          ]
+        }
+      }
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "lookup-agency-72",
+      "case_class": "positive",
+      "request": {
+        "target": "qualified_member",
+        "operation": "lookup",
+        "series": "VONB",
+        "period": "1H26",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-agency",
+            "category": "Agency"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "answered",
+        "http_status": 200,
+        "value": "72",
+        "unit": "%",
+        "value_kind": "explicit",
+        "raw_display": "72%",
+        "fact_ids": [
+          "point-agency"
+        ],
+        "verification": "verified",
+        "confidence_score": null,
+        "confidence_method": "source-qualified explicit percentage; deterministic field-to-occurrence verification"
+      }
+    },
+    {
+      "case_id": "lookup-partnerships-28",
+      "case_class": "positive",
+      "request": {
+        "target": "qualified_member",
+        "operation": "lookup",
+        "series": "VONB",
+        "period": "1H26",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-partnerships",
+            "category": "Partnerships"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "answered",
+        "http_status": 200,
+        "value": "28",
+        "unit": "%",
+        "value_kind": "explicit",
+        "raw_display": "28%",
+        "fact_ids": [
+          "point-partnerships"
+        ],
+        "verification": "verified",
+        "confidence_score": null,
+        "confidence_method": "source-qualified explicit percentage; deterministic field-to-occurrence verification"
+      }
+    },
+    {
+      "case_id": "difference-agency-minus-partnerships",
+      "case_class": "positive",
+      "request": {
+        "target": "qualified_member",
+        "operation": "percentage_point_difference",
+        "series": "VONB",
+        "period": "1H26",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-agency",
+            "category": "Agency"
+          },
+          {
+            "point_id": "point-partnerships",
+            "category": "Partnerships"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "answered",
+        "http_status": 200,
+        "value": "44",
+        "unit": "percentage_points",
+        "value_kind": "derived",
+        "raw_display": null,
+        "fact_ids": [
+          "point-agency",
+          "point-partnerships"
+        ],
+        "verification": "verified",
+        "confidence_score": null,
+        "confidence_method": "deterministic Decimal subtraction of source-qualified explicit percentages; not a model probability"
+      }
+    },
+    {
+      "case_id": "difference-partnerships-minus-agency",
+      "case_class": "positive",
+      "request": {
+        "target": "qualified_member",
+        "operation": "percentage_point_difference",
+        "series": "VONB",
+        "period": "1H26",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-partnerships",
+            "category": "Partnerships"
+          },
+          {
+            "point_id": "point-agency",
+            "category": "Agency"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "answered",
+        "http_status": 200,
+        "value": "-44",
+        "unit": "percentage_points",
+        "value_kind": "derived",
+        "raw_display": null,
+        "fact_ids": [
+          "point-partnerships",
+          "point-agency"
+        ],
+        "verification": "verified",
+        "confidence_score": null,
+        "confidence_method": "deterministic Decimal subtraction of source-qualified explicit percentages; not a model probability"
+      }
+    },
+    {
+      "case_id": "wrong-category",
+      "case_class": "hard_negative",
+      "request": {
+        "target": "qualified_member",
+        "operation": "lookup",
+        "series": "VONB",
+        "period": "1H26",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-agency",
+            "category": "Partnerships"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "abstained",
+        "http_status": 200,
+        "reason_class": "category_mismatch"
+      }
+    },
+    {
+      "case_id": "wrong-point-id",
+      "case_class": "hard_negative",
+      "request": {
+        "target": "qualified_member",
+        "operation": "lookup",
+        "series": "VONB",
+        "period": "1H26",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-missing",
+            "category": "Agency"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "abstained",
+        "http_status": 200,
+        "reason_class": "unknown_point"
+      }
+    },
+    {
+      "case_id": "wrong-series",
+      "case_class": "hard_negative",
+      "request": {
+        "target": "qualified_member",
+        "operation": "lookup",
+        "series": "ANP",
+        "period": "1H26",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-agency",
+            "category": "Agency"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "abstained",
+        "http_status": 200,
+        "reason_class": "series_mismatch"
+      }
+    },
+    {
+      "case_id": "wrong-period",
+      "case_class": "hard_negative",
+      "request": {
+        "target": "qualified_member",
+        "operation": "lookup",
+        "series": "VONB",
+        "period": "1H25",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-agency",
+            "category": "Agency"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "abstained",
+        "http_status": 200,
+        "reason_class": "period_mismatch"
+      }
+    },
+    {
+      "case_id": "wrong-unit",
+      "case_class": "hard_negative",
+      "request": {
+        "target": "qualified_member",
+        "operation": "lookup",
+        "series": "VONB",
+        "period": "1H26",
+        "unit": "USD million",
+        "points": [
+          {
+            "point_id": "point-agency",
+            "category": "Agency"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "abstained",
+        "http_status": 200,
+        "reason_class": "unit_mismatch"
+      }
+    },
+    {
+      "case_id": "wrong-snapshot",
+      "case_class": "hard_negative",
+      "request": {
+        "target": "wrong_snapshot",
+        "operation": "lookup",
+        "series": "VONB",
+        "period": "1H26",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-agency",
+            "category": "Agency"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "transport_error",
+        "http_status": 409,
+        "reason_class": "pin_conflict"
+      }
+    },
+    {
+      "case_id": "wrong-member",
+      "case_class": "hard_negative",
+      "request": {
+        "target": "wrong_member",
+        "operation": "lookup",
+        "series": "VONB",
+        "period": "1H26",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-agency",
+            "category": "Agency"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "transport_error",
+        "http_status": 409,
+        "reason_class": "pin_conflict"
+      }
+    },
+    {
+      "case_id": "labels-only-member",
+      "case_class": "hard_negative",
+      "request": {
+        "target": "labels_only_member",
+        "operation": "lookup",
+        "series": "VONB",
+        "period": "1H26",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-agency",
+            "category": "Agency"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "abstained",
+        "http_status": 200,
+        "reason_class": "unqualified_member"
+      }
+    },
+    {
+      "case_id": "missing-description-branch",
+      "case_class": "hard_negative",
+      "request": {
+        "target": "missing_description_branch",
+        "operation": "lookup",
+        "series": "VONB",
+        "period": "1H26",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-agency",
+            "category": "Agency"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "transport_error",
+        "http_status": 503,
+        "reason_class": "unavailable_evidence"
+      }
+    },
+    {
+      "case_id": "estimated-value",
+      "case_class": "hard_negative",
+      "request": {
+        "target": "estimated_value_fixture",
+        "operation": "lookup",
+        "series": "VONB",
+        "period": "1H26",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-agency",
+            "category": "Agency"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "transport_error",
+        "http_status": 409,
+        "reason_class": "invalid_evidence"
+      }
+    },
+    {
+      "case_class": "hard_negative",
+      "request": {
+        "operation": "lookup",
+        "series": "VONB",
+        "period": "1H26",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-agency",
+            "category": "Agency"
+          }
+        ],
+        "target": "unknown_value_fixture"
+      },
+      "expected": {
+        "business_status": "transport_error",
+        "http_status": 409,
+        "reason_class": "invalid_evidence"
+      },
+      "case_id": "unknown-value"
+    },
+    {
+      "case_class": "hard_negative",
+      "request": {
+        "operation": "lookup",
+        "series": "VONB",
+        "period": "1H26",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-agency",
+            "category": "Agency"
+          }
+        ],
+        "target": "wrong_numeric_artifact"
+      },
+      "expected": {
+        "business_status": "transport_error",
+        "http_status": 409,
+        "reason_class": "invalid_evidence"
+      },
+      "case_id": "wrong-numeric-artifact"
+    },
+    {
+      "case_class": "hard_negative",
+      "request": {
+        "operation": "lookup",
+        "series": "VONB",
+        "period": "1H26",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-agency",
+            "category": "Agency"
+          }
+        ],
+        "target": "wrong_source_fixture"
+      },
+      "expected": {
+        "business_status": "transport_error",
+        "http_status": 409,
+        "reason_class": "invalid_evidence"
+      },
+      "case_id": "wrong-source-artifact"
+    },
+    {
+      "case_id": "unsupported-bar-member",
+      "case_class": "unsupported",
+      "request": {
+        "target": "unsupported_bar_labels_only_member",
+        "operation": "lookup",
+        "series": "VONB",
+        "period": "1H26",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-agency",
+            "category": "Agency"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "abstained",
+        "http_status": 200,
+        "reason_class": "unqualified_member"
+      }
+    },
+    {
+      "case_id": "unsupported-ratio-operation",
+      "case_class": "unsupported",
+      "request": {
+        "target": "qualified_member",
+        "operation": "ratio",
+        "series": "VONB",
+        "period": "1H26",
+        "unit": "%",
+        "points": [
+          {
+            "point_id": "point-agency",
+            "category": "Agency"
+          },
+          {
+            "point_id": "point-partnerships",
+            "category": "Partnerships"
+          }
+        ]
+      },
+      "expected": {
+        "business_status": "transport_error",
+        "http_status": 422,
+        "reason_class": "invalid_request"
+      }
+    }
+  ],
+  "adversarial_response_mutations": [
+    "wrong_value",
+    "wrong_sign",
+    "wrong_operand_order",
+    "wrong_unit",
+    "wrong_value_kind",
+    "fabricated_raw_display",
+    "missing_field_citation",
+    "wrong_source_span",
+    "wrong_observation_slice",
+    "wrong_bbox",
+    "wrong_page",
+    "wrong_source_revision",
+    "wrong_member",
+    "wrong_snapshot",
+    "wrong_verification",
+    "fabricated_confidence_score",
+    "wrong_confidence_method"
+  ],
+  "thresholds": {
+    "answer_precision": "1",
+    "positive_answer_coverage": "1",
+    "citation_exactness": "1",
+    "citation_coverage": "1",
+    "hard_negative_escape_rate": "0"
+  },
+  "pass_preconditions": {
+    "minimum_positive_cases": 1,
+    "positive_answer_coverage_must_be_nonzero": true,
+    "thresholds_must_be_present": true
+  }
+}

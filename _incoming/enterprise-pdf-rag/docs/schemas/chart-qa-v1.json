@@ -1,0 +1,750 @@
+{
+  "ChartQueryRequest": {
+    "$defs": {
+      "PointSelectorInput": {
+        "additionalProperties": false,
+        "properties": {
+          "point_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Point Id",
+            "type": "string"
+          },
+          "category": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Category",
+            "type": "string"
+          }
+        },
+        "required": [
+          "point_id",
+          "category"
+        ],
+        "title": "PointSelectorInput",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "kind": {
+        "const": "chart",
+        "title": "Kind",
+        "type": "string"
+      },
+      "processing_id": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Processing Id",
+        "type": "string"
+      },
+      "snapshot_id": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Snapshot Id",
+        "type": "string"
+      },
+      "member_id": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Member Id",
+        "type": "string"
+      },
+      "operation": {
+        "enum": [
+          "lookup",
+          "percentage_point_difference"
+        ],
+        "title": "Operation",
+        "type": "string"
+      },
+      "series": {
+        "maxLength": 256,
+        "minLength": 1,
+        "title": "Series",
+        "type": "string"
+      },
+      "period": {
+        "maxLength": 128,
+        "minLength": 1,
+        "title": "Period",
+        "type": "string"
+      },
+      "unit": {
+        "maxLength": 32,
+        "minLength": 1,
+        "title": "Unit",
+        "type": "string"
+      },
+      "points": {
+        "items": {
+          "$ref": "#/$defs/PointSelectorInput"
+        },
+        "maxItems": 2,
+        "minItems": 1,
+        "title": "Points",
+        "type": "array"
+      }
+    },
+    "required": [
+      "kind",
+      "processing_id",
+      "snapshot_id",
+      "member_id",
+      "operation",
+      "series",
+      "period",
+      "unit",
+      "points"
+    ],
+    "title": "ChartQueryRequest",
+    "type": "object"
+  },
+  "ChartQueryResponse": {
+    "$defs": {
+      "AnswerValue": {
+        "properties": {
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Value"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          },
+          "value_kind": {
+            "$ref": "#/$defs/ValueKind"
+          },
+          "raw_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Display"
+          },
+          "verification": {
+            "$ref": "#/$defs/Verification"
+          },
+          "confidence": {
+            "$ref": "#/$defs/Confidence"
+          }
+        },
+        "required": [
+          "value",
+          "unit",
+          "value_kind",
+          "raw_display",
+          "verification",
+          "confidence"
+        ],
+        "title": "AnswerValue",
+        "type": "object"
+      },
+      "CalculationInput": {
+        "properties": {
+          "chart_ir_artifact_id": {
+            "title": "Chart Ir Artifact Id",
+            "type": "string"
+          },
+          "field_path": {
+            "title": "Field Path",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "chart_ir_artifact_id",
+          "field_path",
+          "value"
+        ],
+        "title": "CalculationInput",
+        "type": "object"
+      },
+      "CalculationReceiptResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "receipt_id": {
+            "title": "Receipt Id",
+            "type": "string"
+          },
+          "pin": {
+            "$ref": "#/$defs/QueryPin"
+          },
+          "source_manifest_id": {
+            "title": "Source Manifest Id",
+            "type": "string"
+          },
+          "qualification_id": {
+            "title": "Qualification Id",
+            "type": "string"
+          },
+          "rule_version": {
+            "title": "Rule Version",
+            "type": "string"
+          },
+          "operation": {
+            "$ref": "#/$defs/Operation"
+          },
+          "decimal_policy": {
+            "title": "Decimal Policy",
+            "type": "string"
+          },
+          "precision": {
+            "title": "Precision",
+            "type": "integer"
+          },
+          "rounding": {
+            "title": "Rounding",
+            "type": "string"
+          },
+          "inputs": {
+            "items": {
+              "$ref": "#/$defs/CalculationInput"
+            },
+            "title": "Inputs",
+            "type": "array"
+          },
+          "output_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Output Value"
+          },
+          "output_unit": {
+            "title": "Output Unit",
+            "type": "string"
+          },
+          "source_refs": {
+            "items": {
+              "$ref": "#/$defs/SourceAnchor"
+            },
+            "title": "Source Refs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "receipt_id",
+          "pin",
+          "source_manifest_id",
+          "qualification_id",
+          "rule_version",
+          "operation",
+          "decimal_policy",
+          "precision",
+          "rounding",
+          "inputs",
+          "output_value",
+          "output_unit",
+          "source_refs"
+        ],
+        "title": "CalculationReceiptResponse",
+        "type": "object"
+      },
+      "Confidence": {
+        "properties": {
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          }
+        },
+        "required": [
+          "score",
+          "method"
+        ],
+        "title": "Confidence",
+        "type": "object"
+      },
+      "EvidenceKind": {
+        "enum": [
+          "native_element",
+          "source_text_observation"
+        ],
+        "title": "EvidenceKind",
+        "type": "string"
+      },
+      "FieldCitation": {
+        "properties": {
+          "field_path": {
+            "title": "Field Path",
+            "type": "string"
+          },
+          "chart_ir_artifact_id": {
+            "title": "Chart Ir Artifact Id",
+            "type": "string"
+          },
+          "svg_artifact_id": {
+            "title": "Svg Artifact Id",
+            "type": "string"
+          },
+          "svg_digest": {
+            "title": "Svg Digest",
+            "type": "string"
+          },
+          "qualification_id": {
+            "title": "Qualification Id",
+            "type": "string"
+          },
+          "occurrences": {
+            "items": {
+              "$ref": "#/$defs/SvgElement"
+            },
+            "title": "Occurrences",
+            "type": "array"
+          }
+        },
+        "required": [
+          "field_path",
+          "chart_ir_artifact_id",
+          "svg_artifact_id",
+          "svg_digest",
+          "qualification_id",
+          "occurrences"
+        ],
+        "title": "FieldCitation",
+        "type": "object"
+      },
+      "InputClaim": {
+        "properties": {
+          "point_id": {
+            "title": "Point Id",
+            "type": "string"
+          },
+          "series": {
+            "title": "Series",
+            "type": "string"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "period": {
+            "title": "Period",
+            "type": "string"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Value"
+          },
+          "value_kind": {
+            "$ref": "#/$defs/ValueKind"
+          },
+          "raw_display": {
+            "title": "Raw Display",
+            "type": "string"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/$defs/FieldCitation"
+            },
+            "title": "Citations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "point_id",
+          "series",
+          "category",
+          "period",
+          "unit",
+          "value",
+          "value_kind",
+          "raw_display",
+          "citations"
+        ],
+        "title": "InputClaim",
+        "type": "object"
+      },
+      "Operation": {
+        "enum": [
+          "lookup",
+          "percentage_point_difference"
+        ],
+        "title": "Operation",
+        "type": "string"
+      },
+      "QueryPin": {
+        "properties": {
+          "processing_id": {
+            "title": "Processing Id",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "title": "Snapshot Id",
+            "type": "string"
+          },
+          "member_id": {
+            "title": "Member Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "processing_id",
+          "snapshot_id",
+          "member_id"
+        ],
+        "title": "QueryPin",
+        "type": "object"
+      },
+      "QueryStatus": {
+        "enum": [
+          "answered",
+          "abstained"
+        ],
+        "title": "QueryStatus",
+        "type": "string"
+      },
+      "RefusalReason": {
+        "enum": [
+          "unqualified_member",
+          "unsupported_grammar",
+          "unknown_point",
+          "series_mismatch",
+          "category_mismatch",
+          "period_mismatch",
+          "unit_mismatch",
+          "unsupported_value_kind",
+          "unsupported_precision",
+          "insufficient_evidence"
+        ],
+        "title": "RefusalReason",
+        "type": "string"
+      },
+      "SourceAnchor": {
+        "properties": {
+          "source_revision": {
+            "title": "Source Revision",
+            "type": "string"
+          },
+          "document_sha256": {
+            "title": "Document Sha256",
+            "type": "string"
+          },
+          "page_index": {
+            "title": "Page Index",
+            "type": "integer"
+          },
+          "bbox": {
+            "maxItems": 4,
+            "minItems": 4,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Bbox",
+            "type": "array"
+          },
+          "coordinate_frame": {
+            "default": "page-top-left",
+            "title": "Coordinate Frame",
+            "type": "string"
+          },
+          "rotation": {
+            "default": 0,
+            "title": "Rotation",
+            "type": "integer"
+          },
+          "transform": {
+            "default": [
+              1.0,
+              0.0,
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            "maxItems": 6,
+            "minItems": 6,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Transform",
+            "type": "array"
+          }
+        },
+        "required": [
+          "source_revision",
+          "document_sha256",
+          "page_index",
+          "bbox"
+        ],
+        "title": "SourceAnchor",
+        "type": "object"
+      },
+      "SvgElement": {
+        "properties": {
+          "element_id": {
+            "title": "Element Id",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "anchor": {
+            "$ref": "#/$defs/SourceAnchor"
+          },
+          "evidence_kind": {
+            "$ref": "#/$defs/EvidenceKind",
+            "default": "native_element"
+          },
+          "source_span_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Span Id"
+          },
+          "text_range": {
+            "anyOf": [
+              {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "integer"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Text Range"
+          }
+        },
+        "required": [
+          "element_id",
+          "text",
+          "anchor"
+        ],
+        "title": "SvgElement",
+        "type": "object"
+      },
+      "ValueKind": {
+        "enum": [
+          "explicit",
+          "derived",
+          "estimated",
+          "unavailable"
+        ],
+        "title": "ValueKind",
+        "type": "string"
+      },
+      "Verification": {
+        "enum": [
+          "verified",
+          "pending",
+          "rejected"
+        ],
+        "title": "Verification",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": "chart-qa-v1",
+        "default": "chart-qa-v1",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "processing_id": {
+        "title": "Processing Id",
+        "type": "string"
+      },
+      "snapshot_id": {
+        "title": "Snapshot Id",
+        "type": "string"
+      },
+      "member_id": {
+        "title": "Member Id",
+        "type": "string"
+      },
+      "operation": {
+        "$ref": "#/$defs/Operation"
+      },
+      "status": {
+        "$ref": "#/$defs/QueryStatus"
+      },
+      "answer": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/AnswerValue"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "inputs": {
+        "items": {
+          "$ref": "#/$defs/InputClaim"
+        },
+        "title": "Inputs",
+        "type": "array"
+      },
+      "calculation_receipt": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/CalculationReceiptResponse"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "refusal_reason": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/RefusalReason"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "processing_id",
+      "snapshot_id",
+      "member_id",
+      "operation",
+      "status",
+      "answer",
+      "inputs",
+      "calculation_receipt",
+      "refusal_reason"
+    ],
+    "title": "ChartQueryResponse",
+    "type": "object"
+  },
+  "ChartQueryErrorResponse": {
+    "$defs": {
+      "ChartQueryErrorDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "enum": [
+              "pin_conflict",
+              "invalid_evidence",
+              "unavailable_evidence"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ChartQueryErrorDetail",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "error": {
+        "$ref": "#/$defs/ChartQueryErrorDetail"
+      }
+    },
+    "required": [
+      "error"
+    ],
+    "title": "ChartQueryErrorResponse",
+    "type": "object"
+  }
+}

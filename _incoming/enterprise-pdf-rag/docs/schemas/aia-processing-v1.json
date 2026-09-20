@@ -1,0 +1,1972 @@
+{
+  "ProcessingContextRequest": {
+    "$defs": {
+      "RetrievalHitInput": {
+        "additionalProperties": false,
+        "properties": {
+          "member_id": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Member Id",
+            "type": "string"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "snapshot_id": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Snapshot Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "snapshot_id",
+          "member_id",
+          "score"
+        ],
+        "title": "RetrievalHitInput",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "hit": {
+        "$ref": "#/$defs/RetrievalHitInput"
+      },
+      "processing_id": {
+        "title": "Processing Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "processing_id",
+      "hit"
+    ],
+    "title": "ProcessingContextRequest",
+    "type": "object"
+  },
+  "ProcessingContextResponse": {
+    "$defs": {
+      "AssetRef": {
+        "properties": {
+          "byte_length": {
+            "title": "Byte Length",
+            "type": "integer"
+          },
+          "media_type": {
+            "title": "Media Type",
+            "type": "string"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sha256",
+          "media_type",
+          "byte_length"
+        ],
+        "title": "AssetRef",
+        "type": "object"
+      },
+      "CellContentState": {
+        "enum": [
+          "present",
+          "blank",
+          "unavailable"
+        ],
+        "title": "CellContentState",
+        "type": "string"
+      },
+      "ChartAxis": {
+        "properties": {
+          "axis_id": {
+            "title": "Axis Id",
+            "type": "string"
+          },
+          "label": {
+            "$ref": "#/$defs/TextField"
+          },
+          "scale": {
+            "title": "Scale",
+            "type": "string"
+          },
+          "unit": {
+            "$ref": "#/$defs/TextField"
+          }
+        },
+        "required": [
+          "axis_id",
+          "label",
+          "unit",
+          "scale"
+        ],
+        "title": "ChartAxis",
+        "type": "object"
+      },
+      "ChartIR": {
+        "properties": {
+          "axes": {
+            "items": {
+              "$ref": "#/$defs/ChartAxis"
+            },
+            "title": "Axes",
+            "type": "array"
+          },
+          "binding": {
+            "$ref": "#/$defs/SvgBinding"
+          },
+          "execution_mode": {
+            "$ref": "#/$defs/ExecutionMode",
+            "default": "offline-demo"
+          },
+          "grammar": {
+            "title": "Grammar",
+            "type": "string"
+          },
+          "marks": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ChartMark"
+            },
+            "title": "Marks",
+            "type": "array"
+          },
+          "period": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TextField"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "points": {
+            "items": {
+              "$ref": "#/$defs/ChartPoint"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "producer": {
+            "title": "Producer",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TextField"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "verification": {
+            "$ref": "#/$defs/Verification"
+          }
+        },
+        "required": [
+          "binding",
+          "grammar",
+          "axes",
+          "points",
+          "producer",
+          "verification"
+        ],
+        "title": "ChartIR",
+        "type": "object"
+      },
+      "ChartMark": {
+        "description": "A located grammar hypothesis, not an independently validated relation.",
+        "properties": {
+          "bbox": {
+            "maxItems": 4,
+            "minItems": 4,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Bbox",
+            "type": "array"
+          },
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "evidence": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "mark_id": {
+            "title": "Mark Id",
+            "type": "string"
+          },
+          "point_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Point Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "mark_id",
+          "kind",
+          "bbox",
+          "color",
+          "point_ids",
+          "evidence"
+        ],
+        "title": "ChartMark",
+        "type": "object"
+      },
+      "ChartPoint": {
+        "properties": {
+          "category": {
+            "$ref": "#/$defs/TextField"
+          },
+          "point_id": {
+            "title": "Point Id",
+            "type": "string"
+          },
+          "series": {
+            "$ref": "#/$defs/TextField"
+          },
+          "unit": {
+            "$ref": "#/$defs/TextField"
+          },
+          "value": {
+            "$ref": "#/$defs/NumericObservation"
+          }
+        },
+        "required": [
+          "point_id",
+          "series",
+          "category",
+          "unit",
+          "value"
+        ],
+        "title": "ChartPoint",
+        "type": "object"
+      },
+      "Confidence": {
+        "properties": {
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          }
+        },
+        "required": [
+          "score",
+          "method"
+        ],
+        "title": "Confidence",
+        "type": "object"
+      },
+      "DescriptionClaim": {
+        "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Category"
+          },
+          "evidence": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "period": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Period"
+          },
+          "series": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Series"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Unit"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Value"
+          }
+        },
+        "required": [
+          "text",
+          "evidence"
+        ],
+        "title": "DescriptionClaim",
+        "type": "object"
+      },
+      "DiagramEdge": {
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "relationship": {
+            "title": "Relationship",
+            "type": "string"
+          },
+          "source_node_id": {
+            "title": "Source Node Id",
+            "type": "string"
+          },
+          "source_span_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Span Ids",
+            "type": "array"
+          },
+          "target_node_id": {
+            "title": "Target Node Id",
+            "type": "string"
+          },
+          "verification": {
+            "$ref": "#/$defs/Verification",
+            "default": "pending"
+          }
+        },
+        "required": [
+          "source_node_id",
+          "target_node_id",
+          "label",
+          "relationship"
+        ],
+        "title": "DiagramEdge",
+        "type": "object"
+      },
+      "DiagramIR": {
+        "properties": {
+          "diagnostics": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Diagnostics",
+            "type": "array"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/$defs/DiagramEdge"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/$defs/DiagramNode"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/$defs/SourceAnchor"
+          },
+          "verification": {
+            "$ref": "#/$defs/Verification",
+            "default": "pending"
+          }
+        },
+        "required": [
+          "object_id",
+          "source",
+          "nodes",
+          "edges",
+          "diagnostics"
+        ],
+        "title": "DiagramIR",
+        "type": "object"
+      },
+      "DiagramNode": {
+        "properties": {
+          "bbox": {
+            "maxItems": 4,
+            "minItems": 4,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Bbox",
+            "type": "array"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "source_span_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Span Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "node_id",
+          "label",
+          "bbox",
+          "source_span_ids"
+        ],
+        "title": "DiagramNode",
+        "type": "object"
+      },
+      "Evidence": {
+        "properties": {
+          "confidence": {
+            "$ref": "#/$defs/Confidence"
+          },
+          "element_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Element Ids",
+            "type": "array"
+          },
+          "verification": {
+            "$ref": "#/$defs/Verification"
+          }
+        },
+        "required": [
+          "element_ids",
+          "verification",
+          "confidence"
+        ],
+        "title": "Evidence",
+        "type": "object"
+      },
+      "ExecutionMode": {
+        "enum": [
+          "offline-demo",
+          "production"
+        ],
+        "title": "ExecutionMode",
+        "type": "string"
+      },
+      "FieldOccurrence": {
+        "properties": {
+          "element_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Element Ids",
+            "type": "array"
+          },
+          "field_path": {
+            "title": "Field Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field_path",
+          "element_ids"
+        ],
+        "title": "FieldOccurrence",
+        "type": "object"
+      },
+      "FigureQualification": {
+        "description": "A scoped receipt obtained independently of the two model producers.",
+        "properties": {
+          "binding": {
+            "$ref": "#/$defs/SvgBinding"
+          },
+          "execution_mode": {
+            "$ref": "#/$defs/ExecutionMode",
+            "default": "offline-demo"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/$defs/FieldOccurrence"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "semantic_scope": {
+            "default": "explicit-labels",
+            "title": "Semantic Scope",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/$defs/SourceAnchor"
+          },
+          "source_geometry_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Geometry Refs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "binding",
+          "source",
+          "fields",
+          "method"
+        ],
+        "title": "FigureQualification",
+        "type": "object"
+      },
+      "FormulaIR": {
+        "properties": {
+          "diagnostics": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Diagnostics",
+            "type": "array"
+          },
+          "latex": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latex"
+          },
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/$defs/SourceAnchor"
+          },
+          "source_literal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Literal"
+          },
+          "source_span_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Span Ids",
+            "type": "array"
+          },
+          "verification": {
+            "$ref": "#/$defs/Verification",
+            "default": "pending"
+          }
+        },
+        "required": [
+          "object_id",
+          "source",
+          "source_literal",
+          "latex",
+          "source_span_ids",
+          "diagnostics"
+        ],
+        "title": "FormulaIR",
+        "type": "object"
+      },
+      "GroupIR": {
+        "properties": {
+          "child_object_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Child Object Ids",
+            "type": "array"
+          },
+          "diagnostics": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Diagnostics",
+            "type": "array"
+          },
+          "fragments": {
+            "items": {
+              "$ref": "#/$defs/ObservedText"
+            },
+            "title": "Fragments",
+            "type": "array"
+          },
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/$defs/SourceAnchor"
+          }
+        },
+        "required": [
+          "object_id",
+          "source",
+          "child_object_ids",
+          "fragments",
+          "diagnostics"
+        ],
+        "title": "GroupIR",
+        "type": "object"
+      },
+      "ImageIR": {
+        "properties": {
+          "diagnostics": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Diagnostics",
+            "type": "array"
+          },
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "observed_labels": {
+            "items": {
+              "$ref": "#/$defs/ObservedText"
+            },
+            "title": "Observed Labels",
+            "type": "array"
+          },
+          "source": {
+            "$ref": "#/$defs/SourceAnchor"
+          },
+          "verification": {
+            "$ref": "#/$defs/Verification",
+            "default": "pending"
+          },
+          "visible_objects": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Visible Objects",
+            "type": "array"
+          }
+        },
+        "required": [
+          "object_id",
+          "source",
+          "visible_objects",
+          "observed_labels",
+          "diagnostics"
+        ],
+        "title": "ImageIR",
+        "type": "object"
+      },
+      "ListIR": {
+        "properties": {
+          "diagnostics": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Diagnostics",
+            "type": "array"
+          },
+          "fragments": {
+            "items": {
+              "$ref": "#/$defs/ObservedText"
+            },
+            "title": "Fragments",
+            "type": "array"
+          },
+          "item_groups": {
+            "items": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Item Groups",
+            "type": "array"
+          },
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "ordered": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ordered"
+          },
+          "source": {
+            "$ref": "#/$defs/SourceAnchor"
+          }
+        },
+        "required": [
+          "object_id",
+          "source",
+          "fragments",
+          "item_groups",
+          "ordered",
+          "diagnostics"
+        ],
+        "title": "ListIR",
+        "type": "object"
+      },
+      "LiteralQualification": {
+        "description": "Qualifies exact transcription only, never chart or financial relations.",
+        "properties": {
+          "description": {
+            "$ref": "#/$defs/AssetRef"
+          },
+          "ir": {
+            "$ref": "#/$defs/AssetRef"
+          },
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "scope": {
+            "default": "literal-source-transcription-v1",
+            "title": "Scope",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/$defs/SourceAnchor"
+          },
+          "source_manifest_id": {
+            "title": "Source Manifest Id",
+            "type": "string"
+          },
+          "source_span_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Span Ids",
+            "type": "array"
+          },
+          "source_svg": {
+            "$ref": "#/$defs/AssetRef"
+          }
+        },
+        "required": [
+          "object_id",
+          "source",
+          "source_manifest_id",
+          "source_span_ids",
+          "ir",
+          "description",
+          "source_svg"
+        ],
+        "title": "LiteralQualification",
+        "type": "object"
+      },
+      "NumericObservation": {
+        "properties": {
+          "evidence": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "kind": {
+            "$ref": "#/$defs/ValueKind"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "value",
+          "kind",
+          "evidence"
+        ],
+        "title": "NumericObservation",
+        "type": "object"
+      },
+      "ObjectDescription": {
+        "properties": {
+          "confidence": {
+            "$ref": "#/$defs/Confidence"
+          },
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "producer": {
+            "title": "Producer",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/$defs/SourceAnchor"
+          },
+          "source_span_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Span Ids",
+            "type": "array"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "verification": {
+            "$ref": "#/$defs/Verification"
+          }
+        },
+        "required": [
+          "object_id",
+          "source",
+          "source_span_ids",
+          "text",
+          "producer",
+          "confidence",
+          "verification"
+        ],
+        "title": "ObjectDescription",
+        "type": "object"
+      },
+      "ObjectKind": {
+        "enum": [
+          "Text",
+          "List",
+          "Table",
+          "Chart",
+          "Diagram",
+          "Image",
+          "Formula",
+          "Group"
+        ],
+        "title": "ObjectKind",
+        "type": "string"
+      },
+      "ObservedText": {
+        "properties": {
+          "source": {
+            "$ref": "#/$defs/SourceAnchor"
+          },
+          "source_span_id": {
+            "title": "Source Span Id",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_span_id",
+          "text",
+          "source"
+        ],
+        "title": "ObservedText",
+        "type": "object"
+      },
+      "RetrievalContext": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ObjectDescription"
+              },
+              {
+                "$ref": "#/$defs/TextDescription"
+              }
+            ],
+            "title": "Description"
+          },
+          "ir": {
+            "$ref": "#/$defs/TypedIR"
+          },
+          "member": {
+            "$ref": "#/$defs/RetrievalMember"
+          },
+          "qualification": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/LiteralQualification"
+              },
+              {
+                "$ref": "#/$defs/FigureQualification"
+              }
+            ],
+            "title": "Qualification"
+          },
+          "snapshot_id": {
+            "title": "Snapshot Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "snapshot_id",
+          "member",
+          "ir",
+          "description",
+          "qualification"
+        ],
+        "title": "RetrievalContext",
+        "type": "object"
+      },
+      "RetrievalMember": {
+        "properties": {
+          "description": {
+            "$ref": "#/$defs/AssetRef"
+          },
+          "embedding": {
+            "$ref": "#/$defs/AssetRef"
+          },
+          "embedding_dimensions": {
+            "title": "Embedding Dimensions",
+            "type": "integer"
+          },
+          "embedding_fingerprint": {
+            "title": "Embedding Fingerprint",
+            "type": "string"
+          },
+          "ir": {
+            "$ref": "#/$defs/AssetRef"
+          },
+          "kind": {
+            "$ref": "#/$defs/ObjectKind"
+          },
+          "lineage_refs": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/AssetRef"
+            },
+            "title": "Lineage Refs",
+            "type": "array"
+          },
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "page_index": {
+            "title": "Page Index",
+            "type": "integer"
+          },
+          "qualification": {
+            "$ref": "#/$defs/AssetRef"
+          },
+          "source_svg": {
+            "$ref": "#/$defs/AssetRef"
+          }
+        },
+        "required": [
+          "object_id",
+          "kind",
+          "page_index",
+          "ir",
+          "description",
+          "qualification",
+          "embedding",
+          "source_svg",
+          "embedding_fingerprint",
+          "embedding_dimensions"
+        ],
+        "title": "RetrievalMember",
+        "type": "object"
+      },
+      "SlotState": {
+        "enum": [
+          "origin",
+          "continuation",
+          "unknown"
+        ],
+        "title": "SlotState",
+        "type": "string"
+      },
+      "SourceAnchor": {
+        "properties": {
+          "bbox": {
+            "maxItems": 4,
+            "minItems": 4,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Bbox",
+            "type": "array"
+          },
+          "coordinate_frame": {
+            "default": "page-top-left",
+            "title": "Coordinate Frame",
+            "type": "string"
+          },
+          "document_sha256": {
+            "title": "Document Sha256",
+            "type": "string"
+          },
+          "page_index": {
+            "title": "Page Index",
+            "type": "integer"
+          },
+          "rotation": {
+            "default": 0,
+            "title": "Rotation",
+            "type": "integer"
+          },
+          "source_revision": {
+            "title": "Source Revision",
+            "type": "string"
+          },
+          "transform": {
+            "default": [
+              1.0,
+              0.0,
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            "maxItems": 6,
+            "minItems": 6,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Transform",
+            "type": "array"
+          }
+        },
+        "required": [
+          "source_revision",
+          "document_sha256",
+          "page_index",
+          "bbox"
+        ],
+        "title": "SourceAnchor",
+        "type": "object"
+      },
+      "SvgBinding": {
+        "properties": {
+          "figure_id": {
+            "title": "Figure Id",
+            "type": "string"
+          },
+          "source_revision": {
+            "title": "Source Revision",
+            "type": "string"
+          },
+          "svg_artifact_id": {
+            "title": "Svg Artifact Id",
+            "type": "string"
+          },
+          "svg_digest": {
+            "title": "Svg Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "figure_id",
+          "source_revision",
+          "svg_artifact_id",
+          "svg_digest"
+        ],
+        "title": "SvgBinding",
+        "type": "object"
+      },
+      "TableCell": {
+        "properties": {
+          "bbox": {
+            "maxItems": 4,
+            "minItems": 4,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Bbox",
+            "type": "array"
+          },
+          "cell_id": {
+            "title": "Cell Id",
+            "type": "string"
+          },
+          "col": {
+            "title": "Col",
+            "type": "integer"
+          },
+          "col_span": {
+            "title": "Col Span",
+            "type": "integer"
+          },
+          "content_state": {
+            "$ref": "#/$defs/CellContentState"
+          },
+          "row": {
+            "title": "Row",
+            "type": "integer"
+          },
+          "row_span": {
+            "title": "Row Span",
+            "type": "integer"
+          },
+          "source_span_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Span Ids",
+            "type": "array"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "verification": {
+            "$ref": "#/$defs/Verification",
+            "default": "pending"
+          }
+        },
+        "required": [
+          "cell_id",
+          "row",
+          "col",
+          "row_span",
+          "col_span",
+          "bbox",
+          "source_span_ids",
+          "text",
+          "content_state"
+        ],
+        "title": "TableCell",
+        "type": "object"
+      },
+      "TableIR": {
+        "properties": {
+          "cells": {
+            "items": {
+              "$ref": "#/$defs/TableCell"
+            },
+            "title": "Cells",
+            "type": "array"
+          },
+          "col_count": {
+            "title": "Col Count",
+            "type": "integer"
+          },
+          "diagnostics": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Diagnostics",
+            "type": "array"
+          },
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "row_count": {
+            "title": "Row Count",
+            "type": "integer"
+          },
+          "slots": {
+            "items": {
+              "items": {
+                "$ref": "#/$defs/TableSlot"
+              },
+              "type": "array"
+            },
+            "title": "Slots",
+            "type": "array"
+          },
+          "source": {
+            "$ref": "#/$defs/SourceAnchor"
+          },
+          "verification": {
+            "$ref": "#/$defs/Verification",
+            "default": "pending"
+          }
+        },
+        "required": [
+          "object_id",
+          "source",
+          "row_count",
+          "col_count",
+          "cells",
+          "slots"
+        ],
+        "title": "TableIR",
+        "type": "object"
+      },
+      "TableSlot": {
+        "properties": {
+          "origin_cell_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Cell Id"
+          },
+          "state": {
+            "$ref": "#/$defs/SlotState"
+          }
+        },
+        "required": [
+          "state",
+          "origin_cell_id"
+        ],
+        "title": "TableSlot",
+        "type": "object"
+      },
+      "TextDescription": {
+        "properties": {
+          "binding": {
+            "$ref": "#/$defs/SvgBinding"
+          },
+          "claims": {
+            "items": {
+              "$ref": "#/$defs/DescriptionClaim"
+            },
+            "title": "Claims",
+            "type": "array"
+          },
+          "execution_mode": {
+            "$ref": "#/$defs/ExecutionMode",
+            "default": "offline-demo"
+          },
+          "producer": {
+            "title": "Producer",
+            "type": "string"
+          },
+          "verification": {
+            "$ref": "#/$defs/Verification"
+          }
+        },
+        "required": [
+          "binding",
+          "claims",
+          "producer",
+          "verification"
+        ],
+        "title": "TextDescription",
+        "type": "object"
+      },
+      "TextField": {
+        "properties": {
+          "evidence": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "evidence"
+        ],
+        "title": "TextField",
+        "type": "object"
+      },
+      "TextIR": {
+        "properties": {
+          "fragments": {
+            "items": {
+              "$ref": "#/$defs/ObservedText"
+            },
+            "title": "Fragments",
+            "type": "array"
+          },
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/$defs/SourceAnchor"
+          }
+        },
+        "required": [
+          "object_id",
+          "source",
+          "fragments"
+        ],
+        "title": "TextIR",
+        "type": "object"
+      },
+      "TypedIR": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/TextIR"
+          },
+          {
+            "$ref": "#/$defs/ListIR"
+          },
+          {
+            "$ref": "#/$defs/TableIR"
+          },
+          {
+            "$ref": "#/$defs/ChartIR"
+          },
+          {
+            "$ref": "#/$defs/DiagramIR"
+          },
+          {
+            "$ref": "#/$defs/ImageIR"
+          },
+          {
+            "$ref": "#/$defs/FormulaIR"
+          },
+          {
+            "$ref": "#/$defs/GroupIR"
+          }
+        ]
+      },
+      "ValueKind": {
+        "enum": [
+          "explicit",
+          "derived",
+          "estimated",
+          "unavailable"
+        ],
+        "title": "ValueKind",
+        "type": "string"
+      },
+      "Verification": {
+        "enum": [
+          "verified",
+          "pending",
+          "rejected"
+        ],
+        "title": "Verification",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "context": {
+        "$ref": "#/$defs/RetrievalContext"
+      },
+      "processing_id": {
+        "title": "Processing Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "processing_id",
+      "context"
+    ],
+    "title": "ProcessingContextResponse",
+    "type": "object"
+  },
+  "ProcessingSearchRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "limit": {
+        "default": 5,
+        "maximum": 100,
+        "minimum": 1,
+        "title": "Limit",
+        "type": "integer"
+      },
+      "processing_id": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Processing Id",
+        "type": "string"
+      },
+      "query": {
+        "maxLength": 2000,
+        "minLength": 1,
+        "title": "Query",
+        "type": "string"
+      }
+    },
+    "required": [
+      "processing_id",
+      "query"
+    ],
+    "title": "ProcessingSearchRequest",
+    "type": "object"
+  },
+  "ProcessingSearchResponse": {
+    "$defs": {
+      "PinnedRetrievalHit": {
+        "properties": {
+          "member_id": {
+            "title": "Member Id",
+            "type": "string"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "snapshot_id": {
+            "title": "Snapshot Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "snapshot_id",
+          "member_id",
+          "score"
+        ],
+        "title": "PinnedRetrievalHit",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "hits": {
+        "items": {
+          "$ref": "#/$defs/PinnedRetrievalHit"
+        },
+        "title": "Hits",
+        "type": "array"
+      },
+      "processing_id": {
+        "title": "Processing Id",
+        "type": "string"
+      },
+      "snapshot_id": {
+        "title": "Snapshot Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "processing_id",
+      "snapshot_id",
+      "hits"
+    ],
+    "title": "ProcessingSearchResponse",
+    "type": "object"
+  },
+  "ProcessingSnapshotResponse": {
+    "$defs": {
+      "AssetRef": {
+        "properties": {
+          "byte_length": {
+            "title": "Byte Length",
+            "type": "integer"
+          },
+          "media_type": {
+            "title": "Media Type",
+            "type": "string"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sha256",
+          "media_type",
+          "byte_length"
+        ],
+        "title": "AssetRef",
+        "type": "object"
+      },
+      "ObjectKind": {
+        "enum": [
+          "Text",
+          "List",
+          "Table",
+          "Chart",
+          "Diagram",
+          "Image",
+          "Formula",
+          "Group"
+        ],
+        "title": "ObjectKind",
+        "type": "string"
+      },
+      "ObjectProcessingRecord": {
+        "properties": {
+          "kind": {
+            "$ref": "#/$defs/ObjectKind"
+          },
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "qualified_claim_count": {
+            "default": 0,
+            "title": "Qualified Claim Count",
+            "type": "integer"
+          },
+          "stages": {
+            "items": {
+              "$ref": "#/$defs/StageOutcome"
+            },
+            "title": "Stages",
+            "type": "array"
+          }
+        },
+        "required": [
+          "object_id",
+          "kind",
+          "stages"
+        ],
+        "title": "ObjectProcessingRecord",
+        "type": "object"
+      },
+      "PageProcessingRecord": {
+        "properties": {
+          "canonical": {
+            "$ref": "#/$defs/StageOutcome"
+          },
+          "objects": {
+            "items": {
+              "$ref": "#/$defs/ObjectProcessingRecord"
+            },
+            "title": "Objects",
+            "type": "array"
+          },
+          "page_index": {
+            "title": "Page Index",
+            "type": "integer"
+          },
+          "partition": {
+            "$ref": "#/$defs/StageOutcome"
+          },
+          "raw_partition": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/StageOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "page_index",
+          "canonical",
+          "partition",
+          "objects"
+        ],
+        "title": "PageProcessingRecord",
+        "type": "object"
+      },
+      "ProcessingManifest": {
+        "properties": {
+          "pages": {
+            "items": {
+              "$ref": "#/$defs/PageProcessingRecord"
+            },
+            "title": "Pages",
+            "type": "array"
+          },
+          "producer": {
+            "title": "Producer",
+            "type": "string"
+          },
+          "retrieval": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/RetrievalPublication"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "scope": {
+            "$ref": "#/$defs/ProcessingScope"
+          }
+        },
+        "required": [
+          "schema_version",
+          "scope",
+          "producer",
+          "pages"
+        ],
+        "title": "ProcessingManifest",
+        "type": "object"
+      },
+      "ProcessingScope": {
+        "properties": {
+          "selected_page_indices": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Selected Page Indices",
+            "type": "array"
+          },
+          "source_manifest_id": {
+            "title": "Source Manifest Id",
+            "type": "string"
+          },
+          "source_page_count": {
+            "title": "Source Page Count",
+            "type": "integer"
+          },
+          "source_sha256": {
+            "title": "Source Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_manifest_id",
+          "source_sha256",
+          "source_page_count",
+          "selected_page_indices"
+        ],
+        "title": "ProcessingScope",
+        "type": "object"
+      },
+      "RetrievalPublication": {
+        "properties": {
+          "dependencies": {
+            "items": {
+              "$ref": "#/$defs/AssetRef"
+            },
+            "title": "Dependencies",
+            "type": "array"
+          },
+          "index": {
+            "$ref": "#/$defs/AssetRef"
+          },
+          "plan": {
+            "$ref": "#/$defs/AssetRef"
+          },
+          "snapshot_id": {
+            "title": "Snapshot Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "snapshot_id",
+          "plan",
+          "index",
+          "dependencies"
+        ],
+        "title": "RetrievalPublication",
+        "type": "object"
+      },
+      "StageOutcome": {
+        "properties": {
+          "artifact": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/AssetRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "diagnostic": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Diagnostic"
+          },
+          "input_fingerprint": {
+            "title": "Input Fingerprint",
+            "type": "string"
+          },
+          "producer": {
+            "title": "Producer",
+            "type": "string"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/$defs/StageState"
+          }
+        },
+        "required": [
+          "stage",
+          "input_fingerprint",
+          "state",
+          "producer"
+        ],
+        "title": "StageOutcome",
+        "type": "object"
+      },
+      "StageState": {
+        "enum": [
+          "succeeded",
+          "failed",
+          "unavailable",
+          "not_applicable",
+          "deferred"
+        ],
+        "title": "StageState",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "manifest": {
+        "$ref": "#/$defs/ProcessingManifest"
+      },
+      "snapshot_id": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Snapshot Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "snapshot_id",
+      "manifest"
+    ],
+    "title": "ProcessingSnapshotResponse",
+    "type": "object"
+  },
+  "ProcessingStatusResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "deferred_stages": {
+        "title": "Deferred Stages",
+        "type": "integer"
+      },
+      "description_artifacts": {
+        "title": "Description Artifacts",
+        "type": "integer"
+      },
+      "failed_stages": {
+        "title": "Failed Stages",
+        "type": "integer"
+      },
+      "ir_artifacts": {
+        "title": "Ir Artifacts",
+        "type": "integer"
+      },
+      "object_count": {
+        "title": "Object Count",
+        "type": "integer"
+      },
+      "processing_id": {
+        "title": "Processing Id",
+        "type": "string"
+      },
+      "qualified_claim_count": {
+        "title": "Qualified Claim Count",
+        "type": "integer"
+      },
+      "retrieval_snapshot_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Retrieval Snapshot Id"
+      },
+      "selected_physical_pages": {
+        "items": {
+          "type": "integer"
+        },
+        "title": "Selected Physical Pages",
+        "type": "array"
+      },
+      "source_manifest_id": {
+        "title": "Source Manifest Id",
+        "type": "string"
+      },
+      "source_page_count": {
+        "title": "Source Page Count",
+        "type": "integer"
+      },
+      "unavailable_stages": {
+        "title": "Unavailable Stages",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "processing_id",
+      "source_manifest_id",
+      "source_page_count",
+      "selected_physical_pages",
+      "object_count",
+      "ir_artifacts",
+      "description_artifacts",
+      "failed_stages",
+      "unavailable_stages",
+      "deferred_stages",
+      "qualified_claim_count",
+      "retrieval_snapshot_id"
+    ],
+    "title": "ProcessingStatusResponse",
+    "type": "object"
+  }
+}

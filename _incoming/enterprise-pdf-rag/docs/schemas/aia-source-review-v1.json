@@ -1,0 +1,445 @@
+{
+  "SourceChatRequest": {
+    "$defs": {
+      "ChatMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "role": {
+            "enum": [
+              "system",
+              "user",
+              "assistant"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "content": {
+            "maxLength": 16000,
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "content"
+        ],
+        "title": "ChatMessage",
+        "type": "object"
+      },
+      "StreamOptions": {
+        "additionalProperties": false,
+        "properties": {
+          "include_usage": {
+            "default": false,
+            "title": "Include Usage",
+            "type": "boolean"
+          }
+        },
+        "title": "StreamOptions",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "model": {
+        "title": "Model",
+        "type": "string"
+      },
+      "messages": {
+        "items": {
+          "$ref": "#/$defs/ChatMessage"
+        },
+        "maxItems": 32,
+        "minItems": 1,
+        "title": "Messages",
+        "type": "array"
+      },
+      "stream": {
+        "default": false,
+        "title": "Stream",
+        "type": "boolean"
+      },
+      "stream_options": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/StreamOptions"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "snapshot_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Snapshot Id"
+      }
+    },
+    "required": [
+      "model",
+      "messages"
+    ],
+    "title": "SourceChatRequest",
+    "type": "object"
+  },
+  "DocumentSnapshotResponse": {
+    "$defs": {
+      "AssetRef": {
+        "properties": {
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "media_type": {
+            "title": "Media Type",
+            "type": "string"
+          },
+          "byte_length": {
+            "title": "Byte Length",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sha256",
+          "media_type",
+          "byte_length"
+        ],
+        "title": "AssetRef",
+        "type": "object"
+      },
+      "DocumentManifest": {
+        "properties": {
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/$defs/AssetRef"
+          },
+          "producer": {
+            "title": "Producer",
+            "type": "string"
+          },
+          "pages": {
+            "items": {
+              "$ref": "#/$defs/PageRecord"
+            },
+            "title": "Pages",
+            "type": "array"
+          },
+          "region": {
+            "$ref": "#/$defs/RegionRecord"
+          },
+          "coordinate_frame": {
+            "default": "page-top-left-points; cropped SVG retains page-coordinate viewBox",
+            "title": "Coordinate Frame",
+            "type": "string"
+          },
+          "asset_status": {
+            "default": "saved",
+            "title": "Asset Status",
+            "type": "string"
+          },
+          "semantics": {
+            "$ref": "#/$defs/SemanticStatus",
+            "default": "pending"
+          },
+          "span_to_svg_mapping": {
+            "$ref": "#/$defs/SemanticStatus",
+            "default": "pending"
+          },
+          "visual_completeness": {
+            "$ref": "#/$defs/SemanticStatus",
+            "default": "pending"
+          }
+        },
+        "required": [
+          "schema_version",
+          "filename",
+          "source",
+          "producer",
+          "pages",
+          "region"
+        ],
+        "title": "DocumentManifest",
+        "type": "object"
+      },
+      "PageRecord": {
+        "properties": {
+          "page_index": {
+            "title": "Page Index",
+            "type": "integer"
+          },
+          "width": {
+            "title": "Width",
+            "type": "number"
+          },
+          "height": {
+            "title": "Height",
+            "type": "number"
+          },
+          "rotation": {
+            "title": "Rotation",
+            "type": "integer"
+          },
+          "svg": {
+            "$ref": "#/$defs/AssetRef"
+          },
+          "text": {
+            "$ref": "#/$defs/AssetRef"
+          },
+          "span_count": {
+            "title": "Span Count",
+            "type": "integer"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "page_index",
+          "width",
+          "height",
+          "rotation",
+          "svg",
+          "text",
+          "span_count",
+          "warnings"
+        ],
+        "title": "PageRecord",
+        "type": "object"
+      },
+      "RegionRecord": {
+        "properties": {
+          "page_index": {
+            "title": "Page Index",
+            "type": "integer"
+          },
+          "bbox": {
+            "maxItems": 4,
+            "minItems": 4,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Bbox",
+            "type": "array"
+          },
+          "native_svg": {
+            "$ref": "#/$defs/AssetRef"
+          },
+          "cropped_svg": {
+            "$ref": "#/$defs/AssetRef"
+          },
+          "text": {
+            "$ref": "#/$defs/AssetRef"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "page_index",
+          "bbox",
+          "native_svg",
+          "cropped_svg",
+          "text",
+          "warnings"
+        ],
+        "title": "RegionRecord",
+        "type": "object"
+      },
+      "SemanticStatus": {
+        "enum": [
+          "pending"
+        ],
+        "title": "SemanticStatus",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "manifest_id": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Manifest Id",
+        "type": "string"
+      },
+      "manifest": {
+        "$ref": "#/$defs/DocumentManifest"
+      }
+    },
+    "required": [
+      "manifest_id",
+      "manifest"
+    ],
+    "title": "DocumentSnapshotResponse",
+    "type": "object"
+  },
+  "PageTextResponse": {
+    "$defs": {
+      "TextSidecar": {
+        "properties": {
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source_sha256": {
+            "title": "Source Sha256",
+            "type": "string"
+          },
+          "page_index": {
+            "title": "Page Index",
+            "type": "integer"
+          },
+          "spans": {
+            "items": {
+              "$ref": "#/$defs/TextSpan"
+            },
+            "title": "Spans",
+            "type": "array"
+          },
+          "coordinate_frame": {
+            "default": "page-top-left-points",
+            "title": "Coordinate Frame",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "source_sha256",
+          "page_index",
+          "spans"
+        ],
+        "title": "TextSidecar",
+        "type": "object"
+      },
+      "TextSpan": {
+        "properties": {
+          "span_id": {
+            "title": "Span Id",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "bbox": {
+            "maxItems": 4,
+            "minItems": 4,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Bbox",
+            "type": "array"
+          },
+          "origin": {
+            "default": [
+              0.0,
+              0.0
+            ],
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Origin",
+            "type": "array"
+          },
+          "font": {
+            "default": "",
+            "title": "Font",
+            "type": "string"
+          },
+          "size": {
+            "default": 0.0,
+            "title": "Size",
+            "type": "number"
+          },
+          "direction": {
+            "default": [
+              1.0,
+              0.0
+            ],
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Direction",
+            "type": "array"
+          }
+        },
+        "required": [
+          "span_id",
+          "text",
+          "bbox"
+        ],
+        "title": "TextSpan",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "sidecar": {
+        "$ref": "#/$defs/TextSidecar"
+      }
+    },
+    "required": [
+      "sidecar"
+    ],
+    "title": "PageTextResponse",
+    "type": "object"
+  }
+}
