@@ -48,6 +48,7 @@ from enterprise_pdf_rag.figures.models import (
     TextDescription,
     Verification,
 )
+from enterprise_pdf_rag.processing.index_text import chart_index_text
 from enterprise_pdf_rag.processing.models import (
     ObjectKind,
     ObjectProcessingRecord,
@@ -437,7 +438,16 @@ def test_durable_chart_search_embeds_only_qualified_description_and_hydrates_its
     embedding = EmbeddingSpy()
     retrieval = ProcessingRetrieval(sources, ProcessingStore(assets.root), embedding)
     publication = retrieval.build(scope, ((0, record),))
-    assert embedding.texts == [pair.description.text]
+    # Only qualified content is embedded: the index-text projection of the qualified IR
+    # (title / period / grammar / points) when values are citable, else the description.
+    expected_text = chart_index_text(pair.chart, fallback=pair.description.text)
+    assert embedding.texts == [expected_text]
+    if label_scope:
+        assert expected_text == pair.description.text
+    else:
+        assert (
+            expected_text.startswith(pair.description.text) and "Agency VONB 72%" in expected_text
+        )
     reopened = ProcessingRetrieval(sources, ProcessingStore(assets.root), embedding)
     (hit,) = reopened.search(publication, "Agency share", limit=1)
     context = reopened.resolve(publication, hit)

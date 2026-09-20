@@ -52,7 +52,10 @@ def test_source_qualified_bar_draft_reuses_prior_vectors_and_is_idempotent(
     )
     assert release.reused_vectors == 1 and release.added_vectors == 1
     assert release.numeric_claim_count == 2
-    assert embedder.descriptions == ["Expense Ratio for 1H21: 15 %. Expense Ratio for 1H23: 6 %."]
+    # The new member embeds the chart index-text projection (ADR 0012), not the description.
+    assert embedder.descriptions == [
+        "Expense Ratio bar chart figure 1H21 Expense Ratio 15% 1H23 Expense Ratio 6%"
+    ]
     assert outputs.load_current()[0] == prior_id
     assert release.previous_processing_id == prior_id
     assert release.previous_snapshot_id == prior.retrieval.snapshot_id

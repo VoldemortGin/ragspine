@@ -15,7 +15,7 @@ from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit, Retrieva
 
 @dataclass(frozen=True, slots=True)
 class MemberText:
-    """The embedded description text of one pinned member; the lexical corpus unit."""
+    """The embedded index text of one pinned member; the lexical corpus unit."""
 
     member_id: str
     kind: ObjectKind
@@ -44,7 +44,7 @@ class MountedDocument(Protocol):
         ...
 
     def member_texts(self) -> tuple[MemberText, ...]:
-        """Every member's embedded description text, ordered by member id; no model call."""
+        """Every member's embedded index text, ordered by member id; no model call."""
         ...
 
     def search(self, query: str, *, limit: int) -> tuple[PinnedRetrievalHit, ...]:

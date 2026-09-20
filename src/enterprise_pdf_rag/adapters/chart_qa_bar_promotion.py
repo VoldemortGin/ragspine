@@ -34,7 +34,9 @@ from enterprise_pdf_rag.processing.retrieval import (
     retrieval_dependencies,
 )
 
-BAR_PUBLICATION_POLICY = "source-transcription-donut-and-displayed-bar-v1"
+# v2: the appended member's vector embeds the chart index-text projection built by
+# ``ProcessingRetrieval`` (ADR 0012); v1 snapshots embedded the description alone.
+BAR_PUBLICATION_POLICY = "source-transcription-donut-and-displayed-bar-v2"
 
 
 def append_displayed_member(

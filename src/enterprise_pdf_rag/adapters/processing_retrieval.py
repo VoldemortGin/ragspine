@@ -19,6 +19,7 @@ from enterprise_pdf_rag.figures.models import (
     TextDescription,
 )
 from enterprise_pdf_rag.figures.ports import EmbeddingPort
+from enterprise_pdf_rag.processing.index_text import member_index_text
 from enterprise_pdf_rag.processing.models import (
     ObjectKind,
     ObjectProcessingRecord,
@@ -47,10 +48,28 @@ from enterprise_pdf_rag.processing.typed_ir import (
     TextIR,
 )
 
-# v2 admits Table members whose literal transcription qualified; the string is part of
-# the snapshot id, so snapshots built under v1 keep their ids and stay mountable.
-_POLICY = "source-transcription-and-scoped-chart-qualification-v2"
+# v2 admits Table members whose literal transcription qualified; v3 embeds the chart
+# index-text projection (ADR 0012) instead of the description alone. The string is part
+# of the snapshot id, so snapshots built under v1 / v2 keep their ids and stay mountable.
+_POLICY = "source-transcription-and-scoped-chart-qualification-v3"
 _INDEX = "immutable-cosine-index-v1"
+# Snapshots whose vectors embed ``member_index_text``; older ones embedded the description
+# text, and their lexical corpus must keep scoring exactly what they embedded. The
+# displayed-bar admission builds its member through this class, so its v2 policy belongs
+# here too (``chart_qa_bar_promotion.BAR_PUBLICATION_POLICY``).
+PROJECTED_CHART_POLICIES = frozenset({_POLICY, "source-transcription-donut-and-displayed-bar-v2"})
+
+
+def member_text(assets: LocalDocumentStore, plan: RetrievalPlan, member: RetrievalMember) -> str:
+    """The text one pinned member was (or would be) embedded with; no evidence validation."""
+    payload = assets.get(member.description)
+    if member.kind is not ObjectKind.CHART:
+        return TypeAdapter(ObjectDescription).validate_json(payload).text
+    description = TypeAdapter(TextDescription).validate_json(payload).text
+    if plan.qualification_policy not in PROJECTED_CHART_POLICIES:
+        return description
+    chart = TypeAdapter(ChartIR).validate_json(assets.get(member.ir))
+    return member_index_text(chart, description)
 
 
 def eligibility(record: ObjectProcessingRecord) -> tuple[bool, str | None]:
@@ -167,8 +186,8 @@ class ProcessingRetrieval:
                 1,
                 lineage,
             )
-            _, checked_description, _ = self._qualified(scope, provisional)
-            text = checked_description.text
+            checked_ir, checked_description, _ = self._qualified(scope, provisional)
+            text = member_index_text(checked_ir, checked_description.text)
             embedding_ref, embedding = self._embedding(description, text)
             member = RetrievalMember(
                 record.object_id,
@@ -207,7 +226,14 @@ class ProcessingRetrieval:
 
     def _embedding(self, description: AssetRef, text: str) -> tuple[AssetRef, RetrievalEmbedding]:
         fingerprint = sha256(
-            repr(("description-embedding-v1", description, self.embedder.fingerprint)).encode()
+            repr(
+                (
+                    "index-text-embedding-v1",
+                    description,
+                    sha256(text.encode()).hexdigest(),
+                    self.embedder.fingerprint,
+                )
+            ).encode()
         ).hexdigest()
         cached = self.outputs.cached(fingerprint)
         if cached is not None:

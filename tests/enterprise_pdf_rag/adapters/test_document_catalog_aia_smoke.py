@@ -5,8 +5,10 @@ from pathlib import Path
 import pytest
 
 from enterprise_pdf_rag.adapters.document_catalog import mount_document, scan_catalog
+from enterprise_pdf_rag.adapters.processing_retrieval import PROJECTED_CHART_POLICIES
 from enterprise_pdf_rag.adapters.processing_runtime import PROCESSING_OUTPUT
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
+from enterprise_pdf_rag.processing.models import ObjectKind
 from tests.enterprise_pdf_rag.processing.test_persistent_retrieval import RecordingEmbedding
 
 # Only this test names the AIA location; the catalog itself learns it from configuration.
@@ -51,4 +53,17 @@ def test_aia_sample_is_one_ready_legacy_document_and_stays_untouched(tmp_path: P
 
     with pytest.raises(ValueError, match="provider"):
         mount_document(entry, embedder=RecordingEmbedding())
+
+    # Evidence-only mount: the lexical corpus is exactly what the snapshot embedded —
+    # projected chart text under policy v3, the description alone under older policies.
+    texts = mount_document(entry, embedder=None).member_texts()
+    assert len(texts) == entry.member_count == len(plan.members)
+    charts = [item for item in texts if item.kind is ObjectKind.CHART]
+    assert charts
+    projected = [item for item in charts if "chart figure" in item.text]
+    if plan.qualification_policy in PROJECTED_CHART_POLICIES:
+        (donut,) = projected
+        assert donut.page_index == 17 and "Agency VONB 72%" in donut.text
+    else:
+        assert projected == []
     assert _state() == before

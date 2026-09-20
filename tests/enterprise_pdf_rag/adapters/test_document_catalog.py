@@ -21,6 +21,7 @@ from enterprise_pdf_rag.adapters.http.processing_schemas import ProcessingEnvelo
 from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.figures.ports import EmbeddingPort
+from enterprise_pdf_rag.processing.index_text import chart_index_text
 from enterprise_pdf_rag.processing.models import ObjectKind
 from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit, RetrievalIndex
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
@@ -409,7 +410,14 @@ def test_chart_and_displayed_contexts_requalify_only_pinned_chart_members(
     context = charts.chart_context(chart_hit)
     assert context.pin == pin
     assert context.chart.points and context.svg.svg
-    assert context.description.text == charts.member_texts()[0].text
+    # The lexical corpus scores the same projection the vector channel embedded (ADR 0012):
+    # the donut is findable by category / value, not only by its title.
+    (donut_text,) = charts.member_texts()
+    assert donut_text.text == chart_index_text(context.chart, fallback=context.description.text)
+    assert donut_text.text == (
+        "Distribution Mix 1H26 donut chart figure Agency VONB 72% Partnerships VONB 28%"
+    )
+    assert context.description.text == "Distribution Mix"
     with pytest.raises(ValueError, match="unqualified_member"):
         charts.displayed_context(chart_hit)
     text_member = texts.member_texts()[0]
@@ -423,3 +431,27 @@ def test_chart_and_displayed_contexts_requalify_only_pinned_chart_members(
     with pytest.raises(ValueError, match="another semantic snapshot"):
         texts.chart_context(chart_hit)
     assert (embedder.description_calls, embedder.query_calls) == (0, 0)
+
+
+def test_label_only_chart_member_is_not_expanded_by_the_index_text_projection(
+    tmp_path: Path,
+) -> None:
+    """A chart without a citable value keeps its description text (ADR 0012 regression)."""
+    sources, outputs, pin = published_chart(tmp_path / "chart", labels=True)
+    root = tmp_path / "root"
+    chart_sha = outputs.load(pin.processing_id).scope.source_sha256
+    shutil.move(sources.root, root / chart_sha / "source")
+    shutil.move(outputs.root, root / chart_sha / "processing")
+    entry = scan_catalog(root).entry(chart_sha)
+    assert entry is not None and entry.retrieval_status == "ready", entry
+    mounted = mount_document(entry, embedder=None)
+    hit = PinnedRetrievalHit(pin.snapshot_id, pin.member_id, 1.0)
+
+    context = mounted.chart_context(hit)
+    assert not context.chart.points or all(
+        point.value.value is None for point in context.chart.points
+    )
+    (text,) = mounted.member_texts()
+    assert text.kind is ObjectKind.CHART
+    assert text.text == context.description.text == "Distribution Mix"
+    assert "chart figure" not in text.text

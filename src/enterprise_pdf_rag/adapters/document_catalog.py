@@ -6,14 +6,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from pydantic import TypeAdapter
-
 from enterprise_pdf_rag.adapters.chart_qa import StoredChartResolver
 from enterprise_pdf_rag.adapters.chart_qa_displayed import StoredDisplayResolver
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.http.schemas import BoundaryModel
 from enterprise_pdf_rag.adapters.processing_retrieval import (
     ProcessingRetrieval,
+    member_text,
     resolve_processing_context,
 )
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
@@ -22,15 +21,12 @@ from enterprise_pdf_rag.answers.ports import MemberText
 from enterprise_pdf_rag.documents.models import AssetRef
 from enterprise_pdf_rag.figures.chart_qa.displayed_models import DisplayedLookupContext
 from enterprise_pdf_rag.figures.chart_qa.models import ChartContext, QueryPin
-from enterprise_pdf_rag.figures.models import TextDescription
 from enterprise_pdf_rag.figures.ports import EmbeddingPort
 from enterprise_pdf_rag.processing.models import (
-    ObjectKind,
     ProcessingManifest,
     RetrievalPublication,
 )
 from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit, RetrievalContext
-from enterprise_pdf_rag.processing.typed_ir import ObjectDescription
 
 type CatalogOrigin = Literal["ingestion", "legacy"]
 type CatalogRetrievalStatus = Literal["ready", "not_indexed", "corrupt"]
@@ -315,18 +311,18 @@ class MountedDocument:
         return resolve_processing_context(self._sources, self._outputs, self._publication, hit)
 
     def member_texts(self) -> tuple[MemberText, ...]:
-        """Every pinned member's embedded description text, ordered by member id."""
+        """Every pinned member's embedded index text, ordered by member id."""
         self.manifest()
         plan, _ = self._outputs.load_retrieval(self._publication)
-        texts: list[MemberText] = []
-        for member in plan.members:
-            payload = self._outputs.assets.get(member.description)
-            text = (
-                TypeAdapter(TextDescription).validate_json(payload).text
-                if member.kind is ObjectKind.CHART
-                else TypeAdapter(ObjectDescription).validate_json(payload).text
+        texts = [
+            MemberText(
+                member.member_id,
+                member.kind,
+                member.page_index,
+                member_text(self._outputs.assets, plan, member),
             )
-            texts.append(MemberText(member.member_id, member.kind, member.page_index, text))
+            for member in plan.members
+        ]
         return tuple(sorted(texts, key=lambda item: item.member_id))
 
     def _pin(self, hit: PinnedRetrievalHit) -> QueryPin:
