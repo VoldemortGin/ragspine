@@ -202,7 +202,7 @@ def test_generic_pdf_native_table_is_indexed_description_only_under_policy_v2(
     publication = manifest.retrieval
     assert publication is not None
     plan, _ = outputs.load_retrieval(publication)
-    assert plan.qualification_policy == "source-transcription-and-scoped-chart-qualification-v3"
+    assert plan.qualification_policy == "source-transcription-and-scoped-chart-qualification-v4"
     (table_member,) = tuple(member for member in plan.members if member.kind is ObjectKind.TABLE)
     assert table_member.page_index == 2
 

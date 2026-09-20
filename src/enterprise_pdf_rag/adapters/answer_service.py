@@ -6,19 +6,23 @@ deterministic reads of the pinned snapshot.
 """
 
 from collections.abc import Mapping, MutableMapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from enterprise_pdf_rag.adapters.hybrid_search import HybridSearch, LexicalIndex
 from enterprise_pdf_rag.adapters.json_completion import JsonCompletionClient, JsonCompletionError
+from enterprise_pdf_rag.answers.member_filter import candidate_members, region_vocabulary
 from enterprise_pdf_rag.answers.models import (
     AbstainReason,
     AnswerRequest,
     AnswerResult,
     AnswerStatus,
     FusedHit,
+    MemberFilters,
+    VerifiedClaim,
 )
-from enterprise_pdf_rag.answers.ports import MountedDocument
+from enterprise_pdf_rag.answers.ports import MemberText, MountedDocument
 from enterprise_pdf_rag.answers.prompt import SYSTEM_RULES, ModelAnswer, build_prompt
+from enterprise_pdf_rag.answers.query_filters import derive_filters
 from enterprise_pdf_rag.answers.verify import decide, verify_claims
 from enterprise_pdf_rag.figures.chart_qa.displayed_models import (
     DISPLAYED_BAR_SCOPE,
@@ -66,14 +70,18 @@ def _citable_chart(block: ContextBlock) -> bool:
 
 
 def select_context(
-    document: MountedDocument, ranked: Sequence[FusedHit], top_k: int
+    document: MountedDocument,
+    ranked: Sequence[FusedHit],
+    top_k: int,
+    member_texts: Sequence[MemberText] | None = None,
 ) -> tuple[tuple[FusedHit, ...], tuple[ContextBlock, ...]]:
     """Hydrate the top-k fused hits, with one guaranteed seat for a citable chart.
 
     When no hit in the top-k is a chart with an explicit value but one sits within the
     next k fused positions, it replaces the last seat (ADR 0012). A pending or
     label-only chart never qualifies, and nothing outside ``2 * top_k`` is promoted.
-    Only chart members in that window are resolved for the check.
+    Only chart members in that window are resolved for the check; ``member_texts``
+    supplies their kinds when the caller already holds them.
     """
     head = list(ranked[:top_k])
     blocks = {hit.member_id: build_context_block(document.resolve(hit.as_hit())) for hit in head}
@@ -81,7 +89,8 @@ def select_context(
         kinds: dict[str, ObjectKind] | None = None
         for hit in ranked[top_k : 2 * top_k]:
             if kinds is None:
-                kinds = {member.member_id: member.kind for member in document.member_texts()}
+                texts = document.member_texts() if member_texts is None else member_texts
+                kinds = {member.member_id: member.kind for member in texts}
             if kinds.get(hit.member_id) is not ObjectKind.CHART:
                 continue
             block = build_context_block(document.resolve(hit.as_hit()))
@@ -136,14 +145,27 @@ class AnswerService:
             if self._reranker is None:
                 raise DependencyUnavailable("rerank requested but no reranker is configured")
             reranker = self._reranker
-        ranked = HybridSearch(
+        search = HybridSearch(
             document,
             channel_limit=request.channel_limit,
             rrf_k=self._settings.rrf_k,
             reranker=reranker,
             index_cache=self._index_cache,
-        ).search(request.question, top_k=2 * request.top_k)
-        fused, selected = select_context(document, ranked, request.top_k)
+        )
+        members = search.index.members
+        filters = (
+            derive_filters(request.question, region_vocabulary(members))
+            if request.filters is None
+            else request.filters
+        )
+        applied: MemberFilters | None = None if filters.is_empty else filters
+        allowed = candidate_members(members, applied)
+        relaxed = allowed is not None and len(allowed) < request.top_k
+        if relaxed:
+            # Fewer candidates than seats: the narrowing is dropped, and the result says so.
+            allowed = None
+        ranked = search.search(request.question, top_k=2 * request.top_k, allowed=allowed)
+        fused, selected = select_context(document, ranked, request.top_k, members)
         hits = {hit.member_id: hit.as_hit() for hit in fused}
         blocks = budget_blocks(selected, max_chars=self._settings.prompt_budget_chars)
         if not blocks:
@@ -155,6 +177,8 @@ class AnswerService:
                 "no retrieved member fits the context budget"
                 if fused
                 else "no member matched in either channel",
+                filters_applied=applied,
+                filters_relaxed=relaxed,
             )
         member_ids = tuple(block.member_id for block in blocks)
         before = self._llm.live_call_count
@@ -176,6 +200,8 @@ class AnswerService:
                     error.code,
                     request_fingerprint=error.request_fingerprint or None,
                     llm_live_calls=self._llm.live_call_count - before,
+                    filters_applied=applied,
+                    filters_relaxed=relaxed,
                 )
             raise DependencyUnavailable(error.code) from error
         by_member = {block.member_id: block for block in blocks}
@@ -194,7 +220,7 @@ class AnswerService:
         return AnswerResult(
             status,
             model.answer if status is AnswerStatus.ANSWERED else None,
-            verification.verified,
+            _with_page_titles(verification.verified, members),
             verification.rejected,
             reason,
             detail,
@@ -206,6 +232,8 @@ class AnswerService:
             completion.request_fingerprint,
             self._llm.live_call_count - before,
             completion.cache_hit,
+            applied,
+            relaxed,
         )
 
     @staticmethod
@@ -218,6 +246,8 @@ class AnswerService:
         *,
         request_fingerprint: str | None = None,
         llm_live_calls: int = 0,
+        filters_applied: MemberFilters | None = None,
+        filters_relaxed: bool = False,
     ) -> AnswerResult:
         return AnswerResult(
             AnswerStatus.ABSTAINED,
@@ -234,4 +264,25 @@ class AnswerService:
             request_fingerprint,
             llm_live_calls,
             False,
+            filters_applied,
+            filters_relaxed,
         )
+
+
+def _with_page_titles(
+    claims: tuple[VerifiedClaim, ...], members: Sequence[MemberText]
+) -> tuple[VerifiedClaim, ...]:
+    """Label each citation with its member's verified page title, when the page has one."""
+    titles = {member.member_id: member.page_title for member in members if member.page_title}
+    if not titles:
+        return claims
+    return tuple(
+        replace(
+            claim,
+            citations=tuple(
+                replace(citation, page_title=titles.get(citation.member_id))
+                for citation in claim.citations
+            ),
+        )
+        for claim in claims
+    )

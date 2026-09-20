@@ -83,12 +83,13 @@ class StoreMountedDocument:
 
     def member_texts(self) -> tuple[MemberText, ...]:
         plan, _ = self._outputs.load_retrieval(self._publication)
+        contexts = self._outputs.index_contexts(self._pinned)
         texts = [
             MemberText(
                 member.member_id,
                 member.kind,
                 member.page_index,
-                member_text(self._outputs.assets, plan, member),
+                member_text(self._outputs.assets, plan, member, contexts.get(member.page_index)),
             )
             for member in plan.members
         ]

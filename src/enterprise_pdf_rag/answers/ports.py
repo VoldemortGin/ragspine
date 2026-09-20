@@ -21,6 +21,12 @@ class MemberText:
     kind: ObjectKind
     page_index: int
     text: str
+    # Verified page metadata (ADR 0013); absent on snapshots without the stage.
+    page_title: str | None = None
+    section: str | None = None
+    page_type: str | None = None
+    periods: tuple[str, ...] = ()  # canonical forms only (``1H2026``)
+    regions: tuple[str, ...] = ()  # verbatim page values
 
 
 @runtime_checkable

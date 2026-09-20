@@ -343,3 +343,20 @@ def test_local_rerank_judge_maps_provider_order_onto_candidate_indices() -> None
     assert judge.judge("q", ["x", "y", "z"]) == [2, 0, 1]
     assert adapter.calls == [("q", ("x", "y", "z"), 3)]
     assert judge.judge("q", []) == []
+
+
+def test_allowed_members_narrow_both_channels_and_widen_the_vector_read() -> None:
+    document = _FakeDocument(("m-c", "m-a", "m-b", "m-d"))
+    search = HybridSearch(document, channel_limit=2)
+    unfiltered = search.search("expense ratio", top_k=4)
+    assert [hit.member_id for hit in unfiltered] == ["m-a", "m-c", "m-b"]
+    assert document.search_calls[-1] == ("expense ratio", 2)
+
+    narrowed = search.search("expense ratio", top_k=4, allowed=frozenset({"m-b", "m-d"}))
+    # The vector channel is read over the whole corpus (4 members) before filtering.
+    assert document.search_calls[-1] == ("expense ratio", 4)
+    assert [hit.member_id for hit in narrowed] == ["m-b", "m-d"]
+    assert narrowed[0].lexical_rank == 1 and narrowed[0].vector_rank == 1
+    assert narrowed[1].lexical_rank is None  # empty text scores 0 lexically
+    assert search.search("expense ratio", top_k=4, allowed=frozenset()) == ()
+    assert [item.member_id for item in search.index.members] == ["m-a", "m-b", "m-c", "m-d"]

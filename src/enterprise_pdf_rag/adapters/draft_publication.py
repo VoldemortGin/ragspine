@@ -102,18 +102,21 @@ def index_draft(
     embedder: EmbeddingPort,
     document_label: str | None = None,
 ) -> DraftIndex:
-    """Embed a saved draft's eligible descriptions into a new immutable snapshot.
+    """Embed a saved draft's eligible index texts into a new immutable snapshot.
 
-    The embedder is injected, never constructed here; only description text ever
-    reaches it. A fresh snapshot is saved without moving any discovery pointer,
-    so the draft stays unactivated. Missing artifacts or mixed dimensions raise
+    The embedder is injected, never constructed here; only index text (the page's
+    contextual header plus the description or chart projection) ever reaches it. A
+    fresh snapshot is saved without moving any discovery pointer, so the draft stays
+    unactivated. Missing artifacts or mixed dimensions raise
     ValueError from the shared build, failing closed.
     """
     sources = LocalDocumentStore(Path(source_store).resolve())
     outputs = ProcessingStore(Path(processing_store).resolve())
     manifest = outputs.load(processing_id)
     records = tuple((page.page_index, record) for page in manifest.pages for record in page.objects)
-    publication = ProcessingRetrieval(sources, outputs, embedder).build(manifest.scope, records)
+    publication = ProcessingRetrieval(sources, outputs, embedder).build(
+        manifest.scope, records, outputs.index_contexts(manifest)
+    )
     indexed_id = outputs.save_draft(replace(manifest, retrieval=publication), sources=sources)
     plan, _ = outputs.load_retrieval(publication)
     label = (

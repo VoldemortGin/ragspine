@@ -26,7 +26,13 @@ from enterprise_pdf_rag.processing.models import (
     ProcessingManifest,
     RetrievalPublication,
 )
-from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit, RetrievalContext
+from enterprise_pdf_rag.processing.page_metadata import PageMetadata
+from enterprise_pdf_rag.processing.retrieval import (
+    PinnedRetrievalHit,
+    RetrievalContext,
+    RetrievalMember,
+    RetrievalPlan,
+)
 
 type CatalogOrigin = Literal["ingestion", "legacy"]
 type CatalogRetrievalStatus = Literal["ready", "not_indexed", "corrupt"]
@@ -300,6 +306,9 @@ class MountedDocument:
         self._embedding_fingerprint = entry.embedding_fingerprint
         self._charts = StoredChartResolver(sources, outputs, processing_id=self._processing_id)
         self._displayed = StoredDisplayResolver(sources, outputs, processing_id=self._processing_id)
+        # Immutable with the pinned manifest: read once, reused by every member_texts().
+        self._page_metadata = outputs.load_page_metadata(manifest)
+        self._contexts = outputs.index_contexts(manifest)
 
     @property
     def entry(self) -> CatalogEntry:
@@ -349,15 +358,30 @@ class MountedDocument:
         self.manifest()
         plan, _ = self._outputs.load_retrieval(self._publication)
         texts = [
-            MemberText(
-                member.member_id,
-                member.kind,
-                member.page_index,
-                member_text(self._outputs.assets, plan, member),
-            )
+            self._member_text(plan, member, self._page_metadata.get(member.page_index))
             for member in plan.members
         ]
         return tuple(sorted(texts, key=lambda item: item.member_id))
+
+    def _member_text(
+        self, plan: RetrievalPlan, member: RetrievalMember, metadata: PageMetadata | None
+    ) -> MemberText:
+        text = member_text(
+            self._outputs.assets, plan, member, self._contexts.get(member.page_index)
+        )
+        if metadata is None:
+            return MemberText(member.member_id, member.kind, member.page_index, text)
+        return MemberText(
+            member.member_id,
+            member.kind,
+            member.page_index,
+            text,
+            page_title=None if metadata.title is None else metadata.title.text,
+            section=None if metadata.section is None else metadata.section.text,
+            page_type=metadata.page_type.value,
+            periods=metadata.normalized_periods,
+            regions=tuple(region.text for region in metadata.regions),
+        )
 
     def _pin(self, hit: PinnedRetrievalHit) -> QueryPin:
         self.manifest()

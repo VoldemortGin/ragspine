@@ -98,6 +98,11 @@ class FakeMember:
     member_id: str
     text: str
     chart: ChartIR | None = None
+    # Verified page metadata as ``member_texts`` would report it (ADR 0013).
+    page_title: str | None = None
+    page_type: str | None = None
+    periods: tuple[str, ...] = ()
+    regions: tuple[str, ...] = ()
 
     @property
     def kind(self) -> ObjectKind:
@@ -145,7 +150,16 @@ class FakeDocument:
     def member_texts(self) -> tuple[MemberText, ...]:
         self.member_texts_calls += 1
         return tuple(
-            MemberText(member.member_id, member.kind, 0, member.index_text)
+            MemberText(
+                member.member_id,
+                member.kind,
+                0,
+                member.index_text,
+                page_title=member.page_title,
+                page_type=member.page_type,
+                periods=member.periods,
+                regions=member.regions,
+            )
             for member in sorted(self._members.values(), key=lambda item: item.member_id)
         )
 

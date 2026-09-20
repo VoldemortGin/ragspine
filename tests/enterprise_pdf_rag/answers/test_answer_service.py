@@ -25,6 +25,7 @@ from enterprise_pdf_rag.answers.models import (
     AnswerResult,
     AnswerStatus,
     ClaimKind,
+    MemberFilters,
 )
 from enterprise_pdf_rag.answers.prompt import SYSTEM_RULES, ModelAnswer, ModelClaim
 from enterprise_pdf_rag.processing.context_builder import BlockKind
@@ -518,3 +519,100 @@ def test_a_chart_already_in_the_top_k_needs_no_seat_and_no_extra_reads(tmp_path:
     assert result.member_ids == ("donut", "text-1")
     assert document.resolved == ["donut", "text-1"]
     assert document.member_texts_calls == 1  # the lexical index build only
+
+
+def _metadata_document(vector_order: tuple[str, ...]) -> FakeDocument:
+    members = (
+        FakeMember(
+            "cover",
+            "ACME 2026 Interim Results",
+            page_title="ACME 2026 Interim Results",
+            page_type="cover",
+            periods=("Y2026",),
+        ),
+        FakeMember(
+            "hk",
+            "Hong Kong VONB grew strongly",
+            page_title="Hong Kong",
+            page_type="text",
+            periods=("1H2026",),
+            regions=("Hong Kong",),
+        ),
+        FakeMember(
+            "th",
+            "Thailand VONB margin expanded",
+            page_title="Thailand",
+            page_type="text",
+            periods=("1H2026",),
+            regions=("Thailand",),
+        ),
+        FakeMember(
+            "fy",
+            "Full year VONB summary",
+            page_title="Group overview",
+            page_type="text",
+            periods=("FY2024",),
+            regions=("Group",),
+        ),
+        FakeMember("bare", "Untagged VONB remarks"),
+    )
+    return FakeDocument(members, vector_order)
+
+
+def test_question_periods_and_regions_narrow_the_candidates_before_ranking(
+    tmp_path: Path,
+) -> None:
+    document = _metadata_document(("bare", "cover", "hk", "th", "fy"))
+    service, prompts = _service(tmp_path / "a", document, lambda prompt: declined())
+    result = service.answer(AnswerRequest("Thailand VONB in 1H26?", top_k=1))
+    assert result.filters_applied == MemberFilters(("1H2026",), ("Thailand",))
+    assert result.filters_relaxed is False
+    assert result.member_ids == ("th",)
+    assert "Hong Kong VONB" not in prompts[0] and "Untagged" not in prompts[0]
+
+    service, _ = _service(tmp_path / "b", document, lambda prompt: declined())
+    year = service.answer(AnswerRequest("VONB in 2026", top_k=2))
+    assert year.filters_applied == MemberFilters(("Y2026",), ())
+    assert year.filters_relaxed is False
+    assert set(year.member_ids) == {"hk", "th"}  # the cover page never enters the candidates
+
+
+def test_starved_filters_relax_to_the_whole_corpus_and_say_so(tmp_path: Path) -> None:
+    document = _metadata_document(("bare", "cover", "hk", "th", "fy"))
+    service, _ = _service(tmp_path / "a", document, lambda prompt: declined())
+    result = service.answer(
+        AnswerRequest("VONB overview", top_k=3, filters=MemberFilters(regions=("Mars",)))
+    )
+    assert result.filters_applied == MemberFilters((), ("Mars",))
+    assert result.filters_relaxed is True
+    assert len(result.member_ids) == 3 and "cover" not in result.member_ids
+
+    service, _ = _service(tmp_path / "b", document, lambda prompt: declined())
+    explicit = service.answer(AnswerRequest("Hong Kong 2026", top_k=1, filters=MemberFilters()))
+    assert explicit.filters_applied is None and explicit.filters_relaxed is False
+    assert explicit.member_ids == ("hk",)  # lexical hit, not the filter: no auto-derivation
+
+    service, _ = _service(tmp_path / "c", document, lambda prompt: declined())
+    unknown = service.answer(AnswerRequest("Singapore VONB", top_k=1))
+    assert unknown.filters_applied is None  # not in this document's vocabulary
+
+
+def test_claim_citations_carry_the_verified_page_title(tmp_path: Path) -> None:
+    document = _metadata_document(("th", "hk"))
+
+    def quote(prompt: str) -> ModelAnswer:
+        return answered(
+            "Thailand VONB margin expanded",
+            ModelClaim(
+                claim_id="q",
+                member_id="th",
+                kind="quote",
+                field_path="fragments.th-span",
+                text="Thailand VONB margin expanded",
+            ),
+        )
+
+    service, _ = _service(tmp_path, document, quote)
+    result = service.answer(AnswerRequest("Thailand margin", top_k=1))
+    assert result.status is AnswerStatus.ANSWERED
+    assert result.claims[0].citations[0].page_title == "Thailand"

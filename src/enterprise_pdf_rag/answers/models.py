@@ -65,6 +65,27 @@ class FusedHit:
 
 
 @dataclass(frozen=True, slots=True)
+class MemberFilters:
+    """Equality pre-filters on verified page metadata: periods (any form) and regions.
+
+    Both dimensions are optional; a member matches when it satisfies every dimension
+    given. The filter is a candidate narrowing only: when it leaves fewer than ``top_k``
+    fused hits the search is retried unfiltered (``AnswerResult.filters_relaxed``).
+    """
+
+    periods: tuple[str, ...] = ()
+    regions: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if any(not value.strip() for value in (*self.periods, *self.regions)):
+            raise ValueError("Filter values must be nonempty")
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.periods and not self.regions
+
+
+@dataclass(frozen=True, slots=True)
 class AnswerRequest:
     question: str
     document_sha256: str | None = None
@@ -72,6 +93,9 @@ class AnswerRequest:
     channel_limit: int = 50
     rerank: bool = False
     history: tuple[tuple[str, str], ...] = ()
+    # ``None`` derives filters from the question (``answers/query_filters``); an explicit
+    # empty ``MemberFilters()`` disables filtering.
+    filters: MemberFilters | None = None
 
     def __post_init__(self) -> None:
         if not self.question.strip():
@@ -92,6 +116,7 @@ class ClaimCitation:
     bbox: tuple[float, float, float, float] | None
     quote: str
     chart_citation: FieldCitation | None = None
+    page_title: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,3 +155,5 @@ class AnswerResult:
     request_fingerprint: str | None
     llm_live_calls: int
     cache_hit: bool
+    filters_applied: MemberFilters | None = None
+    filters_relaxed: bool = False

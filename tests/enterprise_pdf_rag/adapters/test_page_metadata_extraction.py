@@ -8,10 +8,11 @@ import pytest
 from pydantic import TypeAdapter
 from pytest import CaptureFixture
 
-from enterprise_pdf_rag.adapters.document_catalog import scan_catalog
+from enterprise_pdf_rag.adapters.document_catalog import mount_document, scan_catalog
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.http.processing_review import processing_status
 from enterprise_pdf_rag.adapters.json_completion import JsonCompletionClient
+from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
 from enterprise_pdf_rag.adapters.page_metadata_extraction import (
     annotate_page_metadata,
 )
@@ -22,6 +23,7 @@ from enterprise_pdf_rag.processing.document_metadata import DocumentMetadata
 from enterprise_pdf_rag.processing.index_text import PageIndexContext
 from enterprise_pdf_rag.processing.models import StageState
 from enterprise_pdf_rag.processing.page_metadata import MetadataValue, PageMetadata, PageType
+from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit
 from tests.enterprise_pdf_rag.adapters.page_metadata_helpers import (
     ingest_with_metadata,
     publish_with_metadata,
@@ -295,3 +297,53 @@ def test_catalog_entries_carry_the_document_metadata(
     assert TypeAdapter(DocumentMetadata)  # the record round-trips through the manifest envelope
     manifest = ProcessingStore(Path(first.processing_store)).load(first.current_processing_id or "")
     assert manifest.document_metadata is not None and manifest.retrieval is not None
+
+
+def test_index_text_carries_the_contextual_header_under_policy_v4(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    embedder = _RecordingEmbedder()
+    published = publish_with_metadata(
+        tmp_path,
+        monkeypatch,
+        filename="meridian.pdf",
+        label="Meridian 1H26 Hong Kong",
+        page_count=2,
+        output_dir=tmp_path / "ingestion",
+        embedder=embedder,
+    )
+    header = "Meridian 1H26 Hong Kong page 1 | Meridian 1H26 Hong Kong page 2\n"
+    assert any(text.startswith(header) for text in embedder.descriptions)
+    # The cover page's own title is its header: display title and page title coincide.
+    assert any(
+        text.startswith("Meridian 1H26 Hong Kong page 1 | Meridian 1H26 Hong Kong page 1\n")
+        for text in embedder.descriptions
+    )
+    entry = scan_catalog(tmp_path / "ingestion").entry(published.source_sha256)
+    assert entry is not None
+    mount = mount_document(entry, embedder=embedder)
+    texts = mount.member_texts()
+    assert [text.text for text in texts] == embedder.descriptions[: len(texts)] or {
+        text.text for text in texts
+    } == set(embedder.descriptions)
+    second = next(text for text in texts if text.page_index == 1)
+    assert second.page_title == "Meridian 1H26 Hong Kong page 2"
+    assert second.page_type == "text" and second.section is None
+    assert second.periods == ("1H2026",) and second.regions == ("Hong Kong",)
+    assert next(text for text in texts if text.page_index == 0).page_type == "cover"
+    plan, _ = ProcessingStore(Path(entry.processing_store)).load_retrieval(
+        mount.manifest().retrieval  # type: ignore[arg-type]
+    )
+    assert plan.qualification_policy == "source-transcription-and-scoped-chart-qualification-v4"
+    # Descriptions and quoted evidence are untouched by the header.
+    block = mount.resolve(PinnedRetrievalHit(plan.snapshot_id, second.member_id, 1.0))
+    assert block.description.text == "Meridian 1H26 Hong Kong page 2"
+
+
+class _RecordingEmbedder(OfflineDescriptionEmbedder):
+    def __init__(self) -> None:
+        self.descriptions: list[str] = []
+
+    def embed_description(self, text: str) -> tuple[float, ...]:
+        self.descriptions.append(text)
+        return super().embed_description(text)

@@ -1,5 +1,6 @@
 """Persist real description vectors and hydrate source-qualified typed artifacts."""
 
+from collections.abc import Mapping
 from hashlib import sha256
 from math import sqrt
 
@@ -19,7 +20,11 @@ from enterprise_pdf_rag.figures.models import (
     TextDescription,
 )
 from enterprise_pdf_rag.figures.ports import EmbeddingPort
-from enterprise_pdf_rag.processing.index_text import member_index_text
+from enterprise_pdf_rag.processing.index_text import (
+    PageIndexContext,
+    contextual_index_text,
+    member_index_text,
+)
 from enterprise_pdf_rag.processing.models import (
     ObjectKind,
     ObjectProcessingRecord,
@@ -49,27 +54,48 @@ from enterprise_pdf_rag.processing.typed_ir import (
 )
 
 # v2 admits Table members whose literal transcription qualified; v3 embeds the chart
-# index-text projection (ADR 0012) instead of the description alone. The string is part
-# of the snapshot id, so snapshots built under v1 / v2 keep their ids and stay mountable.
-_POLICY = "source-transcription-and-scoped-chart-qualification-v3"
+# index-text projection (ADR 0012) instead of the description alone; v4 prepends the
+# page's contextual header (``display_title | page_title | section``, ADR 0013). The
+# string is part of the snapshot id, so older snapshots keep their ids and stay mountable.
+_POLICY = "source-transcription-and-scoped-chart-qualification-v4"
 _INDEX = "immutable-cosine-index-v1"
 # Snapshots whose vectors embed ``member_index_text``; older ones embedded the description
 # text, and their lexical corpus must keep scoring exactly what they embedded. The
 # displayed-bar admission builds its member through this class, so its v2 policy belongs
 # here too (``chart_qa_bar_promotion.BAR_PUBLICATION_POLICY``).
-PROJECTED_CHART_POLICIES = frozenset({_POLICY, "source-transcription-donut-and-displayed-bar-v2"})
+PROJECTED_CHART_POLICIES = frozenset(
+    {
+        _POLICY,
+        "source-transcription-and-scoped-chart-qualification-v3",
+        "source-transcription-donut-and-displayed-bar-v2",
+    }
+)
+# Snapshots whose vectors embed the contextual header above the projection.
+CONTEXTUAL_POLICIES = frozenset({_POLICY})
 
 
-def member_text(assets: LocalDocumentStore, plan: RetrievalPlan, member: RetrievalMember) -> str:
-    """The text one pinned member was (or would be) embedded with; no evidence validation."""
+def member_text(
+    assets: LocalDocumentStore,
+    plan: RetrievalPlan,
+    member: RetrievalMember,
+    context: PageIndexContext | None = None,
+) -> str:
+    """The text one pinned member was (or would be) embedded with; no evidence validation.
+
+    ``context`` is the member's page header; it is applied only under a contextual policy,
+    so a snapshot indexed before ADR 0013 keeps scoring exactly what it embedded.
+    """
     payload = assets.get(member.description)
     if member.kind is not ObjectKind.CHART:
-        return TypeAdapter(ObjectDescription).validate_json(payload).text
-    description = TypeAdapter(TextDescription).validate_json(payload).text
-    if plan.qualification_policy not in PROJECTED_CHART_POLICIES:
-        return description
-    chart = TypeAdapter(ChartIR).validate_json(assets.get(member.ir))
-    return member_index_text(chart, description)
+        body = TypeAdapter(ObjectDescription).validate_json(payload).text
+    else:
+        body = TypeAdapter(TextDescription).validate_json(payload).text
+        if plan.qualification_policy in PROJECTED_CHART_POLICIES:
+            chart = TypeAdapter(ChartIR).validate_json(assets.get(member.ir))
+            body = member_index_text(chart, body)
+    if plan.qualification_policy not in CONTEXTUAL_POLICIES:
+        return body
+    return contextual_index_text(body, context)
 
 
 def eligibility(record: ObjectProcessingRecord) -> tuple[bool, str | None]:
@@ -119,7 +145,9 @@ class ProcessingRetrieval:
         self,
         scope: ProcessingScope,
         records: tuple[tuple[int, ObjectProcessingRecord], ...],
+        contexts: Mapping[int, PageIndexContext] | None = None,
     ) -> RetrievalPublication:
+        """Embed every eligible member; ``contexts`` gives each page's index-text header."""
         members: list[RetrievalMember] = []
         entries: list[IndexEntry] = []
         for page_index, record in records:
@@ -187,7 +215,10 @@ class ProcessingRetrieval:
                 lineage,
             )
             checked_ir, checked_description, _ = self._qualified(scope, provisional)
-            text = member_index_text(checked_ir, checked_description.text)
+            text = contextual_index_text(
+                member_index_text(checked_ir, checked_description.text),
+                None if contexts is None else contexts.get(page_index),
+            )
             embedding_ref, embedding = self._embedding(description, text)
             member = RetrievalMember(
                 record.object_id,
