@@ -1,7 +1,6 @@
 """Generic PDF ingest→qualify→index→publish→retrieve runs fully offline, no models."""
 
 import json
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -14,100 +13,20 @@ from enterprise_pdf_rag.adapters.draft_publication import (
     qualify_draft,
 )
 from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
-from enterprise_pdf_rag.adapters.pdf_ingestion import IngestionSummary, ingest_pdf
 from enterprise_pdf_rag.adapters.processing_retrieval import ProcessingRetrieval
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.cli import main
-from tests.enterprise_pdf_rag.adapters.test_pdf_ingestion import authored_pdf
+from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
+    ingest_generic_semantics,
+)
 
-_PROVIDER_BASE_URL = "https://provider.invalid"
-# Kept short so the authored line fits the 240pt page width (no overflow/truncation).
-_DOCUMENT_LABEL = "Revenue expense ratio"
 _QUERY = "revenue expense ratio"
-
-
-def _text_partition_sender(calls: list[bytes]) -> Callable[..., bytes]:
-    """Classify every page region as offline Text so no semantic model call fires."""
-
-    def sender(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
-        assert url == f"{_PROVIDER_BASE_URL}/v1/chat/completions"
-        calls.append(payload)
-        prompt = json.loads(payload)["messages"][1]["content"][0]["text"]
-        assert "Source text observations:" in prompt
-        observations = json.loads(prompt.split("Source text observations:\n", 1)[1])
-        span_ids = [str(observation["id"]) for observation in observations]
-        # Bind the region to the actual span extents so the literal projection stays
-        # in bounds regardless of how the embedded font renders the line.
-        bbox = [
-            min(float(observation["bbox"][0]) for observation in observations),
-            min(float(observation["bbox"][1]) for observation in observations),
-            max(float(observation["bbox"][2]) for observation in observations),
-            max(float(observation["bbox"][3]) for observation in observations),
-        ]
-        content: dict[str, object] = {
-            "regions": [
-                {
-                    "region_id": "body",
-                    "kind": "Text",
-                    "bbox": bbox,
-                    "source_span_ids": span_ids,
-                    "context_span_ids": [],
-                    "list_items": [],
-                    "list_ordered": None,
-                    "parent_id": None,
-                    "interpretation": "Body financial narrative",
-                }
-            ],
-            "unassigned_span_ids": [],
-            "diagnostics": [],
-        }
-        return json.dumps(
-            {
-                "choices": [
-                    {
-                        "message": {"content": json.dumps(content)},
-                        "finish_reason": "stop",
-                    }
-                ]
-            }
-        ).encode()
-
-    return sender
-
-
-def _ingest_generic_semantics(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> tuple[IngestionSummary, list[bytes]]:
-    for key, value in {
-        "OPENAI_API_KEY": "offline-secret",
-        "OPENAI_BASE_URL": _PROVIDER_BASE_URL,
-        "OPENAI_MODEL": "offline-test",
-    }.items():
-        monkeypatch.setenv(key, value)
-    pdf = authored_pdf(
-        tmp_path / "meridian-semiannual.pdf",
-        page_count=3,
-        label=_DOCUMENT_LABEL,
-        embedded_font=True,
-    )
-    calls: list[bytes] = []
-    monkeypatch.setattr(
-        "enterprise_pdf_rag.adapters.json_completion._send_once",
-        _text_partition_sender(calls),
-    )
-    summary = ingest_pdf(
-        pdf=pdf,
-        stage="semantics",
-        max_live_calls=3,
-        output_dir=tmp_path / "ingestion",
-    )
-    return summary, calls
 
 
 def test_generic_pdf_ingest_qualify_index_publish_retrieve_offline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    ingest, calls = _ingest_generic_semantics(tmp_path, monkeypatch)
+    ingest, calls = ingest_generic_semantics(tmp_path, monkeypatch)
 
     assert ingest.indexed is False
     assert ingest.activated is False
@@ -186,7 +105,7 @@ def test_generic_pdf_ingest_qualify_index_publish_retrieve_offline(
 def test_generic_pdf_cli_qualify_index_publish_smoke(
     tmp_path: Path, capsys: CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    ingest, calls = _ingest_generic_semantics(tmp_path, monkeypatch)
+    ingest, calls = ingest_generic_semantics(tmp_path, monkeypatch)
     assert ingest.retrieval_status.startswith("not_ready")
 
     processing_store = Path(ingest.processing_store)

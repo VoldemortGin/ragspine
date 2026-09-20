@@ -141,7 +141,7 @@ def ingest_pdf(
     if not data.startswith(b"%PDF-"):
         raise ValueError("Expected a PDF file beginning with %PDF-")
     parent = (
-        (output_dir if output_dir is not None else get_settings().data_dir / "ingestion")
+        (output_dir if output_dir is not None else get_settings().ingestion_root)
         .expanduser()
         .resolve()
     )

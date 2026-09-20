@@ -61,6 +61,11 @@ def _find_project_root() -> Path:
 ROOT_DIR: Path = _find_project_root()
 
 
+def _resolve_directory(value: Path) -> Path:
+    path = value.expanduser()
+    return (path if path.is_absolute() else ROOT_DIR / path).resolve()
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="APP_",  # APP_IS_DEBUG、APP_BEARTYPE_ON ...
@@ -73,19 +78,37 @@ class Settings(BaseSettings):
     beartype_on: bool = True  # 运行时类型检查总开关;仅生产设 APP_BEARTYPE_ON=false
 
     # Explicit application mode: no implicit mock fallback.
-    execution_mode: Literal["unconfigured", "offline-demo", "production", "aia-source-review"] = (
-        "unconfigured"
-    )
+    execution_mode: Literal[
+        "unconfigured", "offline-demo", "production", "aia-source-review", "document-catalog"
+    ] = "unconfigured"
 
     # 运行期可写目录(默认锚定项目根;部署可用 APP_*_DIR 覆盖)
     data_dir: Path = ROOT_DIR / "data"
     log_dir: Path = ROOT_DIR / "logs"
 
+    # 通用入库/文档目录根;None → data_dir / "ingestion"(与 ingest 默认输出一致)
+    ingestion_dir: Path | None = None
+    # 兼容根:每项是一个 processing store 根,其父目录即 source store 根;默认空
+    legacy_document_roots: tuple[Path, ...] = ()
+
     @field_validator("data_dir", "log_dir")
     @classmethod
     def resolve_runtime_directory(cls, value: Path) -> Path:
-        path = value.expanduser()
-        return (path if path.is_absolute() else ROOT_DIR / path).resolve()
+        return _resolve_directory(value)
+
+    @field_validator("ingestion_dir")
+    @classmethod
+    def resolve_optional_directory(cls, value: Path | None) -> Path | None:
+        return None if value is None else _resolve_directory(value)
+
+    @field_validator("legacy_document_roots")
+    @classmethod
+    def resolve_legacy_roots(cls, value: tuple[Path, ...]) -> tuple[Path, ...]:
+        return tuple(_resolve_directory(item) for item in value)
+
+    @property
+    def ingestion_root(self) -> Path:
+        return self.ingestion_dir if self.ingestion_dir is not None else self.data_dir / "ingestion"
 
     @classmethod
     def settings_customise_sources(

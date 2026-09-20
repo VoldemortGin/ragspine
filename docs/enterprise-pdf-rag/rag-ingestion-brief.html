@@ -1,0 +1,654 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>矢量优先财务 RAG</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+:root {
+  --ink: #1A2430;
+  --ink-2: #4B5B6B;
+  --ground: #F2F5F8;
+  --surface: #FFFFFF;
+  --rule: #CDD6DF;
+  --teal: #0B7285;
+  --teal-soft: #D8EDF1;
+  --amber: #B4640F;
+  --amber-soft: #F9E7D1;
+  --font-body: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ink: #E5EBF1;
+    --ink-2: #A6B3C0;
+    --ground: #0F161C;
+    --surface: #182129;
+    --rule: #2E3B47;
+    --teal: #52C2D3;
+    --teal-soft: #113A44;
+    --amber: #E5A54F;
+    --amber-soft: #3F2A11;
+  }
+}
+:root[data-theme="dark"] {
+  --ink: #E5EBF1;
+  --ink-2: #A6B3C0;
+  --ground: #0F161C;
+  --surface: #182129;
+  --rule: #2E3B47;
+  --teal: #52C2D3;
+  --teal-soft: #113A44;
+  --amber: #E5A54F;
+  --amber-soft: #3F2A11;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.8;
+  padding-inline: clamp(16px, 4vw, 48px);
+  -webkit-font-smoothing: antialiased;
+}
+.page {
+  max-width: 1080px;
+  margin-inline: auto;
+  padding-block: 48px 72px;
+  display: flex;
+  flex-direction: column;
+  gap: 64px;
+}
+h1, h2, h3 { text-wrap: balance; line-height: 1.25; margin: 0; }
+h1 { font-size: clamp(28px, 4vw, 40px); font-weight: 600; letter-spacing: -0.01em; }
+h2 { font-size: 22px; font-weight: 600; }
+h3 { font-size: 17px; font-weight: 600; }
+p { margin: 0; }
+.prose { max-width: 42em; display: flex; flex-direction: column; gap: 14px; }
+.prose p + p { margin: 0; }
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  color: var(--ink-2);
+  text-transform: uppercase;
+}
+.mono { font-family: var(--font-mono); font-size: 0.92em; }
+code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  color: var(--teal);
+  background: none;
+  padding: 0;
+}
+.num { font-variant-numeric: tabular-nums; }
+section { display: flex; flex-direction: column; gap: 22px; }
+.section-head { display: flex; flex-direction: column; gap: 6px; }
+
+/* header */
+header.hero { display: flex; flex-direction: column; gap: 18px; padding-bottom: 32px; border-bottom: 1px solid var(--rule); }
+.hero .thesis { font-size: 19px; line-height: 1.65; max-width: 40em; }
+.hero .meta { display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 13px; color: var(--ink-2); font-family: var(--font-mono); }
+.three-q { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 32px; margin-top: 8px; border-top: 1px solid var(--rule); }
+.three-q > div { padding-top: 14px; display: flex; flex-direction: column; gap: 4px; }
+.three-q .q { font-weight: 600; }
+.three-q .a { font-size: 14px; color: var(--ink-2); line-height: 1.6; }
+
+/* figures */
+figure { margin: 0; display: flex; flex-direction: column; gap: 12px; }
+.fig-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; padding-block: 4px; }
+.fig-scroll svg { display: block; min-width: 760px; width: 100%; height: auto; color: var(--ink-2); font-family: var(--font-body); }
+svg text { fill: var(--ink); font-size: 13px; }
+svg text.sub { fill: var(--ink-2); font-size: 11px; }
+svg text.lbl { fill: var(--ink-2); font-size: 11px; }
+svg text.name-mono { font-family: var(--font-mono); font-size: 12.5px; font-weight: 500; }
+svg text.sub.name-mono { font-size: 10.5px; font-weight: 400; }
+svg .node-det { fill: var(--teal-soft); stroke: var(--teal); stroke-width: 1.2; }
+svg .node-model { fill: var(--amber-soft); stroke: var(--amber); stroke-width: 1.2; }
+svg .node-plain { fill: var(--surface); stroke: var(--rule); stroke-width: 1.2; }
+svg .edge { fill: none; stroke: currentColor; stroke-width: 1.3; }
+svg .edge-dash { stroke-dasharray: 4 3; }
+figcaption { font-size: 14px; color: var(--ink-2); line-height: 1.6; max-width: 60em; }
+
+/* stage grid */
+.stages { display: flex; flex-direction: column; border-top: 1px solid var(--rule); }
+.stage {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 8px 28px;
+  padding-block: 18px;
+  border-bottom: 1px solid var(--rule);
+  align-items: start;
+}
+.stage .k { display: flex; flex-direction: column; gap: 4px; }
+.stage .k .name { font-family: var(--font-mono); font-size: 13.5px; font-weight: 500; }
+.stage .k .tag { font-size: 12px; font-family: var(--font-mono); }
+.tag-det { color: var(--teal); }
+.tag-model { color: var(--amber); }
+.stage .io { font-size: 15px; line-height: 1.7; }
+.stage .io b { font-weight: 600; }
+.stage .why { font-size: 14px; color: var(--ink-2); line-height: 1.7; }
+.stages-head { font-size: 12px; color: var(--ink-2); font-family: var(--font-mono); letter-spacing: 0.06em; padding-block: 8px; }
+
+/* IR example */
+.ir-block {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+pre.ir {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--teal);
+  padding: 16px 18px;
+  overflow-x: auto;
+  color: var(--ink);
+}
+pre.ir .c { color: var(--ink-2); }
+pre.ir .k { color: var(--teal); }
+pre.ir .m { color: var(--amber); }
+.ir-notes { display: flex; flex-direction: column; gap: 12px; font-size: 14.5px; line-height: 1.7; }
+.ir-notes dt { font-weight: 600; font-family: var(--font-mono); font-size: 13px; }
+.ir-notes dd { margin: 0; color: var(--ink-2); }
+.ir-notes dl { display: flex; flex-direction: column; gap: 10px; margin: 0; }
+
+/* comparison table */
+.tbl-scroll { overflow-x: auto; }
+table.cmp { border-collapse: collapse; width: 100%; min-width: 720px; font-size: 14px; line-height: 1.55; }
+table.cmp th, table.cmp td { text-align: left; vertical-align: top; padding: 12px 14px; border-bottom: 1px solid var(--rule); }
+table.cmp thead th { font-size: 12px; font-family: var(--font-mono); letter-spacing: 0.06em; color: var(--ink-2); font-weight: 500; border-bottom: 1px solid var(--ink-2); }
+table.cmp th.row { font-weight: 600; white-space: nowrap; }
+table.cmp tr.ours td, table.cmp tr.ours th { background: var(--teal-soft); }
+table.cmp tr.ours th.row { border-left: 3px solid var(--teal); }
+table.cmp td.loss { color: var(--ink-2); }
+
+/* refusal list */
+.reasons { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0 32px; margin: 0; padding: 0; list-style: none; }
+.reasons li { display: grid; grid-template-columns: 200px 1fr; gap: 12px; padding-block: 10px; border-bottom: 1px solid var(--rule); font-size: 14px; line-height: 1.6; }
+.reasons li .code { font-family: var(--font-mono); font-size: 12.5px; color: var(--teal); }
+.reasons li .txt { color: var(--ink-2); }
+
+/* footer roadmap */
+footer.road { border-top: 1px solid var(--rule); padding-top: 28px; display: flex; flex-direction: column; gap: 12px; }
+footer.road p { max-width: 44em; }
+footer.road .fine { font-size: 13px; color: var(--ink-2); font-family: var(--font-mono); }
+
+@media (max-width: 760px) {
+  .page { gap: 48px; padding-block: 32px 56px; }
+  .three-q { grid-template-columns: 1fr; gap: 0; }
+  .three-q > div { border-top: 1px solid var(--rule); }
+  .three-q > div:first-child { border-top: 0; }
+  .stage { grid-template-columns: 1fr; gap: 6px; }
+  .ir-block { grid-template-columns: 1fr; }
+  .reasons { grid-template-columns: 1fr; }
+  .reasons li { grid-template-columns: 1fr; gap: 2px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+
+<div class="page">
+
+<header class="hero">
+  <div class="eyebrow">Enterprise PDF RAG · 技术路线汇报</div>
+  <h1>矢量优先的财务 PDF 问答路线</h1>
+  <p class="thesis">
+    财务 PDF 里的文字、数字和图表本来就是矢量。我们不把页面拍成图片再去认，而是把每一页原样转成 SVG，让每个数字既是"看得见的字形"，也是"读得出的字符串"，并且始终带着页面坐标。检索只嵌自然语言描述；回答时再回到同一份快照里的结构化图表 IR 与 SVG 证据逐字段核验，核不上就拒答。
+  </p>
+  <div class="meta">
+    <span>PDF → SVG → 文本 → embedding</span>
+    <span>SVG → chart IR → 回答上下文</span>
+    <span>parser: pdfspine 0.11.0（纯 Rust）</span>
+    <span>2026-09</span>
+  </div>
+  <div class="three-q">
+    <div><div class="q">原件里观察到了什么</div><div class="a">页面 SVG、文字 span、对象裁剪，全部内容寻址、不可变。</div></div>
+    <div><div class="q">系统如何解释它</div><div class="a">文字类对象逐字转录；图表由模型从同一张 SVG 独立产出 chart IR 与描述，再由无模型的来源校验授予资格。</div></div>
+    <div><div class="q">哪些证据有资格支持这次回答</div><div class="a">每个数字回指 chart IR 字段 → SVG 元素 → 页面/区域；命中分数本身不算证据。</div></div>
+  </div>
+</header>
+
+<!-- ================= 全景 ================= -->
+<section>
+  <div class="section-head">
+    <div class="eyebrow">01 · 全景</div>
+    <h2>一条主干，一条图表支线，两种颜色</h2>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg viewBox="0 0 1240 400" role="img" aria-label="入库流程：PDF 经 pdfspine 转为页面 SVG 与文字 span，经版面切分为对象，文字对象逐字转录，只有 description 文本进入 embedding，向量与证据一起进入不可变快照；图表对象走支线，同一张 SVG 由 VLM 独立产出 chart IR 与描述，再经确定性的来源资格校验后，描述文本进 embedding，IR 与证据随成员保存但不进向量。">
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"></path>
+          </marker>
+        </defs>
+
+        <!-- 主干 -->
+        <text x="20" y="42" class="lbl">主干 · 文字与版面</text>
+
+        <rect x="20" y="60" width="128" height="56" rx="3" class="node-plain"></rect>
+        <text x="84" y="84" text-anchor="middle">PDF 原件</text>
+        <text x="84" y="102" text-anchor="middle" class="sub">sha256 内容寻址</text>
+
+        <rect x="192" y="60" width="128" height="56" rx="3" class="node-det"></rect>
+        <text x="256" y="84" text-anchor="middle">pdfspine 解析</text>
+        <text x="256" y="102" text-anchor="middle" class="sub">页面 SVG + 文字 span</text>
+
+        <rect x="364" y="60" width="128" height="56" rx="3" class="node-model"></rect>
+        <text x="428" y="84" text-anchor="middle">版面切分</text>
+        <text x="428" y="102" text-anchor="middle" class="sub name-mono">partition · LLM</text>
+
+        <rect x="536" y="60" width="128" height="56" rx="3" class="node-det"></rect>
+        <text x="600" y="84" text-anchor="middle">对象裁剪</text>
+        <text x="600" y="102" text-anchor="middle" class="sub name-mono">svg · source_text</text>
+
+        <rect x="708" y="60" width="128" height="56" rx="3" class="node-det"></rect>
+        <text x="772" y="84" text-anchor="middle">逐字转录</text>
+        <text x="772" y="102" text-anchor="middle" class="sub name-mono">ir · description</text>
+
+        <rect x="880" y="60" width="128" height="56" rx="3" class="node-model"></rect>
+        <text x="944" y="84" text-anchor="middle" class="name-mono">embedding</text>
+        <text x="944" y="102" text-anchor="middle" class="sub">只嵌 description 文本</text>
+
+        <rect x="1052" y="60" width="128" height="56" rx="3" class="node-det"></rect>
+        <text x="1116" y="84" text-anchor="middle">检索快照</text>
+        <text x="1116" y="102" text-anchor="middle" class="sub">不可变 · 内容寻址</text>
+
+        <line x1="148" y1="88" x2="190" y2="88" class="edge" marker-end="url(#arr)"></line>
+        <line x1="320" y1="88" x2="362" y2="88" class="edge" marker-end="url(#arr)"></line>
+        <line x1="492" y1="88" x2="534" y2="88" class="edge" marker-end="url(#arr)"></line>
+        <line x1="664" y1="88" x2="706" y2="88" class="edge" marker-end="url(#arr)"></line>
+        <line x1="836" y1="88" x2="878" y2="88" class="edge" marker-end="url(#arr)"></line>
+        <line x1="1008" y1="88" x2="1050" y2="88" class="edge" marker-end="url(#arr)"></line>
+
+        <text x="170" y="134" text-anchor="middle" class="lbl">打开</text>
+        <text x="342" y="134" text-anchor="middle" class="lbl">整页</text>
+        <text x="514" y="134" text-anchor="middle" class="lbl">bbox</text>
+        <text x="686" y="134" text-anchor="middle" class="lbl">span</text>
+        <text x="858" y="134" text-anchor="middle" class="lbl">文本</text>
+        <text x="1030" y="134" text-anchor="middle" class="lbl">向量</text>
+
+        <!-- 分支：Chart 对象 向下 -->
+        <line x1="600" y1="116" x2="600" y2="230" class="edge" marker-end="url(#arr)"></line>
+        <text x="608" y="178" class="lbl">Chart 对象</text>
+
+        <!-- 支线 -->
+        <text x="536" y="214" class="lbl">支线 · 图表</text>
+
+        <rect x="536" y="232" width="128" height="56" rx="3" class="node-det"></rect>
+        <text x="600" y="256" text-anchor="middle">裁剪 SVG · 渲染</text>
+        <text x="600" y="274" text-anchor="middle" class="sub name-mono">svg · model_render</text>
+
+        <rect x="708" y="224" width="128" height="72" rx="3" class="node-model"></rect>
+        <text x="772" y="248" text-anchor="middle">模型解读</text>
+        <text x="772" y="266" text-anchor="middle" class="sub">chart IR + 描述</text>
+        <text x="772" y="282" text-anchor="middle" class="sub name-mono">ir · description · VLM</text>
+
+        <rect x="880" y="224" width="128" height="72" rx="3" class="node-det"></rect>
+        <text x="944" y="248" text-anchor="middle">来源资格校验</text>
+        <text x="944" y="266" text-anchor="middle" class="sub name-mono">qualification</text>
+        <text x="944" y="282" text-anchor="middle" class="sub">几何 + 字形油漆证明</text>
+
+        <line x1="664" y1="260" x2="706" y2="260" class="edge" marker-end="url(#arr)"></line>
+        <line x1="836" y1="260" x2="878" y2="260" class="edge" marker-end="url(#arr)"></line>
+
+        <!-- 回到主干 -->
+        <line x1="944" y1="224" x2="944" y2="118" class="edge" marker-end="url(#arr)"></line>
+        <text x="936" y="176" text-anchor="end" class="lbl">仅 description 文本</text>
+
+        <path d="M1008,278 H1116 V118" class="edge edge-dash" marker-end="url(#arr)"></path>
+        <text x="1124" y="176" class="lbl">IR · 证据 · 资格回执</text>
+        <text x="1124" y="192" class="lbl">随成员保存，不进向量</text>
+
+        <text x="944" y="316" text-anchor="middle" class="lbl">校验不过 → 不入库</text>
+
+        <!-- 图例 -->
+        <rect x="20" y="372" width="14" height="14" rx="2" class="node-det"></rect>
+        <text x="42" y="384" class="lbl">确定性步骤（无模型，可重放）</text>
+        <rect x="230" y="372" width="14" height="14" rx="2" class="node-model"></rect>
+        <text x="252" y="384" class="lbl">模型步骤（LLM / VLM / embedding）</text>
+        <rect x="470" y="372" width="14" height="14" rx="2" class="node-plain"></rect>
+        <text x="492" y="384" class="lbl">原件 / 产物</text>
+        <line x1="600" y1="379" x2="640" y2="379" class="edge edge-dash"></line>
+        <text x="648" y="384" class="lbl">不进向量，随快照成员保存</text>
+      </svg>
+    </div>
+    <figcaption>
+      入库全景。主干把页面变成 SVG 与文字 span，切分成对象后逐字转录，只有自然语言描述进入 embedding；图表支线从同一张对象 SVG 出发，由 VLM 独立产出 chart IR 与描述，再由无模型的来源校验授予资格。模型只在三处出现，且每一处的输出都要过一道确定性校验才能落库。
+    </figcaption>
+  </figure>
+  <div class="prose">
+    <p>
+      读这张图只需要记住两件事。第一，主干上的模型步骤只有两个：切版面、算向量；文字对象的转录和资格都是确定性的，可以逐字节重放。第二，图表支线上模型产出的 chart IR 和描述互相不做输入，也不能自证正确，只有"来源资格校验"这一步能让它们进入检索快照。
+    </p>
+  </div>
+</section>
+
+<!-- ================= 主干拆解 ================= -->
+<section>
+  <div class="section-head">
+    <div class="eyebrow">02 · 主干拆解</div>
+    <h2>PDF → SVG → 文本 → embedding，每一步在做什么</h2>
+  </div>
+  <div class="prose">
+    <p>
+      下表按处理对象模型中的 stage 名列出。存储层统一为内容寻址：每个产物按 <code>sha256</code> 落到 <code>objects/sha256/&lt;digest&gt;</code>，stage 结果以输入指纹为缓存键，读回时校验摘要与长度。
+    </p>
+  </div>
+  <div class="stages">
+    <div class="stages-head">stage · 输入 → 输出 · 为什么这样做</div>
+
+    <div class="stage">
+      <div class="k"><div class="name">canonical</div><div class="tag tag-det">确定性</div></div>
+      <div class="io"><b>输入</b> PDF 字节。<b>输出</b> 原件的 sha256 身份、页数与页框，写入不可变 manifest。</div>
+      <div class="why">后面所有产物、快照和回答都绑定这一个摘要。换了文件就是新的身份，不会悄悄覆盖。</div>
+    </div>
+
+    <div class="stage">
+      <div class="k"><div class="name">页面观测（pdfspine）</div><div class="tag tag-det">确定性 · 无 OCR</div></div>
+      <div class="io">
+        <b>输入</b> 每一页。<b>输出</b> 两份彼此独立的观测：
+        (1) 整页 native SVG——<code>page.get_svg_image()</code>，路径、填充、描边、裁剪、变换矩阵、内嵌图片全部保留，文字以内嵌字体的字形轮廓输出，坐标就是页面 pt；
+        (2) 文字 span——<code>page.get_text("dict")</code>，每个 span 带文本、bbox、字体、字号、方向，直接来自 PDF 内容流。
+      </div>
+      <div class="why">
+        矢量页面上的数字本来就有精确坐标和精确字符串，没有理由先拍成像素再去认。pdfspine 是唯一的 parser，纯 Rust、无 C 依赖、无网络，结果可逐字节重放；OCR 在 SDK 里只是显式调用的独立能力，不作为主链路的回退。SVG 帧必须等于物理页帧，旋转页、非默认裁剪直接报错而不是猜。
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="k"><div class="name">partition</div><div class="tag tag-model">LLM</div></div>
+      <div class="io"><b>输入</b> 页面 SVG 与 span。<b>输出</b> 对象区域列表，每个对象是 <span class="mono">Text / List / Table / Chart / Diagram / Image / Formula / Group</span> 之一，附 bbox；随后由确定性的 <code>normalized_partition</code> 归一。</div>
+      <div class="why">版面理解是模型擅长的事，而且这一步的输出只有"哪里是什么"，不产生任何数值——模型在这里犯错的上限是分区不准，而不是编出一个数字。</div>
+    </div>
+
+    <div class="stage">
+      <div class="k"><div class="name">svg · source_text</div><div class="tag tag-det">确定性</div></div>
+      <div class="io"><b>输入</b> 对象 bbox。<b>输出</b> 对象级 SVG 裁剪（只改 <code>viewBox</code> 并包一层 <code>overflow="hidden"</code>，保留整棵 native 子树，不重绘）；以及落在 bbox 内的 span 子集。</div>
+      <div class="why">裁剪不重绘，所以对象 SVG 里的每个元素仍能对回整页 SVG 和页面坐标；span 与字形是两份独立观测，谁也不替谁背书，后面的资格校验正是要把它们对上。</div>
+    </div>
+
+    <div class="stage">
+      <div class="k"><div class="name">ir · description</div><div class="tag tag-det">确定性（文字类对象）</div></div>
+      <div class="io">
+        <b>输入</b> 对象的 span。<b>输出</b> 类型化 IR（<span class="mono">TextIR / ListIR / GroupIR</span>，每个片段带 <code>source_span_id</code>）和一段逐字转录的 description，producer 记为 <code>exact-source-transcription-v1</code>。表格由 pdfspine <code>find_tables</code> 依据矢量 ruling 线重建网格得到 <span class="mono">TableIR</span>；图表走支线（见 03）。
+      </div>
+      <div class="why">凡是原文能逐字给出的，就不让模型改写。文字对象的"描述"就是原文本身，检索命中的是原文语义而不是转述。</div>
+    </div>
+
+    <div class="stage">
+      <div class="k"><div class="name">qualification</div><div class="tag tag-det">确定性</div></div>
+      <div class="io"><b>输入</b> 该对象的 ir、description、svg。<b>输出</b> 资格回执：文字类按 <code>literal-source-transcription-v1</code> 逐 span 复核；图表类由几何校验与字形油漆证明（source-paint proof）决定，产出 <code>qualified_ir</code> / <code>qualified_description</code>。</div>
+      <div class="why">"source-qualified" 的含义就在这一步：能进入检索的内容，必须由独立于模型分支的校验器从固定来源重新构建并逐字段比对。模型返回一个 <span class="mono">VERIFIED</span> 标记不授予任何资格。</div>
+    </div>
+
+    <div class="stage">
+      <div class="k"><div class="name">embedding</div><div class="tag tag-model">embedding 模型</div></div>
+      <div class="io"><b>输入</b> 通过资格复核的 description 文本，且只有文本。<b>输出</b> 一个向量，成为快照成员。SVG、IR、图表显示值一律不进 embedding；描述若以 <span class="mono">{ [ &lt; ChartIR(</span> 这类结构化序列化开头会被直接拒绝。</div>
+      <div class="why">
+        向量空间里只放自然语言，语义检索才干净；结构化数据不当"内容"而当"证据"，留在快照里等回答时逐字段核验。这样一条描述被命中只意味着"值得看一眼"，数字仍要从 IR 与 SVG 里取。
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="k"><div class="name">qualify → index → publish</div><div class="tag tag-det">确定性</div></div>
+      <div class="io"><b>输入</b> 已入库的 draft。<b>输出</b> 资格清单 → 新的不可变检索快照（<code>snapshot_id</code> 为 scope 与成员的内容哈希）→ 原子切换 <code>current-processing</code> 指针（可选再切 <code>current-manifest</code>）。三步幂等，任何一步失败不动指针。</div>
+      <div class="why">快照绑定描述、资格策略、模型指纹、维度与成员 lineage。同一来源换了描述或资格，就是一个新快照；回答永远 pin 一个快照，绝不悄悄读 latest。</div>
+    </div>
+  </div>
+  <div class="prose">
+    <p>
+      另有一份逐页导出的轻量 HTML 审阅页（内嵌该页 SVG、原文 span 与 bbox），供人工核对来源。它是给人看的投影，不是处理阶段：进入模型和检索的始终是 SVG 与 span。
+    </p>
+  </div>
+</section>
+
+<!-- ================= 图表支线 ================= -->
+<section>
+  <div class="section-head">
+    <div class="eyebrow">03 · 图表支线</div>
+    <h2>SVG → chart IR → 回答上下文</h2>
+  </div>
+  <div class="prose">
+    <p>
+      图表是财务 PDF 里最容易被"看错"的东西，也是我们路线与常见做法差别最大的地方。支线从对象级 SVG 出发，分四步：
+    </p>
+    <p>
+      <b>渲染。</b> 用 resvg 把裁剪 SVG 确定性地渲染为 PNG（<code>model_render</code>），同时生成一份绑定摘要（<code>model_view</code>）。渲染时禁止未解析字体的 <span class="mono">&lt;text&gt;</span> 元素——模型看到的每个字形都必须来自内嵌字体。
+    </p>
+    <p>
+      <b>两路独立推断。</b> 同一张 SVG 渲染图连同结构化的 span 观测，分别交给两次 VLM 调用：一路提取 chart IR（producer <code>model-chart-v1</code>），一路直接写自然语言描述（producer <code>model-description-v1</code>）。描述这一路的提示词明确写着"你没有结构化提取结果作为输入"，每个显式数值一句话，形如 <span class="mono">During {period}, {series} for {category}: {value} {unit}.</span>，必须引用精确的元素 ID，不得写趋势、估计或比较。两路互不为输入，所以它们的一致是证据，而不是复读。
+    </p>
+    <p>
+      <b>来源资格校验。</b> 无模型。按图表语法做几何校验（donut 的扇区、bar 的柱与标签关联），并做字形油漆证明：通过 pdfspine 的设备接口重放同一页，证明 IR 引用的那块 paint 确实是文字算子用内嵌字体画出来的，Unicode、字形 ID、渲染矩阵、填充与 alpha 都对得上。数值只能来自显式文本出现，绝不从柱高、颜色、坐标轴插值或箭头几何推出来。
+    </p>
+    <p>
+      <b>进入快照。</b> 通过校验的 <code>qualified_description</code> 文本进 embedding；<code>qualified_ir</code>、SVG、资格回执作为同一成员的证据随快照保存。回答时命中描述 → 解析同一快照的 IR 与 SVG → 逐字段核验后才形成上下文。
+    </p>
+  </div>
+
+  <div class="ir-block">
+    <pre class="ir"><span class="c">// chart IR 字段结构（figures/models.py）</span>
+<span class="c">// 示例语义：第 18 页 Distribution Mix donut</span>
+<span class="k">ChartIR</span>
+  binding:      <span class="c">SvgBinding  → svg_digest, element 索引</span>
+  grammar:      <span class="m">"donut"</span>
+  title:        TextField(<span class="m">"Distribution Mix"</span>, evidence)
+  period:       TextField(<span class="m">"1H26"</span>, evidence)
+  axes:         ()                          <span class="c">// donut 无坐标轴</span>
+  points:
+    - <span class="k">ChartPoint</span>
+        series:   TextField(<span class="m">"VONB"</span>, evidence)
+        category: TextField(<span class="m">"Agency"</span>, evidence)
+        unit:     TextField(<span class="m">"%"</span>, evidence)
+        value:    NumericObservation(Decimal(<span class="m">"72"</span>), <span class="k">EXPLICIT</span>, evidence)
+    - <span class="k">ChartPoint</span>
+        series:   <span class="m">"VONB"</span>  category: <span class="m">"Partnerships"</span>  unit: <span class="m">"%"</span>
+        value:    NumericObservation(Decimal(<span class="m">"28"</span>), <span class="k">EXPLICIT</span>, evidence)
+  marks:
+    - <span class="k">ChartMark</span>(kind=<span class="m">"arc"</span>, bbox=(x0, y0, x1, y1),
+                color=<span class="m">"#rrggbb"</span>, point_ids=(<span class="m">"Agency"</span>,), evidence)
+  producer:     <span class="m">"model-chart-v1:&lt;model指纹&gt;:&lt;请求指纹&gt;:&lt;输出摘要&gt;"</span>
+  verification: <span class="k">VERIFIED</span> | PENDING
+  execution_mode: PRODUCTION
+
+<span class="c">// 每个 evidence 都是一组 SVG 元素引用</span>
+<span class="k">Evidence</span>(element_ids=(<span class="m">"…"</span>,), verification, confidence)
+<span class="k">SvgElement</span>.anchor → page_index, bbox, transform</pre>
+    <div class="ir-notes">
+      <dl>
+        <dt>series / category / unit / value</dt>
+        <dd>每个数据点四个字段分别带证据。donut 里指标（VONB）是 series，分段（Agency）是 category，单位是 %。</dd>
+        <dt>NumericObservation.kind</dt>
+        <dd><span class="mono">EXPLICIT</span> 表示值来自页面上显式写出的文本；由位置、柱高、面积或视觉模型估出的值属于 <span class="mono">estimated</span>，不用于精确数值回答；没有值就是 <span class="mono">UNAVAILABLE</span>，value 为空。</dd>
+        <dt>ChartMark</dt>
+        <dd>定位到的图形假设：类型（arc、bar…）、bbox、颜色、它对应哪些点。它记录几何与图例映射，但自身不是被验证的关系。</dd>
+        <dt>Evidence → SvgElement</dt>
+        <dd>所有字段的证据最终落到 SVG 元素，元素锚点带页码、bbox 与变换矩阵。这就是"可追溯到页面坐标"的实现方式。</dd>
+        <dt>回答时的显示值</dt>
+        <dd>IR 里不存"72%"这样的显示串。回答时从 SVG 的原始 span 回读整串，要求数字与单位来自同一 span、正则精确匹配、Decimal 相等，否则报错。</dd>
+      </dl>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 对比 ================= -->
+<section>
+  <div class="section-head">
+    <div class="eyebrow">04 · 为什么不走常见路线</div>
+    <h2>OCR、整页截图喂 VLM、纯文本抽取各自丢了什么</h2>
+  </div>
+  <div class="tbl-scroll">
+    <table class="cmp">
+      <thead>
+        <tr>
+          <th>路线</th>
+          <th>文字与数字精度</th>
+          <th>图表里的数值</th>
+          <th>可追溯性</th>
+          <th>可重放 / 可审计</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th class="row">整页光栅 + OCR</th>
+          <td class="loss">把本来就是矢量的文字先变成像素再识别，引入本可避免的识别误差；小字号、上下标、脚注最先出错。</td>
+          <td class="loss">图形与文字被拍平在同一张位图里，图例、颜色、柱与标签的关联要靠二次猜测。</td>
+          <td class="loss">只能给到像素框，对不回 PDF 的元素与内容流。</td>
+          <td class="loss">识别结果随引擎与版本漂移。</td>
+        </tr>
+        <tr>
+          <th class="row">整页截图直接喂 VLM</th>
+          <td class="loss">数字是模型"读"出来的，读错没有独立信号；同一张图两次可能读出不同值。</td>
+          <td class="loss">值常从柱高、扇区大小估出，与显式标注无法区分；无值的柱子容易被补一个看上去合理的数。</td>
+          <td class="loss">回答只能引用"第几页"，无法指到具体元素与坐标；命中的是模型的转述。</td>
+          <td class="loss">不可重放，事后无法验证模型当时看到了什么、依据了什么。</td>
+        </tr>
+        <tr>
+          <th class="row">纯文本抽取 / 过早 Markdown 化</th>
+          <td class="loss">文字本身准确，但整页拉成线性文本后区域关系被破坏；表格丢失空白、合并单元格拓扑与完整多级表头。</td>
+          <td class="loss">图表里的数字散落成孤立字符串，不知道属于哪个系列、哪个分段、哪个期间。</td>
+          <td class="loss">位置信息在拉平时丢掉，很难回指区域。</td>
+          <td class="loss">可重放，但丢掉的结构无法找回。</td>
+        </tr>
+        <tr class="ours">
+          <th class="row">矢量优先（本路线）</th>
+          <td>文字直接来自内容流，逐字节精确；字形与 span 两份独立观测互相印证。</td>
+          <td>chart IR 每个点带 series / category / unit / value，值只接受显式文本出现；估计值另标 kind，不用于精确回答；无值即 <span class="mono">UNAVAILABLE</span>。</td>
+          <td>claim → chart IR 字段 → SVG 元素 → 页面 / 区域 / 变换矩阵，字段级引用。</td>
+          <td>解析、裁剪、渲染、校验全部确定性、内容寻址；模型输出带 producer 指纹，可重放核对。</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p>
+      我们不是拒绝模型，而是把模型放在它可靠的位置：理解版面、把图表翻译成结构、写一段可核对的描述。凡是页面上已经精确存在的东西——文字、数字、坐标、颜色——一律不经过模型重新生成。
+    </p>
+  </div>
+</section>
+
+<!-- ================= 检索、上下文与拒答 ================= -->
+<section>
+  <div class="section-head">
+    <div class="eyebrow">05 · 检索、上下文与拒答</div>
+    <h2>用文本找到它，用 chart IR 读懂它，核不上就不答</h2>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg viewBox="0 0 1240 214" role="img" aria-label="回答链路：问题同时走向量通道（query embedding 在 description 向量上做 cosine 检索）与 BM25 词法通道（倒排索引建在同一批 description 文本上），两路排序经 RRF 融合得到成员，再从同一快照取出 chart IR、SVG 证据与资格回执构建上下文，由 typed ChartQA 逐字段核验，输出 answered 或 abstained。chart IR 不进任何索引。">
+        <defs>
+          <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"></path>
+          </marker>
+        </defs>
+
+        <rect x="20" y="72" width="150" height="56" rx="3" class="node-plain"></rect>
+        <text x="95" y="96" text-anchor="middle">问题</text>
+        <text x="95" y="114" text-anchor="middle" class="sub">文本 query</text>
+
+        <rect x="204" y="20" width="170" height="56" rx="3" class="node-model"></rect>
+        <text x="289" y="44" text-anchor="middle" class="name-mono">embed query</text>
+        <text x="289" y="62" text-anchor="middle" class="sub">description 向量 · cosine</text>
+
+        <rect x="204" y="124" width="170" height="56" rx="3" class="node-det"></rect>
+        <text x="289" y="148" text-anchor="middle">BM25 词法检索</text>
+        <text x="289" y="166" text-anchor="middle" class="sub">description 文本 · 倒排索引</text>
+
+        <rect x="408" y="72" width="150" height="56" rx="3" class="node-det"></rect>
+        <text x="483" y="96" text-anchor="middle">RRF 融合</text>
+        <text x="483" y="114" text-anchor="middle" class="sub name-mono">k = 60</text>
+
+        <rect x="592" y="72" width="190" height="56" rx="3" class="node-det"></rect>
+        <text x="687" y="96" text-anchor="middle">构建上下文</text>
+        <text x="687" y="114" text-anchor="middle" class="sub">chart IR + SVG 证据 + 资格回执</text>
+
+        <rect x="816" y="72" width="170" height="56" rx="3" class="node-det"></rect>
+        <text x="901" y="96" text-anchor="middle">typed ChartQA</text>
+        <text x="901" y="114" text-anchor="middle" class="sub">逐字段核验 · Decimal 精确算</text>
+
+        <rect x="1020" y="72" width="200" height="56" rx="3" class="node-plain"></rect>
+        <text x="1120" y="96" text-anchor="middle" class="name-mono">answered / abstained</text>
+        <text x="1120" y="114" text-anchor="middle" class="sub">带字段级引用 或 带拒答原因</text>
+
+        <path d="M170,100 H186 V48 H202" class="edge" marker-end="url(#arr2)"></path>
+        <path d="M170,100 H186 V152 H202" class="edge" marker-end="url(#arr2)"></path>
+        <path d="M374,48 H390 V100 H406" class="edge" marker-end="url(#arr2)"></path>
+        <path d="M374,152 H390 V100 H406" class="edge" marker-end="url(#arr2)"></path>
+        <line x1="558" y1="100" x2="590" y2="100" class="edge" marker-end="url(#arr2)"></line>
+        <line x1="782" y1="100" x2="814" y2="100" class="edge" marker-end="url(#arr2)"></line>
+        <line x1="986" y1="100" x2="1018" y2="100" class="edge" marker-end="url(#arr2)"></line>
+
+        <text x="575" y="92" text-anchor="middle" class="lbl">member_id</text>
+        <text x="799" y="92" text-anchor="middle" class="lbl">context</text>
+        <text x="1003" y="92" text-anchor="middle" class="lbl">claims</text>
+
+        <text x="620" y="204" text-anchor="middle" class="lbl">两条通道检索的都只是 SVG → 文本那一路产出的 description；chart IR、SVG 元素、显示值不进任何索引，只在构建上下文时从同一快照按成员取出</text>
+      </svg>
+    </div>
+    <figcaption>回答链路。检索是双通道：向量通道与 BM25 词法通道各自在同一批 description 文本上出一份排序，RRF 融合后得到成员；之后的上下文构建、核验、计算全部无模型，且解析时会重新校验存储的证据。每次查询只 pin 一个快照。</figcaption>
+  </figure>
+
+  <div class="prose">
+    <p>
+      <b>检索是双通道的，索引里只有文本。</b> 问题同时走两条路：一条做 query embedding，在 pinned 快照的 description 向量上做 cosine 检索；一条做 BM25 词法检索，倒排索引建在同一批 description 文本上。两路各出一份排序，用 RRF 融合（<span class="mono">k = 60</span>）。两条通道检索的对象完全相同，都是 SVG → 文本那一路产出、并通过资格复核的 description；chart IR、SVG 元素、图表显示值不进任何索引。文本通道保证问"费用率"能召回写着 expense ratio 的那张图，向量通道保证换个说法也能召回。
+    </p>
+    <p>
+      <b>上下文用 chart IR 构建。</b> 融合后的命中只是成员 ID。构建上下文时回到同一快照，按成员取出 <code>qualified_ir</code>、SVG 证据与资格回执：文字成员给原文转录，图表成员给结构化的 chart IR。检索靠文本找到"哪张图值得看"，回答靠 IR 知道"图里到底写了什么"。
+    </p>
+    <p>
+      <b>引用链是字段级的。</b> 最终引用永远是 claim 或计算输入 → chart IR 字段 → SVG 元素 → PDF 来源版本 / 页 / 区域。每条引用（<span class="mono">FieldCitation</span>）带字段路径、chart IR 与 SVG 的资产 ID、SVG 摘要、资格回执 ID，以及精确的元素出现位置。描述被检索命中的分数本身不授予任何证据资格。
+    </p>
+    <p>
+      <b>计算是精确的。</b> donut 上的百分点差用 Decimal 精确相减，银行家舍入，出现不精确即抛错，并附计算回执（规则、精度、输入、输出与来源锚点）。柱状图的显示值查询只回读页面上写出的值，不做任何跨期计算。
+    </p>
+    <p>
+      <b>拒答是正常的业务结果。</b> 默认状态只有 answered 与 abstained，不用附近的数字补位。拒答走 HTTP 200 并带原因；证据损坏是 409；依赖缺失是 503。常见的拒答原因直接来自代码：
+    </p>
+  </div>
+  <ul class="reasons">
+    <li><span class="code">UNQUALIFIED_MEMBER</span><span class="txt">成员未通过来源资格，或语义范围不匹配</span></li>
+    <li><span class="code">UNSUPPORTED_GRAMMAR</span><span class="txt">图表语法不是本查询支持的类型</span></li>
+    <li><span class="code">UNIT_MISMATCH</span><span class="txt">问的单位与页面单位不一致</span></li>
+    <li><span class="code">UNSUPPORTED_VALUE_KIND</span><span class="txt">值不是显式文本，例如估计值</span></li>
+    <li><span class="code">VALUE_UNAVAILABLE</span><span class="txt">该期间页面上没有写出值——不从柱高估</span></li>
+    <li><span class="code">UNSUPPORTED_PRECISION</span><span class="txt">要求的精度超过来源能支持的精度</span></li>
+    <li><span class="code">INVALID_EVIDENCE</span><span class="txt">重新校验时证据与来源对不上</span></li>
+    <li><span class="code">UNSUPPORTED_OPERATION</span><span class="txt">该图表只允许查显示值，不允许计算</span></li>
+  </ul>
+  <div class="prose">
+    <p>
+      一个具体的例子：费用率柱状图上 1H24 与 1H26 有显式标注，1H25 没有。系统对 1H25 的回答是 <span class="mono">VALUE_UNAVAILABLE</span>，而不是按柱高读一个数；图上标注的 (130) bps 变化也不被当作可回答的事实，因为它不是我们校验过的显式数据点。全部拒答同样不算通过：评测要求在可回答样本上 100% 精确、100% 覆盖，同时 0 个反例逃逸。
+    </p>
+  </div>
+</section>
+
+<!-- ================= 路线图 ================= -->
+<footer class="road">
+  <div class="eyebrow">路线图</div>
+  <p>
+    这条路线已经在 AIA 2026 年中期业绩公开样本（71 页）上从头走通：来源审阅、前 20 页对象处理（241 个对象、189 条描述向量）、description-only 索引，以及第 18 页 donut 的类型化图表问答；通用 PDF 的 ingest → qualify → index → publish 入口也已落地并跑通离线端到端。
+  </p>
+  <p>
+    接下来按顺序推进三件事：接入文档目录与多文档服务挂载，替换目前固定在单一来源上的服务入口；在同一条证据链上实现自然语言检索回答，并对文本、表格、图表分别验收引用与拒答；完成第 20 页费用率柱状图切片的独立验收与原子激活。
+  </p>
+  <p class="fine">parser pdfspine==0.11.0 · 内容寻址快照 · fail-closed</p>
+</footer>
+
+</div>
+</body>
+</html>

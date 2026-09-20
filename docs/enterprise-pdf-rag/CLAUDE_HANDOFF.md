@@ -4,6 +4,28 @@
 
 > 阅读顺序：先看下方“恢复开发记录”；后续旧暂停快照保留作证据，不能作为实时发布或服务状态。
 
+## 会话收尾状态（2026-09-20，下一 session 从这里接手）
+
+**仓库状态**：并入已完成并快进合入 `main`（HEAD `b91205e`，领先 origin 12 个提交，未 push）。当前工作分支 `feat/generic-document-service`，本节对应的提交包含第 2 项阶段 ① 与第 3 项阶段 1 的全部代码与测试；该提交上的验证：`ruff format --check` 698 文件一致、`ruff check` 通过、`mypy` 428 文件零错误、`pytest tests/enterprise_pdf_rag` 694 passed、四个结构门通过、`check_doc_drift` 23 tracked / 0 stale。完整 `bash scripts/ci.sh` 未在本提交重跑（上一次全绿在 `b91205e`）。
+
+**设计方案（函数级，先读）**：`docs/enterprise-pdf-rag/plans/item2-document-catalog-and-service-mount.md`、`plans/item3-answer-chain.md`；合并调研 `plans/merge-into-ragspine-investigation.md`；给领导的路线汇报页 `rag-ingestion-brief.html`（同目录）。
+
+**已拍板的决定**：`MountedDocument` 含 `search/resolve/manifest/member_texts/chart_context/displayed_context`；claim 校验失败走"逐条剔除 + 散文数值门"（散文里任何数字不在已验证 claim 内 → 整体拒答 `CLAIM_NOT_IN_EVIDENCE`；零验证 claim → 拒答并取第一条 rejected 的原因）；rerank 默认关、显式开关；TABLE 成员只在第 3 项阶段 4 放行 `VERIFIED` 的并把资格 policy 升 `-v2`；AIA 样本用 `APP_LEGACY_DOCUMENT_ROOTS` 兼容（默认空）；新增 `execution_mode="document-catalog"`，保留 `aia-source-review`；`ragspine` 只能在 `enterprise_pdf_rag/adapters/` 下 import（conformance 白名单不需改）。
+
+**第 2 项（文档目录与服务挂载）**
+- 阶段 ① 已完成：`core/settings.py`（`document-catalog` 模式、`ingestion_dir`/`APP_INGESTION_DIR`、`legacy_document_roots`/`APP_LEGACY_DOCUMENT_ROOTS`、`ingestion_root`）；`adapters/pdf_ingestion.py` 默认根改 `ingestion_root`；新 `adapters/document_catalog.py`（`CatalogEntry`、`DocumentCatalog`、`scan_catalog`、`MountedDocument`、`mount_document(entry, *, embedder)`、`MountedCatalog`、`mount_catalog`、`QueryEmbeddingUnavailable`；`MemberText` 从 `answers/ports.py` 导入）；测试 `tests/enterprise_pdf_rag/adapters/test_document_catalog.py`（16）、`test_document_catalog_aia_smoke.py`（真实 store 只读，AIA 被发现为 legacy/ready/189 成员）、共享 fixture `generic_publication_helpers.py`。
+- 阶段 ② 未开始（一行未写）：`adapters/http/catalog_schemas.py`（契约 `document-catalog-v1`）、`adapters/http/documents.py`（`create_documents_router`/`create_documents_app`，`GET /v1/documents`、`GET /v1/documents/{id}`、`/manifest`、`POST .../search`、`POST .../context`，404/409/503 映射）、`adapters/http/app.py::create_configured_app` 加 `document-catalog` 分支（embedder 显式构造一次共享；`app.py` 的 unconfigured 提示语加该模式）、`scripts/enterprise_pdf_rag/check_schema.py` 登记 + 生成 `docs/enterprise-pdf-rag/schemas/document-catalog-v1.json`、`tests/enterprise_pdf_rag/adapters/test_documents_http.py`。
+- 阶段 ③ 文档：`src/enterprise_pdf_rag/CLAUDE.md` 目录树与 `verified-against`、ADR 0011、`testing-and-ingestion.md`、本文件。
+
+**第 3 项（证据链上的自然语言回答）**
+- 阶段 1 已完成：`answers/ports.py`（`MemberText`、`MountedDocument` Protocol）；`adapters/hybrid_search.py`（`LexicalIndex` 按快照 id 内容寻址、`build_lexical_index`、`lexical_rank`、`FusedHit`、`fuse`、`HybridSearch.search`、`RerankPort`/`LocalRerankJudge`；精确复用 `ragspine.retrieval.lexical.retrieval.{tokenize,bm25_scores,rrf_fuse}` 与 `ragspine.retrieval.rerank.listwise_rerank.{ListwiseJudge,listwise_rerank}`）；`processing/context_builder.py`（`ContextBlock.prompt_text()`、`SpanEvidence/CellEvidence/ChartFieldEvidence`、`build_context_block`、`budget_blocks` 整块丢弃）；测试 `test_hybrid_search.py`（11）、`test_context_builder.py`（6）。
+- 阶段 2 未开始：`answers/models.py`（`AnswerStatus/ClaimKind/AbstainReason/AnswerRequest/ClaimCitation/VerifiedClaim/RejectedClaim/AnswerResult`；若 `AnswerResult` 要引用 `FusedHit`，把它迁到 `answers/models.py` 并在 `hybrid_search` 回导）、`answers/prompt.py`（`ModelClaim/ModelAnswer` strict pydantic、`SYSTEM_RULES`、`build_prompt`；`ContextBlock.prompt_text()` 已把可引用路径作行前缀 `fragments.<span>`、`cells.<id>`、`points.<pid>.value`）、`answers/verify.py`（`_verify_quote/_verify_cell/_verify_chart_value/prose_grounded/decide`；bar 走 `displayed_evidence.chart_context()+check_displayed_evidence`，donut 走 `check_context/check_fields`）、`adapters/json_completion.py::complete_text_json`（不强制 `image_png`）、`adapters/answer_service.py::AnswerService`（恰好一次 LLM）、测试桥 `tests/enterprise_pdf_rag/answers/store_mounted_document.py` + `test_verify.py` + `test_answer_service.py`（bar 夹具实际值：1H21=15%、1H22 不可用、1H23=6%）。注意 `answers/` 尚未加入 `check_architecture.PACKAGES`（该脚本只放行 stdlib，而 `prompt.py` 需 pydantic），阶段 2 需决定放行方式。
+- 阶段 3（`adapters/http/chat.py`，OpenAI-compatible 真 RAG 聊天）依赖第 2 项阶段 ②；阶段 4：TABLE 放行、`bash scripts/ci.sh` 全绿、文档。
+
+**环境坑**：全局 `uv` 0.6.9 太旧，需 uv ≥0.12（`uv self update`）；`.venv` 为 3.12，`uv sync --all-extras --no-extra ocr`；不用 uv 时可直接 `.venv/bin/python -m pytest|mypy`、`.venv/bin/ruff`；任何触及 `src/ragspine` 的提交后要把 23 份 tracked 文档的 `verified-against` bump 到新 HEAD，否则 `scripts/check_doc_drift.py` 红；11G 运行现场在 `data/`（gitignore），别清理；本地模型隧道变量（`LOCAL_MODELS_SSH_HOST` 等）未配置，真实 embedder 的 `index` 仍未跑过。
+
+**下一 session 起手顺序**：读 `src/enterprise_pdf_rag/CLAUDE.md` → 本节 → 两份 plans → 先做第 2 项阶段 ②（HTTP），再做第 3 项阶段 2（合成与校验），然后阶段 3、4；每阶段 TDD、最小改动、`ruff format`/`ruff check --fix` 做规范化。
+
 ## 并入 rag-spine 记录（2026-09-20）
 
 本项目已作为**独立顶层包**并入 rag-spine 仓库（`/Users/linhan/startup/spine/ragspine`，分支 `merge/enterprise-pdf-rag`），import 名仍是 `enterprise_pdf_rag`，不在 `ragspine.*` 命名空间下；决定、被拒方案与待办见 rag-spine 的 [ADR 0021](../adr/0021-merge-enterprise-pdf-rag-as-sibling-package.md)。四个提交：
