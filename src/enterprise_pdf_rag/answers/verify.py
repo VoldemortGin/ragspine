@@ -82,6 +82,11 @@ def _norm(text: str) -> str:
     return " ".join(text.split()).casefold()
 
 
+def _literal(text: str) -> str:
+    """The literal-transcription criterion: whitespace collapses, case is kept."""
+    return " ".join(text.split())
+
+
 def _decimal(token: str) -> Decimal | None:
     try:
         return Decimal(token.replace(",", "").replace("%", "").strip())
@@ -163,8 +168,9 @@ def _verify_cell(claim: ModelClaim, block: ContextBlock) -> VerifiedClaim | Reje
                 claim, AbstainReason.CLAIM_NOT_IN_EVIDENCE, "claimed row/col differ from the cell"
             )
         if claim.header is not None:
-            # Verbatim, never ``_norm``: a header names a column, and its case is part of it.
-            header = next((ref for ref in cell.headers if ref.text == claim.header), None)
+            # Literal, never ``_norm``: a header names a column, and its case is part of it.
+            wanted = _literal(claim.header)
+            header = next((ref for ref in cell.headers if _literal(ref.text) == wanted), None)
             if header is None:
                 return _reject(
                     claim,

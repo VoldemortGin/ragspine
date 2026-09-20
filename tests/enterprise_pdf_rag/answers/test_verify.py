@@ -331,6 +331,9 @@ def test_cell_claim_with_row_col_header_verifies_against_the_grid() -> None:
     assert (citation.row, citation.col, citation.header) == (1, 1, "Value")
     assert citation.header_cell_id == "h-1"
     assert citation.evidence_ids == ("c-1", "t-1", "h-1")
+    # The literal-transcription criterion: whitespace collapses, case never does.
+    spaced = _verify(_claim(_RULED_MEMBER, "cell", "cells.c-1", "1,234", header=" Value\n"))
+    assert spaced.verified[0].citations[0].header == "Value"
     plain = _verify(_claim(_RULED_MEMBER, "cell", "cells.c-1", "1,234"))
     (bare,) = plain.verified
     # A verified grid still reports the position it proved, even when nothing claimed it.
