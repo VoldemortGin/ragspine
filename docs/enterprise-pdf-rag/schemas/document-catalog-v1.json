@@ -1552,6 +1552,18 @@
             "default": null,
             "title": "Current Processing Id"
           },
+          "display_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Display Title"
+          },
           "document_id": {
             "title": "Document Id",
             "type": "string"
@@ -1594,6 +1606,18 @@
             ],
             "default": null,
             "title": "Embedding Fingerprint"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Language"
           },
           "member_count": {
             "anyOf": [
@@ -1641,6 +1665,26 @@
             ],
             "default": null,
             "title": "Reason"
+          },
+          "regions": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Regions",
+            "type": "array"
+          },
+          "report_period": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Report Period"
           },
           "retrieval_snapshot_id": {
             "anyOf": [
@@ -1723,6 +1767,14 @@
           "source_store": {
             "title": "Source Store",
             "type": "string"
+          },
+          "years": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Years",
+            "type": "array"
           }
         },
         "required": [
@@ -1878,6 +1930,18 @@
             "default": null,
             "title": "Current Processing Id"
           },
+          "display_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Display Title"
+          },
           "document_id": {
             "title": "Document Id",
             "type": "string"
@@ -1920,6 +1984,18 @@
             ],
             "default": null,
             "title": "Embedding Fingerprint"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Language"
           },
           "member_count": {
             "anyOf": [
@@ -1967,6 +2043,26 @@
             ],
             "default": null,
             "title": "Reason"
+          },
+          "regions": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Regions",
+            "type": "array"
+          },
+          "report_period": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Report Period"
           },
           "retrieval_snapshot_id": {
             "anyOf": [
@@ -2049,6 +2145,14 @@
           "source_store": {
             "title": "Source Store",
             "type": "string"
+          },
+          "years": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Years",
+            "type": "array"
           }
         },
         "required": [

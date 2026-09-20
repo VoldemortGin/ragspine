@@ -8,10 +8,38 @@ single explicit value keeps its description text, so a pending or label-only fig
 never climbs the ranking on words it cannot cite. Nothing here reads a store.
 """
 
+from dataclasses import dataclass
 from decimal import Decimal
 
 from enterprise_pdf_rag.figures.models import ChartIR, ChartPoint, ValueKind
 from enterprise_pdf_rag.processing.typed_ir import TypedIR
+
+
+@dataclass(frozen=True, slots=True)
+class PageIndexContext:
+    """The page context prepended to a member's index text (policy v4): none is optional."""
+
+    display_title: str | None = None
+    page_title: str | None = None
+    section: str | None = None
+
+    def header(self) -> str:
+        parts = (
+            " ".join(part.split())
+            for part in (self.display_title, self.page_title, self.section)
+            if part is not None
+        )
+        return " | ".join(part for part in parts if part)
+
+
+def contextual_index_text(body: str, context: PageIndexContext | None) -> str:
+    """``<display_title> | <page_title> | <section>`` on its own line above ``body``.
+
+    Only the text both retrieval channels score changes; descriptions and quoted
+    evidence are untouched. Without any context the body is returned as is.
+    """
+    header = "" if context is None else context.header()
+    return f"{header}\n{body}" if header else body
 
 
 def _explicit(point: ChartPoint) -> bool:

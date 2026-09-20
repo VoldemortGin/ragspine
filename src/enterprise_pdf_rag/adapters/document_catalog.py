@@ -53,6 +53,17 @@ class CatalogEntry(BoundaryModel):
     source_page_count: int | None = None
     selected_physical_pages: tuple[int, ...] | None = None
     source_activated: bool | None = None
+    # Automatic document metadata (ADR 0013): verbatim page values folded deterministically.
+    display_title: str | None = None
+    report_period: str | None = None
+    language: str | None = None
+    years: tuple[int, ...] = ()
+    regions: tuple[str, ...] = ()
+
+    @property
+    def display_name(self) -> str:
+        """The readable name: the cover title when known, else the source filename or id."""
+        return self.display_title or self.document_label or self.document_id
 
 
 class DocumentCatalog(BoundaryModel):
@@ -95,6 +106,11 @@ class _Probe:
     source_page_count: int | None = None
     selected_physical_pages: tuple[int, ...] | None = None
     source_activated: bool | None = None
+    display_title: str | None = None
+    report_period: str | None = None
+    language: str | None = None
+    years: tuple[int, ...] = ()
+    regions: tuple[str, ...] = ()
 
     def entry(self, status: CatalogRetrievalStatus, reason: str | None) -> CatalogEntry:
         return CatalogEntry(
@@ -115,6 +131,11 @@ class _Probe:
             source_page_count=self.source_page_count,
             selected_physical_pages=self.selected_physical_pages,
             source_activated=self.source_activated,
+            display_title=self.display_title,
+            report_period=self.report_period,
+            language=self.language,
+            years=self.years,
+            regions=self.regions,
         )
 
 
@@ -145,6 +166,19 @@ def _inspect(
         probe.source_manifest_id = scope.source_manifest_id
         probe.source_page_count = scope.source_page_count
         probe.selected_physical_pages = scope.physical_pages
+        metadata = manifest.document_metadata
+        if metadata is not None:
+            probe.display_title = (
+                None if metadata.display_title is None else metadata.display_title.text
+            )
+            probe.report_period = (
+                None
+                if metadata.report_period is None
+                else metadata.report_period.normalized or metadata.report_period.text
+            )
+            probe.language = metadata.language
+            probe.years = metadata.years
+            probe.regions = tuple(region.text for region in metadata.regions)
         if expected_sha is not None and scope.source_sha256 != expected_sha:
             raise ValueError(
                 "Document directory name does not match the processing scope source sha256"

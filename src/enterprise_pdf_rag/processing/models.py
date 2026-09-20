@@ -6,6 +6,7 @@ from math import isfinite
 
 from enterprise_pdf_rag.documents.models import AssetRef, Bounds, TextSidecar
 from enterprise_pdf_rag.figures.models import Confidence, SourceAnchor, Verification
+from enterprise_pdf_rag.processing.document_metadata import DocumentMetadata
 
 
 class ObjectKind(StrEnum):
@@ -165,6 +166,8 @@ class PageProcessingRecord:
     partition: StageOutcome
     objects: tuple[ObjectProcessingRecord, ...]
     raw_partition: StageOutcome | None = None
+    # Page-level metadata stage (title / section / page type / periods / regions).
+    metadata: StageOutcome | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,6 +185,8 @@ class ProcessingManifest:
     producer: str
     pages: tuple[PageProcessingRecord, ...]
     retrieval: RetrievalPublication | None = None
+    # Deterministic fold of the succeeded page metadata stages; ``None`` without any.
+    document_metadata: DocumentMetadata | None = None
 
     def __post_init__(self) -> None:
         if tuple(page.page_index for page in self.pages) != self.scope.selected_page_indices:

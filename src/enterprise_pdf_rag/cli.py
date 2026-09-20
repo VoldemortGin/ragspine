@@ -32,7 +32,9 @@ from enterprise_pdf_rag.adapters.http.schemas import (
     ExtractionResponse,
     HitSchema,
 )
+from enterprise_pdf_rag.adapters.json_completion import JsonCompletionClient
 from enterprise_pdf_rag.adapters.local_models import LocalEmbeddingAdapter
+from enterprise_pdf_rag.adapters.page_metadata_extraction import annotate_metadata_draft
 from enterprise_pdf_rag.adapters.pdf_ingestion import ingest_pdf
 from enterprise_pdf_rag.adapters.pdfspine_document import PdfspineDocumentAdapter
 from enterprise_pdf_rag.adapters.pdfspine_figure import PdfspineFigureParser
@@ -84,16 +86,30 @@ def _parser() -> argparse.ArgumentParser:
     )
     ingest.add_argument(
         "--stage",
-        choices=["source", "layout", "semantics"],
+        choices=["source", "layout", "semantics", "metadata"],
         default="source",
-        help="source is offline; layout/semantics require OPENAI_API_KEY, OPENAI_BASE_URL and OPENAI_MODEL even for cache-only replay",
+        help="source is offline; layout/semantics/metadata require OPENAI_API_KEY, OPENAI_BASE_URL and OPENAI_MODEL even for cache-only replay; semantics also runs page metadata, metadata runs it alone over the source stage",
     )
     ingest.add_argument(
         "--max-live-calls",
         type=int,
         default=0,
-        help="Explicit shared model-call budget for layout/semantics; default 0 is cache-only. No embedding, reranking or activation.",
+        help="Explicit shared model-call budget for layout/semantics/metadata; default 0 is cache-only. No embedding, reranking or activation.",
     )
+    metadata = commands.add_parser(
+        "metadata",
+        help="Add the page metadata stage (title / section / page type / periods / regions, verbatim from page spans) to a saved draft or published release; one text-only model call per page, no activation",
+    )
+    metadata.add_argument("--source-store", type=Path, required=True)
+    metadata.add_argument("--processing-store", type=Path, required=True)
+    metadata.add_argument("--processing-id", required=True)
+    metadata.add_argument(
+        "--max-live-calls",
+        type=int,
+        required=True,
+        help="Explicit model-call budget; 0 permits cached responses only and marks the rest deferred",
+    )
+    metadata.add_argument("--timeout", type=float, default=180.0)
     qualify = commands.add_parser(
         "qualify",
         help="Diagnose retrievable members in a saved draft by store paths and processing id; no models or activation",
@@ -239,6 +255,24 @@ def main(argv: list[str] | None = None) -> int:
                 max_live_calls=arguments.max_live_calls,
             )
             sys.stdout.write(ingested.model_dump_json(indent=2) + "\n")
+            return 0
+        if arguments.command == "metadata":
+            try:
+                annotated = annotate_metadata_draft(
+                    source_store=arguments.source_store,
+                    processing_store=arguments.processing_store,
+                    processing_id=arguments.processing_id,
+                    client=JsonCompletionClient(
+                        load_llm_config(),
+                        cache_dir=Path(arguments.processing_store).resolve() / "model-cache",
+                        max_live_calls=arguments.max_live_calls,
+                        timeout=arguments.timeout,
+                    ),
+                )
+            except (ValueError, FileNotFoundError) as error:
+                sys.stdout.write(json.dumps({"error": str(error)}, indent=2) + "\n")
+                return 1
+            sys.stdout.write(annotated.model_dump_json(indent=2) + "\n")
             return 0
         if arguments.command == "qualify":
             try:

@@ -66,7 +66,10 @@ class RetrievalExample(BoundaryModel):
 
 def processing_status(processing_id: str, manifest: ProcessingManifest) -> ProcessingStatusResponse:
     objects = tuple(item for page in manifest.pages for item in page.objects)
-    stages = tuple(stage for item in objects for stage in item.stages)
+    stages = (
+        *(stage for item in objects for stage in item.stages),
+        *(page.metadata for page in manifest.pages if page.metadata is not None),
+    )
     return ProcessingStatusResponse(
         processing_id=processing_id,
         source_manifest_id=manifest.scope.source_manifest_id,

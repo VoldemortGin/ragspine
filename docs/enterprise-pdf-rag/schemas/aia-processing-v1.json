@@ -1625,6 +1625,122 @@
         "title": "AssetRef",
         "type": "object"
       },
+      "DocumentMetadata": {
+        "properties": {
+          "cover_page_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Page Index"
+          },
+          "display_title": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/MetadataValue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "page_count": {
+            "title": "Page Count",
+            "type": "integer"
+          },
+          "regions": {
+            "items": {
+              "$ref": "#/$defs/MetadataValue"
+            },
+            "title": "Regions",
+            "type": "array"
+          },
+          "report_period": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/PeriodValue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "years": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Years",
+            "type": "array"
+          }
+        },
+        "required": [
+          "schema_version",
+          "display_title",
+          "report_period",
+          "language",
+          "regions",
+          "years",
+          "page_count",
+          "cover_page_index"
+        ],
+        "title": "DocumentMetadata",
+        "type": "object"
+      },
+      "MetadataEvidence": {
+        "description": "The source span a value was copied from: its id and its full printed text.",
+        "properties": {
+          "span_id": {
+            "title": "Span Id",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "span_id",
+          "text"
+        ],
+        "title": "MetadataEvidence",
+        "type": "object"
+      },
+      "MetadataValue": {
+        "properties": {
+          "evidence": {
+            "$ref": "#/$defs/MetadataEvidence"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "evidence"
+        ],
+        "title": "MetadataValue",
+        "type": "object"
+      },
       "ObjectKind": {
         "enum": [
           "Text",
@@ -1674,6 +1790,17 @@
           "canonical": {
             "$ref": "#/$defs/StageOutcome"
           },
+          "metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/StageOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "objects": {
             "items": {
               "$ref": "#/$defs/ObjectProcessingRecord"
@@ -1709,8 +1836,48 @@
         "title": "PageProcessingRecord",
         "type": "object"
       },
+      "PeriodValue": {
+        "properties": {
+          "evidence": {
+            "$ref": "#/$defs/MetadataEvidence"
+          },
+          "normalized": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Normalized"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "evidence",
+          "normalized"
+        ],
+        "title": "PeriodValue",
+        "type": "object"
+      },
       "ProcessingManifest": {
         "properties": {
+          "document_metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/DocumentMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "pages": {
             "items": {
               "$ref": "#/$defs/PageProcessingRecord"

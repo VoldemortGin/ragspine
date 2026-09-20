@@ -14,12 +14,15 @@ from enterprise_pdf_rag.adapters.http.processing_schemas import (
 )
 from enterprise_pdf_rag.adapters.source_publication import validate_processing_source
 from enterprise_pdf_rag.documents.models import AssetRef
+from enterprise_pdf_rag.processing.document_metadata import summarize_document
+from enterprise_pdf_rag.processing.index_text import PageIndexContext
 from enterprise_pdf_rag.processing.models import (
     ProcessingManifest,
     RetrievalPublication,
     StageOutcome,
     StageState,
 )
+from enterprise_pdf_rag.processing.page_metadata import PageMetadata
 from enterprise_pdf_rag.processing.retrieval import (
     RetrievalEmbedding,
     RetrievalIndex,
@@ -93,6 +96,9 @@ class ProcessingStore:
         ).manifest
         for ref in processing_assets(manifest):
             self.assets.get(ref)
+        pages = self.load_page_metadata(manifest)
+        if manifest.document_metadata != summarize_document(tuple(pages.values())):
+            raise ValueError("Document metadata differs from its page metadata stages")
         if manifest.retrieval is not None:
             plan, _ = self.load_retrieval(manifest.retrieval)
             if plan.scope != manifest.scope:
@@ -162,6 +168,41 @@ class ProcessingStore:
                 raise ValueError("Index vector does not match its actual embedding artifact")
         return plan, index
 
+    def load_page_metadata(self, manifest: ProcessingManifest) -> dict[int, PageMetadata]:
+        """Every succeeded page metadata stage, parsed and bound to its page; no I/O elsewhere."""
+        pages: dict[int, PageMetadata] = {}
+        for page in manifest.pages:
+            stage = page.metadata
+            if stage is None or stage.state is not StageState.SUCCEEDED or stage.artifact is None:
+                continue
+            metadata = TypeAdapter(PageMetadata).validate_json(
+                self.assets.get(stage.artifact), strict=True
+            )
+            if (metadata.page_index, metadata.source_sha256) != (
+                page.page_index,
+                manifest.scope.source_sha256,
+            ):
+                raise ValueError("Page metadata is bound to another source page")
+            pages[page.page_index] = metadata
+        return pages
+
+    def index_contexts(self, manifest: ProcessingManifest) -> dict[int, PageIndexContext]:
+        """The contextual index-text header of every page that has verified metadata."""
+        display_title = (
+            None
+            if manifest.document_metadata is None
+            or manifest.document_metadata.display_title is None
+            else manifest.document_metadata.display_title.text
+        )
+        return {
+            page_index: PageIndexContext(
+                display_title,
+                None if metadata.title is None else metadata.title.text,
+                None if metadata.section is None else metadata.section.text,
+            )
+            for page_index, metadata in self.load_page_metadata(manifest).items()
+        }
+
     def load_current(self) -> tuple[str, ProcessingManifest]:
         snapshot_id = (self.root / "current-processing").read_text().strip()
         return snapshot_id, self.load(snapshot_id)
@@ -189,6 +230,7 @@ class ProcessingStore:
 def processing_assets(manifest: ProcessingManifest) -> tuple[AssetRef, ...]:
     outcomes = [stage for page in manifest.pages for stage in (page.canonical, page.partition)]
     outcomes.extend(page.raw_partition for page in manifest.pages if page.raw_partition is not None)
+    outcomes.extend(page.metadata for page in manifest.pages if page.metadata is not None)
     outcomes.extend(
         stage for page in manifest.pages for item in page.objects for stage in item.stages
     )

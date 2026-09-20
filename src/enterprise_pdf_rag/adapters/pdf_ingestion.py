@@ -16,6 +16,7 @@ from enterprise_pdf_rag.adapters.aia_processing import (
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.http.schemas import BoundaryModel
 from enterprise_pdf_rag.adapters.json_completion import JsonCompletionClient
+from enterprise_pdf_rag.adapters.page_metadata_extraction import annotate_page_metadata
 from enterprise_pdf_rag.adapters.page_partition import ModelPagePartitioner
 from enterprise_pdf_rag.adapters.pdfspine_document import PdfspineDocumentAdapter
 from enterprise_pdf_rag.adapters.processing_export import export_processing_review
@@ -27,7 +28,9 @@ from enterprise_pdf_rag.documents.models import AssetRef, DocumentSnapshot, Docu
 from enterprise_pdf_rag.documents.service import ingest_document
 from enterprise_pdf_rag.processing.models import StageOutcome, StageState
 
-type IngestionStage = Literal["source", "layout", "semantics"]
+type IngestionStage = Literal["source", "layout", "semantics", "metadata"]
+# Stages that add the page metadata stage after the page pipeline (same budget and cache).
+_METADATA_STAGES = frozenset({"semantics", "metadata"})
 
 
 class _Options(BoundaryModel):
@@ -58,6 +61,9 @@ class IngestionSummary(BoundaryModel):
     object_count: int
     failed_stage_count: int
     semantic_status: str
+    metadata_status: str
+    metadata_page_states: dict[str, int]
+    display_title: str | None
     live_call_count: int
     activated: Literal[False] = False
     indexed: Literal[False] = False
@@ -132,7 +138,8 @@ def ingest_pdf(
     """Save complete PDF sources and selected downstream stages without activation.
 
     Model stages require explicit provider configuration. Their one shared budget
-    covers layout and both semantic branches; zero permits existing cache only.
+    covers layout, both semantic branches and page metadata; zero permits existing
+    cache only. ``metadata`` runs page metadata over the source stage alone.
     """
     options = _Options(stage=stage, max_live_calls=max_live_calls)
     if not pdf.is_file():
@@ -162,7 +169,7 @@ def ingest_pdf(
     pipeline = ProcessingPipeline(
         sources,
         outputs,
-        None if client is None else ModelPagePartitioner(client, sources),
+        None if client is None or stage == "metadata" else ModelPagePartitioner(client, sources),
         SemanticObjectAdapter(sources, outputs, client, qualification_policy="none")
         if client is not None and stage == "semantics"
         else None,
@@ -171,6 +178,12 @@ def ingest_pdf(
         producer="generic-pdf-processing-v1",
     )
     processing_id, manifest = pipeline.run(source.manifest_id, selected_page_indices=selected)
+    metadata = None
+    if stage in _METADATA_STAGES:
+        metadata = annotate_page_metadata(
+            sources, outputs, processing_id=processing_id, client=client
+        )
+        processing_id = metadata.annotated_processing_id
     export_review(sources, source)
     review = export_processing_review(
         sources,
@@ -204,6 +217,11 @@ def ingest_pdf(
         semantic_status="attempted; inspect per-object stages; not qualified for QA or indexed"
         if stage == "semantics"
         else "deferred; no object semantics or index",
+        metadata_status="deferred; page metadata has not run"
+        if metadata is None
+        else "attempted; inspect per-page metadata stages; values are verbatim page spans",
+        metadata_page_states={} if metadata is None else metadata.page_states,
+        display_title=None if metadata is None else metadata.display_title,
         live_call_count=0 if client is None else client.live_call_count,
         review_path=str(review),
     )
