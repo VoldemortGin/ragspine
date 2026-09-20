@@ -35,6 +35,14 @@ from enterprise_pdf_rag.processing.diagram_models import (
     NodeEvidence,
     PathEvidence,
 )
+from enterprise_pdf_rag.processing.formula_models import (
+    FormulaQualification,
+    FormulaStructure,
+    FormulaToken,
+    StructureKind,
+    TokenRole,
+)
+from enterprise_pdf_rag.processing.formula_models import PathEvidence as FormulaPathEvidence
 from enterprise_pdf_rag.processing.models import ObjectKind
 from enterprise_pdf_rag.processing.retrieval import RetrievalContext, RetrievalMember
 from enterprise_pdf_rag.processing.table_models import (
@@ -48,6 +56,7 @@ from enterprise_pdf_rag.processing.typed_ir import (
     DiagramEdge,
     DiagramIR,
     DiagramNode,
+    FormulaIR,
     ImageIR,
     ListIR,
     LiteralQualification,
@@ -323,6 +332,118 @@ def test_diagram_member_kind_mismatch_is_refused() -> None:
         context.ir,
         context.description,
         context.qualification,
+    )
+    with pytest.raises(ValueError, match="kind"):
+        build_context_block(mismatched)
+
+
+_FORMULA_LINEAR = "ROE = \\frac{Net\\ profit}{Equity}"
+_FORMULA_READABLE = "ROE 等于 Net profit 除以 Equity"
+
+
+def _formula_ir(*, proven: bool = True) -> FormulaIR:
+    if not proven:
+        return FormulaIR("formula-1", _ANCHOR, "ROE =", "ROE = x", ("sp-roe",), ())
+    tokens = (
+        FormulaToken(0, "ROE", "sp-roe", 0, 3, (20.0, 72.4, 41.6, 84.4), TokenRole.OPERAND),
+        FormulaToken(1, "=", "sp-roe", 4, 5, (48.8, 72.4, 56.0, 84.4), TokenRole.RELATION),
+        FormulaToken(2, "Net", "sp-num", 0, 3, (62.0, 65.2, 81.8, 76.2), TokenRole.OPERAND),
+        FormulaToken(3, "profit", "sp-num", 4, 10, (88.4, 65.2, 128.0, 76.2), TokenRole.OPERAND),
+        FormulaToken(4, "Equity", "sp-den", 0, 6, (72.0, 85.2, 111.6, 96.2), TokenRole.OPERAND),
+    )
+    structure = FormulaStructure(
+        StructureKind.FRACTION,
+        FormulaPathEvidence(0, "line", ((60.0, 78.0), (120.0, 78.0)), 0.8),
+        (2, 3),
+        (4,),
+    )
+    return FormulaIR(
+        "formula-1",
+        _ANCHOR,
+        "ROE =\nNet profit\nEquity",
+        None,
+        ("sp-roe", "sp-num", "sp-den"),
+        ("proof_level=full",),
+        Verification.VERIFIED,
+        tokens,
+        (structure,),
+        _FORMULA_LINEAR,
+        _FORMULA_READABLE,
+        "full",
+    )
+
+
+def _formula_context(*, proven: bool = True) -> RetrievalContext:
+    ir = _formula_ir(proven=proven)
+    qualification = FormulaQualification(
+        "formula-1",
+        _ANCHOR,
+        _SHA,
+        ("sp-roe", "sp-num", "sp-den"),
+        _REF,
+        _REF,
+        _REF,
+        _REF,
+        "full",
+        len(ir.tokens) or 1,
+        len(ir.structures),
+        (),
+        "unavailable",
+    )
+    description = ObjectDescription(
+        "formula-1",
+        _ANCHOR,
+        ("sp-roe", "sp-num", "sp-den"),
+        _FORMULA_READABLE,
+        "exact-formula-transcription-v1",
+        Confidence(None, "deterministic formula token transcription"),
+        Verification.VERIFIED,
+    )
+    return RetrievalContext(
+        _SNAPSHOT,
+        _member("formula-1", ObjectKind.FORMULA),
+        ir,
+        description,
+        qualification,
+    )
+
+
+def test_formula_member_renders_linear_readable_and_token_paths() -> None:
+    block = build_context_block(_formula_context())
+    assert block.kind is BlockKind.FORMULA
+    assert block.scope == "formula-source-tokens-v1"
+    assert block.verification is Verification.VERIFIED
+    assert block.formula_proof_level == "full"
+    assert tuple(token.text for token in block.formula_tokens) == (
+        "ROE",
+        "=",
+        "Net",
+        "profit",
+        "Equity",
+    )
+    assert block.formula_tokens[1].source_span_id == "sp-roe"
+    assert block.prompt_text().split("\n")[1:] == [
+        "formula proof_level=full",
+        f"formula.linear: {_FORMULA_LINEAR}",
+        f"formula.readable: {_FORMULA_READABLE}",
+        "tokens.0: ROE  (role=operand, script=base, proof=none)",
+        "tokens.1: =  (role=relation, script=base, proof=none)",
+        "tokens.2: Net  (role=operand, script=base, proof=none)",
+        "tokens.3: profit  (role=operand, script=base, proof=none)",
+        "tokens.4: Equity  (role=operand, script=base, proof=none)",
+    ]
+
+
+def test_model_only_formula_ir_is_refused() -> None:
+    with pytest.raises(ValueError, match="need their proven token IR"):
+        build_context_block(_formula_context(proven=False))
+    proven = _formula_context()
+    mismatched = RetrievalContext(
+        proven.snapshot_id,
+        _member("formula-1", ObjectKind.IMAGE),
+        proven.ir,
+        proven.description,
+        proven.qualification,
     )
     with pytest.raises(ValueError, match="kind"):
         build_context_block(mismatched)

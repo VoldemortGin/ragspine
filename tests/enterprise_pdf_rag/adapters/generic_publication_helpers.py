@@ -23,6 +23,8 @@ from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit, Retrieva
 from tests.enterprise_pdf_rag.adapters.test_pdf_ingestion import (
     DIAGRAM_NODES,
     DIAGRAM_REGION,
+    FORMULA_FRACTION_BBOX,
+    FORMULA_POWER_BBOX,
     TABLE_COLUMNS,
     TABLE_ROWS,
     authored_pdf,
@@ -37,10 +39,16 @@ TABLE_BBOX = (TABLE_COLUMNS[0], TABLE_ROWS[0], TABLE_COLUMNS[-1], TABLE_ROWS[-1]
 TABLE_REGION = (TABLE_BBOX[0] - 5.0, TABLE_BBOX[1] - 5.0, TABLE_BBOX[2] + 5.0, TABLE_BBOX[3] + 5.0)
 # The natural-language branch of the Diagram object; its words are never a claim path.
 DIAGRAM_DESCRIPTION = "Two boxes joined by an arrow."
+# The two authored formula regions of ``authored_pdf(formula_page=True)`` and the
+# natural-language branch of a Formula object, which is lineage only: the qualified
+# description is the proof's own readable transcription.
+FORMULA_REGIONS = {"fraction": FORMULA_FRACTION_BBOX, "power": FORMULA_POWER_BBOX}
+FORMULA_DESCRIPTION = "A formula defining ROE as Net profit over Equity."
 _INTERPRETATION = {
     "Text": "Body financial narrative",
     "Table": "Ruled metrics table",
     "Diagram": "Two labelled frames joined by one arrow",
+    "Formula": "An authored expression with its drawn rule",
 }
 
 
@@ -110,12 +118,26 @@ def _diagram_ir_reply(prompt: str) -> dict[str, Any]:
     }
 
 
-def _visual_description_reply(prompt: str) -> dict[str, Any]:
+def _formula_ir_reply(prompt: str) -> dict[str, Any]:
+    """A formula-observations-v1 answer citing every observation the region owns."""
+    view: dict[str, Any] = json.loads(prompt.rsplit("\n", 1)[-1])
+    return {
+        "schema_version": "formula-observations-v1",
+        "svg_digest": view["svg_digest"],
+        "source_literal_element_ids": [str(item["id"]) for item in view["observations"]],
+        "normalization_state": "inferred",
+        "latex": "ROE = \\frac{Net profit}{Equity}",
+        "confidence": "medium",
+        "diagnostics": [],
+    }
+
+
+def _visual_description_reply(prompt: str, text: str) -> dict[str, Any]:
     view: dict[str, Any] = json.loads(prompt.rsplit("\n", 1)[-1])
     return {
         "schema_version": "visual-description-v1",
         "svg_digest": view["svg_digest"],
-        "text": DIAGRAM_DESCRIPTION,
+        "text": text,
         "evidence": {
             "element_ids": [str(item["id"]) for item in view["observations"]],
             "confidence": "0.5",
@@ -130,10 +152,11 @@ def text_partition_sender(
     table_caption: bool = False,
     diagram_page: bool = False,
     diagram_caption: bool = False,
+    formula_page: bool = False,
 ) -> Callable[..., bytes]:
     """Classify page regions offline: occurrences inside the authored ruled grid become one
-    Table region, those inside the authored diagram frame one Diagram region, everything
-    else one Text region.
+    Table region, those inside the authored diagram frame one Diagram region, those inside
+    each authored formula box one Formula region, everything else one Text region.
 
     ``table_caption`` also hands the page's caption line to the Table region, which
     leaves the region owning an occurrence outside its native cells; ``diagram_caption``
@@ -148,8 +171,16 @@ def text_partition_sender(
         prompt = json.loads(payload)["messages"][1]["content"][0]["text"]
         if "Return diagram-observations-v1" in prompt:
             return _reply(_diagram_ir_reply(prompt))
+        if "Return formula-observations-v1" in prompt:
+            return _reply(_formula_ir_reply(prompt))
         if "Return visual-description-v1" in prompt:
-            return _reply(_visual_description_reply(prompt))
+            # The two visual branches share one prompt shape; the authored layouts are
+            # mutually exclusive, so the page under test names the region.
+            return _reply(
+                _visual_description_reply(
+                    prompt, FORMULA_DESCRIPTION if formula_page else DIAGRAM_DESCRIPTION
+                )
+            )
         assert "Source text observations:" in prompt
         observations: list[dict[str, Any]] = json.loads(
             prompt.split("Source text observations:\n", 1)[1]
@@ -161,15 +192,28 @@ def text_partition_sender(
             if diagram_page
             else []
         )
+        in_formula: dict[str, list[dict[str, Any]]] = {}
+        if formula_page:
+            for name, box in FORMULA_REGIONS.items():
+                in_formula[name] = [
+                    observation
+                    for observation in observations
+                    if observation not in in_diagram and _inside(observation, box)
+                ]
+        claimed = [item for owned in in_formula.values() for item in owned]
         in_grid = [
             observation
             for observation in observations
-            if observation not in in_diagram and _inside(observation, TABLE_BBOX)
+            if observation not in in_diagram
+            and observation not in claimed
+            and _inside(observation, TABLE_BBOX)
         ]
         outside = [
             observation
             for observation in observations
-            if observation not in in_grid and observation not in in_diagram
+            if observation not in in_grid
+            and observation not in in_diagram
+            and observation not in claimed
         ]
         regions: list[dict[str, object]] = []
         if in_grid:
@@ -196,6 +240,24 @@ def text_partition_sender(
             regions.append(_region("diagram", "Diagram", bbox, [str(item["id"]) for item in owned]))
             if diagram_caption:
                 outside = []
+        for name, owned in in_formula.items():
+            if not owned:
+                continue
+            box = FORMULA_REGIONS[name]
+            extent = _extent(owned)
+            regions.append(
+                _region(
+                    f"formula-{name}",
+                    "Formula",
+                    [
+                        min(box[0], extent[0]),
+                        min(box[1], extent[1]),
+                        max(box[2], extent[2]),
+                        max(box[3], extent[3]),
+                    ],
+                    [str(item["id"]) for item in owned],
+                )
+            )
         if outside:
             regions.append(
                 _region("body", "Text", _extent(outside), [str(item["id"]) for item in outside])
@@ -223,6 +285,9 @@ def ingest_generic_semantics(
     table_caption: bool = False,
     diagram_page: bool = False,
     diagram_caption: bool = False,
+    formula_page: bool = False,
+    formula_rule: bool = True,
+    max_live_calls: int | None = None,
 ) -> tuple[IngestionSummary, list[bytes]]:
     """Ingest an authored PDF through the semantics stage with one stubbed layout call per page.
 
@@ -231,6 +296,9 @@ def ingest_generic_semantics(
     ``diagram_page`` draws two labelled frames joined by an arrow instead, which costs
     two further stubbed calls (the typed and the natural-language visual branch);
     ``diagram_caption`` hands that page's caption line to the Diagram region.
+    ``formula_page`` draws two formula regions instead, so four further stubbed calls;
+    ``formula_rule=False`` omits the fraction rule, which withholds the proof.
+    ``max_live_calls`` overrides the budget so a test can starve the visual branches.
     """
     for key, value in {
         "OPENAI_API_KEY": "offline-secret",
@@ -246,6 +314,8 @@ def ingest_generic_semantics(
         table_page=table_page,
         diagram_page=diagram_page,
         diagram_caption=diagram_caption,
+        formula_page=formula_page,
+        formula_rule=formula_rule,
     )
     calls: list[bytes] = []
     monkeypatch.setattr(
@@ -255,12 +325,14 @@ def ingest_generic_semantics(
             table_caption=table_caption,
             diagram_page=diagram_page,
             diagram_caption=diagram_caption,
+            formula_page=formula_page,
         ),
     )
+    visual_calls = 4 if formula_page else (2 if diagram_page else 0)
     summary = ingest_pdf(
         pdf=pdf,
         stage="semantics",
-        max_live_calls=page_count + 2 if diagram_page else page_count,
+        max_live_calls=page_count + visual_calls if max_live_calls is None else max_live_calls,
         output_dir=output_dir if output_dir is not None else tmp_path / "ingestion",
     )
     return summary, calls

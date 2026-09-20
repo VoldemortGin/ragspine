@@ -12,6 +12,10 @@ from enterprise_pdf_rag.adapters.chart_member_validation import (
 )
 from enterprise_pdf_rag.adapters.diagram_publication import validate_diagram_member
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
+from enterprise_pdf_rag.adapters.formula_qualification import (
+    FormulaPublicationReceipt,
+    validate_formula_member,
+)
 from enterprise_pdf_rag.adapters.literal_qualification import validate_literal_member
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.documents.models import AssetRef
@@ -22,6 +26,7 @@ from enterprise_pdf_rag.figures.models import (
 )
 from enterprise_pdf_rag.figures.ports import EmbeddingPort
 from enterprise_pdf_rag.processing.diagram_models import DiagramQualification
+from enterprise_pdf_rag.processing.formula_models import FormulaQualification
 from enterprise_pdf_rag.processing.index_text import (
     PageIndexContext,
     contextual_index_text,
@@ -49,6 +54,7 @@ from enterprise_pdf_rag.processing.retrieval import (
 from enterprise_pdf_rag.processing.table_models import TableIR
 from enterprise_pdf_rag.processing.typed_ir import (
     DiagramIR,
+    FormulaIR,
     GroupIR,
     ListIR,
     LiteralQualification,
@@ -105,6 +111,12 @@ def member_text(
         ):
             diagram = TypeAdapter(DiagramIR).validate_json(assets.get(member.ir))
             body = member_index_text(diagram, body)
+        if (
+            member.kind is ObjectKind.FORMULA
+            and plan.qualification_policy in VISUAL_PROJECTION_POLICIES
+        ):
+            formula = TypeAdapter(FormulaIR).validate_json(assets.get(member.ir))
+            body = member_index_text(formula, body)
     else:
         body = TypeAdapter(TextDescription).validate_json(payload).text
         if plan.qualification_policy in PROJECTED_CHART_POLICIES:
@@ -128,12 +140,13 @@ def eligibility(record: ObjectProcessingRecord) -> tuple[bool, str | None]:
         ObjectKind.TABLE,
         ObjectKind.CHART,
         ObjectKind.DIAGRAM,
+        ObjectKind.FORMULA,
     ):
         return False, f"{record.kind.value} objects are not retrievable"
     stages = {stage.stage: stage for stage in record.stages}
     required = (
         ("qualified_ir", "qualified_description", "qualification", "svg")
-        if record.kind in (ObjectKind.CHART, ObjectKind.DIAGRAM)
+        if record.kind in (ObjectKind.CHART, ObjectKind.DIAGRAM, ObjectKind.FORMULA)
         else ("ir", "description", "qualification", "svg")
     )
     if any(
@@ -148,6 +161,11 @@ def eligibility(record: ObjectProcessingRecord) -> tuple[bool, str | None]:
             return (
                 False,
                 "Diagram structure is not proven; only geometry-qualified diagrams are retrievable",
+            )
+        if record.kind is ObjectKind.FORMULA:
+            return (
+                False,
+                "Formula tokens are not source-proven; only proven formulas are retrievable",
             )
         return False, "required qualification stages are incomplete"
     return True, None
@@ -180,7 +198,7 @@ class ProcessingRetrieval:
             stages = {stage.stage: stage for stage in record.stages}
             required = (
                 ("qualified_ir", "qualified_description", "qualification", "svg")
-                if record.kind in (ObjectKind.CHART, ObjectKind.DIAGRAM)
+                if record.kind in (ObjectKind.CHART, ObjectKind.DIAGRAM, ObjectKind.FORMULA)
                 else ("ir", "description", "qualification", "svg")
             )
             refs = tuple(stages[name].artifact for name in required)
@@ -240,6 +258,25 @@ class ProcessingRetrieval:
                     for stage in diagram_refs
                     if stage is not None and stage.artifact is not None
                 )
+            elif record.kind is ObjectKind.FORMULA:
+                # The proof reads no model, so the model branches are lineage only when
+                # they actually succeeded; the observation is always part of the closure.
+                formula_receipt = TypeAdapter(FormulaPublicationReceipt).validate_json(
+                    self.outputs.assets.get(qualification), strict=True
+                )
+                lineage = (
+                    formula_receipt.qualification.observation,
+                    *formula_receipt.qualification.lineage,
+                )
+                produced = {
+                    stage.artifact
+                    for stage in record.stages
+                    if stage.state is StageState.SUCCEEDED and stage.artifact is not None
+                }
+                if not set(lineage) <= produced:
+                    raise ValueError(
+                        "Qualified formula lineage is outside its processing object stages"
+                    )
             provisional = RetrievalMember(
                 record.object_id,
                 record.kind,
@@ -386,14 +423,16 @@ class ProcessingRetrieval:
     def _qualified(
         self, scope: ProcessingScope, member: RetrievalMember
     ) -> tuple[
-        TextIR | ListIR | GroupIR | TableIR | ChartIR | DiagramIR,
+        TextIR | ListIR | GroupIR | TableIR | ChartIR | DiagramIR | FormulaIR,
         ObjectDescription | TextDescription,
-        LiteralQualification | FigureQualification | DiagramQualification,
+        LiteralQualification | FigureQualification | DiagramQualification | FormulaQualification,
     ]:
         if member.kind is ObjectKind.CHART:
             return validate_retrieval_chart_member(self.sources, self.outputs.assets, scope, member)
         if member.kind is ObjectKind.DIAGRAM:
             return validate_diagram_member(self.sources, self.outputs.assets, scope, member)
+        if member.kind is ObjectKind.FORMULA:
+            return validate_formula_member(self.sources, self.outputs.assets, scope, member)
         return self._literal(scope, member)
 
 
@@ -417,6 +456,13 @@ def resolve_processing_context(
         )
         return RetrievalContext(
             plan.snapshot_id, member, diagram, diagram_description, diagram_receipt
+        )
+    if member.kind is ObjectKind.FORMULA:
+        formula, formula_description, formula_receipt = validate_formula_member(
+            sources, outputs.assets, plan.scope, member
+        )
+        return RetrievalContext(
+            plan.snapshot_id, member, formula, formula_description, formula_receipt
         )
     ir, description, receipt = validate_literal_member(sources, outputs.assets, plan.scope, member)
     return RetrievalContext(plan.snapshot_id, member, ir, description, receipt)

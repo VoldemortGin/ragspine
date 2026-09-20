@@ -52,7 +52,12 @@ from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
     publish_generic_document,
     resolve_table_member,
 )
-from tests.enterprise_pdf_rag.answers.fake_document import DIAGRAM_LABELS, diagram_member
+from tests.enterprise_pdf_rag.answers.fake_document import (
+    DIAGRAM_LABELS,
+    diagram_member,
+    formula_ir,
+    formula_member,
+)
 from tests.enterprise_pdf_rag.answers.store_mounted_document import (
     StoreMountedDocument,
     bar_document,
@@ -63,6 +68,7 @@ _SNAPSHOT = "5" * 64
 _TEXT_MEMBER = "a" * 64
 _TABLE_MEMBER = "b" * 64
 _DIAGRAM_MEMBER = "diagram-1"
+_FORMULA_MEMBER = "formula-1"
 _ANCHOR = SourceAnchor("c" * 64, "c" * 64, 3, (0.0, 0.0, 100.0, 50.0))
 
 type ChartEvidence = Callable[[str], ChartContext | DisplayedLookupContext]
@@ -123,7 +129,7 @@ def _no_chart(member_id: str) -> Never:
 
 def _claim(
     member_id: str,
-    kind: Literal["quote", "cell", "chart_value", "diagram_node", "diagram_edge"],
+    kind: Literal["quote", "cell", "chart_value", "diagram_node", "diagram_edge", "formula"],
     field_path: str,
     text: str,
     *,
@@ -142,11 +148,16 @@ def _diagram_block() -> ContextBlock:
     return build_context_block(diagram_member(_DIAGRAM_MEMBER))
 
 
+def _formula_block() -> ContextBlock:
+    return build_context_block(formula_member(_FORMULA_MEMBER))
+
+
 def _verify(*claims: ModelClaim, chart_evidence: ChartEvidence = _no_chart) -> ClaimVerification:
     blocks = {
         _TEXT_MEMBER: _text_block(),
         _TABLE_MEMBER: _table_block(),
         _DIAGRAM_MEMBER: _diagram_block(),
+        _FORMULA_MEMBER: _formula_block(),
     }
     return verify_claims(_answer(*claims), blocks, chart_evidence=chart_evidence)
 
@@ -310,6 +321,77 @@ def test_diagram_claim_kind_and_path_must_agree() -> None:
         _verify(_claim(_DIAGRAM_MEMBER, "diagram_edge", "edges.first", "x"))
     )
     assert not_an_index.reason is AbstainReason.MODEL_OUTPUT_INVALID
+
+
+def _formula_line(path: str) -> str:
+    ir = formula_ir()
+    line = ir.linear if path == "formula.linear" else ir.readable
+    assert line is not None
+    return line
+
+
+@pytest.mark.parametrize("path", ["formula.linear", "formula.readable"])
+def test_formula_linear_claim_verifies_verbatim_only(path: str) -> None:
+    line = _formula_line(path)
+    verification = _verify(_claim(_FORMULA_MEMBER, "formula", path, line))
+    (claim,) = verification.verified
+    assert verification.rejected == ()
+    assert claim.kind is ClaimKind.FORMULA and claim.value is None
+    (citation,) = claim.citations
+    assert citation.kind is BlockKind.FORMULA and citation.page_index == 4
+    assert citation.field_path == path
+    # A whole-line claim cites every span the proven tokens quote, and has no single box.
+    assert citation.evidence_ids == ("sp-roe", "sp-num", "sp-den", "sp-scale")
+    assert citation.bbox is None and citation.quote == line
+    spaced = _verify(_claim(_FORMULA_MEMBER, "formula", path, line.replace(" ", "  ")))
+    assert len(spaced.verified) == 1
+    # Formula symbols are case sensitive: ``x`` is not ``X``.
+    recased = _only_rejected(
+        _verify(_claim(_FORMULA_MEMBER, "formula", path, line.replace("ROE", "roe")))
+    )
+    assert recased.reason is AbstainReason.CLAIM_NOT_IN_EVIDENCE
+    assert recased.detail == "claim text differs from the formula line"
+    blank = _only_rejected(_verify(_claim(_FORMULA_MEMBER, "formula", path, "   ")))
+    assert blank.reason is AbstainReason.CLAIM_NOT_IN_EVIDENCE
+
+
+def test_formula_token_claim_cites_span_and_bbox() -> None:
+    verification = _verify(_claim(_FORMULA_MEMBER, "formula", "tokens.4", "Equity"))
+    (claim,) = verification.verified
+    (citation,) = claim.citations
+    assert citation.field_path == "tokens.4"
+    assert citation.evidence_ids == ("sp-den",)
+    assert citation.bbox == (72.0, 85.2, 111.6, 96.2) and citation.quote == "Equity"
+    wrong = _only_rejected(_verify(_claim(_FORMULA_MEMBER, "formula", "tokens.4", "Capital")))
+    assert wrong.reason is AbstainReason.CLAIM_NOT_IN_EVIDENCE
+    assert wrong.detail == "claim text differs from token"
+
+
+def test_formula_unknown_token_index_is_rejected() -> None:
+    unknown = _only_rejected(_verify(_claim(_FORMULA_MEMBER, "formula", "tokens.9", "Equity")))
+    assert unknown.reason is AbstainReason.CLAIM_NOT_IN_EVIDENCE
+    assert unknown.detail == "cited token is not in the block"
+    malformed = _only_rejected(_verify(_claim(_FORMULA_MEMBER, "formula", "tokens.a", "Equity")))
+    assert malformed.reason is AbstainReason.MODEL_OUTPUT_INVALID
+    assert malformed.detail == (
+        "formula claims cite formula.linear, formula.readable or tokens.<index>"
+    )
+
+
+def test_formula_path_prefix_mismatch_is_invalid_output() -> None:
+    crossed = _only_rejected(_verify(_claim(_FORMULA_MEMBER, "formula", "points.p-1.value", "100")))
+    assert crossed.reason is AbstainReason.MODEL_OUTPUT_INVALID
+    on_text = _only_rejected(_verify(_claim(_TEXT_MEMBER, "formula", "tokens.0", "ROE")))
+    assert on_text.reason is AbstainReason.MODEL_OUTPUT_INVALID
+    as_quote = _only_rejected(_verify(_claim(_FORMULA_MEMBER, "quote", "tokens.0", "ROE")))
+    assert as_quote.reason is AbstainReason.MODEL_OUTPUT_INVALID
+
+
+def test_prose_number_from_formula_token_is_grounded() -> None:
+    verification = _verify(_claim(_FORMULA_MEMBER, "formula", "tokens.6", "100"))
+    assert verification.rejected == ()
+    assert prose_grounded("ROE 除以之后再乘以 100。", verification.verified) == (True, ())
+    assert prose_grounded("ROE 乘以 250。", verification.verified) == (False, ("250",))
 
 
 def _chart_setup(

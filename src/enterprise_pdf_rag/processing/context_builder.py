@@ -18,6 +18,7 @@ from enterprise_pdf_rag.processing.retrieval import RetrievalContext
 from enterprise_pdf_rag.processing.table_models import CellContentState, TableIR
 from enterprise_pdf_rag.processing.typed_ir import (
     DiagramIR,
+    FormulaIR,
     GroupIR,
     ListIR,
     ObservedText,
@@ -32,6 +33,7 @@ class BlockKind(StrEnum):
     TABLE = "table"
     CHART = "chart"
     DIAGRAM = "diagram"
+    FORMULA = "formula"
 
 
 _KIND_OF_OBJECT = {
@@ -41,6 +43,7 @@ _KIND_OF_OBJECT = {
     ObjectKind.TABLE: BlockKind.TABLE,
     ObjectKind.CHART: BlockKind.CHART,
     ObjectKind.DIAGRAM: BlockKind.DIAGRAM,
+    ObjectKind.FORMULA: BlockKind.FORMULA,
 }
 
 
@@ -103,6 +106,19 @@ class DiagramEdgeEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class FormulaTokenEvidence:
+    """One proven formula token: ``tokens.<index>`` is its citable path."""
+
+    index: int
+    text: str
+    role: str
+    script: str
+    proof: str | None
+    source_span_id: str
+    bbox: Bounds
+
+
+@dataclass(frozen=True, slots=True)
 class ContextBlock:
     snapshot_id: str
     member_id: str
@@ -120,6 +136,10 @@ class ContextBlock:
     chart_fields: tuple[ChartFieldEvidence, ...] = ()
     nodes: tuple[DiagramNodeEvidence, ...] = ()
     edges: tuple[DiagramEdgeEvidence, ...] = ()
+    formula_linear: str | None = None
+    formula_readable: str | None = None
+    formula_proof_level: str | None = None
+    formula_tokens: tuple[FormulaTokenEvidence, ...] = ()
 
     def prompt_text(self) -> str:
         """Deterministic rendering; every citable path appears verbatim as a line prefix."""
@@ -143,6 +163,15 @@ class ContextBlock:
                     f"category={fields[prefix + '.category'].text} "
                     f"unit={fields[prefix + '.unit'].text} value={value}"
                 )
+        elif self.kind is BlockKind.FORMULA:
+            lines.append(f"formula proof_level={self.formula_proof_level}")
+            lines.append(f"formula.linear: {self.formula_linear}")
+            lines.append(f"formula.readable: {self.formula_readable}")
+            lines.extend(
+                f"tokens.{token.index}: {token.text}  "
+                f"(role={token.role}, script={token.script}, proof={token.proof or 'none'})"
+                for token in self.formula_tokens
+            )
         elif self.kind is BlockKind.TABLE:
             lines.append(f"table rows={self.row_count} cols={self.col_count}")
             for cell in self.cells:
@@ -299,6 +328,34 @@ def build_context_block(context: RetrievalContext) -> ContextBlock:
                     ),
                 )
                 for index, edge in enumerate(ir.edges)
+            ),
+        )
+    if isinstance(ir, FormulaIR):
+        if member.kind is not ObjectKind.FORMULA:
+            raise ValueError("Retrieval member kind does not match its typed IR")
+        if not ir.tokens:
+            raise ValueError("Formula members need their proven token IR")
+        return ContextBlock(
+            *common,
+            BlockKind.FORMULA,
+            member.page_index,
+            context.scope,
+            ir.verification,
+            context.description.text,
+            formula_linear=ir.linear,
+            formula_readable=ir.readable,
+            formula_proof_level=ir.proof_level,
+            formula_tokens=tuple(
+                FormulaTokenEvidence(
+                    token.index,
+                    token.text,
+                    token.role.value,
+                    token.script.value,
+                    token.script_proof,
+                    token.source_span_id,
+                    token.bbox,
+                )
+                for token in ir.tokens
             ),
         )
     raise ValueError(f"{type(ir).__name__} members are not supported as answer context")

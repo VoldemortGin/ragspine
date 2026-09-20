@@ -15,7 +15,7 @@ from decimal import Decimal
 
 from enterprise_pdf_rag.figures.models import ChartIR, ChartPoint, ValueKind
 from enterprise_pdf_rag.processing.diagram_description import EDGE_ARROW, reading_order
-from enterprise_pdf_rag.processing.typed_ir import DiagramIR, TypedIR
+from enterprise_pdf_rag.processing.typed_ir import DiagramIR, FormulaIR, TypedIR
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,10 +108,27 @@ def diagram_index_text(diagram: DiagramIR, *, fallback: str) -> str:
     return " ".join(part.strip() for part in parts if part.strip())
 
 
+def formula_index_text(formula: FormulaIR, *, fallback: str) -> str:
+    """Project a proven formula into searchable text; otherwise ``fallback``.
+
+    The projection is deterministic: the readable transcription, its linear form, the
+    literal word ``formula`` and every distinct token text, so a question that names a
+    symbol or an operand rather than the surrounding prose has something to match. A
+    model-only ``FormulaIR`` carries no token, so it keeps its description text.
+    """
+    if not formula.tokens or formula.linear is None or formula.readable is None:
+        return fallback
+    parts = [formula.readable, formula.linear, "formula"]
+    parts.extend(dict.fromkeys(token.text for token in formula.tokens))
+    return " ".join(part.strip() for part in parts if part.strip())
+
+
 def member_index_text(ir: TypedIR, description_text: str) -> str:
     """Text / list / group / table members index their description; figures are projected."""
     if isinstance(ir, ChartIR):
         return chart_index_text(ir, fallback=description_text)
     if isinstance(ir, DiagramIR):
         return diagram_index_text(ir, fallback=description_text)
+    if isinstance(ir, FormulaIR):
+        return formula_index_text(ir, fallback=description_text)
     return description_text

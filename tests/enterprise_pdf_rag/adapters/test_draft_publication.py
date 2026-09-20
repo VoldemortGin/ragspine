@@ -49,6 +49,9 @@ from enterprise_pdf_rag.processing.typed_ir import (
     ObjectDescription,
     TextIR,
 )
+from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
+    ingest_generic_semantics,
+)
 
 
 def _publish_source(
@@ -745,4 +748,23 @@ def test_qualify_skips_an_unverified_table_with_its_own_reason(tmp_path: Path) -
     assert result.kinds == {}
     assert result.skipped_reasons == {
         "Table transcription is not verified; only verified tables are retrievable": 1
+    }
+
+
+def test_qualify_skips_an_unproven_formula_with_its_own_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without its drawn rule the fraction has no structure, so its baselines never cluster."""
+    ingest, _ = ingest_generic_semantics(
+        tmp_path, monkeypatch, formula_page=True, formula_rule=False
+    )
+    result = qualify_draft(
+        source_store=Path(ingest.source_store),
+        processing_store=Path(ingest.processing_store),
+        processing_id=ingest.processing_id,
+    )
+    assert result.kinds == {"Formula": 1, "Text": 3}
+    assert result.skipped_object_count == 1
+    assert result.skipped_reasons == {
+        "Formula tokens are not source-proven; only proven formulas are retrievable": 1
     }

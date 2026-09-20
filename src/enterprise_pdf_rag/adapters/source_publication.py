@@ -8,6 +8,7 @@ from enterprise_pdf_rag.adapters.chart_member_validation import (
 )
 from enterprise_pdf_rag.adapters.diagram_publication import validate_diagram_member
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
+from enterprise_pdf_rag.adapters.formula_qualification import validate_formula_member
 from enterprise_pdf_rag.adapters.layout_normalization import normalize_partition
 from enterprise_pdf_rag.adapters.literal_qualification import validate_literal_member
 from enterprise_pdf_rag.processing.models import (
@@ -82,5 +83,7 @@ def validate_processing_source(
                 validate_retrieval_chart_member(sources, artifacts, manifest.scope, member)
             elif member.kind is ObjectKind.DIAGRAM:
                 validate_diagram_member(sources, artifacts, manifest.scope, member)
+            elif member.kind is ObjectKind.FORMULA:
+                validate_formula_member(sources, artifacts, manifest.scope, member)
             else:
                 validate_literal_member(sources, artifacts, manifest.scope, member)

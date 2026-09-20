@@ -178,6 +178,7 @@ def _coverage(outputs: ProcessingStore, manifest: ProcessingManifest) -> tuple[s
                     "description_artifacts",
                     "source_transcription_qualified",
                     "diagram_structure_qualified",
+                    "formula_tokens_qualified",
                     "labels_only_qualified",
                     "numeric_qualified",
                     "displayed_lookup_qualified",
@@ -196,6 +197,8 @@ def _coverage(outputs: ProcessingStore, manifest: ProcessingManifest) -> tuple[s
                 key = "qualification_unavailable"
             elif kind is ObjectKind.DIAGRAM:
                 key = "diagram_structure_qualified"
+            elif kind is ObjectKind.FORMULA:
+                key = "formula_tokens_qualified"
             elif kind is not ObjectKind.CHART:
                 key = "source_transcription_qualified"
             else:
@@ -219,6 +222,7 @@ def _coverage(outputs: ProcessingStore, manifest: ProcessingManifest) -> tuple[s
         "description_artifacts",
         "source_transcription_qualified",
         "diagram_structure_qualified",
+        "formula_tokens_qualified",
         "labels_only_qualified",
         "numeric_qualified",
         "displayed_lookup_qualified",
@@ -231,6 +235,7 @@ def _coverage(outputs: ProcessingStore, manifest: ProcessingManifest) -> tuple[s
         "已保存描述",
         "仅原文转录资格",
         "图结构资格",
+        "公式 token 资格",
         "仅标签资格",
         "数值关系资格",
         "仅显示值查值资格",

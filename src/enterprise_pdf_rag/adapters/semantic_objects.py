@@ -25,6 +25,11 @@ from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.donut_qualification import DonutQualification
 from enterprise_pdf_rag.adapters.figure_label_qualification import qualify_source_labels
 from enterprise_pdf_rag.adapters.figure_reasoning import PreparedFigure, prepare_figure
+from enterprise_pdf_rag.adapters.formula_qualification import (
+    FormulaPublicationReceipt,
+    check_model_description,
+    qualify_formula,
+)
 from enterprise_pdf_rag.adapters.json_completion import (
     JsonCompletionClient,
     JsonCompletionError,
@@ -37,6 +42,10 @@ from enterprise_pdf_rag.adapters.source_objects import source_table_description
 from enterprise_pdf_rag.adapters.visual_semantics import VisualInference, VisualSemanticAdapter
 from enterprise_pdf_rag.documents.models import AssetRef, TextSidecar
 from enterprise_pdf_rag.figures.models import ChartIR, TextDescription
+from enterprise_pdf_rag.processing.formula_models import (
+    FormulaQualification,
+    FormulaSourceObservation,
+)
 from enterprise_pdf_rag.processing.models import (
     LayoutObject,
     ObjectKind,
@@ -48,6 +57,7 @@ from enterprise_pdf_rag.processing.models import (
 from enterprise_pdf_rag.processing.table_models import TableExtractionResult, TableIR
 from enterprise_pdf_rag.processing.typed_ir import (
     DiagramIR,
+    FormulaIR,
     LiteralQualification,
     ObjectDescription,
 )
@@ -226,6 +236,15 @@ class SemanticObjectAdapter:
             )
             stages.append(outcome)
             branch[name] = outcome
+        if item.kind is ObjectKind.FORMULA:
+            return self._formula(
+                page,
+                item,
+                writer,
+                stages,
+                result.ir if isinstance(result.ir, FormulaIR) else None,
+                result.description,
+            )
         if item.kind is not ObjectKind.DIAGRAM:
             stages.append(
                 writer.diagnostic(
@@ -379,6 +398,105 @@ class SemanticObjectAdapter:
             )
         )
         return ObjectProcessingRecord(item.object_id, item.kind, tuple(stages))
+
+    def _formula(
+        self,
+        page: PageInput,
+        item: LayoutObject,
+        writer: _Writer,
+        stages: list[StageOutcome],
+        model_ir: FormulaIR | None,
+        model_description: ObjectDescription | None,
+    ) -> ObjectProcessingRecord:
+        """Prove the formula from the pinned PDF itself; the two model branches stay lineage.
+
+        Like ``_table`` this runs under whatever ``qualification_policy`` was selected, and
+        unlike ``_diagram`` it needs neither model branch: no model byte reaches the
+        qualified products, so a budget-exhausted object still qualifies.
+        """
+        source = self.sources.load(page.source_manifest_id)
+        try:
+            result = qualify_formula(
+                self.sources.get(source.manifest.source),
+                page=page,
+                item=item,
+                model_ir=model_ir,
+            )
+        except ValueError as error:
+            stages.extend(
+                (
+                    writer.diagnostic("formula_observation", str(error), failed=True),
+                    writer.diagnostic(
+                        "qualification",
+                        "Formula source could not be re-observed: " + str(error),
+                    ),
+                )
+            )
+            return ObjectProcessingRecord(item.object_id, item.kind, tuple(stages))
+        observation = writer.save(
+            "formula_observation",
+            TypeAdapter(FormulaSourceObservation).dump_json(result.observation),
+        )
+        stages.append(observation)
+        if result.ir is None or result.description is None or result.ir.proof_level is None:
+            stages.append(
+                writer.diagnostic(
+                    "qualification",
+                    "Formula qualification withheld: " + "; ".join(result.diagnostics),
+                )
+            )
+            return ObjectProcessingRecord(item.object_id, item.kind, tuple(stages))
+        by_name = {stage.stage: stage for stage in stages}
+        lineage = tuple(
+            _ref(by_name[name])
+            for name in ("ir", "description", "model_view")
+            if name in by_name and by_name[name].state is StageState.SUCCEEDED
+        )
+        ir = writer.save("qualified_ir", TypeAdapter(FormulaIR).dump_json(result.ir))
+        described = writer.save(
+            "qualified_description", TypeAdapter(ObjectDescription).dump_json(result.description)
+        )
+        receipt = FormulaQualification(
+            item.object_id,
+            result.ir.source,
+            page.source_manifest_id,
+            result.ir.source_span_ids,
+            _ref(ir),
+            _ref(described),
+            _ref(by_name["svg"]),
+            _ref(observation),
+            result.ir.proof_level,
+            len(result.ir.tokens),
+            len(result.ir.structures),
+            tuple(token.index for token in result.ir.tokens if token.script_proof == "derived"),
+            result.agreement,
+            lineage,
+        )
+        stages.extend(
+            (
+                ir,
+                described,
+                writer.save(
+                    "qualification",
+                    FormulaPublicationReceipt(qualification=receipt).model_dump_json().encode(),
+                ),
+                writer.save(
+                    "qualification_exclusions",
+                    json.dumps(
+                        {
+                            "model_literal_agreement": result.agreement,
+                            "model_description_diagnostics": list(
+                                check_model_description(model_description, result.ir)
+                            ),
+                            "diagnostics": list(result.diagnostics),
+                        }
+                    ).encode(),
+                ),
+            )
+        )
+        return ObjectProcessingRecord(
+            item.object_id, item.kind, tuple(stages), len(result.ir.tokens)
+        )
 
     def _chart(
         self,

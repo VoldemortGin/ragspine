@@ -831,6 +831,103 @@
         "title": "FormulaIR",
         "type": "object"
       },
+      "FormulaQualification": {
+        "description": "Qualifies exact token transcription and path-backed structure only; never a financial relation.",
+        "properties": {
+          "derived_script_token_indices": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Derived Script Token Indices",
+            "type": "array"
+          },
+          "description": {
+            "$ref": "#/$defs/AssetRef"
+          },
+          "ir": {
+            "$ref": "#/$defs/AssetRef"
+          },
+          "lineage": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/AssetRef"
+            },
+            "title": "Lineage",
+            "type": "array"
+          },
+          "method": {
+            "default": "exact-span-tiling+path-geometry+text-rise-v1",
+            "title": "Method",
+            "type": "string"
+          },
+          "model_literal_agreement": {
+            "enum": [
+              "agrees",
+              "disagrees",
+              "unavailable"
+            ],
+            "title": "Model Literal Agreement",
+            "type": "string"
+          },
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "observation": {
+            "$ref": "#/$defs/AssetRef"
+          },
+          "proof_level": {
+            "$ref": "#/$defs/ProofLevel"
+          },
+          "scope": {
+            "default": "formula-source-tokens-v1",
+            "title": "Scope",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/$defs/SourceAnchor"
+          },
+          "source_manifest_id": {
+            "title": "Source Manifest Id",
+            "type": "string"
+          },
+          "source_span_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Span Ids",
+            "type": "array"
+          },
+          "source_svg": {
+            "$ref": "#/$defs/AssetRef"
+          },
+          "structure_count": {
+            "title": "Structure Count",
+            "type": "integer"
+          },
+          "token_count": {
+            "title": "Token Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "object_id",
+          "source",
+          "source_manifest_id",
+          "source_span_ids",
+          "ir",
+          "description",
+          "source_svg",
+          "observation",
+          "proof_level",
+          "token_count",
+          "structure_count",
+          "derived_script_token_indices",
+          "model_literal_agreement"
+        ],
+        "title": "FormulaQualification",
+        "type": "object"
+      },
       "FormulaStructure": {
         "properties": {
           "first": {
@@ -1368,6 +1465,9 @@
               },
               {
                 "$ref": "#/$defs/DiagramQualification"
+              },
+              {
+                "$ref": "#/$defs/FormulaQualification"
               }
             ],
             "title": "Qualification"

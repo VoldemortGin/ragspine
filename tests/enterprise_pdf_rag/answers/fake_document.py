@@ -35,6 +35,15 @@ from enterprise_pdf_rag.processing.diagram_models import (
     NodeEvidence,
     PathEvidence,
 )
+from enterprise_pdf_rag.processing.formula_models import (
+    FormulaQualification,
+    FormulaStructure,
+    FormulaToken,
+    StructureKind,
+    TokenRole,
+)
+from enterprise_pdf_rag.processing.formula_models import PathEvidence as FormulaPathEvidence
+from enterprise_pdf_rag.processing.formula_rules import linearize, readable_text
 from enterprise_pdf_rag.processing.index_text import member_index_text
 from enterprise_pdf_rag.processing.models import ObjectKind, ProcessingManifest
 from enterprise_pdf_rag.processing.retrieval import (
@@ -46,6 +55,7 @@ from enterprise_pdf_rag.processing.typed_ir import (
     DiagramEdge,
     DiagramIR,
     DiagramNode,
+    FormulaIR,
     LiteralQualification,
     ObjectDescription,
     ObservedText,
@@ -124,6 +134,77 @@ def diagram_member(member_id: str = DIAGRAM_MEMBER) -> RetrievalContext:
     )
     member = _NamedMember(member_id, ObjectKind.DIAGRAM, 2, _REF, _REF, _REF, _REF, _REF, "fp", 2)
     return RetrievalContext(SNAPSHOT, member, ir, describe_diagram(ir), qualification)
+
+
+FORMULA_MEMBER = "formula-1"
+FORMULA_ANCHOR = SourceAnchor(_SHA, _SHA, 4, (18.0, 56.0, 160.0, 100.0))
+FORMULA_TOKENS = (
+    FormulaToken(0, "ROE", "sp-roe", 0, 3, (20.0, 72.4, 41.6, 84.4), TokenRole.OPERAND),
+    FormulaToken(1, "=", "sp-roe", 4, 5, (48.8, 72.4, 56.0, 84.4), TokenRole.RELATION),
+    FormulaToken(2, "Net", "sp-num", 0, 3, (62.0, 65.2, 81.8, 76.2), TokenRole.OPERAND),
+    FormulaToken(3, "profit", "sp-num", 4, 10, (88.4, 65.2, 128.0, 76.2), TokenRole.OPERAND),
+    FormulaToken(4, "Equity", "sp-den", 0, 6, (72.0, 85.2, 111.6, 96.2), TokenRole.OPERAND),
+    FormulaToken(5, "×", "sp-scale", 0, 1, (135.0, 72.4, 142.2, 84.4), TokenRole.OPERATOR),  # noqa: RUF001 — the multiplication sign is the source glyph, not an ASCII lookalike
+    FormulaToken(6, "100", "sp-scale", 2, 5, (145.0, 72.4, 160.0, 84.4), TokenRole.NUMBER),
+)
+FORMULA_STRUCTURES = (
+    FormulaStructure(
+        StructureKind.FRACTION,
+        FormulaPathEvidence(0, "line", ((60.0, 78.0), (120.0, 78.0)), 0.8),
+        (2, 3),
+        (4,),
+    ),
+)
+
+
+def formula_ir() -> FormulaIR:
+    """A fully proven ``ROE = Net profit / Equity`` scaled by 100; the last token is a number."""
+    return FormulaIR(
+        FORMULA_MEMBER,
+        FORMULA_ANCHOR,
+        "ROE =\nNet profit\nEquity\n× 100",  # noqa: RUF001 — the multiplication sign is the source glyph, not an ASCII lookalike
+        None,
+        ("sp-roe", "sp-num", "sp-den", "sp-scale"),
+        ("proof_level=full",),
+        Verification.VERIFIED,
+        FORMULA_TOKENS,
+        FORMULA_STRUCTURES,
+        linearize(FORMULA_TOKENS, FORMULA_STRUCTURES),
+        readable_text(FORMULA_TOKENS, FORMULA_STRUCTURES),
+        "full",
+    )
+
+
+def formula_member(member_id: str = FORMULA_MEMBER) -> RetrievalContext:
+    """The hydrated formula member a store-backed ``resolve`` returns, without a store."""
+    ir = formula_ir()
+    assert ir.readable is not None
+    qualification = FormulaQualification(
+        FORMULA_MEMBER,
+        FORMULA_ANCHOR,
+        _SHA,
+        ir.source_span_ids,
+        _REF,
+        _REF,
+        _REF,
+        _REF,
+        "full",
+        len(ir.tokens),
+        len(ir.structures),
+        (),
+        "unavailable",
+    )
+    description = ObjectDescription(
+        FORMULA_MEMBER,
+        FORMULA_ANCHOR,
+        ir.source_span_ids,
+        ir.readable,
+        "exact-formula-transcription-v1",
+        Confidence(None, "deterministic formula token transcription"),
+        Verification.VERIFIED,
+    )
+    member = _NamedMember(member_id, ObjectKind.FORMULA, 4, _REF, _REF, _REF, _REF, _REF, "fp", 2)
+    return RetrievalContext(SNAPSHOT, member, ir, description, qualification)
 
 
 @dataclass(frozen=True, slots=True)

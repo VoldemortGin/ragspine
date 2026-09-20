@@ -15,9 +15,17 @@ from enterprise_pdf_rag.figures.models import (
     ValueKind,
     Verification,
 )
+from enterprise_pdf_rag.processing.formula_models import (
+    FormulaStructure,
+    FormulaToken,
+    PathEvidence,
+    StructureKind,
+    TokenRole,
+)
 from enterprise_pdf_rag.processing.index_text import (
     chart_index_text,
     diagram_index_text,
+    formula_index_text,
     has_citable_structure,
     has_citable_value,
     member_index_text,
@@ -26,6 +34,7 @@ from enterprise_pdf_rag.processing.typed_ir import (
     DiagramEdge,
     DiagramIR,
     DiagramNode,
+    FormulaIR,
     TextIR,
 )
 
@@ -142,6 +151,59 @@ def test_diagram_without_source_labels_keeps_its_description_text() -> None:
     anchor = SourceAnchor(_SHA, _SHA, 2, (15.0, 65.0, 225.0, 105.0))
     empty = DiagramIR("diagram-1", anchor, (), (), ())
     assert diagram_index_text(empty, fallback=fallback) == fallback
+
+
+_LINEAR = "ROE = \\frac{Net\\ profit}{Equity}"
+_READABLE = "ROE 等于 Net profit 除以 Equity"
+
+
+def _formula(*, proven: bool = True) -> FormulaIR:
+    """The authored ``ROE = Net profit / Equity`` fixture, already proven from its source."""
+    anchor = SourceAnchor(_SHA, _SHA, 2, (18.0, 56.0, 132.0, 100.0))
+    if not proven:
+        return FormulaIR("formula-1", anchor, "ROE =", "ROE = x", ("sp-roe",), ())
+    tokens = (
+        FormulaToken(0, "ROE", "sp-roe", 0, 3, (20.0, 72.4, 41.6, 84.4), TokenRole.OPERAND),
+        FormulaToken(1, "=", "sp-roe", 4, 5, (48.8, 72.4, 56.0, 84.4), TokenRole.RELATION),
+        FormulaToken(2, "Net", "sp-num", 0, 3, (62.0, 65.2, 81.8, 76.2), TokenRole.OPERAND),
+        FormulaToken(3, "profit", "sp-num", 4, 10, (88.4, 65.2, 128.0, 76.2), TokenRole.OPERAND),
+        FormulaToken(4, "Equity", "sp-den", 0, 6, (72.0, 85.2, 111.6, 96.2), TokenRole.OPERAND),
+    )
+    structure = FormulaStructure(
+        StructureKind.FRACTION,
+        PathEvidence(0, "line", ((60.0, 78.0), (120.0, 78.0)), 0.8),
+        (2, 3),
+        (4,),
+    )
+    return FormulaIR(
+        "formula-1",
+        anchor,
+        "ROE =\nNet profit\nEquity",
+        None,
+        ("sp-roe", "sp-num", "sp-den"),
+        ("proof_level=full",),
+        Verification.VERIFIED,
+        tokens,
+        (structure,),
+        _LINEAR,
+        _READABLE,
+        "full",
+    )
+
+
+def test_formula_members_index_readable_linear_and_tokens() -> None:
+    formula = _formula()
+    expected = f"{_READABLE} {_LINEAR} formula ROE = Net profit Equity"
+    assert formula_index_text(formula, fallback="A ratio definition.") == expected
+    assert member_index_text(formula, "A ratio definition.") == expected
+
+
+def test_model_only_formula_ir_keeps_description_text() -> None:
+    fallback = "A formula defining ROE as Net profit over Equity."
+    model_only = _formula(proven=False)
+    assert model_only.tokens == ()
+    assert formula_index_text(model_only, fallback=fallback) == fallback
+    assert member_index_text(model_only, fallback) == fallback
 
 
 def test_literal_members_index_their_description_unchanged() -> None:

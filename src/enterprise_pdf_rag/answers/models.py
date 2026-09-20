@@ -21,6 +21,7 @@ class ClaimKind(StrEnum):
     CHART_VALUE = "chart_value"
     DIAGRAM_NODE = "diagram_node"
     DIAGRAM_EDGE = "diagram_edge"
+    FORMULA = "formula"
 
 
 class AbstainReason(StrEnum):

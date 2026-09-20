@@ -351,7 +351,8 @@
           "group",
           "table",
           "chart",
-          "diagram"
+          "diagram",
+          "formula"
         ],
         "title": "BlockKind",
         "type": "string"
@@ -454,7 +455,8 @@
           "cell",
           "chart_value",
           "diagram_node",
-          "diagram_edge"
+          "diagram_edge",
+          "formula"
         ],
         "title": "ClaimKind",
         "type": "string"
@@ -1110,7 +1112,8 @@
           "group",
           "table",
           "chart",
-          "diagram"
+          "diagram",
+          "formula"
         ],
         "title": "BlockKind",
         "type": "string"
@@ -1239,7 +1242,8 @@
           "cell",
           "chart_value",
           "diagram_node",
-          "diagram_edge"
+          "diagram_edge",
+          "formula"
         ],
         "title": "ClaimKind",
         "type": "string"

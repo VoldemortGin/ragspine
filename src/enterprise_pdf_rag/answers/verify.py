@@ -65,6 +65,7 @@ _PATH_PREFIX = {
     ClaimKind.CHART_VALUE: ("points.",),
     ClaimKind.DIAGRAM_NODE: ("nodes.",),
     ClaimKind.DIAGRAM_EDGE: ("edges.",),
+    ClaimKind.FORMULA: ("formula.", "tokens."),
 }
 _BLOCK_KINDS = {
     ClaimKind.QUOTE: {BlockKind.TEXT, BlockKind.LIST, BlockKind.GROUP},
@@ -72,11 +73,13 @@ _BLOCK_KINDS = {
     ClaimKind.CHART_VALUE: {BlockKind.CHART},
     ClaimKind.DIAGRAM_NODE: {BlockKind.DIAGRAM},
     ClaimKind.DIAGRAM_EDGE: {BlockKind.DIAGRAM},
+    ClaimKind.FORMULA: {BlockKind.FORMULA},
 }
 _NUMBER_RE = re.compile(r"(?<![\w.])[-+]?\d[\d,]*(?:\.\d+)?\s*%?(?![\w%])")
 _POINT_VALUE_RE = re.compile(r"points\.(?P<point>[^.]+)\.value")
 _NODE_LABEL_RE = re.compile(r"nodes\.(?P<node>[A-Za-z0-9_-]+)\.label")
 _EDGE_RE = re.compile(r"edges\.(?P<index>\d+)")
+_TOKEN_PATH_RE = re.compile(r"tokens\.(?P<index>\d+)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,6 +178,59 @@ def _verify_cell(claim: ModelClaim, block: ContextBlock) -> VerifiedClaim | Reje
             ),
         ),
     )
+
+
+def _verify_formula(claim: ModelClaim, block: ContextBlock) -> VerifiedClaim | RejectedClaim:
+    """A formula line or one proven token, compared verbatim: symbols are case sensitive."""
+    if claim.field_path in ("formula.linear", "formula.readable"):
+        expected = (
+            block.formula_linear if claim.field_path == "formula.linear" else block.formula_readable
+        )
+        if expected is None:
+            return _reject(claim, AbstainReason.VALUE_UNAVAILABLE, "formula line is unavailable")
+        if not claim.text.strip() or _exact(claim.text) != _exact(expected):
+            return _reject(
+                claim,
+                AbstainReason.CLAIM_NOT_IN_EVIDENCE,
+                "claim text differs from the formula line",
+            )
+        citation = ClaimCitation(
+            block.member_id,
+            block.kind,
+            block.page_index,
+            claim.field_path,
+            tuple(dict.fromkeys(token.source_span_id for token in block.formula_tokens)),
+            None,
+            expected,
+        )
+    else:
+        match = _TOKEN_PATH_RE.fullmatch(claim.field_path)
+        if match is None:
+            return _reject(
+                claim,
+                AbstainReason.MODEL_OUTPUT_INVALID,
+                "formula claims cite formula.linear, formula.readable or tokens.<index>",
+            )
+        index = int(match.group("index"))
+        token = next((item for item in block.formula_tokens if item.index == index), None)
+        if token is None:
+            return _reject(
+                claim, AbstainReason.CLAIM_NOT_IN_EVIDENCE, "cited token is not in the block"
+            )
+        if _exact(claim.text) != _exact(token.text):
+            return _reject(
+                claim, AbstainReason.CLAIM_NOT_IN_EVIDENCE, "claim text differs from token"
+            )
+        citation = ClaimCitation(
+            block.member_id,
+            block.kind,
+            block.page_index,
+            claim.field_path,
+            (token.source_span_id,),
+            token.bbox,
+            token.text,
+        )
+    return VerifiedClaim(claim.claim_id, ClaimKind.FORMULA, claim.text, None, None, (citation,))
 
 
 def _verify_diagram_node(claim: ModelClaim, block: ContextBlock) -> VerifiedClaim | RejectedClaim:
@@ -408,6 +464,8 @@ def verify_claims(
             outcome = _verify_quote(claim, block)
         elif kind is ClaimKind.CELL:
             outcome = _verify_cell(claim, block)
+        elif kind is ClaimKind.FORMULA:
+            outcome = _verify_formula(claim, block)
         elif kind is ClaimKind.DIAGRAM_NODE:
             outcome = _verify_diagram_node(claim, block)
         elif kind is ClaimKind.DIAGRAM_EDGE:

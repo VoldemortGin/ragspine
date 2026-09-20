@@ -45,6 +45,25 @@ DIAGRAM_ARROWHEAD = ((142.0, 81.0), (142.0, 89.0), (150.0, 85.0))
 DIAGRAM_REGION = (15.0, 65.0, 225.0, 105.0)
 
 
+# ``ROE = Net profit / Equity`` over a drawn fraction rule, plus a typographic ``x`` with a
+# smaller raised ``2`` (pdfspine cannot write a real ``Ts``, so that superscript is derived).
+# Both boxes are the layout regions the stub partitioner proposes; they hold the authored
+# spans exactly as the embedded fixture font lays them out.
+FORMULA_FRACTION_BBOX = (18.0, 56.0, 132.0, 100.0)
+FORMULA_POWER_BBOX = (150.0, 62.0, 172.0, 86.0)
+FORMULA_RULE = ((60.0, 78.0), (120.0, 78.0))
+
+
+def _draw_formula(page: pdfspine.Page, fontname: str, *, rule: bool = True) -> None:
+    page.insert_text((20, 82), "ROE =", fontsize=12, fontname=fontname)
+    page.insert_text((62, 74), "Net profit", fontsize=11, fontname=fontname)
+    if rule:
+        page.draw_line(*FORMULA_RULE, width=0.8)
+    page.insert_text((72, 94), "Equity", fontsize=11, fontname=fontname)
+    page.insert_text((152, 82), "x", fontsize=12, fontname=fontname)
+    page.insert_text((160, 76), "2", fontsize=7, fontname=fontname)
+
+
 def _draw_table(page: pdfspine.Page, fontname: str) -> None:
     for y in TABLE_ROWS:
         page.draw_line((TABLE_COLUMNS[0], y), (TABLE_COLUMNS[-1], y), width=1)
@@ -77,9 +96,13 @@ def authored_pdf(
     table_page: bool = False,
     diagram_page: bool = False,
     diagram_caption: bool = False,
+    formula_page: bool = False,
+    formula_rule: bool = True,
 ) -> Path:
     """``diagram_caption`` is carried for the partition stub that owns the caption line."""
-    assert not (table_page and diagram_page), "Only one authored layout fits the last page"
+    assert sum(bool(value) for value in (table_page, diagram_page, formula_page)) <= 1, (
+        "Only one authored layout fits the last page"
+    )
     assert diagram_page or not diagram_caption, "A diagram caption needs the diagram layout"
     with pdfspine.open() as document:
         for number in range(page_count):
@@ -98,6 +121,8 @@ def authored_pdf(
                 _draw_table(page, fontname)
             if diagram_page and number == page_count - 1:
                 _draw_diagram(page, fontname)
+            if formula_page and number == page_count - 1:
+                _draw_formula(page, fontname, rule=formula_rule)
         path.write_bytes(document.tobytes())
     return path
 
