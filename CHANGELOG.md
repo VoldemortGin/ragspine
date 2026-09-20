@@ -2,39 +2,6 @@
 
 All notable changes to RAGSpine are documented here. This project follows Semantic Versioning.
 
-## [Unreleased]
-
-### Changed
-
-- **`enterprise_pdf_rag` indexes charts by a projection of their qualified IR** (ADR 0012).
-  A chart member used to embed its description, which is often its title alone, so a question
-  naming the chart's categories or values had nothing to match. `processing/index_text.py` now
-  projects a chart with at least one explicit point value into
-  `<title> <period> <grammar> chart figure` plus `<category> <series> <value><unit>` per point;
-  a pending, label-only or valueless chart keeps its description, and text / list / group / table
-  members are unchanged. Description assets are untouched. The retrieval policy moves to
-  `source-transcription-and-scoped-chart-qualification-v3` (bar publication to
-  `source-transcription-donut-and-displayed-bar-v2`) and BM25 is gated on the same policy set, so
-  both channels always score the string that was embedded — on old snapshots too. Policy strings
-  stay informational: **existing releases keep mounting and answering, but only a re-run of
-  `index` + `publish` gives them the projection.**
-- **`enterprise_pdf_rag` retrieval defaults widen**: `AnswerRequest.top_k` 6 → 10 and
-  `channel_limit` 20 → 50 (neither is exposed on the `rag-chat-v1` request, so the contract is
-  unchanged). The opt-in reranker now judges evidence blocks — what the answer model would see —
-  instead of a concatenation of index texts; it stays off by default because it must resolve
-  every fused candidate.
-
-### Added
-
-- **A conditional prompt seat for a citable chart** (`enterprise_pdf_rag`, ADR 0012): when no
-  hit in the top-k is a chart block with an explicit value but one sits within the next k fused
-  positions, it replaces the last seat. Pending or label-only charts never qualify and nothing
-  outside the window is promoted.
-- **`AnswerEnvelope.member_ranks`** in the `rag-chat-v1` response: one optional
-  `MemberRankOut(member_id, fused_score, vector_rank, lexical_rank, vector_score, bm25_score)`
-  per member that entered the prompt, so retrieval behaviour is readable from a response. The
-  contract name is unchanged.
-
 ## [0.14.0] - 2026-09-21
 
 ### Added
@@ -92,6 +59,15 @@ All notable changes to RAGSpine are documented here. This project follows Semant
   lazy-imported behind the extra with a friendly error when missing. The chosen checkpoint's licence
   must be checked against ADR 0009's ≤Apache-2.0 gate before promoting it to a default path.
 
+- **A conditional prompt seat for a citable chart** (`enterprise_pdf_rag`, ADR 0012): when no
+  hit in the top-k is a chart block with an explicit value but one sits within the next k fused
+  positions, it replaces the last seat. Pending or label-only charts never qualify and nothing
+  outside the window is promoted.
+- **`AnswerEnvelope.member_ranks`** in the `rag-chat-v1` response: one optional
+  `MemberRankOut(member_id, fused_score, vector_rank, lexical_rank, vector_score, bm25_score)`
+  per member that entered the prompt, so retrieval behaviour is readable from a response. The
+  contract name is unchanged.
+
 ### Fixed
 
 - **Prose number gate no longer rejects restated years / periods** (enterprise_pdf_rag
@@ -104,6 +80,23 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ### Changed
 
+- **`enterprise_pdf_rag` indexes charts by a projection of their qualified IR** (ADR 0012).
+  A chart member used to embed its description, which is often its title alone, so a question
+  naming the chart's categories or values had nothing to match. `processing/index_text.py` now
+  projects a chart with at least one explicit point value into
+  `<title> <period> <grammar> chart figure` plus `<category> <series> <value><unit>` per point;
+  a pending, label-only or valueless chart keeps its description, and text / list / group / table
+  members are unchanged. Description assets are untouched. The retrieval policy moves to
+  `source-transcription-and-scoped-chart-qualification-v3` (bar publication to
+  `source-transcription-donut-and-displayed-bar-v2`) and BM25 is gated on the same policy set, so
+  both channels always score the string that was embedded — on old snapshots too. Policy strings
+  stay informational: **existing releases keep mounting and answering, but only a re-run of
+  `index` + `publish` gives them the projection.**
+- **`enterprise_pdf_rag` retrieval defaults widen**: `AnswerRequest.top_k` 6 → 10 and
+  `channel_limit` 20 → 50 (neither is exposed on the `rag-chat-v1` request, so the contract is
+  unchanged). The opt-in reranker now judges evidence blocks — what the answer model would see —
+  instead of a concatenation of index texts; it stays off by default because it must resolve
+  every fused candidate.
 - **Base dependencies**: `httpx>=0.27` moves into the base install — `enterprise_pdf_rag`'s HTTP
   layer imports it statically, so `enterprise-pdf-rag --help` failed on a plain
   `pip install rag-spine` without `[service]`. A new guard test
