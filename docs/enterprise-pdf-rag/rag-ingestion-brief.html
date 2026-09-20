@@ -174,10 +174,11 @@ table.cmp tr.ours th.row { border-left: 3px solid var(--teal); }
 table.cmp td.loss { color: var(--ink-2); }
 
 /* refusal list */
-.reasons { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0 32px; margin: 0; padding: 0; list-style: none; }
+.reasons { display: grid; grid-template-columns: repeat(auto-fit, minmax(430px, 1fr)); gap: 0 32px; margin: 0; padding: 0; list-style: none; }
 .reasons li { display: grid; grid-template-columns: 200px 1fr; gap: 12px; padding-block: 10px; border-bottom: 1px solid var(--rule); font-size: 14px; line-height: 1.6; }
 .reasons li .code { font-family: var(--font-mono); font-size: 12.5px; color: var(--teal); }
 .reasons li .txt { color: var(--ink-2); }
+.reasons li .code.todo { color: var(--amber); }
 
 /* footer roadmap */
 footer.road { border-top: 1px solid var(--rule); padding-top: 28px; display: flex; flex-direction: column; gap: 12px; }
@@ -207,18 +208,18 @@ footer.road .fine { font-size: 13px; color: var(--ink-2); font-family: var(--fon
   <div class="eyebrow">Enterprise PDF RAG · 技术路线汇报</div>
   <h1>矢量优先的财务 PDF 问答路线</h1>
   <p class="thesis">
-    财务 PDF 里的文字、数字和图表本来就是矢量。我们不把页面拍成图片再去认，而是把每一页原样转成 SVG，让每个数字既是"看得见的字形"，也是"读得出的字符串"，并且始终带着页面坐标。检索只嵌自然语言描述；回答时再回到同一份快照里的结构化图表 IR 与 SVG 证据逐字段核验，核不上就拒答。
+    财务 PDF 里的文字、数字和图表本来就是矢量。我们不把页面拍成图片再去认，而是把每一页原样转成 SVG，让每个数字既是"看得见的字形"，也是"读得出的字符串"，并且始终带着页面坐标。进入索引的是每个成员的 index text——已验证字段的确定性文本投影，最上面再加一行本页的上下文头；回答时回到同一份快照取出类型化 IR 与 SVG 证据逐字段核验，核不上就拒答。
   </p>
   <div class="meta">
     <span>PDF → SVG → 文本 → embedding</span>
-    <span>SVG → chart IR → 回答上下文</span>
+    <span>SVG → 类型化 IR → 回答上下文</span>
     <span>parser: pdfspine 0.11.0（纯 Rust）</span>
-    <span>2026-09</span>
+    <span>rag-spine 0.15.0 · 2026-09-21</span>
   </div>
   <div class="three-q">
     <div><div class="q">原件里观察到了什么</div><div class="a">页面 SVG、文字 span、对象裁剪，全部内容寻址、不可变。</div></div>
-    <div><div class="q">系统如何解释它</div><div class="a">文字类对象逐字转录；图表由模型从同一张 SVG 独立产出 chart IR 与描述，再由无模型的来源校验授予资格。</div></div>
-    <div><div class="q">哪些证据有资格支持这次回答</div><div class="a">每个数字回指 chart IR 字段 → SVG 元素 → 页面/区域；命中分数本身不算证据。</div></div>
+    <div><div class="q">系统如何解释它</div><div class="a">文字类对象逐字转录；表格网格由页面 ruling 线证明；图表由模型从同一张 SVG 独立产出 IR 与描述；流程图与公式的结构由 SVG 几何无模型地证明。资格一律由独立的校验授予。</div></div>
+    <div><div class="q">哪些证据有资格支持这次回答</div><div class="a">每个数字回指 IR 字段 → SVG 元素 → 页面/区域；表格单元格另带行、列与表头。命中分数本身不算证据。</div></div>
   </div>
 </header>
 
@@ -230,7 +231,7 @@ footer.road .fine { font-size: 13px; color: var(--ink-2); font-family: var(--fon
   </div>
   <figure>
     <div class="fig-scroll">
-      <svg viewBox="0 0 1240 400" role="img" aria-label="入库流程：PDF 经 pdfspine 转为页面 SVG 与文字 span，经版面切分为对象，文字对象逐字转录，只有 description 文本进入 embedding，向量与证据一起进入不可变快照；图表对象走支线，同一张 SVG 由 VLM 独立产出 chart IR 与描述，再经确定性的来源资格校验后，描述文本进 embedding，IR 与证据随成员保存但不进向量。">
+      <svg viewBox="0 0 1240 400" role="img" aria-label="入库流程：PDF 经 pdfspine 转为页面 SVG 与文字 span，经版面切分为对象，文字对象逐字转录，只有投影出来的 index text 进入 embedding，向量与证据一起进入不可变快照；图表对象走支线，同一张 SVG 由 VLM 独立产出 chart IR 与描述，再经确定性的来源资格校验后，投影文本进 embedding，IR 与证据随成员保存但不进向量。另有一个页级元数据步骤，为每页产出标题、章节、期间与地区，成为 index text 最上面的上下文头。">
         <defs>
           <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
             <path d="M0,0 L10,5 L0,10 z" fill="currentColor"></path>
@@ -262,7 +263,7 @@ footer.road .fine { font-size: 13px; color: var(--ink-2); font-family: var(--fon
 
         <rect x="880" y="60" width="128" height="56" rx="3" class="node-model"></rect>
         <text x="944" y="84" text-anchor="middle" class="name-mono">embedding</text>
-        <text x="944" y="102" text-anchor="middle" class="sub">只嵌 description 文本</text>
+        <text x="944" y="102" text-anchor="middle" class="sub">只嵌 index text</text>
 
         <rect x="1052" y="60" width="128" height="56" rx="3" class="node-det"></rect>
         <text x="1116" y="84" text-anchor="middle">检索快照</text>
@@ -308,7 +309,7 @@ footer.road .fine { font-size: 13px; color: var(--ink-2); font-family: var(--fon
 
         <!-- 回到主干 -->
         <line x1="944" y1="224" x2="944" y2="118" class="edge" marker-end="url(#arr)"></line>
-        <text x="936" y="176" text-anchor="end" class="lbl">仅 description 文本</text>
+        <text x="936" y="176" text-anchor="end" class="lbl">仅投影后的文本</text>
 
         <path d="M1008,278 H1116 V118" class="edge edge-dash" marker-end="url(#arr)"></path>
         <text x="1124" y="176" class="lbl">IR · 证据 · 资格回执</text>
@@ -328,12 +329,12 @@ footer.road .fine { font-size: 13px; color: var(--ink-2); font-family: var(--fon
       </svg>
     </div>
     <figcaption>
-      入库全景。主干把页面变成 SVG 与文字 span，切分成对象后逐字转录，只有自然语言描述进入 embedding；图表支线从同一张对象 SVG 出发，由 VLM 独立产出 chart IR 与描述，再由无模型的来源校验授予资格。模型只在三处出现，且每一处的输出都要过一道确定性校验才能落库。
+      入库全景。主干把页面变成 SVG 与文字 span，切分成对象后逐字转录，只有投影出来的 index text 进入 embedding；图表支线从同一张对象 SVG 出发，由 VLM 独立产出 chart IR 与描述，再由无模型的来源校验授予资格。模型共出现四处：版面切分、图表的两路推断、embedding，另加一个按页跑的元数据步骤（见 02、06，图中未画）；每一处的输出都要过一道确定性校验才能落库。
     </figcaption>
   </figure>
   <div class="prose">
     <p>
-      读这张图只需要记住两件事。第一，主干上的模型步骤只有两个：切版面、算向量；文字对象的转录和资格都是确定性的，可以逐字节重放。第二，图表支线上模型产出的 chart IR 和描述互相不做输入，也不能自证正确，只有"来源资格校验"这一步能让它们进入检索快照。
+      读这张图只需要记住两件事。第一，主干上的模型步骤只有三个：切版面、抽页级元数据、算向量；文字对象的转录和资格都是确定性的，可以逐字节重放，页级元数据的每个字段也必须在本页正文里找到逐字出处。第二，图表支线上模型产出的 chart IR 和描述互相不做输入，也不能自证正确，只有"来源资格校验"这一步能让它们进入检索快照。
     </p>
   </div>
 </section>
@@ -385,22 +386,40 @@ footer.road .fine { font-size: 13px; color: var(--ink-2); font-family: var(--fon
     <div class="stage">
       <div class="k"><div class="name">ir · description</div><div class="tag tag-det">确定性（文字类对象）</div></div>
       <div class="io">
-        <b>输入</b> 对象的 span。<b>输出</b> 类型化 IR（<span class="mono">TextIR / ListIR / GroupIR</span>，每个片段带 <code>source_span_id</code>）和一段逐字转录的 description，producer 记为 <code>exact-source-transcription-v1</code>。表格由 pdfspine <code>find_tables</code> 依据矢量 ruling 线重建网格得到 <span class="mono">TableIR</span>；图表走支线（见 03）。
+        <b>输入</b> 对象的 span。<b>输出</b> 类型化 IR（<span class="mono">TextIR / ListIR / GroupIR</span>，每个片段带 <code>source_span_id</code>）和一段逐字转录的 description，producer 记为 <code>exact-source-transcription-v1</code>。表格由 pdfspine <code>find_tables</code> 依据矢量 ruling 线重建网格得到 <span class="mono">TableIR</span>，网格本身还要再被证明一次（见下一阶段）；图表、流程图与公式走支线（见 03）。
       </div>
       <div class="why">凡是原文能逐字给出的，就不让模型改写。文字对象的"描述"就是原文本身，检索命中的是原文语义而不是转述。</div>
     </div>
 
     <div class="stage">
       <div class="k"><div class="name">qualification</div><div class="tag tag-det">确定性</div></div>
-      <div class="io"><b>输入</b> 该对象的 ir、description、svg。<b>输出</b> 资格回执：文字类按 <code>literal-source-transcription-v1</code> 逐 span 复核；图表类由几何校验与字形油漆证明（source-paint proof）决定，产出 <code>qualified_ir</code> / <code>qualified_description</code>。</div>
-      <div class="why">"source-qualified" 的含义就在这一步：能进入检索的内容，必须由独立于模型分支的校验器从固定来源重新构建并逐字段比对。模型返回一个 <span class="mono">VERIFIED</span> 标记不授予任何资格。</div>
+      <div class="io">
+        <b>输入</b> 该对象的 ir、description、svg。<b>输出</b> 资格回执与 <code>qualified_ir</code> / <code>qualified_description</code>。五类对象各有各的证明，全部无模型：
+        <b>文字</b>按 <code>literal-source-transcription-v1</code> 逐 span 复核；
+        <b>表格</b>要求每条行列边界与每条单元格边都真有线——只把厚度不超过 <span class="num">3.0</span> pt 的轴对齐实线（虚线、曲线、斜线一律不算）收为 ruling 观测，再以 <span class="num">0.5</span> pt 容差逐条比对，合并单元格反过来由"跨过的内部边界上没有线"证明；
+        <b>图表</b>由几何校验与字形油漆证明（source-paint proof）决定；
+        <b>流程图</b>要求每个节点框对上一个真实矢量形状、每个标签逐字等于它引用的 span，每条边要有连线加一个填充箭头，箭尖落在目标节点里；
+        <b>公式</b>把 span 切成有序、不重叠、拼起来等于原文的 token，上下标由 PDF 的 <code>Ts</code> 算子证明。
+      </div>
+      <div class="why">
+        "source-qualified" 的含义就在这一步：能进入检索的内容，必须由独立于模型分支的校验器从固定来源重新构建并逐字段比对。模型返回一个 <span class="mono">VERIFIED</span> 标记不授予任何资格；反过来，<span class="mono">VERIFIED</span> 与"存在证据"现在是严格等价的——表格网格没有证据就不可能是 VERIFIED，单元格也就不会印出行、列与表头，模型自然引不到。证不出来的对象不是猜一个，而是整体退回，降级成"只能逐字引用、不声称结构"或干脆不入库。
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="k"><div class="name">page_metadata</div><div class="tag tag-model">LLM · 每页一次</div></div>
+      <div class="io"><b>输入</b> 整页的文字 span。<b>输出</b> 该页的标题、所属章节、页面类型、语言、涉及期间与地区，每个字段都必须点名它引用的 span，且折空白后逐字出现在其中；对不上的字段被剔除并记入诊断，不做纠正。文档级再零模型地折叠出一个可显示标题与报告期间，期间统一成 <span class="mono">1H2026</span> / <span class="mono">FY2024</span> 这样的写法。</div>
+      <div class="why">这是入库侧唯一为"找得到"服务的模型步骤，也是全自动的关键：没有人需要填标题、分章节或标年份。它的产物有两个用途——检索前的年份/地区过滤条件，以及 index text 最上面那行上下文头。它只抽取、不概括。</div>
     </div>
 
     <div class="stage">
       <div class="k"><div class="name">embedding</div><div class="tag tag-model">embedding 模型</div></div>
-      <div class="io"><b>输入</b> 通过资格复核的 description 文本，且只有文本。<b>输出</b> 一个向量，成为快照成员。SVG、IR、图表显示值一律不进 embedding；描述若以 <span class="mono">{ [ &lt; ChartIR(</span> 这类结构化序列化开头会被直接拒绝。</div>
+      <div class="io">
+        <b>输入</b> 该成员的 <b>index text</b>，且只有文本。文字、列表、表格成员的 index text 就是它逐字转录的 description；图表、流程图、公式则换成已验证字段的确定性投影——图表投影出标题、期间、语法与每个点的<span class="mono">分段 系列 值单位</span>，流程图投影出阅读序的节点标签加每条已证边的 <span class="mono">A -&gt; B</span>，公式投影出可读式、线性式与每个 token。最上面再加一行 <span class="mono">文档标题 | 页标题 | 章节</span>。<b>输出</b> 一个向量，成为快照成员。SVG、IR 对象与资格回执一律不进向量。
+      </div>
       <div class="why">
-        向量空间里只放自然语言，语义检索才干净；结构化数据不当"内容"而当"证据"，留在快照里等回答时逐字段核验。这样一条描述被命中只意味着"值得看一眼"，数字仍要从 IR 与 SVG 里取。
+        原来只嵌 description，而一张图的描述往往只有标题一句话（<span class="mono">Distribution Mix</span>），问分段、问数值就无从匹配。改成投影后，进索引的仍然全是已经通过资格复核的字段，只是排成一串可检索的文本——它不引入任何新信息。模型写的自然语言描述本身仍受约束，以 <span class="mono">{ [ &lt; ChartIR(</span> 这类结构化序列化开头会被直接拒绝。
+        命中 index text 只意味着"值得看一眼"，回答时数字仍要从 IR 与 SVG 里重新取一遍。
       </div>
     </div>
 
@@ -420,12 +439,12 @@ footer.road .fine { font-size: 13px; color: var(--ink-2); font-family: var(--fon
 <!-- ================= 图表支线 ================= -->
 <section>
   <div class="section-head">
-    <div class="eyebrow">03 · 图表支线</div>
-    <h2>SVG → chart IR → 回答上下文</h2>
+    <div class="eyebrow">03 · 视觉对象支线</div>
+    <h2>SVG → 类型化 IR → 回答上下文</h2>
   </div>
   <div class="prose">
     <p>
-      图表是财务 PDF 里最容易被"看错"的东西，也是我们路线与常见做法差别最大的地方。支线从对象级 SVG 出发，分四步：
+      图表是财务 PDF 里最容易被"看错"的东西，也是我们路线与常见做法差别最大的地方。支线从对象级 SVG 出发，分四步（流程图与公式走同一条支线，差别见本节末尾）：
     </p>
     <p>
       <b>渲染。</b> 用 resvg 把裁剪 SVG 确定性地渲染为 PNG（<code>model_render</code>），同时生成一份绑定摘要（<code>model_view</code>）。渲染时禁止未解析字体的 <span class="mono">&lt;text&gt;</span> 元素——模型看到的每个字形都必须来自内嵌字体。
@@ -437,7 +456,10 @@ footer.road .fine { font-size: 13px; color: var(--ink-2); font-family: var(--fon
       <b>来源资格校验。</b> 无模型。按图表语法做几何校验（donut 的扇区、bar 的柱与标签关联），并做字形油漆证明：通过 pdfspine 的设备接口重放同一页，证明 IR 引用的那块 paint 确实是文字算子用内嵌字体画出来的，Unicode、字形 ID、渲染矩阵、填充与 alpha 都对得上。数值只能来自显式文本出现，绝不从柱高、颜色、坐标轴插值或箭头几何推出来。
     </p>
     <p>
-      <b>进入快照。</b> 通过校验的 <code>qualified_description</code> 文本进 embedding；<code>qualified_ir</code>、SVG、资格回执作为同一成员的证据随快照保存。回答时命中描述 → 解析同一快照的 IR 与 SVG → 逐字段核验后才形成上下文。
+      <b>进入快照。</b> 通过校验后，从 <code>qualified_ir</code> 里确定性地投影出一串 index text 送进 embedding——标题、期间、语法，加上每个点的分段、系列与显式值；一个点都没有显式值的图表则退回用它的 <code>qualified_description</code>，免得一张只有标签的图靠它引不出来的词爬上排名。<code>qualified_ir</code>、SVG、资格回执作为同一成员的证据随快照保存。回答时命中 index text → 解析同一快照的 IR 与 SVG → 逐字段核验后才形成上下文。
+    </p>
+    <p>
+      <b>流程图与公式。</b> 流程图沿用同一条支线：模型从裁剪 SVG 读出节点与边，再由无模型的几何证明逐个复核——节点框必须对上一个真实矢量形状，标签必须逐字等于它引用的 span，边必须有连线加一个填充箭头指向目标；对象框里只要有一个 span 没被任何节点或边引用，整个对象就退回，这是防止模型悄悄漏掉一个节点的确定性守卫。只有节点、没有一条证得出的边，也允许入库——代价是上下文里一条边都不印，模型因此无法推断先后顺序。公式更进一步，连 IR 都不靠模型：token 直接从 span 观测出来，必须有序、不重叠、拼起来等于原文；上下标由 PDF 的 <code>Ts</code> 算子逐字证明，证不到就只按字号与基线推断并明确标成推断，可读式也跟着改口径——写成"x 上标 2"而不是"x 的 2 次方"。
     </p>
   </div>
 
@@ -529,7 +551,7 @@ footer.road .fine { font-size: 13px; color: var(--ink-2); font-family: var(--fon
           <th class="row">矢量优先（本路线）</th>
           <td>文字直接来自内容流，逐字节精确；字形与 span 两份独立观测互相印证。</td>
           <td>chart IR 每个点带 series / category / unit / value，值只接受显式文本出现；估计值另标 kind，不用于精确回答；无值即 <span class="mono">UNAVAILABLE</span>。</td>
-          <td>claim → chart IR 字段 → SVG 元素 → 页面 / 区域 / 变换矩阵，字段级引用。</td>
+          <td>claim → IR 字段 → SVG 元素 → 页面 / 区域 / 变换矩阵，字段级引用；网格已证明的表格另给出单元格的行、列与表头。</td>
           <td>解析、裁剪、渲染、校验全部确定性、内容寻址；模型输出带 producer 指纹，可重放核对。</td>
         </tr>
       </tbody>
@@ -550,7 +572,7 @@ footer.road .fine { font-size: 13px; color: var(--ink-2); font-family: var(--fon
   </div>
   <figure>
     <div class="fig-scroll">
-      <svg viewBox="0 0 1240 214" role="img" aria-label="回答链路：问题同时走向量通道（query embedding 在 description 向量上做 cosine 检索）与 BM25 词法通道（倒排索引建在同一批 description 文本上），两路排序经 RRF 融合得到成员，再从同一快照取出 chart IR、SVG 证据与资格回执构建上下文，由 typed ChartQA 逐字段核验，输出 answered 或 abstained。chart IR 不进任何索引。">
+      <svg viewBox="0 0 1240 214" role="img" aria-label="回答链路：问题同时走向量通道（query embedding 在 index text 向量上做 cosine 检索）与 BM25 词法通道（倒排索引建在同一批 index text 上），两路各取 50 个候选，排序经 RRF 融合得到成员，再从同一快照取出类型化 IR、SVG 证据与资格回执构建上下文，逐字段核验，输出 answered 或 abstained。SVG 与 IR 对象不进任何索引。">
         <defs>
           <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
             <path d="M0,0 L10,5 L0,10 z" fill="currentColor"></path>
@@ -563,15 +585,15 @@ footer.road .fine { font-size: 13px; color: var(--ink-2); font-family: var(--fon
 
         <rect x="204" y="20" width="170" height="56" rx="3" class="node-model"></rect>
         <text x="289" y="44" text-anchor="middle" class="name-mono">embed query</text>
-        <text x="289" y="62" text-anchor="middle" class="sub">description 向量 · cosine</text>
+        <text x="289" y="62" text-anchor="middle" class="sub">index text 向量 · cosine</text>
 
         <rect x="204" y="124" width="170" height="56" rx="3" class="node-det"></rect>
         <text x="289" y="148" text-anchor="middle">BM25 词法检索</text>
-        <text x="289" y="166" text-anchor="middle" class="sub">description 文本 · 倒排索引</text>
+        <text x="289" y="166" text-anchor="middle" class="sub">index text · 倒排索引</text>
 
         <rect x="408" y="72" width="150" height="56" rx="3" class="node-det"></rect>
         <text x="483" y="96" text-anchor="middle">RRF 融合</text>
-        <text x="483" y="114" text-anchor="middle" class="sub name-mono">k = 60</text>
+        <text x="483" y="114" text-anchor="middle" class="sub name-mono">k = 60 · 每通道 50</text>
 
         <rect x="592" y="72" width="190" height="56" rx="3" class="node-det"></rect>
         <text x="687" y="96" text-anchor="middle">构建上下文</text>
@@ -597,27 +619,27 @@ footer.road .fine { font-size: 13px; color: var(--ink-2); font-family: var(--fon
         <text x="799" y="92" text-anchor="middle" class="lbl">context</text>
         <text x="1003" y="92" text-anchor="middle" class="lbl">claims</text>
 
-        <text x="620" y="204" text-anchor="middle" class="lbl">两条通道检索的都只是 SVG → 文本那一路产出的 description；chart IR、SVG 元素、显示值不进任何索引，只在构建上下文时从同一快照按成员取出</text>
+        <text x="620" y="204" text-anchor="middle" class="lbl">两条通道打分的是同一串 index text；SVG、IR 对象与资格回执不进任何索引，只在构建上下文时从同一快照按成员取出</text>
       </svg>
     </div>
-    <figcaption>回答链路。检索是双通道：向量通道与 BM25 词法通道各自在同一批 description 文本上出一份排序，RRF 融合后得到成员；之后的上下文构建、核验、计算全部无模型，且解析时会重新校验存储的证据。每次查询只 pin 一个快照。</figcaption>
+    <figcaption>回答链路（typed ChartQA 端点）。检索是双通道：向量通道与 BM25 词法通道各自在同一批 index text 上出一份排序，RRF 融合后得到成员；之后的上下文构建、核验、计算全部无模型，且解析时会重新校验存储的证据。每次查询只 pin 一个快照。自然语言聊天共用前半段的检索，但在构建上下文之后多一次模型合成，再走同样的逐字段核验——见 06。</figcaption>
   </figure>
 
   <div class="prose">
     <p>
-      <b>检索是双通道的，索引里只有文本。</b> 问题同时走两条路：一条做 query embedding，在 pinned 快照的 description 向量上做 cosine 检索；一条做 BM25 词法检索，倒排索引建在同一批 description 文本上。两路各出一份排序，用 RRF 融合（<span class="mono">k = 60</span>）。两条通道检索的对象完全相同，都是 SVG → 文本那一路产出、并通过资格复核的 description；chart IR、SVG 元素、图表显示值不进任何索引。文本通道保证问"费用率"能召回写着 expense ratio 的那张图，向量通道保证换个说法也能召回。
+      <b>检索是双通道的，索引里只有文本。</b> 问题同时走两条路：一条做 query embedding，在 pinned 快照的向量上做 cosine 检索；一条做 BM25 词法检索，倒排索引建在同一批文本上。两路各取 <span class="num">50</span> 个候选，出一份排序，用 RRF 融合（<span class="mono">k = 60</span>），默认交出前 <span class="num">10</span> 名。两条通道打分的对象完全相同，都是每个成员那一串 index text；SVG、IR 对象与资格回执不进任何索引。文本通道保证问"费用率"能召回写着 expense ratio 的那张图，向量通道保证换个说法也能召回。
     </p>
     <p>
-      <b>上下文用 chart IR 构建。</b> 融合后的命中只是成员 ID。构建上下文时回到同一快照，按成员取出 <code>qualified_ir</code>、SVG 证据与资格回执：文字成员给原文转录，图表成员给结构化的 chart IR。检索靠文本找到"哪张图值得看"，回答靠 IR 知道"图里到底写了什么"。
+      <b>上下文用类型化 IR 构建。</b> 融合后的命中只是成员 ID。构建上下文时回到同一快照，按成员取出 <code>qualified_ir</code>、SVG 证据与资格回执：文字成员给原文转录，表格成员给单元格（网格已证明的还带行、列与表头），图表成员给结构化的 chart IR，流程图给节点与已证的边，公式给 token。检索靠文本找到"哪一块值得看"，回答靠 IR 知道"里面到底写了什么"。
     </p>
     <p>
       <b>引用链是字段级的。</b> 最终引用永远是 claim 或计算输入 → chart IR 字段 → SVG 元素 → PDF 来源版本 / 页 / 区域。每条引用（<span class="mono">FieldCitation</span>）带字段路径、chart IR 与 SVG 的资产 ID、SVG 摘要、资格回执 ID，以及精确的元素出现位置。描述被检索命中的分数本身不授予任何证据资格。
     </p>
     <p>
-      <b>计算是精确的。</b> donut 上的百分点差用 Decimal 精确相减，银行家舍入，出现不精确即抛错，并附计算回执（规则、精度、输入、输出与来源锚点）。柱状图的显示值查询只回读页面上写出的值，不做任何跨期计算。
+      <b>计算是精确的，而且只在一个入口。</b> donut 上的百分点差用 Decimal 精确相减，银行家舍入，出现不精确即抛错，并附计算回执（规则、精度、输入、输出与来源锚点）。柱状图的显示值查询只回读页面上写出的值，不做任何跨期计算。这条能力目前只开在结构化的 typed ChartQA 端点上：自然语言聊天那一侧，模型被明确禁止做任何加减、换算、取整与跨期合并，问"Agency 比 Partnerships 高多少个百分点"会直接拒答并标 <span class="mono">needs_calculation</span>。把精确计算接进聊天是后续的事，在那之前宁可拒答，也不让模型自己算。
     </p>
     <p>
-      <b>拒答是正常的业务结果。</b> 默认状态只有 answered 与 abstained，不用附近的数字补位。拒答走 HTTP 200 并带原因；证据损坏是 409；依赖缺失是 503。常见的拒答原因直接来自代码：
+      <b>拒答是正常的业务结果。</b> 默认状态只有 answered 与 abstained，不用附近的数字补位。拒答走 HTTP 200 并带原因；证据损坏是 409；依赖缺失是 503。typed ChartQA 常见的拒答原因直接来自代码（聊天那一侧另有自己的一组，见 06 的第 6、7 步）：
     </p>
   </div>
   <ul class="reasons">
@@ -637,16 +659,110 @@ footer.road .fine { font-size: 13px; color: var(--ink-2); font-family: var(--fon
   </div>
 </section>
 
+<!-- ================= 检索与元数据 ================= -->
+<section>
+  <div class="section-head">
+    <div class="eyebrow">06 · 检索与元数据</div>
+    <h2>入库不需要人工，检索靠每页自己报出来的元数据收敛</h2>
+  </div>
+  <div class="prose">
+    <p>
+      一份 PDF 从字节到可检索快照，中间没有任何人工标注：没有人填标题、分章节、标年份，也没有人圈选图表区域。模型只出现在构建阶段，而且每一个被写进元数据的值都必须在本页正文里找到逐字出处，对不上的字段被剔除并记入诊断——它是抽取，不是概括。
+    </p>
+    <p>
+      页级元数据有两个用途：一是检索前的过滤条件，二是 index text 最上面那行上下文头。<span class="mono">Distribution Mix</span> 这种在多份报告里重名的图表，因此能靠"哪份文件、哪一章"区分开；也正因为有了期间过滤加上下文头，中文问"2026 上半年分销渠道占比"能命中第 18 页——而不是因为我们有中文词面通道（见 07）。一次问答固定走下面七步：
+    </p>
+  </div>
+  <div class="stages">
+    <div class="stages-head">步骤 · 做什么 · 为什么这样做</div>
+
+    <div class="stage">
+      <div class="k"><div class="name">1 · 前置过滤</div><div class="tag tag-det">确定性 · 可撤销</div></div>
+      <div class="io"><b>做什么</b> 从问题里解析出期间与地区，只保留页级元数据匹配的成员；封面与目录页永不进候选。地区只在这份文档自己的地区词表里逐字匹配，没有地名库，也没有硬编码的公司。</div>
+      <div class="why">过滤只允许提精度，不允许把答案滤没。<b>候选数少于席位时，整层收窄被直接丢掉</b>，退回未过滤的排名并在响应里标记 <span class="mono">filters_relaxed</span>。开着过滤时向量通道仍在全语料上检索、之后才截断，所以过滤不会饿死它。</div>
+    </div>
+
+    <div class="stage">
+      <div class="k"><div class="name">2 · 双通道 + RRF</div><div class="tag tag-model">embedding 模型</div></div>
+      <div class="io"><b>做什么</b> BM25 与向量各取 <span class="num">50</span> 个候选，两路打分的是同一串 index text，用 RRF 融合（<span class="mono">k = 60</span>），交出前 <span class="num">10</span> 名。</div>
+      <div class="why">k 取 60 意味着单通道第一名的贡献封顶在 <span class="mono">1/61</span>，而两个通道都找得到的普通段落即使名次都在 20 也能超过它——融合天然偏向"两边都认"的证据，而不是某一路的偶然高分。</div>
+    </div>
+
+    <div class="stage">
+      <div class="k"><div class="name">3 · rerank</div><div class="tag tag-model">可选 · 默认关</div></div>
+      <div class="io"><b>做什么</b> 开启时由重排模型对融合结果重新排序。判官读的是每个候选解析出来的<b>证据块</b>，不是索引文本——它看到的与答题模型看到的完全一致。</div>
+      <div class="why">代价是必须把全部融合候选（最多 <span class="num">100</span> 个）逐个解析，每次解析都要重校验资产摘要并重证结构，实测单次问答从十几秒涨到五十多秒。所以它按请求显式开启，默认关闭。</div>
+    </div>
+
+    <div class="stage">
+      <div class="k"><div class="name">4 · 视觉对象保底席位</div><div class="tag tag-det">确定性</div></div>
+      <div class="io"><b>做什么</b> 前 <span class="num">10</span> 名里若缺少可引用的图表、流程图或公式，各从第 <span class="num">11</span>–<span class="num">20</span> 名里提升一个进来，席位从末位向前让出，且绝不让出已经拿着视觉对象的那一席。</div>
+      <div class="why">图与公式的可检索文本本来就短，容易被长段落挤掉。有了保底席位，一张已证明的流程图不必依赖提问者恰好说出某个节点的字眼——第 6 页那张三阶段路径图正是靠第 10 席进的上下文。只有标签、没有可引用内容的对象永远不占席。</div>
+    </div>
+
+    <div class="stage">
+      <div class="k"><div class="name">5 · 一次模型合成</div><div class="tag tag-model">LLM · 每次问答恰好一次</div></div>
+      <div class="io"><b>做什么</b> 把选中的上下文块原样交给模型，要求它产出结构化的回答与 claim 列表，每条 claim 点名一个成员和一条该块里印出来的路径。超出预算的块整块丢弃，从不截断。</div>
+      <div class="why">模型被明确禁止做任何加减、换算、取整与跨期合并；标成不可用、空白的值不得引用也不得推断；流程图的边只有画出来的箭头算数，不得推断先后顺序。答不上来就弃答，不许猜。</div>
+    </div>
+
+    <div class="stage">
+      <div class="k"><div class="name">6 · 逐字段核验</div><div class="tag tag-det">确定性</div></div>
+      <div class="io"><b>做什么</b> 每条 claim 回到存储证据重新比对：引文必须是 span 的逐字子串，单元格必须等于存储的单元格文本，图表值必须等于资格化的 Decimal 或其原样显示串，流程图节点与边必须等于印出来的标签和 <span class="mono">A -&gt; B</span> 对，公式必须等于那一行或那个 token。</div>
+      <div class="why">核不上的 claim 被单独剔除进 rejected 列表并附原因；一条都没留下就整体弃答。表格的行列表头引用还要多一道：只有网格已证明的块才印出行、列与表头，声称的行列与 IR 不符、或表头不属于该单元格的已证表头，同样判为证据外。</div>
+    </div>
+
+    <div class="stage">
+      <div class="k"><div class="name">7 · 散文门与判定</div><div class="tag tag-det">确定性</div></div>
+      <div class="io"><b>做什么</b> 回答正文里的每一个数字都必须出现在某条已验证 claim 或它所引证据里，或者逐字出现在用户的问题里。行首与句首的列表序号（<span class="mono">1.</span> / <span class="mono">(2)</span> / <span class="mono">第 3</span> / <span class="mono">Step 4</span>）不算数字，条目正文里的金额与百分比照旧受门控。</div>
+      <div class="why">这是最后一道闸：只要有一个数字逃逸，整个回答改判弃答，而不是删掉那句话交付剩下的。最终只有两种结果——带字段级引用的 answered，或带原因的 abstained。</div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 尚未完成 ================= -->
+<section>
+  <div class="section-head">
+    <div class="eyebrow">07 · 尚未完成</div>
+    <h2>已知的缺口，以及它们会怎么表现</h2>
+  </div>
+  <div class="prose">
+    <p>
+      下面这些都还没做完或没复验过。它们不动摇"答出来的必须核得上"这条底线——缺口的表现形式是覆盖不足或拒答，不是错答。
+    </p>
+  </div>
+  <ul class="reasons">
+    <li><span class="code todo">图表实际覆盖率</span><span class="txt">前 20 页共 <span class="num">29</span> 个图表对象，只有 <span class="num">9</span> 个拿到资格进入索引，其中仅 <span class="num">1</span> 张（第 18 页 donut）带可引用的显式数值，另外 8 张只有标签</span></li>
+    <li><span class="code todo">第 20 页柱状图</span><span class="txt">费用率柱状图 v2 切片的独立验收与原子激活尚未开始，证据已备好但未嵌入、未激活</span></li>
+    <li><span class="code todo">金标集未冻结</span><span class="txt">自然语言回答只有逐例真实复测，没有冻结的金标集，因此还构不成可回归的门禁</span></li>
+    <li><span class="code todo">Image 不可检索</span><span class="txt">Image 对象不进索引，前 20 页的 7 个 Image 全部无资格</span></li>
+    <li><span class="code todo">中文无词面通道</span><span class="txt">BM25 分词只处理拉丁词，中文提问时该通道全空，RRF 退化成单通道</span></li>
+    <li><span class="code todo">partition 误判</span><span class="txt">版面切分偶尔把标题行判成流程图或公式。后续证明会正确拒绝它们，代价是污染分类统计并白跑一遍</span></li>
+    <li><span class="code todo">计算未接入聊天</span><span class="txt">精确计算只在 typed ChartQA 端点；聊天遇到要算的问题一律拒答</span></li>
+    <li><span class="code todo">表格与公式未实证</span><span class="txt">网格证明与公式证明有离线测试和合成 PDF 端到端验证，但当前 AIA 快照里没有表格与公式对象，尚未在真实报告上跑出来</span></li>
+    <li><span class="code todo">地区口径</span><span class="txt">地区按逐字匹配，<span class="mono">AIA Thailand</span> 与 <span class="mono">Thailand</span> 不等价；中文地名抽不出过滤条件；免责声明页会污染地区词表</span></li>
+    <li><span class="code todo">rerank 时延</span><span class="txt">开启后单次问答从十几秒涨到五十多秒，缓解方案（缓存资产校验与已解析索引）尚未实施</span></li>
+    <li><span class="code todo">部署未复验</span><span class="txt">容器编排与健康检查仍固定在 AIA profile，document-catalog 没有容器配置；后端 Dockerfile 与 Databricks 路径自合并以来未复验</span></li>
+    <li><span class="code todo">发版通道</span><span class="txt">构建与测试门在三个 Python 版本上全绿，但自动发布通道（PyPI Trusted Publisher）尚未配置，两次发版都是手动上传的</span></li>
+  </ul>
+</section>
+
 <!-- ================= 路线图 ================= -->
 <footer class="road">
   <div class="eyebrow">路线图</div>
   <p>
-    这条路线已经在 AIA 2026 年中期业绩公开样本（71 页）上从头走通：来源审阅、前 20 页对象处理（241 个对象、189 条描述向量）、description-only 索引，以及第 18 页 donut 的类型化图表问答；通用 PDF 的 ingest → qualify → index → publish 入口也已落地并跑通离线端到端。
+    这条路线已经在 AIA 2026 年中期业绩公开样本（71 页）上从头走通：来源审阅、前 20 页对象处理（<span class="num">241</span> 个对象、当前快照 <span class="num">190</span> 个成员）、投影后的 index text 索引，以及第 18 页 donut 的类型化图表问答；通用 PDF 的 ingest → qualify → index → publish 入口也已落地并跑通端到端。
   </p>
   <p>
-    接下来按顺序推进三件事：接入文档目录与多文档服务挂载，替换目前固定在单一来源上的服务入口；在同一条证据链上实现自然语言检索回答，并对文本、表格、图表分别验收引用与拒答；完成第 20 页费用率柱状图切片的独立验收与原子激活。
+    <b>上一轮的三件事，前两件已完成。</b> 文档目录与多文档挂载替换了固定在单一来源上的服务入口，并给出一套 OpenAI 兼容的聊天接口；自然语言回答走同一条证据链，文本、表格、图表、流程图、公式各有自己的引用类型与拒答路径，离线测试与真实模型复测都已跑过。这一程另外多做了三件当时没规划的：页级自动元数据与年份/地区过滤、表格网格的划线来源证明、流程图与公式的可检索化；对外预览也增加了文档目录模式与可选的自带登录。
   </p>
-  <p class="fine">parser pdfspine==0.11.0 · 内容寻址快照 · fail-closed</p>
+  <p>
+    <b>真实模型复测的样子。</b> 第 4 页的 Operating ROE 17.5% 逐字引到 span；第 18 页的 Distribution Mix 答出 <span class="num">72%</span> / <span class="num">28%</span> 并引到两个数据点，中文问法同样命中；第 6 页的三阶段路径图给出三个节点引用。问 2027 年的预测和"高多少个百分点"则如实拒答——前者不在证据里，后者需要计算。
+  </p>
+  <p>
+    <b>下一步。</b> 第 20 页费用率柱状图切片的独立验收与原子激活仍未开始；自然语言回答目前只有逐例复测，还没有冻结下来的金标集——把它冻下来，才能从"验收过一次"变成"每次改动都过得去"。
+  </p>
+  <p class="fine">2026-09-21 · rag-spine 0.15.0 · parser pdfspine==0.11.0 · 内容寻址快照 · fail-closed</p>
 </footer>
 
 </div>
