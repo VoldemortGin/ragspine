@@ -342,19 +342,36 @@ def verify_claims(
     return ClaimVerification(tuple(verified), tuple(rejected))
 
 
-def prose_grounded(answer: str, verified: Sequence[VerifiedClaim]) -> tuple[bool, tuple[str, ...]]:
-    """Every number or percentage in the prose must equal a verified claim's text number or value."""
+def prose_grounded(
+    answer: str, verified: Sequence[VerifiedClaim], *, question: str = ""
+) -> tuple[bool, tuple[str, ...]]:
+    """Every number or percentage in the prose must be grounded.
+
+    A number is grounded when it equals a verified claim's text number or value, equals a
+    number in the evidence text those claims cite (span quote, cell text, chart labels and
+    source display), or appears verbatim in the user's question (a restated year or period
+    is not a new figure). Anything else escapes and the whole answer abstains.
+    """
     allowed: set[Decimal] = set()
     for claim in verified:
         allowed.update(value for _, value in _numbers(claim.text))
         if claim.value is not None:
             allowed.add(claim.value)
-    escaped = sorted({token for token, value in _numbers(answer) if value not in allowed})
+        for cited in claim.citations:
+            allowed.update(value for _, value in _numbers(cited.quote))
+    asked = {token for token, _ in _numbers(question)}
+    escaped = sorted(
+        {token for token, value in _numbers(answer) if value not in allowed and token not in asked}
+    )
     return not escaped, tuple(escaped)
 
 
 def decide(
-    model: ModelAnswer, verification: ClaimVerification, *, blocks_present: bool
+    model: ModelAnswer,
+    verification: ClaimVerification,
+    *,
+    blocks_present: bool,
+    question: str = "",
 ) -> tuple[AnswerStatus, AbstainReason | None, str | None]:
     """Drop failed claims one by one; abstain on no verified claim or on ungrounded prose."""
     if not blocks_present:
@@ -366,7 +383,7 @@ def decide(
             first = verification.rejected[0]
             return AnswerStatus.ABSTAINED, first.reason, f"{first.claim_id}: {first.detail}"
         return AnswerStatus.ABSTAINED, AbstainReason.NO_VERIFIED_CLAIM, "the model cited no claim"
-    grounded, escaped = prose_grounded(model.answer, verification.verified)
+    grounded, escaped = prose_grounded(model.answer, verification.verified, question=question)
     if not grounded:
         dropped = ", ".join(claim.claim_id for claim in verification.rejected) or "none"
         return (

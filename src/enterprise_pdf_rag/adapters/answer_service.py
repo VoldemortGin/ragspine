@@ -150,7 +150,9 @@ class AnswerService:
 
         model = completion.parsed
         verification = verify_claims(model, by_member, chart_evidence=chart_evidence)
-        status, reason, detail = decide(model, verification, blocks_present=True)
+        status, reason, detail = decide(
+            model, verification, blocks_present=True, question=request.question
+        )
         return AnswerResult(
             status,
             model.answer if status is AnswerStatus.ANSWERED else None,

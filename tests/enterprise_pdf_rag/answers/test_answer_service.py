@@ -217,6 +217,75 @@ def test_prose_number_outside_verified_claims_abstains_as_a_whole(
     assert result.answer is None
 
 
+def test_prose_may_repeat_numbers_from_the_question_but_not_invent_new_ones(
+    tmp_path: Path, bar: tuple[StoreMountedDocument, str]
+) -> None:
+    document, _ = bar
+    question = "What was the expense ratio in 1H21, the first half of 2021?"
+    service, _ = _service(
+        tmp_path, document, _one_chart_claim("15%", answer="In 1H21 (2021) it was 15%.")
+    )
+    result = service.answer(AnswerRequest(question))
+    assert (result.status, result.answer) == (AnswerStatus.ANSWERED, "In 1H21 (2021) it was 15%.")
+
+    invented, _ = _service(
+        tmp_path / "invented",
+        document,
+        _one_chart_claim("15%", answer="In 1H21 (2021) it was 15%, up from 12%."),
+    )
+    result = invented.answer(AnswerRequest(question))
+    assert (result.status, result.abstain_reason) == (
+        AnswerStatus.ABSTAINED,
+        AbstainReason.CLAIM_NOT_IN_EVIDENCE,
+    )
+    assert result.abstain_detail is not None and "12%" in result.abstain_detail
+    assert "2021" not in result.abstain_detail
+
+
+def test_prose_may_repeat_numbers_from_the_cited_evidence_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    publication = publish_generic_document(
+        tmp_path,
+        monkeypatch,
+        filename="meridian-2025.pdf",
+        label="Revenue 2025",
+        page_count=3,
+        embedder=OfflineDescriptionEmbedder(),
+    )
+    document = StoreMountedDocument(
+        LocalDocumentStore(Path(publication.source_store), activate_on_publish=False),
+        ProcessingStore(Path(publication.processing_store)),
+        processing_id=publication.current_processing_id,
+        embedder=OfflineDescriptionEmbedder(),
+    )
+    fragment = re.compile(r"^fragments\.(\S+): (.*page 2.*)$", re.MULTILINE)
+
+    def script(prompt: str) -> ModelAnswer:
+        blocks = prompt.split("[member ")[1:]
+        block = next(block for block in blocks if "page 2" in block)
+        found = fragment.search(block)
+        assert found is not None
+        span_id, text = found.groups()
+        assert text == "Revenue 2025 page 2"
+        return answered(
+            "Page 2 covers 2025 revenue.",
+            ModelClaim(
+                claim_id="q",
+                member_id=block[:64],
+                kind="quote",
+                field_path=f"fragments.{span_id}",
+                text="revenue",
+            ),
+        )
+
+    service, _ = _service(tmp_path, document, script)
+    result = service.answer(AnswerRequest("What does the second page cover?", top_k=3))
+    assert result.status is AnswerStatus.ANSWERED, result
+    (claim,) = result.claims
+    assert claim.text == "revenue" and "2025" in claim.citations[0].quote
+
+
 def test_zero_verified_claims_and_model_declines_abstain(
     tmp_path: Path, bar: tuple[StoreMountedDocument, str]
 ) -> None:

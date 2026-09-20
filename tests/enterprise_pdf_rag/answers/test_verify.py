@@ -11,6 +11,7 @@ from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
 from enterprise_pdf_rag.answers.models import (
     AbstainReason,
     AnswerStatus,
+    ClaimCitation,
     ClaimKind,
     RejectedClaim,
     VerifiedClaim,
@@ -373,6 +374,59 @@ def test_prose_numbers_must_equal_a_verified_claim_value() -> None:
     assert prose_grounded("about 1500", (_verified("1,500"),)) == (True, ())
     assert prose_grounded("FY2024 revenue", ()) == (True, ())  # alphanumeric labels are not numbers
     assert prose_grounded("12%", ())[0] is False
+
+
+def _cited(text: str, *quotes: str, value: Decimal | None = None) -> VerifiedClaim:
+    citations = tuple(
+        ClaimCitation(_TEXT_MEMBER, BlockKind.TEXT, 3, "fragments.sp-1", ("sp-1",), None, quote)
+        for quote in quotes
+    )
+    return VerifiedClaim("v", ClaimKind.QUOTE, text, value, None, citations)
+
+
+def test_prose_numbers_from_the_question_or_the_cited_evidence_are_grounded() -> None:
+    claims = (_verified("17.5%", Decimal("17.5")),)
+    question = "What was the operating ROE in 1H 2026?"
+    # (b) a number repeated verbatim from the question — the year — is not a new figure.
+    assert prose_grounded("The operating ROE in 1H 2026 was 17.5%.", claims, question=question) == (
+        True,
+        (),
+    )
+    assert prose_grounded("In 1H 2026 it was 17.5%.", claims) == (False, ("2026",))
+    # A number in neither the question nor the evidence still escapes.
+    ok, tokens = prose_grounded(
+        "In 1H 2026 it was 17.5%, up from 16.1%.", claims, question=question
+    )
+    assert not ok and tokens == ("16.1%",)
+    # (c) numbers in the cited evidence text ground the prose even outside the claim text.
+    quoted = (_cited("grew 12%", "Revenue grew 12% in 2025."),)
+    assert prose_grounded("Revenue grew 12% in 2025.", quoted) == (True, ())
+    assert prose_grounded("Revenue grew 12% in 2024.", quoted) == (False, ("2024",))
+    # Chart claims cite their period / category labels and the source display.
+    chart = (_cited("17.5%", "17.5%", "1H 2026", "%", value=Decimal("17.5")),)
+    assert prose_grounded("It reached 17.5% in 1H 2026.", chart) == (True, ())
+
+
+def test_decide_admits_question_and_evidence_numbers_but_not_new_ones() -> None:
+    verified = (_cited("17.5%", "record Operating ROE of 17.5%", value=Decimal("17.5")),)
+    question = "What was the operating ROE in 1H 2026?"
+    answered = _answer(answer="The operating ROE in 1H 2026 was 17.5%.")
+    assert decide(
+        answered, ClaimVerification(verified, ()), blocks_present=True, question=question
+    ) == (AnswerStatus.ANSWERED, None, None)
+    assert decide(answered, ClaimVerification(verified, ()), blocks_present=True)[:2] == (
+        AnswerStatus.ABSTAINED,
+        AbstainReason.CLAIM_NOT_IN_EVIDENCE,
+    )
+    invented = _answer(answer="The operating ROE in 1H 2026 was 17.5%, up from 16.1%.")
+    status, reason, detail = decide(
+        invented, ClaimVerification(verified, ()), blocks_present=True, question=question
+    )
+    assert (status, reason) == (AnswerStatus.ABSTAINED, AbstainReason.CLAIM_NOT_IN_EVIDENCE)
+    assert detail is not None and "16.1%" in detail and "2026" not in detail
+    # Zero verified claims are unchanged: the question never grounds an answer by itself.
+    none = decide(answered, ClaimVerification((), ()), blocks_present=True, question=question)
+    assert none[:2] == (AnswerStatus.ABSTAINED, AbstainReason.NO_VERIFIED_CLAIM)
 
 
 def test_decide_applies_the_rejection_then_prose_gate_policy() -> None:

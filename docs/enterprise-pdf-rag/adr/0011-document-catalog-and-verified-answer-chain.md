@@ -184,10 +184,14 @@ calls a provider; and `TableIR` / `TableCell.verification` are pinned `PENDING` 
   named the chart but not its categories, with or without rerank. Candidate directions — add
   period / category aliases to chart descriptions, or weight chart members on the query side —
   are undecided.
-- **ISSUE-3, the prose gate treats years as numbers.** "in 1H 2026 was 17.5%" abstains when
-  `2026` is not inside a verified claim's text. This is the deliberately conservative rule and is
-  unchanged; a relaxation (admit only digits that appear verbatim in the user's question) needs
-  the user's decision.
+- **ISSUE-3, the prose gate treated years as numbers — resolved (rag-spine 0.14.0).** "in 1H
+  2026 was 17.5%" abstained because `2026` was not inside a verified claim's text. The gate
+  (`answers/verify.py::prose_grounded`) now grounds a prose number when it (a) equals a verified
+  claim's text number or value, (b) appears verbatim in the user's question
+  (`AnswerRequest.question`), or (c) equals a number in the evidence text the verified claims
+  cite — the span quote, the table cell text, or a chart claim's period / category labels and
+  source display (`ClaimCitation.quote`). Any other number still abstains the whole answer, and
+  zero verified claims are handled exactly as before; `decide` keeps its order.
 - `AnswerEnvelope` does not carry `request_fingerprint`, so a failed live call cannot be located
   under `model-cache/requests/<fingerprint>.json` from the response alone.
 - The four `contains` call sites in `adapters/visual_semantics.py` have no dedicated regression

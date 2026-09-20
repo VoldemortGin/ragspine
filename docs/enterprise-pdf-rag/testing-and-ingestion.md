@@ -1,6 +1,6 @@
 # 测试与通用 PDF 入库
 
-本文区分已运行的服务、通用入库草稿和完整产品验收。2026-09-19 已在官方 pdfspine 0.11.0 环境通过完整离线门（639 tests）、独立 Python 3.12 plain-pip 安装及 checkout 外 smoke，并受控重启 API/WebUI。实际在线验收包含一次真实 query embedding 搜索、5 条命中、同 snapshot context 回填、第 18 页带引用的 72% 查值和来源审阅聊天；界面可达本身不作为完整 RAG 通过依据。2026-09-20 新增与 `aia-source-review` 并存的 `document-catalog` 服务模式（多文档目录、按文档检索、证据链上的自然语言回答），已离线实现并测试，并在真实 Qwen3 embedder / reranker 与真实答案模型上做过一轮 18 用例验收（AIA 发布 + 合成 PDF，证据 `data/validation/generic-chat-2026-09-20/`）；结果、修复的 BUG-1 与遗留（ISSUE-2 图表召回、ISSUE-3 散文门年份）只以 [交接文档](CLAUDE_HANDOFF.md) 为准，本文不重述。
+本文区分已运行的服务、通用入库草稿和完整产品验收。2026-09-19 已在官方 pdfspine 0.11.0 环境通过完整离线门（639 tests）、独立 Python 3.12 plain-pip 安装及 checkout 外 smoke，并受控重启 API/WebUI。实际在线验收包含一次真实 query embedding 搜索、5 条命中、同 snapshot context 回填、第 18 页带引用的 72% 查值和来源审阅聊天；界面可达本身不作为完整 RAG 通过依据。2026-09-20 新增与 `aia-source-review` 并存的 `document-catalog` 服务模式（多文档目录、按文档检索、证据链上的自然语言回答），已离线实现并测试，并在真实 Qwen3 embedder / reranker 与真实答案模型上做过一轮 18 用例验收（AIA 发布 + 合成 PDF，证据 `data/validation/generic-chat-2026-09-20/`）；结果、修复的 BUG-1 与遗留（ISSUE-2 图表召回、ISSUE-3 散文门年份——后者已于 0.14.0 解决）只以 [交接文档](CLAUDE_HANDOFF.md) 为准，本文不重述。
 
 ## 现在能测什么
 
@@ -293,7 +293,7 @@ curl --fail-with-body http://127.0.0.1:8766/v1/chat/completions \
 
 `claims[].kind` ∈ `quote` / `cell` / `chart_value`；图表值的 `text` 是来源显示串（如 `72%`）、`value` 是十进制字符串、`unit` 是单位，正文引用写作 `[n] p.N points.<point_id>.value = 72% (svg #<element>, …)`。`citations[].kind` 是证据块类型（`text`/`list`/`group`/`table`/`chart`），`page_index` 为 0-based（正文 `p.N` 为 1-based），`field_path` 是 `fragments.<span_id>` / `cells.<cell_id>` / `points.<point_id>.value`，`evidence_ids` 是来源 span 或 SVG 元素 id，`chart_citation` 只有图表值有。`rejected[]` 列出被逐条剔除的 claim（`claim_id`/`member_id`/`field_path`/`text`/`reason`/`detail`），供审计。`llm_live_calls` 是本次真实模型调用数（0 或 1），`cache_hit` 表示指纹命中缓存回放。
 
-拒答也是 200：信封 `status` 为 `abstained`，`content` 为 `无法基于已验证证据回答 (<abstain_reason>): <abstain_detail>`，`claims` 为空。判定顺序：无检索命中或预算内无证据块 → `no_relevant_member`；模型自报 abstain → `model_declined`；模型输出不合 schema/截断 → `model_output_invalid`；逐条校验失败的 claim 进入 `rejected`；零验证 claim → 取第一条 rejected 的原因（否则 `no_verified_claim`）；散文里任何数字不在已验证 claim 内 → 整体 `claim_not_in_evidence`。图表类 refusal（`value_unavailable`、`period_mismatch` 等）与 ChartQA 同名。
+拒答也是 200：信封 `status` 为 `abstained`，`content` 为 `无法基于已验证证据回答 (<abstain_reason>): <abstain_detail>`，`claims` 为空。判定顺序：无检索命中或预算内无证据块 → `no_relevant_member`；模型自报 abstain → `model_declined`；模型输出不合 schema/截断 → `model_output_invalid`；逐条校验失败的 claim 进入 `rejected`；零验证 claim → 取第一条 rejected 的原因（否则 `no_verified_claim`）；散文里的数字既不属于已验证 claim 的 text / value、也不逐字出现在用户问题里、也不在已验证 claim 所引用证据原文（span quote / cell 原文 / 图表 period、category 标签与 source_display）中 → 整体 `claim_not_in_evidence`（0.14.0 起；此前任何不在 claim 内的数字都拒答）。图表类 refusal（`value_unavailable`、`period_mismatch` 等）与 ChartQA 同名。
 
 `"stream": true` 时先完成检索、模型调用与校验，再把正文按 128 字符切片以 SSE 回放：首帧 `delta: {"role":"assistant"}`，倒数第二帧 `finish_reason: "stop"`，最后一帧 `choices: []` 且带完整 `enterprise_pdf_rag` 信封，然后 `data: [DONE]`；`usage` 恒为 `null`。
 
@@ -317,7 +317,7 @@ curl --fail-with-body http://127.0.0.1:8766/v1/chat/completions \
 
 离线（默认门，零网络）：`tests/enterprise_pdf_rag/adapters/test_document_catalog.py`、`test_documents_http.py`、`test_hybrid_search.py`、`test_chat_http.py`，`tests/enterprise_pdf_rag/answers/`（store 桥 `store_mounted_document.py` + 脚本化 LLM `fake_llm.py`），`processing/test_context_builder.py`、`processing/test_table_transcription.py`，以及 e2e / draft publication / pdf ingestion 里新增的程序化表格页用例。它们用程序化 PDF、`OfflineDescriptionEmbedder` 和脚本化模型输出，证明契约、状态码、恰好一次模型调用、逐字段校验与拒答策略。
 
-需真实模型：真实本地 embedder 的 `index` 与在线 search（隧道）、真实答案模型的合成与校验、`APP_LEGACY_DOCUMENT_ROOTS` 挂载真实 AIA 发布后的检索 / 引用 / 拒答验收。2026-09-20 已做一轮（18 用例，无证据外数字进入 answered 回答；图表召回 ISSUE-2 与散文门年份 ISSUE-3 待定），结论只以 [交接文档](CLAUDE_HANDOFF.md) 为准，本文不作宣称；它是一轮验收，不是冻结金标集。
+需真实模型：真实本地 embedder 的 `index` 与在线 search（隧道）、真实答案模型的合成与校验、`APP_LEGACY_DOCUMENT_ROOTS` 挂载真实 AIA 发布后的检索 / 引用 / 拒答验收。2026-09-20 已做一轮（18 用例，无证据外数字进入 answered 回答；图表召回 ISSUE-2 待定，散文门年份 ISSUE-3 已于 0.14.0 解决），结论只以 [交接文档](CLAUDE_HANDOFF.md) 为准，本文不作宣称；它是一轮验收，不是冻结金标集。
 
 ## 通用性与完整 RAG 的完成条件
 

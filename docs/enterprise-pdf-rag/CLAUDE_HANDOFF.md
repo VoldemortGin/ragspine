@@ -45,7 +45,7 @@
 1. `adapters/http/webui_gate.py` 只认 `aia-2026-interim-source-review-v1` / `enterprise-pdf-rag-offline-demo-v1`，Open WebUI 网关不能前置 `document-catalog` 模式（另一 agent 正在加 `document-catalog` profile，未完成）。
 2. `JsonCompletionClient` 以 `retry_failed=False` 构造：真实调用失败会被缓存回放，删 `<ingestion_root>/model-cache/requests/<fingerprint>.json` 才能重试。
 3. 自然语言问答没有冻结 gold 集（只有 chart-qa v1/bar 两套）。
-4. 真实 embedder 的 `index`、真实答案模型的 chat、`APP_LEGACY_DOCUMENT_ROOTS` 挂真实 AIA 发布——已于 2026-09-20 做过一轮（18 用例，反捏造守住），结论与遗留（ISSUE-2 图表召回、ISSUE-3 散文门年份、信封无 `request_fingerprint`、`visual_semantics` 无专属回归）见下方“真实模型验收”。
+4. 真实 embedder 的 `index`、真实答案模型的 chat、`APP_LEGACY_DOCUMENT_ROOTS` 挂真实 AIA 发布——已于 2026-09-20 做过一轮（18 用例，反捏造守住），结论与遗留（ISSUE-2 图表召回、ISSUE-3 散文门年份（已于 0.14.0 解决）、信封无 `request_fingerprint`、`visual_semantics` 无专属回归）见下方“真实模型验收”。
 5. `deploy/enterprise-pdf-rag/open-webui/backend.Dockerfile` 未复验（ADR 0021）。
 6. 第 20 页 v2 独立验收（第 4 项）未动。
 7. 完整 `bash scripts/ci.sh` 未在本工作树整体跑绿；全部改动未 commit / 未 push。
@@ -70,7 +70,7 @@ AIA 前 20 页（model `enterprise-pdf-rag/df902346791b`，189 成员）：
 | c2 | “Agency 比 Partnerships 高多少个百分点?” | abstained `model_declined` / `needs_calculation` |
 | d | 重复 a | `cache_hit=true`、`llm_live_calls=0`，4.4s |
 | e | a 的 `stream=true` | 6 帧：role → content×2 → 空 delta → 尾帧含 `enterprise_pdf_rag` → `[DONE]` |
-| f | a 的 `rerank=true` | 真实调用了 39001（lsof 证据），但 abstained `claim_not_in_evidence`：模型原文 “…in 1H 2026 was 17.5%.”，17.5% 已验证，“2026” 不在 claim 文本内被散文数值门整体拒答。**ISSUE-3** |
+| f | a 的 `rerank=true` | 真实调用了 39001（lsof 证据），但 abstained `claim_not_in_evidence`：模型原文 “…in 1H 2026 was 17.5%.”，17.5% 已验证，“2026” 不在 claim 文本内被散文数值门整体拒答。**ISSUE-3**（已于 0.14.0 放宽，见下方验收遗留） |
 | g1 / g2 | `temperature` 字段 / 不存在的 `document` | 422 `extra_forbidden` / 404 |
 
 通用合成 PDF（虚构，3 页文本 + 第 3 页原生 4×2 划线表）：修复前 sha `f41da5…`：`ingest --stage semantics --max-live-calls 3` → live=3（每页 1 次 layout，设计内）、object_count=8、failed_stage_count=5（**BUG-1**，见下）；`qualify` eligible=3 / skipped=5；`index`（首次真实 Qwen3 embedder）member_count=3、dims [2560]、1.06s；`publish` ready。重启后 `/v1/documents` 两文档 ready/mounted，`/v1/models` 两个 id。chat：
@@ -91,7 +91,7 @@ AIA 前 20 页（model `enterprise-pdf-rag/df902346791b`，189 成员）：
 
 **验收遗留**（已同步进 ADR 0011 follow-ups）：
 - ISSUE-2 图表召回：图表成员只嵌入短描述，词面弱于长文本，top-6 未召回 p.18 donut；候选方向：图表描述加入 period / 类别别名，或对 chart 成员做 query 侧加权，待定。
-- ISSUE-3 散文数值门把年份当数字（用户拍板的保守规则，未改）；如放宽，建议只放行逐字出现在用户问题里的数字，需用户决定。
+- ISSUE-3 散文数值门把年份当数字——**已解决（rag-spine 0.14.0，用户拍板）**：`answers/verify.py::prose_grounded` 现在放行三类数字：(a) 属于某条已验证 claim 的 text / value；(b) 逐字出现在用户问题（`AnswerRequest.question`）里；(c) 出现在已验证 claim 所引用证据的原文中（span quote、表格 cell 原文、图表 claim 的 period / category 标签与 source_display，即 `ClaimCitation.quote`）。其余数字仍整体拒答，零验证 claim 的处理不变，`decide` 顺序不变；用例见 `tests/enterprise_pdf_rag/answers/test_verify.py` 与 `test_answer_service.py`。
 - `AnswerEnvelope` 不含 `request_fingerprint`，排障时无法直接定位 `model-cache/requests/<fp>.json`。
 - `visual_semantics.py` 的 4 个 `contains` 调用点无专属回归测试。
 - `ingest` 的 layout 阶段每页 1 次真实 LLM 调用，纯文本页也一样（设计内）。
