@@ -518,6 +518,107 @@
         "title": "DiagramNode",
         "type": "object"
       },
+      "DiagramQualification": {
+        "description": "Independent geometry/verbatim proof of a DiagramIR; produced and replayed by one pure function.",
+        "properties": {
+          "edges": {
+            "items": {
+              "$ref": "#/$defs/EdgeEvidence"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "method": {
+            "default": "exact-span-label + native-shape-bbox + connector-endpoint + filled-arrowhead-tip; no relationship semantics, no financial relations",
+            "title": "Method",
+            "type": "string"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/$defs/NodeEvidence"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "scope": {
+            "default": "diagram-structure-source-geometry-v1",
+            "title": "Scope",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/$defs/SourceAnchor"
+          },
+          "source_manifest_id": {
+            "title": "Source Manifest Id",
+            "type": "string"
+          },
+          "source_span_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Span Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "object_id",
+          "source",
+          "source_manifest_id",
+          "source_span_ids",
+          "nodes",
+          "edges"
+        ],
+        "title": "DiagramQualification",
+        "type": "object"
+      },
+      "EdgeEvidence": {
+        "description": "The connector and the filled arrowhead that prove one directed edge.",
+        "properties": {
+          "arrowhead": {
+            "$ref": "#/$defs/PathEvidence"
+          },
+          "base_mid": {
+            "$ref": "#/$defs/Point"
+          },
+          "edge_index": {
+            "title": "Edge Index",
+            "type": "integer"
+          },
+          "line": {
+            "$ref": "#/$defs/PathEvidence"
+          },
+          "line_end_at_target": {
+            "$ref": "#/$defs/Point"
+          },
+          "source_node_id": {
+            "title": "Source Node Id",
+            "type": "string"
+          },
+          "target_node_id": {
+            "title": "Target Node Id",
+            "type": "string"
+          },
+          "tip": {
+            "$ref": "#/$defs/Point"
+          }
+        },
+        "required": [
+          "edge_index",
+          "source_node_id",
+          "target_node_id",
+          "line",
+          "arrowhead",
+          "tip",
+          "base_mid",
+          "line_end_at_target"
+        ],
+        "title": "EdgeEvidence",
+        "type": "object"
+      },
       "Evidence": {
         "properties": {
           "confidence": {
@@ -869,6 +970,53 @@
         "title": "LiteralQualification",
         "type": "object"
       },
+      "NodeEvidence": {
+        "description": "The verbatim spans and the real drawn frame that prove one node.",
+        "properties": {
+          "clipped_bounds": {
+            "maxItems": 4,
+            "minItems": 4,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Clipped Bounds",
+            "type": "array"
+          },
+          "label_span_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Label Span Ids",
+            "type": "array"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "shape": {
+            "$ref": "#/$defs/PathEvidence"
+          }
+        },
+        "required": [
+          "node_id",
+          "label_span_ids",
+          "shape",
+          "clipped_bounds"
+        ],
+        "title": "NodeEvidence",
+        "type": "object"
+      },
       "NumericObservation": {
         "properties": {
           "evidence": {
@@ -980,6 +1128,72 @@
         "title": "ObservedText",
         "type": "object"
       },
+      "PathEvidence": {
+        "description": "One native SVG <path>, located by its document order; points are page-top-left.",
+        "properties": {
+          "bounds": {
+            "maxItems": 4,
+            "minItems": 4,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Bounds",
+            "type": "array"
+          },
+          "kind": {
+            "enum": [
+              "shape",
+              "line",
+              "arrowhead"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "path_index": {
+            "title": "Path Index",
+            "type": "integer"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/$defs/Point"
+            },
+            "title": "Points",
+            "type": "array"
+          }
+        },
+        "required": [
+          "path_index",
+          "kind",
+          "points",
+          "bounds"
+        ],
+        "title": "PathEvidence",
+        "type": "object"
+      },
+      "Point": {
+        "maxItems": 2,
+        "minItems": 2,
+        "prefixItems": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "number"
+          }
+        ],
+        "type": "array"
+      },
       "RetrievalContext": {
         "properties": {
           "description": {
@@ -1006,6 +1220,9 @@
               },
               {
                 "$ref": "#/$defs/FigureQualification"
+              },
+              {
+                "$ref": "#/$defs/DiagramQualification"
               }
             ],
             "title": "Qualification"

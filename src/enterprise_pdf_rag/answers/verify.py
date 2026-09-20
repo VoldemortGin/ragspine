@@ -58,18 +58,25 @@ from enterprise_pdf_rag.processing.table_models import CellContentState
 type ChartEvidence = Callable[[str], ChartContext | DisplayedLookupContext]
 
 _DONUT_SCOPE = "explicit-distribution-shares"
+# One kind may own several prefixes; ``str.startswith`` accepts the tuple as is.
 _PATH_PREFIX = {
-    ClaimKind.QUOTE: "fragments.",
-    ClaimKind.CELL: "cells.",
-    ClaimKind.CHART_VALUE: "points.",
+    ClaimKind.QUOTE: ("fragments.",),
+    ClaimKind.CELL: ("cells.",),
+    ClaimKind.CHART_VALUE: ("points.",),
+    ClaimKind.DIAGRAM_NODE: ("nodes.",),
+    ClaimKind.DIAGRAM_EDGE: ("edges.",),
 }
 _BLOCK_KINDS = {
     ClaimKind.QUOTE: {BlockKind.TEXT, BlockKind.LIST, BlockKind.GROUP},
     ClaimKind.CELL: {BlockKind.TABLE},
     ClaimKind.CHART_VALUE: {BlockKind.CHART},
+    ClaimKind.DIAGRAM_NODE: {BlockKind.DIAGRAM},
+    ClaimKind.DIAGRAM_EDGE: {BlockKind.DIAGRAM},
 }
 _NUMBER_RE = re.compile(r"(?<![\w.])[-+]?\d[\d,]*(?:\.\d+)?\s*%?(?![\w%])")
 _POINT_VALUE_RE = re.compile(r"points\.(?P<point>[^.]+)\.value")
+_NODE_LABEL_RE = re.compile(r"nodes\.(?P<node>[A-Za-z0-9_-]+)\.label")
+_EDGE_RE = re.compile(r"edges\.(?P<index>\d+)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +87,11 @@ class ClaimVerification:
 
 def _norm(text: str) -> str:
     return " ".join(text.split()).casefold()
+
+
+def _exact(text: str) -> str:
+    """Fold whitespace only: a proven diagram label is verbatim source text, case included."""
+    return " ".join(text.split())
 
 
 def _decimal(token: str) -> Decimal | None:
@@ -160,6 +172,74 @@ def _verify_cell(claim: ModelClaim, block: ContextBlock) -> VerifiedClaim | Reje
                 (cell.cell_id, *cell.source_span_ids),
                 cell.bbox,
                 cell.text,
+            ),
+        ),
+    )
+
+
+def _verify_diagram_node(claim: ModelClaim, block: ContextBlock) -> VerifiedClaim | RejectedClaim:
+    match = _NODE_LABEL_RE.fullmatch(claim.field_path)
+    if match is None:
+        return _reject(
+            claim, AbstainReason.MODEL_OUTPUT_INVALID, "diagram node claims cite nodes.<id>.label"
+        )
+    node = next((item for item in block.nodes if item.node_id == match.group("node")), None)
+    if node is None:
+        return _reject(claim, AbstainReason.CLAIM_NOT_IN_EVIDENCE, "cited node is not in the block")
+    if _exact(claim.text) != _exact(node.label):
+        return _reject(
+            claim, AbstainReason.CLAIM_NOT_IN_EVIDENCE, "claim text differs from node label"
+        )
+    return VerifiedClaim(
+        claim.claim_id,
+        ClaimKind.DIAGRAM_NODE,
+        claim.text,
+        None,
+        None,
+        (
+            ClaimCitation(
+                block.member_id,
+                block.kind,
+                block.page_index,
+                claim.field_path,
+                (node.node_id, *node.source_span_ids),
+                node.bbox,
+                node.label,
+            ),
+        ),
+    )
+
+
+def _verify_diagram_edge(claim: ModelClaim, block: ContextBlock) -> VerifiedClaim | RejectedClaim:
+    match = _EDGE_RE.fullmatch(claim.field_path)
+    if match is None:
+        return _reject(
+            claim, AbstainReason.MODEL_OUTPUT_INVALID, "diagram edge claims cite edges.<index>"
+        )
+    edge = next(
+        (item for item in block.edges if item.edge_index == int(match.group("index"))), None
+    )
+    if edge is None:
+        return _reject(claim, AbstainReason.CLAIM_NOT_IN_EVIDENCE, "cited edge is not in the block")
+    if _exact(claim.text) != _exact(edge.value):
+        return _reject(
+            claim, AbstainReason.CLAIM_NOT_IN_EVIDENCE, "claim text differs from the printed edge"
+        )
+    return VerifiedClaim(
+        claim.claim_id,
+        ClaimKind.DIAGRAM_EDGE,
+        claim.text,
+        None,
+        None,
+        (
+            ClaimCitation(
+                block.member_id,
+                block.kind,
+                block.page_index,
+                claim.field_path,
+                (claim.field_path, edge.source_node_id, edge.target_node_id),
+                edge.bbox,
+                edge.value,
             ),
         ),
     )
@@ -328,6 +408,10 @@ def verify_claims(
             outcome = _verify_quote(claim, block)
         elif kind is ClaimKind.CELL:
             outcome = _verify_cell(claim, block)
+        elif kind is ClaimKind.DIAGRAM_NODE:
+            outcome = _verify_diagram_node(claim, block)
+        elif kind is ClaimKind.DIAGRAM_EDGE:
+            outcome = _verify_diagram_edge(claim, block)
         else:
             try:
                 if claim.member_id not in contexts:

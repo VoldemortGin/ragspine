@@ -16,6 +16,11 @@ from enterprise_pdf_rag.adapters.chart_semantics import (
     ModelDescriptionGenerator,
     ModelOutputBindingError,
 )
+from enterprise_pdf_rag.adapters.diagram_publication import DiagramPublicationReceipt
+from enterprise_pdf_rag.adapters.diagram_qualification import (
+    DiagramQualificationError,
+    qualify_diagram,
+)
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.donut_qualification import DonutQualification
 from enterprise_pdf_rag.adapters.figure_label_qualification import qualify_source_labels
@@ -29,7 +34,7 @@ from enterprise_pdf_rag.adapters.pdfspine_svg import crop_native_svg
 from enterprise_pdf_rag.adapters.pdfspine_tables import PdfspineTableAdapter
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.source_objects import source_table_description
-from enterprise_pdf_rag.adapters.visual_semantics import VisualSemanticAdapter
+from enterprise_pdf_rag.adapters.visual_semantics import VisualInference, VisualSemanticAdapter
 from enterprise_pdf_rag.documents.models import AssetRef, TextSidecar
 from enterprise_pdf_rag.figures.models import ChartIR, TextDescription
 from enterprise_pdf_rag.processing.models import (
@@ -41,7 +46,11 @@ from enterprise_pdf_rag.processing.models import (
     StageState,
 )
 from enterprise_pdf_rag.processing.table_models import TableExtractionResult, TableIR
-from enterprise_pdf_rag.processing.typed_ir import LiteralQualification, ObjectDescription
+from enterprise_pdf_rag.processing.typed_ir import (
+    DiagramIR,
+    LiteralQualification,
+    ObjectDescription,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,6 +203,7 @@ class SemanticObjectAdapter:
                 writer.save("model_view", result.model_view_json),
             )
         )
+        branch: dict[str, StageOutcome] = {}
         for name, value, raw, diagnostic in (
             ("ir", result.ir, result.ir_raw_json, result.ir_diagnostic),
             (
@@ -205,7 +215,7 @@ class SemanticObjectAdapter:
         ):
             if raw is not None:
                 stages.append(writer.save(name + "_raw", raw))
-            stages.append(
+            outcome = (
                 writer.diagnostic(
                     name,
                     diagnostic or "No source-bound result was returned",
@@ -214,13 +224,80 @@ class SemanticObjectAdapter:
                 if value is None
                 else writer.save(name, TypeAdapter[object](type(value)).dump_json(value))
             )
-        stages.append(
-            writer.diagnostic(
-                "qualification",
-                "Visual semantics are source-bound model inferences; an independent field/relationship verifier is not available for this object.",
+            stages.append(outcome)
+            branch[name] = outcome
+        if item.kind is not ObjectKind.DIAGRAM:
+            stages.append(
+                writer.diagnostic(
+                    "qualification",
+                    "Visual semantics are source-bound model inferences; an independent field/relationship verifier is not available for this object.",
+                )
+            )
+            return ObjectProcessingRecord(item.object_id, item.kind, tuple(stages))
+        return self._diagram(page, item, result, writer, stages, branch)
+
+    def _diagram(
+        self,
+        page: PageInput,
+        item: LayoutObject,
+        result: VisualInference,
+        writer: _Writer,
+        stages: list[StageOutcome],
+        branch: dict[str, StageOutcome],
+    ) -> ObjectProcessingRecord:
+        """Prove the model's structure against the same crop; an unproven diagram stays out.
+
+        Like ``_table`` this runs whatever ``qualification_policy`` was selected: the proof
+        is deterministic and reads no model.
+        """
+        if not isinstance(result.ir, DiagramIR) or result.description is None:
+            stages.append(
+                writer.diagnostic(
+                    "qualification",
+                    "Both actual source-bound branches are required; no description-only fallback is admitted.",
+                )
+            )
+            return ObjectProcessingRecord(item.object_id, item.kind, tuple(stages))
+        try:
+            qualified = qualify_diagram(
+                svg=result.crop_svg,
+                spans=page.text.spans,
+                ir=result.ir,
+                source_manifest_id=page.source_manifest_id,
+            )
+        except DiagramQualificationError as error:
+            stages.append(writer.diagnostic("qualification", str(error)))
+            return ObjectProcessingRecord(item.object_id, item.kind, tuple(stages))
+        svg_stage = next(stage for stage in stages if stage.stage == "svg")
+        view_stage = next(stage for stage in stages if stage.stage == "model_view")
+        ir_stage = writer.save("qualified_ir", TypeAdapter(DiagramIR).dump_json(qualified.ir))
+        description_stage = writer.save(
+            "qualified_description", TypeAdapter(ObjectDescription).dump_json(qualified.description)
+        )
+        receipt = DiagramPublicationReceipt(
+            object_id=item.object_id,
+            source_manifest_id=page.source_manifest_id,
+            ir=_ref(ir_stage),
+            description=_ref(description_stage),
+            source_svg=_ref(svg_stage),
+            raw_ir=_ref(branch["ir"]),
+            raw_description=_ref(branch["description"]),
+            view=_ref(view_stage),
+            qualification=qualified.qualification,
+        )
+        stages.extend(
+            (
+                ir_stage,
+                description_stage,
+                writer.save("qualification", receipt.model_dump_json().encode()),
             )
         )
-        return ObjectProcessingRecord(item.object_id, item.kind, tuple(stages))
+        return ObjectProcessingRecord(
+            item.object_id,
+            item.kind,
+            tuple(stages),
+            len(qualified.ir.nodes) + len(qualified.ir.edges),
+        )
 
     def _table(
         self,

@@ -7,6 +7,7 @@ from math import isfinite
 
 from enterprise_pdf_rag.documents.models import AssetRef
 from enterprise_pdf_rag.figures.models import FigureQualification, TextDescription
+from enterprise_pdf_rag.processing.diagram_models import DiagramQualification
 from enterprise_pdf_rag.processing.models import ObjectKind, ProcessingScope
 from enterprise_pdf_rag.processing.typed_ir import (
     LiteralQualification,
@@ -146,7 +147,7 @@ class RetrievalContext:
     member: RetrievalMember
     ir: TypedIR
     description: ObjectDescription | TextDescription
-    qualification: LiteralQualification | FigureQualification
+    qualification: LiteralQualification | FigureQualification | DiagramQualification
 
     @property
     def scope(self) -> str:

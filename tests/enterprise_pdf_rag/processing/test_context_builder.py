@@ -29,6 +29,12 @@ from enterprise_pdf_rag.processing.context_builder import (
     budget_blocks,
     build_context_block,
 )
+from enterprise_pdf_rag.processing.diagram_description import describe_diagram
+from enterprise_pdf_rag.processing.diagram_models import (
+    DiagramQualification,
+    NodeEvidence,
+    PathEvidence,
+)
 from enterprise_pdf_rag.processing.models import ObjectKind
 from enterprise_pdf_rag.processing.retrieval import RetrievalContext, RetrievalMember
 from enterprise_pdf_rag.processing.table_models import (
@@ -39,7 +45,10 @@ from enterprise_pdf_rag.processing.table_models import (
     TableSlot,
 )
 from enterprise_pdf_rag.processing.typed_ir import (
+    DiagramEdge,
     DiagramIR,
+    DiagramNode,
+    ImageIR,
     ListIR,
     LiteralQualification,
     ObjectDescription,
@@ -259,6 +268,66 @@ def test_table_block_lists_cells_with_content_state() -> None:
     assert "cells.c-3 (1,0): <UNAVAILABLE>" in rendered
 
 
+def _diagram_ir() -> DiagramIR:
+    nodes = (
+        DiagramNode("n1", "PLAN", (20.0, 70.0, 90.0, 100.0), ("sp-plan",)),
+        DiagramNode("n2", "BUILD", (150.0, 70.0, 220.0, 100.0), ("sp-build",)),
+    )
+    edges = (DiagramEdge("n1", "n2", None, "leads to", Verification.VERIFIED),)
+    return DiagramIR("diagram-1", _ANCHOR, nodes, edges, (), Verification.VERIFIED)
+
+
+def _diagram_context() -> RetrievalContext:
+    ir = _diagram_ir()
+    shape = PathEvidence(0, "shape", ((20.0, 70.0), (90.0, 100.0)), (20.0, 70.0, 90.0, 100.0))
+    qualification = DiagramQualification(
+        "diagram-1",
+        _ANCHOR,
+        _SHA,
+        ("sp-plan", "sp-build"),
+        (NodeEvidence("n1", ("sp-plan",), shape, (20.0, 70.0, 90.0, 100.0)),),
+        (),
+    )
+    return RetrievalContext(
+        _SNAPSHOT,
+        _member("diagram-1", ObjectKind.DIAGRAM),
+        ir,
+        describe_diagram(ir),
+        qualification,
+    )
+
+
+def test_diagram_block_prints_node_labels_and_edges() -> None:
+    block = build_context_block(_diagram_context())
+    assert block.kind is BlockKind.DIAGRAM
+    assert block.scope == "diagram-structure-source-geometry-v1"
+    assert block.verification is Verification.VERIFIED
+    assert block.description_text == "Diagram with 2 nodes and 1 edge: PLAN; BUILD. PLAN -> BUILD."
+    (edge,) = block.edges
+    assert edge.value == "PLAN -> BUILD"
+    # The citable box is the union of both endpoints.
+    assert edge.bbox == (20.0, 70.0, 220.0, 100.0)
+    assert block.prompt_text().split("\n")[1:] == [
+        "diagram nodes=2 edges=1",
+        "nodes.n1.label: PLAN",
+        "nodes.n2.label: BUILD",
+        "edges.0: PLAN -> BUILD",
+    ]
+
+
+def test_diagram_member_kind_mismatch_is_refused() -> None:
+    context = _diagram_context()
+    mismatched = RetrievalContext(
+        context.snapshot_id,
+        _member("diagram-1", ObjectKind.IMAGE),
+        context.ir,
+        context.description,
+        context.qualification,
+    )
+    with pytest.raises(ValueError, match="kind"):
+        build_context_block(mismatched)
+
+
 def test_kind_mismatch_and_unsupported_ir_are_refused() -> None:
     text = _text_context()
     mismatched = RetrievalContext(
@@ -270,15 +339,15 @@ def test_kind_mismatch_and_unsupported_ir_are_refused() -> None:
     )
     with pytest.raises(ValueError, match="kind"):
         build_context_block(mismatched)
-    diagram = RetrievalContext(
+    image = RetrievalContext(
         text.snapshot_id,
-        _member("diagram-1", ObjectKind.DIAGRAM),
-        DiagramIR("diagram-1", _ANCHOR, (), (), ()),
+        _member("image-1", ObjectKind.IMAGE),
+        ImageIR("image-1", _ANCHOR, (), (), ()),
         text.description,
         text.qualification,
     )
     with pytest.raises(ValueError, match="not supported"):
-        build_context_block(diagram)
+        build_context_block(image)
 
 
 def test_budget_drops_whole_blocks_and_keeps_order() -> None:

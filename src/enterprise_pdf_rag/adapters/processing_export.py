@@ -177,6 +177,7 @@ def _coverage(outputs: ProcessingStore, manifest: ProcessingManifest) -> tuple[s
                     "ir_artifacts",
                     "description_artifacts",
                     "source_transcription_qualified",
+                    "diagram_structure_qualified",
                     "labels_only_qualified",
                     "numeric_qualified",
                     "displayed_lookup_qualified",
@@ -193,6 +194,8 @@ def _coverage(outputs: ProcessingStore, manifest: ProcessingManifest) -> tuple[s
             qualification = stages.get("qualification")
             if qualification is None or qualification.artifact is None:
                 key = "qualification_unavailable"
+            elif kind is ObjectKind.DIAGRAM:
+                key = "diagram_structure_qualified"
             elif kind is not ObjectKind.CHART:
                 key = "source_transcription_qualified"
             else:
@@ -215,6 +218,7 @@ def _coverage(outputs: ProcessingStore, manifest: ProcessingManifest) -> tuple[s
         "ir_artifacts",
         "description_artifacts",
         "source_transcription_qualified",
+        "diagram_structure_qualified",
         "labels_only_qualified",
         "numeric_qualified",
         "displayed_lookup_qualified",
@@ -226,6 +230,7 @@ def _coverage(outputs: ProcessingStore, manifest: ProcessingManifest) -> tuple[s
         "已保存 IR",
         "已保存描述",
         "仅原文转录资格",
+        "图结构资格",
         "仅标签资格",
         "数值关系资格",
         "仅显示值查值资格",

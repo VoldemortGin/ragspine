@@ -17,10 +17,17 @@ from enterprise_pdf_rag.figures.models import (
 )
 from enterprise_pdf_rag.processing.index_text import (
     chart_index_text,
+    diagram_index_text,
+    has_citable_structure,
     has_citable_value,
     member_index_text,
 )
-from enterprise_pdf_rag.processing.typed_ir import TextIR
+from enterprise_pdf_rag.processing.typed_ir import (
+    DiagramEdge,
+    DiagramIR,
+    DiagramNode,
+    TextIR,
+)
 
 _SHA = "c" * 64
 _BINDING = SvgBinding("fig", _SHA, "svg-v2:" + "e" * 64, "f" * 64)
@@ -102,6 +109,39 @@ def test_unavailable_points_keep_labels_but_no_value_and_word_units_stay_separat
     assert chart_index_text(chart, fallback="x") == (
         "bar chart figure 1H21 VONB 15 US cents 1H22 VONB"
     )
+
+
+def _diagram(*, labelled: bool = True, edges: tuple[DiagramEdge, ...] = ()) -> DiagramIR:
+    anchor = SourceAnchor(_SHA, _SHA, 2, (15.0, 65.0, 225.0, 105.0))
+    nodes = (
+        DiagramNode("n2", "BUILD" if labelled else "", (150.0, 70.0, 220.0, 100.0), ("sp-build",)),
+        DiagramNode("n1", "PLAN" if labelled else "", (20.0, 70.0, 90.0, 100.0), ("sp-plan",)),
+    )
+    return DiagramIR("diagram-1", anchor, nodes, edges, ())
+
+
+def test_proven_diagram_projects_labels_in_reading_order_and_every_edge() -> None:
+    edge = DiagramEdge("n1", "n2", None, "leads to")
+    diagram = _diagram(edges=(edge,))
+    assert has_citable_structure(diagram)
+    text = diagram_index_text(diagram, fallback="Two boxes joined by an arrow.")
+    # Reading order, not IR order: the left frame comes first on the same row.
+    assert text == "diagram figure PLAN BUILD PLAN -> BUILD"
+    assert diagram_index_text(diagram, fallback="other") == text
+    assert member_index_text(diagram, "Two boxes joined by an arrow.") == text
+    nodes_only = _diagram()
+    assert diagram_index_text(nodes_only, fallback="x") == "diagram figure PLAN BUILD"
+
+
+def test_diagram_without_source_labels_keeps_its_description_text() -> None:
+    fallback = "Five tiles and two curved arrows."
+    unlabelled = _diagram(labelled=False)
+    assert not has_citable_structure(unlabelled)
+    assert diagram_index_text(unlabelled, fallback=fallback) == fallback
+    assert member_index_text(unlabelled, fallback) == fallback
+    anchor = SourceAnchor(_SHA, _SHA, 2, (15.0, 65.0, 225.0, 105.0))
+    empty = DiagramIR("diagram-1", anchor, (), (), ())
+    assert diagram_index_text(empty, fallback=fallback) == fallback
 
 
 def test_literal_members_index_their_description_unchanged() -> None:

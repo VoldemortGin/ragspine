@@ -6,6 +6,7 @@ from enterprise_pdf_rag.adapters.aia_ingestion import read_text_sidecar
 from enterprise_pdf_rag.adapters.chart_member_validation import (
     validate_retrieval_chart_member,
 )
+from enterprise_pdf_rag.adapters.diagram_publication import validate_diagram_member
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.layout_normalization import normalize_partition
 from enterprise_pdf_rag.adapters.literal_qualification import validate_literal_member
@@ -79,5 +80,7 @@ def validate_processing_source(
         for member in plan.members:
             if member.kind is ObjectKind.CHART:
                 validate_retrieval_chart_member(sources, artifacts, manifest.scope, member)
+            elif member.kind is ObjectKind.DIAGRAM:
+                validate_diagram_member(sources, artifacts, manifest.scope, member)
             else:
                 validate_literal_member(sources, artifacts, manifest.scope, member)

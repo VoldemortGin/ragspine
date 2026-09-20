@@ -52,6 +52,7 @@ from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
     publish_generic_document,
     resolve_table_member,
 )
+from tests.enterprise_pdf_rag.answers.fake_document import DIAGRAM_LABELS, diagram_member
 from tests.enterprise_pdf_rag.answers.store_mounted_document import (
     StoreMountedDocument,
     bar_document,
@@ -61,6 +62,7 @@ from tests.enterprise_pdf_rag.answers.store_mounted_document import (
 _SNAPSHOT = "5" * 64
 _TEXT_MEMBER = "a" * 64
 _TABLE_MEMBER = "b" * 64
+_DIAGRAM_MEMBER = "diagram-1"
 _ANCHOR = SourceAnchor("c" * 64, "c" * 64, 3, (0.0, 0.0, 100.0, 50.0))
 
 type ChartEvidence = Callable[[str], ChartContext | DisplayedLookupContext]
@@ -121,7 +123,7 @@ def _no_chart(member_id: str) -> Never:
 
 def _claim(
     member_id: str,
-    kind: Literal["quote", "cell", "chart_value"],
+    kind: Literal["quote", "cell", "chart_value", "diagram_node", "diagram_edge"],
     field_path: str,
     text: str,
     *,
@@ -136,8 +138,16 @@ def _answer(*claims: ModelClaim, answer: str = "") -> ModelAnswer:
     return ModelAnswer(abstain=False, abstain_reason=None, answer=answer, claims=claims)
 
 
+def _diagram_block() -> ContextBlock:
+    return build_context_block(diagram_member(_DIAGRAM_MEMBER))
+
+
 def _verify(*claims: ModelClaim, chart_evidence: ChartEvidence = _no_chart) -> ClaimVerification:
-    blocks = {_TEXT_MEMBER: _text_block(), _TABLE_MEMBER: _table_block()}
+    blocks = {
+        _TEXT_MEMBER: _text_block(),
+        _TABLE_MEMBER: _table_block(),
+        _DIAGRAM_MEMBER: _diagram_block(),
+    }
     return verify_claims(_answer(*claims), blocks, chart_evidence=chart_evidence)
 
 
@@ -236,6 +246,70 @@ def test_cell_claim_requires_the_exact_present_cell_text() -> None:
     assert unavailable.reason is AbstainReason.VALUE_UNAVAILABLE
     unknown = _only_rejected(_verify(_claim(_TABLE_MEMBER, "cell", "cells.c-9", "x")))
     assert unknown.reason is AbstainReason.CLAIM_NOT_IN_EVIDENCE
+
+
+def test_diagram_node_claim_requires_the_exact_label_case_included() -> None:
+    label = DIAGRAM_LABELS[0]
+    verification = _verify(_claim(_DIAGRAM_MEMBER, "diagram_node", "nodes.n1.label", label))
+    (claim,) = verification.verified
+    assert verification.rejected == ()
+    assert claim.kind is ClaimKind.DIAGRAM_NODE and claim.value is None
+    (citation,) = claim.citations
+    assert citation.kind is BlockKind.DIAGRAM and citation.page_index == 2
+    assert citation.field_path == "nodes.n1.label"
+    assert citation.evidence_ids == ("n1", "sp-plan")
+    assert citation.bbox == (20.0, 70.0, 90.0, 100.0) and citation.quote == label
+    # The label's own percentage is grounded by the claim it was copied from.
+    assert prose_grounded(f"The first stage is {label}.", verification.verified) == (True, ())
+    # Diagram labels are verbatim source text: folded whitespace passes, a case change does not.
+    spaced = _verify(
+        _claim(_DIAGRAM_MEMBER, "diagram_node", "nodes.n1.label", label.replace(": ", ":  "))
+    )
+    assert len(spaced.verified) == 1
+    recased = _only_rejected(
+        _verify(_claim(_DIAGRAM_MEMBER, "diagram_node", "nodes.n1.label", label.casefold()))
+    )
+    assert recased.reason is AbstainReason.CLAIM_NOT_IN_EVIDENCE
+    unknown = _only_rejected(
+        _verify(_claim(_DIAGRAM_MEMBER, "diagram_node", "nodes.n9.label", "Growth"))
+    )
+    assert unknown.reason is AbstainReason.CLAIM_NOT_IN_EVIDENCE
+
+
+def test_diagram_edge_claim_requires_the_printed_pair_in_its_drawn_direction() -> None:
+    printed = f"{DIAGRAM_LABELS[0]} -> {DIAGRAM_LABELS[1]}"
+    verification = _verify(_claim(_DIAGRAM_MEMBER, "diagram_edge", "edges.0", printed))
+    (claim,) = verification.verified
+    assert claim.kind is ClaimKind.DIAGRAM_EDGE
+    (citation,) = claim.citations
+    assert citation.evidence_ids == ("edges.0", "n1", "n2")
+    assert citation.bbox == (20.0, 70.0, 220.0, 100.0) and citation.quote == printed
+    reversed_pair = f"{DIAGRAM_LABELS[1]} -> {DIAGRAM_LABELS[0]}"
+    backwards = _only_rejected(
+        _verify(_claim(_DIAGRAM_MEMBER, "diagram_edge", "edges.0", reversed_pair))
+    )
+    assert backwards.reason is AbstainReason.CLAIM_NOT_IN_EVIDENCE
+    missing = _only_rejected(_verify(_claim(_DIAGRAM_MEMBER, "diagram_edge", "edges.1", printed)))
+    assert missing.reason is AbstainReason.CLAIM_NOT_IN_EVIDENCE
+
+
+def test_diagram_claim_kind_and_path_must_agree() -> None:
+    crossed = _only_rejected(
+        _verify(_claim(_DIAGRAM_MEMBER, "quote", "nodes.n1.label", DIAGRAM_LABELS[0]))
+    )
+    assert crossed.reason is AbstainReason.MODEL_OUTPUT_INVALID
+    on_text = _only_rejected(
+        _verify(_claim(_TEXT_MEMBER, "diagram_node", "nodes.n1.label", DIAGRAM_LABELS[0]))
+    )
+    assert on_text.reason is AbstainReason.MODEL_OUTPUT_INVALID
+    malformed = _only_rejected(
+        _verify(_claim(_DIAGRAM_MEMBER, "diagram_node", "nodes.n1", DIAGRAM_LABELS[0]))
+    )
+    assert malformed.reason is AbstainReason.MODEL_OUTPUT_INVALID
+    not_an_index = _only_rejected(
+        _verify(_claim(_DIAGRAM_MEMBER, "diagram_edge", "edges.first", "x"))
+    )
+    assert not_an_index.reason is AbstainReason.MODEL_OUTPUT_INVALID
 
 
 def _chart_setup(

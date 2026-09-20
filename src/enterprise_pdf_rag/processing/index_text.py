@@ -5,14 +5,17 @@ a question that names the chart's categories or values but not its title has not
 to match. ``chart_index_text`` projects the qualified IR instead: title, period,
 grammar and every point's category / series / explicit value. A chart without a
 single explicit value keeps its description text, so a pending or label-only figure
-never climbs the ranking on words it cannot cite. Nothing here reads a store.
+never climbs the ranking on words it cannot cite. A proven diagram is projected the same
+way: its node labels in reading order plus one ``<from> -> <to>`` pair per drawn edge.
+Nothing here reads a store.
 """
 
 from dataclasses import dataclass
 from decimal import Decimal
 
 from enterprise_pdf_rag.figures.models import ChartIR, ChartPoint, ValueKind
-from enterprise_pdf_rag.processing.typed_ir import TypedIR
+from enterprise_pdf_rag.processing.diagram_description import EDGE_ARROW, reading_order
+from enterprise_pdf_rag.processing.typed_ir import DiagramIR, TypedIR
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,8 +85,33 @@ def chart_index_text(chart: ChartIR, *, fallback: str) -> str:
     return " ".join(part.strip() for part in parts if part.strip())
 
 
+def has_citable_structure(diagram: DiagramIR) -> bool:
+    """True when at least one node label is verbatim source text an answer may cite."""
+    return any(node.label.strip() and node.source_span_ids for node in diagram.nodes)
+
+
+def diagram_index_text(diagram: DiagramIR, *, fallback: str) -> str:
+    """Project a proven diagram into searchable text; otherwise ``fallback``.
+
+    The projection is deterministic: ``diagram figure`` followed by every node label in
+    reading order and then ``<from> -> <to>`` per proven edge, the same pair a
+    ``diagram_edge`` claim cites. ``fallback`` is the member's description text.
+    """
+    if not has_citable_structure(diagram):
+        return fallback
+    by_id = {node.node_id: node.label for node in diagram.nodes}
+    parts = ["diagram figure", *(node.label for node in reading_order(diagram.nodes))]
+    parts.extend(
+        f"{by_id[edge.source_node_id]}{EDGE_ARROW}{by_id[edge.target_node_id]}"
+        for edge in diagram.edges
+    )
+    return " ".join(part.strip() for part in parts if part.strip())
+
+
 def member_index_text(ir: TypedIR, description_text: str) -> str:
-    """Text / list / group / table members index their description; charts are projected."""
+    """Text / list / group / table members index their description; figures are projected."""
     if isinstance(ir, ChartIR):
         return chart_index_text(ir, fallback=description_text)
+    if isinstance(ir, DiagramIR):
+        return diagram_index_text(ir, fallback=description_text)
     return description_text

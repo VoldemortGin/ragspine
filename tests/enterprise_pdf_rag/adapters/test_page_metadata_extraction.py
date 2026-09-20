@@ -299,7 +299,7 @@ def test_catalog_entries_carry_the_document_metadata(
     assert manifest.document_metadata is not None and manifest.retrieval is not None
 
 
-def test_index_text_carries_the_contextual_header_under_policy_v4(
+def test_index_text_carries_the_contextual_header_under_policy_v5(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     embedder = _RecordingEmbedder()
@@ -334,7 +334,7 @@ def test_index_text_carries_the_contextual_header_under_policy_v4(
     plan, _ = ProcessingStore(Path(entry.processing_store)).load_retrieval(
         mount.manifest().retrieval  # type: ignore[arg-type]
     )
-    assert plan.qualification_policy == "source-transcription-and-scoped-chart-qualification-v4"
+    assert plan.qualification_policy == "source-transcription-and-scoped-chart-qualification-v5"
     # Descriptions and quoted evidence are untouched by the header.
     block = mount.resolve(PinnedRetrievalHit(plan.snapshot_id, second.member_id, 1.0))
     assert block.description.text == "Meridian 1H26 Hong Kong page 2"

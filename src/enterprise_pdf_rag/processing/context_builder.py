@@ -12,10 +12,17 @@ from enum import StrEnum
 
 from enterprise_pdf_rag.documents.models import Bounds
 from enterprise_pdf_rag.figures.models import ChartIR, TextField, ValueKind, Verification
+from enterprise_pdf_rag.processing.diagram_description import EDGE_ARROW
 from enterprise_pdf_rag.processing.models import ObjectKind
 from enterprise_pdf_rag.processing.retrieval import RetrievalContext
 from enterprise_pdf_rag.processing.table_models import CellContentState, TableIR
-from enterprise_pdf_rag.processing.typed_ir import GroupIR, ListIR, ObservedText, TextIR
+from enterprise_pdf_rag.processing.typed_ir import (
+    DiagramIR,
+    GroupIR,
+    ListIR,
+    ObservedText,
+    TextIR,
+)
 
 
 class BlockKind(StrEnum):
@@ -24,6 +31,7 @@ class BlockKind(StrEnum):
     GROUP = "group"
     TABLE = "table"
     CHART = "chart"
+    DIAGRAM = "diagram"
 
 
 _KIND_OF_OBJECT = {
@@ -32,6 +40,7 @@ _KIND_OF_OBJECT = {
     ObjectKind.GROUP: BlockKind.GROUP,
     ObjectKind.TABLE: BlockKind.TABLE,
     ObjectKind.CHART: BlockKind.CHART,
+    ObjectKind.DIAGRAM: BlockKind.DIAGRAM,
 }
 
 
@@ -68,6 +77,32 @@ class ChartFieldEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class DiagramNodeEvidence:
+    """One proven diagram node: ``nodes.<node_id>.label`` is its citable path."""
+
+    node_id: str
+    label: str
+    bbox: Bounds
+    source_span_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class DiagramEdgeEvidence:
+    """One proven drawn edge: ``edges.<index>`` is its citable path, printed as a pair."""
+
+    edge_index: int
+    source_node_id: str
+    target_node_id: str
+    source_label: str
+    target_label: str
+    bbox: Bounds
+
+    @property
+    def value(self) -> str:
+        return f"{self.source_label}{EDGE_ARROW}{self.target_label}"
+
+
+@dataclass(frozen=True, slots=True)
 class ContextBlock:
     snapshot_id: str
     member_id: str
@@ -83,6 +118,8 @@ class ContextBlock:
     col_count: int = 0
     grammar: str | None = None
     chart_fields: tuple[ChartFieldEvidence, ...] = ()
+    nodes: tuple[DiagramNodeEvidence, ...] = ()
+    edges: tuple[DiagramEdgeEvidence, ...] = ()
 
     def prompt_text(self) -> str:
         """Deterministic rendering; every citable path appears verbatim as a line prefix."""
@@ -114,6 +151,10 @@ class ContextBlock:
                 else:
                     shown = f"<{cell.content_state.name}>"
                 lines.append(f"cells.{cell.cell_id} ({cell.row},{cell.col}): {shown}")
+        elif self.kind is BlockKind.DIAGRAM:
+            lines.append(f"diagram nodes={len(self.nodes)} edges={len(self.edges)}")
+            lines.extend(f"nodes.{node.node_id}.label: {node.label}" for node in self.nodes)
+            lines.extend(f"edges.{edge.edge_index}: {edge.value}" for edge in self.edges)
         else:
             lines.extend(f"fragments.{span.source_span_id}: {span.text}" for span in self.spans)
             lines.extend(
@@ -158,6 +199,15 @@ def _chart_fields(chart: ChartIR) -> tuple[ChartFieldEvidence, ...]:
             )
         )
     return tuple(fields)
+
+
+def _union(first: Bounds, second: Bounds) -> Bounds:
+    return (
+        min(first[0], second[0]),
+        min(first[1], second[1]),
+        max(first[2], second[2]),
+        max(first[3], second[3]),
+    )
 
 
 def build_context_block(context: RetrievalContext) -> ContextBlock:
@@ -220,6 +270,36 @@ def build_context_block(context: RetrievalContext) -> ContextBlock:
             context.description.text,
             grammar=ir.grammar,
             chart_fields=_chart_fields(ir),
+        )
+    if isinstance(ir, DiagramIR):
+        if member.kind is not ObjectKind.DIAGRAM:
+            raise ValueError("Retrieval member kind does not match its typed IR")
+        by_id = {node.node_id: node for node in ir.nodes}
+        return ContextBlock(
+            *common,
+            BlockKind.DIAGRAM,
+            member.page_index,
+            context.scope,
+            ir.verification,
+            context.description.text,
+            nodes=tuple(
+                DiagramNodeEvidence(node.node_id, node.label, node.bbox, node.source_span_ids)
+                for node in ir.nodes
+            ),
+            edges=tuple(
+                DiagramEdgeEvidence(
+                    index,
+                    edge.source_node_id,
+                    edge.target_node_id,
+                    by_id[edge.source_node_id].label,
+                    by_id[edge.target_node_id].label,
+                    _union(
+                        by_id[edge.source_node_id].bbox,
+                        by_id[edge.target_node_id].bbox,
+                    ),
+                )
+                for index, edge in enumerate(ir.edges)
+            ),
         )
     raise ValueError(f"{type(ir).__name__} members are not supported as answer context")
 

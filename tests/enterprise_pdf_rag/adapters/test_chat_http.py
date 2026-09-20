@@ -21,14 +21,17 @@ from enterprise_pdf_rag.adapters.document_catalog import (
 from enterprise_pdf_rag.adapters.draft_publication import DraftPublication
 from enterprise_pdf_rag.adapters.http import app as app_module
 from enterprise_pdf_rag.adapters.http.chat import create_chat_router, model_id, render_message
+from enterprise_pdf_rag.adapters.http.chat_schemas import ClaimOut
 from enterprise_pdf_rag.adapters.http.documents import create_documents_app
 from enterprise_pdf_rag.adapters.json_completion import JsonCompletionClient
 from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
 from enterprise_pdf_rag.adapters.providers import LLMConfig, LocalModelConfig
 from enterprise_pdf_rag.answers.models import AnswerRequest
 from enterprise_pdf_rag.answers.prompt import ModelAnswer, ModelClaim
+from enterprise_pdf_rag.answers.verify import verify_claims
 from enterprise_pdf_rag.core.settings import get_settings
 from enterprise_pdf_rag.figures.ports import EmbeddingPort
+from enterprise_pdf_rag.processing.context_builder import build_context_block
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
     publish_generic_document,
 )
@@ -40,6 +43,7 @@ from tests.enterprise_pdf_rag.adapters.test_documents_http import (
     _route_paths,
     _run,
 )
+from tests.enterprise_pdf_rag.answers.fake_document import diagram_member
 from tests.enterprise_pdf_rag.answers.fake_llm import (
     Script,
     answered,
@@ -130,6 +134,33 @@ def fabricate_page_two(prompt: str) -> ModelAnswer:
             text="revenue doubled",
         ),
     )
+
+
+def _no_chart_evidence(member_id: str) -> Never:
+    raise AssertionError("a diagram claim must never read chart evidence")
+
+
+def test_diagram_claims_serialise_their_kind_and_block_on_the_wire() -> None:
+    block = build_context_block(diagram_member())
+    (verified,) = verify_claims(
+        answered(
+            "PLAN leads to BUILD.",
+            ModelClaim(
+                claim_id="e",
+                member_id=block.member_id,
+                kind="diagram_edge",
+                field_path="edges.0",
+                text=block.edges[0].value,
+            ),
+        ),
+        {block.member_id: block},
+        chart_evidence=_no_chart_evidence,
+    ).verified
+    payload = json.loads(ClaimOut.from_domain(verified).model_dump_json())
+    assert payload["kind"] == "diagram_edge"
+    (citation,) = payload["citations"]
+    assert citation["kind"] == "diagram" and citation["field_path"] == "edges.0"
+    assert citation["chart_citation"] is None
 
 
 @dataclass

@@ -10,6 +10,7 @@ from enterprise_pdf_rag.adapters.chart_member_validation import (
     uses_displayed_bar_policy,
     validate_retrieval_chart_member,
 )
+from enterprise_pdf_rag.adapters.diagram_publication import validate_diagram_member
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.literal_qualification import validate_literal_member
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
@@ -20,6 +21,7 @@ from enterprise_pdf_rag.figures.models import (
     TextDescription,
 )
 from enterprise_pdf_rag.figures.ports import EmbeddingPort
+from enterprise_pdf_rag.processing.diagram_models import DiagramQualification
 from enterprise_pdf_rag.processing.index_text import (
     PageIndexContext,
     contextual_index_text,
@@ -46,6 +48,7 @@ from enterprise_pdf_rag.processing.retrieval import (
 )
 from enterprise_pdf_rag.processing.table_models import TableIR
 from enterprise_pdf_rag.processing.typed_ir import (
+    DiagramIR,
     GroupIR,
     ListIR,
     LiteralQualification,
@@ -55,9 +58,12 @@ from enterprise_pdf_rag.processing.typed_ir import (
 
 # v2 admits Table members whose literal transcription qualified; v3 embeds the chart
 # index-text projection (ADR 0012) instead of the description alone; v4 prepends the
-# page's contextual header (``display_title | page_title | section``, ADR 0013). The
-# string is part of the snapshot id, so older snapshots keep their ids and stay mountable.
-_POLICY = "source-transcription-and-scoped-chart-qualification-v4"
+# page's contextual header (``display_title | page_title | section``, ADR 0013); v5
+# embeds the qualified-IR projection of Diagram members (proven nodes in reading order,
+# ``A -> B`` per proven edge) and of Formula members (readable + linear + token texts),
+# both admitted by ADR 0015. The string is part of the snapshot id, so older snapshots
+# keep their ids and stay mountable.
+_POLICY = "source-transcription-and-scoped-chart-qualification-v5"
 _INDEX = "immutable-cosine-index-v1"
 # Snapshots whose vectors embed ``member_index_text``; older ones embedded the description
 # text, and their lexical corpus must keep scoring exactly what they embedded. The
@@ -66,12 +72,17 @@ _INDEX = "immutable-cosine-index-v1"
 PROJECTED_CHART_POLICIES = frozenset(
     {
         _POLICY,
+        "source-transcription-and-scoped-chart-qualification-v4",
         "source-transcription-and-scoped-chart-qualification-v3",
         "source-transcription-donut-and-displayed-bar-v2",
     }
 )
 # Snapshots whose vectors embed the contextual header above the projection.
-CONTEXTUAL_POLICIES = frozenset({_POLICY})
+CONTEXTUAL_POLICIES = frozenset({_POLICY, "source-transcription-and-scoped-chart-qualification-v4"})
+# Snapshots whose vectors embed the qualified-IR projection of a non-chart visual member
+# (Diagram, Formula). A snapshot indexed before ADR 0015 holds no such member, so the
+# gate is unreachable there; it keeps "one policy embeds exactly what it declared" checkable.
+VISUAL_PROJECTION_POLICIES = frozenset({_POLICY})
 
 
 def member_text(
@@ -88,6 +99,12 @@ def member_text(
     payload = assets.get(member.description)
     if member.kind is not ObjectKind.CHART:
         body = TypeAdapter(ObjectDescription).validate_json(payload).text
+        if (
+            member.kind is ObjectKind.DIAGRAM
+            and plan.qualification_policy in VISUAL_PROJECTION_POLICIES
+        ):
+            diagram = TypeAdapter(DiagramIR).validate_json(assets.get(member.ir))
+            body = member_index_text(diagram, body)
     else:
         body = TypeAdapter(TextDescription).validate_json(payload).text
         if plan.qualification_policy in PROJECTED_CHART_POLICIES:
@@ -110,12 +127,13 @@ def eligibility(record: ObjectProcessingRecord) -> tuple[bool, str | None]:
         ObjectKind.GROUP,
         ObjectKind.TABLE,
         ObjectKind.CHART,
+        ObjectKind.DIAGRAM,
     ):
         return False, f"{record.kind.value} objects are not retrievable"
     stages = {stage.stage: stage for stage in record.stages}
     required = (
         ("qualified_ir", "qualified_description", "qualification", "svg")
-        if record.kind is ObjectKind.CHART
+        if record.kind in (ObjectKind.CHART, ObjectKind.DIAGRAM)
         else ("ir", "description", "qualification", "svg")
     )
     if any(
@@ -125,6 +143,11 @@ def eligibility(record: ObjectProcessingRecord) -> tuple[bool, str | None]:
             return (
                 False,
                 "Table transcription is not verified; only verified tables are retrievable",
+            )
+        if record.kind is ObjectKind.DIAGRAM:
+            return (
+                False,
+                "Diagram structure is not proven; only geometry-qualified diagrams are retrievable",
             )
         return False, "required qualification stages are incomplete"
     return True, None
@@ -157,7 +180,7 @@ class ProcessingRetrieval:
             stages = {stage.stage: stage for stage in record.stages}
             required = (
                 ("qualified_ir", "qualified_description", "qualification", "svg")
-                if record.kind is ObjectKind.CHART
+                if record.kind in (ObjectKind.CHART, ObjectKind.DIAGRAM)
                 else ("ir", "description", "qualification", "svg")
             )
             refs = tuple(stages[name].artifact for name in required)
@@ -199,6 +222,22 @@ class ProcessingRetrieval:
                 lineage = tuple(
                     stage.artifact
                     for stage in raw_refs
+                    if stage is not None and stage.artifact is not None
+                )
+            elif record.kind is ObjectKind.DIAGRAM:
+                diagram_refs = tuple(
+                    stages.get(name) for name in ("ir", "description", "model_view")
+                )
+                if any(
+                    stage is None
+                    or stage.state is not StageState.SUCCEEDED
+                    or stage.artifact is None
+                    for stage in diagram_refs
+                ):
+                    raise ValueError("Qualified diagram is missing its raw branch or model view")
+                lineage = tuple(
+                    stage.artifact
+                    for stage in diagram_refs
                     if stage is not None and stage.artifact is not None
                 )
             provisional = RetrievalMember(
@@ -347,12 +386,14 @@ class ProcessingRetrieval:
     def _qualified(
         self, scope: ProcessingScope, member: RetrievalMember
     ) -> tuple[
-        TextIR | ListIR | GroupIR | TableIR | ChartIR,
+        TextIR | ListIR | GroupIR | TableIR | ChartIR | DiagramIR,
         ObjectDescription | TextDescription,
-        LiteralQualification | FigureQualification,
+        LiteralQualification | FigureQualification | DiagramQualification,
     ]:
         if member.kind is ObjectKind.CHART:
             return validate_retrieval_chart_member(self.sources, self.outputs.assets, scope, member)
+        if member.kind is ObjectKind.DIAGRAM:
+            return validate_diagram_member(self.sources, self.outputs.assets, scope, member)
         return self._literal(scope, member)
 
 
@@ -370,5 +411,12 @@ def resolve_processing_context(
             sources, outputs.assets, plan.scope, member
         )
         return RetrievalContext(plan.snapshot_id, member, chart, chart_description, chart_receipt)
+    if member.kind is ObjectKind.DIAGRAM:
+        diagram, diagram_description, diagram_receipt = validate_diagram_member(
+            sources, outputs.assets, plan.scope, member
+        )
+        return RetrievalContext(
+            plan.snapshot_id, member, diagram, diagram_description, diagram_receipt
+        )
     ir, description, receipt = validate_literal_member(sources, outputs.assets, plan.scope, member)
     return RetrievalContext(plan.snapshot_id, member, ir, description, receipt)

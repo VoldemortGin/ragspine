@@ -29,6 +29,12 @@ from enterprise_pdf_rag.figures.models import (
     ValueKind,
     Verification,
 )
+from enterprise_pdf_rag.processing.diagram_description import describe_diagram
+from enterprise_pdf_rag.processing.diagram_models import (
+    DiagramQualification,
+    NodeEvidence,
+    PathEvidence,
+)
 from enterprise_pdf_rag.processing.index_text import member_index_text
 from enterprise_pdf_rag.processing.models import ObjectKind, ProcessingManifest
 from enterprise_pdf_rag.processing.retrieval import (
@@ -37,6 +43,9 @@ from enterprise_pdf_rag.processing.retrieval import (
     RetrievalMember,
 )
 from enterprise_pdf_rag.processing.typed_ir import (
+    DiagramEdge,
+    DiagramIR,
+    DiagramNode,
     LiteralQualification,
     ObjectDescription,
     ObservedText,
@@ -82,6 +91,39 @@ def donut_chart(*shares: tuple[str, str]) -> ChartIR:
 def pending_chart() -> ChartIR:
     """A pending bar with no points, like the untitled AIA bars."""
     return ChartIR(_BINDING, "bar", (), (), "fake", Verification.PENDING)
+
+
+DIAGRAM_MEMBER = "diagram-1"
+DIAGRAM_ANCHOR = SourceAnchor(_SHA, _SHA, 2, (15.0, 65.0, 225.0, 105.0))
+DIAGRAM_LABELS = ("Foundation: 100% Digitalised Agency", "Growth")
+
+
+def diagram_ir() -> DiagramIR:
+    """A proven two-node, one-edge diagram; the first label carries a percentage."""
+    nodes = (
+        DiagramNode("n1", DIAGRAM_LABELS[0], (20.0, 70.0, 90.0, 100.0), ("sp-plan",)),
+        DiagramNode("n2", DIAGRAM_LABELS[1], (150.0, 70.0, 220.0, 100.0), ("sp-build",)),
+    )
+    edges = (DiagramEdge("n1", "n2", None, "leads to", Verification.VERIFIED),)
+    return DiagramIR(DIAGRAM_MEMBER, DIAGRAM_ANCHOR, nodes, edges, (), Verification.VERIFIED)
+
+
+def diagram_member(member_id: str = DIAGRAM_MEMBER) -> RetrievalContext:
+    """The hydrated diagram member a store-backed ``resolve`` returns, without a store."""
+    ir = diagram_ir()
+    shape = PathEvidence(0, "shape", ((20.0, 70.0), (90.0, 100.0)), (20.0, 70.0, 90.0, 100.0))
+    qualification = DiagramQualification(
+        DIAGRAM_MEMBER,
+        DIAGRAM_ANCHOR,
+        _SHA,
+        ("sp-plan", "sp-build"),
+        tuple(
+            NodeEvidence(node.node_id, node.source_span_ids, shape, node.bbox) for node in ir.nodes
+        ),
+        (),
+    )
+    member = _NamedMember(member_id, ObjectKind.DIAGRAM, 2, _REF, _REF, _REF, _REF, _REF, "fp", 2)
+    return RetrievalContext(SNAPSHOT, member, ir, describe_diagram(ir), qualification)
 
 
 @dataclass(frozen=True, slots=True)

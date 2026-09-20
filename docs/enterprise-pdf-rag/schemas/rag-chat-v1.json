@@ -350,7 +350,8 @@
           "list",
           "group",
           "table",
-          "chart"
+          "chart",
+          "diagram"
         ],
         "title": "BlockKind",
         "type": "string"
@@ -451,7 +452,9 @@
         "enum": [
           "quote",
           "cell",
-          "chart_value"
+          "chart_value",
+          "diagram_node",
+          "diagram_edge"
         ],
         "title": "ClaimKind",
         "type": "string"
@@ -1106,7 +1109,8 @@
           "list",
           "group",
           "table",
-          "chart"
+          "chart",
+          "diagram"
         ],
         "title": "BlockKind",
         "type": "string"
@@ -1233,7 +1237,9 @@
         "enum": [
           "quote",
           "cell",
-          "chart_value"
+          "chart_value",
+          "diagram_node",
+          "diagram_edge"
         ],
         "title": "ClaimKind",
         "type": "string"

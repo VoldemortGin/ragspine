@@ -21,6 +21,8 @@ from enterprise_pdf_rag.figures.ports import EmbeddingPort
 from enterprise_pdf_rag.processing.models import ObjectKind
 from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit, RetrievalContext
 from tests.enterprise_pdf_rag.adapters.test_pdf_ingestion import (
+    DIAGRAM_NODES,
+    DIAGRAM_REGION,
     TABLE_COLUMNS,
     TABLE_ROWS,
     authored_pdf,
@@ -33,6 +35,13 @@ DOCUMENT_LABEL = "Revenue expense ratio"
 # partitioner proposes around it (5pt margin, still inside the 240x160 page).
 TABLE_BBOX = (TABLE_COLUMNS[0], TABLE_ROWS[0], TABLE_COLUMNS[-1], TABLE_ROWS[-1])
 TABLE_REGION = (TABLE_BBOX[0] - 5.0, TABLE_BBOX[1] - 5.0, TABLE_BBOX[2] + 5.0, TABLE_BBOX[3] + 5.0)
+# The natural-language branch of the Diagram object; its words are never a claim path.
+DIAGRAM_DESCRIPTION = "Two boxes joined by an arrow."
+_INTERPRETATION = {
+    "Text": "Body financial narrative",
+    "Table": "Ruled metrics table",
+    "Diagram": "Two labelled frames joined by one arrow",
+}
 
 
 def _extent(observations: list[dict[str, Any]]) -> list[float]:
@@ -61,37 +70,107 @@ def _region(region_id: str, kind: str, bbox: list[float], span_ids: list[str]) -
         "list_items": [],
         "list_ordered": None,
         "parent_id": None,
-        "interpretation": "Body financial narrative" if kind == "Text" else "Ruled metrics table",
+        "interpretation": _INTERPRETATION[kind],
+    }
+
+
+def _inside(observation: dict[str, Any], box: tuple[float, ...]) -> bool:
+    bbox = [float(value) for value in observation["bbox"]]
+    return box[0] <= bbox[0] and box[1] <= bbox[1] and bbox[2] <= box[2] and bbox[3] <= box[3]
+
+
+def _diagram_ir_reply(prompt: str) -> dict[str, Any]:
+    """A diagram-observations-v1 answer copying the two authored labels verbatim."""
+    view: dict[str, Any] = json.loads(prompt.rsplit("\n", 1)[-1])
+    by_text = {str(item["text"]): str(item["id"]) for item in view["observations"]}
+    nodes = [
+        {
+            "node_id": node_id,
+            "label": label,
+            "bbox": list(rect),
+            "evidence": {"element_ids": [by_text[label]], "confidence": "high"},
+        }
+        for node_id, (rect, label, _origin) in DIAGRAM_NODES.items()
+    ]
+    return {
+        "schema_version": "diagram-observations-v1",
+        "svg_digest": view["svg_digest"],
+        "nodes": nodes,
+        "edges": [
+            {
+                "source_node_id": "n1",
+                "target_node_id": "n2",
+                "label": None,
+                "relationship": "leads to",
+                "evidence": {"element_ids": [], "confidence": "high"},
+            }
+        ],
+        "confidence": "high",
+        "diagnostics": [],
+    }
+
+
+def _visual_description_reply(prompt: str) -> dict[str, Any]:
+    view: dict[str, Any] = json.loads(prompt.rsplit("\n", 1)[-1])
+    return {
+        "schema_version": "visual-description-v1",
+        "svg_digest": view["svg_digest"],
+        "text": DIAGRAM_DESCRIPTION,
+        "evidence": {
+            "element_ids": [str(item["id"]) for item in view["observations"]],
+            "confidence": "0.5",
+        },
+        "diagnostics": [],
     }
 
 
 def text_partition_sender(
-    calls: list[bytes], *, table_caption: bool = False
+    calls: list[bytes],
+    *,
+    table_caption: bool = False,
+    diagram_page: bool = False,
+    diagram_caption: bool = False,
 ) -> Callable[..., bytes]:
     """Classify page regions offline: occurrences inside the authored ruled grid become one
-    Table region, everything else one Text region, so no semantic model call fires.
+    Table region, those inside the authored diagram frame one Diagram region, everything
+    else one Text region.
 
     ``table_caption`` also hands the page's caption line to the Table region, which
-    leaves the region owning an occurrence outside its native cells.
+    leaves the region owning an occurrence outside its native cells; ``diagram_caption``
+    does the same for the Diagram region, leaving a source occurrence no node cites.
+    A Diagram region does fire the two visual model calls, which this stub answers from
+    the observations it was shown; nothing else reaches a provider seam.
     """
 
     def sender(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
         assert url == f"{PROVIDER_BASE_URL}/v1/chat/completions"
         calls.append(payload)
         prompt = json.loads(payload)["messages"][1]["content"][0]["text"]
+        if "Return diagram-observations-v1" in prompt:
+            return _reply(_diagram_ir_reply(prompt))
+        if "Return visual-description-v1" in prompt:
+            return _reply(_visual_description_reply(prompt))
         assert "Source text observations:" in prompt
         observations: list[dict[str, Any]] = json.loads(
             prompt.split("Source text observations:\n", 1)[1]
         )
+        # The authored layouts are mutually exclusive, but the frames overlap the ruled
+        # grid's extent, so the diagram claims its occurrences first.
+        in_diagram = (
+            [observation for observation in observations if _inside(observation, DIAGRAM_REGION)]
+            if diagram_page
+            else []
+        )
         in_grid = [
             observation
             for observation in observations
-            if TABLE_BBOX[0] <= float(observation["bbox"][0])
-            and TABLE_BBOX[1] <= float(observation["bbox"][1])
-            and float(observation["bbox"][2]) <= TABLE_BBOX[2]
-            and float(observation["bbox"][3]) <= TABLE_BBOX[3]
+            if observation not in in_diagram and _inside(observation, TABLE_BBOX)
         ]
-        outside = [observation for observation in observations if observation not in in_grid]
+        outside = [
+            observation
+            for observation in observations
+            if observation not in in_grid and observation not in in_diagram
+        ]
         regions: list[dict[str, object]] = []
         if in_grid:
             owned = in_grid + (outside if table_caption else [])
@@ -105,27 +184,31 @@ def text_partition_sender(
             regions.append(_region("table", "Table", bbox, [str(item["id"]) for item in owned]))
             if table_caption:
                 outside = []
+        if in_diagram:
+            owned = in_diagram + (outside if diagram_caption else [])
+            extent = _extent(owned)
+            bbox = [
+                min(DIAGRAM_REGION[0], extent[0]),
+                min(DIAGRAM_REGION[1], extent[1]),
+                max(DIAGRAM_REGION[2], extent[2]),
+                max(DIAGRAM_REGION[3], extent[3]),
+            ]
+            regions.append(_region("diagram", "Diagram", bbox, [str(item["id"]) for item in owned]))
+            if diagram_caption:
+                outside = []
         if outside:
             regions.append(
                 _region("body", "Text", _extent(outside), [str(item["id"]) for item in outside])
             )
-        content: dict[str, object] = {
-            "regions": regions,
-            "unassigned_span_ids": [],
-            "diagnostics": [],
-        }
-        return json.dumps(
-            {
-                "choices": [
-                    {
-                        "message": {"content": json.dumps(content)},
-                        "finish_reason": "stop",
-                    }
-                ]
-            }
-        ).encode()
+        return _reply({"regions": regions, "unassigned_span_ids": [], "diagnostics": []})
 
     return sender
+
+
+def _reply(content: dict[str, object]) -> bytes:
+    return json.dumps(
+        {"choices": [{"message": {"content": json.dumps(content)}, "finish_reason": "stop"}]}
+    ).encode()
 
 
 def ingest_generic_semantics(
@@ -138,11 +221,16 @@ def ingest_generic_semantics(
     output_dir: Path | None = None,
     table_page: bool = False,
     table_caption: bool = False,
+    diagram_page: bool = False,
+    diagram_caption: bool = False,
 ) -> tuple[IngestionSummary, list[bytes]]:
     """Ingest an authored PDF through the semantics stage with one stubbed layout call per page.
 
     ``table_page`` draws a native ruled table on the last page; ``table_caption`` makes
     the stub layout hand that page's caption line to the Table region as well.
+    ``diagram_page`` draws two labelled frames joined by an arrow instead, which costs
+    two further stubbed calls (the typed and the natural-language visual branch);
+    ``diagram_caption`` hands that page's caption line to the Diagram region.
     """
     for key, value in {
         "OPENAI_API_KEY": "offline-secret",
@@ -156,16 +244,23 @@ def ingest_generic_semantics(
         label=label,
         embedded_font=True,
         table_page=table_page,
+        diagram_page=diagram_page,
+        diagram_caption=diagram_caption,
     )
     calls: list[bytes] = []
     monkeypatch.setattr(
         "enterprise_pdf_rag.adapters.json_completion._send_once",
-        text_partition_sender(calls, table_caption=table_caption),
+        text_partition_sender(
+            calls,
+            table_caption=table_caption,
+            diagram_page=diagram_page,
+            diagram_caption=diagram_caption,
+        ),
     )
     summary = ingest_pdf(
         pdf=pdf,
         stage="semantics",
-        max_live_calls=page_count,
+        max_live_calls=page_count + 2 if diagram_page else page_count,
         output_dir=output_dir if output_dir is not None else tmp_path / "ingestion",
     )
     return summary, calls

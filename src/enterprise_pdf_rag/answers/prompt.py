@@ -18,7 +18,7 @@ class ModelClaim(BaseModel):
     model_config = ConfigDict(strict=True, frozen=True, extra="forbid")
     claim_id: str
     member_id: str
-    kind: Literal["quote", "cell", "chart_value"]
+    kind: Literal["quote", "cell", "chart_value", "diagram_node", "diagram_edge"]
     field_path: str
     text: str
 
@@ -46,7 +46,11 @@ SYSTEM_RULES: Final[str] = (
     "`member_id` and one path printed in that block: kind `quote` uses `fragments.<span_id>` "
     "and `text` is a verbatim substring of that line; kind `cell` uses `cells.<cell_id>` and "
     "`text` is exactly the cell content; kind `chart_value` uses `points.<point_id>.value` "
-    "and `text` is the displayed value with its unit, for example `15%`.\n"
+    "and `text` is the displayed value with its unit, for example `15%`; "
+    "kind `diagram_node` uses `nodes.<node_id>.label` and `text` is exactly that label; "
+    "kind `diagram_edge` uses `edges.<index>` and `text` is exactly the printed "
+    "`<from> -> <to>` pair. A diagram's edges are its drawn arrows only: never infer an "
+    "order, a next step or a relationship that is not printed as an `edges.` line.\n"
     "2. Never calculate, add, subtract, average, convert, round, estimate or combine periods. "
     "A value printed as <UNAVAILABLE>, <BLANK> or <NONE> cannot be cited or inferred.\n"
     "3. Every number in `answer` must also appear in the `text` of one of your claims.\n"

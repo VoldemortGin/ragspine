@@ -4,6 +4,12 @@ from dataclasses import replace
 
 import pytest
 
+from enterprise_pdf_rag.adapters.processing_retrieval import (
+    _POLICY,
+    CONTEXTUAL_POLICIES,
+    PROJECTED_CHART_POLICIES,
+    VISUAL_PROJECTION_POLICIES,
+)
 from enterprise_pdf_rag.documents.models import AssetRef
 from enterprise_pdf_rag.processing.models import ObjectKind, ProcessingScope
 from enterprise_pdf_rag.processing.retrieval import (
@@ -12,6 +18,8 @@ from enterprise_pdf_rag.processing.retrieval import (
     RetrievalPlan,
     resolve_member,
 )
+
+_V4_POLICY = "source-transcription-and-scoped-chart-qualification-v4"
 
 
 def _member() -> RetrievalMember:
@@ -46,6 +54,20 @@ def test_description_qualification_and_embedding_changes_create_distinct_snapsho
     assert resolve_member(original, hit) == member
     with pytest.raises(ValueError, match="snapshot"):
         resolve_member(variants[0], hit)
+
+
+def test_a_policy_upgrade_leaves_every_older_snapshot_id_untouched() -> None:
+    # Frozen: a snapshot published under ADR 0013's v4 policy keeps this id forever, so it
+    # stays mountable after ADR 0015 raised the live policy to v5.
+    scope = ProcessingScope("c" * 64, "d" * 64, 71, tuple(range(20)))
+    plan = RetrievalPlan(scope, (_member(),), _V4_POLICY, "immutable-cosine-index-v1")
+    assert plan.snapshot_id == "2dce209f1e09bc79be7bfd3e66f9a83a159abaff38682126adc5e21bdf68d139"
+    upgraded = replace(plan, qualification_policy=_POLICY)
+    assert (
+        upgraded.snapshot_id == "58c280f8f4adcb9bef97ea00951ccfe498fe99b89a87aeef5e351e5b6595ce9a"
+    )
+    assert _V4_POLICY in PROJECTED_CHART_POLICIES and _V4_POLICY in CONTEXTUAL_POLICIES
+    assert _V4_POLICY not in VISUAL_PROJECTION_POLICIES
 
 
 def test_member_order_does_not_change_snapshot_and_unpublished_member_is_rejected() -> None:
