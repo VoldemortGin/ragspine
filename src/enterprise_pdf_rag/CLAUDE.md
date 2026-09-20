@@ -1,6 +1,6 @@
 ---
 covers: src/enterprise_pdf_rag/
-verified-against: 0efbc60
+verified-against: d33b5dd
 ---
 
 # enterprise_pdf_rag — agent contract
@@ -19,7 +19,8 @@ the same `pyproject.toml` — import name unchanged, not under `ragspine.*`
 3. [ADR 0009](../../docs/enterprise-pdf-rag/adr/0009-source-qualified-expense-ratio-bar-lookup.md),
    [ADR 0010](../../docs/enterprise-pdf-rag/adr/0010-generic-pdf-ingestion-entry.md),
    [ADR 0011](../../docs/enterprise-pdf-rag/adr/0011-document-catalog-and-verified-answer-chain.md),
-   [ADR 0012](../../docs/enterprise-pdf-rag/adr/0012-chart-index-text-and-retrieval-seats.md)
+   [ADR 0012](../../docs/enterprise-pdf-rag/adr/0012-chart-index-text-and-retrieval-seats.md),
+   [ADR 0013](../../docs/enterprise-pdf-rag/adr/0013-page-metadata-and-prefilters.md)
    and [PRD v0.2](../../docs/enterprise-pdf-rag/PRD-v0.2.md) define scope; the full list is
    [`docs/enterprise-pdf-rag/adr/`](../../docs/enterprise-pdf-rag/adr/).
 4. [`testing-and-ingestion.md`](../../docs/enterprise-pdf-rag/testing-and-ingestion.md) — what is
@@ -40,16 +41,21 @@ documents/    pure document model — stdlib immutable values + Protocols only
 figures/      pure figure/chart pipeline — same rule; same-SVG two branches, snapshot binding
 processing/   pure page-processing / qualification logic; context_builder.py (evidence blocks
               for the prompt), table_transcription.py (literal table transcription rule),
-              index_text.py (chart index-text projection both retrieval channels score)
-answers/      pure answer chain — ports.py (MountedDocument), models.py, prompt.py (strict
-              model output schema), verify.py (claim re-read); stdlib + pydantic only
+              index_text.py (contextual header + chart projection both retrieval channels
+              score), page_metadata.py / periods.py / document_metadata.py (verbatim page
+              metadata, deterministic period forms, zero-model document fold — ADR 0013)
+answers/      pure answer chain — ports.py (MountedDocument, MemberText), models.py
+              (MemberFilters), prompt.py (strict model output schema), verify.py (claim
+              re-read), query_filters.py / member_filter.py (period / region pre-filters
+              derived from the question, relaxed when they starve); stdlib + pydantic only
 adapters/     every SDK and I/O: pdfspine, http/ (FastAPI app factory; documents.py + chat.py
               serve document-catalog mode), local models, stores, draft_publication.py
-              (qualify / index / publish), document_catalog.py (scan / mount), hybrid_search.py
-              (BM25 + RRF + opt-in rerank borrowed from ragspine), answer_service.py (one
-              model call per answer), chart QA v1/v2
+              (qualify / index / publish), page_metadata_extraction.py (page_metadata stage),
+              document_catalog.py (scan / mount), hybrid_search.py (BM25 + RRF + opt-in
+              rerank borrowed from ragspine), answer_service.py (one model call per answer),
+              chart QA v1/v2
 resources/    packaged prompts / static data
-cli.py        enterprise-pdf-rag ingest|qualify|index|publish|serve|chart-qa|demo|extract|llm-smoke
+cli.py        enterprise-pdf-rag ingest|metadata|qualify|index|publish|serve|chart-qa|demo|extract|llm-smoke
               + AIA-sample-only ingest-aia|process-aia-layout|process-aia-semantics|index-aia-processing
 ```
 
@@ -92,11 +98,18 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   whole answer (ADR 0011). One model call per answer; nothing is derived or retried.
 - **Same-SVG two branches, snapshot binding, no-summary-fallback** — hard invariants of the
   figure chain (ADR 0002). What gets embedded is the **index text** of
-  `processing/index_text.py`: the natural-language description for text / list / group / table
+  `processing/index_text.py`: the page's contextual header (`display_title | page_title |
+  section`, ADR 0013) above the natural-language description for text / list / group / table
   members, and for a chart a deterministic projection of its already-qualified IR (title, period,
   grammar, per-point category / series / explicit value), falling back to the description when the
   chart has no citable value (ADR 0012). Both retrieval channels score that same string; the raw
-  branch is never embedded.
+  branch is never embedded; description assets are never rewritten.
+- **Metadata is verbatim, automatic and never a hard gate** (ADR 0013) — every page-metadata
+  value quotes its page spans (dropped otherwise, with a diagnostic); the model runs only at
+  build time, nobody annotates; document metadata is a deterministic fold that is recomputed
+  and refused on drift; only **period (by year) and region** pre-filter retrieval, regions
+  only from the document's own vocabulary (no hardcoded company), and a filter that leaves
+  fewer candidates than seats is relaxed and reported, never turned into an abstention.
 - **Immutable, content-addressed snapshots** — `publish_draft` switches `current-*` pointers
   atomically and is idempotent; corrupted evidence is refused, never repaired. A mount re-reads
   its pinned manifest on every request and refuses drift.

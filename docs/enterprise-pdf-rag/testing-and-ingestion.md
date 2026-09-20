@@ -155,13 +155,15 @@ print(result.model_dump_json(indent=2))
 | --- | --- |
 | `--stage source` | 默认；完整来源提取和选页 Canonical，layout/semantics deferred，无模型配置和调用 |
 | `--stage layout` | 显式运行/回放模型布局；对象语义仍 deferred |
-| `--stage semantics` | 同一客户端依次布局并生成独立 IR/description 分支；图表资格策略为 `none` |
-| `--max-live-calls N` | layout 和两条语义分支共享的新请求上限；默认 0 仅复用缓存，不自动获取正预算 |
+| `--stage semantics` | 同一客户端依次布局并生成独立 IR/description 分支；图表资格策略为 `none`；之后对每页再跑一次页级元数据阶段（[ADR 0013](adr/0013-page-metadata-and-prefilters.md)） |
+| `--stage metadata` | 只在 source 阶段之上跑页级元数据（title / section / page_type / language / periods / regions，值逐字来自该页 span）；layout/semantics 仍 deferred |
+| `--max-live-calls N` | layout、两条语义分支与页级元数据共享的新请求上限；默认 0 仅复用缓存，不自动获取正预算；预算耗尽的页元数据标 `deferred` 并带诊断 |
 | `source_store` / `processing_store` | 实际磁盘 store 根目录，可交给后续显式索引/发布流程 |
 | `source_manifest_id` / `processing_id` | 不可变 draft 身份；不能冒充当前服务已加载的身份 |
 | `source_page_count` / `selected_physical_pages` | 全源页数与下游实际选页 |
 | `source_cached` / `live_call_count` | 是否复用已有来源缓存、实际新模型请求数 |
 | `failed_stage_count` / `semantic_status` / `review_path` | 查看部分失败、deferred 或 unavailable 的具体结果；CLI 返回 JSON 不代表全部阶段成功 |
+| `metadata_status` / `metadata_page_states` / `display_title` | 页级元数据阶段是否运行、各页 `succeeded/deferred/failed` 计数、封面标题（抽不到为 `null`，不猜） |
 | `activated` / `indexed` | 此命令始终为 `false`；没有索引构建、发布或服务切换 |
 | `retrieval_status` | 明确 `not_ready`；资格、索引和发布需要独立流程 |
 
@@ -189,7 +191,15 @@ enterprise-pdf-rag publish --source-store <src> --processing-store <proc> --proc
 
 三命令错误统一输出 `{"error": ...}` 并以退出码 1 fail closed。完整生命周期为 ingest 的 `not_ready` → `qualified; indexing pending` → `indexed; publication pending` → `ready`。
 
-`index` 对图表成员嵌入的不是描述文本而是已资格化 IR 的**投影文本**（policy `source-transcription-and-scoped-chart-qualification-v3`，[ADR 0012](adr/0012-chart-index-text-and-retrieval-seats.md)；无可引用值的图表仍回退描述，其余成员不变）；2026-09-20 之前发布的快照要重新 `index` + `publish` 才受益，旧快照照常可挂载、可回答。
+`index` 嵌入的是成员的**索引文本**：页级上下文头 `<display_title> | <page_title> | <section>`（缺省项省略）加一行 ADR 0012 的投影（图表为已资格化 IR 的投影，无可引用值的图表回退描述，其余成员为描述原文），policy `source-transcription-and-scoped-chart-qualification-v4`（[ADR 0013](adr/0013-page-metadata-and-prefilters.md)）。描述资产与引用原文不变。2026-09-21 之前发布的快照按各自 policy 门控（v3 只投影、更早只描述），照常可挂载、可回答；重新 `metadata` → `index` → `publish` 即迁移。
+
+### 页级元数据命令（ADR 0013）
+
+```sh
+enterprise-pdf-rag metadata --source-store <src> --processing-store <proc> --processing-id <id> --max-live-calls N [--timeout 180]
+```
+
+对一个已保存的 draft 或已发布 release 的每一页各发一次文本模型调用（任务 `page-metadata-v1`，与 layout/semantics 同一份 `OPENAI_*` 配置、预算与 `<proc>/model-cache` 缓存），产出 `title / section / page_type / language / periods / regions`；每个字符串值必须逐字（折叠空白后）出现在它引用的 span、或该 span 与其后至多两个 span 的拼接里，否则剔除并记入该页 `dropped`。periods 另按确定性规则规范化（`1H26` / `2026年上半年` → `1H2026`，`FY24` → `FY2024`，`Q1 2025` → `Q1-2025`，裸年份 → `Y2026`；规范化失败只保留原文）。文档级 `display_title`（封面页标题）/ `report_period`（各页投票）/ `years` / `regions`（本文档自己的地区词表）零模型、确定性折叠，写在新 draft 的 manifest 上，加载时重算校验。输出 `annotated_processing_id` 是新的未索引 draft；`--max-live-calls 0` 只回放缓存，其余页 `deferred`；不切指针。
 
 ### 离线验证 vs 真实验证
 
@@ -253,7 +263,7 @@ context 不调用模型，返回与 `/v1/processing/context` 相同结构的 `Re
 curl --fail-with-body http://127.0.0.1:8766/v1/models
 ```
 
-每个已挂载文档一个 model：`id` 为 `enterprise-pdf-rag/<sha256 前 12 位>`，`name` 为 `<document_label> (<sha12>)`，`owned_by` 为 `enterprise-pdf-rag/document-catalog`。
+每个已挂载文档一个 model：`id` 为 `enterprise-pdf-rag/<sha256 前 12 位>`，`name` 为 `<display_title 或 document_label> (<sha12>)`（有页级元数据时是封面标题，如 `INTERIM RESULTS PRESENTATION (df902346791b)`），`owned_by` 为 `enterprise-pdf-rag/document-catalog`。`/v1/documents` 条目同时带 `display_title` / `report_period` / `language` / `years` / `regions`（[ADR 0013](adr/0013-page-metadata-and-prefilters.md)；无元数据时为 `null` / `[]`）。
 
 ```sh
 curl --fail-with-body http://127.0.0.1:8766/v1/chat/completions \
@@ -263,11 +273,14 @@ curl --fail-with-body http://127.0.0.1:8766/v1/chat/completions \
     "messages": [{"role": "user", "content": "What does page 2 say about the outlook?"}],
     "stream": false,
     "document": null,
-    "rerank": false
+    "rerank": false,
+    "filters": {"periods": ["1H26"], "regions": ["Hong Kong"]}
   }'
 ```
 
-文档选择优先级：`document`（完整 sha256 或 ≥12 位十六进制前缀）> `model` 形如 `enterprise-pdf-rag/<sha12>` > 目录里唯一一个已挂载文档；多文档且未指定 → 422。最后一条消息必须是 `user`；之前的 `user`/`assistant` 轮作为数据进入 prompt，客户端 `system` 消息被丢弃。请求 `extra=forbid`，`temperature` 等未声明字段 → 422。`rerank` 默认 `false`。
+文档选择优先级：`document`（完整 sha256 或 ≥12 位十六进制前缀）> `model` 形如 `enterprise-pdf-rag/<sha12>` > 目录里唯一一个已挂载文档 > 多文档时按问题路由（ADR 0013：问题里出现某文档封面标题独有的词、且/或问题里的年份是该文档打印过的年份，恰好一个命中即选中）；仍歧义 → 422，文案列出各候选的 display name。
+
+`filters` 可省略：省略 → 从问题自动抽取（期间用同一套规范化规则，地区只在该文档自己的地区词表里做大小写不敏感的逐字匹配）；`{}` → 关闭过滤；显式给 `periods`（任意写法，裸年份匹配该年所有期间）/ `regions`（各 ≤8 个）→ 按等值收窄候选。封面 / 目录页默认不进候选。收窄后候选数 < `top_k` 时去过滤重试，信封 `filters_relaxed: true`。最后一条消息必须是 `user`；之前的 `user`/`assistant` 轮作为数据进入 prompt，客户端 `system` 消息被丢弃。请求 `extra=forbid`，`temperature` 等未声明字段 → 422。`rerank` 默认 `false`。
 
 响应是标准 `chat.completion`，`choices[0].message.content` 为回答正文加 `引用:` 编号列表，并多一个 `enterprise_pdf_rag` 信封（下例只示意字段；值以实际响应为准）：
 
@@ -286,16 +299,18 @@ curl --fail-with-body http://127.0.0.1:8766/v1/chat/completions \
     "claims": [{"claim_id": "q1", "kind": "quote", "text": "<verbatim span text>", "value": null, "unit": null,
       "citations": [{"member_id": "<member_id>", "kind": "text", "page_index": 1,
         "field_path": "fragments.<span_id>", "evidence_ids": ["<span_id>"],
-        "bbox": [x0, y0, x1, y1], "quote": "<verbatim span text>", "chart_citation": null}]}],
+        "bbox": [x0, y0, x1, y1], "quote": "<verbatim span text>", "chart_citation": null,
+        "page_title": "<verified page title or null>"}]}],
     "rejected": [],
     "member_ranks": [{"member_id": "<member_id>", "fused_score": 0.0320,
       "vector_rank": 2, "lexical_rank": 3, "vector_score": 0.5708, "bm25_score": 10.197}],
-    "llm_live_calls": 1, "cache_hit": false
+    "llm_live_calls": 1, "cache_hit": false,
+    "filters_applied": {"periods": ["1H2026"], "regions": []}, "filters_relaxed": false
   }
 }
 ```
 
-`claims[].kind` ∈ `quote` / `cell` / `chart_value`；图表值的 `text` 是来源显示串（如 `72%`）、`value` 是十进制字符串、`unit` 是单位，正文引用写作 `[n] p.N points.<point_id>.value = 72% (svg #<element>, …)`。`citations[].kind` 是证据块类型（`text`/`list`/`group`/`table`/`chart`），`page_index` 为 0-based（正文 `p.N` 为 1-based），`field_path` 是 `fragments.<span_id>` / `cells.<cell_id>` / `points.<point_id>.value`，`evidence_ids` 是来源 span 或 SVG 元素 id，`chart_citation` 只有图表值有。`rejected[]` 列出被逐条剔除的 claim（`claim_id`/`member_id`/`field_path`/`text`/`reason`/`detail`），供审计。`member_ranks[]` 是可选字段（[ADR 0012](adr/0012-chart-index-text-and-retrieval-seats.md)），每个进入 prompt 的成员一条、按 `member_ids` 顺序给出该成员在两个通道与融合后的名次：`fused_score`（RRF 分数）、`vector_rank` / `lexical_rank`（只被一个通道命中时另一个为 `null`）、`vector_score`（余弦）、`bm25_score`；用于排查召回问题，不影响回答。`llm_live_calls` 是本次真实模型调用数（0 或 1），`cache_hit` 表示指纹命中缓存回放。
+`claims[].kind` ∈ `quote` / `cell` / `chart_value`；图表值的 `text` 是来源显示串（如 `72%`）、`value` 是十进制字符串、`unit` 是单位，正文引用写作 `[n] p.N points.<point_id>.value = 72% (svg #<element>, …)`。`citations[].kind` 是证据块类型（`text`/`list`/`group`/`table`/`chart`），`page_index` 为 0-based（正文 `p.N` 为 1-based），`field_path` 是 `fragments.<span_id>` / `cells.<cell_id>` / `points.<point_id>.value`，`evidence_ids` 是来源 span 或 SVG 元素 id，`chart_citation` 只有图表值有。`rejected[]` 列出被逐条剔除的 claim（`claim_id`/`member_id`/`field_path`/`text`/`reason`/`detail`），供审计。`member_ranks[]` 是可选字段（[ADR 0012](adr/0012-chart-index-text-and-retrieval-seats.md)），每个进入 prompt 的成员一条、按 `member_ids` 顺序给出该成员在两个通道与融合后的名次：`fused_score`（RRF 分数）、`vector_rank` / `lexical_rank`（只被一个通道命中时另一个为 `null`）、`vector_score`（余弦）、`bm25_score`；用于排查召回问题，不影响回答。`llm_live_calls` 是本次真实模型调用数（0 或 1），`cache_hit` 表示指纹命中缓存回放。`filters_applied`（自动抽取或显式传入的期间 / 地区过滤，未过滤为 `null`）与 `filters_relaxed`（收窄后候选不足 `top_k` 而回退全量检索）以及引用里的 `page_title` 是 ADR 0013 新增的可选字段。
 
 拒答也是 200：信封 `status` 为 `abstained`，`content` 为 `无法基于已验证证据回答 (<abstain_reason>): <abstain_detail>`，`claims` 为空。判定顺序：无检索命中或预算内无证据块 → `no_relevant_member`；模型自报 abstain → `model_declined`；模型输出不合 schema/截断 → `model_output_invalid`；逐条校验失败的 claim 进入 `rejected`；零验证 claim → 取第一条 rejected 的原因（否则 `no_verified_claim`）；散文里的数字既不属于已验证 claim 的 text / value、也不逐字出现在用户问题里、也不在已验证 claim 所引用证据原文（span quote / cell 原文 / 图表 period、category 标签与 source_display）中 → 整体 `claim_not_in_evidence`（0.14.0 起；此前任何不在 claim 内的数字都拒答）。图表类 refusal（`value_unavailable`、`period_mismatch` 等）与 ChartQA 同名。
 
@@ -308,7 +323,7 @@ curl --fail-with-body http://127.0.0.1:8766/v1/chat/completions \
 | 200 | 已回答或业务拒答（看信封 `status`） |
 | 404 | 未知 `document_id`；`document`/`model` 引用不匹配任何目录条目 |
 | 409 | 目录可见但未挂载（`mounted=false`，附原因）；pinned manifest 漂移或证据损坏；hit 不属于该 snapshot；`ChartQueryError` `INVALID_EVIDENCE` / `PIN_CONFLICT` |
-| 422 | 文档引用前缀歧义；多文档未指定；最后一条不是 `user`；空问题等 `AnswerRequest` 不变量；未声明字段 |
+| 422 | 文档引用前缀歧义；多文档未指定且按问题路由不到恰好一个（文案列出候选）；最后一条不是 `user`；空问题等 `AnswerRequest` 不变量；未声明字段；`filters` 超过 8 项或含未知键 |
 | 503 | `OPENAI_*` 未配置（chat）；`EMBEDDING_*` 未配置或 provider 失败（search / chat）；请求 `rerank` 但未配置 `RERANK_*`；模型传输失败或 `APP_ANSWER_MAX_LIVE_CALLS` 用尽（`DependencyUnavailable`）；`ChartQueryError` `UNAVAILABLE_EVIDENCE` |
 
 错误文案固定，不含凭证、provider 响应体或磁盘路径。
@@ -319,7 +334,7 @@ curl --fail-with-body http://127.0.0.1:8766/v1/chat/completions \
 
 ### 离线可测 vs 需真实模型
 
-离线（默认门，零网络）：`tests/enterprise_pdf_rag/adapters/test_document_catalog.py`、`test_documents_http.py`、`test_hybrid_search.py`、`test_chat_http.py`，`tests/enterprise_pdf_rag/answers/`（store 桥 `store_mounted_document.py` + 脚本化 LLM `fake_llm.py`），`processing/test_context_builder.py`、`processing/test_table_transcription.py`，以及 e2e / draft publication / pdf ingestion 里新增的程序化表格页用例。它们用程序化 PDF、`OfflineDescriptionEmbedder` 和脚本化模型输出，证明契约、状态码、恰好一次模型调用、逐字段校验与拒答策略。
+离线（默认门，零网络）：`tests/enterprise_pdf_rag/adapters/test_document_catalog.py`、`test_documents_http.py`、`test_hybrid_search.py`、`test_chat_http.py`、`test_page_metadata_extraction.py`、`test_chat_metadata_http.py`（页级元数据阶段、v4 索引头、过滤与路由；脚本化的文本模型回复来自 prompt 自己的 span），`tests/enterprise_pdf_rag/answers/`（store 桥 `store_mounted_document.py` + 脚本化 LLM `fake_llm.py`，`test_query_filters.py` / `test_member_filter.py`），`processing/test_periods.py`、`processing/test_page_metadata.py`，`processing/test_context_builder.py`、`processing/test_table_transcription.py`，以及 e2e / draft publication / pdf ingestion 里新增的程序化表格页用例。它们用程序化 PDF、`OfflineDescriptionEmbedder` 和脚本化模型输出，证明契约、状态码、恰好一次模型调用、逐字段校验与拒答策略。
 
 需真实模型：真实本地 embedder 的 `index` 与在线 search（隧道）、真实答案模型的合成与校验、`APP_LEGACY_DOCUMENT_ROOTS` 挂载真实 AIA 发布后的检索 / 引用 / 拒答验收。2026-09-20 已做一轮（18 用例，无证据外数字进入 answered 回答；散文门年份 ISSUE-3 已于 0.14.0 解决），结论只以 [交接文档](CLAUDE_HANDOFF.md) 为准，本文不作宣称；它是一轮验收，不是冻结金标集。图表召回 ISSUE-2 已由 [ADR 0012](adr/0012-chart-index-text-and-retrieval-seats.md) 解决（索引投影 policy v3 + 查询默认 10/50 + reranker 读证据块 + 图表保底席位），真实重建与复测见交接文档。
 

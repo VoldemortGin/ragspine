@@ -4,6 +4,16 @@
 
 > 阅读顺序：先看下方“恢复开发记录”；后续旧暂停快照保留作证据，不能作为实时发布或服务状态。
 
+## 页级自动元数据与前置过滤（2026-09-21，分支 `feat/page-metadata`，ADR 0013）
+
+> 本节是最新状态；下方 2026-09-20 的收尾状态仍有效，只是 AIA 发布指针已再次前移。
+
+**做了什么**（[ADR 0013](adr/0013-page-metadata-and-prefilters.md)）：新 processing 阶段 `page_metadata`（每页一次文本模型调用，`title / section / page_type / language / periods / regions` 每个值逐字来自该页 span 或连续 ≤3 个 span 的拼接，否则剔除并记诊断；期间确定性规范化）；文档级 `display_title / report_period / years / regions` 零模型折叠、加载时重算校验；索引文本 policy **v4** = `display_title | page_title | section` 一行上下文头 + ADR 0012 投影（描述与引用原文不变，旧快照按 policy 门控）；`AnswerRequest.filters`（只有**期间**与**地区**两维；省略即从问题自动抽取，地区只在本文档自己的词表里逐字匹配；候选 < `top_k` 去过滤重试并标 `filters_relaxed`）；封面 / 目录页默认不进候选；多文档按封面标题独有词 + 年份路由；`/v1/models` 名称用封面标题；引用带 `page_title`。CLI：`ingest --stage metadata|semantics`、新 `metadata` 子命令。契约 `document-catalog-v1` / `rag-chat-v1` / `aia-processing-v1` 只新增可选字段。
+
+**真实验证（AIA 前 20 页，证据 `data/validation/generic-chat-2026-09-21/page-metadata/`）**：`metadata` 对 `da1065fc…` 跑 20 页 = 20 次真实调用（预算 25；后两次 v1.1 / v1.2 重跑均从 model-cache 回放，0 次调用），20/20 `succeeded`；`display_title = "INTERIM RESULTS PRESENTATION"`（封面两行 span 拼接），`report_period = 1H2026`，`years = 2022–2026`，34 个地区词；`qualify` 189 / 52 / 9；`index` 41 s → processing `00d5c714…`、snapshot `99f47f48…`（2560 维，policy v4）；`publish` 把 `current-processing` 从 `da1065fc…` 切到 `00d5c714…`（`current-manifest` 仍 `e702bf1c…`，shasum 前后见 `pointers-*.sha256`）；8768 / 3200 用报告里的 stop / start 命令重启，16 s 就绪，`/v1/models` 显示 `INTERIM RESULTS PRESENTATION (df902346791b)`。HTTP 复测 11 例全部 200：ISSUE-2 三问与 ROE 控制组照旧答对（p.18 donut 现为融合第 1 名）；新增 `1H26 Distribution Mix`（不带 VONB）与中文 `2026 上半年 分销渠道 占比` 都从 p.18 答出 72% / 28%；显式 `filters {"periods":["1H26"]}` 应用未放宽，`{"regions":["Mars"]}` 放宽（`filters_relaxed: true`，回放无过滤答案）；`What was the VONB growth in 2024?` 收窄到 Y2024 页答 `+11%`（p.6）。**未过**：`Thailand 1H26 VONB`（地区等值只命中标 `Thailand` 的 p.4 / p.5，p.13 标的是 `AIA Thailand`，模型 `not_in_context` 拒答）；中文 `泰国 1H26 VONB`（词表是英文，抽不到地区过滤，拒答）——跨语言与地区等值是已知缺口。
+
+**遗留**：地区匹配的同义 / 包含（`AIA Thailand` vs `Thailand`）、中文地区词、免责声明页污染地区词表、封面无公司名时路由只能靠年份、`chart_qa_bar_promotion` 追加成员时 plan policy 回落到 bar-v2（该路径的 BM25 会丢上下文头）、mypy 在本机对 `src/ragspine/common/observability/adapters/otel.py:49` 报 `opentelemetry` 无 `trace`（main 同样，环境问题，与本分支无关）。
+
 ## 会话收尾状态（2026-09-20，下一 session 从这里接手）
 
 > **重启前接手清单（2026-09-20 深夜，Claude Code 重启前写）**
