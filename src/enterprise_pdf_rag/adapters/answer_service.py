@@ -7,6 +7,7 @@ deterministic reads of the pinned snapshot.
 
 from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, replace
+from typing import Final
 
 from enterprise_pdf_rag.adapters.hybrid_search import HybridSearch, LexicalIndex
 from enterprise_pdf_rag.adapters.json_completion import JsonCompletionClient, JsonCompletionError
@@ -59,6 +60,11 @@ class DependencyUnavailable(RuntimeError):
         self.code = code
 
 
+# The visual object kinds that may each hold one guaranteed prompt seat (ADR 0012, extended
+# to the ADR 0015 objects); the order fixes which candidate is examined first.
+_VISUAL_KINDS: Final = (ObjectKind.CHART, ObjectKind.DIAGRAM, ObjectKind.FORMULA)
+
+
 def _citable_chart(block: ContextBlock) -> bool:
     """A chart block with at least one explicit value the model could cite."""
     return block.kind is BlockKind.CHART and any(
@@ -69,35 +75,59 @@ def _citable_chart(block: ContextBlock) -> bool:
     )
 
 
+def _citable_visual(block: ContextBlock) -> ObjectKind | None:
+    """The visual kind a block can be cited as: a chart with an explicit value, a diagram
+    with at least one labelled node, a formula with a linear form; ``None`` otherwise."""
+    if _citable_chart(block):
+        return ObjectKind.CHART
+    if block.kind is BlockKind.DIAGRAM and any(node.label.strip() for node in block.nodes):
+        return ObjectKind.DIAGRAM
+    if block.kind is BlockKind.FORMULA and block.formula_linear is not None:
+        return ObjectKind.FORMULA
+    return None
+
+
 def select_context(
     document: MountedDocument,
     ranked: Sequence[FusedHit],
     top_k: int,
     member_texts: Sequence[MemberText] | None = None,
 ) -> tuple[tuple[FusedHit, ...], tuple[ContextBlock, ...]]:
-    """Hydrate the top-k fused hits, with one guaranteed seat for a citable chart.
+    """Hydrate the top-k fused hits, with one guaranteed seat per citable visual kind.
 
-    When no hit in the top-k is a chart with an explicit value but one sits within the
-    next k fused positions, it replaces the last seat (ADR 0012). A pending or
-    label-only chart never qualifies, and nothing outside ``2 * top_k`` is promoted.
-    Only chart members in that window are resolved for the check; ``member_texts``
-    supplies their kinds when the caller already holds them.
+    For each visual kind (chart / diagram / formula) with no citable block in the top-k,
+    the first citable member of that kind within the next k fused positions takes a seat,
+    given up from the last seat backward and never one that already holds a citable visual
+    object (ADR 0012, generalised by ADR 0015's follow-up). A pending or label-only object
+    never qualifies, and nothing outside ``2 * top_k`` is promoted. Only members of a still
+    missing kind in that window are resolved for the check; ``member_texts`` supplies their
+    kinds when the caller already holds them.
     """
     head = list(ranked[:top_k])
     blocks = {hit.member_id: build_context_block(document.resolve(hit.as_hit())) for hit in head}
-    if head and not any(_citable_chart(blocks[hit.member_id]) for hit in head):
-        kinds: dict[str, ObjectKind] | None = None
-        for hit in ranked[top_k : 2 * top_k]:
-            if kinds is None:
-                texts = document.member_texts() if member_texts is None else member_texts
-                kinds = {member.member_id: member.kind for member in texts}
-            if kinds.get(hit.member_id) is not ObjectKind.CHART:
+    seated = {_citable_visual(blocks[hit.member_id]) for hit in head}
+    missing = [kind for kind in _VISUAL_KINDS if kind not in seated]
+    window = ranked[top_k : 2 * top_k]
+    if missing and window:
+        texts = document.member_texts() if member_texts is None else member_texts
+        kinds = {member.member_id: member.kind for member in texts}
+        evictable = [
+            seat
+            for seat in range(len(head) - 1, -1, -1)
+            if _citable_visual(blocks[head[seat].member_id]) is None
+        ]
+        for hit in window:
+            if not missing or not evictable:
+                break
+            kind = kinds.get(hit.member_id)
+            if kind not in missing:
                 continue
             block = build_context_block(document.resolve(hit.as_hit()))
-            if _citable_chart(block):
-                blocks[hit.member_id] = block
-                head[-1] = hit
-                break
+            if _citable_visual(block) is not kind:
+                continue
+            blocks[hit.member_id] = block
+            head[evictable.pop(0)] = hit
+            missing.remove(kind)
     return tuple(head), tuple(blocks[hit.member_id] for hit in head)
 
 

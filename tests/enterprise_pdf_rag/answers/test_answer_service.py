@@ -28,18 +28,24 @@ from enterprise_pdf_rag.answers.models import (
     MemberFilters,
 )
 from enterprise_pdf_rag.answers.prompt import SYSTEM_RULES, ModelAnswer, ModelClaim
+from enterprise_pdf_rag.figures.models import Verification
 from enterprise_pdf_rag.processing.context_builder import BlockKind
 from enterprise_pdf_rag.processing.models import ObjectKind
+from enterprise_pdf_rag.processing.typed_ir import DiagramIR, DiagramNode
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
     DOCUMENT_LABEL,
     publish_generic_document,
 )
 from tests.enterprise_pdf_rag.adapters.test_pdf_ingestion import MULTI_HEADER_TABLE
 from tests.enterprise_pdf_rag.answers.fake_document import (
+    DIAGRAM_ANCHOR,
+    DIAGRAM_LABELS,
     DONUT_TITLE,
     FakeDocument,
     FakeMember,
+    diagram_ir,
     donut_chart,
+    formula_ir,
     pending_chart,
 )
 from tests.enterprise_pdf_rag.answers.fake_llm import (
@@ -476,11 +482,21 @@ def test_request_defaults_widen_the_channel_window_and_the_prompt_seats() -> Non
 _TEXT_IDS = tuple(f"text-{index}" for index in range(1, 7))
 
 
+def _label_less_diagram() -> DiagramIR:
+    """A diagram whose only node carries no label: nothing an answer could cite."""
+    node = DiagramNode("n1", "", (20.0, 70.0, 90.0, 100.0), ())
+    return DiagramIR("diagram-blank", DIAGRAM_ANCHOR, (node,), (), (), Verification.PENDING)
+
+
 def _seat_document(vector_order: tuple[str, ...]) -> FakeDocument:
     members = (
         *(FakeMember(member_id, f"Narrative sentence {member_id}") for member_id in _TEXT_IDS),
         FakeMember("donut", DONUT_TITLE, donut_chart(("Agency", "72"), ("Partnerships", "28"))),
         FakeMember("pending", "High-Quality In-Force Portfolio", pending_chart()),
+        FakeMember("diagram", "Agency technology investment", visual=diagram_ir()),
+        FakeMember("diagram-2", "A second proven diagram", visual=diagram_ir()),
+        FakeMember("blank-diagram", "A diagram without a label", visual=_label_less_diagram()),
+        FakeMember("formula", "Return on equity", visual=formula_ir()),
     )
     return FakeDocument(members, vector_order)
 
@@ -521,6 +537,59 @@ def test_a_chart_already_in_the_top_k_needs_no_seat_and_no_extra_reads(tmp_path:
     assert result.member_ids == ("donut", "text-1")
     assert document.resolved == ["donut", "text-1"]
     assert document.member_texts_calls == 1  # the lexical index build only
+
+
+def test_a_proven_diagram_and_a_formula_within_two_top_k_each_take_a_seat(
+    tmp_path: Path,
+) -> None:
+    # One seat per visual kind, given up from the last seat backward (ADR 0012 generalised).
+    document = _seat_document(("text-1", "text-2", "text-3", "donut", "diagram", "text-4"))
+    service, prompts = _service(tmp_path, document, lambda prompt: declined())
+    result = service.answer(AnswerRequest("zzz-nothing-matches", top_k=3))
+    assert result.member_ids == ("text-1", "diagram", "donut")
+    assert document.resolved == ["text-1", "text-2", "text-3", "donut", "diagram"]
+    assert f"nodes.n1.label: {DIAGRAM_LABELS[0]}" in prompts[0]
+    assert f"nodes.n2.label: {DIAGRAM_LABELS[1]}" in prompts[0]
+    assert "points.point-agency.value" in prompts[0]
+
+    formula = _seat_document(("text-1", "text-2", "formula", "text-3"))
+    service, prompts = _service(tmp_path / "formula", formula, lambda prompt: declined())
+    result = service.answer(AnswerRequest("zzz-nothing-matches", top_k=2))
+    assert result.member_ids == ("text-1", "formula")
+    assert formula.resolved == ["text-1", "text-2", "formula"]
+    assert "formula.linear: " in prompts[0]
+
+
+def test_visual_seats_never_evict_a_seated_visual_and_stop_at_one_per_kind(
+    tmp_path: Path,
+) -> None:
+    # The chart in the head keeps its seat; the diagram replaces the last non-visual one.
+    document = _seat_document(("text-1", "donut", "diagram", "text-2"))
+    result, _ = _seat_result(tmp_path, document)
+    assert result.member_ids == ("diagram", "donut")
+
+    # A diagram already seated closes its kind: the second one in the window is not read.
+    capped = _seat_document(("diagram", "text-1", "diagram-2", "text-2"))
+    result, _ = _seat_result(tmp_path / "capped", capped)
+    assert result.member_ids == ("diagram", "text-1")
+    assert capped.resolved == ["diagram", "text-1"]
+    assert capped.member_texts_calls == 1
+
+
+def test_no_visual_seat_beyond_two_top_k_or_for_a_diagram_without_a_citable_label(
+    tmp_path: Path,
+) -> None:
+    beyond = _seat_document(("text-1", "text-2", "text-3", "text-4", "diagram", "formula"))
+    result, prompts = _seat_result(tmp_path, beyond)
+    assert result.member_ids == ("text-1", "text-2")
+    assert "diagram" not in beyond.resolved and "formula" not in beyond.resolved
+    assert "kind=diagram" not in prompts[0] and "kind=formula" not in prompts[0]
+
+    blank = _seat_document(("text-1", "text-2", "blank-diagram", "text-3"))
+    result, prompts = _seat_result(tmp_path / "blank", blank)
+    assert result.member_ids == ("text-1", "text-2")
+    assert blank.resolved == ["text-1", "text-2", "blank-diagram"]  # checked, not promoted
+    assert "kind=diagram" not in prompts[0]
 
 
 def _metadata_document(vector_order: tuple[str, ...]) -> FakeDocument:

@@ -1,12 +1,13 @@
 """In-memory ``MountedDocument`` whose members resolve to real context blocks.
 
-Each member is a text (one span quoting its index text) or a chart (a ``ChartIR``);
-the vector channel returns the configured order, so tests can place a chart at any
-fused position without a store or an embedder. ``chart_context`` is not part of
+Each member is a text (one span quoting its index text), a chart (a ``ChartIR``) or a
+proven visual object (a ``DiagramIR`` / ``FormulaIR``); the vector channel returns the
+configured order, so tests can place a visual member at any fused position without a
+store or an embedder. ``chart_context`` is not part of
 ranking or seat selection and stays unavailable.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 
 from enterprise_pdf_rag.answers.ports import MemberText, MountedDocument
@@ -221,6 +222,9 @@ class FakeMember:
     member_id: str
     text: str
     chart: ChartIR | None = None
+    # A proven diagram / formula member (ADR 0015); ``diagram_member`` / ``formula_member``
+    # supply its qualification on resolve.
+    visual: DiagramIR | FormulaIR | None = None
     # Verified page metadata as ``member_texts`` would report it (ADR 0013).
     page_title: str | None = None
     page_type: str | None = None
@@ -229,11 +233,18 @@ class FakeMember:
 
     @property
     def kind(self) -> ObjectKind:
-        return ObjectKind.TEXT if self.chart is None else ObjectKind.CHART
+        if self.chart is not None:
+            return ObjectKind.CHART
+        if isinstance(self.visual, DiagramIR):
+            return ObjectKind.DIAGRAM
+        if isinstance(self.visual, FormulaIR):
+            return ObjectKind.FORMULA
+        return ObjectKind.TEXT
 
     @property
     def index_text(self) -> str:
-        return self.text if self.chart is None else member_index_text(self.chart, self.text)
+        ir = self.chart if self.chart is not None else self.visual
+        return self.text if ir is None else member_index_text(ir, self.text)
 
 
 class FakeDocument:
@@ -298,6 +309,11 @@ class FakeDocument:
             raise ValueError("Retrieval hit belongs to another semantic snapshot")
         member = self._members[hit.member_id]
         self.resolved.append(member.member_id)
+        if isinstance(member.visual, DiagramIR):
+            hydrated = diagram_member(member.member_id)
+            return replace(hydrated, ir=member.visual, description=describe_diagram(member.visual))
+        if isinstance(member.visual, FormulaIR):
+            return replace(formula_member(member.member_id), ir=member.visual)
         retrieval_member = _NamedMember(
             member.member_id, member.kind, 0, _REF, _REF, _REF, _REF, _REF, "fp", 2
         )

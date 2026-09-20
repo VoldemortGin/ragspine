@@ -76,6 +76,17 @@ _BLOCK_KINDS = {
     ClaimKind.FORMULA: {BlockKind.FORMULA},
 }
 _NUMBER_RE = re.compile(r"(?<![\w.])[-+]?\d[\d,]*(?:\.\d+)?\s*%?(?![\w%])")
+# An enumeration marker at the start of a line or of a sentence — ``1.`` / ``2)`` / ``3、`` /
+# ``(4)`` / ``第 5`` / ``Step 6`` — numbers the items of a list; it is not a figure. Inside a
+# sentence the same token stays a number, and a decimal ending a sentence (``17.5.``) is
+# untouched because a sentence start needs whitespace after ASCII punctuation (fullwidth CJK
+# punctuation is never a decimal point, so no whitespace is required after it).
+_ENUMERATOR_RE = re.compile(
+    r"(?:^\s*|(?<=[.!?;:])\s+|(?<=[。！？；：])\s*)"  # noqa: RUF001 — fullwidth CJK sentence punctuation is matched on purpose, never its ASCII lookalike
+    r"(?:\(\d{1,2}\)|\d{1,2}[.)、]|(?:Step|第)\s\d{1,2})"
+    r"(?=\s|[:：]|$)",  # noqa: RUF001 — the fullwidth colon after ``第 1`` / ``Step 1`` is the CJK form
+    re.MULTILINE,
+)
 _POINT_VALUE_RE = re.compile(r"points\.(?P<point>[^.]+)\.value")
 _NODE_LABEL_RE = re.compile(r"nodes\.(?P<node>[A-Za-z0-9_-]+)\.label")
 _EDGE_RE = re.compile(r"edges\.(?P<index>\d+)")
@@ -531,7 +542,9 @@ def prose_grounded(
     A number is grounded when it equals a verified claim's text number or value, equals a
     number in the evidence text those claims cite (span quote, cell text, chart labels and
     source display), or appears verbatim in the user's question (a restated year or period
-    is not a new figure). Anything else escapes and the whole answer abstains.
+    is not a new figure). An enumeration marker opening a line or a sentence (``1.``,
+    ``(2)``, ``第 3``, ``Step 4``) numbers a list item and is not a figure. Anything else
+    escapes and the whole answer abstains.
     """
     allowed: set[Decimal] = set()
     for claim in verified:
@@ -541,8 +554,9 @@ def prose_grounded(
         for cited in claim.citations:
             allowed.update(value for _, value in _numbers(cited.quote))
     asked = {token for token, _ in _numbers(question)}
+    prose = _ENUMERATOR_RE.sub(" ", answer)
     escaped = sorted(
-        {token for token, value in _numbers(answer) if value not in allowed and token not in asked}
+        {token for token, value in _numbers(prose) if value not in allowed and token not in asked}
     )
     return not escaped, tuple(escaped)
 

@@ -692,6 +692,41 @@ def test_prose_numbers_from_the_question_or_the_cited_evidence_are_grounded() ->
     assert prose_grounded("It reached 17.5% in 1H 2026.", chart) == (True, ())
 
 
+def test_prose_enumerators_at_a_line_or_sentence_start_are_not_figures() -> None:
+    stages = tuple(_verified(label) for label in ("Foundation", "Growth", "Scale"))
+    listed = "The three stages are:\n1. Foundation\n2. Growth\n3. Scale"
+    assert prose_grounded(listed, stages) == (True, ())
+    assert prose_grounded("  1) Foundation\n  2) Growth\n  3) Scale", stages) == (True, ())
+    assert prose_grounded("(1) Foundation; (2) Growth; (3) Scale.", stages) == (True, ())
+    assert prose_grounded("① Foundation ② Growth ③ Scale", stages) == (True, ())
+    assert prose_grounded("第 1 阶段是 Foundation。第 2 阶段是 Growth。", stages) == (True, ())
+    assert prose_grounded("Step 1: Foundation. Step 2: Growth. Step 3: Scale.", stages) == (
+        True,
+        (),
+    )
+    # Only a line or sentence start is an enumerator; the same token inside a sentence is
+    # a figure, and so is every amount, percentage or year in the body of an item.
+    assert prose_grounded("Foundation is stage 1. of 3", stages) == (False, ("1", "3"))
+    assert prose_grounded("1. Foundation reached 45% of agents", stages) == (False, ("45%",))
+    assert prose_grounded("1. Foundation\n2. Growth (2025)", stages) == (False, ("2025",))
+    assert prose_grounded("1. Foundation costs 1,500", stages) == (False, ("1,500",))
+    # A decimal at a sentence end is never mistaken for an enumerator.
+    ratio = (_verified("17.5%", Decimal("17.5")),)
+    assert prose_grounded("The ratio was 17.5. It held.", ratio) == (True, ())
+    assert prose_grounded("The ratio was 17.5.\n2. It held.", ratio) == (True, ())
+
+
+def test_decide_answers_a_numbered_list_but_not_a_number_outside_the_evidence() -> None:
+    stages = tuple(_verified(label) for label in ("Foundation", "Growth", "Scale"))
+    verification = ClaimVerification(stages, ())
+    listed = _answer(answer="1. Foundation\n2. Growth\n3. Scale")
+    assert decide(listed, verification, blocks_present=True) == (AnswerStatus.ANSWERED, None, None)
+    invented = _answer(answer="1. Foundation (45%)\n2. Growth\n3. Scale")
+    status, reason, detail = decide(invented, verification, blocks_present=True)
+    assert status is AnswerStatus.ABSTAINED and reason is AbstainReason.CLAIM_NOT_IN_EVIDENCE
+    assert detail is not None and "45%" in detail
+
+
 def test_decide_admits_question_and_evidence_numbers_but_not_new_ones() -> None:
     verified = (_cited("17.5%", "record Operating ROE of 17.5%", value=Decimal("17.5")),)
     question = "What was the operating ROE in 1H 2026?"
