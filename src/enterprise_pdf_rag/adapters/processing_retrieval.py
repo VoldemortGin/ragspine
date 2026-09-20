@@ -305,8 +305,10 @@ class ProcessingRetrieval:
         self, publication: RetrievalPublication, query: str, *, limit: int = 5
     ) -> tuple[PinnedRetrievalHit, ...]:
         plan, index = self._load(publication)
-        if not query.strip() or not 1 <= limit <= 100:
-            raise ValueError("A nonempty query and bounded limit are required")
+        # Results are bounded by the corpus; a metadata pre-filter reads the whole corpus
+        # (ADR 0013) and the HTTP search contract bounds its own limit separately.
+        if not query.strip() or limit < 1:
+            raise ValueError("A nonempty query and a positive limit are required")
         if not plan.members:
             return ()
         if any(

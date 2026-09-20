@@ -51,7 +51,7 @@ def test_semantics_stage_annotates_every_page_with_verbatim_metadata(
     for page in manifest.pages:
         stage = page.metadata
         assert stage is not None and stage.state is StageState.SUCCEEDED
-        assert stage.stage == "page_metadata" and stage.producer.startswith("page-metadata-v1:")
+        assert stage.stage == "page_metadata" and stage.producer.startswith("page-metadata-v1.2:")
         assert stage.artifact is not None
         stored = TypeAdapter(PageMetadata).validate_json(outputs.assets.get(stage.artifact))
         assert stored == pages[page.page_index]
@@ -61,7 +61,7 @@ def test_semantics_stage_annotates_every_page_with_verbatim_metadata(
     assert cover.title.evidence.text == "Meridian 1H26 Hong Kong page 1"
     assert cover.normalized_periods == ("1H2026",)
     assert cover.periods[0].text == "1H26"
-    assert cover.periods[0].evidence.span_id == cover.title.evidence.span_id
+    assert cover.periods[0].evidence.span_ids == cover.title.evidence.span_ids
     assert tuple(region.text for region in cover.regions) == ("Hong Kong",)
     assert any("'Mars'" in line and "not verbatim" in line for line in cover.diagnostics)
 

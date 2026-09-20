@@ -27,11 +27,16 @@ class PageType(StrEnum):
     OTHER = "other"
 
 
+# A value may run across a few consecutive lines of the page (a wrapped title): the cited
+# span plus at most this many following spans, in page order, form the evidence window.
+MAX_EVIDENCE_SPANS = 3
+
+
 @dataclass(frozen=True, slots=True)
 class MetadataEvidence:
-    """The source span a value was copied from: its id and its full printed text."""
+    """The consecutive source spans a value was copied from and their (whitespace-folded) text."""
 
-    span_id: str
+    span_ids: tuple[str, ...]
     text: str
 
 
@@ -93,17 +98,28 @@ def fold_whitespace(text: str) -> str:
 
 
 def _verify(
-    field: str, value: CandidateValue, spans: dict[str, str]
+    field: str, value: CandidateValue, spans: Sequence[tuple[str, str]]
 ) -> tuple[MetadataValue | None, str | None]:
     folded = fold_whitespace(value.text)
     if not folded:
         return None, f"{field}: empty value dropped"
-    span_text = spans.get(value.span_id)
-    if span_text is None:
+    start = next(
+        (index for index, (span_id, _) in enumerate(spans) if span_id == value.span_id), None
+    )
+    if start is None:
         return None, f"{field}: {folded!r} cites unknown span {value.span_id}; dropped"
-    if folded not in fold_whitespace(span_text):
-        return None, f"{field}: {folded!r} is not verbatim in span {value.span_id}; dropped"
-    return MetadataValue(folded, MetadataEvidence(value.span_id, span_text)), None
+    # The smallest window of consecutive spans, starting at the cited one, that prints the
+    # value verbatim. Evidence keeps that text whitespace-folded so it survives every
+    # boundary round trip (which strips outer whitespace) byte-identically.
+    for width in range(1, MAX_EVIDENCE_SPANS + 1):
+        window = spans[start : start + width]
+        if len(window) < width:
+            break
+        text = fold_whitespace(" ".join(span_text for _, span_text in window))
+        if folded in text:
+            ids = tuple(span_id for span_id, _ in window)
+            return MetadataValue(folded, MetadataEvidence(ids, text)), None
+    return None, f"{field}: {folded!r} is not verbatim in span {value.span_id}; dropped"
 
 
 def verify_page_metadata(
@@ -113,8 +129,12 @@ def verify_page_metadata(
     source_sha256: str,
     page_index: int,
 ) -> PageMetadata:
-    """Keep only values that quote this page verbatim; record every drop as a diagnostic."""
-    spans = {span.span_id: span.text for span in page_spans}
+    """Keep only values that quote this page verbatim; record every drop as a diagnostic.
+
+    A value must be a whitespace-folded substring of its cited span, or of that span
+    joined with the next few spans in page order (a title wrapped over several lines).
+    """
+    spans = tuple((span.span_id, span.text) for span in page_spans)
     diagnostics: list[str] = []
 
     def single(field: str, value: CandidateValue | None) -> MetadataValue | None:

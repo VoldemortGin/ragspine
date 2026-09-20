@@ -79,7 +79,9 @@ _PROMPT = (
 class PageMetadataExtractor:
     def __init__(self, client: JsonCompletionClient) -> None:
         self.client = client
-        self.fingerprint = "page-metadata-v1:" + client.fingerprint
+        # v1.2: evidence is a window of consecutive spans with whitespace-folded text (the
+        # v1 / v1.1 stage artifacts cited exactly one raw span).
+        self.fingerprint = "page-metadata-v1.2:" + client.fingerprint
 
     def extract(self, page: PageInput) -> PageMetadata:
         aliases = {f"s{index:04d}": span for index, span in enumerate(page.text.spans)}

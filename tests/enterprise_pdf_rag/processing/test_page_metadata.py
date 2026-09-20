@@ -30,7 +30,7 @@ def _page(
     regions: tuple[str, ...] = (),
     language: str | None = "en",
 ) -> PageMetadata:
-    evidence = MetadataEvidence("s1", "printed")
+    evidence = MetadataEvidence(("s1",), "printed")
     return PageMetadata(
         "page-metadata-v1",
         _SHA,
@@ -47,7 +47,7 @@ def _page(
 def test_verification_keeps_verbatim_values_and_drops_the_rest_with_diagnostics() -> None:
     spans = (
         _span("p1-s0", "Distribution   Mix"),
-        _span("p1-s1", "1H26 VONB by channel — Hong Kong and Thailand"),
+        _span("p1-s1", " 1H26 VONB by channel — Hong Kong and Thailand "),
     )
     candidate = PageMetadataCandidate(
         PageType.CHART,
@@ -72,16 +72,17 @@ def test_verification_keeps_verbatim_values_and_drops_the_rest_with_diagnostics(
     assert metadata.schema_version == "page-metadata-v1"
     assert (metadata.source_sha256, metadata.page_index) == (_SHA, 17)
     assert metadata.page_type is PageType.CHART and metadata.language == "en"
+    # Evidence text is whitespace-folded so it survives strip-on-validate boundaries.
     assert metadata.title == MetadataValue(
-        "Distribution Mix", MetadataEvidence("p1-s0", "Distribution   Mix")
+        "Distribution Mix", MetadataEvidence(("p1-s0",), "Distribution Mix")
     )
     assert metadata.section is None
     assert metadata.periods == (
-        PeriodValue("1H26", MetadataEvidence("p1-s1", spans[1].text), "1H2026"),
+        PeriodValue("1H26", MetadataEvidence(("p1-s1",), spans[1].text.strip()), "1H2026"),
     )
     assert metadata.normalized_periods == ("1H2026",)
     assert tuple(region.text for region in metadata.regions) == ("Hong Kong", "Thailand")
-    assert all(region.evidence.span_id == "p1-s1" for region in metadata.regions)
+    assert all(region.evidence.span_ids == ("p1-s1",) for region in metadata.regions)
     assert len(metadata.diagnostics) == 5
     assert any(
         "'Business review'" in line and "not verbatim" in line for line in metadata.diagnostics
@@ -89,6 +90,39 @@ def test_verification_keeps_verbatim_values_and_drops_the_rest_with_diagnostics(
     assert any("unknown span p1-s9" in line for line in metadata.diagnostics)
     assert any("'Mainland China'" in line for line in metadata.diagnostics)
     assert any("empty value" in line for line in metadata.diagnostics)
+
+
+def test_a_value_wrapped_over_consecutive_spans_is_verbatim_within_their_window() -> None:
+    spans = (
+        _span("s0", "2026"),
+        _span("s1", "INTERIM RESULTS "),
+        _span("s2", "PRESENTATION"),
+        _span("s3", "20 AUGUST 2026"),
+        _span("s4", "Hong Kong"),
+    )
+    candidate = PageMetadataCandidate(
+        PageType.COVER,
+        "en",
+        CandidateValue("INTERIM RESULTS PRESENTATION", "s1"),
+        CandidateValue("PRESENTATION 20 AUGUST 2026 Hong Kong", "s2"),  # 3 spans: allowed
+        (
+            CandidateValue("2026", "s0"),
+            CandidateValue("2026 INTERIM RESULTS PRESENTATION 20", "s0"),
+        ),
+        (CandidateValue("RESULTS PRESENTATION", "s2"),),  # starts before the cited span
+    )
+    metadata = verify_page_metadata(candidate, spans, source_sha256=_SHA, page_index=0)
+    assert metadata.title == MetadataValue(
+        "INTERIM RESULTS PRESENTATION",
+        MetadataEvidence(("s1", "s2"), "INTERIM RESULTS PRESENTATION"),
+    )
+    assert metadata.section is not None
+    assert metadata.section.evidence.span_ids == ("s2", "s3", "s4")
+    assert [period.evidence.span_ids for period in metadata.periods] == [
+        ("s0",)
+    ]  # 4 spans: too wide
+    assert metadata.regions == ()
+    assert len(metadata.diagnostics) == 2
 
 
 def test_unnormalisable_period_keeps_its_verbatim_text_only() -> None:

@@ -1706,11 +1706,14 @@
         "type": "object"
       },
       "MetadataEvidence": {
-        "description": "The source span a value was copied from: its id and its full printed text.",
+        "description": "The consecutive source spans a value was copied from and their (whitespace-folded) text.",
         "properties": {
-          "span_id": {
-            "title": "Span Id",
-            "type": "string"
+          "span_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Span Ids",
+            "type": "array"
           },
           "text": {
             "title": "Text",
@@ -1718,7 +1721,7 @@
           }
         },
         "required": [
-          "span_id",
+          "span_ids",
           "text"
         ],
         "title": "MetadataEvidence",

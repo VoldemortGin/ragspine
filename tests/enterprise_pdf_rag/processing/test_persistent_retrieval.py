@@ -112,6 +112,10 @@ def test_persisted_description_search_hydrates_typed_ir_without_granting_financi
     assert embedder.descriptions == ["Agency 72%"]
     reopened = ProcessingRetrieval(sources, ProcessingStore(outputs.root), embedder)
     hit = reopened.search(publication, "Agency", limit=1)[0]
+    # A limit beyond the corpus (a pre-filter reads every member) is bounded by the corpus.
+    assert reopened.search(publication, "Agency", limit=500) == (hit,)
+    with pytest.raises(ValueError, match="positive limit"):
+        reopened.search(publication, "Agency", limit=0)
     context = reopened.resolve(publication, hit)
     assert context.description.text == "Agency 72%" and context.member.object_id == "object"
     assert context.scope == "literal-source-transcription-v1"
