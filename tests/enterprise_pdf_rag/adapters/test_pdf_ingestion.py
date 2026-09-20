@@ -2,11 +2,12 @@
 
 import json
 import os
+import re
 import subprocess
 import sys
 from hashlib import sha256
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pdfspine
 import pytest
@@ -33,6 +34,17 @@ TABLE_CELLS = {
 }
 
 
+# Two stroked node frames joined by a straight connector whose filled triangle points at
+# the second frame, drawn on the last page by ``authored_pdf(diagram_page=True)``.
+DIAGRAM_NODES = {
+    "n1": ((20.0, 70.0, 90.0, 100.0), "PLAN", (28.0, 89.0)),
+    "n2": ((150.0, 70.0, 220.0, 100.0), "BUILD", (158.0, 89.0)),
+}
+DIAGRAM_LINE = ((90.0, 85.0), (142.0, 85.0))
+DIAGRAM_ARROWHEAD = ((142.0, 81.0), (142.0, 89.0), (150.0, 85.0))
+DIAGRAM_REGION = (15.0, 65.0, 225.0, 105.0)
+
+
 def _draw_table(page: pdfspine.Page, fontname: str) -> None:
     for y in TABLE_ROWS:
         page.draw_line((TABLE_COLUMNS[0], y), (TABLE_COLUMNS[-1], y), width=1)
@@ -44,6 +56,18 @@ def _draw_table(page: pdfspine.Page, fontname: str) -> None:
         )
 
 
+def _draw_diagram(page: pdfspine.Page, fontname: str) -> None:
+    for rect, label, origin in DIAGRAM_NODES.values():
+        page.draw_rect(rect, color=(0, 0, 0), width=1)
+        page.insert_text(origin, label, fontsize=10, fontname=fontname)
+    page.draw_line(*DIAGRAM_LINE, width=1)
+    # ``draw_polyline`` has no fill/closePath parameters; a filled triangle needs a Shape.
+    shape = page.new_shape()
+    shape.draw_polyline(list(DIAGRAM_ARROWHEAD))
+    shape.finish(color=(0, 0, 0), fill=(0, 0, 0), width=0.5, closePath=True)
+    shape.commit()
+
+
 def authored_pdf(
     path: Path,
     *,
@@ -51,7 +75,12 @@ def authored_pdf(
     label: str,
     embedded_font: bool = False,
     table_page: bool = False,
+    diagram_page: bool = False,
+    diagram_caption: bool = False,
 ) -> Path:
+    """``diagram_caption`` is carried for the partition stub that owns the caption line."""
+    assert not (table_page and diagram_page), "Only one authored layout fits the last page"
+    assert diagram_page or not diagram_caption, "A diagram caption needs the diagram layout"
     with pdfspine.open() as document:
         for number in range(page_count):
             page = document.new_page(width=240, height=160)
@@ -67,8 +96,45 @@ def authored_pdf(
             page.insert_text((20, 40), f"{label} page {number + 1}", fontsize=12, fontname=fontname)
             if table_page and number == page_count - 1:
                 _draw_table(page, fontname)
+            if diagram_page and number == page_count - 1:
+                _draw_diagram(page, fontname)
         path.write_bytes(document.tobytes())
     return path
+
+
+def test_authored_diagram_page_draws_native_shapes_and_two_label_spans(tmp_path: Path) -> None:
+    pdf = authored_pdf(
+        tmp_path / "diagram.pdf",
+        page_count=1,
+        label="Diagram",
+        embedded_font=True,
+        diagram_page=True,
+    )
+    with pdfspine.open(stream=pdf.read_bytes()) as document:
+        page = document.load_page(0)
+        svg = page.get_svg_image(text_as_path=False)
+        extraction = cast(dict[str, Any], page.get_text("dict"))
+
+    # The embedded font keeps every glyph a scaled <path>, so render_svg_png accepts the crop.
+    assert "<text" not in svg
+    geometry = [
+        element for element in re.findall(r"<path[^>]*/>", svg) if "transform=" not in element
+    ]
+    assert len(geometry) >= 4
+    assert 'd="M20 60L90 60L90 90L20 90Z"' in svg and 'd="M90 75L142 75"' in svg
+    assert 'd="M142 79L142 71L150 75L142 79Z" fill="#000000"' in svg
+    labels = {
+        str(span["text"]): tuple(span["bbox"])
+        for block in extraction["blocks"]
+        for line in block["lines"]
+        for span in line["spans"]
+        if DIAGRAM_REGION[1] <= span["bbox"][1] and span["bbox"][3] <= DIAGRAM_REGION[3]
+    }
+    assert set(labels) == {"PLAN", "BUILD"}
+    for node_id, (rect, label, _origin) in DIAGRAM_NODES.items():
+        bbox = labels[label]
+        assert rect[0] <= bbox[0] and bbox[2] <= rect[2], node_id
+        assert rect[1] <= bbox[1] and bbox[3] <= rect[3], node_id
 
 
 def test_public_api_accepts_pages_beyond_twenty_and_saves_full_source(
