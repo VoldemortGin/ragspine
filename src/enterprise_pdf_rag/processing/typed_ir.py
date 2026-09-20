@@ -130,3 +130,6 @@ class LiteralQualification:
     description: AssetRef
     source_svg: AssetRef
     scope: str = "literal-source-transcription-v1"
+    # ADR 0014: set only when the IR's grid re-proves from the page's own rulings.
+    grid_scope: str | None = None
+    ruling_digest: str | None = None

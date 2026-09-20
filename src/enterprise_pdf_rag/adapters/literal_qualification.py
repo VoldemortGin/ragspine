@@ -1,14 +1,20 @@
 """Independently revalidate exact literal projections against their pinned source."""
 
+from collections.abc import Sequence
+
+import pdfspine
 from pydantic import TypeAdapter
 
 from enterprise_pdf_rag.adapters.aia_ingestion import read_text_sidecar
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.pdfspine_svg import crop_native_svg
+from enterprise_pdf_rag.adapters.pdfspine_tables import fill_rectangles, ruling_segments
+from enterprise_pdf_rag.documents.models import TextSpan
 from enterprise_pdf_rag.figures.models import Confidence, Verification
 from enterprise_pdf_rag.processing.geometry import contains
 from enterprise_pdf_rag.processing.models import ObjectKind, ProcessingScope
 from enterprise_pdf_rag.processing.retrieval import RetrievalMember
+from enterprise_pdf_rag.processing.table_grid_proof import GRID_SCOPE, check_grid_evidence
 from enterprise_pdf_rag.processing.table_models import TableIR
 from enterprise_pdf_rag.processing.table_transcription import (
     check_table_transcription,
@@ -23,6 +29,40 @@ from enterprise_pdf_rag.processing.typed_ir import (
 )
 
 LITERAL_SCOPE = "literal-source-transcription-v1"
+
+
+def _reprove_table_grid(
+    pdf: bytes,
+    table: TableIR,
+    receipt: LiteralQualification,
+    *,
+    page_index: int,
+    spans: Sequence[TextSpan],
+) -> None:
+    """Re-prove a VERIFIED grid from the pinned page's own rulings (ADR 0014).
+
+    A pending grid must not claim one: the receipt's two grid fields are then absent.
+    """
+    evidence = table.grid_evidence
+    if table.verification is not Verification.VERIFIED or evidence is None:
+        if receipt.grid_scope is not None or receipt.ruling_digest is not None:
+            raise ValueError("Pending table grid must not carry a grid qualification")
+        return
+    if (receipt.grid_scope, receipt.ruling_digest) != (GRID_SCOPE, evidence.ruling_digest):
+        raise ValueError("Table grid qualification does not bind the proved rulings")
+    document = pdfspine.open(stream=pdf, filetype="pdf")
+    try:
+        if page_index >= document.page_count:
+            raise ValueError("Qualified table page is absent from the pinned source")
+        source_page = document.load_page(page_index)
+        check_grid_evidence(
+            table,
+            ruling_segments(source_page),
+            fills=fill_rectangles(source_page),
+            spans=spans,
+        )
+    finally:
+        document.close()
 
 
 def validate_literal_member(
@@ -120,6 +160,13 @@ def validate_literal_member(
         ):
             raise ValueError("Typed table IR does not match the literal qualification")
         check_table_transcription(table, spans, anchor=anchor.bbox)
+        _reprove_table_grid(
+            sources.get(source.manifest.source),
+            table,
+            receipt,
+            page_index=member.page_index,
+            spans=text.spans,
+        )
         return table, description, receipt
     ir: TextIR | ListIR | GroupIR
     if member.kind is ObjectKind.TEXT:
