@@ -44,3 +44,16 @@ docs/site/
 node_modules/
 studio/dist/
 src/ragspine/service/studio_dist/
+
+# enterprise_pdf_rag runtime / secrets (merged from the enterprise-pdf-rag repo's .gitignore)
+/output/
+/logs/
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+.session-secret
+.hypothesis/
+.coverage
+htmlcov/

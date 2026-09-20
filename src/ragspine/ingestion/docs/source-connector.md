@@ -4,7 +4,7 @@ covers:
   - src/ragspine/ingestion/source/memory.py
   - src/ragspine/ingestion/source/remote.py
   - src/ragspine/ingestion/source/bridge.py
-verified-against: e6d36368639903633ceb4d142684324cc12bce57
+verified-against: 95f607e7bf0aea1ae6fa6b27ae89a330940f1fb7
 ---
 
 # SourceConnector seam — where raw documents enter ingestion

@@ -1,0 +1,10 @@
+**
+!pyproject.toml
+!uv.lock
+!README.md
+!.project-root
+!config/
+!config/enterprise-pdf-rag/
+!config/enterprise-pdf-rag/settings.yaml
+!src/
+!src/**

@@ -34,7 +34,7 @@ Any doc that describes code carries:
 ---
 covers:
   - src/ragspine/retrieval/rerank/
-verified-against: 3c6bf0b
+verified-against: 95f607e7bf0aea1ae6fa6b27ae89a330940f1fb7
 ---
 ```
 

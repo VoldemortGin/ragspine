@@ -19,19 +19,20 @@ fi
 
 echo "==> using interpreter: $("$PY" -c 'import sys; print(sys.executable)')"
 
-echo "==> [1/8] docstring reference integrity (no dead src/ or docs/ links; package indexes match)"
+echo "==> [1/9] docstring reference integrity (no dead src/ or docs/ links; package indexes match)"
 "$PY" scripts/check_docstring_refs.py
 
-echo "==> [2/8] doc-drift (contracts re-verified against their covered code)"
+echo "==> [2/9] doc-drift (contracts re-verified against their covered code)"
 "$PY" scripts/check_doc_drift.py --quiet
 
-echo "==> [3/8] mypy --strict (static type contract — zero-warning gate, half 1 of 2)"
+echo "==> [3/9] mypy --strict (static type contract — zero-warning gate, half 1 of 2)"
 "$PY" -m mypy
 
-echo "==> [4/8] ruff lint (style + import order + dead code)"
-"$PY" -m ruff check src/ragspine
+echo "==> [4/9] ruff lint + format (whole repo; enterprise_pdf_rag strict set scoped via per-file-ignores, ragspine keeps its E/F/I/W/UP/B)"
+"$PY" -m ruff check .
+"$PY" -m ruff format --check .
 
-echo "==> [5/8] test suite (excludes gpu + docling + network — the bulk; filterwarnings=error + beartype runtime contracts active)"
+echo "==> [5/9] test suite (excludes gpu + docling + network — the bulk; filterwarnings=error + beartype runtime contracts active; includes tests/enterprise_pdf_rag, whose own conftest enforces no-network)"
 # The 1,000-file catalog exporter is intentionally isolated: after PDF/OCR native
 # libraries have raised the main process footprint, APFS copies become pathologically
 # slow. A fresh process keeps the same contract deterministic and cuts minutes from CI.
@@ -39,7 +40,7 @@ echo "==> [5/8] test suite (excludes gpu + docling + network — the bulk; filte
 "$PY" -m pytest tests/ -q -m "not gpu and not docling and not network" \
   --ignore=tests/workflows/test_workflow_catalog_export.py
 
-echo "==> [6/8] docling extractor tests (own process — isolates 3rd-party ML nondeterminism)"
+echo "==> [6/9] docling extractor tests (own process — isolates 3rd-party ML nondeterminism)"
 # `[pdf-docling]` is an optional extra; on a lean gate (no docling installed) every docling
 # test self-skips and pytest exits 5 ("no tests ran"). Tolerate ONLY that — any real failure
 # (exit 1) still propagates and fails the gate.
@@ -47,7 +48,7 @@ echo "==> [6/8] docling extractor tests (own process — isolates 3rd-party ML n
   && echo "  (no docling tests ran — [pdf-docling] not installed; lane skipped)" \
   || exit "$rc"; }
 
-echo "==> [7/8] QA eval + baseline ratchet (4-gate: numeric / citation / refusal / clarification + fabrication; W5 groundedness: faithfulness / answer-accuracy; ratchets up, never down)"
+echo "==> [7/9] QA eval + baseline ratchet (4-gate: numeric / citation / refusal / clarification + fabrication; W5 groundedness: faithfulness / answer-accuracy; ratchets up, never down)"
 # tool = zero-LLM deterministic direct test; agent = answer_question + MockProvider.
 # W5 groundedness uses the offline deterministic default (lexical-overlap entailment) — no model
 # download, no network, runs in CI; the opt-in ONNX-NLI / LLM-judge adapters are follow-ups.
@@ -56,8 +57,19 @@ echo "==> [7/8] QA eval + baseline ratchet (4-gate: numeric / citation / refusal
 "$PY" scripts/run_qa_eval.py --mode tool
 "$PY" scripts/run_qa_eval.py --mode agent
 
-echo "==> [8/8] end-to-end demo smoke"
+echo "==> [8/9] end-to-end demo smoke"
 "$PY" scripts/run_demo.py | tail -1
+
+echo "==> [9/9] enterprise_pdf_rag structural gates (scoped to src/enterprise_pdf_rag + docs/enterprise-pdf-rag; never judge ragspine by them)"
+# conformance: src layout / beartype claw hook / core-settings leaf / absolute imports / closed
+#   import whitelist outside adapters/.  architecture: pure figures/documents/processing (no IO).
+#   schema: versioned public JSON contracts under docs/enterprise-pdf-rag/schemas/ vs pydantic models.
+#   drift: `covers:` paths in enterprise_pdf_rag docs still exist.
+# Their pytest suite already ran inside step 5 (tests/enterprise_pdf_rag/, same collection).
+"$PY" scripts/enterprise_pdf_rag/check_conformance.py .
+"$PY" scripts/enterprise_pdf_rag/check_architecture.py
+"$PY" scripts/enterprise_pdf_rag/check_schema.py
+"$PY" scripts/enterprise_pdf_rag/check_drift.py
 
 echo
 echo "✅ local CI passed"

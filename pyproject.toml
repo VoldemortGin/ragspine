@@ -51,7 +51,18 @@ dependencies = [
     "beartype>=0.18",
     # High-level RAGSpineConfig is a base-install boundary contract: strict nested
     # validation + JSON Schema without importing FastAPI or any provider SDK.
-    "pydantic>=2.0",
+    # `<3` 是 enterprise_pdf_rag 带来的上界（挡未来 v3 破坏性升级）；`>=2.12` 为两包约束交集。
+    "pydantic>=2.12,<3",
+    # ---- enterprise_pdf_rag（src/enterprise_pdf_rag，独立顶层包）的运行时依赖 ----
+    # 全部轻量、无 torch 链；均为其默认能力（settings / HTTP 边界 / PDF→SVG→PNG 渲染），
+    # 故进 base 而非 extra。fastapi/uvicorn 与下方 [service] extra 重合，base 优先。
+    "pydantic-settings[yaml]>=2.2,<3",
+    "jinja2>=3.1",
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    "pdfspine>=0.11.0",
+    "resvg-py>=0.5.0",
+    "fonttools>=4.65.0",
 ]
 
 [project.urls]
@@ -61,6 +72,7 @@ Issues = "https://github.com/VoldemortGin/ragspine/issues"
 
 [project.scripts]
 ragspine = "ragspine.cli:main"
+enterprise-pdf-rag = "enterprise_pdf_rag.cli:main"
 
 [project.optional-dependencies]
 dev = [
@@ -77,6 +89,10 @@ dev = [
     # 打包 / 发布工具（make build：python -m build；twine check/upload 到 PyPI）。
     "build>=1.2",
     "twine>=5.0",
+    # enterprise_pdf_rag 测试用：hypothesis 属性测试；httpx2（import 名 httpx2，与 httpx 不同包）
+    # 提供 ASGITransport/AsyncClient 做无 socket 的 ASGI 测试。与 [service] 的 httpx 并存，选型待统一。
+    "hypothesis>=6.0",
+    "httpx2>=2.13.0",
 ]
 # 二期 PDF 线的默认引擎（数字型 PDF 表格解析）：pdfspine —— 纯 Rust、确定性、
 # abi3-py311 预编译 wheel，无 torch 重依赖（体积 30-50M，对比 docling 链 ~600M）。
@@ -275,11 +291,13 @@ build-backend = "hatchling.build"
 [tool.hatch.build]
 artifacts = ["/src/ragspine/service/studio_dist"]
 
+# 两个独立顶层包出自同一 wheel：ragspine（家族 RAG 引擎）+ enterprise_pdf_rag（PDF 图表
+# 取证/问答后端，import 名不变，资源 resources/ 随包目录带入）。
 [tool.hatch.build.targets.wheel]
-packages = ["src/ragspine"]
+packages = ["src/ragspine", "src/enterprise_pdf_rag"]
 
 [tool.hatch.build.targets.sdist]
-exclude = ["/uv.lock", "/_incoming"]
+exclude = ["/uv.lock"]
 
 # 面向 AI 消费者的使用文档随 wheel 出货，装后在 site-packages/ragspine/_llms/ 可读
 # （llms.txt 索引 + docs/llms/*.md）。映射到包内 _llms/，不污染 ragspine 命名空间的导入面。
@@ -292,8 +310,9 @@ exclude = ["/uv.lock", "/_incoming"]
 corespine = { path = "../corespine", editable = true }
 
 [tool.pytest.ini_options]
-# 默认递归排除项 + _incoming/（subtree 导入的外部仓库快照，不属于 rag-spine 的门）。
-norecursedirs = ["*.egg", ".*", "_darcs", "build", "CVS", "dist", "node_modules", "venv", "{arch}", "_incoming"]
+# 两套测试同一次 pytest 收集：tests/ 是包（tests/__init__.py），tests/enterprise_pdf_rag/ 是其子包，
+# 默认 prepend import 模式下模块名带全路径（tests.enterprise_pdf_rag.adapters.test_x），无 basename 撞车；
+# enterprise_pdf_rag 子树的 conftest.py（autouse no_network 断网）只作用于该子树。
 markers = [
     "gpu: 需要 Ubuntu+NVIDIA GPU 与真实 OCR 模型，本地默认跳过",
     "docling: 走 docling 重模型抽取的测试；ci.sh 放独立进程跑，避免全套并跑时的第三方不确定性",
@@ -315,29 +334,72 @@ filterwarnings = [
     "ignore:Exception ignored while finalizing database connection:pytest.PytestUnraisableExceptionWarning",
 ]
 
-# Lint config exists so cleanup is incremental and consistent; the CI gate does NOT yet
-# block on ruff (the extracted codebase predates linting — see scripts/lint.sh).
+# 全仓一份 ruff 配置、分目录分级：全局 select 是 enterprise_pdf_rag 的严格集，
+# ragspine 子树（src/ragspine、tests/ 非 epr 部分、scripts/ 非 epr 部分）经 per-file-ignores
+# 关掉它从未启用过的规则，维持 ragspine 现状零新告警；`ruff format .` 对全仓统一生效。
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-# _incoming/：subtree 导入的外部仓库快照，不属于 rag-spine 的门，任何工具都不扫描。
-extend-exclude = ["_incoming"]
-# src 布局：把 src/ 标为第一方根，isort（I 规则）才能正确把 `import ragspine` 归到一方分组。
-src = ["src"]
+# data/ 是 gitignore 的运行期资产（含隔离验证 venv 与一次性脚本），不是项目代码，不扫。
+# *.md：ruff ≥0.16 默认会格式化 Markdown 里的 Python 代码块；文档的代码示例排版由文档自己管，
+# 不让 `ruff format .` 顺手改 docs/llms（随 wheel 出货）与各级 CLAUDE.md。
+extend-exclude = ["data", "*.md"]
+# src 布局：把 src/ 与 tests/ 标为第一方根，isort（I 规则）才能把 `import ragspine` /
+# `from tests.enterprise_pdf_rag...` 归到一方分组。
+src = ["src", "tests"]
+# `ruff check --fix` 只准应用 safe fixes；unsafe fix 可能改变运行时语义或删注释，须由人单独审阅。
+unsafe-fixes = false
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "W", "UP", "B"]
+# ragspine 原集 E/F/I/W/UP/B ∪ enterprise_pdf_rag 严格集：
+#   ANN 注解必须完整；SIM 简化；RUF ruff 自有规则；TID 禁相对导入 + banned-api；
+#   BLE 禁 `except Exception` 兜底；PGH 禁裸 `# type: ignore` / `# noqa`；T20 库代码禁 print。
+select = ["E", "F", "I", "W", "UP", "B", "ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20"]
 # E501: long lines are abundant in the inherited code; don't gate on them yet.
 # UP042: `class X(str, Enum)` is intentional (stable, explicit str-mixin); the StrEnum
 #   migration changes str()/format semantics, so we keep the existing pattern as-is.
 ignore = ["E501", "UP042"]
 
+[tool.ruff.lint.flake8-tidy-imports]
+# 包内禁相对导入（enterprise_pdf_rag 规范 §7.1）；ragspine 子树经下方 per-file-ignores 的 TID 豁免。
+ban-relative-imports = "all"
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+# PEP 563 是被官方放弃的过渡路径,注解一律保持「活对象」。
+"__future__.annotations".msg = "本规范禁用 from __future__ import annotations:注解保持活对象,前向/自引用类型加引号即可。"
+
+[tool.ruff.lint.per-file-ignores]
+# ---- ragspine 子树：只保留其原有 E/F/I/W/UP/B，enterprise_pdf_rag 独有的严格规则不套过来 ----
+"src/ragspine/**" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20"]
+# ragspine 的 tests/ scripts/ benchmarks/ examples/ 此前从不在 ruff 门内：除严格集外，再豁免其既有的
+# E402（conftest/脚本先 setup_root 再 import 的既定写法）、B017、B018、B023、B905、F841。
+"tests/*.py" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20", "E402", "B017", "B018", "B023", "B905", "F841"]
+"tests/{agent,budget,cli,common,compat,conformance,diagnostics,dify,e2e,eval,extraction,graph,ingestion,n8n,pipeline,retrieval,service,storage,workflows}/**" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20", "E402", "B017", "B018", "B023", "B905", "F841"]
+"scripts/*.py" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20", "E402", "B017", "B018", "B023", "B905", "F841"]
+"benchmarks/**" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20", "E402", "B017", "B018", "B023", "B905", "F841"]
+"examples/**" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20", "E402", "B017", "B018", "B023", "B905", "F841"]
+# ---- enterprise_pdf_rag 的 scripts/ 是命令行工具层：stdout 就是输出契约，放行 print ----
+"scripts/enterprise_pdf_rag/*.py" = ["T20"]
+
 # Strict static typing on the library (ADR 0004 quality bar: "no warnings = qualified").
 # Gate: `mypy ragspine` (ci.sh). tests/ + scripts/ are intentionally out of scope.
 [tool.mypy]
 python_version = "3.12"
-files = ["src/ragspine"]
+files = ["src/ragspine", "src/enterprise_pdf_rag"]
 strict = true
+# enterprise_pdf_rag 的两项加严（全局开、对 ragspine.* 经下方 override 关回去）：
+# warn_unreachable：不可达分支即错；ignore-without-code：裸 `# type: ignore` 直接报错，
+# 必须写成 `# type: ignore[code]`，否则一条 ignore 会顺手压掉同一行所有别的错误。
+warn_unreachable = true
+enable_error_code = ["ignore-without-code"]
+# data/ 是运行期资产与隔离验证环境，不是项目代码。
+exclude = ['^data/']
+
+# ragspine 从未跑过这两项加严，按 ADR 0011 的偏离记录维持现状，不在本次并包中扩面。
+[[tool.mypy.overrides]]
+module = "ragspine.*"
+warn_unreachable = false
+disable_error_code = ["ignore-without-code"]
 
 # Third-party packages without type stubs — ignore their missing imports rather than
 # vendoring stubs (most are lazy-imported optional extras).
