@@ -12,6 +12,7 @@ from hashlib import sha256
 from typing import Protocol, runtime_checkable
 
 from enterprise_pdf_rag.adapters.local_models import RerankResult
+from enterprise_pdf_rag.answers.models import FusedHit as FusedHit
 from enterprise_pdf_rag.answers.ports import MountedDocument
 from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit
 from ragspine.retrieval.lexical.retrieval import bm25_scores, rrf_fuse, tokenize
@@ -75,20 +76,6 @@ def lexical_rank(index: LexicalIndex, query: str, *, limit: int) -> tuple[Pinned
         if score > 0
     ]
     return tuple(sorted(hits, key=lambda hit: (-hit.score, hit.member_id))[:limit])
-
-
-@dataclass(frozen=True, slots=True)
-class FusedHit:
-    snapshot_id: str
-    member_id: str
-    fused_score: float
-    vector_rank: int | None
-    lexical_rank: int | None
-    vector_score: float | None
-    bm25_score: float | None
-
-    def as_hit(self) -> PinnedRetrievalHit:
-        return PinnedRetrievalHit(self.snapshot_id, self.member_id, self.fused_score)
 
 
 def fuse(

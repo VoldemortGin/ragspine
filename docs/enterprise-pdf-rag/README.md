@@ -4,7 +4,7 @@ Python 3.12 / uv 文档 RAG 后端，目标是为不同 PDF 提供可追溯的�
 
 样本为 AIA 官网公开可查的《2026 Interim Results Presentation》（2026 年 8 月 20 日），来源是 [AIA 官方业绩与报告页](https://www.aia.com/en/investor-relations/overview/results-presentations)及[官方 PDF](https://www.aia.com/content/dam/group-wise/en/docs/investor-relations/2026/AIA%20Group%202026%20Interim%20Results%20Analyst%20Presentation%20Final.pdf)，并非私有客户数据。原 PDF 不随公共仓库发布。2026-09-19 已核对官方页面、PDF 封面日期和 71 页页数；本地文件身份仍由下文 SHA-256 固定。
 
-**现在可以测试** Open WebUI 来源/处理结果审阅、原文 API、已发布描述索引的在线语义搜索与证据回填，以及第 18 页已取得资格的结构化 ChartQA。2026-09-19 已在官方 pdfspine 0.11.0 环境受控重启并完成一次真实本地查询向量搜索，返回 5 条命中且回填保持同一快照；普通自然语言财务聊天仍返回 422。具体入口、请求、凭证要求和通用 RAG 的剩余条件见 [测试与入库指南](testing-and-ingestion.md)。界面可打开不代表 RAG 全链路通过。
+**现在可以测试** Open WebUI 来源/处理结果审阅、原文 API、已发布描述索引的在线语义搜索与证据回填，以及第 18 页已取得资格的结构化 ChartQA。2026-09-19 已在官方 pdfspine 0.11.0 环境受控重启并完成一次真实本地查询向量搜索，返回 5 条命中且回填保持同一快照；普通自然语言财务聊天在该模式下仍返回 422。2026-09-20 起另有与之并存的 `document-catalog` 服务模式（多文档目录、按文档检索、证据链上逐字段校验的自然语言回答），已离线实现并测试；真实模型验收结论以 [交接文档](CLAUDE_HANDOFF.md) 为准。具体入口、请求、凭证要求和通用 RAG 的剩余条件见 [测试与入库指南](testing-and-ingestion.md)。界面可打开不代表 RAG 全链路通过。
 
 当前验收样本是 AIA Group 报告。页面布局、typed IR、独立描述和资格回执分别保存；模型产物初始为 **pending**，成功保存不等于独立验证。只有逐字原文投影或具有完整字段资格的描述可以进入真实本地 embedding；ChartIR 和 SVG 不进入 embedding。`text.json` 仍是 pdfspine 原文观测。每页/对象是否已完成、失败或尚未运行，以处理 manifest 和实际文件为准。
 
@@ -34,7 +34,7 @@ enterprise-pdf-rag index   --source-store <src> --processing-store <proc> --proc
 enterprise-pdf-rag publish --source-store <src> --processing-store <proc> --processing-id <id>
 ```
 
-`qualify` 只读统计资格，零模型；`index` 用生产本地 embedding 构建 description-only 检索快照并产新不可变 snapshot，不切指针（`--document-label` 可覆盖审阅标题）；`publish` 原子切 `current-processing`，默认同时激活来源 manifest（`--no-activate-source` 只切 processing），未 `index` 的 draft 拒绝，内容寻址幂等。检索状态依次为 `not_ready → qualified; indexing pending → indexed; publication pending → ready`。这是资格/索引/发布入口，不等于通用 RAG 回答链已完成。
+`qualify` 只读统计资格，零模型；`index` 用生产本地 embedding 构建 description-only 检索快照并产新不可变 snapshot，不切指针（`--document-label` 可覆盖审阅标题）；`publish` 原子切 `current-processing`，默认同时激活来源 manifest（`--no-activate-source` 只切 processing），未 `index` 的 draft 拒绝，内容寻址幂等。检索状态依次为 `not_ready → qualified; indexing pending → indexed; publication pending → ready`。这是资格/索引/发布入口，不等于通用 RAG 回答链已完成。已发布的文档由 `APP_EXECUTION_MODE=document-catalog` 的服务进程挂载，提供 `/v1/documents*`、`/v1/models` 与证据链上的 `/v1/chat/completions`（[ADR 0011](adr/0011-document-catalog-and-verified-answer-chain.md)、[测试与入库指南](testing-and-ingestion.md)）。
 
 ## 公开验收样本的来源处理
 
@@ -171,4 +171,4 @@ bash scripts/ci.sh                               # 唯一完整、只读、离�
 
 真实 LLM 测试只在大版本或模型调用流程实质变化时显式触发，普通改动使用 transport 替身。来源 ingestion 不需要 LLM；前 20 页的视觉语义加工则使用有预算、可缓存的实际模型请求。已有 `llm-smoke` 仅验证连接；从环境读取 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL`，不读取 `.env`、不打印密钥，也不证明图表质量。本地 embedding/rerank 使用独立配置，未配置时拒绝，不继承云端 LLM。
 
-架构和范围见 [ADR 0001](adr/0001-architecture.md)、[图表链 ADR 0002](adr/0002-figure-pipeline.md)、[UI ADR 0003](adr/0003-open-webui.md)、[真实来源 ADR 0004](adr/0004-aia-source-review.md)、[前 20 页 ADR 0005](adr/0005-first-twenty-pages-processing.md)、[其他视觉 ADR 0006](adr/0006-non-chart-visual-semantics.md)、[独立安装 ADR 0007](adr/0007-installable-runtime.md)、[PRD v0.2](PRD-v0.2.md)。PDF、密钥、运行产物、虚拟环境与本地 IDE 配置不进入公共仓库。
+架构和范围见 [ADR 0001](adr/0001-architecture.md)、[图表链 ADR 0002](adr/0002-figure-pipeline.md)、[UI ADR 0003](adr/0003-open-webui.md)、[真实来源 ADR 0004](adr/0004-aia-source-review.md)、[前 20 页 ADR 0005](adr/0005-first-twenty-pages-processing.md)、[其他视觉 ADR 0006](adr/0006-non-chart-visual-semantics.md)、[独立安装 ADR 0007](adr/0007-installable-runtime.md)、[通用入库 ADR 0010](adr/0010-generic-pdf-ingestion-entry.md)、[文档目录与回答链 ADR 0011](adr/0011-document-catalog-and-verified-answer-chain.md)、[PRD v0.2](PRD-v0.2.md)。PDF、密钥、运行产物、虚拟环境与本地 IDE 配置不进入公共仓库。

@@ -145,3 +145,40 @@ def test_cross_page_and_dropped_source_occurrences_fail_before_processing() -> N
     )
     with pytest.raises(ValueError, match="all source text"):
         validate_partition(page, invented)
+
+
+def test_page_geometry_tolerates_model_rendered_float_noise_but_not_real_overreach() -> None:
+    from enterprise_pdf_rag.documents.models import AssetRef
+    from enterprise_pdf_rag.figures.models import Confidence
+    from enterprise_pdf_rag.processing.models import LayoutObject, PagePartition
+    from enterprise_pdf_rag.processing.service import validate_partition
+
+    page = PageInput(
+        "a" * 64,
+        "b" * 64,
+        0,
+        100.0,
+        100.0,
+        AssetRef(sha256(b"svg").hexdigest(), "image/svg+xml", 3),
+        TextSidecar(
+            "source-text-v1",
+            "b" * 64,
+            0,
+            (TextSpan("s0", "actual", (1.0, 1.0, 5.0, 5.0)),),
+        ),
+    )
+
+    def partition(bbox: tuple[float, float, float, float]) -> PagePartition:
+        return PagePartition(
+            "layout-v1",
+            page.source_manifest_id,
+            page.source_sha256,
+            0,
+            "test",
+            (LayoutObject("text", ObjectKind.TEXT, bbox, ("s0",), "ok", Confidence(None, "t")),),
+            (),
+        )
+
+    validate_partition(page, partition((0.0, 0.0, 100.00000000000001, 100.0)))
+    with pytest.raises(ValueError, match="outside source page geometry"):
+        validate_partition(page, partition((0.0, 0.0, 100.5, 100.0)))

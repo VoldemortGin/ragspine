@@ -28,6 +28,7 @@ from enterprise_pdf_rag.adapters.object_processing import ProcessingObjectAdapte
 from enterprise_pdf_rag.adapters.pdfspine_svg import crop_native_svg
 from enterprise_pdf_rag.adapters.pdfspine_tables import PdfspineTableAdapter
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
+from enterprise_pdf_rag.adapters.source_objects import source_table_description
 from enterprise_pdf_rag.adapters.visual_semantics import VisualSemanticAdapter
 from enterprise_pdf_rag.documents.models import AssetRef, TextSidecar
 from enterprise_pdf_rag.figures.models import ChartIR, TextDescription
@@ -40,6 +41,7 @@ from enterprise_pdf_rag.processing.models import (
     StageState,
 )
 from enterprise_pdf_rag.processing.table_models import TableExtractionResult, TableIR
+from enterprise_pdf_rag.processing.typed_ir import LiteralQualification, ObjectDescription
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,29 +234,70 @@ class SemanticObjectAdapter:
         result = PdfspineTableAdapter().extract(
             self.sources.get(source.manifest.source), page=page, item=item
         )
+        svg = writer.save("svg", crop, "image/svg+xml")
         stages.extend(
             (
-                writer.save("svg", crop, "image/svg+xml"),
+                svg,
                 writer.save(
                     "table_detection",
                     TypeAdapter(TableExtractionResult).dump_json(result),
                 ),
             )
         )
-        stages.append(
-            writer.diagnostic("ir", "; ".join(result.diagnostics))
-            if result.table is None
-            else writer.save("ir", TypeAdapter(TableIR).dump_json(result.table))
+        if result.table is None:
+            stages.extend(
+                (
+                    writer.diagnostic("ir", "; ".join(result.diagnostics)),
+                    writer.diagnostic(
+                        "description",
+                        "A table description cannot be generated before source cell/row/header relations have qualified.",
+                    ),
+                    writer.diagnostic(
+                        "qualification",
+                        "Typed native topology is observed; financial row/header relationships remain unverified.",
+                    ),
+                )
+            )
+            return ObjectProcessingRecord(item.object_id, item.kind, tuple(stages))
+        ir = writer.save("ir", TypeAdapter(TableIR).dump_json(result.table))
+        stages.append(ir)
+        try:
+            transcription = source_table_description(page, item, result.table)
+        except ValueError as error:
+            # The inferred grid is kept for review; only a verbatim transcription qualifies.
+            stages.extend(
+                (
+                    writer.diagnostic(
+                        "description",
+                        "A table description is only its verbatim cell transcription; "
+                        + str(error),
+                    ),
+                    writer.diagnostic(
+                        "qualification",
+                        "Typed native topology is observed but its literal transcription did "
+                        "not verify; financial row/header relationships remain unverified. "
+                        + str(error),
+                    ),
+                )
+            )
+            return ObjectProcessingRecord(item.object_id, item.kind, tuple(stages))
+        description = writer.save(
+            "description", TypeAdapter(ObjectDescription).dump_json(transcription)
+        )
+        qualification = LiteralQualification(
+            item.object_id,
+            transcription.source,
+            page.source_manifest_id,
+            transcription.source_span_ids,
+            _ref(ir),
+            _ref(description),
+            _ref(svg),
         )
         stages.extend(
             (
-                writer.diagnostic(
-                    "description",
-                    "A table description cannot be generated before source cell/row/header relations have qualified.",
-                ),
-                writer.diagnostic(
-                    "qualification",
-                    "Typed native topology is observed; financial row/header relationships remain unverified.",
+                description,
+                writer.save(
+                    "qualification", TypeAdapter(LiteralQualification).dump_json(qualification)
                 ),
             )
         )

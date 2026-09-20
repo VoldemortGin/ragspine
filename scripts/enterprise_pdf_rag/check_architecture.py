@@ -1,4 +1,4 @@
-"""Reject infrastructure dependencies and I/O in the pure figures package."""
+"""Reject infrastructure dependencies and I/O in the pure domain packages."""
 
 import ast
 import sys
@@ -9,7 +9,11 @@ PACKAGES = (
     "enterprise_pdf_rag.figures",
     "enterprise_pdf_rag.documents",
     "enterprise_pdf_rag.processing",
+    "enterprise_pdf_rag.answers",
 )
+# Per-package third-party allowances beyond the standard library. ``answers`` declares
+# the model's strict output schema with pydantic; nothing else is admitted.
+EXTRA_ALLOWED = {"enterprise_pdf_rag.answers": frozenset({"pydantic"})}
 FORBIDDEN_STDLIB = {
     "os",
     "pathlib",
@@ -26,11 +30,12 @@ FORBIDDEN_STDLIB = {
 def main() -> int:
     problems: list[str] = []
     domain_paths = [
-        path
+        (package, path)
         for package in PACKAGES
         for path in (ROOT / "src" / package.replace(".", "/")).rglob("*.py")
     ]
-    for path in domain_paths:
+    for package, path in domain_paths:
+        extra = EXTRA_ALLOWED.get(package, frozenset())
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             names: list[tuple[str, int]] = []
             if isinstance(node, ast.Import):
@@ -39,7 +44,9 @@ def main() -> int:
                 names = [(node.module or "", node.lineno)]
             for name, line in names:
                 root = name.split(".")[0]
-                if any(name == package or name.startswith(package + ".") for package in PACKAGES):
+                if any(name == pure or name.startswith(pure + ".") for pure in PACKAGES):
+                    continue
+                if root in extra:
                     continue
                 if root not in sys.stdlib_module_names or root in FORBIDDEN_STDLIB:
                     problems.append(
@@ -56,7 +63,7 @@ def main() -> int:
     for problem in problems:
         print(problem)
     if not problems:
-        print("Pure figures/documents/processing architecture verified.")
+        print("Pure figures/documents/processing/answers architecture verified.")
     return int(bool(problems))
 
 

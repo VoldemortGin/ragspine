@@ -103,6 +103,45 @@ uv run --locked python scripts/enterprise_pdf_rag/webui_preview.py start --profi
 
 该模式的唯一模型为 `enterprise-pdf-rag-offline-demo-v1`，问题集合和证据固定。它不能替代真实 AIA 来源 ingestion 或财报问答验证。
 
+## document-catalog profile：任意已发布文档的证据链聊天
+
+`--profile document-catalog` 让同一个 gate 服务 `document-catalog` 模式的后端（[测试与入库指南](testing-and-ingestion.md) 的同名节，契约 `rag-chat-v1`）。它与两个固定 profile 并存，后者行为不变。
+
+- 模型列表来自后端 `/v1/models`：每个已挂载文档一个 `enterprise-pdf-rag/<sha256 前 12 位>`，在 Open WebUI 的模型选择器里按文档挑选；没有预设默认模型，也没有固定问题集，问题是自由文本，后端只按已验证证据回答或拒答。
+- 请求路径：浏览器 → gate（`/api/chat/completions`，仍拒绝上传、工具、knowledge、联网）→ Open WebUI → gate 自带的 relay（`/v1/models`、`/v1/chat/completions`；`OPENAI_API_BASE_URL` 指向 gate 自己的端口）→ 后端 API（`ENTERPRISE_WEBUI_BACKEND_URL`）。Open WebUI 进程本身不直接连后端。
+- relay 白名单净化：只转发 `model`（必须以 `enterprise-pdf-rag/` 开头）、`messages`（每条只保留 `role`/`content`，content 规约为纯文本：数组形式的多段 `text` 按行合并，含图片等非文本部分则 403 而不是悄悄丢弃）、`stream`、`stream_options.include_usage`、`document`、`rerank`；Open WebUI 附加的 `metadata`、`chat_id`、`id`、`session_id`、`params`、`temperature`、`max_tokens` 等一律丢弃，不会变成后端的 422。消息条数上限沿用契约的 32。
+- 凭证隔离：relay 只接受携带本地占位 key 的调用（即同进程的 Open WebUI），转发前去掉 `Authorization`；后端不需要 key，浏览器或反代带来的任何 `Authorization` 头都不会到达后端。Open WebUI 的 `/ws/socket.io` 与其余放行路径原样透传。
+- SSE 逐块透传、不缓冲；后端 4xx/5xx 保持状态码，其 `detail` 同时复制到 `error.message`（Open WebUI 只显示后者，否则界面只见 "Server Connection Error"）；后端不可达为 503，文案不含地址。
+
+启动示例（后端 8768、UI 3200；默认仍是 8766/8767，两个端口都由环境变量给出，`status` 也要带同样的环境）：
+
+```sh
+export APP_INGESTION_DIR=/abs/path/data/ingestion              # 可省略；见测试与入库指南
+export EMBEDDING_BASE_URL='<loopback url>' EMBEDDING_MODEL='<model>' EMBEDDING_API_KEY='<key>'
+export OPENAI_BASE_URL='<https url>' OPENAI_MODEL='<model>' OPENAI_API_KEY='<key>'
+ENTERPRISE_API_PORT=8768 ENTERPRISE_WEBUI_PORT=3200 \
+  ./scripts/enterprise_pdf_rag/start.sh --profile document-catalog
+ENTERPRISE_API_PORT=8768 ENTERPRISE_WEBUI_PORT=3200 \
+  uv run --locked python scripts/enterprise_pdf_rag/webui_preview.py status --profile document-catalog
+```
+
+只有 API 子进程继承 `EMBEDDING_*` / `OPENAI_*` / `RERANK_*` / `APP_INGESTION_DIR` / `APP_LEGACY_DOCUMENT_ROOTS` / `APP_ANSWER_MAX_LIVE_CALLS`；Open WebUI 进程只收到构造的环境和占位 key。
+
+### 可选：启用 Open WebUI 自带登录（对外暴露时）
+
+默认 `WEBUI_AUTH=False`（无登录、无注册），与固定 profile 相同。只有 document-catalog profile 可显式 opt-in：`ENTERPRISE_WEBUI_AUTH=1` 让 gate 给 vendor 进程输出 `WEBUI_AUTH=True`，并只透传 `ENABLE_SIGNUP`（默认 `True`；0.6.5 按 `.lower() == "true"` 解析）与 `DEFAULT_USER_ROLE`（默认 `pending`，可选 `user`/`admin`）这两个变量，仍不透传任何模型 key。gate 此时额外放行 `POST /api/v1/auths/signup`。Open WebUI 让**第一个注册的用户成为 admin**（`routers/auths.py:signup`，`user_count == 0` → `admin`），之后的注册按 `DEFAULT_USER_ROLE`；因为 `ENABLE_PERSISTENT_CONFIG=False`，每次启动重读 env，用户表则保存在 `data/open-webui-preview/vendor/webui.db`。
+
+```sh
+# 首次：开放注册，浏览器打开 UI 端口注册管理员（表单要求邮箱格式）
+ENTERPRISE_WEBUI_AUTH=1 ENTERPRISE_API_PORT=8768 ENTERPRISE_WEBUI_PORT=3200 \
+  ./scripts/enterprise_pdf_rag/start.sh --profile document-catalog
+# 之后：stop，再以关闭注册重启
+ENTERPRISE_WEBUI_AUTH=1 ENABLE_SIGNUP=False ENTERPRISE_API_PORT=8768 ENTERPRISE_WEBUI_PORT=3200 \
+  ./scripts/enterprise_pdf_rag/start.sh --profile document-catalog
+```
+
+用反代做 HTTP Basic 鉴权会与 Open WebUI 前端自带的 `Authorization: Bearer` 冲突，不要叠加。`status` 只要求 `/v1/models` 里的 id 全部以 `enterprise-pdf-rag/` 开头（空目录也算该 profile）。`start.sh` 仍固定加 `--require-processing`，它只对 AIA profile 生效。直接运行 gate 时同样的端口以参数给出：`webui_gate.py --profile document-catalog --port 3200 --backend-port 8768 --data-dir <dir>`。Compose 目前仍把 profile、只读挂载与健康检查固定在 AIA 上，document-catalog 尚无容器配置。
+
 ## 受限边界
 
 Open WebUI 只连接本地 API，并收到固定占位 key；启动器构造完整的子进程环境，不继承用户的云端 API key、数据库、对象存储或模型下载配置。外层 ASGI gate 在 vendor 代码之前拒绝上传、文件/knowledge、内置 retrieval、工具/function、联网搜索、其他模型、未知问题和管理配置写入。旧版 UI 的 title/tag 后台任务会在进入 vendor 前被强制关闭，未知且启用的后台任务仍被拒绝。

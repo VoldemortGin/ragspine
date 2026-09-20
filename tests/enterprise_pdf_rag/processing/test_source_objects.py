@@ -82,3 +82,45 @@ def test_nonchart_projection_rejects_unobserved_or_outside_text_occurrences() ->
         )
         with pytest.raises(ValueError, match="occurrence"):
             source_object_ir(page, item)
+
+
+def test_projection_tolerates_model_rendered_coordinates_but_not_real_overreach() -> None:
+    # pdfspine emits ``42.400000000000006``; the layout model echoes the prompt as ``42.4``.
+    span = TextSpan(
+        "s0",
+        "Meridian Holdings semiannual report 1H26",
+        (20.0, 30.400000000000006, 307.9999999999998, 42.400000000000006),
+    )
+    page = PageInput(
+        "a" * 64,
+        "b" * 64,
+        0,
+        320.0,
+        260.0,
+        AssetRef(sha256(b"svg").hexdigest(), "image/svg+xml", 3),
+        TextSidecar("source-text-v1", "b" * 64, 0, (span,)),
+    )
+    for kind in (ObjectKind.TEXT, ObjectKind.LIST, ObjectKind.GROUP):
+        item = LayoutObject(
+            "line",
+            kind,
+            (20.0, 30.4, 308.0, 42.4),
+            ("s0",),
+            "Inferred layout",
+            Confidence(None, "test inference"),
+        )
+        assert source_object_ir(page, item).description.text == span.text
+        with pytest.raises(ValueError, match="unbound source occurrence"):
+            source_object_ir(page, replace(item, bbox=(20.0, 30.4, 308.0, 41.9)))
+    region = LayoutObject(
+        "card",
+        ObjectKind.GROUP,
+        (20.0, 30.4, 308.0, 42.4),
+        (),
+        "Inferred layout",
+        Confidence(None, "test inference"),
+        child_object_ids=("line",),
+    )
+    assert source_object_ir(page, region).description.source_span_ids == ("s0",)
+    short = source_object_ir(page, replace(region, bbox=(20.0, 30.4, 308.0, 41.9)))
+    assert short.description.source_span_ids == ()

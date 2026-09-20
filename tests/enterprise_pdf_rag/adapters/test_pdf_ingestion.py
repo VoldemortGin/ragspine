@@ -20,8 +20,38 @@ from enterprise_pdf_rag.core.settings import ROOT_DIR
 from enterprise_pdf_rag.processing.models import CanonicalPage, StageState
 from tests.enterprise_pdf_rag.adapters.test_source_paint import _FontInsertionPage
 
+# Ruled 3x2 grid drawn on the last page by ``authored_pdf(table_page=True)``; the
+# bottom-right cell is left blank on purpose so cell states differ.
+TABLE_COLUMNS = (20.0, 120.0, 220.0)
+TABLE_ROWS = (60.0, 86.0, 113.0, 140.0)
+TABLE_CELLS = {
+    (0, 0): "Metric",
+    (0, 1): "Value",
+    (1, 0): "Revenue",
+    (1, 1): "1,234",
+    (2, 0): "Margin",
+}
 
-def authored_pdf(path: Path, *, page_count: int, label: str, embedded_font: bool = False) -> Path:
+
+def _draw_table(page: pdfspine.Page, fontname: str) -> None:
+    for y in TABLE_ROWS:
+        page.draw_line((TABLE_COLUMNS[0], y), (TABLE_COLUMNS[-1], y), width=1)
+    for x in TABLE_COLUMNS:
+        page.draw_line((x, TABLE_ROWS[0]), (x, TABLE_ROWS[-1]), width=1)
+    for (row, column), text in TABLE_CELLS.items():
+        page.insert_text(
+            (TABLE_COLUMNS[column] + 6, TABLE_ROWS[row] + 18), text, fontsize=11, fontname=fontname
+        )
+
+
+def authored_pdf(
+    path: Path,
+    *,
+    page_count: int,
+    label: str,
+    embedded_font: bool = False,
+    table_page: bool = False,
+) -> Path:
     with pdfspine.open() as document:
         for number in range(page_count):
             page = document.new_page(width=240, height=160)
@@ -35,6 +65,8 @@ def authored_pdf(path: Path, *, page_count: int, label: str, embedded_font: bool
                     ).read_bytes(),
                 )
             page.insert_text((20, 40), f"{label} page {number + 1}", fontsize=12, fontname=fontname)
+            if table_page and number == page_count - 1:
+                _draw_table(page, fontname)
         path.write_bytes(document.tobytes())
     return path
 

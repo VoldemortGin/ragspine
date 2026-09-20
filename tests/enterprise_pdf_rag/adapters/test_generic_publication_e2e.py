@@ -16,6 +16,10 @@ from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
 from enterprise_pdf_rag.adapters.processing_retrieval import ProcessingRetrieval
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.cli import main
+from enterprise_pdf_rag.figures.models import Verification
+from enterprise_pdf_rag.processing.context_builder import BlockKind, build_context_block
+from enterprise_pdf_rag.processing.models import ObjectKind, StageState
+from enterprise_pdf_rag.processing.table_models import TableIR
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
     ingest_generic_semantics,
 )
@@ -149,3 +153,115 @@ def test_generic_pdf_cli_qualify_index_publish_smoke(
     # not_ready → qualified → indexed → ready, one processing lineage, zero model calls.
     assert (processing_store / "current-processing").read_text().strip() == indexed_id
     assert len(calls) == 3
+
+
+class _RecordingOfflineEmbedder(OfflineDescriptionEmbedder):
+    """The offline vector plus a record of exactly which texts were embedded."""
+
+    def __init__(self) -> None:
+        self.descriptions: list[str] = []
+
+    def embed_description(self, text: str) -> tuple[float, ...]:
+        self.descriptions.append(text)
+        return super().embed_description(text)
+
+
+def test_generic_pdf_native_table_is_indexed_description_only_under_policy_v2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ingest, calls = ingest_generic_semantics(tmp_path, monkeypatch, table_page=True)
+    assert ingest.failed_stage_count == 0 and len(calls) == 3
+    source_store = Path(ingest.source_store)
+    processing_store = Path(ingest.processing_store)
+
+    qualified = qualify_draft(
+        source_store=source_store,
+        processing_store=processing_store,
+        processing_id=ingest.processing_id,
+    )
+    assert qualified.qualification_policy == "retrieval-eligibility-kind-and-stage-completeness-v2"
+    assert qualified.kinds == {"Table": 1, "Text": 3}
+    assert qualified.skipped_reasons == {}
+
+    embedder = _RecordingOfflineEmbedder()
+    indexed = index_draft(
+        source_store=source_store,
+        processing_store=processing_store,
+        processing_id=ingest.processing_id,
+        embedder=embedder,
+    )
+    assert indexed.member_count == 4
+    published = publish_draft(
+        source_store=source_store,
+        processing_store=processing_store,
+        processing_id=indexed.indexed_processing_id,
+    )
+    sources = LocalDocumentStore(source_store)
+    outputs = ProcessingStore(processing_store)
+    _, manifest = outputs.load_current()
+    publication = manifest.retrieval
+    assert publication is not None
+    plan, _ = outputs.load_retrieval(publication)
+    assert plan.qualification_policy == "source-transcription-and-scoped-chart-qualification-v2"
+    (table_member,) = tuple(member for member in plan.members if member.kind is ObjectKind.TABLE)
+    assert table_member.page_index == 2
+
+    # Description-only: the embedded text is the cells' source text, never the grid.
+    table_text = "Metric\nValue\nRevenue\n1,234\nMargin"
+    assert table_text in embedder.descriptions
+    assert not any("cells." in text or "row" in text for text in embedder.descriptions)
+
+    retrieval = ProcessingRetrieval(sources, outputs, embedder)
+    hits = retrieval.search(publication, "Metric Value Margin 1,234", limit=4)
+    assert hits[0].member_id == table_member.member_id
+    assert hits[0].snapshot_id == published.retrieval_snapshot_id
+
+    context = retrieval.resolve(publication, hits[0])
+    assert isinstance(context.ir, TableIR)
+    assert context.ir.verification is Verification.PENDING  # inferred grid stays pending
+    assert context.description.verification is Verification.VERIFIED
+    assert context.description.text == table_text
+    assert context.scope == "literal-source-transcription-v1"
+    assert (context.ir.row_count, context.ir.col_count) == (3, 2)
+    assert tuple(cell.text for cell in context.ir.cells) == (*table_text.split("\n"), "")
+    block = build_context_block(context)
+    assert block.kind is BlockKind.TABLE and block.verification is Verification.VERIFIED
+    value = next(cell for cell in block.cells if cell.text == "1,234")
+    assert (value.row, value.col) == (1, 1) and len(value.source_span_ids) == 1
+    assert f"cells.{value.cell_id} (1,1): 1,234" in block.prompt_text()
+    assert len(calls) == 3
+
+
+def test_generic_pdf_table_owning_a_caption_is_not_verified_and_stays_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ingest, _ = ingest_generic_semantics(tmp_path, monkeypatch, table_page=True, table_caption=True)
+    assert ingest.failed_stage_count == 0
+    source_store = Path(ingest.source_store)
+    processing_store = Path(ingest.processing_store)
+    manifest = ProcessingStore(processing_store).load(ingest.processing_id)
+    (record,) = tuple(
+        item for page in manifest.pages for item in page.objects if item.kind is ObjectKind.TABLE
+    )
+    stages = {stage.stage: stage for stage in record.stages}
+    assert stages["ir"].state is StageState.SUCCEEDED  # the grid itself was observed
+    assert stages["description"].state is StageState.UNAVAILABLE
+    assert stages["qualification"].state is StageState.UNAVAILABLE
+    assert "outside its native cells" in (stages["qualification"].diagnostic or "")
+
+    qualified = qualify_draft(
+        source_store=source_store,
+        processing_store=processing_store,
+        processing_id=ingest.processing_id,
+    )
+    assert qualified.kinds == {"Text": 2}
+    assert qualified.skipped_reasons == {
+        "Table transcription is not verified; only verified tables are retrievable": 1
+    }
+    indexed = index_draft(
+        source_store=source_store,
+        processing_store=processing_store,
+        processing_id=ingest.processing_id,
+        embedder=OfflineDescriptionEmbedder(),
+    )
+    assert indexed.member_count == 2

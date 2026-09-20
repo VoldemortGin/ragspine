@@ -4,8 +4,10 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from enterprise_pdf_rag.adapters.aia_ingestion import AIA_OUTPUT
+from enterprise_pdf_rag.adapters.document_catalog import scan_catalog
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.http.aia_review import create_aia_app
+from enterprise_pdf_rag.adapters.http.documents import create_documents_app
 from enterprise_pdf_rag.adapters.http.openai_demo import create_demo_router
 from enterprise_pdf_rag.adapters.http.schemas import (
     ContextRequest,
@@ -16,11 +18,14 @@ from enterprise_pdf_rag.adapters.http.schemas import (
     SearchRequest,
     SearchResponse,
 )
-from enterprise_pdf_rag.adapters.local_models import LocalEmbeddingAdapter
+from enterprise_pdf_rag.adapters.hybrid_search import LocalRerankJudge
+from enterprise_pdf_rag.adapters.json_completion import JsonCompletionClient
+from enterprise_pdf_rag.adapters.local_models import LocalEmbeddingAdapter, LocalRerankAdapter
 from enterprise_pdf_rag.adapters.processing_runtime import PROCESSING_OUTPUT
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.providers import (
     ProviderConfigurationError,
+    load_llm_config,
     load_local_model_config,
 )
 from enterprise_pdf_rag.adapters.runtime import create_runtime
@@ -70,7 +75,9 @@ def create_configured_app() -> FastAPI:
     """Load the explicit API profile from external configuration and saved data."""
     configured = get_settings().execution_mode
     if configured == "unconfigured":
-        raise ValueError("Set APP_EXECUTION_MODE explicitly to aia-source-review or offline-demo")
+        raise ValueError(
+            "Set APP_EXECUTION_MODE explicitly to aia-source-review, document-catalog or offline-demo"
+        )
     if configured == "aia-source-review":
         processing = (
             ProcessingStore(PROCESSING_OUTPUT)
@@ -84,4 +91,26 @@ def create_configured_app() -> FastAPI:
         return create_aia_app(
             LocalDocumentStore(AIA_OUTPUT), processing=processing, embedder=embedder
         )
+    if configured == "document-catalog":
+        settings = get_settings()
+        catalog = scan_catalog(settings.ingestion_root, legacy_roots=settings.legacy_document_roots)
+        try:
+            # Built once and shared by every mount; construction sends no request.
+            shared_embedder = LocalEmbeddingAdapter(load_local_model_config("embedding"))
+        except ProviderConfigurationError:
+            shared_embedder = None
+        try:
+            # One bounded client for every chat request; construction sends nothing.
+            llm = JsonCompletionClient(
+                load_llm_config(),
+                cache_dir=settings.ingestion_root / "model-cache",
+                max_live_calls=settings.answer_max_live_calls,
+            )
+        except ProviderConfigurationError:
+            llm = None
+        try:
+            reranker = LocalRerankJudge(LocalRerankAdapter(load_local_model_config("rerank")))
+        except ProviderConfigurationError:
+            reranker = None
+        return create_documents_app(catalog, embedder=shared_embedder, llm=llm, reranker=reranker)
     return create_app(mode=ExecutionMode(configured))

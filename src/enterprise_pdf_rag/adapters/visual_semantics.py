@@ -30,6 +30,7 @@ from enterprise_pdf_rag.figures.models import (
     Verification,
     content_id,
 )
+from enterprise_pdf_rag.processing.geometry import contains
 from enterprise_pdf_rag.processing.models import LayoutObject, ObjectKind, PageInput
 from enterprise_pdf_rag.processing.typed_ir import (
     DiagramEdge,
@@ -76,9 +77,7 @@ class VisualInference:
 
 
 def _inside(inner: Bounds, outer: Bounds) -> bool:
-    return (
-        outer[0] <= inner[0] < inner[2] <= outer[2] and outer[1] <= inner[1] < inner[3] <= outer[3]
-    )
+    return contains(outer, inner)
 
 
 def _overlaps(first: Bounds, second: Bounds) -> bool:

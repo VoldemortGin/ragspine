@@ -668,3 +668,81 @@ def test_source_only_draft_produces_publishable_empty_index(tmp_path: Path) -> N
     assert (
         outputs.root / "current-processing"
     ).read_text().strip() == indexed.indexed_processing_id
+
+
+def _table_draft(
+    tmp_path: Path, *, verified: bool
+) -> tuple[LocalDocumentStore, ProcessingStore, str]:
+    """A draft whose only object is a Table; ``verified`` means its literal transcription
+    qualified (all four stages succeeded) rather than staying unavailable."""
+    sources = LocalDocumentStore(tmp_path / "source")
+    outputs = ProcessingStore(tmp_path / "processed")
+    source_id, sha, page, _item = _publish_source(sources)
+    table_item = LayoutObject(
+        "table",
+        ObjectKind.TABLE,
+        (0.0, 0.0, 100.0, 40.0),
+        ("number",),
+        "ruled metrics table",
+        Confidence(None, "test"),
+    )
+    artifact = outputs.assets.put(b"{}", media_type="application/json")
+
+    def succeeded(stage: str) -> StageOutcome:
+        return StageOutcome(stage, "3" * 64, StageState.SUCCEEDED, "test", artifact)
+
+    def unavailable(stage: str) -> StageOutcome:
+        return StageOutcome(
+            stage, "4" * 64, StageState.UNAVAILABLE, "test", None, "transcription drifted"
+        )
+
+    stages = (
+        (succeeded("svg"), succeeded("ir"), succeeded("description"), succeeded("qualification"))
+        if verified
+        else (
+            succeeded("svg"),
+            succeeded("ir"),
+            unavailable("description"),
+            unavailable("qualification"),
+        )
+    )
+    record = ObjectProcessingRecord("table", ObjectKind.TABLE, stages)
+    scope = ProcessingScope(source_id, sha, 1, (0,))
+    page_record = PageProcessingRecord(
+        0,
+        _canonical(outputs, page),
+        _partition(outputs, source_id, sha, table_item),
+        (record,),
+    )
+    manifest = ProcessingManifest("processing-v1", scope, "test", (page_record,))
+    return sources, outputs, outputs.save_draft(manifest, sources=sources)
+
+
+def test_qualify_counts_a_verified_table_member_under_policy_v2(tmp_path: Path) -> None:
+    sources, outputs, processing_id = _table_draft(tmp_path, verified=True)
+    result = qualify_draft(
+        source_store=sources.root,
+        processing_store=outputs.root,
+        processing_id=processing_id,
+    )
+    assert result.qualification_policy == "retrieval-eligibility-kind-and-stage-completeness-v2"
+    assert result.eligible_member_count == 1
+    assert result.skipped_object_count == 0
+    assert result.chart_member_count == 0
+    assert result.kinds == {"Table": 1}
+    assert result.skipped_reasons == {}
+
+
+def test_qualify_skips_an_unverified_table_with_its_own_reason(tmp_path: Path) -> None:
+    sources, outputs, processing_id = _table_draft(tmp_path, verified=False)
+    result = qualify_draft(
+        source_store=sources.root,
+        processing_store=outputs.root,
+        processing_id=processing_id,
+    )
+    assert result.eligible_member_count == 0
+    assert result.skipped_object_count == 1
+    assert result.kinds == {}
+    assert result.skipped_reasons == {
+        "Table transcription is not verified; only verified tables are retrievable": 1
+    }

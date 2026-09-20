@@ -1,7 +1,13 @@
 """Ground literal text projections separately from inferred financial relationships."""
 
 from enterprise_pdf_rag.figures.models import Confidence, SourceAnchor, Verification
+from enterprise_pdf_rag.processing.geometry import contains
 from enterprise_pdf_rag.processing.models import LayoutObject, ObjectKind, PageInput
+from enterprise_pdf_rag.processing.table_models import TableIR
+from enterprise_pdf_rag.processing.table_transcription import (
+    check_table_transcription,
+    table_span_ids,
+)
 from enterprise_pdf_rag.processing.typed_ir import (
     GroupIR,
     ListIR,
@@ -9,6 +15,11 @@ from enterprise_pdf_rag.processing.typed_ir import (
     ObservedText,
     SourceObjectResult,
     TextIR,
+)
+
+_LITERAL_PRODUCER = "exact-source-transcription-v1"
+_LITERAL_CONFIDENCE = Confidence(
+    None, "deterministic source occurrence transcription; no semantic inference"
 )
 
 
@@ -20,10 +31,7 @@ def source_object_ir(page: PageInput, item: LayoutObject) -> SourceObjectResult:
     fragments: list[ObservedText] = []
     for span_id in item.source_span_ids:
         span = observed.get(span_id)
-        if span is None or not (
-            item.bbox[0] <= span.bbox[0] < span.bbox[2] <= item.bbox[2]
-            and item.bbox[1] <= span.bbox[1] < span.bbox[3] <= item.bbox[3]
-        ):
+        if span is None or not contains(item.bbox, span.bbox):
             raise ValueError("Text projection contains an unbound source occurrence")
         fragments.append(
             ObservedText(
@@ -39,10 +47,7 @@ def source_object_ir(page: PageInput, item: LayoutObject) -> SourceObjectResult:
         )
     if not fragments and item.kind is ObjectKind.GROUP and item.child_object_ids:
         region_observations = tuple(
-            span
-            for span in page.text.spans
-            if item.bbox[0] <= span.bbox[0] < span.bbox[2] <= item.bbox[2]
-            and item.bbox[1] <= span.bbox[1] < span.bbox[3] <= item.bbox[3]
+            span for span in page.text.spans if contains(item.bbox, span.bbox)
         )
         return SourceObjectResult(
             item.kind,
@@ -102,8 +107,37 @@ def source_object_ir(page: PageInput, item: LayoutObject) -> SourceObjectResult:
         source,
         item.source_span_ids,
         "\n".join(fragment.text for fragment in fragments),
-        "exact-source-transcription-v1",
-        Confidence(None, "deterministic source occurrence transcription; no semantic inference"),
+        _LITERAL_PRODUCER,
+        _LITERAL_CONFIDENCE,
         Verification.VERIFIED,
     )
     return SourceObjectResult(item.kind, source, ir, description)
+
+
+def source_table_description(
+    page: PageInput, item: LayoutObject, table: TableIR
+) -> ObjectDescription:
+    """Transcribe a native table's cells verbatim, in cell order, as its only description.
+
+    The description is source text alone (no rows, columns or cell ids), so only
+    natural language is ever embedded. Any occurrence the layout owns outside the
+    native cells, or any cell text that drifts from its occurrences, refuses.
+    """
+    if item.kind is not ObjectKind.TABLE or table.object_id != item.object_id:
+        raise ValueError("This producer only transcribes the Table object's own native grid")
+    span_ids = table_span_ids(table)
+    if not span_ids:
+        raise ValueError("No literal source text is available for this table")
+    if set(span_ids) != set(item.source_span_ids):
+        raise ValueError("Table layout owns source occurrences outside its native cells")
+    observed = {span.span_id: span for span in page.text.spans}
+    check_table_transcription(table, observed, anchor=item.bbox)
+    return ObjectDescription(
+        item.object_id,
+        SourceAnchor(page.source_sha256, page.source_sha256, page.page_index, item.bbox),
+        span_ids,
+        "\n".join(observed[span_id].text for span_id in span_ids),
+        _LITERAL_PRODUCER,
+        _LITERAL_CONFIDENCE,
+        Verification.VERIFIED,
+    )

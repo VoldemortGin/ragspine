@@ -11,14 +11,21 @@ import re
 import secrets
 import sys
 import unicodedata
+from collections.abc import Mapping
+from dataclasses import dataclass
 from importlib import import_module
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import cast
 
+import httpx
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 AIA_REVIEW_MODEL = "aia-2026-interim-source-review-v1"
+# The document-catalog profile serves one model per mounted document (``rag-chat-v1``); the
+# gate itself relays ``/v1/models`` and ``/v1/chat/completions`` to the backend.
+DOCUMENT_CATALOG_PROFILE = "document-catalog"
+DOCUMENT_MODEL_PREFIX = "enterprise-pdf-rag/"
 
 
 def source_review_page(value: str) -> int | None:
@@ -75,6 +82,14 @@ _DISABLED_READS = {
     "/api/changelog": b"{}",
 }
 _CHAT_PATHS = frozenset({"/api/chat/completions", "/api/chat/completed"})
+_RELAY_ROUTES = {"/v1/models": "GET", "/v1/chat/completions": "POST"}
+# Only these backend headers are repeated; the server name and framing are this process's.
+_RELAY_HEADERS = frozenset(
+    {"content-type", "content-encoding", "cache-control", "x-accel-buffering"}
+)
+_DOCUMENT_ROLES = frozenset({"system", "user", "assistant"})
+_DOCUMENT_REFERENCE = re.compile(r"[0-9a-f]{12,64}")
+_LOCAL_BACKEND = re.compile(r"http://(?:127\.0\.0\.1|api):\d{1,5}/v1")
 _FORBIDDEN_INPUTS = frozenset(
     {
         "files",
@@ -126,7 +141,11 @@ def _allowed_route(path: str, method: str) -> bool:
     return False
 
 
-async def _reject(send: Send, status: int = 403) -> None:
+async def _reject(
+    send: Send,
+    status: int = 403,
+    detail: str = "This local demo disables uploads, built-in RAG, tools and configuration changes.",
+) -> None:
     await send(
         {
             "type": "http.response.start",
@@ -134,16 +153,42 @@ async def _reject(send: Send, status: int = 403) -> None:
             "headers": [(b"content-type", b"application/json")],
         }
     )
-    await send(
-        {
-            "type": "http.response.body",
-            "body": b'{"detail":"This local demo disables uploads, built-in RAG, tools and configuration changes."}',
-        }
-    )
+    await send({"type": "http.response.body", "body": json.dumps({"detail": detail}).encode()})
+
+
+async def _read_body(receive: Receive, send: Send) -> bytes | None:
+    """The whole request body, or ``None`` once the client left or a 413 was answered."""
+    body = bytearray()
+    while True:
+        message = await receive()
+        if message["type"] == "http.disconnect":
+            return None
+        body.extend(message.get("body", b""))
+        if len(body) > 524288:
+            await _reject(send, 413)
+            return None
+        if not message.get("more_body", False):
+            return bytes(body)
+
+
+def _model_accepted(model: object, model_id: str) -> bool:
+    if model_id == DOCUMENT_CATALOG_PROFILE:
+        return isinstance(model, str) and model.startswith(DOCUMENT_MODEL_PREFIX)
+    return model == model_id
+
+
+def _question_accepted(content: str, model_id: str) -> bool:
+    if model_id == DOCUMENT_CATALOG_PROFILE:
+        # Free text: the backend answers only from verified evidence or abstains.
+        return True
+    question = normalize_demo_question(content)
+    if model_id == AIA_REVIEW_MODEL:
+        return source_review_page(question) is not None
+    return question in DEMO_QUESTIONS
 
 
 def _safe_chat(payload: object, model_id: str) -> bool:
-    if not isinstance(payload, dict) or payload.get("model") != model_id:
+    if not isinstance(payload, dict) or not _model_accepted(payload.get("model"), model_id):
         return False
     messages = payload.get("messages")
     if not isinstance(messages, list) or not 1 <= len(messages) <= 32:
@@ -158,11 +203,7 @@ def _safe_chat(payload: object, model_id: str) -> bool:
             return False
         if message["role"] == "user":
             has_user = True
-            question = normalize_demo_question(message["content"])
-            if model_id == AIA_REVIEW_MODEL:
-                if source_review_page(question) is None:
-                    return False
-            elif question not in DEMO_QUESTIONS:
+            if not _question_accepted(message["content"], model_id):
                 return False
     if not has_user:
         return False
@@ -184,14 +225,197 @@ def _safe_chat(payload: object, model_id: str) -> bool:
     return True
 
 
+def _plain_text(content: object) -> str | None:
+    """Text content as one string; ``None`` for images or any other non-text part.
+
+    Images are refused rather than silently dropped: an answer that ignored an attached
+    picture would look like it had been considered.
+    """
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return None
+    parts: list[str] = []
+    for part in content:
+        if (
+            not isinstance(part, dict)
+            or part.get("type") != "text"
+            or not isinstance(part.get("text"), str)
+        ):
+            return None
+        parts.append(part["text"])
+    return "\n".join(parts)
+
+
+def document_chat_payload(payload: object) -> dict[str, object] | None:
+    """The ``rag-chat-v1`` subset of a vendor chat request, or ``None`` when unservable.
+
+    The UI adds bookkeeping (``metadata``, ``chat_id``, ``params``, sampling settings …)
+    that the ``extra="forbid"`` backend would reject; it is dropped here instead. Kept:
+    ``model`` (a document model), ``messages`` (role + plain text), ``stream``,
+    ``stream_options.include_usage``, ``document`` and ``rerank`` when well-typed.
+    """
+    if not isinstance(payload, dict):
+        return None
+    model = payload.get("model")
+    if not isinstance(model, str) or not model.startswith(DOCUMENT_MODEL_PREFIX):
+        return None
+    messages = payload.get("messages")
+    if not isinstance(messages, list) or not 1 <= len(messages) <= 32:
+        return None
+    kept: list[dict[str, str]] = []
+    for message in messages:
+        if not isinstance(message, dict) or message.get("role") not in _DOCUMENT_ROLES:
+            return None
+        text = _plain_text(message.get("content"))
+        if text is None:
+            return None
+        kept.append({"role": message["role"], "content": text})
+    clean: dict[str, object] = {"model": model, "messages": kept}
+    if isinstance(payload.get("stream"), bool):
+        clean["stream"] = payload["stream"]
+    options = payload.get("stream_options")
+    if isinstance(options, dict) and isinstance(options.get("include_usage"), bool):
+        clean["stream_options"] = {"include_usage": options["include_usage"]}
+    document = payload.get("document")
+    if isinstance(document, str) and _DOCUMENT_REFERENCE.fullmatch(document):
+        clean["document"] = document
+    if payload.get("rerank") is True:
+        clean["rerank"] = True
+    return clean
+
+
+def _visible_error(body: bytes) -> bytes:
+    """Repeat a FastAPI ``detail`` under ``error.message``, the only key the UI displays."""
+    try:
+        parsed: object = json.loads(body)
+    except ValueError:
+        return body
+    if (
+        not isinstance(parsed, dict)
+        or "error" in parsed
+        or not isinstance(parsed.get("detail"), str)
+    ):
+        return body
+    return json.dumps({**parsed, "error": {"message": parsed["detail"]}}).encode()
+
+
+class DocumentRelay:
+    """Serves the two OpenAI routes the UI needs from the document-catalog backend.
+
+    Only ``document_chat_payload`` leaves this process; the UI's placeholder credential is
+    checked and dropped, so no ``Authorization`` header reaches the backend, which needs
+    none. Streamed bodies are repeated chunk by chunk, never buffered.
+    """
+
+    def __init__(
+        self, backend_url: str, *, transport: httpx.AsyncBaseTransport | None = None
+    ) -> None:
+        self._base = backend_url.rstrip("/")
+        self._transport = transport
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        path = scope["path"].rstrip("/")
+        expected = f"Bearer {LOCAL_PLACEHOLDER_KEY}".encode()
+        if (
+            scope["method"] != _RELAY_ROUTES[path]
+            or dict(scope["headers"]).get(b"authorization") != expected
+        ):
+            await _reject(send, detail="Only the local Open WebUI may use the document relay.")
+            return
+        if path == "/v1/models":
+            await self._forward("GET", "/models", None, send)
+            return
+        body = await _read_body(receive, send)
+        if body is None:
+            return
+        try:
+            payload: object = json.loads(body)
+        except (ValueError, RecursionError):
+            payload = None
+        clean = document_chat_payload(payload)
+        if clean is None:
+            await _reject(
+                send,
+                detail="Only text questions to an enterprise-pdf-rag/<document> model are relayed.",
+            )
+            return
+        await self._forward("POST", "/chat/completions", json.dumps(clean).encode(), send)
+
+    async def _forward(self, method: str, route: str, body: bytes | None, send: Send) -> None:
+        headers = {"accept": "application/json, text/event-stream"}
+        if body is not None:
+            headers["content-type"] = "application/json"
+        started = False
+        try:
+            async with (
+                httpx.AsyncClient(
+                    transport=self._transport,
+                    timeout=httpx.Timeout(600.0, connect=5.0),
+                    trust_env=False,
+                ) as client,
+                client.stream(
+                    method, self._base + route, content=body, headers=headers
+                ) as upstream,
+            ):
+                streamed = upstream.headers.get("content-type", "").startswith("text/event-stream")
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": upstream.status_code,
+                        "headers": [
+                            (key.encode(), value.encode())
+                            for key, value in upstream.headers.multi_items()
+                            if key.lower() in _RELAY_HEADERS
+                        ],
+                    }
+                )
+                started = True
+                if upstream.is_success or streamed:
+                    async for chunk in upstream.aiter_raw():
+                        if chunk:
+                            await send(
+                                {"type": "http.response.body", "body": chunk, "more_body": True}
+                            )
+                    await send({"type": "http.response.body", "body": b"", "more_body": False})
+                else:
+                    await send(
+                        {
+                            "type": "http.response.body",
+                            "body": _visible_error(await upstream.aread()),
+                        }
+                    )
+        except httpx.HTTPError:
+            if not started:
+                await _reject(send, 503, "Document backend is unavailable; no substitute.")
+                return
+            await send({"type": "http.response.body", "body": b"", "more_body": False})
+
+
 class WebUIBoundary:
     def __init__(
-        self, app: ASGIApp, *, model_id: str = "enterprise-pdf-rag-offline-demo-v1"
+        self,
+        app: ASGIApp,
+        *,
+        model_id: str = "enterprise-pdf-rag-offline-demo-v1",
+        relay: DocumentRelay | None = None,
+        login: bool = False,
     ) -> None:
-        if model_id not in {AIA_REVIEW_MODEL, "enterprise-pdf-rag-offline-demo-v1"}:
+        if model_id not in {
+            AIA_REVIEW_MODEL,
+            "enterprise-pdf-rag-offline-demo-v1",
+            DOCUMENT_CATALOG_PROFILE,
+        }:
             raise ValueError("Unknown local UI profile")
+        if (relay is None) == (model_id == DOCUMENT_CATALOG_PROFILE):
+            raise ValueError("A document relay belongs to exactly the document-catalog profile")
+        if login and model_id != DOCUMENT_CATALOG_PROFILE:
+            raise ValueError("The vendor login is an option of the document-catalog profile only")
         self._app = app
         self._model_id = model_id
+        self._relay = relay
+        # With the vendor's own login the first sign-up creates the admin account.
+        self._login = login
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         kind = scope["type"]
@@ -204,6 +428,9 @@ class WebUIBoundary:
                 return
             await self._app(scope, receive, send)
             return
+        if self._relay is not None and scope["path"].rstrip("/") in _RELAY_ROUTES:
+            await self._relay(scope, receive, send)
+            return
         disabled = _DISABLED_READS.get(scope["path"].rstrip("/"))
         if scope["method"] == "GET" and disabled is not None:
             await send(
@@ -215,21 +442,17 @@ class WebUIBoundary:
             )
             await send({"type": "http.response.body", "body": disabled})
             return
-        if not _allowed_route(scope["path"], scope["method"]):
+        signup = self._login and scope["path"].rstrip("/") == "/api/v1/auths/signup"
+        if not (signup and scope["method"] == "POST") and not _allowed_route(
+            scope["path"], scope["method"]
+        ):
             await _reject(send)
             return
         if scope["method"] == "POST" and scope["path"].rstrip("/") in _CHAT_PATHS:
-            body = bytearray()
-            while True:
-                message = await receive()
-                if message["type"] == "http.disconnect":
-                    return
-                body.extend(message.get("body", b""))
-                if len(body) > 524288:
-                    await _reject(send, 413)
-                    return
-                if not message.get("more_body", False):
-                    break
+            raw = await _read_body(receive, send)
+            if raw is None:
+                return
+            body = bytearray(raw)
             try:
                 payload: object = json.loads(body)
             except (ValueError, RecursionError):
@@ -303,14 +526,52 @@ def create_guarded_app() -> ASGIApp:
         raise RuntimeError(
             "Open WebUI must receive only the local placeholder credential in an isolated environment"
         )
-    allowed = {"http://api:8766/v1", "http://127.0.0.1:8766/v1"}
+    backend = os.environ.get("ENTERPRISE_WEBUI_BACKEND_URL", "http://127.0.0.1:8766/v1")
+    if _LOCAL_BACKEND.fullmatch(backend) is None:
+        raise RuntimeError("Open WebUI may connect only to the local demo backend")
+    profile = os.environ.get("ENTERPRISE_WEBUI_PROFILE", "")
+    if profile == DOCUMENT_CATALOG_PROFILE:
+        # The UI talks to this process's own relay; only the relay reaches the backend.
+        allowed = {os.environ.get("WEBUI_URL", "") + "/v1"}
+    else:
+        allowed = {backend, "http://api:8766/v1", "http://127.0.0.1:8766/v1"}
     if (
         os.environ.get("OPENAI_API_BASE_URL") not in allowed
         or os.environ.get("OPENAI_API_BASE_URLS") not in allowed
     ):
         raise RuntimeError("Open WebUI may connect only to the local demo backend")
     vendor = cast(ASGIApp, import_module("open_webui.main").app)
+    if profile == DOCUMENT_CATALOG_PROFILE:
+        return WebUIBoundary(
+            vendor,
+            model_id=profile,
+            relay=DocumentRelay(backend),
+            login=os.environ.get("WEBUI_AUTH") == "True",
+        )
     return WebUIBoundary(vendor, model_id=os.environ["DEFAULT_MODELS"])
+
+
+@dataclass(frozen=True)
+class LoginOptions:
+    """The vendor's own login, opted in explicitly; the first sign-up becomes the admin."""
+
+    signup: bool = True
+    default_role: str = "pending"
+
+
+def login_options(environment: Mapping[str, str]) -> LoginOptions | None:
+    """``ENTERPRISE_WEBUI_AUTH=1`` opts in; ``ENABLE_SIGNUP`` / ``DEFAULT_USER_ROLE`` then pass.
+
+    ``ENABLE_SIGNUP`` is parsed exactly as Open WebUI parses it (``.lower() == "true"``).
+    """
+    if environment.get("ENTERPRISE_WEBUI_AUTH") != "1":
+        return None
+    role = environment.get("DEFAULT_USER_ROLE", "pending")
+    if role not in {"pending", "user", "admin"}:
+        raise ValueError("DEFAULT_USER_ROLE must be pending, user or admin")
+    return LoginOptions(
+        signup=environment.get("ENABLE_SIGNUP", "True").lower() == "true", default_role=role
+    )
 
 
 def build_webui_environment(
@@ -319,12 +580,24 @@ def build_webui_environment(
     secret: str,
     preview: bool = False,
     profile: str = "aia-source-review",
+    ui_port: int = 8767,
+    backend_port: int = 8766,
+    login: LoginOptions | None = None,
 ) -> dict[str, str]:
     """Construct, rather than inherit, the entire vendor process environment."""
-    if profile not in {"aia-source-review", "offline-demo"}:
+    if profile not in {"aia-source-review", "offline-demo", DOCUMENT_CATALOG_PROFILE}:
         raise ValueError("Unknown local UI profile")
+    if login is not None and profile != DOCUMENT_CATALOG_PROFILE:
+        raise ValueError("The vendor login is an option of the document-catalog profile only")
     data_dir = data_dir.resolve()
-    endpoint = "http://127.0.0.1:8766/v1" if preview else "http://api:8766/v1"
+    backend = f"http://{'127.0.0.1' if preview else 'api'}:{backend_port}/v1"
+    # The catalog profile points the vendor at this process's relay, never at the backend.
+    endpoint = f"http://127.0.0.1:{ui_port}/v1" if profile == DOCUMENT_CATALOG_PROFILE else backend
+    names = {
+        "aia-source-review": "AIA Source Review",
+        "offline-demo": "PDF RAG Offline Demo",
+        DOCUMENT_CATALOG_PROFILE: "PDF RAG Document Catalog",
+    }
     environment = {
         "PATH": f"{Path(sys.executable).parent}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
         "LANG": "en_US.UTF-8",
@@ -340,12 +613,9 @@ def build_webui_environment(
         "DATABASE_URL": f"sqlite:///{data_dir}/webui.db",
         "WEBUI_SECRET_KEY": secret,
         "WEBUI_AUTH": "False",
-        "WEBUI_URL": "http://127.0.0.1:8767",
-        "WEBUI_NAME": (
-            "AIA Source Review" if profile == "aia-source-review" else "PDF RAG Offline Demo"
-        )
-        + (" (0.6.5 preview)" if preview else ""),
-        "CORS_ALLOW_ORIGIN": "http://127.0.0.1:8767;http://localhost:8767",
+        "WEBUI_URL": f"http://127.0.0.1:{ui_port}",
+        "WEBUI_NAME": names[profile] + (" (0.6.5 preview)" if preview else ""),
+        "CORS_ALLOW_ORIGIN": f"http://127.0.0.1:{ui_port};http://localhost:{ui_port}",
         "ENABLE_PERSISTENT_CONFIG": "False",
         "RESET_CONFIG_ON_START": "True",
         "ENABLE_OPENAI_API": "True",
@@ -353,9 +623,6 @@ def build_webui_environment(
         "OPENAI_API_BASE_URLS": endpoint,
         "OPENAI_API_KEY": LOCAL_PLACEHOLDER_KEY,
         "OPENAI_API_KEYS": LOCAL_PLACEHOLDER_KEY,
-        "DEFAULT_MODELS": AIA_REVIEW_MODEL
-        if profile == "aia-source-review"
-        else "enterprise-pdf-rag-offline-demo-v1",
         "OFFLINE_MODE": "True",
         "HF_HUB_OFFLINE": "1",
         "TRANSFORMERS_OFFLINE": "1",
@@ -396,6 +663,20 @@ def build_webui_environment(
         "USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ACCESS",
     )
     environment.update(dict.fromkeys(disabled, "False"))
+    if profile == DOCUMENT_CATALOG_PROFILE:
+        # One model per mounted document: the UI lists them; nothing is preselected.
+        environment["ENTERPRISE_WEBUI_PROFILE"] = profile
+        environment["ENTERPRISE_WEBUI_BACKEND_URL"] = backend
+        if login is not None:
+            environment["WEBUI_AUTH"] = "True"
+            environment["ENABLE_SIGNUP"] = "True" if login.signup else "False"
+            environment["DEFAULT_USER_ROLE"] = login.default_role
+    else:
+        environment["DEFAULT_MODELS"] = (
+            AIA_REVIEW_MODEL
+            if profile == "aia-source-review"
+            else "enterprise-pdf-rag-offline-demo-v1"
+        )
     if preview:
         environment["FROM_INIT_PY"] = "True"
     return environment
@@ -411,8 +692,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--profile",
-        choices=("aia-source-review", "offline-demo"),
+        choices=("aia-source-review", "offline-demo", DOCUMENT_CATALOG_PROFILE),
         default="aia-source-review",
+    )
+    parser.add_argument("--port", type=int, default=8767, help="This UI's listening port")
+    parser.add_argument(
+        "--backend-port", type=int, default=8766, help="Port of the local project API"
     )
     args = parser.parse_args()
     expected = "0.6.5" if args.preview_legacy else "0.11.3"
@@ -430,6 +715,9 @@ def main() -> None:
         secret=secret_file.read_text(),
         preview=args.preview_legacy,
         profile=args.profile,
+        ui_port=args.port,
+        backend_port=args.backend_port,
+        login=login_options(os.environ),
     )
     os.execve(
         sys.executable,
@@ -444,7 +732,7 @@ def main() -> None:
             "--host",
             "127.0.0.1" if args.preview_legacy else "0.0.0.0",
             "--port",
-            "8767",
+            str(args.port),
         ],
         environment,
     )

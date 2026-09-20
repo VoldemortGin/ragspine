@@ -38,6 +38,7 @@ from enterprise_pdf_rag.processing.retrieval import (
     resolve_member,
     retrieval_dependencies,
 )
+from enterprise_pdf_rag.processing.table_models import TableIR
 from enterprise_pdf_rag.processing.typed_ir import (
     GroupIR,
     ListIR,
@@ -46,16 +47,23 @@ from enterprise_pdf_rag.processing.typed_ir import (
     TextIR,
 )
 
-_POLICY = "source-transcription-and-scoped-chart-qualification-v1"
+# v2 admits Table members whose literal transcription qualified; the string is part of
+# the snapshot id, so snapshots built under v1 keep their ids and stay mountable.
+_POLICY = "source-transcription-and-scoped-chart-qualification-v2"
 _INDEX = "immutable-cosine-index-v1"
 
 
 def eligibility(record: ObjectProcessingRecord) -> tuple[bool, str | None]:
-    """Kind and stage-completeness predicate shared by build and draft qualification."""
+    """Kind and stage-completeness predicate shared by build and draft qualification.
+
+    A Table is verified only when its literal transcription qualification succeeded;
+    an observed grid whose description/qualification stayed unavailable is skipped.
+    """
     if record.kind not in (
         ObjectKind.TEXT,
         ObjectKind.LIST,
         ObjectKind.GROUP,
+        ObjectKind.TABLE,
         ObjectKind.CHART,
     ):
         return False, f"{record.kind.value} objects are not retrievable"
@@ -68,6 +76,11 @@ def eligibility(record: ObjectProcessingRecord) -> tuple[bool, str | None]:
     if any(
         name not in stages or stages[name].state is not StageState.SUCCEEDED for name in required
     ):
+        if record.kind is ObjectKind.TABLE:
+            return (
+                False,
+                "Table transcription is not verified; only verified tables are retrievable",
+            )
         return False, "required qualification stages are incomplete"
     return True, None
 
@@ -269,13 +282,13 @@ class ProcessingRetrieval:
 
     def _literal(
         self, scope: ProcessingScope, member: RetrievalMember
-    ) -> tuple[TextIR | ListIR | GroupIR, ObjectDescription, LiteralQualification]:
+    ) -> tuple[TextIR | ListIR | GroupIR | TableIR, ObjectDescription, LiteralQualification]:
         return validate_literal_member(self.sources, self.outputs.assets, scope, member)
 
     def _qualified(
         self, scope: ProcessingScope, member: RetrievalMember
     ) -> tuple[
-        TextIR | ListIR | GroupIR | ChartIR,
+        TextIR | ListIR | GroupIR | TableIR | ChartIR,
         ObjectDescription | TextDescription,
         LiteralQualification | FigureQualification,
     ]:

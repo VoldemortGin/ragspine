@@ -1,0 +1,1393 @@
+{
+  "ModelList": {
+    "$defs": {
+      "ModelInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "created": {
+            "default": 0,
+            "title": "Created",
+            "type": "integer"
+          },
+          "id": {
+            "default": "enterprise-pdf-rag-offline-demo-v1",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "default": "Offline demo \u2014 authored PDF figure evidence only",
+            "title": "Name",
+            "type": "string"
+          },
+          "object": {
+            "const": "model",
+            "default": "model",
+            "title": "Object",
+            "type": "string"
+          },
+          "owned_by": {
+            "default": "enterprise-pdf-rag/offline-demo",
+            "title": "Owned By",
+            "type": "string"
+          }
+        },
+        "title": "ModelInfo",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "data": {
+        "items": {
+          "$ref": "#/$defs/ModelInfo"
+        },
+        "title": "Data",
+        "type": "array"
+      },
+      "object": {
+        "const": "list",
+        "default": "list",
+        "title": "Object",
+        "type": "string"
+      }
+    },
+    "required": [
+      "data"
+    ],
+    "title": "ModelList",
+    "type": "object"
+  },
+  "RagChatRequest": {
+    "$defs": {
+      "ChatMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "maxLength": 16000,
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "system",
+              "user",
+              "assistant"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "content"
+        ],
+        "title": "ChatMessage",
+        "type": "object"
+      },
+      "StreamOptions": {
+        "additionalProperties": false,
+        "properties": {
+          "include_usage": {
+            "default": false,
+            "title": "Include Usage",
+            "type": "boolean"
+          }
+        },
+        "title": "StreamOptions",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "document": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{12,64}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Document"
+      },
+      "messages": {
+        "items": {
+          "$ref": "#/$defs/ChatMessage"
+        },
+        "maxItems": 32,
+        "minItems": 1,
+        "title": "Messages",
+        "type": "array"
+      },
+      "model": {
+        "title": "Model",
+        "type": "string"
+      },
+      "rerank": {
+        "default": false,
+        "title": "Rerank",
+        "type": "boolean"
+      },
+      "stream": {
+        "default": false,
+        "title": "Stream",
+        "type": "boolean"
+      },
+      "stream_options": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/StreamOptions"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      }
+    },
+    "required": [
+      "model",
+      "messages"
+    ],
+    "title": "RagChatRequest",
+    "type": "object"
+  },
+  "RagCompletionChunk": {
+    "$defs": {
+      "AbstainReason": {
+        "description": "Superset of both chart-QA refusal enums plus the answer-chain-only reasons.",
+        "enum": [
+          "no_relevant_member",
+          "model_declined",
+          "model_output_invalid",
+          "claim_not_in_evidence",
+          "no_verified_claim",
+          "unqualified_member",
+          "unsupported_grammar",
+          "unknown_point",
+          "series_mismatch",
+          "category_mismatch",
+          "period_mismatch",
+          "unit_mismatch",
+          "unsupported_value_kind",
+          "value_unavailable",
+          "unsupported_precision",
+          "unsupported_operation",
+          "insufficient_evidence"
+        ],
+        "title": "AbstainReason",
+        "type": "string"
+      },
+      "AnswerEnvelope": {
+        "additionalProperties": false,
+        "description": "Verified claims, audit rejections and pinned provenance beside the OpenAI shape.",
+        "properties": {
+          "abstain_detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Abstain Detail"
+          },
+          "abstain_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/AbstainReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cache_hit": {
+            "title": "Cache Hit",
+            "type": "boolean"
+          },
+          "claims": {
+            "items": {
+              "$ref": "#/$defs/ClaimOut"
+            },
+            "title": "Claims",
+            "type": "array"
+          },
+          "document_sha256": {
+            "title": "Document Sha256",
+            "type": "string"
+          },
+          "llm_live_calls": {
+            "title": "Llm Live Calls",
+            "type": "integer"
+          },
+          "member_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Member Ids",
+            "type": "array"
+          },
+          "processing_id": {
+            "title": "Processing Id",
+            "type": "string"
+          },
+          "rejected": {
+            "items": {
+              "$ref": "#/$defs/RejectedClaimOut"
+            },
+            "title": "Rejected",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "rag-chat-v1",
+            "default": "rag-chat-v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "title": "Snapshot Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/$defs/AnswerStatus"
+          }
+        },
+        "required": [
+          "status",
+          "abstain_reason",
+          "abstain_detail",
+          "document_sha256",
+          "processing_id",
+          "snapshot_id",
+          "member_ids",
+          "claims",
+          "rejected",
+          "llm_live_calls",
+          "cache_hit"
+        ],
+        "title": "AnswerEnvelope",
+        "type": "object"
+      },
+      "AnswerStatus": {
+        "enum": [
+          "answered",
+          "abstained"
+        ],
+        "title": "AnswerStatus",
+        "type": "string"
+      },
+      "BlockKind": {
+        "enum": [
+          "text",
+          "list",
+          "group",
+          "table",
+          "chart"
+        ],
+        "title": "BlockKind",
+        "type": "string"
+      },
+      "ClaimCitationOut": {
+        "additionalProperties": false,
+        "properties": {
+          "bbox": {
+            "anyOf": [
+              {
+                "maxItems": 4,
+                "minItems": 4,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bbox"
+          },
+          "chart_citation": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/FieldCitation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "field_path": {
+            "title": "Field Path",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/$defs/BlockKind"
+          },
+          "member_id": {
+            "title": "Member Id",
+            "type": "string"
+          },
+          "page_index": {
+            "title": "Page Index",
+            "type": "integer"
+          },
+          "quote": {
+            "title": "Quote",
+            "type": "string"
+          }
+        },
+        "required": [
+          "member_id",
+          "kind",
+          "page_index",
+          "field_path",
+          "evidence_ids",
+          "bbox",
+          "quote",
+          "chart_citation"
+        ],
+        "title": "ClaimCitationOut",
+        "type": "object"
+      },
+      "ClaimKind": {
+        "enum": [
+          "quote",
+          "cell",
+          "chart_value"
+        ],
+        "title": "ClaimKind",
+        "type": "string"
+      },
+      "ClaimOut": {
+        "additionalProperties": false,
+        "properties": {
+          "citations": {
+            "items": {
+              "$ref": "#/$defs/ClaimCitationOut"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/$defs/ClaimKind"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "claim_id",
+          "kind",
+          "text",
+          "value",
+          "unit",
+          "citations"
+        ],
+        "title": "ClaimOut",
+        "type": "object"
+      },
+      "CompletionDelta": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Content"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "const": "assistant",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Role"
+          }
+        },
+        "title": "CompletionDelta",
+        "type": "object"
+      },
+      "EvidenceKind": {
+        "enum": [
+          "native_element",
+          "source_text_observation"
+        ],
+        "title": "EvidenceKind",
+        "type": "string"
+      },
+      "FieldCitation": {
+        "properties": {
+          "chart_ir_artifact_id": {
+            "title": "Chart Ir Artifact Id",
+            "type": "string"
+          },
+          "field_path": {
+            "title": "Field Path",
+            "type": "string"
+          },
+          "occurrences": {
+            "items": {
+              "$ref": "#/$defs/SvgElement"
+            },
+            "title": "Occurrences",
+            "type": "array"
+          },
+          "qualification_id": {
+            "title": "Qualification Id",
+            "type": "string"
+          },
+          "svg_artifact_id": {
+            "title": "Svg Artifact Id",
+            "type": "string"
+          },
+          "svg_digest": {
+            "title": "Svg Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field_path",
+          "chart_ir_artifact_id",
+          "svg_artifact_id",
+          "svg_digest",
+          "qualification_id",
+          "occurrences"
+        ],
+        "title": "FieldCitation",
+        "type": "object"
+      },
+      "RejectedClaimOut": {
+        "additionalProperties": false,
+        "properties": {
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "field_path": {
+            "title": "Field Path",
+            "type": "string"
+          },
+          "member_id": {
+            "title": "Member Id",
+            "type": "string"
+          },
+          "reason": {
+            "$ref": "#/$defs/AbstainReason"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "claim_id",
+          "member_id",
+          "field_path",
+          "text",
+          "reason",
+          "detail"
+        ],
+        "title": "RejectedClaimOut",
+        "type": "object"
+      },
+      "SourceAnchor": {
+        "properties": {
+          "bbox": {
+            "maxItems": 4,
+            "minItems": 4,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Bbox",
+            "type": "array"
+          },
+          "coordinate_frame": {
+            "default": "page-top-left",
+            "title": "Coordinate Frame",
+            "type": "string"
+          },
+          "document_sha256": {
+            "title": "Document Sha256",
+            "type": "string"
+          },
+          "page_index": {
+            "title": "Page Index",
+            "type": "integer"
+          },
+          "rotation": {
+            "default": 0,
+            "title": "Rotation",
+            "type": "integer"
+          },
+          "source_revision": {
+            "title": "Source Revision",
+            "type": "string"
+          },
+          "transform": {
+            "default": [
+              1.0,
+              0.0,
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            "maxItems": 6,
+            "minItems": 6,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Transform",
+            "type": "array"
+          }
+        },
+        "required": [
+          "source_revision",
+          "document_sha256",
+          "page_index",
+          "bbox"
+        ],
+        "title": "SourceAnchor",
+        "type": "object"
+      },
+      "StreamChoice": {
+        "additionalProperties": false,
+        "properties": {
+          "delta": {
+            "$ref": "#/$defs/CompletionDelta"
+          },
+          "finish_reason": {
+            "anyOf": [
+              {
+                "const": "stop",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Finish Reason"
+          },
+          "index": {
+            "default": 0,
+            "title": "Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "delta"
+        ],
+        "title": "StreamChoice",
+        "type": "object"
+      },
+      "SvgElement": {
+        "properties": {
+          "anchor": {
+            "$ref": "#/$defs/SourceAnchor"
+          },
+          "element_id": {
+            "title": "Element Id",
+            "type": "string"
+          },
+          "evidence_kind": {
+            "$ref": "#/$defs/EvidenceKind",
+            "default": "native_element"
+          },
+          "source_span_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Span Id"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "text_range": {
+            "anyOf": [
+              {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "integer"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Text Range"
+          }
+        },
+        "required": [
+          "element_id",
+          "text",
+          "anchor"
+        ],
+        "title": "SvgElement",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "description": "Stream trailer: empty ``choices`` plus the verified envelope, sent before ``[DONE]``.",
+    "properties": {
+      "choices": {
+        "items": {
+          "$ref": "#/$defs/StreamChoice"
+        },
+        "title": "Choices",
+        "type": "array"
+      },
+      "created": {
+        "title": "Created",
+        "type": "integer"
+      },
+      "enterprise_pdf_rag": {
+        "$ref": "#/$defs/AnswerEnvelope"
+      },
+      "id": {
+        "title": "Id",
+        "type": "string"
+      },
+      "model": {
+        "default": "enterprise-pdf-rag-offline-demo-v1",
+        "title": "Model",
+        "type": "string"
+      },
+      "object": {
+        "const": "chat.completion.chunk",
+        "default": "chat.completion.chunk",
+        "title": "Object",
+        "type": "string"
+      },
+      "usage": {
+        "default": null,
+        "title": "Usage",
+        "type": "null"
+      }
+    },
+    "required": [
+      "id",
+      "created",
+      "choices",
+      "enterprise_pdf_rag"
+    ],
+    "title": "RagCompletionChunk",
+    "type": "object"
+  },
+  "RagCompletionResponse": {
+    "$defs": {
+      "AbstainReason": {
+        "description": "Superset of both chart-QA refusal enums plus the answer-chain-only reasons.",
+        "enum": [
+          "no_relevant_member",
+          "model_declined",
+          "model_output_invalid",
+          "claim_not_in_evidence",
+          "no_verified_claim",
+          "unqualified_member",
+          "unsupported_grammar",
+          "unknown_point",
+          "series_mismatch",
+          "category_mismatch",
+          "period_mismatch",
+          "unit_mismatch",
+          "unsupported_value_kind",
+          "value_unavailable",
+          "unsupported_precision",
+          "unsupported_operation",
+          "insufficient_evidence"
+        ],
+        "title": "AbstainReason",
+        "type": "string"
+      },
+      "AnswerEnvelope": {
+        "additionalProperties": false,
+        "description": "Verified claims, audit rejections and pinned provenance beside the OpenAI shape.",
+        "properties": {
+          "abstain_detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Abstain Detail"
+          },
+          "abstain_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/AbstainReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cache_hit": {
+            "title": "Cache Hit",
+            "type": "boolean"
+          },
+          "claims": {
+            "items": {
+              "$ref": "#/$defs/ClaimOut"
+            },
+            "title": "Claims",
+            "type": "array"
+          },
+          "document_sha256": {
+            "title": "Document Sha256",
+            "type": "string"
+          },
+          "llm_live_calls": {
+            "title": "Llm Live Calls",
+            "type": "integer"
+          },
+          "member_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Member Ids",
+            "type": "array"
+          },
+          "processing_id": {
+            "title": "Processing Id",
+            "type": "string"
+          },
+          "rejected": {
+            "items": {
+              "$ref": "#/$defs/RejectedClaimOut"
+            },
+            "title": "Rejected",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "rag-chat-v1",
+            "default": "rag-chat-v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "title": "Snapshot Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/$defs/AnswerStatus"
+          }
+        },
+        "required": [
+          "status",
+          "abstain_reason",
+          "abstain_detail",
+          "document_sha256",
+          "processing_id",
+          "snapshot_id",
+          "member_ids",
+          "claims",
+          "rejected",
+          "llm_live_calls",
+          "cache_hit"
+        ],
+        "title": "AnswerEnvelope",
+        "type": "object"
+      },
+      "AnswerStatus": {
+        "enum": [
+          "answered",
+          "abstained"
+        ],
+        "title": "AnswerStatus",
+        "type": "string"
+      },
+      "BlockKind": {
+        "enum": [
+          "text",
+          "list",
+          "group",
+          "table",
+          "chart"
+        ],
+        "title": "BlockKind",
+        "type": "string"
+      },
+      "ChatMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "maxLength": 16000,
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "system",
+              "user",
+              "assistant"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "content"
+        ],
+        "title": "ChatMessage",
+        "type": "object"
+      },
+      "ClaimCitationOut": {
+        "additionalProperties": false,
+        "properties": {
+          "bbox": {
+            "anyOf": [
+              {
+                "maxItems": 4,
+                "minItems": 4,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bbox"
+          },
+          "chart_citation": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/FieldCitation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "field_path": {
+            "title": "Field Path",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/$defs/BlockKind"
+          },
+          "member_id": {
+            "title": "Member Id",
+            "type": "string"
+          },
+          "page_index": {
+            "title": "Page Index",
+            "type": "integer"
+          },
+          "quote": {
+            "title": "Quote",
+            "type": "string"
+          }
+        },
+        "required": [
+          "member_id",
+          "kind",
+          "page_index",
+          "field_path",
+          "evidence_ids",
+          "bbox",
+          "quote",
+          "chart_citation"
+        ],
+        "title": "ClaimCitationOut",
+        "type": "object"
+      },
+      "ClaimKind": {
+        "enum": [
+          "quote",
+          "cell",
+          "chart_value"
+        ],
+        "title": "ClaimKind",
+        "type": "string"
+      },
+      "ClaimOut": {
+        "additionalProperties": false,
+        "properties": {
+          "citations": {
+            "items": {
+              "$ref": "#/$defs/ClaimCitationOut"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/$defs/ClaimKind"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "claim_id",
+          "kind",
+          "text",
+          "value",
+          "unit",
+          "citations"
+        ],
+        "title": "ClaimOut",
+        "type": "object"
+      },
+      "CompletionChoice": {
+        "additionalProperties": false,
+        "properties": {
+          "finish_reason": {
+            "const": "stop",
+            "default": "stop",
+            "title": "Finish Reason",
+            "type": "string"
+          },
+          "index": {
+            "default": 0,
+            "title": "Index",
+            "type": "integer"
+          },
+          "message": {
+            "$ref": "#/$defs/ChatMessage"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "CompletionChoice",
+        "type": "object"
+      },
+      "EvidenceKind": {
+        "enum": [
+          "native_element",
+          "source_text_observation"
+        ],
+        "title": "EvidenceKind",
+        "type": "string"
+      },
+      "FieldCitation": {
+        "properties": {
+          "chart_ir_artifact_id": {
+            "title": "Chart Ir Artifact Id",
+            "type": "string"
+          },
+          "field_path": {
+            "title": "Field Path",
+            "type": "string"
+          },
+          "occurrences": {
+            "items": {
+              "$ref": "#/$defs/SvgElement"
+            },
+            "title": "Occurrences",
+            "type": "array"
+          },
+          "qualification_id": {
+            "title": "Qualification Id",
+            "type": "string"
+          },
+          "svg_artifact_id": {
+            "title": "Svg Artifact Id",
+            "type": "string"
+          },
+          "svg_digest": {
+            "title": "Svg Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field_path",
+          "chart_ir_artifact_id",
+          "svg_artifact_id",
+          "svg_digest",
+          "qualification_id",
+          "occurrences"
+        ],
+        "title": "FieldCitation",
+        "type": "object"
+      },
+      "RejectedClaimOut": {
+        "additionalProperties": false,
+        "properties": {
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "field_path": {
+            "title": "Field Path",
+            "type": "string"
+          },
+          "member_id": {
+            "title": "Member Id",
+            "type": "string"
+          },
+          "reason": {
+            "$ref": "#/$defs/AbstainReason"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "claim_id",
+          "member_id",
+          "field_path",
+          "text",
+          "reason",
+          "detail"
+        ],
+        "title": "RejectedClaimOut",
+        "type": "object"
+      },
+      "SourceAnchor": {
+        "properties": {
+          "bbox": {
+            "maxItems": 4,
+            "minItems": 4,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Bbox",
+            "type": "array"
+          },
+          "coordinate_frame": {
+            "default": "page-top-left",
+            "title": "Coordinate Frame",
+            "type": "string"
+          },
+          "document_sha256": {
+            "title": "Document Sha256",
+            "type": "string"
+          },
+          "page_index": {
+            "title": "Page Index",
+            "type": "integer"
+          },
+          "rotation": {
+            "default": 0,
+            "title": "Rotation",
+            "type": "integer"
+          },
+          "source_revision": {
+            "title": "Source Revision",
+            "type": "string"
+          },
+          "transform": {
+            "default": [
+              1.0,
+              0.0,
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            "maxItems": 6,
+            "minItems": 6,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Transform",
+            "type": "array"
+          }
+        },
+        "required": [
+          "source_revision",
+          "document_sha256",
+          "page_index",
+          "bbox"
+        ],
+        "title": "SourceAnchor",
+        "type": "object"
+      },
+      "SvgElement": {
+        "properties": {
+          "anchor": {
+            "$ref": "#/$defs/SourceAnchor"
+          },
+          "element_id": {
+            "title": "Element Id",
+            "type": "string"
+          },
+          "evidence_kind": {
+            "$ref": "#/$defs/EvidenceKind",
+            "default": "native_element"
+          },
+          "source_span_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Span Id"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "text_range": {
+            "anyOf": [
+              {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "integer"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Text Range"
+          }
+        },
+        "required": [
+          "element_id",
+          "text",
+          "anchor"
+        ],
+        "title": "SvgElement",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "choices": {
+        "items": {
+          "$ref": "#/$defs/CompletionChoice"
+        },
+        "title": "Choices",
+        "type": "array"
+      },
+      "created": {
+        "title": "Created",
+        "type": "integer"
+      },
+      "enterprise_pdf_rag": {
+        "$ref": "#/$defs/AnswerEnvelope"
+      },
+      "id": {
+        "title": "Id",
+        "type": "string"
+      },
+      "model": {
+        "default": "enterprise-pdf-rag-offline-demo-v1",
+        "title": "Model",
+        "type": "string"
+      },
+      "object": {
+        "const": "chat.completion",
+        "default": "chat.completion",
+        "title": "Object",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "created",
+      "choices",
+      "enterprise_pdf_rag"
+    ],
+    "title": "RagCompletionResponse",
+    "type": "object"
+  }
+}

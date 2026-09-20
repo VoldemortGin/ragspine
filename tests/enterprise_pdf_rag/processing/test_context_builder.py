@@ -1,9 +1,11 @@
 """Context blocks carry only stored evidence and are dropped whole under budget."""
 
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
+from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
 from enterprise_pdf_rag.documents.models import AssetRef
 from enterprise_pdf_rag.figures.models import (
     ChartIR,
@@ -43,6 +45,11 @@ from enterprise_pdf_rag.processing.typed_ir import (
     ObjectDescription,
     ObservedText,
     TextIR,
+)
+from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
+    DOCUMENT_LABEL,
+    publish_generic_document,
+    resolve_table_member,
 )
 
 _SHA = "c" * 64
@@ -293,3 +300,38 @@ def test_blocks_are_immutable_values() -> None:
     assert isinstance(block, ContextBlock)
     with pytest.raises(AttributeError):
         block.member_id = "other"  # type: ignore[misc]
+
+
+def test_published_native_table_member_yields_citable_cell_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    published = publish_generic_document(
+        tmp_path,
+        monkeypatch,
+        filename="meridian-semiannual.pdf",
+        label=DOCUMENT_LABEL,
+        page_count=3,
+        embedder=OfflineDescriptionEmbedder(),
+        table_page=True,
+    )
+    context = resolve_table_member(published)
+    assert isinstance(context.ir, TableIR)
+    block = build_context_block(context)
+    assert block.kind is BlockKind.TABLE and block.page_index == 2
+    assert block.snapshot_id == published.retrieval_snapshot_id
+    assert block.scope == "literal-source-transcription-v1"
+    assert block.verification is Verification.VERIFIED
+    assert (block.row_count, block.col_count) == (3, 2)
+    assert block.description_text == "Metric\nValue\nRevenue\n1,234\nMargin"
+    by_position = {(cell.row, cell.col): cell for cell in block.cells}
+    assert set(by_position) == {(r, c) for r in range(3) for c in range(2)}
+    assert {cell.cell_id for cell in block.cells} == {cell.cell_id for cell in context.ir.cells}
+    value = by_position[(1, 1)]
+    assert value.text == "1,234" and value.content_state is CellContentState.PRESENT
+    assert len(value.source_span_ids) == 1 and value.bbox == (120.0, 86.0, 220.0, 113.0)
+    blank = by_position[(2, 1)]
+    assert blank.content_state is CellContentState.BLANK and blank.source_span_ids == ()
+    rendered = block.prompt_text()
+    assert f"cells.{value.cell_id} (1,1): 1,234" in rendered
+    assert f"cells.{blank.cell_id} (2,1): <BLANK>" in rendered
+    assert "verification=verified" in rendered.splitlines()[0]

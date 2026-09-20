@@ -23,6 +23,27 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 STATE = ROOT / "data" / "open-webui-preview"
 PROCESS_FILE = STATE / "processes.json"
 GATE = ROOT / "src" / "enterprise_pdf_rag" / "adapters" / "http" / "webui_gate.py"
+# Loopback ports; override both start and status with the same environment.
+API_PORT = int(os.environ.get("ENTERPRISE_API_PORT", "8766"))
+WEBUI_PORT = int(os.environ.get("ENTERPRISE_WEBUI_PORT", "8767"))
+_EMBEDDING_SETTINGS = ("EMBEDDING_BASE_URL", "EMBEDDING_MODEL", "EMBEDDING_API_KEY")
+# Only the API child inherits provider settings, and only those its profile can use.
+_API_SETTINGS = {
+    "aia-source-review": _EMBEDDING_SETTINGS,
+    "document-catalog": (
+        *_EMBEDDING_SETTINGS,
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+        "OPENAI_MODEL",
+        "RERANK_BASE_URL",
+        "RERANK_MODEL",
+        "RERANK_API_KEY",
+        "APP_INGESTION_DIR",
+        "APP_LEGACY_DOCUMENT_ROOTS",
+        "APP_ANSWER_MAX_LIVE_CALLS",
+    ),
+}
+_WEBUI_LOGIN_SETTINGS = ("ENTERPRISE_WEBUI_AUTH", "ENABLE_SIGNUP", "DEFAULT_USER_ROLE")
 
 
 class ProcessRecord(BaseModel):
@@ -146,20 +167,32 @@ def ready(profile: str, processing_id: str | None) -> bool:
     from enterprise_pdf_rag.adapters.http.processing_schemas import (
         ProcessingStatusResponse,
     )
-    from enterprise_pdf_rag.adapters.http.webui_gate import AIA_REVIEW_MODEL
+    from enterprise_pdf_rag.adapters.http.webui_gate import (
+        AIA_REVIEW_MODEL,
+        DOCUMENT_CATALOG_PROFILE,
+        DOCUMENT_MODEL_PREFIX,
+    )
 
     opener = build_opener(ProxyHandler({}))
     try:
-        with opener.open("http://127.0.0.1:8766/v1/models", timeout=3) as response:
+        with opener.open(f"http://127.0.0.1:{API_PORT}/v1/models", timeout=3) as response:
             models = ModelList.model_validate_json(response.read(65536))
-        expected = AIA_REVIEW_MODEL if profile == "aia-source-review" else DEMO_MODEL
-        if tuple(item.id for item in models.data) != (expected,):
-            return False
-        with opener.open("http://127.0.0.1:8767/api/config", timeout=3) as response:
+        ids = tuple(item.id for item in models.data)
+        if profile == DOCUMENT_CATALOG_PROFILE:
+            # One model per mounted document; an empty catalog is still the right profile.
+            if not all(item.startswith(DOCUMENT_MODEL_PREFIX) for item in ids):
+                return False
+        else:
+            expected = AIA_REVIEW_MODEL if profile == "aia-source-review" else DEMO_MODEL
+            if ids != (expected,):
+                return False
+        with opener.open(f"http://127.0.0.1:{WEBUI_PORT}/api/config", timeout=3) as response:
             if response.status != 200:
                 return False
         if processing_id is not None:
-            with opener.open("http://127.0.0.1:8766/v1/processing/status", timeout=30) as response:
+            with opener.open(
+                f"http://127.0.0.1:{API_PORT}/v1/processing/status", timeout=30
+            ) as response:
                 saved = ProcessingStatusResponse.model_validate_json(response.read(65536))
             if saved.processing_id != processing_id:
                 return False
@@ -169,14 +202,17 @@ def ready(profile: str, processing_id: str | None) -> bool:
 
 
 def show_links(processing_id: str | None, profile: str = "aia-source-review") -> None:
-    print("Open WebUI 0.6.5 compatibility preview: http://127.0.0.1:8767")
-    print("API: http://127.0.0.1:8766")
+    print(f"Open WebUI 0.6.5 compatibility preview: http://127.0.0.1:{WEBUI_PORT}")
+    print(f"API: http://127.0.0.1:{API_PORT}")
     if processing_id is not None:
-        print("First-20-page review: http://127.0.0.1:8766/v1/processing/review/review.html")
+        print(f"First-20-page review: http://127.0.0.1:{API_PORT}/v1/processing/review/review.html")
         print(f"Saved processing: {processing_id}")
     print(f"Logs and PID record: {STATE}")
-    command = f"uv run --directory {quote(str(ROOT))} --locked python scripts/enterprise_pdf_rag/webui_preview.py"
-    option = " --profile offline-demo" if profile == "offline-demo" else ""
+    ports = ""
+    if (API_PORT, WEBUI_PORT) != (8766, 8767):
+        ports = f"ENTERPRISE_API_PORT={API_PORT} ENTERPRISE_WEBUI_PORT={WEBUI_PORT} "
+    command = f"{ports}uv run --directory {quote(str(ROOT))} --locked python scripts/enterprise_pdf_rag/webui_preview.py"
+    option = "" if profile == "aia-source-review" else f" --profile {profile}"
     print(f"Status: {command} status{option}")
     print(f"Stop: {command} stop")
 
@@ -205,7 +241,7 @@ def start(profile: str = "aia-source-review", *, require_processing: bool = Fals
     if not (ROOT / ".venv/bin/python").is_file():
         raise SystemExit("Project Python environment is missing. Run: uv sync --locked --extra pdf")
     vendor_python = preview_python()
-    for port in (8766, 8767):
+    for port in (API_PORT, WEBUI_PORT):
         with socket.socket() as listener:
             listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
@@ -226,7 +262,7 @@ def start(profile: str = "aia-source-review", *, require_processing: bool = Fals
             "--host",
             "127.0.0.1",
             "--port",
-            "8766",
+            str(API_PORT),
         ],
         "webui": [
             str(vendor_python),
@@ -236,6 +272,10 @@ def start(profile: str = "aia-source-review", *, require_processing: bool = Fals
             profile,
             "--data-dir",
             str(STATE / "vendor"),
+            "--port",
+            str(WEBUI_PORT),
+            "--backend-port",
+            str(API_PORT),
         ],
     }
     for name, command in commands.items():
@@ -247,14 +287,14 @@ def start(profile: str = "aia-source-review", *, require_processing: bool = Fals
         }
         if name == "api":
             environment["APP_EXECUTION_MODE"] = profile
-            if profile == "aia-source-review":
-                for setting in (
-                    "EMBEDDING_BASE_URL",
-                    "EMBEDDING_MODEL",
-                    "EMBEDDING_API_KEY",
-                ):
-                    if setting in os.environ:
-                        environment[setting] = os.environ[setting]
+            for setting in _API_SETTINGS.get(profile, ()):
+                if setting in os.environ:
+                    environment[setting] = os.environ[setting]
+        elif profile == "document-catalog":
+            # Explicit opt-in to the vendor's own login; the gate rebuilds the rest.
+            for setting in _WEBUI_LOGIN_SETTINGS:
+                if setting in os.environ:
+                    environment[setting] = os.environ[setting]
         with (STATE / f"{name}.log").open("ab") as log:
             process = subprocess.Popen(
                 command,
@@ -358,7 +398,7 @@ def main() -> int:
     parser.add_argument("action", choices=("start", "stop", "status"))
     parser.add_argument(
         "--profile",
-        choices=("aia-source-review", "offline-demo"),
+        choices=("aia-source-review", "offline-demo", "document-catalog"),
         default="aia-source-review",
     )
     parser.add_argument(

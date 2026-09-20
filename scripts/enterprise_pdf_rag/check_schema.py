@@ -5,6 +5,14 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from enterprise_pdf_rag.adapters.http.catalog_schemas import (
+    DocumentContextRequest,
+    DocumentContextResponse,
+    DocumentDetailResponse,
+    DocumentListResponse,
+    DocumentSearchRequest,
+    DocumentSearchResponse,
+)
 from enterprise_pdf_rag.adapters.http.chart_qa_schemas import (
     ChartQueryErrorResponse,
     ChartQueryRequest,
@@ -13,6 +21,11 @@ from enterprise_pdf_rag.adapters.http.chart_qa_schemas import (
 from enterprise_pdf_rag.adapters.http.chart_qa_v2_schemas import (
     DisplayedChartQueryRequest,
     DisplayedChartQueryResponse,
+)
+from enterprise_pdf_rag.adapters.http.chat_schemas import (
+    RagChatRequest,
+    RagCompletionChunk,
+    RagCompletionResponse,
 )
 from enterprise_pdf_rag.adapters.http.document_schemas import (
     DocumentSnapshotResponse,
@@ -79,6 +92,15 @@ CONTRACTS: dict[str, tuple[type[BaseModel], ...]] = {
         ProcessingContextRequest,
         ProcessingContextResponse,
     ),
+    "document-catalog-v1": (
+        DocumentListResponse,
+        DocumentDetailResponse,
+        DocumentSearchRequest,
+        DocumentSearchResponse,
+        DocumentContextRequest,
+        DocumentContextResponse,
+    ),
+    "rag-chat-v1": (RagChatRequest, ModelList, RagCompletionResponse, RagCompletionChunk),
 }
 
 

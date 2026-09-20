@@ -90,6 +90,8 @@ class Settings(BaseSettings):
     ingestion_dir: Path | None = None
     # 兼容根:每项是一个 processing store 根,其父目录即 source store 根;默认空
     legacy_document_roots: tuple[Path, ...] = ()
+    # document-catalog 聊天端点整个进程的模型真实调用预算(缓存回放不计;用尽即 503)
+    answer_max_live_calls: int = 200
 
     @field_validator("data_dir", "log_dir")
     @classmethod

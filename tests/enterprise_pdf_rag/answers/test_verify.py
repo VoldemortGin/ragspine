@@ -1,0 +1,485 @@
+"""Every claim is re-read from stored evidence; prose numbers must come from verified claims."""
+
+from collections.abc import Callable
+from decimal import Decimal
+from pathlib import Path
+from typing import Literal, Never
+
+import pytest
+
+from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
+from enterprise_pdf_rag.answers.models import (
+    AbstainReason,
+    AnswerStatus,
+    ClaimKind,
+    RejectedClaim,
+    VerifiedClaim,
+    from_refusal,
+)
+from enterprise_pdf_rag.answers.prompt import ModelAnswer, ModelClaim
+from enterprise_pdf_rag.answers.verify import (
+    ClaimVerification,
+    decide,
+    prose_grounded,
+    verify_claims,
+)
+from enterprise_pdf_rag.figures.chart_qa.displayed_models import (
+    DisplayedLookupContext,
+    DisplayedRefusal,
+    DisplayedRefusalReason,
+)
+from enterprise_pdf_rag.figures.chart_qa.models import (
+    ChartContext,
+    ChartQueryError,
+    ChartRefusal,
+    QueryFailure,
+    RefusalReason,
+)
+from enterprise_pdf_rag.figures.models import SourceAnchor, Verification
+from enterprise_pdf_rag.processing.context_builder import (
+    BlockKind,
+    CellEvidence,
+    ContextBlock,
+    SpanEvidence,
+    build_context_block,
+)
+from enterprise_pdf_rag.processing.models import ObjectKind
+from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit
+from enterprise_pdf_rag.processing.table_models import CellContentState
+from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
+    DOCUMENT_LABEL,
+    publish_generic_document,
+    resolve_table_member,
+)
+from tests.enterprise_pdf_rag.answers.store_mounted_document import (
+    StoreMountedDocument,
+    bar_document,
+    donut_document,
+)
+
+_SNAPSHOT = "5" * 64
+_TEXT_MEMBER = "a" * 64
+_TABLE_MEMBER = "b" * 64
+_ANCHOR = SourceAnchor("c" * 64, "c" * 64, 3, (0.0, 0.0, 100.0, 50.0))
+
+type ChartEvidence = Callable[[str], ChartContext | DisplayedLookupContext]
+
+
+def _text_block() -> ContextBlock:
+    return ContextBlock(
+        _SNAPSHOT,
+        _TEXT_MEMBER,
+        BlockKind.TEXT,
+        3,
+        "literal-source-transcription-v1",
+        Verification.VERIFIED,
+        "Revenue grew 12% in 2025. Costs fell.",
+        spans=(
+            SpanEvidence("sp-1", 3, (1.0, 10.0, 90.0, 19.0), "Revenue grew 12% in 2025."),
+            SpanEvidence("sp-2", 3, (1.0, 20.0, 90.0, 29.0), "Costs   fell."),
+        ),
+    )
+
+
+def _table_block() -> ContextBlock:
+    return ContextBlock(
+        _SNAPSHOT,
+        _TABLE_MEMBER,
+        BlockKind.TABLE,
+        3,
+        "literal-source-transcription-v1",
+        Verification.VERIFIED,
+        "Revenue",
+        cells=(
+            CellEvidence(
+                "c-1",
+                0,
+                0,
+                1,
+                1,
+                (1.0, 1.0, 40.0, 20.0),
+                "1,234",
+                CellContentState.PRESENT,
+                ("t-1",),
+            ),
+            CellEvidence(
+                "c-2", 0, 1, 1, 1, (41.0, 1.0, 90.0, 20.0), "", CellContentState.BLANK, ()
+            ),
+            CellEvidence(
+                "c-3", 1, 0, 1, 2, (1.0, 21.0, 90.0, 40.0), None, CellContentState.UNAVAILABLE, ()
+            ),
+        ),
+        row_count=2,
+        col_count=2,
+    )
+
+
+def _no_chart(member_id: str) -> Never:
+    raise AssertionError("chart evidence must only be read for chart_value claims")
+
+
+def _claim(
+    member_id: str,
+    kind: Literal["quote", "cell", "chart_value"],
+    field_path: str,
+    text: str,
+    *,
+    claim_id: str = "c1",
+) -> ModelClaim:
+    return ModelClaim(
+        claim_id=claim_id, member_id=member_id, kind=kind, field_path=field_path, text=text
+    )
+
+
+def _answer(*claims: ModelClaim, answer: str = "") -> ModelAnswer:
+    return ModelAnswer(abstain=False, abstain_reason=None, answer=answer, claims=claims)
+
+
+def _verify(*claims: ModelClaim, chart_evidence: ChartEvidence = _no_chart) -> ClaimVerification:
+    blocks = {_TEXT_MEMBER: _text_block(), _TABLE_MEMBER: _table_block()}
+    return verify_claims(_answer(*claims), blocks, chart_evidence=chart_evidence)
+
+
+def _only_rejected(verification: ClaimVerification) -> RejectedClaim:
+    assert verification.verified == ()
+    (rejected,) = verification.rejected
+    return rejected
+
+
+def test_every_chart_qa_refusal_maps_onto_an_abstain_reason() -> None:
+    for reason in (*RefusalReason, *DisplayedRefusalReason):
+        mapped = from_refusal(reason)
+        assert isinstance(mapped, AbstainReason) and mapped.value == reason.value
+
+
+def test_model_output_shape_is_strict() -> None:
+    with pytest.raises(ValueError):
+        ModelAnswer.model_validate_json('{"abstain": false, "answer": "x", "claims": []}')
+    with pytest.raises(ValueError):
+        ModelAnswer.model_validate_json(
+            '{"abstain": false, "abstain_reason": null, "answer": "x", "claims": [], "extra": 1}'
+        )
+    with pytest.raises(ValueError, match="16"):
+        _answer(
+            *(
+                _claim(_TEXT_MEMBER, "quote", "fragments.sp-1", "R", claim_id=f"c{i}")
+                for i in range(17)
+            )
+        )
+
+
+def test_quote_claim_passes_only_as_a_verbatim_substring_of_its_span() -> None:
+    verification = _verify(_claim(_TEXT_MEMBER, "quote", "fragments.sp-1", "grew 12% in 2025"))
+    (claim,) = verification.verified
+    assert verification.rejected == ()
+    assert (claim.claim_id, claim.kind, claim.text, claim.value, claim.unit) == (
+        "c1",
+        ClaimKind.QUOTE,
+        "grew 12% in 2025",
+        None,
+        None,
+    )
+    (citation,) = claim.citations
+    assert (citation.member_id, citation.kind, citation.page_index) == (
+        _TEXT_MEMBER,
+        BlockKind.TEXT,
+        3,
+    )
+    assert citation.field_path == "fragments.sp-1"
+    assert citation.evidence_ids == ("sp-1",)
+    assert citation.bbox == (1.0, 10.0, 90.0, 19.0)
+    assert citation.quote == "Revenue grew 12% in 2025."
+    assert citation.chart_citation is None
+    # Whitespace and case are normalised, nothing else.
+    whitespace = _verify(_claim(_TEXT_MEMBER, "quote", "fragments.sp-2", "costs fell."))
+    assert len(whitespace.verified) == 1
+
+
+def test_quote_claim_is_rejected_when_absent_or_malformed() -> None:
+    missing = _only_rejected(_verify(_claim(_TEXT_MEMBER, "quote", "fragments.sp-1", "grew 13%")))
+    assert (missing.reason, missing.member_id, missing.field_path) == (
+        AbstainReason.CLAIM_NOT_IN_EVIDENCE,
+        _TEXT_MEMBER,
+        "fragments.sp-1",
+    )
+    empty = _only_rejected(_verify(_claim(_TEXT_MEMBER, "quote", "fragments.sp-1", "   ")))
+    assert empty.reason is AbstainReason.CLAIM_NOT_IN_EVIDENCE
+    unknown_span = _only_rejected(_verify(_claim(_TEXT_MEMBER, "quote", "fragments.sp-9", "x")))
+    assert unknown_span.reason is AbstainReason.CLAIM_NOT_IN_EVIDENCE
+    unknown_member = _only_rejected(_verify(_claim("9" * 64, "quote", "fragments.sp-1", "x")))
+    assert unknown_member.reason is AbstainReason.MODEL_OUTPUT_INVALID
+    wrong_kind = _only_rejected(_verify(_claim(_TEXT_MEMBER, "cell", "cells.c-1", "1,234")))
+    assert wrong_kind.reason is AbstainReason.MODEL_OUTPUT_INVALID
+    wrong_path = _only_rejected(_verify(_claim(_TEXT_MEMBER, "quote", "cells.sp-1", "Revenue")))
+    assert wrong_path.reason is AbstainReason.MODEL_OUTPUT_INVALID
+    duplicate = _verify(
+        _claim(_TEXT_MEMBER, "quote", "fragments.sp-1", "Revenue"),
+        _claim(_TEXT_MEMBER, "quote", "fragments.sp-2", "Costs"),
+    )
+    assert len(duplicate.verified) == 1
+    assert duplicate.rejected[0].reason is AbstainReason.MODEL_OUTPUT_INVALID
+
+
+def test_cell_claim_requires_the_exact_present_cell_text() -> None:
+    verification = _verify(_claim(_TABLE_MEMBER, "cell", "cells.c-1", "1,234"))
+    (claim,) = verification.verified
+    assert claim.kind is ClaimKind.CELL and claim.value is None
+    (citation,) = claim.citations
+    assert citation.evidence_ids == ("c-1", "t-1")
+    assert citation.bbox == (1.0, 1.0, 40.0, 20.0) and citation.quote == "1,234"
+    wrong = _only_rejected(_verify(_claim(_TABLE_MEMBER, "cell", "cells.c-1", "1234")))
+    assert wrong.reason is AbstainReason.CLAIM_NOT_IN_EVIDENCE
+    blank = _only_rejected(_verify(_claim(_TABLE_MEMBER, "cell", "cells.c-2", "")))
+    assert blank.reason is AbstainReason.VALUE_UNAVAILABLE
+    unavailable = _only_rejected(_verify(_claim(_TABLE_MEMBER, "cell", "cells.c-3", "x")))
+    assert unavailable.reason is AbstainReason.VALUE_UNAVAILABLE
+    unknown = _only_rejected(_verify(_claim(_TABLE_MEMBER, "cell", "cells.c-9", "x")))
+    assert unknown.reason is AbstainReason.CLAIM_NOT_IN_EVIDENCE
+
+
+def _chart_setup(
+    document: StoreMountedDocument, member_id: str
+) -> tuple[dict[str, ContextBlock], PinnedRetrievalHit]:
+    hit = PinnedRetrievalHit(document.retrieval_snapshot_id, member_id, 1.0)
+    block = build_context_block(document.resolve(hit))
+    assert block.kind is BlockKind.CHART
+    return {member_id: block}, hit
+
+
+def test_bar_value_claims_are_read_back_from_the_displayed_source(tmp_path: Path) -> None:
+    document, pin = bar_document(tmp_path)
+    blocks, hit = _chart_setup(document, pin.member_id)
+    reads = 0
+
+    def evidence(member_id: str) -> DisplayedLookupContext:
+        nonlocal reads
+        reads += 1
+        assert member_id == pin.member_id
+        return document.displayed_context(hit)
+
+    model = _answer(
+        _claim(pin.member_id, "chart_value", "points.p-1H21.value", "15%", claim_id="ok"),
+        _claim(pin.member_id, "chart_value", "points.p-1H23.value", "6", claim_id="bare"),
+        _claim(pin.member_id, "chart_value", "points.p-1H23.value", "7%", claim_id="wrong"),
+        _claim(pin.member_id, "chart_value", "points.p-1H22.value", "10%", claim_id="gap"),
+        _claim(pin.member_id, "chart_value", "points.p-1H99.value", "1%", claim_id="none"),
+        _claim(
+            pin.member_id, "chart_value", "points.p-1H21.series", "Expense Ratio", claim_id="path"
+        ),
+    )
+    verification = verify_claims(model, blocks, chart_evidence=evidence)
+    assert reads == 1  # the displayed evidence is requalified once per member
+    verified = {claim.claim_id: claim for claim in verification.verified}
+    rejected = {claim.claim_id: claim for claim in verification.rejected}
+    assert set(verified) == {"ok", "bare"} and set(rejected) == {"wrong", "gap", "none", "path"}
+    ok = verified["ok"]
+    assert (ok.kind, ok.text, ok.value, ok.unit) == (
+        ClaimKind.CHART_VALUE,
+        "15%",
+        Decimal("15"),
+        "%",
+    )
+    assert verified["bare"].text == "6%" and verified["bare"].value == Decimal("6")
+    paths = [citation.field_path for citation in ok.citations]
+    assert paths[0] == "points.p-1H21.value"
+    assert set(paths) == {
+        "points.p-1H21.value",
+        "points.p-1H21.series",
+        "points.p-1H21.category",
+        "points.p-1H21.unit",
+    }
+    value = ok.citations[0]
+    assert value.kind is BlockKind.CHART and value.member_id == pin.member_id
+    assert value.quote == "15%" and value.evidence_ids and value.bbox is not None
+    assert value.chart_citation is not None
+    assert value.chart_citation.field_path == "points.p-1H21.value"
+    assert value.chart_citation.occurrences and value.chart_citation.svg_digest
+    assert rejected["wrong"].reason is AbstainReason.CLAIM_NOT_IN_EVIDENCE
+    assert rejected["gap"].reason is AbstainReason.VALUE_UNAVAILABLE
+    assert rejected["none"].reason is AbstainReason.UNKNOWN_POINT
+    assert rejected["path"].reason is AbstainReason.MODEL_OUTPUT_INVALID
+
+
+def test_donut_value_claims_pass_check_fields_and_source_display(tmp_path: Path) -> None:
+    document, pin = donut_document(tmp_path)
+    blocks, hit = _chart_setup(document, pin.member_id)
+    context = document.chart_context(hit)
+    point = context.chart.points[0]
+    assert point.value.value is not None
+    display = f"{point.value.value}%"
+    model = _answer(
+        _claim(pin.member_id, "chart_value", f"points.{point.point_id}.value", display),
+        _claim(
+            pin.member_id, "chart_value", f"points.{point.point_id}.value", "0.5%", claim_id="c2"
+        ),
+    )
+    verification = verify_claims(model, blocks, chart_evidence=lambda _: context)
+    (claim,) = verification.verified
+    assert claim.value == point.value.value and claim.text == display
+    assert {c.field_path for c in claim.citations} == {
+        f"points.{point.point_id}.value",
+        f"points.{point.point_id}.series",
+        f"points.{point.point_id}.category",
+        f"points.{point.point_id}.unit",
+        "period",
+    }
+    (rejected,) = verification.rejected
+    assert rejected.reason is AbstainReason.CLAIM_NOT_IN_EVIDENCE
+
+
+def test_chart_refusals_become_rejections_and_evidence_errors_propagate(tmp_path: Path) -> None:
+    document, pin = bar_document(tmp_path)
+    blocks, _ = _chart_setup(document, pin.member_id)
+    claim = _claim(pin.member_id, "chart_value", "points.p-1H21.value", "15%")
+
+    def refused(member_id: str) -> Never:
+        raise DisplayedRefusal(DisplayedRefusalReason.UNQUALIFIED_MEMBER)
+
+    def refused_donut(member_id: str) -> Never:
+        raise ChartRefusal(RefusalReason.UNSUPPORTED_GRAMMAR)
+
+    def corrupt(member_id: str) -> Never:
+        raise ChartQueryError(QueryFailure.INVALID_EVIDENCE, "tampered")
+
+    assert (
+        _only_rejected(verify_claims(_answer(claim), blocks, chart_evidence=refused)).reason
+        is AbstainReason.UNQUALIFIED_MEMBER
+    )
+    assert (
+        _only_rejected(verify_claims(_answer(claim), blocks, chart_evidence=refused_donut)).reason
+        is AbstainReason.UNSUPPORTED_GRAMMAR
+    )
+    with pytest.raises(ChartQueryError):
+        verify_claims(_answer(claim), blocks, chart_evidence=corrupt)
+    # Quote claims never touch chart evidence.
+    assert verify_claims(_answer(), blocks, chart_evidence=corrupt) == ClaimVerification((), ())
+
+
+def _verified(text: str, value: Decimal | None = None) -> VerifiedClaim:
+    return VerifiedClaim("v", ClaimKind.QUOTE, text, value, None, ())
+
+
+def test_prose_numbers_must_equal_a_verified_claim_value() -> None:
+    claims = (_verified("15%", Decimal("15")), _verified("Revenue grew 12% in 2025."))
+    assert prose_grounded("In 1H21 the ratio was 15 % and revenue grew 12% in 2025.", claims) == (
+        True,
+        (),
+    )
+    assert prose_grounded("The ratio was 15.0%.", claims) == (True, ())
+    assert prose_grounded("No figures here.", claims) == (True, ())
+    ok, tokens = prose_grounded("It fell 9 points to 6% (from 15%).", claims)
+    assert not ok and tokens == ("6%", "9")
+    assert prose_grounded("about 1,500", (_verified("1,500"),)) == (True, ())
+    assert prose_grounded("about 1500", (_verified("1,500"),)) == (True, ())
+    assert prose_grounded("FY2024 revenue", ()) == (True, ())  # alphanumeric labels are not numbers
+    assert prose_grounded("12%", ())[0] is False
+
+
+def test_decide_applies_the_rejection_then_prose_gate_policy() -> None:
+    verified = (_verified("15%", Decimal("15")),)
+    rejected = (
+        RejectedClaim(
+            "c2", "m", "points.p-1H22.value", "10%", AbstainReason.VALUE_UNAVAILABLE, "gap"
+        ),
+        RejectedClaim("c3", "m", "fragments.x", "y", AbstainReason.CLAIM_NOT_IN_EVIDENCE, "no"),
+    )
+    answer = _answer(answer="The ratio was 15%.")
+    assert decide(answer, ClaimVerification(verified, rejected), blocks_present=True) == (
+        AnswerStatus.ANSWERED,
+        None,
+        None,
+    )
+    assert decide(answer, ClaimVerification(verified, ()), blocks_present=False)[:2] == (
+        AnswerStatus.ABSTAINED,
+        AbstainReason.NO_RELEVANT_MEMBER,
+    )
+    declined = ModelAnswer(abstain=True, abstain_reason="ambiguous", answer="", claims=())
+    assert decide(declined, ClaimVerification(verified, ()), blocks_present=True) == (
+        AnswerStatus.ABSTAINED,
+        AbstainReason.MODEL_DECLINED,
+        "ambiguous",
+    )
+    first = decide(answer, ClaimVerification((), rejected), blocks_present=True)
+    assert first[:2] == (AnswerStatus.ABSTAINED, AbstainReason.VALUE_UNAVAILABLE)
+    none = decide(answer, ClaimVerification((), ()), blocks_present=True)
+    assert none[:2] == (AnswerStatus.ABSTAINED, AbstainReason.NO_VERIFIED_CLAIM)
+    gated = decide(
+        _answer(answer="It fell 9 points to 6%."),
+        ClaimVerification(verified, rejected),
+        blocks_present=True,
+    )
+    assert gated[:2] == (AnswerStatus.ABSTAINED, AbstainReason.CLAIM_NOT_IN_EVIDENCE)
+    assert gated[2] is not None and "6%" in gated[2] and "9" in gated[2] and "c2" in gated[2]
+
+
+def test_chart_kind_mismatch_with_block_is_invalid_output(tmp_path: Path) -> None:
+    document, pin = bar_document(tmp_path)
+    blocks, _ = _chart_setup(document, pin.member_id)
+    (footer,) = document.member_ids_by_kind(ObjectKind.TEXT)
+    quote_on_chart = verify_claims(
+        _answer(_claim(pin.member_id, "quote", "fragments.x", "Expense")),
+        blocks,
+        chart_evidence=_no_chart,
+    )
+    assert _only_rejected(quote_on_chart).reason is AbstainReason.MODEL_OUTPUT_INVALID
+    chart_on_missing = verify_claims(
+        _answer(_claim(footer, "chart_value", "points.p-1H21.value", "15%")),
+        blocks,
+        chart_evidence=_no_chart,
+    )
+    assert _only_rejected(chart_on_missing).reason is AbstainReason.MODEL_OUTPUT_INVALID
+
+
+def test_published_native_table_cells_verify_verbatim_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    published = publish_generic_document(
+        tmp_path,
+        monkeypatch,
+        filename="meridian-semiannual.pdf",
+        label=DOCUMENT_LABEL,
+        page_count=3,
+        embedder=OfflineDescriptionEmbedder(),
+        table_page=True,
+    )
+    block = build_context_block(resolve_table_member(published))
+    assert block.kind is BlockKind.TABLE
+    member = block.member_id
+    value = next(cell for cell in block.cells if cell.text == "1,234")
+    blank = next(cell for cell in block.cells if cell.content_state is CellContentState.BLANK)
+    blocks = {member: block}
+
+    def run(*claims: ModelClaim) -> ClaimVerification:
+        return verify_claims(_answer(*claims), blocks, chart_evidence=_no_chart)
+
+    exact = _claim(member, "cell", f"cells.{value.cell_id}", "1,234")
+    verification = run(exact)
+    (claim,) = verification.verified
+    assert claim.kind is ClaimKind.CELL and claim.text == "1,234" and claim.value is None
+    (citation,) = claim.citations
+    assert citation.member_id == member and citation.kind is BlockKind.TABLE
+    assert citation.page_index == 2 and citation.field_path == f"cells.{value.cell_id}"
+    assert citation.evidence_ids == (value.cell_id, *value.source_span_ids)
+    assert len(value.source_span_ids) == 1 and citation.bbox == value.bbox
+    assert citation.quote == "1,234"
+
+    # Values are never derived or reformatted: any numeric drift is dropped.
+    for drifted in ("1234", "1,235", "1,234.0", "1 234"):
+        rejected = _only_rejected(run(_claim(member, "cell", f"cells.{value.cell_id}", drifted)))
+        assert rejected.reason is AbstainReason.CLAIM_NOT_IN_EVIDENCE, drifted
+    blank_claim = _only_rejected(run(_claim(member, "cell", f"cells.{blank.cell_id}", "0")))
+    assert blank_claim.reason is AbstainReason.VALUE_UNAVAILABLE
+    missing = _only_rejected(run(_claim(member, "cell", "cells.not-a-cell", "1,234")))
+    assert missing.reason is AbstainReason.CLAIM_NOT_IN_EVIDENCE
+
+    assert decide(
+        _answer(exact, answer="Revenue is 1,234."), verification, blocks_present=True
+    ) == (
+        AnswerStatus.ANSWERED,
+        None,
+        None,
+    )
+    status, reason, _detail = decide(
+        _answer(exact, answer="Revenue is 1,235."), verification, blocks_present=True
+    )
+    assert (status, reason) == (AnswerStatus.ABSTAINED, AbstainReason.CLAIM_NOT_IN_EVIDENCE)

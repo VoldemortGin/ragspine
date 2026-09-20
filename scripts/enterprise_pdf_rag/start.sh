@@ -5,8 +5,10 @@ set -euo pipefail
 PROJECT_ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 cd -- "$PROJECT_ROOT"
 
-if [[ $# -ne 0 ]]; then
-    echo "Usage: $0" >&2
+# Optional: --profile aia-source-review|offline-demo|document-catalog (default AIA).
+# Ports come from ENTERPRISE_API_PORT / ENTERPRISE_WEBUI_PORT (default 8766 / 8767).
+if [[ $# -ne 0 && "$1" != "--profile" ]]; then
+    echo "Usage: $0 [--profile aia-source-review|offline-demo|document-catalog]" >&2
     exit 2
 fi
 if ! command -v uv >/dev/null 2>&1; then
@@ -27,4 +29,4 @@ fi
 
 exec uv run --locked --offline --no-sync --no-env-file --no-python-downloads \
     --python "$PROJECT_PYTHON" "$PROJECT_PYTHON" \
-    "$PROJECT_ROOT/scripts/enterprise_pdf_rag/webui_preview.py" start --require-processing
+    "$PROJECT_ROOT/scripts/enterprise_pdf_rag/webui_preview.py" start --require-processing "$@"

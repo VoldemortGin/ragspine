@@ -346,12 +346,36 @@ version-controlled evaluation sets live under `data/golden/`. Nothing here is re
 
 ## enterprise_pdf_rag（财务 PDF 可追溯 RAG 后端）
 
-同仓库、同一个 `pyproject.toml` 里的 **sibling package**（import 名 `enterprise_pdf_rag`，不在 `ragspine.*` 命名空间下；决定与待办见 [ADR 0021](docs/adr/0021-merge-enterprise-pdf-rag-as-sibling-package.md)）。一句话定位：把财务 PDF 变成**内容寻址、不可变的 source → processing → retrieval 快照**，从 PDF span/drawing 到答案保留完整证据链，只让来源资格化的图表事实进入 ChartQA。它带来 CAS 快照、证据链与 chart QA；RAGSpine 提供检索 / rerank / 回答链，把两者接起来是下一步。
+同仓库、同一个 `pyproject.toml` 里的 **sibling package**（import 名 `enterprise_pdf_rag`，不在 `ragspine.*` 命名空间下；决定与待办见 [ADR 0021](docs/adr/0021-merge-enterprise-pdf-rag-as-sibling-package.md)）。一句话定位：把财务 PDF 变成**内容寻址、不可变的 source → processing → retrieval 快照**，从 PDF span/drawing 到答案保留完整证据链，只让来源资格化的图表事实进入 ChartQA。它带来 CAS 快照、证据链与 chart QA；其 `document-catalog` 模式复用 RAGSpine 的 BM25 / RRF / listwise rerank 做 hybrid 检索，并在证据链上做一次模型调用 + 逐字段校验的回答（[ADR 0011](docs/enterprise-pdf-rag/adr/0011-document-catalog-and-verified-answer-chain.md)，离线验证；真实模型验收见其交接文档）。
 
 - **安装**：与 RAGSpine 共用一个 `pyproject.toml` —— `uv sync`（或上文 Install 的 `uv pip install -e ".[dev,service,vector]"`）即同时得到两个包与两个 console script。
 - **CLI**：`enterprise-pdf-rag ingest|qualify|index|publish|serve`（另有 `chart-qa` / `demo` / `extract` / `llm-smoke`，以及 AIA 样本专用的 `ingest-aia` / `process-aia-*` / `index-aia-processing`）。
 - **测试与门**：`bash scripts/ci.sh` 已包含它的测试（第 5 步，与 ragspine 同一次 pytest 收集）和四个结构守卫（第 9 步：conformance / architecture / schema / drift）；单跑 `uv run pytest tests/enterprise_pdf_rag -q`。
-- **文档入口**：包内契约 [`src/enterprise_pdf_rag/CLAUDE.md`](src/enterprise_pdf_rag/CLAUDE.md) 与规则 [`AGENTS.md`](src/enterprise_pdf_rag/AGENTS.md)；长文档在 [`docs/enterprise-pdf-rag/`](docs/enterprise-pdf-rag/)：[README](docs/enterprise-pdf-rag/README.md) · [交接](docs/enterprise-pdf-rag/CLAUDE_HANDOFF.md) · [PRD v0.2](docs/enterprise-pdf-rag/PRD-v0.2.md) · [ADR 0001–0010](docs/enterprise-pdf-rag/adr/) · [测试与通用入库](docs/enterprise-pdf-rag/testing-and-ingestion.md) · [schemas](docs/enterprise-pdf-rag/schemas/)。配置 `config/enterprise-pdf-rag/settings.yaml`，部署 `deploy/enterprise-pdf-rag/`，基准 `benchmarks/enterprise-pdf-rag/`。
+- **文档入口**：包内契约 [`src/enterprise_pdf_rag/CLAUDE.md`](src/enterprise_pdf_rag/CLAUDE.md) 与规则 [`AGENTS.md`](src/enterprise_pdf_rag/AGENTS.md)；长文档在 [`docs/enterprise-pdf-rag/`](docs/enterprise-pdf-rag/)：[README](docs/enterprise-pdf-rag/README.md) · [交接](docs/enterprise-pdf-rag/CLAUDE_HANDOFF.md) · [PRD v0.2](docs/enterprise-pdf-rag/PRD-v0.2.md) · [ADR 0001–0011](docs/enterprise-pdf-rag/adr/) · [测试与通用入库](docs/enterprise-pdf-rag/testing-and-ingestion.md) · [schemas](docs/enterprise-pdf-rag/schemas/)。配置 `config/enterprise-pdf-rag/settings.yaml`，部署 `deploy/enterprise-pdf-rag/`，基准 `benchmarks/enterprise-pdf-rag/`。
+
+### Quickstart：财务 PDF 流水线
+
+安装（上文 Install 的 `uv pip install -e ".[dev,service,vector]"` 或 `uv sync`）即得 `enterprise-pdf-rag` 命令；PDF 引擎 `pdfspine` 在**基础依赖**里，此流水线无需额外 extra。
+
+**前置 env**（checkout 之外运行的约定见 [ADR 0007](docs/enterprise-pdf-rag/adr/0007-installable-runtime.md)）：`APP_ROOT_DIR` 指向已存在的工作目录、`APP_DATA_DIR` 指向持久数据目录；`OPENAI_BASE_URL`(https 强制)/`OPENAI_MODEL`/`OPENAI_API_KEY` 供 layout 阶段每页一次模型调用——`--stage source` 可零模型，但文档检索状态为 `not_ready`；`EMBEDDING_BASE_URL` 必须是回环地址（`127.0.0.1`/`localhost`/`::1`），远端模型走既有 SSH 隧道，另配 `EMBEDDING_MODEL`/`EMBEDDING_API_KEY`；`RERANK_*` 可选，仅请求显式 `"rerank": true` 时使用。
+
+```bash
+# 1) 入库：完整来源始终保存，选页只驱动下游；此命令的 JSON 输出给出后三步要用的 store 路径
+enterprise-pdf-rag ingest --pdf report.pdf --pages all --stage semantics --max-live-calls N
+# 取上一步输出的 source_store / processing_store / processing_id，记作 SRC / PROC / PID：
+enterprise-pdf-rag qualify --source-store SRC --processing-store PROC --processing-id PID   # 资格化，零模型
+enterprise-pdf-rag index   --source-store SRC --processing-store PROC --processing-id PID --document-label "FY25 report"   # 本地 embedding 一次
+enterprise-pdf-rag publish --source-store SRC --processing-store PROC --processing-id PID   # 切指针并默认激活来源，零模型
+# 起 document-catalog 服务并问答
+APP_EXECUTION_MODE=document-catalog enterprise-pdf-rag serve --host 127.0.0.1 --port 8766
+curl -s http://127.0.0.1:8766/v1/models   # 每个挂载文档一个 id：enterprise-pdf-rag/<sha12>
+curl -s http://127.0.0.1:8766/v1/chat/completions -H 'Content-Type: application/json' \
+  --data '{"model":"enterprise-pdf-rag/<sha12>","messages":[{"role":"user","content":"FY25 revenue?"}]}'
+```
+
+**回答链保证**：每条 claim 逐字段回读证据，散文里任何未验证的数字都触发整体拒答（HTTP 200 + `enterprise_pdf_rag.status=abstained`），从不派生数值。
+
+**Python API**：同一流水线见 `enterprise_pdf_rag.adapters.pdf_ingestion.ingest_pdf` 与 `adapters.draft_publication` 的 `qualify_draft` / `index_draft` / `publish_draft`。完整命令、env 与契约见 [测试与通用入库](docs/enterprise-pdf-rag/testing-and-ingestion.md)。
 
 ## Status & roadmap
 

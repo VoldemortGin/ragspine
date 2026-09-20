@@ -182,12 +182,14 @@ def build_context_block(context: RetrievalContext) -> ContextBlock:
     if isinstance(ir, TableIR):
         if member.kind is not ObjectKind.TABLE:
             raise ValueError("Retrieval member kind does not match its typed IR")
+        # The inferred grid is pinned PENDING; what a table member verifies is its
+        # literal transcription, exactly like text members.
         return ContextBlock(
             *common,
             BlockKind.TABLE,
             member.page_index,
             context.scope,
-            ir.verification,
+            context.description.verification,
             context.description.text,
             cells=tuple(
                 CellEvidence(

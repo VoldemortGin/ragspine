@@ -22,8 +22,8 @@ class DraftQualification(BoundaryModel):
     source_sha256: str
     source_manifest_id: str
     processing_id: str
-    qualification_policy: Literal["retrieval-eligibility-kind-and-stage-completeness-v1"] = (
-        "retrieval-eligibility-kind-and-stage-completeness-v1"
+    qualification_policy: Literal["retrieval-eligibility-kind-and-stage-completeness-v2"] = (
+        "retrieval-eligibility-kind-and-stage-completeness-v2"
     )
     eligible_member_count: int
     skipped_object_count: int

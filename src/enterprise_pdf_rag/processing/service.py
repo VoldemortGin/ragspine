@@ -4,6 +4,7 @@ from dataclasses import replace
 from math import isfinite
 
 from enterprise_pdf_rag.figures.models import SourceAnchor, content_id
+from enterprise_pdf_rag.processing.geometry import contains
 from enterprise_pdf_rag.processing.models import (
     CanonicalPage,
     CanonicalText,
@@ -57,9 +58,8 @@ def validate_partition(page: PageInput, partition: PagePartition) -> None:
     covered = set(partition.unassigned_span_ids)
     parents = {item.object_id: item.parent_id for item in partition.objects}
     for item in partition.objects:
-        x0, y0, x1, y1 = item.bbox
-        if not all(isfinite(value) for value in item.bbox) or not (
-            0 <= x0 < x1 <= page.width and 0 <= y0 < y1 <= page.height
+        if not all(isfinite(value) for value in item.bbox) or not contains(
+            (0.0, 0.0, page.width, page.height), item.bbox
         ):
             raise ValueError("Layout region is outside source page geometry")
         if item.parent_id is not None and item.parent_id not in object_ids:

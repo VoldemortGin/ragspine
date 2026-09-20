@@ -6,8 +6,14 @@ from enterprise_pdf_rag.adapters.aia_ingestion import read_text_sidecar
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.pdfspine_svg import crop_native_svg
 from enterprise_pdf_rag.figures.models import Confidence, Verification
+from enterprise_pdf_rag.processing.geometry import contains
 from enterprise_pdf_rag.processing.models import ObjectKind, ProcessingScope
 from enterprise_pdf_rag.processing.retrieval import RetrievalMember
+from enterprise_pdf_rag.processing.table_models import TableIR
+from enterprise_pdf_rag.processing.table_transcription import (
+    check_table_transcription,
+    table_span_ids,
+)
 from enterprise_pdf_rag.processing.typed_ir import (
     GroupIR,
     ListIR,
@@ -24,7 +30,7 @@ def validate_literal_member(
     assets: LocalDocumentStore,
     scope: ProcessingScope,
     member: RetrievalMember,
-) -> tuple[TextIR | ListIR | GroupIR, ObjectDescription, LiteralQualification]:
+) -> tuple[TextIR | ListIR | GroupIR | TableIR, ObjectDescription, LiteralQualification]:
     receipt = TypeAdapter(LiteralQualification).validate_json(assets.get(member.qualification))
     description = TypeAdapter(ObjectDescription).validate_json(assets.get(member.description))
     if description.producer != "exact-source-transcription-v1":
@@ -88,11 +94,7 @@ def validate_literal_member(
     if description.text != "\n".join(spans[span_id].text for span_id in receipt.source_span_ids):
         raise ValueError("Qualified text is not an exact source transcription")
     for span_id in receipt.source_span_ids:
-        bbox = spans[span_id].bbox
-        if not (
-            anchor.bbox[0] <= bbox[0] < bbox[2] <= anchor.bbox[2]
-            and anchor.bbox[1] <= bbox[1] < bbox[3] <= anchor.bbox[3]
-        ):
+        if not contains(anchor.bbox, spans[span_id].bbox):
             raise ValueError("Literal source occurrence is outside its qualified anchor")
     page = source.manifest.pages[member.page_index]
     expected_crop = crop_native_svg(
@@ -103,8 +105,23 @@ def validate_literal_member(
     ).encode()
     if assets.get(member.source_svg) != expected_crop:
         raise ValueError("Literal SVG crop does not derive from the pinned source page and anchor")
-    ir: TextIR | ListIR | GroupIR
     payload = assets.get(member.ir)
+    if member.kind is ObjectKind.TABLE:
+        table = TypeAdapter(TableIR).validate_json(payload)
+        if (
+            table.object_id != member.object_id
+            or (
+                table.source.document_sha256,
+                table.source.source_revision,
+                table.source.page_index,
+            )
+            != (scope.source_sha256, scope.source_sha256, member.page_index)
+            or table_span_ids(table) != receipt.source_span_ids
+        ):
+            raise ValueError("Typed table IR does not match the literal qualification")
+        check_table_transcription(table, spans, anchor=anchor.bbox)
+        return table, description, receipt
+    ir: TextIR | ListIR | GroupIR
     if member.kind is ObjectKind.TEXT:
         ir = TypeAdapter(TextIR).validate_json(payload)
     elif member.kind is ObjectKind.LIST:

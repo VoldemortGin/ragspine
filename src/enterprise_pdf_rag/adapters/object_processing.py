@@ -10,6 +10,7 @@ from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.source_objects import source_object_ir
 from enterprise_pdf_rag.documents.models import AssetRef, TextSidecar
 from enterprise_pdf_rag.figures.models import Verification
+from enterprise_pdf_rag.processing.geometry import contains
 from enterprise_pdf_rag.processing.models import (
     LayoutObject,
     ObjectKind,
@@ -50,11 +51,7 @@ class ProcessingObjectAdapter:
                 span
                 for span in page.text.spans
                 if span.span_id in item.source_span_ids
-                or (
-                    container
-                    and item.bbox[0] <= span.bbox[0] < span.bbox[2] <= item.bbox[2]
-                    and item.bbox[1] <= span.bbox[1] < span.bbox[3] <= item.bbox[3]
-                )
+                or (container and contains(item.bbox, span.bbox))
             ),
         )
         stages.append(

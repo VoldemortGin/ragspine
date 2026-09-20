@@ -116,3 +116,40 @@ def test_container_group_retains_children_and_independent_source_region_descript
     assert sidecar_ref is not None
     sidecar = TypeAdapter(TextSidecar).validate_json(outputs.assets.get(sidecar_ref))
     assert set(desc.source_span_ids) <= {span.span_id for span in sidecar.spans}
+
+
+def test_container_region_tolerates_model_rendered_float_noise(tmp_path: Path) -> None:
+    sources = LocalDocumentStore(tmp_path / "source")
+    svg = sources.put(
+        b'<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"/>',
+        media_type="image/svg+xml",
+    )
+    page = PageInput(
+        "a" * 64,
+        "b" * 64,
+        0,
+        100.0,
+        100.0,
+        svg,
+        TextSidecar(
+            "source-text-v1",
+            "b" * 64,
+            0,
+            (TextSpan("child-label", "72%", (10.0, 10.0, 30.0, 40.00000000000001)),),
+        ),
+    )
+    group = LayoutObject(
+        "group",
+        ObjectKind.GROUP,
+        (0.0, 0.0, 100.0, 40.0),
+        (),
+        "proposed card",
+        Confidence(None, "layout"),
+        child_object_ids=("child",),
+    )
+    record = ProcessingObjectAdapter(sources, ProcessingStore(tmp_path / "out")).process(
+        page, group
+    )
+    stages = {stage.stage: stage for stage in record.stages}
+    desc_ref = stages["description"].artifact
+    assert desc_ref is not None
