@@ -36,7 +36,7 @@ dependencies = [
     # Spine 家族薄共享核（ADR 0001 D3/D5）：domain-neutral 底层原语（缝注册表 / 隐私
     # trace 形状 / conformance 基座 / 配置加载 / 统一异常）。corespine 自身 dependencies
     # 恒为空，不引入任何重依赖；本地开发经下方 [tool.uv.sources] 指向同家族目录里的源码。
-    "corespine>=0.1.1",
+    "corespine>=0.5.1",
     "python-pptx>=0.6.23",
     "openpyxl>=3.1.0",
     "rootutils>=1.0.7",
@@ -82,16 +82,14 @@ dev = [
 # abi3-py311 预编译 wheel，无 torch 重依赖（体积 30-50M，对比 docling 链 ~600M）。
 # 延迟 import（pdf_spine_extractor 函数体内），不装 [pdf] 也能 import 核心、跑离线默认。
 pdf = [
-    "pdfspine>=0.0.4",
+    "pdfspine>=0.11.0",
 ]
 # 可选 docling 兜底引擎（历史默认，现降级）。仅当需要 docling 的版面/表格模型（重依赖
 # torch/transformers，~600M）时安装，注入 DoclingGridExtractor 即走旧路径。
-# transformers 上界（仅 darwin）：docling-ibm-models 在 macOS 上要求 transformers<5.9.0
-# （新版 rt_detr_v2 layout 模型在 Apple MPS 上用 float64，而 MPS 不支持 → docling 数字 PDF
-# 抽取整列报错）。此上界纯为 docling 服务，故随引擎一并放在本 extra；[embed] 自身放行到最新。
+# 历史上曾为 darwin 加 transformers<5.9.0 上界（rt_detr_v2 layout 模型在 Apple MPS 用 float64 报错）；
+# docling 2.129 + docling-ibm-models 4.x 已在 macOS 上用 transformers 5.17 跑通 docling lane，上界撤除。
 pdf-docling = [
     "docling>=2.0.0",
-    "transformers<5.9.0; sys_platform == 'darwin'",
 ]
 # 三期扫描线的重依赖（扫描型 PDF OCR/VLM 抽取），仅在 Ubuntu+NVIDIA GPU 上的
 # 真实集成测试阶段安装。注意：paddlepaddle-gpu 需按官方指引在 Ubuntu 上单独装
@@ -104,7 +102,7 @@ ocr = [
 # 延迟 import（docspine_extractor 函数体内），不装 [doc] 也能 import 核心、跑离线默认；装了之后
 # .docx 即接入结构化（表格→StyledGrid）与叙事（正文段落→NarrativeDoc）两条通路。
 doc = [
-    "docspine>=0.1.0",
+    "docspine>=0.5.1",
 ]
 # 家族 .pptx 抽取引擎（W3c，可选/opt-in）：pptspine —— 纯 Rust PowerPoint(OOXML)解析器
 # （信息无损：更富的表 merges gridSpan/rowSpan/hMerge/vMerge + autoshape + 内嵌图 OCR，
@@ -113,7 +111,7 @@ doc = [
 # 默认 .pptx 仍走 python-pptx（pptx_styled，保 color/chart/note 不丢）；pptspine 是更富
 # 表合并的 opt-in 备选，经 registry 选择项 'pptx+pptspine' 或结构化派发注入 pptx_extractor 启用。
 ppt = [
-    "pptspine>=0.1.0",
+    "pptspine>=0.5.1",
 ]
 # Agent 编排层接真实 Claude 时安装（mock 模式不需要，SDK 延迟 import）。
 # openai：OpenAIEmbeddingBackend（src/embedding_backends）用，同样延迟 import。
@@ -281,7 +279,7 @@ artifacts = ["/src/ragspine/service/studio_dist"]
 packages = ["src/ragspine"]
 
 [tool.hatch.build.targets.sdist]
-exclude = ["/uv.lock"]
+exclude = ["/uv.lock", "/_incoming"]
 
 # 面向 AI 消费者的使用文档随 wheel 出货，装后在 site-packages/ragspine/_llms/ 可读
 # （llms.txt 索引 + docs/llms/*.md）。映射到包内 _llms/，不污染 ragspine 命名空间的导入面。
@@ -294,6 +292,8 @@ exclude = ["/uv.lock"]
 corespine = { path = "../corespine", editable = true }
 
 [tool.pytest.ini_options]
+# 默认递归排除项 + _incoming/（subtree 导入的外部仓库快照，不属于 rag-spine 的门）。
+norecursedirs = ["*.egg", ".*", "_darcs", "build", "CVS", "dist", "node_modules", "venv", "{arch}", "_incoming"]
 markers = [
     "gpu: 需要 Ubuntu+NVIDIA GPU 与真实 OCR 模型，本地默认跳过",
     "docling: 走 docling 重模型抽取的测试；ci.sh 放独立进程跑，避免全套并跑时的第三方不确定性",
@@ -303,7 +303,12 @@ markers = [
 filterwarnings = [
     "error",
     "ignore:Using `httpx` with `starlette.testclient`",     # starlette TestClient（第三方）
+    # starlette 1.6 testclient 仍用 anyio 4.15 已废弃的 anyio.abc.BlockingPortal 别名（第三方对第三方）
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
     "ignore:This field is deprecated. Use `generate_page_images",  # docling 管线（第三方）
+    # fastembed >=0.8（第三方）：默认 ONNX 模型 paraphrase-multilingual-MiniLM-L12-v2 改为 mean pooling，
+    # 加载时一次性 UserWarning 提示可钉回 0.5.1 保旧行为；我们跟随新版，仅放行该提示。
+    "ignore:The model sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 now uses mean pooling:UserWarning",
     # qdrant-client local 模式（第三方，py3.14 起可见）：persistence.py 用
     # `with sqlite3.connect(":memory:")` 探测 THREADSAFE——sqlite3 上下文管理器只管事务
     # 不关连接，泄漏的临时连接在 GC 终结时触发 unraisable ResourceWarning。
@@ -315,6 +320,8 @@ filterwarnings = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# _incoming/：subtree 导入的外部仓库快照，不属于 rag-spine 的门，任何工具都不扫描。
+extend-exclude = ["_incoming"]
 # src 布局：把 src/ 标为第一方根，isort（I 规则）才能正确把 `import ragspine` 归到一方分组。
 src = ["src"]
 

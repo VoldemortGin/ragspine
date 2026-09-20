@@ -22,8 +22,12 @@ DIFY_FIXTURES = Path(__file__).resolve().parents[1] / "dify" / "fixtures"
 
 
 def test_implicit_description_reuses_paper_template(
-    capsys: pytest.CaptureFixture[str],
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from ragspine.workflows.matching import LexicalTemplateMatcher
+
+    monkeypatch.setattr(cli_module, "_workflow_matcher", lambda name: LexicalTemplateMatcher())
+
     rc = main(["A rag form understanding paper of CNN", "--stdout"])
 
     assert rc == 0

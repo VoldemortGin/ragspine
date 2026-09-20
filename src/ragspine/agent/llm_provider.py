@@ -86,7 +86,7 @@ def _openai_tool_to_anthropic(tool: dict[str, Any]) -> dict[str, Any]:
 
 def _openai_messages_to_anthropic(
     messages: list[dict[str, Any]],
-) -> tuple[str, list[dict[str, Any]]]:
+) -> tuple[str, list[Any]]:
     """OpenAI messages → (system 字符串, Anthropic messages)。
 
     system 角色合并进 system 参数；tool 角色转 tool_result block；assistant 的 tool_calls 转
@@ -151,7 +151,7 @@ class AnthropicProvider:
 
         # 超时/重试透传给 SDK：429/5xx/超时由 SDK 原生指数退避处理（被动兜底，与
         # corespine RateLimitedProvider 的主动 TPM 限流互补）。
-        client_kwargs: dict[str, object] = {"timeout": timeout, "max_retries": max_retries}
+        client_kwargs: dict[str, Any] = {"timeout": timeout, "max_retries": max_retries}
         if api_key is not None:
             client_kwargs["api_key"] = api_key
         if base_url is not None:
@@ -179,12 +179,12 @@ class AnthropicProvider:
             raise ProviderError(f"Anthropic 调用失败：{exc}") from exc
 
         text = "".join(
-            b.text for b in resp.content if getattr(b, "type", None) == "text"
+            b.text for b in resp.content if b.type == "text"
         )
         tool_calls = tuple(
             ToolCall(id=b.id, function=FunctionCall(name=b.name, arguments=json.dumps(dict(b.input))))
             for b in resp.content
-            if getattr(b, "type", None) == "tool_use"
+            if b.type == "tool_use"
         )
         message = ResponseMessage(
             role="assistant", content=(text or None), tool_calls=(tool_calls or None)
@@ -192,7 +192,8 @@ class AnthropicProvider:
         choice = Choice(
             index=0,
             message=message,
-            finish_reason=_ANTHROPIC_FINISH.get(resp.stop_reason, "stop"),
+            # stop_reason 可能为 None(SDK 类型),归一到 "" 走默认 stop;行为与原先一致。
+            finish_reason=_ANTHROPIC_FINISH.get(resp.stop_reason or "", "stop"),
         )
         usage: Usage | None = None
         u = getattr(resp, "usage", None)

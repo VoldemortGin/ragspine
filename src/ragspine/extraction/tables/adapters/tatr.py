@@ -77,7 +77,8 @@ class TatrStructureRecognizer:
                 "未安装表格结构识别依赖：pip install 'rag-spine[tsr]' "
                 "或 pip install torch transformers pillow"
             ) from exc
-        self._processor = AutoImageProcessor.from_pretrained(self.model_id)
+        # transformers 5.17 未给 from_pretrained 标注类型,第三方缺类型,精确豁免一条。
+        self._processor = AutoImageProcessor.from_pretrained(self.model_id)  # type: ignore[no-untyped-call]
         self._model = AutoModelForObjectDetection.from_pretrained(self.model_id)
         self._model.eval()
         self._torch = torch
