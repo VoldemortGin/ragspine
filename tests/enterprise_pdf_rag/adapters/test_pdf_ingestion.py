@@ -4,6 +4,8 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from hashlib import sha256
 from pathlib import Path
 from typing import cast
@@ -33,14 +35,115 @@ TABLE_CELLS = {
 }
 
 
-def _draw_table(page: pdfspine.Page, fontname: str) -> None:
-    for y in TABLE_ROWS:
-        page.draw_line((TABLE_COLUMNS[0], y), (TABLE_COLUMNS[-1], y), width=1)
-    for x in TABLE_COLUMNS:
-        page.draw_line((x, TABLE_ROWS[0]), (x, TABLE_ROWS[-1]), width=1)
-    for (row, column), text in TABLE_CELLS.items():
+@dataclass(frozen=True)
+class TableSpec:
+    """A ruled grid to author: boundaries, cell texts, merges and header styling."""
+
+    rows: tuple[float, ...] = TABLE_ROWS
+    cols: tuple[float, ...] = TABLE_COLUMNS
+    cells: Mapping[tuple[int, int], str] = field(default_factory=lambda: dict(TABLE_CELLS))
+    merges: tuple[tuple[int, int, int, int], ...] = ()
+    header_rows: int = 0
+    header_rule_width: float | None = None
+    line_width: float = 1.0
+    ruled: bool = True
+    frame_only: bool = False
+    split_segments: bool = False
+    fill_header: bool = False
+    text_dy: float = 18.0
+
+    @property
+    def bbox(self) -> tuple[float, float, float, float]:
+        return (self.cols[0], self.rows[0], self.cols[-1], self.rows[-1])
+
+
+# Byte-identical to the grid ``table_page=True`` has always drawn: whole lines, rows
+# before columns, width 1, text 18pt below each row boundary.
+DEFAULT_TABLE = TableSpec()
+# Two header rows closed by a 2pt rule, a column-spanning title and a row-spanning unit.
+MULTI_HEADER_TABLE = TableSpec(
+    rows=(48.0, 70.0, 92.0, 114.0, 136.0),
+    cols=(20.0, 90.0, 160.0, 220.0),
+    cells={
+        (0, 0): "Group",
+        (0, 2): "Unit",
+        (1, 0): "Metric",
+        (1, 1): "Value",
+        (2, 0): "Revenue",
+        (2, 1): "1,234",
+        (2, 2): "m",
+        (3, 0): "Margin",
+        (3, 1): "12%",
+    },
+    merges=((0, 0, 1, 2), (2, 2, 2, 1)),
+    header_rows=2,
+    header_rule_width=2.0,
+    text_dy=16.0,
+)
+FILL_HEADER_TABLE = TableSpec(header_rows=1, fill_header=True)
+FRAME_ONLY_TABLE = TableSpec(frame_only=True)
+UNRULED_TABLE = TableSpec(ruled=False)
+SPLIT_TABLE = TableSpec(split_segments=True)
+
+
+def _blocked(spec: TableSpec, *, boundary: int, index: int, horizontal: bool) -> bool:
+    """Is the piece of boundary ``boundary`` in column/row ``index`` inside a merged cell?"""
+    for row, col, row_span, col_span in spec.merges:
+        if horizontal and row < boundary < row + row_span and col <= index < col + col_span:
+            return True
+        if not horizontal and col < boundary < col + col_span and row <= index < row + row_span:
+            return True
+    return False
+
+
+def _runs(spec: TableSpec, *, boundary: int, count: int, horizontal: bool) -> list[tuple[int, int]]:
+    """Maximal runs ``[start, end)`` of un-blocked pieces along one boundary."""
+    runs: list[tuple[int, int]] = []
+    start: int | None = None
+    for index in range(count + 1):
+        open_piece = index < count and not _blocked(
+            spec, boundary=boundary, index=index, horizontal=horizontal
+        )
+        if open_piece and start is None:
+            start = index
+        if not open_piece and start is not None:
+            runs.append((start, index))
+            start = None
+    if spec.split_segments:
+        return [(piece, piece + 1) for begin, end in runs for piece in range(begin, end)]
+    return runs
+
+
+def _draw_table(page: pdfspine.Page, fontname: str, spec: TableSpec = DEFAULT_TABLE) -> None:
+    row_count, col_count = len(spec.rows) - 1, len(spec.cols) - 1
+    if spec.ruled and spec.frame_only:
+        page.draw_rect(spec.bbox, width=spec.line_width)
+    elif spec.ruled:
+        if spec.fill_header:
+            for row in range(spec.header_rows):
+                page.draw_rect(
+                    (spec.cols[0], spec.rows[row], spec.cols[-1], spec.rows[row + 1]),
+                    color=None,
+                    fill=(0.85, 0.85, 0.85),
+                    width=0,
+                )
+        for index, y in enumerate(spec.rows):
+            width = (
+                spec.header_rule_width
+                if (spec.header_rule_width is not None and index == spec.header_rows)
+                else spec.line_width
+            )
+            for start, end in _runs(spec, boundary=index, count=col_count, horizontal=True):
+                page.draw_line((spec.cols[start], y), (spec.cols[end], y), width=width)
+        for index, x in enumerate(spec.cols):
+            for start, end in _runs(spec, boundary=index, count=row_count, horizontal=False):
+                page.draw_line((x, spec.rows[start]), (x, spec.rows[end]), width=spec.line_width)
+    for (row, column), text in spec.cells.items():
         page.insert_text(
-            (TABLE_COLUMNS[column] + 6, TABLE_ROWS[row] + 18), text, fontsize=11, fontname=fontname
+            (spec.cols[column] + 6, spec.rows[row] + spec.text_dy),
+            text,
+            fontsize=11,
+            fontname=fontname,
         )
 
 
@@ -50,8 +153,11 @@ def authored_pdf(
     page_count: int,
     label: str,
     embedded_font: bool = False,
-    table_page: bool = False,
+    table_page: bool | TableSpec = False,
 ) -> Path:
+    spec = (
+        table_page if isinstance(table_page, TableSpec) else (DEFAULT_TABLE if table_page else None)
+    )
     with pdfspine.open() as document:
         for number in range(page_count):
             page = document.new_page(width=240, height=160)
@@ -65,8 +171,8 @@ def authored_pdf(
                     ).read_bytes(),
                 )
             page.insert_text((20, 40), f"{label} page {number + 1}", fontsize=12, fontname=fontname)
-            if table_page and number == page_count - 1:
-                _draw_table(page, fontname)
+            if spec is not None and number == page_count - 1:
+                _draw_table(page, fontname, spec)
         path.write_bytes(document.tobytes())
     return path
 

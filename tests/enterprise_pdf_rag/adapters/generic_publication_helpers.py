@@ -21,18 +21,29 @@ from enterprise_pdf_rag.figures.ports import EmbeddingPort
 from enterprise_pdf_rag.processing.models import ObjectKind
 from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit, RetrievalContext
 from tests.enterprise_pdf_rag.adapters.test_pdf_ingestion import (
+    DEFAULT_TABLE,
     TABLE_COLUMNS,
     TABLE_ROWS,
+    TableSpec,
     authored_pdf,
 )
 
 PROVIDER_BASE_URL = "https://provider.invalid"
 # Kept short so the authored line fits the 240pt page width (no overflow/truncation).
 DOCUMENT_LABEL = "Revenue expense ratio"
-# The ruled grid of ``authored_pdf(table_page=True)`` and the layout region the stub
-# partitioner proposes around it (5pt margin, still inside the 240x160 page).
+# The ruled grid of ``authored_pdf(table_page=True)``.
 TABLE_BBOX = (TABLE_COLUMNS[0], TABLE_ROWS[0], TABLE_COLUMNS[-1], TABLE_ROWS[-1])
-TABLE_REGION = (TABLE_BBOX[0] - 5.0, TABLE_BBOX[1] - 5.0, TABLE_BBOX[2] + 5.0, TABLE_BBOX[3] + 5.0)
+
+
+def table_region(bbox: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
+    """The layout region the stub partitioner proposes around a ruled grid (5pt margin)."""
+    return (bbox[0] - 5.0, bbox[1] - 5.0, bbox[2] + 5.0, bbox[3] + 5.0)
+
+
+def _spec(table_page: bool | TableSpec) -> TableSpec | None:
+    if isinstance(table_page, TableSpec):
+        return table_page
+    return DEFAULT_TABLE if table_page else None
 
 
 def _extent(observations: list[dict[str, Any]]) -> list[float]:
@@ -66,14 +77,19 @@ def _region(region_id: str, kind: str, bbox: list[float], span_ids: list[str]) -
 
 
 def text_partition_sender(
-    calls: list[bytes], *, table_caption: bool = False
+    calls: list[bytes],
+    *,
+    table_caption: bool = False,
+    table_bbox: tuple[float, float, float, float] = TABLE_BBOX,
 ) -> Callable[..., bytes]:
     """Classify page regions offline: occurrences inside the authored ruled grid become one
     Table region, everything else one Text region, so no semantic model call fires.
 
     ``table_caption`` also hands the page's caption line to the Table region, which
-    leaves the region owning an occurrence outside its native cells.
+    leaves the region owning an occurrence outside its native cells. ``table_bbox`` is the
+    authored grid to classify against, for fixtures other than the default one.
     """
+    region = table_region(table_bbox)
 
     def sender(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
         assert url == f"{PROVIDER_BASE_URL}/v1/chat/completions"
@@ -86,10 +102,10 @@ def text_partition_sender(
         in_grid = [
             observation
             for observation in observations
-            if TABLE_BBOX[0] <= float(observation["bbox"][0])
-            and TABLE_BBOX[1] <= float(observation["bbox"][1])
-            and float(observation["bbox"][2]) <= TABLE_BBOX[2]
-            and float(observation["bbox"][3]) <= TABLE_BBOX[3]
+            if table_bbox[0] <= float(observation["bbox"][0])
+            and table_bbox[1] <= float(observation["bbox"][1])
+            and float(observation["bbox"][2]) <= table_bbox[2]
+            and float(observation["bbox"][3]) <= table_bbox[3]
         ]
         outside = [observation for observation in observations if observation not in in_grid]
         regions: list[dict[str, object]] = []
@@ -97,10 +113,10 @@ def text_partition_sender(
             owned = in_grid + (outside if table_caption else [])
             extent = _extent(owned)
             bbox = [
-                min(TABLE_REGION[0], extent[0]),
-                min(TABLE_REGION[1], extent[1]),
-                max(TABLE_REGION[2], extent[2]),
-                max(TABLE_REGION[3], extent[3]),
+                min(region[0], extent[0]),
+                min(region[1], extent[1]),
+                max(region[2], extent[2]),
+                max(region[3], extent[3]),
             ]
             regions.append(_region("table", "Table", bbox, [str(item["id"]) for item in owned]))
             if table_caption:
@@ -136,14 +152,16 @@ def ingest_generic_semantics(
     label: str = DOCUMENT_LABEL,
     page_count: int = 3,
     output_dir: Path | None = None,
-    table_page: bool = False,
+    table_page: bool | TableSpec = False,
     table_caption: bool = False,
 ) -> tuple[IngestionSummary, list[bytes]]:
     """Ingest an authored PDF through the semantics stage with one stubbed layout call per page.
 
-    ``table_page`` draws a native ruled table on the last page; ``table_caption`` makes
-    the stub layout hand that page's caption line to the Table region as well.
+    ``table_page`` draws a native ruled table on the last page (``True`` for the default
+    grid, or a ``TableSpec``); ``table_caption`` makes the stub layout hand that page's
+    caption line to the Table region as well.
     """
+    spec = _spec(table_page)
     for key, value in {
         "OPENAI_API_KEY": "offline-secret",
         "OPENAI_BASE_URL": PROVIDER_BASE_URL,
@@ -160,7 +178,11 @@ def ingest_generic_semantics(
     calls: list[bytes] = []
     monkeypatch.setattr(
         "enterprise_pdf_rag.adapters.json_completion._send_once",
-        text_partition_sender(calls, table_caption=table_caption),
+        text_partition_sender(
+            calls,
+            table_caption=table_caption,
+            table_bbox=spec.bbox if spec is not None else TABLE_BBOX,
+        ),
     )
     summary = ingest_pdf(
         pdf=pdf,
@@ -180,7 +202,7 @@ def publish_generic_document(
     page_count: int,
     embedder: EmbeddingPort,
     output_dir: Path | None = None,
-    table_page: bool = False,
+    table_page: bool | TableSpec = False,
 ) -> DraftPublication:
     """Ingest, qualify, index with the injected embedder and publish one document."""
     ingest, _ = ingest_generic_semantics(

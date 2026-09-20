@@ -1,12 +1,21 @@
 """Map pdfspine's explicit typed table slots into source-bound TableIR."""
 
+from dataclasses import replace
 from hashlib import sha256
 from math import isfinite
 
 import pdfspine
 
+from enterprise_pdf_rag.documents.models import Bounds
 from enterprise_pdf_rag.figures.models import SourceAnchor, content_id
+from enterprise_pdf_rag.processing.geometry import COORDINATE_TOLERANCE, Axis, Segment
 from enterprise_pdf_rag.processing.models import LayoutObject, ObjectKind, PageInput
+from enterprise_pdf_rag.processing.table_grid_proof import (
+    GRID_SCOPE,
+    GridRejection,
+    prove_grid,
+    verified_table,
+)
 from enterprise_pdf_rag.processing.table_models import (
     CellContentState,
     SlotState,
@@ -15,6 +24,145 @@ from enterprise_pdf_rag.processing.table_models import (
     TableIR,
     TableSlot,
 )
+
+# pdfspine's own ``find_tables(line_max_thickness=3.0)`` default: what it will not treat
+# as a ruling, we do not treat as one either.
+LINE_MAX_THICKNESS = 3.0
+
+
+def ruling_segments(
+    page: pdfspine.Page, *, line_max_thickness: float = LINE_MAX_THICKNESS
+) -> tuple[Segment, ...]:
+    """Axis-aligned solid strokes and thin filled rectangles from ``page.get_drawings()``.
+
+    ``get_drawings()`` is page-top-left like text spans and ``Table.rows``/``cols``; never
+    use ``get_cdrawings()`` here (PDF bottom-left). Dashed paths, diagonal lines, curves
+    and strokes thicker than ``line_max_thickness`` are not rulings.
+    """
+    segments: list[Segment] = []
+    for path_index, drawing in enumerate(page.get_drawings()):
+        kind = str(drawing.get("type", ""))
+        if drawing.get("dashes") not in (None, ""):
+            continue
+        width = float(drawing.get("width") or 0.0)
+        stroked, filled = "s" in kind, "f" in kind
+        for item_index, item in enumerate(drawing["items"]):
+            operator = item[0]
+            if operator == "l" and stroked and width <= line_max_thickness:
+                (ax, ay), (bx, by) = tuple(item[1]), tuple(item[2])
+                if abs(ay - by) <= COORDINATE_TOLERANCE and abs(ax - bx) > COORDINATE_TOLERANCE:
+                    segments.append(
+                        Segment(
+                            path_index,
+                            item_index,
+                            "l",
+                            Axis.HORIZONTAL,
+                            ay,
+                            min(ax, bx),
+                            max(ax, bx),
+                            width,
+                        )
+                    )
+                elif abs(ax - bx) <= COORDINATE_TOLERANCE and abs(ay - by) > COORDINATE_TOLERANCE:
+                    segments.append(
+                        Segment(
+                            path_index,
+                            item_index,
+                            "l",
+                            Axis.VERTICAL,
+                            ax,
+                            min(ay, by),
+                            max(ay, by),
+                            width,
+                        )
+                    )
+            elif operator == "re":
+                rx0, ry0, rx1, ry1 = (float(value) for value in item[1])
+                rect_width, rect_height = rx1 - rx0, ry1 - ry0
+                if filled and rect_height <= line_max_thickness and rect_width > rect_height:
+                    segments.append(
+                        Segment(
+                            path_index,
+                            item_index,
+                            "re-thin",
+                            Axis.HORIZONTAL,
+                            (ry0 + ry1) / 2,
+                            rx0,
+                            rx1,
+                            rect_height,
+                        )
+                    )
+                elif filled and rect_width <= line_max_thickness and rect_height > rect_width:
+                    segments.append(
+                        Segment(
+                            path_index,
+                            item_index,
+                            "re-thin",
+                            Axis.VERTICAL,
+                            (rx0 + rx1) / 2,
+                            ry0,
+                            ry1,
+                            rect_width,
+                        )
+                    )
+                elif (
+                    stroked
+                    and width <= line_max_thickness
+                    and rect_width > line_max_thickness
+                    and rect_height > line_max_thickness
+                ):
+                    segments.extend(
+                        (
+                            Segment(
+                                path_index,
+                                item_index,
+                                "re-top",
+                                Axis.HORIZONTAL,
+                                ry0,
+                                rx0,
+                                rx1,
+                                width,
+                            ),
+                            Segment(
+                                path_index,
+                                item_index,
+                                "re-bottom",
+                                Axis.HORIZONTAL,
+                                ry1,
+                                rx0,
+                                rx1,
+                                width,
+                            ),
+                            Segment(
+                                path_index,
+                                item_index,
+                                "re-left",
+                                Axis.VERTICAL,
+                                rx0,
+                                ry0,
+                                ry1,
+                                width,
+                            ),
+                            Segment(
+                                path_index,
+                                item_index,
+                                "re-right",
+                                Axis.VERTICAL,
+                                rx1,
+                                ry0,
+                                ry1,
+                                width,
+                            ),
+                        )
+                    )
+    return tuple(segments)
+
+
+def fill_rectangles(page: pdfspine.Page) -> tuple[Bounds, ...]:
+    """Non-white filled rectangles (header bands); page-top-left like ``get_drawings``."""
+    return tuple(
+        _bounds(rectangle.rect) for rectangle in page.filled_rectangles(include_white=False)
+    )
 
 
 def _bounds(rect: pdfspine.Rect) -> tuple[float, float, float, float]:
@@ -65,6 +213,8 @@ class PdfspineTableAdapter:
             ):
                 raise ValueError("Table page geometry differs from PageInput")
             try:
+                # ``clip`` is silently ignored by the lines strategy; the ``_contains``
+                # filter below is what scopes the match to the layout region.
                 detected = tuple(source_page.find_tables(strategy="lines", clip=item.bbox))
                 matches = tuple(
                     table for table in detected if _contains(item.bbox, _bounds(table.bbox))
@@ -83,7 +233,7 @@ class PdfspineTableAdapter:
                         f"pdfspine/{pdfspine.__version__} native lines found {len(detected)} page table(s) and {len(matches)} exact region match(es); typed table unavailable.",
                     ),
                 )
-            return self._map_table(matches[0], page=page, item=item)
+            return self._map_table(matches[0], page=page, item=item, source_page=source_page)
         finally:
             document.close()
 
@@ -109,7 +259,11 @@ class PdfspineTableAdapter:
 
     @staticmethod
     def _map_table(
-        table: pdfspine.Table, *, page: PageInput, item: LayoutObject
+        table: pdfspine.Table,
+        *,
+        page: PageInput,
+        item: LayoutObject,
+        source_page: pdfspine.Page,
     ) -> TableExtractionResult:
         table_bbox = _bounds(table.bbox)
         owned = set(item.source_span_ids)
@@ -182,24 +336,43 @@ class PdfspineTableAdapter:
             )
             for row in table.slots
         )
-        diagnostics = (
+        diagnostics: tuple[str, ...] = (
             f"pdfspine/{pdfspine.__version__} typed slots; source={table.source}; text_source={table.text_source}; confidence={'unknown' if table.confidence is None else table.confidence}.",
-            "Cell source occurrences use bbox-center assignment and remain pending; legacy extract() None values were not used.",
+            "Cell source occurrences use bbox-center assignment; legacy extract() None values were not used.",
+        )
+        pending = TableIR(
+            item.object_id,
+            SourceAnchor(
+                page.source_sha256,
+                page.source_sha256,
+                page.page_index,
+                table_bbox,
+            ),
+            table.row_count,
+            table.col_count,
+            tuple(cells),
+            slots,
+            diagnostics=diagnostics,
+        )
+        segments = ruling_segments(source_page)
+        proof = prove_grid(
+            pending,
+            segments,
+            rows=table.rows,
+            cols=table.cols,
+            fills=fill_rectangles(source_page),
+            spans=spans_in_table,
+        )
+        if isinstance(proof, GridRejection):
+            diagnostics = (
+                *diagnostics,
+                f"Grid structure pending: {proof.reason} (rulings={len(segments)}).",
+            )
+            return TableExtractionResult(replace(pending, diagnostics=diagnostics), diagnostics)
+        diagnostics = (
+            *diagnostics,
+            f"Grid structure proved from {len(segments)} ruling segment(s); scope={GRID_SCOPE}.",
         )
         return TableExtractionResult(
-            TableIR(
-                item.object_id,
-                SourceAnchor(
-                    page.source_sha256,
-                    page.source_sha256,
-                    page.page_index,
-                    table_bbox,
-                ),
-                table.row_count,
-                table.col_count,
-                tuple(cells),
-                slots,
-                diagnostics=diagnostics,
-            ),
-            diagnostics,
+            verified_table(replace(pending, diagnostics=diagnostics), proof), diagnostics
         )
