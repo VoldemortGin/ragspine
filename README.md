@@ -13,7 +13,7 @@
 [![PyPI](https://img.shields.io/pypi/v/rag-spine.svg)](https://pypi.org/project/rag-spine/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
-![Tests](https://img.shields.io/badge/tests-4863%20collected-brightgreen)
+![Tests](https://img.shields.io/badge/tests-5050%20collected-brightgreen)
 [![Docs](https://img.shields.io/badge/docs-rag--spine.org-2dd4bf)](https://rag-spine.org)
 
 ---
