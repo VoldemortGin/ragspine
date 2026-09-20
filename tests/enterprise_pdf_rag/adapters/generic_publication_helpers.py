@@ -21,22 +21,22 @@ from enterprise_pdf_rag.figures.ports import EmbeddingPort
 from enterprise_pdf_rag.processing.models import ObjectKind
 from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit, RetrievalContext
 from tests.enterprise_pdf_rag.adapters.test_pdf_ingestion import (
+    DEFAULT_TABLE,
     DIAGRAM_NODES,
     DIAGRAM_REGION,
     FORMULA_FRACTION_BBOX,
     FORMULA_POWER_BBOX,
     TABLE_COLUMNS,
     TABLE_ROWS,
+    TableSpec,
     authored_pdf,
 )
 
 PROVIDER_BASE_URL = "https://provider.invalid"
 # Kept short so the authored line fits the 240pt page width (no overflow/truncation).
 DOCUMENT_LABEL = "Revenue expense ratio"
-# The ruled grid of ``authored_pdf(table_page=True)`` and the layout region the stub
-# partitioner proposes around it (5pt margin, still inside the 240x160 page).
+# The ruled grid of ``authored_pdf(table_page=True)``.
 TABLE_BBOX = (TABLE_COLUMNS[0], TABLE_ROWS[0], TABLE_COLUMNS[-1], TABLE_ROWS[-1])
-TABLE_REGION = (TABLE_BBOX[0] - 5.0, TABLE_BBOX[1] - 5.0, TABLE_BBOX[2] + 5.0, TABLE_BBOX[3] + 5.0)
 # The natural-language branch of the Diagram object; its words are never a claim path.
 DIAGRAM_DESCRIPTION = "Two boxes joined by an arrow."
 # The two authored formula regions of ``authored_pdf(formula_page=True)`` and the
@@ -50,6 +50,17 @@ _INTERPRETATION = {
     "Diagram": "Two labelled frames joined by one arrow",
     "Formula": "An authored expression with its drawn rule",
 }
+
+
+def table_region(bbox: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
+    """The layout region the stub partitioner proposes around a ruled grid (5pt margin)."""
+    return (bbox[0] - 5.0, bbox[1] - 5.0, bbox[2] + 5.0, bbox[3] + 5.0)
+
+
+def _spec(table_page: bool | TableSpec) -> TableSpec | None:
+    if isinstance(table_page, TableSpec):
+        return table_page
+    return DEFAULT_TABLE if table_page else None
 
 
 def _extent(observations: list[dict[str, Any]]) -> list[float]:
@@ -150,6 +161,7 @@ def text_partition_sender(
     calls: list[bytes],
     *,
     table_caption: bool = False,
+    table_bbox: tuple[float, float, float, float] = TABLE_BBOX,
     diagram_page: bool = False,
     diagram_caption: bool = False,
     formula_page: bool = False,
@@ -161,9 +173,11 @@ def text_partition_sender(
     ``table_caption`` also hands the page's caption line to the Table region, which
     leaves the region owning an occurrence outside its native cells; ``diagram_caption``
     does the same for the Diagram region, leaving a source occurrence no node cites.
-    A Diagram region does fire the two visual model calls, which this stub answers from
-    the observations it was shown; nothing else reaches a provider seam.
+    ``table_bbox`` is the authored grid to classify against, for fixtures other than the
+    default one. A Diagram region does fire the two visual model calls, which this stub
+    answers from the observations it was shown; nothing else reaches a provider seam.
     """
+    region = table_region(table_bbox)
 
     def sender(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
         assert url == f"{PROVIDER_BASE_URL}/v1/chat/completions"
@@ -206,7 +220,7 @@ def text_partition_sender(
             for observation in observations
             if observation not in in_diagram
             and observation not in claimed
-            and _inside(observation, TABLE_BBOX)
+            and _inside(observation, table_bbox)
         ]
         outside = [
             observation
@@ -220,10 +234,10 @@ def text_partition_sender(
             owned = in_grid + (outside if table_caption else [])
             extent = _extent(owned)
             bbox = [
-                min(TABLE_REGION[0], extent[0]),
-                min(TABLE_REGION[1], extent[1]),
-                max(TABLE_REGION[2], extent[2]),
-                max(TABLE_REGION[3], extent[3]),
+                min(region[0], extent[0]),
+                min(region[1], extent[1]),
+                max(region[2], extent[2]),
+                max(region[3], extent[3]),
             ]
             regions.append(_region("table", "Table", bbox, [str(item["id"]) for item in owned]))
             if table_caption:
@@ -281,7 +295,7 @@ def ingest_generic_semantics(
     label: str = DOCUMENT_LABEL,
     page_count: int = 3,
     output_dir: Path | None = None,
-    table_page: bool = False,
+    table_page: bool | TableSpec = False,
     table_caption: bool = False,
     diagram_page: bool = False,
     diagram_caption: bool = False,
@@ -291,8 +305,9 @@ def ingest_generic_semantics(
 ) -> tuple[IngestionSummary, list[bytes]]:
     """Ingest an authored PDF through the semantics stage with one stubbed layout call per page.
 
-    ``table_page`` draws a native ruled table on the last page; ``table_caption`` makes
-    the stub layout hand that page's caption line to the Table region as well.
+    ``table_page`` draws a native ruled table on the last page (``True`` for the default
+    grid, or a ``TableSpec``); ``table_caption`` makes the stub layout hand that page's
+    caption line to the Table region as well.
     ``diagram_page`` draws two labelled frames joined by an arrow instead, which costs
     two further stubbed calls (the typed and the natural-language visual branch);
     ``diagram_caption`` hands that page's caption line to the Diagram region.
@@ -300,6 +315,7 @@ def ingest_generic_semantics(
     ``formula_rule=False`` omits the fraction rule, which withholds the proof.
     ``max_live_calls`` overrides the budget so a test can starve the visual branches.
     """
+    spec = _spec(table_page)
     for key, value in {
         "OPENAI_API_KEY": "offline-secret",
         "OPENAI_BASE_URL": PROVIDER_BASE_URL,
@@ -323,6 +339,7 @@ def ingest_generic_semantics(
         text_partition_sender(
             calls,
             table_caption=table_caption,
+            table_bbox=spec.bbox if spec is not None else TABLE_BBOX,
             diagram_page=diagram_page,
             diagram_caption=diagram_caption,
             formula_page=formula_page,
@@ -347,7 +364,7 @@ def publish_generic_document(
     page_count: int,
     embedder: EmbeddingPort,
     output_dir: Path | None = None,
-    table_page: bool = False,
+    table_page: bool | TableSpec = False,
 ) -> DraftPublication:
     """Ingest, qualify, index with the injected embedder and publish one document."""
     ingest, _ = ingest_generic_semantics(

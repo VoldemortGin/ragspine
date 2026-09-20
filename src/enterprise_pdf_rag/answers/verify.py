@@ -52,7 +52,7 @@ from enterprise_pdf_rag.figures.models import (
     ValueKind,
     Verification,
 )
-from enterprise_pdf_rag.processing.context_builder import BlockKind, ContextBlock
+from enterprise_pdf_rag.processing.context_builder import BlockKind, ContextBlock, HeaderRef
 from enterprise_pdf_rag.processing.table_models import CellContentState
 
 type ChartEvidence = Callable[[str], ChartContext | DisplayedLookupContext]
@@ -93,7 +93,7 @@ def _norm(text: str) -> str:
 
 
 def _exact(text: str) -> str:
-    """Fold whitespace only: a proven diagram label is verbatim source text, case included."""
+    """The literal-transcription criterion: whitespace collapses, case is kept."""
     return " ".join(text.split())
 
 
@@ -160,6 +160,34 @@ def _verify_cell(claim: ModelClaim, block: ContextBlock) -> VerifiedClaim | Reje
         )
     if _norm(claim.text) != _norm(cell.text):
         return _reject(claim, AbstainReason.CLAIM_NOT_IN_EVIDENCE, "claim text differs from cell")
+    header: HeaderRef | None = None
+    if any(value is not None for value in (claim.row, claim.col, claim.header)):
+        if (
+            block.grid_verification is not Verification.VERIFIED
+            or cell.verification is not Verification.VERIFIED
+        ):
+            return _reject(
+                claim,
+                AbstainReason.CLAIM_NOT_IN_EVIDENCE,
+                "grid relations of this table are not verified",
+            )
+        if (claim.row is not None and claim.row != cell.row) or (
+            claim.col is not None and claim.col != cell.col
+        ):
+            return _reject(
+                claim, AbstainReason.CLAIM_NOT_IN_EVIDENCE, "claimed row/col differ from the cell"
+            )
+        if claim.header is not None:
+            # Literal, never ``_norm``: a header names a column, and its case is part of it.
+            wanted = _exact(claim.header)
+            header = next((ref for ref in cell.headers if _exact(ref.text) == wanted), None)
+            if header is None:
+                return _reject(
+                    claim,
+                    AbstainReason.CLAIM_NOT_IN_EVIDENCE,
+                    "claimed header is not a proved header of the cell",
+                )
+    grid_verified = block.grid_verification is Verification.VERIFIED
     return VerifiedClaim(
         claim.claim_id,
         ClaimKind.CELL,
@@ -172,9 +200,13 @@ def _verify_cell(claim: ModelClaim, block: ContextBlock) -> VerifiedClaim | Reje
                 block.kind,
                 block.page_index,
                 claim.field_path,
-                (cell.cell_id, *cell.source_span_ids),
+                (cell.cell_id, *cell.source_span_ids, *((header.cell_id,) if header else ())),
                 cell.bbox,
                 cell.text,
+                row=cell.row if grid_verified else None,
+                col=cell.col if grid_verified else None,
+                header=None if header is None else header.text,
+                header_cell_id=None if header is None else header.cell_id,
             ),
         ),
     )
@@ -452,6 +484,13 @@ def verify_claims(
         seen.add(claim.claim_id)
         if block is None:
             rejected.append(_reject(claim, AbstainReason.MODEL_OUTPUT_INVALID, "unknown member"))
+            continue
+        if kind is not ClaimKind.CELL and any(
+            value is not None for value in (claim.row, claim.col, claim.header)
+        ):
+            rejected.append(
+                _reject(claim, AbstainReason.MODEL_OUTPUT_INVALID, "grid relations need a cell")
+            )
             continue
         if block.kind not in _BLOCK_KINDS[kind] or not claim.field_path.startswith(
             _PATH_PREFIX[kind]

@@ -1,6 +1,6 @@
 ---
 covers: src/enterprise_pdf_rag/
-verified-against: d33b5dd
+verified-against: 268aedb
 ---
 
 # enterprise_pdf_rag — agent contract
@@ -20,7 +20,8 @@ the same `pyproject.toml` — import name unchanged, not under `ragspine.*`
    [ADR 0010](../../docs/enterprise-pdf-rag/adr/0010-generic-pdf-ingestion-entry.md),
    [ADR 0011](../../docs/enterprise-pdf-rag/adr/0011-document-catalog-and-verified-answer-chain.md),
    [ADR 0012](../../docs/enterprise-pdf-rag/adr/0012-chart-index-text-and-retrieval-seats.md),
-   [ADR 0013](../../docs/enterprise-pdf-rag/adr/0013-page-metadata-and-prefilters.md)
+   [ADR 0013](../../docs/enterprise-pdf-rag/adr/0013-page-metadata-and-prefilters.md),
+   [ADR 0014](../../docs/enterprise-pdf-rag/adr/0014-ruled-table-grid-proof.md)
    and [PRD v0.2](../../docs/enterprise-pdf-rag/PRD-v0.2.md) define scope; the full list is
    [`docs/enterprise-pdf-rag/adr/`](../../docs/enterprise-pdf-rag/adr/).
 4. [`testing-and-ingestion.md`](../../docs/enterprise-pdf-rag/testing-and-ingestion.md) — what is
@@ -41,9 +42,11 @@ documents/    pure document model — stdlib immutable values + Protocols only
 figures/      pure figure/chart pipeline — same rule; same-SVG two branches, snapshot binding
 processing/   pure page-processing / qualification logic; context_builder.py (evidence blocks
               for the prompt), table_transcription.py (literal table transcription rule),
-              index_text.py (contextual header + chart projection both retrieval channels
-              score), page_metadata.py / periods.py / document_metadata.py (verbatim page
-              metadata, deterministic period forms, zero-model document fold — ADR 0013)
+              geometry.py + table_grid_proof.py (the ruled-grid proof: every boundary, cell
+              edge and merge bound to a real ruling — ADR 0014), index_text.py (contextual
+              header + chart projection both retrieval channels score), page_metadata.py /
+              periods.py / document_metadata.py (verbatim page metadata, deterministic period
+              forms, zero-model document fold — ADR 0013)
 answers/      pure answer chain — ports.py (MountedDocument, MemberText), models.py
               (MemberFilters), prompt.py (strict model output schema), verify.py (claim
               re-read), query_filters.py / member_filter.py (period / region pre-filters
@@ -96,6 +99,13 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   source display, cited back to SVG elements);
   failed claims are dropped, and any number in the prose outside a verified claim abstains the
   whole answer (ADR 0011). One model call per answer; nothing is derived or retried.
+- **A verified table grid means ink** (ADR 0014) — `TableIR` / `TableCell` are `VERIFIED` only
+  with `GridEvidence` / `CellBorderEvidence`: every row and column boundary sits on a real
+  ruling, every cell edge is continuously ruled, every merge is proved by the absence of a rule
+  inside it, and the whole proof is re-derived from the pinned source on every resolve. `row` /
+  `col` / `header` citations open only for a verified grid, and `header` only names a header
+  *proved* by a thick rule or a fill — never a font or first-row heuristic. An unruled, snapped
+  or double-ruled table stays `PENDING`, and stays retrievable and citable by cell text.
 - **Same-SVG two branches, snapshot binding, no-summary-fallback** — hard invariants of the
   figure chain (ADR 0002). What gets embedded is the **index text** of
   `processing/index_text.py`: the page's contextual header (`display_title | page_title |

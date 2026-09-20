@@ -2,6 +2,27 @@
 
 All notable changes to RAGSpine are documented here. This project follows Semantic Versioning.
 
+## [Unreleased]
+
+### Added
+
+- **A ruled table's grid is proved from the page's own rulings** (`enterprise_pdf_rag`,
+  ADR 0014): `TableIR` / `TableCell.verification` were pinned `PENDING` by construction, so a
+  cell citation could quote the cell's text but never its row or column. They are now `VERIFIED`
+  exactly when a proof exists — every row and column boundary sits on a real axis-aligned ruling
+  from `page.get_drawings()` within 0.5pt, every cell edge is continuously ruled (collinear
+  pieces stitched), and every merge is proved by the absence of a rule inside the merged cell.
+  `processing/geometry.py` gains the ruling vocabulary, `processing/table_grid_proof.py` is the
+  pure rule, and `adapters/pdfspine_tables.py` produces the observations (solid strokes, thin
+  filled rectangles and stroked-rectangle edges; dashed, curved and over-thick paths are not
+  rulings). Header rows / columns are graded: a thick interior rule or a filled band is `proved`
+  and citable, a bold face or "first row" is a `heuristic` that never is. The stage receipt binds
+  `grid_scope` + `ruling_digest`, and every `resolve` re-derives the whole proof from the pinned
+  source PDF. An answer may then cite a cell's `row`, `col` and `header` — only on a verified
+  grid, with the header matched verbatim apart from whitespace. Unruled, snapped and
+  double-ruled tables stay `PENDING`; they remain retrievable and citable by cell text, and every
+  snapshot published earlier still parses, mounts and resolves unchanged.
+
 ## [0.14.0] - 2026-09-21
 
 ### Added

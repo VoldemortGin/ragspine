@@ -41,6 +41,7 @@ from enterprise_pdf_rag.processing.context_builder import (
     BlockKind,
     CellEvidence,
     ContextBlock,
+    HeaderRef,
     SpanEvidence,
     build_context_block,
 )
@@ -69,6 +70,7 @@ _TEXT_MEMBER = "a" * 64
 _TABLE_MEMBER = "b" * 64
 _DIAGRAM_MEMBER = "diagram-1"
 _FORMULA_MEMBER = "formula-1"
+_RULED_MEMBER = "d" * 64
 _ANCHOR = SourceAnchor("c" * 64, "c" * 64, 3, (0.0, 0.0, 100.0, 50.0))
 
 type ChartEvidence = Callable[[str], ChartContext | DisplayedLookupContext]
@@ -123,6 +125,74 @@ def _table_block() -> ContextBlock:
     )
 
 
+def _verified_table_block() -> ContextBlock:
+    """A table whose grid re-proved (ADR 0014): cells carry their row, column and header."""
+    return ContextBlock(
+        _SNAPSHOT,
+        _RULED_MEMBER,
+        BlockKind.TABLE,
+        3,
+        "literal-source-transcription-v1",
+        Verification.VERIFIED,
+        "Metric\nValue\nRevenue\n1,234",
+        cells=(
+            CellEvidence(
+                "h-2",
+                0,
+                0,
+                1,
+                1,
+                (1.0, 1.0, 40.0, 20.0),
+                "Metric",
+                CellContentState.PRESENT,
+                ("t-h2",),
+                Verification.VERIFIED,
+            ),
+            CellEvidence(
+                "h-1",
+                0,
+                1,
+                1,
+                1,
+                (41.0, 1.0, 90.0, 20.0),
+                "Value",
+                CellContentState.PRESENT,
+                ("t-h1",),
+                Verification.VERIFIED,
+            ),
+            CellEvidence(
+                "c-2",
+                1,
+                0,
+                1,
+                1,
+                (1.0, 21.0, 40.0, 40.0),
+                "Revenue",
+                CellContentState.PRESENT,
+                ("t-2",),
+                Verification.VERIFIED,
+                (HeaderRef("h-2", "Metric", "row"),),
+            ),
+            CellEvidence(
+                "c-1",
+                1,
+                1,
+                1,
+                1,
+                (41.0, 21.0, 90.0, 40.0),
+                "1,234",
+                CellContentState.PRESENT,
+                ("t-1",),
+                Verification.VERIFIED,
+                (HeaderRef("h-1", "Value", "row"),),
+            ),
+        ),
+        row_count=2,
+        col_count=2,
+        grid_verification=Verification.VERIFIED,
+    )
+
+
 def _no_chart(member_id: str) -> Never:
     raise AssertionError("chart evidence must only be read for chart_value claims")
 
@@ -134,9 +204,19 @@ def _claim(
     text: str,
     *,
     claim_id: str = "c1",
+    row: int | None = None,
+    col: int | None = None,
+    header: str | None = None,
 ) -> ModelClaim:
     return ModelClaim(
-        claim_id=claim_id, member_id=member_id, kind=kind, field_path=field_path, text=text
+        claim_id=claim_id,
+        member_id=member_id,
+        kind=kind,
+        field_path=field_path,
+        text=text,
+        row=row,
+        col=col,
+        header=header,
     )
 
 
@@ -158,6 +238,7 @@ def _verify(*claims: ModelClaim, chart_evidence: ChartEvidence = _no_chart) -> C
         _TABLE_MEMBER: _table_block(),
         _DIAGRAM_MEMBER: _diagram_block(),
         _FORMULA_MEMBER: _formula_block(),
+        _RULED_MEMBER: _verified_table_block(),
     }
     return verify_claims(_answer(*claims), blocks, chart_evidence=chart_evidence)
 
@@ -392,6 +473,54 @@ def test_prose_number_from_formula_token_is_grounded() -> None:
     assert verification.rejected == ()
     assert prose_grounded("ROE 除以之后再乘以 100。", verification.verified) == (True, ())
     assert prose_grounded("ROE 乘以 250。", verification.verified) == (False, ("250",))
+
+
+def test_cell_claim_with_row_col_header_verifies_against_the_grid() -> None:
+    verification = _verify(
+        _claim(_RULED_MEMBER, "cell", "cells.c-1", "1,234", row=1, col=1, header="Value")
+    )
+    (claim,) = verification.verified
+    (citation,) = claim.citations
+    assert (citation.row, citation.col, citation.header) == (1, 1, "Value")
+    assert citation.header_cell_id == "h-1"
+    assert citation.evidence_ids == ("c-1", "t-1", "h-1")
+    # The literal-transcription criterion: whitespace collapses, case never does.
+    spaced = _verify(_claim(_RULED_MEMBER, "cell", "cells.c-1", "1,234", header=" Value\n"))
+    assert spaced.verified[0].citations[0].header == "Value"
+    plain = _verify(_claim(_RULED_MEMBER, "cell", "cells.c-1", "1,234"))
+    (bare,) = plain.verified
+    # A verified grid still reports the position it proved, even when nothing claimed it.
+    assert (bare.citations[0].row, bare.citations[0].col) == (1, 1)
+    assert bare.citations[0].header is None and bare.citations[0].evidence_ids == ("c-1", "t-1")
+
+
+def test_cell_claim_relations_are_rejected_when_wrong_or_unverified() -> None:
+    wrong_row = _only_rejected(
+        _verify(_claim(_RULED_MEMBER, "cell", "cells.c-1", "1,234", row=0, col=1))
+    )
+    assert wrong_row.reason is AbstainReason.CLAIM_NOT_IN_EVIDENCE
+    assert wrong_row.detail == "claimed row/col differ from the cell"
+    wrong_col = _only_rejected(
+        _verify(_claim(_RULED_MEMBER, "cell", "cells.c-1", "1,234", row=1, col=0))
+    )
+    assert wrong_col.reason is AbstainReason.CLAIM_NOT_IN_EVIDENCE
+    # A header is cited verbatim: case is part of the column's name.
+    miscased = _only_rejected(
+        _verify(_claim(_RULED_MEMBER, "cell", "cells.c-1", "1,234", header="value"))
+    )
+    assert miscased.reason is AbstainReason.CLAIM_NOT_IN_EVIDENCE
+    assert miscased.detail.startswith("claimed header")
+    other = _only_rejected(
+        _verify(_claim(_RULED_MEMBER, "cell", "cells.c-1", "1,234", header="Metric"))
+    )
+    assert other.reason is AbstainReason.CLAIM_NOT_IN_EVIDENCE
+    pending = _only_rejected(_verify(_claim(_TABLE_MEMBER, "cell", "cells.c-1", "1,234", row=0)))
+    assert pending.reason is AbstainReason.CLAIM_NOT_IN_EVIDENCE
+    assert pending.detail == "grid relations of this table are not verified"
+    quote = _only_rejected(
+        _verify(_claim(_TEXT_MEMBER, "quote", "fragments.sp-1", "Revenue", row=0))
+    )
+    assert quote.reason is AbstainReason.MODEL_OUTPUT_INVALID
 
 
 def _chart_setup(

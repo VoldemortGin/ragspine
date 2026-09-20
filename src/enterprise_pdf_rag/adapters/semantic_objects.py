@@ -41,7 +41,7 @@ from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.source_objects import source_table_description
 from enterprise_pdf_rag.adapters.visual_semantics import VisualInference, VisualSemanticAdapter
 from enterprise_pdf_rag.documents.models import AssetRef, TextSidecar
-from enterprise_pdf_rag.figures.models import ChartIR, TextDescription
+from enterprise_pdf_rag.figures.models import ChartIR, TextDescription, Verification
 from enterprise_pdf_rag.processing.formula_models import (
     FormulaQualification,
     FormulaSourceObservation,
@@ -54,6 +54,7 @@ from enterprise_pdf_rag.processing.models import (
     StageOutcome,
     StageState,
 )
+from enterprise_pdf_rag.processing.table_grid_proof import GRID_SCOPE
 from enterprise_pdf_rag.processing.table_models import TableExtractionResult, TableIR
 from enterprise_pdf_rag.processing.typed_ir import (
     DiagramIR,
@@ -357,6 +358,7 @@ class SemanticObjectAdapter:
             return ObjectProcessingRecord(item.object_id, item.kind, tuple(stages))
         ir = writer.save("ir", TypeAdapter(TableIR).dump_json(result.table))
         stages.append(ir)
+        proved_grid = result.table.verification is Verification.VERIFIED
         try:
             transcription = source_table_description(page, item, result.table)
         except ValueError as error:
@@ -372,7 +374,7 @@ class SemanticObjectAdapter:
                         "qualification",
                         "Typed native topology is observed but its literal transcription did "
                         "not verify; financial row/header relationships remain unverified. "
-                        + str(error),
+                        + f"{error} grid={'verified' if proved_grid else 'pending'}",
                     ),
                 )
             )
@@ -388,6 +390,12 @@ class SemanticObjectAdapter:
             _ref(ir),
             _ref(description),
             _ref(svg),
+            grid_scope=GRID_SCOPE if proved_grid else None,
+            ruling_digest=(
+                result.table.grid_evidence.ruling_digest
+                if result.table.grid_evidence is not None
+                else None
+            ),
         )
         stages.extend(
             (

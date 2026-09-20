@@ -21,6 +21,9 @@ class ModelClaim(BaseModel):
     kind: Literal["quote", "cell", "chart_value", "diagram_node", "diagram_edge", "formula"]
     field_path: str
     text: str
+    row: int | None = None
+    col: int | None = None
+    header: str | None = None
 
 
 class ModelAnswer(BaseModel):
@@ -53,7 +56,11 @@ SYSTEM_RULES: Final[str] = (
     "order, a next step or a relationship that is not printed as an `edges.` line. "
     "kind `formula` uses `formula.linear` or `formula.readable` and `text` is exactly that "
     "line after the colon, or `tokens.<index>` and `text` is exactly the token printed "
-    "before the parenthesised annotation.\n"
+    "before the parenthesised annotation. "
+    "A `cell` claim may also carry `row`, `col` and `header`, copied exactly from the "
+    '`row=\u2026 col=\u2026 header="\u2026"` suffix printed after that cell; only cells in a block whose '
+    "table line says `grid=verified` print that suffix, and `header` must be one of the quoted "
+    "header texts, verbatim. Never add row, col or header to a cell that prints none.\n"
     "2. Never calculate, add, subtract, average, convert, round, estimate or combine periods. "
     "A value printed as <UNAVAILABLE>, <BLANK> or <NONE> cannot be cited or inferred.\n"
     "3. Every number in `answer` must also appear in the `text` of one of your claims.\n"

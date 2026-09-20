@@ -1,18 +1,22 @@
 """Generic PDF ingest→qualify→index→publish→retrieve runs fully offline, no models."""
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Never
 
 import pytest
+from pydantic import TypeAdapter
 from pytest import CaptureFixture
 
+from enterprise_pdf_rag.adapters.aia_ingestion import read_text_sidecar
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.draft_publication import (
     index_draft,
     publish_draft,
     qualify_draft,
 )
+from enterprise_pdf_rag.adapters.literal_qualification import _reprove_table_grid
 from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
 from enterprise_pdf_rag.adapters.processing_retrieval import ProcessingRetrieval
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
@@ -23,12 +27,17 @@ from enterprise_pdf_rag.cli import main
 from enterprise_pdf_rag.figures.models import Verification
 from enterprise_pdf_rag.processing.context_builder import BlockKind, build_context_block
 from enterprise_pdf_rag.processing.models import ObjectKind, StageState
+from enterprise_pdf_rag.processing.table_grid_proof import GRID_SCOPE, strip_grid_evidence
 from enterprise_pdf_rag.processing.table_models import TableIR
-from enterprise_pdf_rag.processing.typed_ir import DiagramIR
+from enterprise_pdf_rag.processing.typed_ir import DiagramIR, LiteralQualification
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
     DIAGRAM_DESCRIPTION,
+    DOCUMENT_LABEL,
     ingest_generic_semantics,
+    publish_generic_document,
+    resolve_table_member,
 )
+from tests.enterprise_pdf_rag.adapters.test_pdf_ingestion import MULTI_HEADER_TABLE
 
 _QUERY = "revenue expense ratio"
 
@@ -228,7 +237,7 @@ def test_generic_pdf_native_table_is_indexed_description_only_under_policy_v2(
 
     context = retrieval.resolve(publication, hits[0])
     assert isinstance(context.ir, TableIR)
-    assert context.ir.verification is Verification.PENDING  # inferred grid stays pending
+    assert context.ir.verification is Verification.VERIFIED  # ADR 0014: the grid is ruled
     assert context.description.verification is Verification.VERIFIED
     assert context.description.text == table_text
     assert context.scope == "literal-source-transcription-v1"
@@ -236,9 +245,11 @@ def test_generic_pdf_native_table_is_indexed_description_only_under_policy_v2(
     assert tuple(cell.text for cell in context.ir.cells) == (*table_text.split("\n"), "")
     block = build_context_block(context)
     assert block.kind is BlockKind.TABLE and block.verification is Verification.VERIFIED
+    assert block.grid_verification is Verification.VERIFIED
     value = next(cell for cell in block.cells if cell.text == "1,234")
     assert (value.row, value.col) == (1, 1) and len(value.source_span_ids) == 1
-    assert f"cells.{value.cell_id} (1,1): 1,234" in block.prompt_text()
+    # All rules are 1pt, so the grid proves but no header band does.
+    assert f"cells.{value.cell_id} (1,1): 1,234 row=1 col=1 header=<NONE>" in block.prompt_text()
     assert len(calls) == 3
 
 
@@ -258,6 +269,15 @@ def test_generic_pdf_table_owning_a_caption_is_not_verified_and_stays_out(
     assert stages["description"].state is StageState.UNAVAILABLE
     assert stages["qualification"].state is StageState.UNAVAILABLE
     assert "outside its native cells" in (stages["qualification"].diagnostic or "")
+    assert (stages["qualification"].diagnostic or "").endswith("grid=verified")
+    # The two branches are independent facts: the ruled grid proves even though the
+    # caption kept the verbatim transcription from qualifying.
+    artifact = stages["ir"].artifact
+    assert artifact is not None
+    observed = TypeAdapter(TableIR).validate_json(
+        ProcessingStore(processing_store).assets.get(artifact)
+    )
+    assert observed.verification is Verification.VERIFIED
 
     qualified = qualify_draft(
         source_store=source_store,
@@ -427,3 +447,68 @@ def test_generic_pdf_diagram_owning_a_caption_is_not_proven_and_stays_out(
         embedder=OfflineDescriptionEmbedder(),
     )
     assert indexed.member_count == 2
+
+
+def test_generic_pdf_table_grid_receipt_must_bind_the_proved_rulings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    published = publish_generic_document(
+        tmp_path,
+        monkeypatch,
+        filename="meridian-semiannual.pdf",
+        label=DOCUMENT_LABEL,
+        page_count=3,
+        embedder=OfflineDescriptionEmbedder(),
+        table_page=True,
+    )
+    context = resolve_table_member(published)
+    table, receipt = context.ir, context.qualification
+    assert isinstance(table, TableIR) and table.grid_evidence is not None
+    assert isinstance(receipt, LiteralQualification)
+    assert (receipt.grid_scope, receipt.ruling_digest) == (
+        GRID_SCOPE,
+        table.grid_evidence.ruling_digest,
+    )
+
+    sources = LocalDocumentStore(Path(published.source_store), activate_on_publish=False)
+    source = sources.load(receipt.source_manifest_id)
+    page_index = context.member.page_index
+    pdf = sources.get(source.manifest.source)
+    spans = read_text_sidecar(sources, source, page_index).spans
+    _reprove_table_grid(pdf, table, receipt, page_index=page_index, spans=spans)
+
+    for tampered in (replace(receipt, ruling_digest="0" * 64), replace(receipt, grid_scope=None)):
+        with pytest.raises(ValueError, match="does not bind the proved rulings"):
+            _reprove_table_grid(pdf, table, tampered, page_index=page_index, spans=spans)
+    with pytest.raises(ValueError, match="must not carry a grid qualification"):
+        _reprove_table_grid(
+            pdf, strip_grid_evidence(table), receipt, page_index=page_index, spans=spans
+        )
+
+
+def test_generic_pdf_multi_header_table_publishes_with_proved_headers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    published = publish_generic_document(
+        tmp_path,
+        monkeypatch,
+        filename="meridian-semiannual.pdf",
+        label=DOCUMENT_LABEL,
+        page_count=3,
+        embedder=OfflineDescriptionEmbedder(),
+        table_page=MULTI_HEADER_TABLE,
+    )
+    context = resolve_table_member(published)
+    table = context.ir
+    assert isinstance(table, TableIR) and table.grid_evidence is not None
+    assert table.verification is Verification.VERIFIED
+    # The 2pt rule under row 1 closes a two-row header; both rows are proved.
+    assert table.grid_evidence.proved_header_rows() == frozenset({0, 1})
+
+    block = build_context_block(context)
+    value = next(cell for cell in block.cells if (cell.row, cell.col) == (2, 1))
+    assert tuple(ref.text for ref in value.headers) == ("Group", "Value")
+    assert (
+        f'cells.{value.cell_id} (2,1): 1,234 row=2 col=1 header="Group" | "Value"'
+        in block.prompt_text()
+    )

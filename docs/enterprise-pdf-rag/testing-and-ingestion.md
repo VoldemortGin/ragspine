@@ -15,7 +15,7 @@
 | `POST /v1/chat/completions`（`aia-source-review` 模式） | OpenAI 兼容的来源/状态审阅，支持 SSE | 普通财务问答返回 422；该模式不做 RAG 回答 |
 | `GET /v1/documents*`、`GET /v1/models`、`POST /v1/chat/completions`（`document-catalog` 模式） | 多文档目录与挂载状态、按文档检索/证据回填、证据链上的自然语言回答（逐字段引用或拒答） | 需另起 `APP_EXECUTION_MODE=document-catalog` 进程，见下文同名节；离线已实现并测试，真实模型验收结论见 [交接文档](CLAUDE_HANDOFF.md) |
 
-第 20 页 typed ChartQA v2 已有工作树实现和候选证据，但不能在新 runtime 验收、发布与激活之前当成当前在线能力。多文档目录/切换与证据链聊天已有离线实现和测试（`document-catalog` 模式），但只有真实模型验收后才能称为已验收；完整图表能力与通用 TableQA 仍未验收——TABLE 成员目前只放行逐字转写 `VERIFIED` 的表，单元格引用只证明原文，不证明行列关系。
+第 20 页 typed ChartQA v2 已有工作树实现和候选证据，但不能在新 runtime 验收、发布与激活之前当成当前在线能力。多文档目录/切换与证据链聊天已有离线实现和测试（`document-catalog` 模式），但只有真实模型验收后才能称为已验收；完整图表能力与通用 TableQA 仍未验收——TABLE 成员目前只放行逐字转写 `VERIFIED` 的表；划线表另外证明行列关系（[ADR 0014](adr/0014-ruled-table-grid-proof.md)：每条行/列边界、每个单元格四边、每处合并都要在该页 `get_drawings()` 的实际线段里找到证据，`row`/`col`/`header` 引用只对网格 `VERIFIED` 的表开放），无线表、吸附/双线边界仍只证明原文。
 
 本地 `8766` API 当前没有调用者 API key 校验。来源审阅、context、typed ChartQA 不需要 `OPENAI_API_KEY`。查询向量由后端使用独立的 `EMBEDDING_BASE_URL`、`EMBEDDING_MODEL`、`EMBEDDING_API_KEY`；客户端不提交这些凭证。Open WebUI 厂商进程仍拿不到 embedding/LLM/rerank key。
 
@@ -200,6 +200,15 @@ enterprise-pdf-rag metadata --source-store <src> --processing-store <proc> --pro
 ```
 
 对一个已保存的 draft 或已发布 release 的每一页各发一次文本模型调用（任务 `page-metadata-v1`，与 layout/semantics 同一份 `OPENAI_*` 配置、预算与 `<proc>/model-cache` 缓存），产出 `title / section / page_type / language / periods / regions`；每个字符串值必须逐字（折叠空白后）出现在它引用的 span、或该 span 与其后至多两个 span 的拼接里，否则剔除并记入该页 `dropped`。periods 另按确定性规则规范化（`1H26` / `2026年上半年` → `1H2026`，`FY24` → `FY2024`，`Q1 2025` → `Q1-2025`，裸年份 → `Y2026`；规范化失败只保留原文）。文档级 `display_title`（封面页标题）/ `report_period`（各页投票）/ `years` / `regions`（本文档自己的地区词表）零模型、确定性折叠，写在新 draft 的 manifest 上，加载时重算校验。输出 `annotated_processing_id` 是新的未索引 draft；`--max-live-calls 0` 只回放缓存，其余页 `deferred`；不切指针。
+
+### 表格网格证明的测试口径（ADR 0014）
+
+划线表的网格证明全部离线可测，没有任何夹具反向登记证据：
+
+- **版面夹具**：`tests/enterprise_pdf_rag/adapters/test_pdf_ingestion.py::TableSpec` 描述一张要画的表（行/列边界、单元格文本、合并、表头行数、线宽、是否只画外框 / 不画线 / 拆段 / 填充表头），`authored_pdf(..., table_page=<TableSpec>)` 用 pdfspine 真实画出来。现成的几张：`DEFAULT_TABLE`（与旧 `table_page=True` 逐字节相同）、`MULTI_HEADER_TABLE`（两行表头 + 2pt 粗线 + 跨列标题 + 跨行单位）、`FILL_HEADER_TABLE`（填充表头带）、`FRAME_ONLY_TABLE` / `UNRULED_TABLE`（检测阶段就 0 张表）、`SPLIT_TABLE`（一条边界由多段线拼出，走覆盖拼接）。`test_pdfspine_tables.py` 另外用 `_snapped_pdf()` / `_doubled_pdf()` 造吸附与双线边界，断言它们**保持 `PENDING`** 并在诊断里给出具体坐标。
+- **prompt 口径**：`ContextBlock.prompt_text()` 的表格首行渲染 `table rows=<n> cols=<m> grid=verified|pending`；只有 `grid=verified` 的块才在每个单元格行尾追加 `row=<r> col=<c> header="…"`（无已证表头时 `header=<NONE>`）。断言写在 `tests/enterprise_pdf_rag/processing/test_context_builder.py`。
+- **claim 口径**：`ModelClaim` 的 `row` / `col` / `header` 是可选字段。`tests/enterprise_pdf_rag/answers/test_verify.py` 覆盖：非 `cell` claim 带这三个字段 → `MODEL_OUTPUT_INVALID`；网格 `PENDING` 的表上带这三个字段 → `CLAIM_NOT_IN_EVIDENCE`；`row`/`col` 与 IR 不符 → 拒；`header` 不是该单元格的**已证**表头 → 拒；表头比对折叠空白、保留大小写（与逐字转写同口径，不像单元格文本那样 casefold）。通过的引用带 `row` / `col` / `header` / `header_cell_id`，并把表头单元格 id 并入 `evidence_ids`。
+- **真实样本只读 smoke**：`test_pdfspine_tables.py::test_synthetic_ingestion_table_reproves_verified` 对 `data/ingestion/3f7233e3…` 的 page 2 重新提取，断言网格证明成立、cell id 与快照里的旧 `ir.json` 完全一致、而旧 `ir.json` 仍解析为 `PENDING`；`test_real_p20_sensitivity_region_reports_native_grid_unavailable` 对 AIA 第 20 页敏感度矩阵断言"检测阶段就没有表"，并在 `-s` 下打印该区域的线段计数作诊断。两者在样本缺失时 `skip`，都不下载任何东西。
 
 ### 离线验证 vs 真实验证
 

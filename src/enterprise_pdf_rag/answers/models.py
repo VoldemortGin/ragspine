@@ -120,6 +120,11 @@ class ClaimCitation:
     quote: str
     chart_citation: FieldCitation | None = None
     page_title: str | None = None
+    # ADR 0014: filled only when the cited table's grid re-proved from its own rulings.
+    row: int | None = None
+    col: int | None = None
+    header: str | None = None
+    header_cell_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

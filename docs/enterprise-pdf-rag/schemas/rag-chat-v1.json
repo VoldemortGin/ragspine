@@ -397,6 +397,18 @@
               }
             ]
           },
+          "col": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Col"
+          },
           "evidence_ids": {
             "items": {
               "type": "string"
@@ -407,6 +419,30 @@
           "field_path": {
             "title": "Field Path",
             "type": "string"
+          },
+          "header": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Header"
+          },
+          "header_cell_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Header Cell Id"
           },
           "kind": {
             "$ref": "#/$defs/BlockKind"
@@ -434,6 +470,18 @@
           "quote": {
             "title": "Quote",
             "type": "string"
+          },
+          "row": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Row"
           }
         },
         "required": [
@@ -1184,6 +1232,18 @@
               }
             ]
           },
+          "col": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Col"
+          },
           "evidence_ids": {
             "items": {
               "type": "string"
@@ -1194,6 +1254,30 @@
           "field_path": {
             "title": "Field Path",
             "type": "string"
+          },
+          "header": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Header"
+          },
+          "header_cell_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Header Cell Id"
           },
           "kind": {
             "$ref": "#/$defs/BlockKind"
@@ -1221,6 +1305,18 @@
           "quote": {
             "title": "Quote",
             "type": "string"
+          },
+          "row": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Row"
           }
         },
         "required": [

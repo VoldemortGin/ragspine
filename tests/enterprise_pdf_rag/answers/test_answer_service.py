@@ -31,8 +31,10 @@ from enterprise_pdf_rag.answers.prompt import SYSTEM_RULES, ModelAnswer, ModelCl
 from enterprise_pdf_rag.processing.context_builder import BlockKind
 from enterprise_pdf_rag.processing.models import ObjectKind
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
+    DOCUMENT_LABEL,
     publish_generic_document,
 )
+from tests.enterprise_pdf_rag.adapters.test_pdf_ingestion import MULTI_HEADER_TABLE
 from tests.enterprise_pdf_rag.answers.fake_document import (
     DONUT_TITLE,
     FakeDocument,
@@ -616,3 +618,77 @@ def test_claim_citations_carry_the_verified_page_title(tmp_path: Path) -> None:
     result = service.answer(AnswerRequest("Thailand margin", top_k=1))
     assert result.status is AnswerStatus.ANSWERED
     assert result.claims[0].citations[0].page_title == "Thailand"
+
+
+_CELL_LINE = re.compile(
+    r"^cells\.(\S+) \((\d+),(\d+)\): 1,234 row=(\d+) col=(\d+) header=(.*)$", re.MULTILINE
+)
+
+
+def _cell_relation_script(header: str) -> Script:
+    def script(prompt: str) -> ModelAnswer:
+        match = _CELL_LINE.search(prompt)
+        assert match is not None
+        (table,) = _members(prompt, "table")
+        return answered(
+            "Revenue under Value is 1,234.",
+            ModelClaim(
+                claim_id="c1",
+                member_id=table,
+                kind="cell",
+                field_path=f"cells.{match[1]}",
+                text="1,234",
+                row=int(match[4]),
+                col=int(match[5]),
+                header=header,
+            ),
+        )
+
+    return script
+
+
+def _ruled_table_document(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> StoreMountedDocument:
+    published = publish_generic_document(
+        tmp_path,
+        monkeypatch,
+        filename="meridian-semiannual.pdf",
+        label=DOCUMENT_LABEL,
+        page_count=3,
+        embedder=OfflineDescriptionEmbedder(),
+        table_page=MULTI_HEADER_TABLE,
+    )
+    return StoreMountedDocument(
+        LocalDocumentStore(Path(published.source_store), activate_on_publish=False),
+        ProcessingStore(Path(published.processing_store)),
+        processing_id=published.published_processing_id,
+        embedder=OfflineDescriptionEmbedder(),
+    )
+
+
+def test_table_cell_claim_with_proved_header_answers_and_cites_the_header(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    document = _ruled_table_document(tmp_path, monkeypatch)
+    service, prompts = _service(tmp_path, document, _cell_relation_script("Value"))
+    result = service.answer(
+        AnswerRequest("What is the value in the second row, first column under Value?")
+    )
+    assert result.status is AnswerStatus.ANSWERED, result
+    (claim,) = result.claims
+    (citation,) = claim.citations
+    assert (citation.row, citation.col, citation.header) == (2, 1, "Value")
+    assert citation.header_cell_id in citation.evidence_ids
+    assert 'header="Group" | "Value"' in prompts[0]
+
+
+def test_table_cell_claim_with_unproved_header_text_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    document = _ruled_table_document(tmp_path, monkeypatch)
+    service, _ = _service(tmp_path, document, _cell_relation_script("value"))
+    result = service.answer(
+        AnswerRequest("What is the value in the second row, first column under Value?")
+    )
+    assert result.status is AnswerStatus.ABSTAINED
+    assert result.abstain_reason is AbstainReason.CLAIM_NOT_IN_EVIDENCE
+    assert result.rejected[0].detail.startswith("claimed header")
