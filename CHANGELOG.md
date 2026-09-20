@@ -2,10 +2,40 @@
 
 All notable changes to RAGSpine are documented here. This project follows Semantic Versioning.
 
-## [Unreleased]
+## [0.14.0] - 2026-09-21
 
 ### Added
 
+- **`enterprise_pdf_rag` ships in the same distribution** (ADR 0021): `pip install rag-spine`
+  now provides both `import ragspine` and `import enterprise_pdf_rag` (the traceable
+  financial-PDF evidence / QA backend: content-addressed immutable snapshots
+  source → processing → retrieval, span/drawing-level evidence chains, source-qualified
+  ChartQA), plus a second console script `enterprise-pdf-rag` next to `ragspine`. History was
+  preserved via `git subtree`; `ragspine` may only be imported under its `adapters/`, the
+  `figures/ documents/ processing/` packages stay pure stdlib (guarded by
+  `check_architecture.py`), and its four structural gates (conformance / architecture / schema /
+  drift) run as `scripts/ci.sh` step 9. Its `CLAUDE.md` / `AGENTS.md` contract and `resources/`
+  ship in the wheel; PRD, ADR 0001–0011 and JSON schemas live under `docs/enterprise-pdf-rag/`.
+- **Generic PDF ingestion entry** (enterprise_pdf_rag ADR 0010):
+  `enterprise-pdf-rag ingest --pdf <any PDF> --pages all|1-3,5 --stage source|layout|semantics
+  --max-live-calls N` turns any PDF into an immutable draft; the default `source` stage makes
+  zero model calls, the full source is always retained and page selection only scopes
+  downstream work. `qualify → index → publish` stay explicit, with no implicit model call and
+  no implicit activation. Runs outside the checkout with `APP_ROOT_DIR` / `APP_DATA_DIR`.
+- **Document catalog, mounted documents and verified answer chain** (enterprise_pdf_rag
+  ADR 0011): `APP_EXECUTION_MODE=document-catalog` scans published documents under
+  `APP_INGESTION_DIR`, mounts each one and re-verifies its pinned manifest before any model
+  call (drift / corruption → 409, missing embedder → 503, never a mock fallback). The
+  `document-catalog-v1` contract adds `GET /v1/documents`, `GET /v1/documents/{id}`,
+  `.../manifest`, `POST .../search` and `POST .../context`; hybrid retrieval pairs the pinned
+  cosine vector channel with BM25 over the same description text, reusing `ragspine`'s
+  retrieval / rerank pieces. `POST /v1/chat/completions` grows from source-review-only (422 on
+  financial questions) into evidence-chain natural-language answering, every claim checked
+  against its evidence under the family's anti-fabrication / provenance invariants. `TABLE`
+  figures are admitted to the catalog and chart geometry matching gained an explicit tolerance.
+- **Open WebUI `document-catalog` profile** for `scripts/enterprise_pdf_rag/webui_preview.py`,
+  and `ENTERPRISE_PREVIEW_STATE_DIR` to relocate the preview's logs / PID record so a second
+  preview can run beside an already recorded one.
 - **`TableStructureRecognizer` seam** (`extraction/tables/`): given an already-detected table
   region plus its text-layer words, produce a cell grid (rows / columns / spans). Motivated by a
   2026-08 measurement on FinTabNet.c (150 pages / 186 gold tables): pdfspine's `strategy="text"`
@@ -28,6 +58,28 @@ All notable changes to RAGSpine are documented here. This project follows Semant
   coordinate system matches the deterministic default exactly. torch/transformers/pillow are
   lazy-imported behind the extra with a friendly error when missing. The chosen checkpoint's licence
   must be checked against ADR 0009's ≤Apache-2.0 gate before promoting it to a default path.
+
+### Fixed
+
+- **Prose number gate no longer rejects restated years / periods** (enterprise_pdf_rag
+  ISSUE-3, `answers/verify.py::prose_grounded`): "…in 1H 2026 was 17.5%" abstained as
+  `claim_not_in_evidence` because `2026` was not inside a verified claim's text. A prose number
+  is now grounded when it equals a verified claim's text number or value, appears verbatim in
+  the user's question, or equals a number in the evidence text the verified claims cite (span
+  quote, table cell text, chart period / category labels and source display). Any other number
+  still abstains the whole answer; zero verified claims and the `decide` order are unchanged.
+
+### Changed
+
+- **Base dependencies**: `httpx>=0.27` moves into the base install — `enterprise_pdf_rag`'s HTTP
+  layer imports it statically, so `enterprise-pdf-rag --help` failed on a plain
+  `pip install rag-spine` without `[service]`. A new guard test
+  (`tests/enterprise_pdf_rag/test_base_dependencies.py`) asserts that every third-party import
+  of `enterprise_pdf_rag` is covered by `[project].dependencies`. Also in base for the sibling
+  package: `pydantic-settings[yaml]`, `jinja2`, `fastapi` / `uvicorn`, `pdfspine`, `resvg-py`,
+  `fonttools`; `corespine>=0.5.1`, `pdfspine>=0.11.0`, `pydantic>=2.12,<3`.
+- **Toolchain**: ruff 0.16 formatting across the repo; `mypy --strict` covers `src/ragspine`, `src/enterprise_pdf_rag`,
+  `tests/enterprise_pdf_rag` and `scripts/enterprise_pdf_rag`; `uv` 0.12.17.
 
 ## [0.13.0] - 2026-08-03
 
@@ -87,7 +139,8 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 - The package-root API now exposes the `RAGSpine` facade alongside the four original primitives.
 - Installed users can complete ingestion, querying, and local visualization without repository scripts.
 
-[Unreleased]: https://github.com/VoldemortGin/ragspine/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/VoldemortGin/ragspine/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/VoldemortGin/ragspine/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/VoldemortGin/ragspine/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/VoldemortGin/ragspine/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/VoldemortGin/ragspine/compare/v0.11.0...v0.12.0

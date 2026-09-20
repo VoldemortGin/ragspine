@@ -1,6 +1,6 @@
 [project]
 name = "rag-spine"
-version = "0.13.0"
+version = "0.14.0"
 description = "Framework-free backend RAG: deterministic dual-channel retrieval + agent orchestration with built-in anti-fabrication and source provenance."
 readme = "README.md"
 license = "Apache-2.0"
@@ -60,6 +60,9 @@ dependencies = [
     "jinja2>=3.1",
     "fastapi>=0.110",
     "uvicorn>=0.27",
+    # enterprise_pdf_rag 的 HTTP 层（adapters/http：webui_gate 等）静态 import httpx，
+    # `enterprise-pdf-rag` 入口不装 [service] 也要能起；版本约束与 [service]/[connectors] 一致。
+    "httpx>=0.27",
     "pdfspine>=0.11.0",
     "resvg-py>=0.5.0",
     "fonttools>=4.65.0",

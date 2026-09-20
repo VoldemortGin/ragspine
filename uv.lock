@@ -4101,13 +4101,14 @@ wheels = [
 
 [[package]]
 name = "rag-spine"
-version = "0.13.0"
+version = "0.14.0"
 source = { editable = "." }
 dependencies = [
     { name = "beartype" },
     { name = "corespine" },
     { name = "fastapi" },
     { name = "fonttools" },
+    { name = "httpx" },
     { name = "jinja2" },
     { name = "openpyxl" },
     { name = "pdfspine" },
@@ -4246,6 +4247,7 @@ requires-dist = [
     { name = "fastembed", marker = "extra == 'rerank'", specifier = ">=0.7,<0.9" },
     { name = "fastembed", marker = "extra == 'splade'", specifier = ">=0.7,<0.9" },
     { name = "fonttools", specifier = ">=4.65.0" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'connectors'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'service'", specifier = ">=0.27" },
     { name = "httpx2", marker = "extra == 'dev'", specifier = ">=2.13.0" },
