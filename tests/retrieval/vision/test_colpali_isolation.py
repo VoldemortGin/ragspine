@@ -69,7 +69,9 @@ def test_all_restricted_embedder_not_called(fake_visual_embedder):
     """全 RESTRICTED -> 视觉索引为空 -> retrieve 返回 [] 且 embedder 完全不被调用。"""
     embedder, captured = fake_visual_embedder()
     pages = [
-        VisualPage(doc_id=f"d{i}", page_no=i + 1, image=b"secret", sensitivity=RESTRICTED_SENSITIVITY)
+        VisualPage(
+            doc_id=f"d{i}", page_no=i + 1, image=b"secret", sensitivity=RESTRICTED_SENSITIVITY
+        )
         for i in range(3)
     ]
     out = ColPaliVisualRetriever(embedder, pages).retrieve("q")

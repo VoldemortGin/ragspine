@@ -23,10 +23,10 @@ ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpa
 from ragspine.extraction.extractors.pdf_spine_extractor import extract_grids
 from ragspine.extraction.ir import StyledGrid
 
-
 # ---------------------------------------------------------------------------
 # 辅助
 # ---------------------------------------------------------------------------
+
 
 def _grids_by_sheet(path) -> dict[str, StyledGrid]:
     """把抽取出的 grid 列表按 sheet 名索引。"""
@@ -46,6 +46,7 @@ def _norm(text) -> str:
 # ===========================================================================
 # story #9 —— 每张表一个 StyledGrid，sheet 命名 'page{N}_table{M}'
 # ===========================================================================
+
 
 def test_extract_returns_list_of_styled_grids(digital_pdf_path):
     """story #9 —— digital.pdf 抽取结果是 list[StyledGrid]，且至少含一张表。"""
@@ -76,6 +77,7 @@ def test_table_sheet_names_follow_page_table_pattern(digital_pdf_path):
 # ===========================================================================
 # story #9 —— 逐格值与 ground truth 精确一致（数值精确、文本空白归一化）
 # ===========================================================================
+
 
 def test_table_dimensions_match_truth(digital_pdf_path, pdf_ground_truth):
     """story #9 —— page1_table1 的逻辑行列数与真值一致（4 行 × 4 列）。"""
@@ -158,6 +160,7 @@ def test_top_left_corner_cell_is_blank_or_absent(digital_pdf_path, pdf_ground_tr
 # story #9 —— 单元格文本空白归一化（不留首尾空白/不残留多空格）
 # ===========================================================================
 
+
 def test_cell_text_is_whitespace_normalized(digital_pdf_path, pdf_ground_truth):
     """story #9 —— 文本格不带首尾空白、内部无连续多空白（已归一化）。"""
     truth = _digital_table_truth(pdf_ground_truth)
@@ -174,6 +177,7 @@ def test_cell_text_is_whitespace_normalized(digital_pdf_path, pdf_ground_truth):
 # story #9 —— resolved_rgb 一律 None（PDF 不做颜色语义）
 # ===========================================================================
 
+
 def test_all_cells_resolved_rgb_none(digital_pdf_path):
     """story #9 —— 抽出的每个单元格 resolved_rgb 恒为 None（颜色语义是 Excel/PPT 的范畴）。"""
     grids = extract_grids(digital_pdf_path)
@@ -186,6 +190,7 @@ def test_all_cells_resolved_rgb_none(digital_pdf_path):
 # ===========================================================================
 # story #27 —— 血缘：source_doc_id / source_file_hash 写入每张 grid
 # ===========================================================================
+
 
 def test_grids_carry_source_doc_id(digital_pdf_path):
     """story #27 —— 每张 grid 的 source_doc_id 为源文件名（下游血缘根）。"""
@@ -215,6 +220,7 @@ def test_grids_share_same_source_hash(digital_pdf_path):
 # 扫描 / 不可读 PDF —— 返回 [] 不抛异常（依赖分诊路由）
 # ===========================================================================
 
+
 def test_scanned_pdf_returns_empty(scanned_pdf_path):
     """story #9 —— 扫描型 PDF（无文本层）输入返回 []，不抛异常、不做 OCR。"""
     out = extract_grids(scanned_pdf_path)
@@ -239,6 +245,7 @@ def test_scanned_pdf_returns_list_type(scanned_pdf_path):
 # 路径入参鲁棒性 + 叙述文本不入表
 # ===========================================================================
 
+
 def test_accepts_str_and_path_equivalently(digital_pdf_path, pdf_ground_truth):
     """story #9 —— str 与 Path 入参产出一致的 sheet 集合（接口宽容）。"""
     by_path = {g.sheet for g in extract_grids(digital_pdf_path)}
@@ -259,6 +266,7 @@ def test_narrative_text_not_emitted_as_table(digital_pdf_path):
 # ===========================================================================
 # GridExtractor 协议 —— PdfSpineGridExtractor 结构性满足 + version 血缘
 # ===========================================================================
+
 
 def test_pdf_spine_grid_extractor_satisfies_protocol():
     """story #9 —— PdfSpineGridExtractor 结构性满足 GridExtractor 协议（version + extract_grids），

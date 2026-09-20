@@ -79,8 +79,11 @@ def convert_to_n8n(doc: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
         else:
             nodes_out.extend(
                 _build_new_node(
-                    info, id_to_name=id_to_name, llm_ids=llm_ids,
-                    ai_connections=ai_connections, used_names=used_names,
+                    info,
+                    id_to_name=id_to_name,
+                    llm_ids=llm_ids,
+                    ai_connections=ai_connections,
+                    used_names=used_names,
                     warnings=warnings,
                 )
             )
@@ -102,9 +105,9 @@ def convert_to_n8n(doc: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
             main_ports.append([])
         main_ports[port].append({"node": target.name, "type": "main", "index": 0})
     for attachment_name, conn_type, host_name in ai_connections:
-        connections.setdefault(attachment_name, {})[conn_type] = [[
-            {"node": host_name, "type": conn_type, "index": 0}
-        ]]
+        connections.setdefault(attachment_name, {})[conn_type] = [
+            [{"node": host_name, "type": conn_type, "index": 0}]
+        ]
 
     # 顶层：有 x_n8n 则以其为基底合并还原。
     x_n8n = doc.get("x_n8n")
@@ -182,7 +185,8 @@ def _unique_name(base: str, used: set[str]) -> str:
 def _restore_node(info: _NodeInfo) -> dict[str, Any]:
     assert info.n8n_meta is not None
     raw = {
-        key: value for key, value in info.n8n_meta.items()
+        key: value
+        for key, value in info.n8n_meta.items()
         if key not in ("ai_attachments", "synthetic")
     }
     raw["name"] = info.name
@@ -242,8 +246,7 @@ def _build_new_node(
     mapped = DIFY_TO_N8N_TYPE.get(info.dify_type)
     if mapped is None:
         warnings.append(
-            f"未知 dify 节点类型 {info.dify_type!r}（{label!r}），"
-            f"映射为 noOp，原始 data 存于 notes"
+            f"未知 dify 节点类型 {info.dify_type!r}（{label!r}），映射为 noOp，原始 data 存于 notes"
         )
         return [_noop_node(info, position)]
     n8n_type, type_version = mapped
@@ -259,24 +262,18 @@ def _build_new_node(
     extra_nodes: list[dict[str, Any]] = []
 
     def _to_expr(text: str) -> str:
-        converted, warns = dify_text_to_n8n(
-            text, id_to_name=id_to_name, llm_node_ids=llm_ids
-        )
+        converted, warns = dify_text_to_n8n(text, id_to_name=id_to_name, llm_node_ids=llm_ids)
         warnings.extend(warns)
         return converted
 
     if info.dify_type in ("answer", "end"):
-        warnings.append(
-            f"dify {info.dify_type} 节点 {label!r} 映射为 noOp，原始 data 存于 notes"
-        )
+        warnings.append(f"dify {info.dify_type} 节点 {label!r} 映射为 noOp，原始 data 存于 notes")
         return [_noop_node(info, position)]
     if info.dify_type == "if-else":
         node["parameters"] = _if_parameters(info, _to_expr, warnings)
     elif info.dify_type == "question-classifier":
         node["parameters"] = _switch_parameters(info)
-        warnings.append(
-            f"question-classifier 节点 {label!r} 近似映射为 switch，分支语义可能有出入"
-        )
+        warnings.append(f"question-classifier 节点 {label!r} 近似映射为 switch，分支语义可能有出入")
     elif info.dify_type == "code":
         node["parameters"] = _code_parameters(info)
         warnings.append(f"code 节点 {label!r}：代码原文还原，语义可能需人工调整")
@@ -304,18 +301,12 @@ def _noop_node(info: _NodeInfo, position: list[int | float]) -> dict[str, Any]:
     }
 
 
-def _if_parameters(
-    info: _NodeInfo, to_expr: Any, warnings: list[str]
-) -> dict[str, Any]:
+def _if_parameters(info: _NodeInfo, to_expr: Any, warnings: list[str]) -> dict[str, Any]:
     cases = info.data.get("cases")
-    case = next(
-        (c for c in (cases if isinstance(cases, list) else []) if isinstance(c, dict)), {}
-    )
+    case = next((c for c in (cases if isinstance(cases, list) else []) if isinstance(c, dict)), {})
     conditions_out: list[dict[str, Any]] = []
     raw_conditions = case.get("conditions")
-    for index, condition in enumerate(
-        raw_conditions if isinstance(raw_conditions, list) else []
-    ):
+    for index, condition in enumerate(raw_conditions if isinstance(raw_conditions, list) else []):
         if not isinstance(condition, dict):
             continue
         selector = condition.get("variable_selector")
@@ -333,12 +324,14 @@ def _if_parameters(
                 f"无对应 n8n operation，原样保留"
             )
         operator_type, operation = mapped_operator
-        conditions_out.append({
-            "id": f"cond-{index + 1}",
-            "leftValue": left_value,
-            "rightValue": _typed_value(condition.get("value", ""), operator_type),
-            "operator": {"type": operator_type, "operation": operation},
-        })
+        conditions_out.append(
+            {
+                "id": f"cond-{index + 1}",
+                "leftValue": left_value,
+                "rightValue": _typed_value(condition.get("value", ""), operator_type),
+                "operator": {"type": operator_type, "operation": operation},
+            }
+        )
     return {
         "conditions": {
             "options": {"caseSensitive": True, "typeValidation": "loose", "version": 2},
@@ -399,9 +392,7 @@ def _set_parameters(info: _NodeInfo, to_expr: Any) -> dict[str, Any]:
     value = to_expr(text)
     return {
         "assignments": {
-            "assignments": [
-                {"id": "assign-1", "name": "output", "value": value, "type": "string"}
-            ]
+            "assignments": [{"id": "assign-1", "name": "output", "value": value, "type": "string"}]
         },
         "options": {},
     }

@@ -29,5 +29,7 @@ def test_all_other_params_are_keyword_only_with_defaults():
     params = list(inspect.signature(answer_question).parameters.values())
     extras = [p for p in params if p.name not in ("question", "store", "provider")]
     for p in extras:
-        assert p.kind == p.KEYWORD_ONLY, f"参数 {p.name} 必须是 keyword-only（不得成为新的必填位置参）"
+        assert p.kind == p.KEYWORD_ONLY, (
+            f"参数 {p.name} 必须是 keyword-only（不得成为新的必填位置参）"
+        )
         assert p.default is not p.empty, f"参数 {p.name} 必须带默认值（首答路径上不得多一个必填项）"

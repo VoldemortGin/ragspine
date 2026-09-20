@@ -21,8 +21,14 @@ from ragspine.retrieval.vector.persistence_policy import PersistEverythingPolicy
 
 def _meta(doc_id: str, **overrides) -> DocumentMeta:
     kwargs = dict(
-        doc_id=doc_id, title=doc_id, topic="FIN", entity="ACME_HK",
-        geography="HK", period="2025H1", language="zh", sensitivity="INTERNAL",
+        doc_id=doc_id,
+        title=doc_id,
+        topic="FIN",
+        entity="ACME_HK",
+        geography="HK",
+        period="2025H1",
+        language="zh",
+        sensitivity="INTERNAL",
     )
     kwargs.update(overrides)
     return DocumentMeta(**kwargs)
@@ -52,6 +58,7 @@ def store(tmp_db_path):
 # 入库即嵌入落盘
 # ---------------------------------------------------------------------------
 
+
 def test_embed_and_persist_at_ingest(store):
     """入库即把可落盘块的向量写进 vector_store——尚未 retrieve，count 已等于块数。"""
     index = NarrativeIndex(store, embedding_backend=DeterministicEmbeddingBackend(dim=32))
@@ -76,6 +83,7 @@ def test_retrieve_does_not_reembed_chunks(store):
 # ---------------------------------------------------------------------------
 # doc 粒度失效（持久 store 跨 ingest 存活）
 # ---------------------------------------------------------------------------
+
 
 def test_doc_scoped_invalidation_preserves_other_docs(store):
     """重入 docA 只撤换 docA 的向量，docB 的持久向量存活（不再 delete-all 全清）。"""
@@ -103,6 +111,7 @@ def test_reingest_replaces_only_that_doc_vectors(store):
 # ---------------------------------------------------------------------------
 # PersistencePolicy 隔离绑定：默认绝不落盘 RESTRICTED 向量
 # ---------------------------------------------------------------------------
+
 
 def test_restricted_vector_not_persisted_under_default_policy(store):
     """默认 IsolationFirstPolicy：RESTRICTED 块的衍生向量绝不写盘（at-rest 隔离第三道门）。"""
@@ -163,6 +172,7 @@ def test_persist_everything_policy_persists_restricted(store):
 # ---------------------------------------------------------------------------
 # 持久化真正生效：跨实例（模拟重启）不重算块向量
 # ---------------------------------------------------------------------------
+
 
 def test_persistence_survives_across_index_instances(tmp_path):
     """换一个 NarrativeIndex 实例（同 sqlite-vec db）即可用已落盘向量检索——块文本不重嵌。"""

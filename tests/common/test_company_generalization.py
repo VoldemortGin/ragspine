@@ -26,7 +26,6 @@ TDD 红灯阶段——本文件只写【失败的】测试，不含任何实现�
 import os
 from datetime import date
 
-import pytest
 import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
@@ -35,8 +34,8 @@ import ragspine.agent.agent as agent_mod
 import ragspine.agent.intent as intent_mod
 import ragspine.agent.query_tools as query_tools_mod
 import ragspine.eval.qa_eval as qa_eval_mod
-from ragspine.common.company_profile import CompanyProfile, load_company_profile
 from ragspine.agent.intent import clarify_scope, parse_intent
+from ragspine.common.company_profile import CompanyProfile, load_company_profile
 
 REF = date(2026, 6, 12)
 
@@ -89,9 +88,7 @@ def _activate_acme(monkeypatch, profile: CompanyProfile) -> None:
     for mod in _PROFILE_BOUND_MODULES:
         monkeypatch.setattr(mod, "_PROFILE", profile, raising=False)
     # intent 层把默认实体缓存在 module-level _DEFAULT_ENTITY，一并随 profile 切换。
-    monkeypatch.setattr(
-        intent_mod, "_DEFAULT_ENTITY", profile.home_entity_code, raising=False
-    )
+    monkeypatch.setattr(intent_mod, "_DEFAULT_ENTITY", profile.home_entity_code, raising=False)
 
 
 def _write_acme_toml(tmp_path) -> os.PathLike:
@@ -151,6 +148,7 @@ def _current_anthropic_tool() -> dict:
 # G4：CompanyProfile.home_entity_labels 字段
 # ===========================================================================
 
+
 def test_home_entity_labels_field_default_acme():
     """user story：CompanyProfile 必须有 home_entity_labels 字段（entity_code→展示名）。
     缺省（本部署 config/company.toml 或缺失回退）应得默认 ACME labels：
@@ -196,6 +194,7 @@ def test_home_entity_labels_read_from_toml(tmp_path):
 # G3：env-var RAGSPINE_COMPANY_CONFIG → load_company_profile(path=None) 优先读它
 # ===========================================================================
 
+
 def test_env_var_overrides_default_config_path(tmp_path, monkeypatch):
     """user story：运行期换公司不应靠就地编辑文件。设 RAGSPINE_COMPANY_CONFIG 指向临时 ACME
     toml 后，load_company_profile()（path=None）必须返回 ACME profile。"""
@@ -229,6 +228,7 @@ def test_explicit_path_takes_precedence_over_env_var(tmp_path, monkeypatch):
 # ===========================================================================
 # G1：默认(ACME) profile — clarify_scope 文案由 labels 派生（而非写死）
 # ===========================================================================
+
 
 def test_g1_default_assumption_note_derived_contains_acme_group():
     """user story：默认 ACME profile 下，缺实体的 assumption_note 必须含默认实体展示名
@@ -267,6 +267,7 @@ def test_g1_period_narrowing_unchanged_no_company_name():
 # ===========================================================================
 # G2：ACME profile 激活 — clarify_scope / agent / query_tools 全说 ACME、不含 ACME
 # ===========================================================================
+
 
 def test_g2_clarify_scope_uses_acme_labels(monkeypatch):
     """user story：换上 YourCo profile（经支持的运行期换 profile 机制）后，缺实体的
@@ -317,6 +318,7 @@ def test_g2_query_tools_description_uses_acme(monkeypatch):
 # ===========================================================================
 # G5：回归守护 — 默认 profile 下文案仍含 ACME（换 profile 才变）
 # ===========================================================================
+
 
 def test_g5_default_agent_system_prompt_still_contains_acme():
     """回归守护：默认 ACME profile 下，agent 系统 prompt（由 profile 派生）必须仍含

@@ -31,10 +31,10 @@ from ragspine.retrieval.lexical.retrieval import (
     tokenize,
 )
 
-
 # ---------------------------------------------------------------------------
 # 测试专用 fake（定义在测试文件内，不放 src）
 # ---------------------------------------------------------------------------
+
 
 class FakeEmbeddingBackend:
     """实现 EmbeddingBackend 协议的确定性替身。
@@ -107,9 +107,13 @@ def _chunk(chunk_id: str, text: str, **overrides) -> Chunk:
 def corpus() -> list[Chunk]:
     """跨 topic/entity 的小语料，含强信号实体词 Nexora / MPFA / CPL。"""
     return [
-        _chunk("c1#0", "Nexora 事件对银保渠道的影响评估", topic="REG", entity="ACME_CN", geography="CN"),
+        _chunk(
+            "c1#0", "Nexora 事件对银保渠道的影响评估", topic="REG", entity="ACME_CN", geography="CN"
+        ),
         _chunk("c2#0", "MPFA 强积金新规要求披露管理费", topic="REG", entity="ACME_HK"),
-        _chunk("c3#0", "CPL 渠道归因分析显示银保增长", topic="FIN", entity="ACME_CN", geography="CN"),
+        _chunk(
+            "c3#0", "CPL 渠道归因分析显示银保增长", topic="FIN", entity="ACME_CN", geography="CN"
+        ),
         _chunk("c4#0", "香港 REVENUE 营收持续增长", topic="FIN", entity="ACME_HK"),
         _chunk("c5#0", "weekend cricket match report 板球比赛", topic="OTHER", entity="NONE"),
     ]
@@ -118,6 +122,7 @@ def corpus() -> list[Chunk]:
 # ===========================================================================
 # 分词：中英混排
 # ===========================================================================
+
 
 def test_tokenize_ascii_words_case_folded():
     """ASCII 连续串按词、大小写归一。"""
@@ -150,6 +155,7 @@ def test_tokenize_empty_and_punct():
 # BM25：手算例 + 强信号词
 # ===========================================================================
 
+
 def test_bm25_hand_example():
     """手算例：docs=[[x,x,y],[y,z]]、query=[x]，标准 Okapi k1=1.5/b=0.75。
 
@@ -178,6 +184,7 @@ def test_bm25_entity_strong_signal(corpus):
 # 余弦 / RRF 手算
 # ===========================================================================
 
+
 def test_cosine_basics():
     """同向=1、正交=0、零向量=0。"""
     assert cosine_similarity([1.0, 2.0], [2.0, 4.0]) == pytest.approx(1.0)
@@ -203,6 +210,7 @@ def test_rrf_k_param():
 # ===========================================================================
 # HybridRetriever：通道 / 预过滤 / top-k / multi-query
 # ===========================================================================
+
 
 def test_bm25_only_search_hits_entity(corpus):
     """纯 BM25 模式（无 backend）：'Nexora 事件' top1 = c1，通道得分可解释。"""
@@ -287,9 +295,7 @@ def test_multiquery_rewrite_merged_by_rrf(corpus):
     plain = HybridRetriever(chunks)
     assert "c6#0" not in {r.chunk.chunk_id for r in plain.search("营收的表现")}
 
-    rewriting = HybridRetriever(
-        chunks, query_rewriter=FakeRewriter(["REVENUE 表现"])
-    )
+    rewriting = HybridRetriever(chunks, query_rewriter=FakeRewriter(["REVENUE 表现"]))
     ids = {r.chunk.chunk_id for r in rewriting.search("营收的表现")}
     assert "c6#0" in ids
     assert "c4#0" in ids  # 原 query 命中的块仍在
@@ -297,9 +303,7 @@ def test_multiquery_rewrite_merged_by_rrf(corpus):
 
 def test_multiquery_duplicate_rewrites_tolerated(corpus):
     """改写器返回重复 query 不致重复计分/崩溃。"""
-    retriever = HybridRetriever(
-        corpus, query_rewriter=FakeRewriter(["Nexora 事件", "Nexora 事件"])
-    )
+    retriever = HybridRetriever(corpus, query_rewriter=FakeRewriter(["Nexora 事件", "Nexora 事件"]))
     results = retriever.search("Nexora 事件")
     ids = [r.chunk.chunk_id for r in results]
     assert len(ids) == len(set(ids))
@@ -309,6 +313,7 @@ def test_multiquery_duplicate_rewrites_tolerated(corpus):
 # ===========================================================================
 # GlossaryQueryRewriter：确定性规则改写
 # ===========================================================================
+
 
 def test_rewriter_original_first():
     """原 query 恒在首位。"""
@@ -352,6 +357,7 @@ def test_rewriter_ascii_word_boundary():
 # ===========================================================================
 # NarrativeIndex：建库 -> 检索 -> 二审 端到端
 # ===========================================================================
+
 
 def _meta(doc_id: str, **overrides) -> DocumentMeta:
     kwargs = dict(
@@ -414,9 +420,7 @@ def test_index_rerank_with_judge(index_store):
     baseline = index.retrieve("REVENUE", rerank=False)
     assert len(baseline) == 3
     reranked = index.retrieve("REVENUE")
-    assert [r.chunk.chunk_id for r in reranked] == [
-        r.chunk.chunk_id for r in reversed(baseline)
-    ]
+    assert [r.chunk.chunk_id for r in reranked] == [r.chunk.chunk_id for r in reversed(baseline)]
     assert len(judge.calls) == 1
     query, candidates = judge.calls[0]
     assert query == "REVENUE"

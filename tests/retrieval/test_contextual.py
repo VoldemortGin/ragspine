@@ -50,6 +50,7 @@ def _chunk(seq: int, text: str, **md) -> Chunk:
 # build_context_header：确定性、跳过空字段、零编造
 # ===========================================================================
 
+
 def test_build_context_header_from_metadata():
     """头由 title/entity/period 拼成，标签固定、顺序确定、只含元数据值。"""
     c = _chunk(0, "正文", title="2025上半年财务", entity="ACME_HK", period="2025H1")
@@ -78,6 +79,7 @@ def test_build_context_header_empty_when_no_metadata():
 # contextual_index_text：头进索引文本，原文不被污染
 # ===========================================================================
 
+
 def test_contextual_index_text_prepends_header_keeps_text_pure():
     """索引文本 = 头 + 换行 + 原文；chunk.text 原样不动（citation 不污染）。"""
     c = _chunk(0, "香港营收增长。", title="T", entity="ACME_HK", period="2025H1")
@@ -96,6 +98,7 @@ def test_contextual_index_text_no_header_returns_text():
 # ===========================================================================
 # HybridRetriever 注入：context 头进 BM25 索引（opt-in），默认不进
 # ===========================================================================
+
 
 def _two_chunks() -> list[Chunk]:
     # chunk 正文都【不含】实体代码；代码只活在元数据里。
@@ -143,6 +146,7 @@ def test_narrative_index_contextual_through_store(tmp_path):
 # ===========================================================================
 # make_index_text_fn 工厂（spec/env 选用）
 # ===========================================================================
+
 
 def test_make_index_text_fn_none_returns_none():
     assert make_index_text_fn(None) is None

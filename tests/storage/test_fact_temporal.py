@@ -31,15 +31,14 @@ import os
 import re
 from datetime import date
 
-import pytest
 import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
-from ragspine.agent.agent import AgentResult, answer_question, _structured_answer
-from ragspine.storage.fact_store import Fact, FactStore, SqliteFactStore
+from ragspine.agent.agent import AgentResult, _structured_answer, answer_question
 from ragspine.agent.llm_provider import MockProvider
 from ragspine.agent.query_tools import execute_query_metric
+from ragspine.storage.fact_store import Fact, FactStore, SqliteFactStore
 
 REF = date(2026, 6, 13)
 
@@ -70,10 +69,7 @@ def _base_fact(**overrides) -> Fact:
 
 def _columns(fs: FactStore) -> set[str]:
     """fact_metric 当前列名集合（PRAGMA table_info）。"""
-    return {
-        row["name"]
-        for row in fs.execute_read("PRAGMA table_info(fact_metric)")
-    }
+    return {row["name"] for row in fs.execute_read("PRAGMA table_info(fact_metric)")}
 
 
 # ===========================================================================

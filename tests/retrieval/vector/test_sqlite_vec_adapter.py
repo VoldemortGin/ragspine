@@ -98,6 +98,7 @@ def test_missing_sdk_raises_friendly_error(monkeypatch):
 # Native ANN/KNN：vec0 KNN MATCH 收窄候选池 + 精确重排（大库仍回精确 top-k）
 # ===========================================================================
 
+
 def test_native_knn_pool_narrows_yet_returns_exact_topk():
     """大库（count > pool_ceiling）触发 vec0 KNN 收窄候选池，精确重排后 top-k 与全量覆盖逐位一致。
 

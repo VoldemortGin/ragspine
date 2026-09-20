@@ -54,8 +54,15 @@ _WEBHOOK_HINT = (
 
 # n8n workflow body 严格校验（additionalProperties: false + readOnly，拒绝而非忽略）。
 _READONLY_FIELDS = (
-    "id", "active", "createdAt", "updatedAt", "tags",
-    "isArchived", "versionId", "triggerCount", "meta",
+    "id",
+    "active",
+    "createdAt",
+    "updatedAt",
+    "tags",
+    "isArchived",
+    "versionId",
+    "triggerCount",
+    "meta",
 )
 _REQUIRED_FIELDS = ("name", "nodes", "connections", "settings")
 _OPTIONAL_FIELDS = ("staticData",)
@@ -77,9 +84,7 @@ def _not_found() -> JSONResponse:
 def _check_api_key(request: Request, config: ServiceConfig) -> JSONResponse | None:
     """/api/v1/* 鉴权；每个 handler 开头调用，非 None 直接 return。"""
     if not config.n8n_api_key:
-        return _message(
-            401, "n8n public API is disabled: set RAGSPINE_N8N_API_KEY to enable it"
-        )
+        return _message(401, "n8n public API is disabled: set RAGSPINE_N8N_API_KEY to enable it")
     supplied = request.headers.get("X-N8N-API-KEY")
     if supplied is None:
         return _message(401, "'X-N8N-API-KEY' header required")
@@ -95,11 +100,7 @@ def _store(config: ServiceConfig) -> N8nStore:
 
 def _now_iso() -> str:
     """n8n 时间戳格式：UTC 毫秒 + Z（如 2024-01-15T10:30:00.000Z）。"""
-    return (
-        datetime.now(UTC)
-        .isoformat(timespec="milliseconds")
-        .replace("+00:00", "Z")
-    )
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def _clamp_limit(limit: int) -> int:
@@ -131,14 +132,10 @@ def _validate_workflow_body(body: dict[str, Any]) -> JSONResponse | None:
     allowed = set(_REQUIRED_FIELDS) | set(_OPTIONAL_FIELDS)
     for key in body:
         if key not in allowed:
-            return _message(
-                400, "request/body must NOT have additional properties"
-            )
+            return _message(400, "request/body must NOT have additional properties")
     for field in _REQUIRED_FIELDS:
         if field not in body:
-            return _message(
-                400, f"request/body must have required property '{field}'"
-            )
+            return _message(400, f"request/body must have required property '{field}'")
     return None
 
 
@@ -178,10 +175,11 @@ def list_workflows(
         offset = decoded["offset"]
         if isinstance(decoded.get("limit"), int):
             limit = _clamp_limit(decoded["limit"])
-    page = records[offset:offset + limit]
+    page = records[offset : offset + limit]
     next_cursor = (
         _encode_cursor({"limit": limit, "offset": offset + limit})
-        if offset + limit < len(records) else None
+        if offset + limit < len(records)
+        else None
     )
     return {"data": page, "nextCursor": next_cursor}
 
@@ -331,7 +329,8 @@ def list_executions(
     page = records[:limit]
     next_cursor = (
         _encode_cursor({"lastId": int(page[-1]["id"]), "limit": limit})
-        if len(records) > limit else None
+        if len(records) > limit
+        else None
     )
     return {
         "data": [_execution_view(r, include_data) for r in page],
@@ -349,10 +348,7 @@ def get_execution(
     denied = _check_api_key(request, config)
     if denied is not None:
         return denied
-    record = (
-        _store(config).get_execution(int(execution_id))
-        if execution_id.isdigit() else None
-    )
+    record = _store(config).get_execution(int(execution_id)) if execution_id.isdigit() else None
     if record is None:
         return _not_found()
     return _execution_view(record, include_data)
@@ -366,10 +362,7 @@ def delete_execution(
     denied = _check_api_key(request, config)
     if denied is not None:
         return denied
-    deleted = (
-        _store(config).delete_execution(int(execution_id))
-        if execution_id.isdigit() else None
-    )
+    deleted = _store(config).delete_execution(int(execution_id)) if execution_id.isdigit() else None
     if deleted is None:
         return _not_found()
     return _execution_view(deleted, False)
@@ -430,23 +423,23 @@ def _run_webhook_workflow(
     started_at = _now_iso()
 
     def _record(status: str, data: Any) -> None:
-        store.create_execution({
-            "finished": status == "success",
-            "mode": "webhook",
-            "retryOf": None,
-            "retrySuccessId": None,
-            "startedAt": started_at,
-            "stoppedAt": _now_iso(),
-            "workflowId": workflow.get("id"),
-            "waitTill": None,
-            "status": status,
-            "customData": {},
-            "data": data,
-        })
+        store.create_execution(
+            {
+                "finished": status == "success",
+                "mode": "webhook",
+                "retryOf": None,
+                "retrySuccessId": None,
+                "startedAt": started_at,
+                "stoppedAt": _now_iso(),
+                "workflowId": workflow.get("id"),
+                "waitTill": None,
+                "status": status,
+                "customData": {},
+                "data": data,
+            }
+        )
 
-    source = {
-        key: workflow.get(key) for key in ("name", "nodes", "connections", "settings")
-    }
+    source = {key: workflow.get(key) for key in ("name", "nodes", "connections", "settings")}
     try:
         dify_doc, _warnings = n8n_to_dify(source)
     except N8nConvertError as exc:
@@ -455,15 +448,15 @@ def _run_webhook_workflow(
 
     response = dify_run(
         DifyRunRequest(yaml=_dify_dict_to_yaml(dify_doc), inputs=inputs),
-        config, provider,
+        config,
+        provider,
     )
     if isinstance(response, JSONResponse):
         # dify_run 已整形的错误信封（编译 400 / L0 闸 422 / 执行失败超时 400）。
         error_payload = json.loads(bytes(response.body))
         _record(
             "error",
-            error_payload if isinstance(error_payload, dict)
-            else {"error": error_payload},
+            error_payload if isinstance(error_payload, dict) else {"error": error_payload},
         )
         return _message(500, "Error in workflow")
 
@@ -472,9 +465,7 @@ def _run_webhook_workflow(
     return JSONResponse(content=result)
 
 
-@webhook_router.api_route(
-    "/{path:path}", methods=["GET", "POST"], response_model=None
-)
+@webhook_router.api_route("/{path:path}", methods=["GET", "POST"], response_model=None)
 async def webhook_trigger(
     path: str, request: Request, config: ConfigDep, provider: ProviderDep
 ) -> JSONResponse:
@@ -489,18 +480,14 @@ async def webhook_trigger(
             status_code=404,
             content={
                 "code": 404,
-                "message": (
-                    f'The requested webhook "{request.method} {path}" '
-                    "is not registered."
-                ),
+                "message": (f'The requested webhook "{request.method} {path}" is not registered.'),
                 "hint": _WEBHOOK_HINT,
             },
         )
     if not config.dify_run_enabled:
         return _message(
             503,
-            "workflow execution is disabled: "
-            "set RAGSPINE_DIFY_RUN_ENABLED=true to enable it",
+            "workflow execution is disabled: set RAGSPINE_DIFY_RUN_ENABLED=true to enable it",
         )
     try:
         body = await request.json()
@@ -508,9 +495,7 @@ async def webhook_trigger(
         body = None  # body 非 JSON -> 只用 query params
     inputs = _merge_inputs(dict(request.query_params), body)
     # 同步执行段进线程池：与 sync def 路由的默认行为等价，执行期不阻塞事件循环。
-    return await run_in_threadpool(
-        _run_webhook_workflow, workflow, inputs, config, provider
-    )
+    return await run_in_threadpool(_run_webhook_workflow, workflow, inputs, config, provider)
 
 
 # 对外合成一个 router（/api/v1 + /webhook），app.py 只 include 这一个。

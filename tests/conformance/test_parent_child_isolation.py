@@ -65,6 +65,7 @@ class _StubIndex:
 # 端到端：ingest（父子预设）→ store 持久化 → retrieve → snippet 展开
 # ===========================================================================
 
+
 def _ingest_and_retrieve(tmp_path, chunker_spec, *, sensitivity="INTERNAL"):
     store = ChunkStore(tmp_path / "chunk.db")
     store.init_schema()
@@ -82,7 +83,11 @@ def test_child_hit_expands_to_parent_window(tmp_path, spec):
     snippets = _ingest_and_retrieve(tmp_path, spec)
     assert snippets, "应召回至少一个 child"
     # 存在一个命中 child：其自身 text 不含'毛利改善'，但父窗口 prompt_text 含之（small-to-big 展开）。
-    expanded = [s for s in snippets if "毛利改善" not in s["text"] and "毛利改善" in s.get("prompt_text", "")]
+    expanded = [
+        s
+        for s in snippets
+        if "毛利改善" not in s["text"] and "毛利改善" in s.get("prompt_text", "")
+    ]
     assert expanded, "至少一个 child 的父窗口应展开出 child 自身不含的兄弟段落"
     s = expanded[0]
     # provenance：source_locator 指向 child 真实段落，parent_locator 附指父小节真实跨度，二者不同。
@@ -115,15 +120,18 @@ def test_default_chunker_snippet_byte_identical(tmp_path):
 # RESTRICTED 隔离反向证明：带窗口的 RESTRICTED 块整段被拒，父窗口绝不泄漏
 # ===========================================================================
 
+
 def test_restricted_windowed_chunk_rejected_whole(tmp_path):
     """带 window_text 的 RESTRICTED 块经出口整段被拒——父窗口绝不经 child 泄漏到 prompt_text。"""
     internal = _windowed_chunk("INTERNAL", seq=0)
     restricted = _windowed_chunk("RESTRICTED", seq=1)
     restricted.window_text = "机密：内幕消息。"  # 若泄漏，会出现在某条 prompt_text 里
-    index = _StubIndex([
-        RetrievalResult(chunk=internal, bm25_score=1.0, vector_score=0.0, fused_score=1.0),
-        RetrievalResult(chunk=restricted, bm25_score=1.0, vector_score=0.0, fused_score=0.9),
-    ])
+    index = _StubIndex(
+        [
+            RetrievalResult(chunk=internal, bm25_score=1.0, vector_score=0.0, fused_score=1.0),
+            RetrievalResult(chunk=restricted, bm25_score=1.0, vector_score=0.0, fused_score=0.9),
+        ]
+    )
     snippets = NarrativeIndexRetriever(index).retrieve("营收", top_k=50)
     # RESTRICTED 块整段不出域：无其 chunk_id、无其正文、无其父窗口。
     assert all(s["chunk_id"] != "d#c1" for s in snippets)
@@ -137,8 +145,10 @@ def test_restricted_windowed_chunk_rejected_whole(tmp_path):
 def test_restricted_only_yields_no_snippet(tmp_path):
     """仅有一个带窗口的 RESTRICTED 块时：零 snippet（整段拒绝，无任何窗口泄漏）。"""
     restricted = _windowed_chunk("RESTRICTED")
-    index = _StubIndex([
-        RetrievalResult(chunk=restricted, bm25_score=1.0, vector_score=0.0, fused_score=1.0),
-    ])
+    index = _StubIndex(
+        [
+            RetrievalResult(chunk=restricted, bm25_score=1.0, vector_score=0.0, fused_score=1.0),
+        ]
+    )
     snippets = NarrativeIndexRetriever(index).retrieve("营收", top_k=50)
     assert snippets == []

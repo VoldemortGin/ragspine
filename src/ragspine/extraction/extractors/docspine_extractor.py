@@ -72,8 +72,9 @@ def _file_hash(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _build_grid(table: dict[str, Any], sheet: str, source_doc_id: str,
-                source_file_hash: str) -> list[StyledGrid]:
+def _build_grid(
+    table: dict[str, Any], sheet: str, source_doc_id: str, source_file_hash: str
+) -> list[StyledGrid]:
     """把一张 docspine 表 dict 转成 StyledGrid 列表：[本表, *递归嵌套子表]。
 
     用列游标按 gridSpan 推进得到真实网格列；vMerge restart/continue 计算纵向跨度；
@@ -138,9 +139,7 @@ def _build_grid(table: dict[str, Any], sheet: str, source_doc_id: str,
         # 嵌套表：作为独立 StyledGrid 递归产出（即便父格空文本也不丢），父留 breadcrumb 告警。
         for k, nested_block in enumerate(p["nested_tables"], start=1):
             child_sheet = f"{sheet}.cell{p['r']}_{p['c']}.nested{k}"
-            grid.add_warning(
-                f"{sheet}!{ref} 含嵌套表，已作为独立 StyledGrid 产出：{child_sheet}"
-            )
+            grid.add_warning(f"{sheet}!{ref} 含嵌套表，已作为独立 StyledGrid 产出：{child_sheet}")
             nested_grids.extend(
                 _build_grid(nested_block, child_sheet, source_doc_id, source_file_hash)
             )

@@ -105,8 +105,7 @@ class ManifestStore:
             """
         )
         self._conn.execute(
-            "CREATE INDEX IF NOT EXISTS ix_manifest_input_batch "
-            "ON manifest_input (batch_id, seq)"
+            "CREATE INDEX IF NOT EXISTS ix_manifest_input_batch ON manifest_input (batch_id, seq)"
         )
         self._conn.commit()
 
@@ -207,9 +206,7 @@ class ManifestStore:
         n_warnings = 0
         n_failed = 0
         for r in inputs_rows:
-            inputs.append(
-                {"path": r["path"], "hash": r["hash"], "format": r["format"]}
-            )
+            inputs.append({"path": r["path"], "hash": r["hash"], "format": r["format"]})
             n_facts += r["n_facts"] or 0
             n_warnings += r["n_warnings"] or 0
             if r["failed"]:

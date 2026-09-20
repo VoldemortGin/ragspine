@@ -35,8 +35,9 @@ def _default_gate() -> SecurityGate:
 # 1) 检测 + 遮蔽
 # --------------------------------------------------------------------------
 
+
 def test_detect_longest_match_masks_whole_competitor():
-    """"中国竞安"整体命中（长于"竞安"），遮蔽后既无"竞安"也无"中国"残留。"""
+    """ "中国竞安"整体命中（长于"竞安"），遮蔽后既无"竞安"也无"中国"残留。"""
     scr = _default_gate().detect("中国竞安的营收")
     assert scr.external_entity == "竞安(Jingan)"
     assert "竞安" not in scr.masked_text
@@ -83,9 +84,7 @@ def test_detect_resists_internal_whitespace_evasion():
 
 def test_screen_resists_internal_whitespace_evasion():
     """screen 同样免疫空格绕过：内部加空白的竞品名仍判越权拒答。"""
-    verdict = _default_gate().screen(
-        raw_question="竞 安去年REVENUE多少", metric="REVENUE"
-    )
+    verdict = _default_gate().screen(raw_question="竞 安去年REVENUE多少", metric="REVENUE")
     assert verdict.decision == SECURITY_REFUSE_OUT_OF_SCOPE
     assert verdict.external_entity == "竞安(Jingan)"
 
@@ -93,6 +92,7 @@ def test_screen_resists_internal_whitespace_evasion():
 # --------------------------------------------------------------------------
 # 2) 拒答决策（screen）
 # --------------------------------------------------------------------------
+
 
 def test_screen_refuses_competitor_with_full_message():
     home = load_company_profile().home_company_name
@@ -131,6 +131,7 @@ def test_screen_redetects_from_raw_question_not_a_parser_field():
 # --------------------------------------------------------------------------
 # 3) 完全配置驱动（无硬编码竞品）
 # --------------------------------------------------------------------------
+
 
 def test_gate_is_config_driven_no_hardcoded_competitor():
     """换一份外部清单 + 公司名：检测与文案随之变化，原 ACME 竞品不再被识别。"""

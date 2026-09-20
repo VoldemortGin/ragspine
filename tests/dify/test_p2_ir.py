@@ -35,8 +35,10 @@ def test_node_kinds_normalized(fixture_text: Callable[[str], str]) -> None:
     ir = _ir(fixture_text, "seq")
     kinds = {n.id: n.kind for n in ir.graph.nodes}
     assert kinds == {
-        "start_1": "start", "llm_1": "llm",
-        "tt_1": "template-transform", "end_1": "end",
+        "start_1": "start",
+        "llm_1": "llm",
+        "tt_1": "template-transform",
+        "end_1": "end",
     }
     assert isinstance(ir.node("start_1"), StartNode)
     assert isinstance(ir.node("llm_1"), LLMNode)
@@ -97,9 +99,7 @@ def test_parallel_layer_groups_independent_nodes(
 ) -> None:
     """parallel fixture：llm_a 与 llm_b 互不依赖 → 同处一个 parallel_layer。"""
     ir = _ir(fixture_text, "parallel")
-    layer_with_llms = next(
-        layer for layer in ir.parallel_layers if "llm_a" in layer
-    )
+    layer_with_llms = next(layer for layer in ir.parallel_layers if "llm_a" in layer)
     assert set(layer_with_llms) == {"llm_a", "llm_b"}
 
 

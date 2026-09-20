@@ -344,9 +344,7 @@ def test_dify_run_http_node_rejected_when_http_disabled(tmp_path, monkeypatch):
     assert "RAGSPINE_DIFY_HTTP_ENABLED" in err["message"]
 
 
-def test_dify_run_http_node_executes_when_enabled_with_controlled_client(
-    tmp_path, monkeypatch
-):
+def test_dify_run_http_node_executes_when_enabled_with_controlled_client(tmp_path, monkeypatch):
     # 显式开启 + 假客户端（测试禁止真实网络）：runner 注入生效，端到端 200。
     monkeypatch.setenv("RAGSPINE_DIFY_HTTP_ENABLED", "true")
     from ragspine.service.dify import runner as dify_runner

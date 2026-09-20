@@ -120,9 +120,7 @@ def run_eval(
             if actual == expected:
                 ch.correct += 1
             else:
-                ch.mismatches.append(
-                    {"locator": key, "expected": expected, "actual": actual}
-                )
+                ch.mismatches.append({"locator": key, "expected": expected, "actual": actual})
 
     for ch in channels.values():
         ch.accuracy = 1.0 if ch.total == 0 else ch.correct / ch.total

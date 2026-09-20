@@ -17,6 +17,7 @@ import rootutils
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
 from corespine import ChatCompletion
+
 from ragspine.agent.llm_provider import (
     DEFAULT_ANTHROPIC_MODEL,
     AnthropicProvider,
@@ -40,16 +41,18 @@ def _tool_result_messages(result: dict) -> list[dict]:
         {
             "role": "assistant",
             "content": None,
-            "tool_calls": [{
-                "id": "toolu_1",
-                "type": "function",
-                "function": {
-                    "name": "query_metric",
-                    "arguments": json.dumps(
-                        {"metric": "REVENUE", "entity": "ACME_HK", "period": "FY2025"}
-                    ),
-                },
-            }],
+            "tool_calls": [
+                {
+                    "id": "toolu_1",
+                    "type": "function",
+                    "function": {
+                        "name": "query_metric",
+                        "arguments": json.dumps(
+                            {"metric": "REVENUE", "entity": "ACME_HK", "period": "FY2025"}
+                        ),
+                    },
+                }
+            ],
         },
         {
             "role": "tool",
@@ -62,6 +65,7 @@ def _tool_result_messages(result: dict) -> list[dict]:
 # ---------------------------------------------------------------------------
 # MockProvider：确定性脚本化，零网络零 key
 # ---------------------------------------------------------------------------
+
 
 def test_mock_first_turn_emits_tool_use():
     provider = MockProvider(reference_date=REF)
@@ -82,9 +86,15 @@ def test_mock_first_turn_emits_tool_use():
 def test_mock_final_answer_on_found():
     provider = MockProvider(reference_date=REF)
     found = {
-        "status": "found", "value": 1702.0, "unit": "USD_M",
-        "metric_code": "REVENUE", "entity": "ACME_HK", "geography": "HK",
-        "channel": "TOTAL", "period_type": "FY", "period": "2025",
+        "status": "found",
+        "value": 1702.0,
+        "unit": "USD_M",
+        "metric_code": "REVENUE",
+        "entity": "ACME_HK",
+        "geography": "HK",
+        "channel": "TOTAL",
+        "period_type": "FY",
+        "period": "2025",
         "source": {"doc": "ACME_FY2025_Results.pptx", "locator": "slide=5,table=1"},
     }
     resp = provider.chat(
@@ -101,8 +111,13 @@ def test_mock_final_answer_on_not_found_never_fabricates():
     provider = MockProvider(reference_date=REF)
     not_found = {
         "status": "not_found",
-        "normalized": {"metric_code": "ROE", "entity": "ACME_CN",
-                       "period_type": "FY", "period": "2024", "channel": "TOTAL"},
+        "normalized": {
+            "metric_code": "ROE",
+            "entity": "ACME_CN",
+            "period_type": "FY",
+            "period": "2024",
+            "channel": "TOTAL",
+        },
     }
     resp = provider.chat(
         [{"role": "system", "content": SYSTEM}, *_tool_result_messages(not_found)], tools=TOOLS
@@ -141,6 +156,7 @@ def test_mock_is_deterministic():
 # ---------------------------------------------------------------------------
 # AnthropicProvider：延迟 import、默认模型集中、base_url 可覆盖
 # ---------------------------------------------------------------------------
+
 
 def test_default_model_constant_centralized():
     assert DEFAULT_ANTHROPIC_MODEL == "claude-opus-4-8"
@@ -211,7 +227,9 @@ def test_anthropic_provider_converts_tool_use_blocks(monkeypatch):
     blocks = [
         SimpleNamespace(type="text", text="我先查一下。"),
         SimpleNamespace(
-            type="tool_use", id="toolu_abc", name="query_metric",
+            type="tool_use",
+            id="toolu_abc",
+            name="query_metric",
             input={"metric": "REVENUE", "entity": "ACME_HK", "period": "FY2025"},
         ),
     ]
@@ -228,7 +246,9 @@ def test_anthropic_provider_converts_tool_use_blocks(monkeypatch):
     assert tcs[0].id == "toolu_abc"
     assert tcs[0].function.name == "query_metric"
     assert json.loads(tcs[0].function.arguments) == {
-        "metric": "REVENUE", "entity": "ACME_HK", "period": "FY2025"
+        "metric": "REVENUE",
+        "entity": "ACME_HK",
+        "period": "FY2025",
     }
     # tools 内部转成 Anthropic 形状再传 SDK；system 角色合并成 system 字符串透传。
     tools_arg = captured["create_kwargs"]["tools"]

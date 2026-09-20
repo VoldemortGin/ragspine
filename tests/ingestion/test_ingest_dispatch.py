@@ -29,9 +29,9 @@ from pptx.dml.color import RGBColor
 from pptx.util import Inches
 
 from ragspine.extraction.color.color_semantics import ColorMapping, LegendEntry, MappingRegistry
-from ragspine.storage.fact_store import SqliteFactStore, VISIBLE_REVIEW_STATUSES
-from ragspine.ingestion.structured.ingestion import IngestReport, ingest_excel
 from ragspine.ingestion.review.review_queue import ReviewQueue
+from ragspine.ingestion.structured.ingestion import IngestReport, ingest_excel
+from ragspine.storage.fact_store import VISIBLE_REVIEW_STATUSES, SqliteFactStore
 
 # excel_styled_fixture.xlsx 的 HK_Performance sheet：A1='ACME Hong Kong'、
 # 首行 FY2022..FY2024、首列 REVENUE/NEWSALES/PROFIT/ROE = 4 指标 × 3 期间 = 12 候选事实。
@@ -39,7 +39,7 @@ HK_SCOPE = "excel_styled_fixture.xlsx"
 EXPECTED_HK_FACTS = 12
 
 # 受控实体（home 公司 profile 可归一）：grid 的 A1 / sheet / 标题写它，实体可解析。
-RESOLVABLE_ENTITY_TITLE = "ACME Hong Kong"   # -> ACME_HK
+RESOLVABLE_ENTITY_TITLE = "ACME Hong Kong"  # -> ACME_HK
 # 语义色（与 Excel 线同一套：黄色 = 新产品线）。
 YELLOW = "FFFF00"
 
@@ -104,9 +104,7 @@ def _make_pptx_financial(path, *, entity_title: str, colored: bool = False) -> N
     prs = Presentation()
     slide = prs.slides.add_slide(prs.slide_layouts[6])  # blank
     # 表：2 行 × 2 列。R1C1=实体、R1C2=期间表头、R2C1=指标、R2C2=数值。
-    tbl = slide.shapes.add_table(
-        2, 2, Inches(0.5), Inches(1.0), Inches(8), Inches(2)
-    ).table
+    tbl = slide.shapes.add_table(2, 2, Inches(0.5), Inches(1.0), Inches(8), Inches(2)).table
     tbl.cell(0, 0).text = entity_title
     tbl.cell(0, 1).text = "FY2024"
     tbl.cell(1, 0).text = "REVENUE"
@@ -117,9 +115,7 @@ def _make_pptx_financial(path, *, entity_title: str, colored: bool = False) -> N
     prs.save(str(path))
 
 
-def _make_xlsx_financial(
-    path, *, sheet_title: str, a1: str, colored: bool = False
-) -> None:
+def _make_xlsx_financial(path, *, sheet_title: str, a1: str, colored: bool = False) -> None:
     """造一张 xlsx 财务表：A1=a1（实体源）、首行期间、首列指标、B2 数值。
 
     sheet_title / a1 决定实体能否归一；colored=True 时给 B2 上黄色填充。
@@ -132,9 +128,7 @@ def _make_xlsx_financial(
     ws["A2"] = "REVENUE"
     ws["B2"] = 2680
     if colored:
-        ws["B2"].fill = PatternFill(
-            start_color="FFFFFF00", end_color="FFFFFF00", fill_type="solid"
-        )
+        ws["B2"].fill = PatternFill(start_color="FFFFFF00", end_color="FFFFFF00", fill_type="solid")
     wb.save(str(path))
 
 
@@ -144,17 +138,14 @@ def _fact_keys(rows) -> set[tuple]:
     rows 为 store.execute_read 返回的 sqlite3.Row（按列名下标访问）。
     """
     return {
-        (r["metric_code"], r["entity"], r["period_type"], r["period"], r["channel"])
-        for r in rows
+        (r["metric_code"], r["entity"], r["period_type"], r["period"], r["channel"]) for r in rows
     }
 
 
 # ===========================================================================
 # D1 — xlsx 平价：ingest_file 与 ingest_excel 对同一 xlsx 入库结果一致
 # ===========================================================================
-def test_d1_xlsx_parity_fact_count(
-    store, registry, queue, excel_fixture_path, ground_truth
-):
+def test_d1_xlsx_parity_fact_count(store, registry, queue, excel_fixture_path, ground_truth):
     """user story：作为接手方，我要 ingest_file 走 xlsx 分支与既有 ingest_excel
     入库条数完全一致，确保统一入口不丢不重既有 Excel 能力。"""
     from ragspine.ingestion.structured.ingestion import ingest_file
@@ -193,9 +184,7 @@ def test_d1_xlsx_parity_same_keys(
     assert keys_file == keys_excel
 
 
-def test_d1_xlsx_returns_ingest_report(
-    store, registry, queue, excel_fixture_path, ground_truth
-):
+def test_d1_xlsx_returns_ingest_report(store, registry, queue, excel_fixture_path, ground_truth):
     """user story：ingest_file 返回与 ingest_excel 同型的 IngestReport（字段冻结），
     下游台账 / 观测面零改动即可消费。"""
     from ragspine.ingestion.structured.ingestion import ingest_file
@@ -265,9 +254,9 @@ def test_d3_pdf_digital_routed_to_digital_extractor(
     """user story：作为接手方，我把数字型 PDF 交给 ingest_file，它应先经 pdf_router
     判定为 digital，再把抽取分发给默认的 pdf_spine_extractor.extract_grids（而非扫描线），
     确保数字型 PDF 走确定性表格解析。pdfspine 纯 Rust 确定性，无需 docling 隔离进程。"""
-    from ragspine.ingestion.structured.ingestion import ingest_file
     import ragspine.ingestion.structured.ingestion as ingestion_mod
-    from ragspine.extraction.routing.pdf_router import route, VERDICT_DIGITAL
+    from ragspine.extraction.routing.pdf_router import VERDICT_DIGITAL, route
+    from ragspine.ingestion.structured.ingestion import ingest_file
 
     # 该 fixture 必须被 router 判为 digital（前置事实）。
     assert route(str(digital_pdf_path)).verdict == VERDICT_DIGITAL
@@ -282,9 +271,7 @@ def test_d3_pdf_digital_routed_to_digital_extractor(
         called["spine"] += 1
         return real(path)
 
-    monkeypatch.setattr(
-        ingestion_mod.pdf_spine_extractor, "extract_grids", _spy
-    )
+    monkeypatch.setattr(ingestion_mod.pdf_spine_extractor, "extract_grids", _spy)
 
     ingest_file(digital_pdf_path, store, registry, queue)
     assert called["spine"] >= 1
@@ -342,8 +329,8 @@ def test_d3_injected_grid_extractor_version_is_stamped(
 ):
     """user story：作为审计者，我要血缘里的 extractor_version 随注入的解析器而变——
     换解析器即换版本标识，溯源链天然支持多解析器并存。"""
-    from ragspine.ingestion.structured.ingestion import ingest_file
     import ragspine.ingestion.structured.ingestion as ingestion_mod
+    from ragspine.ingestion.structured.ingestion import ingest_file
 
     _init_three(store, registry, queue)
     captured: dict[str, object] = {}
@@ -355,7 +342,10 @@ def test_d3_injected_grid_extractor_version_is_stamped(
 
     monkeypatch.setattr(ingestion_mod, "_ingest_grids", _spy)
     ingest_file(
-        digital_pdf_path, store, registry, queue,
+        digital_pdf_path,
+        store,
+        registry,
+        queue,
         grid_extractor=_FakeGridExtractor(version="fake_grid_v9"),
     )
     assert captured["extractor_version"] == "fake_grid_v9"
@@ -394,8 +384,8 @@ def test_d3_default_grid_extractor_stamps_pdf_spine(
 ):
     """user story：作为审计者，我要未注入 grid_extractor 时默认走 pdfspine——血缘里的
     extractor_version 为 'pdf_spine@1'（默认解析引擎从 docling 切到 pdfspine 的可溯源标志）。"""
-    from ragspine.ingestion.structured.ingestion import ingest_file
     import ragspine.ingestion.structured.ingestion as ingestion_mod
+    from ragspine.ingestion.structured.ingestion import ingest_file
 
     _init_three(store, registry, queue)
     captured: dict[str, object] = {}
@@ -424,10 +414,10 @@ def test_d4_scanned_pdf_routed_to_ocr_extractor(
     enqueue，而是真正被 OCR 成可检索事实。完整入库/检索/低置信复核/血缘/幂等/dry_run
     行为由 tests/ingestion/structured/test_scanned_pdf_ocr_wiring.py 穷尽覆盖；本用例只在
     dispatch 层证明路由已切到 OCR 抽取器、默认走家族后端。）"""
-    from ragspine.ingestion.structured.ingestion import ingest_file
     import ragspine.ingestion.structured.ingestion as ingestion_mod
-    from ragspine.extraction.routing.pdf_router import route, VERDICT_SCANNED
     from ragspine.extraction.extractors.pdf_scanned_extractor import PdfSpineOcrBackend
+    from ragspine.extraction.routing.pdf_router import VERDICT_SCANNED, route
+    from ragspine.ingestion.structured.ingestion import ingest_file
 
     # 该 fixture 必须被 router 判为 scanned（前置事实）。
     assert route(str(scanned_pdf_path)).verdict == VERDICT_SCANNED
@@ -443,23 +433,19 @@ def test_d4_scanned_pdf_routed_to_ocr_extractor(
         captured["backend"] = backend
         return []
 
-    monkeypatch.setattr(
-        ingestion_mod.pdf_scanned_extractor, "extract_grids", _spy
-    )
+    monkeypatch.setattr(ingestion_mod.pdf_scanned_extractor, "extract_grids", _spy)
 
     ingest_file(scanned_pdf_path, store, registry, queue)  # 不注入 -> 默认家族 OCR
     assert captured.get("called") is True
     assert isinstance(captured["backend"], PdfSpineOcrBackend)
 
 
-def test_d4_ppt_export_pdf_asks_for_pptx_and_enqueues(
-    store, registry, queue, ppt_export_pdf_path
-):
+def test_d4_ppt_export_pdf_asks_for_pptx_and_enqueues(store, registry, queue, ppt_export_pdf_path):
     """user story：PowerPoint 导出的 PDF（producer 命中 PowerPoint）应触发
     ask_for_pptx：ingest_file 不强抽，而是告警 + 入队请求提供 pptx 源
     （PRD「原生优先」），避免在退化 PDF 上做不可靠抽取。"""
-    from ragspine.ingestion.structured.ingestion import ingest_file
     from ragspine.extraction.routing.pdf_router import route
+    from ragspine.ingestion.structured.ingestion import ingest_file
 
     assert route(str(ppt_export_pdf_path)).ask_for_pptx is True
 
@@ -472,14 +458,10 @@ def test_d4_ppt_export_pdf_asks_for_pptx_and_enqueues(
         for it in pending
     )
     # 应至少有一条告警提示原生优先。
-    assert any(
-        ("pptx" in w.lower()) or ("PowerPoint" in w) for w in report.warnings
-    )
+    assert any(("pptx" in w.lower()) or ("PowerPoint" in w) for w in report.warnings)
 
 
-def test_d4_scanned_pdf_not_silently_dropped(
-    store, registry, queue, scanned_pdf_path
-):
+def test_d4_scanned_pdf_not_silently_dropped(store, registry, queue, scanned_pdf_path):
     """user story：扫描型 PDF 不得被静默丢弃——即便不入库，也必须留下队列项
     或告警，让运营能看到「这份文件被挡下、原因是什么」。"""
     from ragspine.ingestion.structured.ingestion import ingest_file
@@ -492,9 +474,7 @@ def test_d4_scanned_pdf_not_silently_dropped(
 # ===========================================================================
 # D5 — 实体不可解析 -> skip + enqueue（关键：不猜实体、不误归因）
 # ===========================================================================
-def test_d5_unresolvable_entity_skips_ingest(
-    store, registry, queue, tmp_path
-):
+def test_d5_unresolvable_entity_skips_ingest(store, registry, queue, tmp_path):
     """user story：作为接手方，当一张表的实体无法归一（A1 与 sheet 名都不是受控实体）
     时，ingest_file 绝不臆造实体（避免 GAP-B 式误归因），该表零事实入库。"""
     from ragspine.ingestion.structured.ingestion import ingest_file
@@ -508,9 +488,7 @@ def test_d5_unresolvable_entity_skips_ingest(
     assert store.count() == 0
 
 
-def test_d5_unresolvable_entity_enqueues_for_human(
-    store, registry, queue, tmp_path
-):
+def test_d5_unresolvable_entity_enqueues_for_human(store, registry, queue, tmp_path):
     """user story：实体不可解析的表必须入复核队列、reason 含「实体无法解析」，
     并带定位血缘（source_doc_id / sheet / locator），让 SME 人工指认而非系统瞎猜。"""
     from ragspine.ingestion.structured.ingestion import ingest_file
@@ -527,9 +505,7 @@ def test_d5_unresolvable_entity_enqueues_for_human(
 # ===========================================================================
 # D6 — 无 active 映射 + 有颜色 tag -> enqueue（颜色映射未确认）
 # ===========================================================================
-def test_d6_colored_no_active_mapping_enqueues(
-    store, registry, queue, tmp_path
-):
+def test_d6_colored_no_active_mapping_enqueues(store, registry, queue, tmp_path):
     """user story：作为接手方，当文件确有颜色编码（数值格被着色，需翻译成 tag）但
     该 scope 无 active 颜色映射时，ingest_file 应入复核队列（reason 含「颜色映射未确认」），
     绝不静默把带语义的颜色当无意义忽略。"""
@@ -538,30 +514,21 @@ def test_d6_colored_no_active_mapping_enqueues(
     _init_three(store, registry, queue)  # registry 空：无任何 active 映射
     p = tmp_path / "acme_hk_colored.xlsx"
     # 实体可解析（A1='ACME Hong Kong'），B2 数值格上黄色填充（确有颜色 tag 需翻译）。
-    _make_xlsx_financial(
-        p, sheet_title="HK", a1=RESOLVABLE_ENTITY_TITLE, colored=True
-    )
+    _make_xlsx_financial(p, sheet_title="HK", a1=RESOLVABLE_ENTITY_TITLE, colored=True)
     report = ingest_file(p, store, registry, queue)
     assert report.n_enqueued_review > 0
     pending = queue.list_pending()
-    assert any(
-        ("颜色映射" in it.reason) or ("映射未确认" in it.reason)
-        for it in pending
-    )
+    assert any(("颜色映射" in it.reason) or ("映射未确认" in it.reason) for it in pending)
 
 
-def test_d6_colored_no_active_mapping_still_warns(
-    store, registry, queue, tmp_path
-):
+def test_d6_colored_no_active_mapping_still_warns(store, registry, queue, tmp_path):
     """user story：有色无映射时除入队外仍应在报告里告警（颜色 tag 未翻译），
     确保运营在台账上能看到「这份文件的颜色语义被挂起待确认」。"""
     from ragspine.ingestion.structured.ingestion import ingest_file
 
     _init_three(store, registry, queue)
     p = tmp_path / "acme_hk_colored.xlsx"
-    _make_xlsx_financial(
-        p, sheet_title="HK", a1=RESOLVABLE_ENTITY_TITLE, colored=True
-    )
+    _make_xlsx_financial(p, sheet_title="HK", a1=RESOLVABLE_ENTITY_TITLE, colored=True)
     report = ingest_file(p, store, registry, queue)
     assert any(("映射" in w) or ("map" in w.lower()) for w in report.warnings)
 
@@ -569,17 +536,13 @@ def test_d6_colored_no_active_mapping_still_warns(
 # ===========================================================================
 # D7 — dry_run：store 与 queue 均零写入，n_facts_ingested / n_enqueued_review 皆 0
 # ===========================================================================
-def test_d7_dry_run_writes_nothing(
-    store, registry, queue, excel_fixture_path, ground_truth
-):
+def test_d7_dry_run_writes_nothing(store, registry, queue, excel_fixture_path, ground_truth):
     """user story：作为接手方，dry_run 预览只产报告、绝不碰库——fact_store 与
     review_queue 都零写入，n_facts_ingested == 0 且 n_enqueued_review == 0。"""
     from ragspine.ingestion.structured.ingestion import ingest_file
 
     _setup_hk_mapping(store, registry, queue, ground_truth)
-    report = ingest_file(
-        excel_fixture_path, store, registry, queue, dry_run=True
-    )
+    report = ingest_file(excel_fixture_path, store, registry, queue, dry_run=True)
     assert report.dry_run is True
     assert report.n_facts_ingested == 0
     assert report.n_enqueued_review == 0
@@ -595,25 +558,19 @@ def test_d7_dry_run_report_otherwise_complete(
     from ragspine.ingestion.structured.ingestion import ingest_file
 
     _setup_hk_mapping(store, registry, queue, ground_truth)
-    report = ingest_file(
-        excel_fixture_path, store, registry, queue, dry_run=True
-    )
+    report = ingest_file(excel_fixture_path, store, registry, queue, dry_run=True)
     assert report.n_grids >= 1
     assert report.n_facts_extracted >= EXPECTED_HK_FACTS
     assert report.file_hash
 
 
-def test_d7_dry_run_scanned_pdf_no_queue_write(
-    store, registry, queue, scanned_pdf_path
-):
+def test_d7_dry_run_scanned_pdf_no_queue_write(store, registry, queue, scanned_pdf_path):
     """user story：扫描型 PDF 的 dry_run 也不得写队列——dry_run 是「只看不动」的硬约定，
     即便走的是入队分支，n_enqueued_review 仍为 0、队列保持空。"""
     from ragspine.ingestion.structured.ingestion import ingest_file
 
     _init_three(store, registry, queue)
-    report = ingest_file(
-        scanned_pdf_path, store, registry, queue, dry_run=True
-    )
+    report = ingest_file(scanned_pdf_path, store, registry, queue, dry_run=True)
     assert report.n_enqueued_review == 0
     assert queue.list_pending() == []
 
@@ -621,9 +578,7 @@ def test_d7_dry_run_scanned_pdf_no_queue_write(
 # ===========================================================================
 # D8 — 幂等：同文件 ingest_file 两次，store.count() 不增长
 # ===========================================================================
-def test_d8_idempotent_xlsx(
-    store, registry, queue, excel_fixture_path, ground_truth
-):
+def test_d8_idempotent_xlsx(store, registry, queue, excel_fixture_path, ground_truth):
     """user story：作为接手方，同一文件重复 ingest_file 必须幂等——靠 fact_metric
     唯一键 upsert，库内事实总数不随重复入库增长。"""
     from ragspine.ingestion.structured.ingestion import ingest_file
@@ -654,9 +609,7 @@ def test_d8_idempotent_pptx(store, registry, queue, tmp_path):
 # ===========================================================================
 # D9 — 不支持后缀：status='failed' / 妥善处理，不崩
 # ===========================================================================
-def test_d9_unsupported_suffix_does_not_raise(
-    store, registry, queue, tmp_path
-):
+def test_d9_unsupported_suffix_does_not_raise(store, registry, queue, tmp_path):
     """user story：作为接手方，把不支持的格式（.txt）交给 ingest_file，它绝不裸抛
     异常把整批拖垮，而应返回一份报告（status='failed' 并记 error）。"""
     from ragspine.ingestion.structured.ingestion import ingest_file
@@ -670,9 +623,7 @@ def test_d9_unsupported_suffix_does_not_raise(
     assert report.error
 
 
-def test_d9_unsupported_suffix_writes_nothing(
-    store, registry, queue, tmp_path
-):
+def test_d9_unsupported_suffix_writes_nothing(store, registry, queue, tmp_path):
     """user story：不支持后缀的文件不得污染库——fact_store 零写入。"""
     from ragspine.ingestion.structured.ingestion import ingest_file
 
@@ -748,8 +699,8 @@ def test_d11_injected_pptx_extractor_is_used_and_stamped(
 ):
     """user story：注入自定义 pptx Extractor，ingest_file 应改用它解析 .pptx（绕开
     python-pptx），且血缘 extractor_version 随注入的解析器而变（多解析器并存可溯源）。"""
-    from ragspine.ingestion.structured.ingestion import ingest_file
     import ragspine.ingestion.structured.ingestion as ingestion_mod
+    from ragspine.ingestion.structured.ingestion import ingest_file
 
     _init_three(store, registry, queue)
     p = tmp_path / "acme_hk_deck.pptx"
@@ -780,13 +731,21 @@ def test_d11_pptspine_extractor_e2e_ingest(store, registry, queue, make_pptx, tm
 
     _init_three(store, registry, queue)
     p = tmp_path / "acme_hk_deck.pptx"
-    make_pptx(p, [[("table", [
-        [RESOLVABLE_ENTITY_TITLE, "FY2024"],
-        ["REVENUE", "2680"],
-    ])]])
-    report = ingest_file(
-        p, store, registry, queue, pptx_extractor=PptspineGridExtractor()
+    make_pptx(
+        p,
+        [
+            [
+                (
+                    "table",
+                    [
+                        [RESOLVABLE_ENTITY_TITLE, "FY2024"],
+                        ["REVENUE", "2680"],
+                    ],
+                )
+            ]
+        ],
     )
+    report = ingest_file(p, store, registry, queue, pptx_extractor=PptspineGridExtractor())
     assert report.status == "ok"
     rows = store.query("REVENUE", "ACME_HK", "FY", "2024", channel="TOTAL")
     assert len(rows) == 1

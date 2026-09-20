@@ -22,7 +22,6 @@ ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpa
 
 from corespine import ConformanceSuite, InvariantPack, Registry
 
-
 # ---------------------------------------------------------------------------
 # 注册表：受 conformance 约束的 VectorStore 实现 -> 其【能力等级】（仅登记名字+能力，类延迟解析）。
 # 能力等级驱动确定性断言的强弱（见 test_vector_store_invariants.py 的 capability 分支）：
@@ -76,9 +75,13 @@ def vector_store(request):
     if request.param == "pgvector":
         pytest.importorskip("pg8000", reason="pg8000 未装（pip install ragspine[vector]）")
         if not os.environ.get("RAGSPINE_PG_URL"):
-            pytest.skip("RAGSPINE_PG_URL 未设（pgvector conformance 需带 pgvector 扩展的 Postgres）")
+            pytest.skip(
+                "RAGSPINE_PG_URL 未设（pgvector conformance 需带 pgvector 扩展的 Postgres）"
+            )
     if request.param == "qdrant":
-        pytest.importorskip("qdrant_client", reason="qdrant-client 未装（pip install ragspine[vector]）")
+        pytest.importorskip(
+            "qdrant_client", reason="qdrant-client 未装（pip install ragspine[vector]）"
+        )
     store = _resolve_impl(request.param)()
     yield store
     close = getattr(store, "close", None)
@@ -146,7 +149,7 @@ def source_tree(tmp_path):
     (tmp_path / "sub" / "b.pdf").write_bytes(b"%PDF-bravo")
     (tmp_path / "sub" / "c.txt").write_bytes(b"charlie")
     (tmp_path / ".hidden.pptx").write_bytes(b"nope")  # 隐藏文件，应被忽略
-    (tmp_path / "~$temp.pptx").write_bytes(b"nope")   # Office 临时文件，应被忽略
+    (tmp_path / "~$temp.pptx").write_bytes(b"nope")  # Office 临时文件，应被忽略
     return tmp_path
 
 
@@ -286,10 +289,16 @@ def _determinism_repeated_query_stable(store) -> None:
 
 def _provenance_id_and_locator_round_trip(store) -> None:
     """血缘锚点 id / doc_id / source_locator 经 upsert->query 原样回传（不臆造·机制）。"""
-    store.upsert([
-        _record("HK_FIN.pptx#3", [1.0, 0.0, 0.0],
-                doc_id="HK_FIN.pptx", source_locator="HK_FIN.pptx!slide3#para2"),
-    ])
+    store.upsert(
+        [
+            _record(
+                "HK_FIN.pptx#3",
+                [1.0, 0.0, 0.0],
+                doc_id="HK_FIN.pptx",
+                source_locator="HK_FIN.pptx!slide3#para2",
+            ),
+        ]
+    )
     [hit] = store.query([1.0, 0.0, 0.0], k=1)
     assert hit.id == "HK_FIN.pptx#3"
     assert hit.metadata["doc_id"] == "HK_FIN.pptx"
@@ -298,10 +307,12 @@ def _provenance_id_and_locator_round_trip(store) -> None:
 
 def _isolation_filter_excludes_nearest(store) -> None:
     """where 下推：被过滤记录即便是最近邻也不出现（敏感度隔离下推·机制）。"""
-    store.upsert([
-        _record("secret#0", [1.0, 0.0, 0.0], sensitivity="RESTRICTED"),  # 最近邻
-        _record("pub#0", [0.0, 1.0, 0.0], sensitivity="INTERNAL"),
-    ])
+    store.upsert(
+        [
+            _record("secret#0", [1.0, 0.0, 0.0], sensitivity="RESTRICTED"),  # 最近邻
+            _record("pub#0", [0.0, 1.0, 0.0], sensitivity="INTERNAL"),
+        ]
+    )
     out_ids = {h.id for h in store.query([1.0, 0.0, 0.0], k=5, where={"sensitivity": "INTERNAL"})}
     assert "secret#0" not in out_ids
     assert "pub#0" in out_ids
@@ -317,7 +328,10 @@ VECTOR_STORE_INVARIANTS: "InvariantPack" = (
 # 实现 × 不变量 的笛卡尔积套件：corespine 负责「跑全套 + 定位坏格子」。
 # 工厂取自 Registry（单一出处）；每格新建实例，杜绝实现间状态串味。
 VECTOR_STORE_SUITE: "ConformanceSuite" = ConformanceSuite(
-    {name: (lambda n=name: VECTOR_STORE_REGISTRY.make(n)) for name in VECTOR_STORE_REGISTRY.names()},
+    {
+        name: (lambda n=name: VECTOR_STORE_REGISTRY.make(n))
+        for name in VECTOR_STORE_REGISTRY.names()
+    },
     VECTOR_STORE_INVARIANTS,
 )
 
@@ -412,14 +426,23 @@ def _graph_determinism_repeated_traverse_stable(store) -> None:
 
 def _graph_provenance_node_and_edge_round_trip(store) -> None:
     """节点/边血缘锚点 source_doc_id / source_locator 经 upsert->遍历原样回传（不臆造·机制）。"""
-    store.upsert_nodes([
-        _graph_node("GROUP"),
-        _graph_node("HK", source_doc_id="HK_FIN.pptx", source_locator="HK_FIN.pptx!slide3"),
-    ])
-    store.upsert_edges([
-        _graph_edge("GROUP", "HK", "parent_of",
-                    source_doc_id="company.toml", source_locator="company.toml#home"),
-    ])
+    store.upsert_nodes(
+        [
+            _graph_node("GROUP"),
+            _graph_node("HK", source_doc_id="HK_FIN.pptx", source_locator="HK_FIN.pptx!slide3"),
+        ]
+    )
+    store.upsert_edges(
+        [
+            _graph_edge(
+                "GROUP",
+                "HK",
+                "parent_of",
+                source_doc_id="company.toml",
+                source_locator="company.toml#home",
+            ),
+        ]
+    )
     [hk] = store.neighbors("GROUP")
     assert hk.metadata["source_doc_id"] == "HK_FIN.pptx"
     assert hk.metadata["source_locator"] == "HK_FIN.pptx!slide3"
@@ -430,14 +453,22 @@ def _graph_provenance_node_and_edge_round_trip(store) -> None:
 
 def _graph_isolation_restricted_never_surfaces(store) -> None:
     """RESTRICTED 来源节点绝不出现在 neighbors/traverse/subgraph，也不作跳板（隔离·机制）。"""
-    store.upsert_nodes([
-        _graph_node("A"), _graph_node("B"),
-        _graph_node("SECRET", sensitivity="RESTRICTED"), _graph_node("C"),
-    ])
-    store.upsert_edges([
-        _graph_edge("A", "B", "rel"), _graph_edge("B", "C", "rel"),
-        _graph_edge("A", "SECRET", "rel"), _graph_edge("SECRET", "C", "rel"),
-    ])
+    store.upsert_nodes(
+        [
+            _graph_node("A"),
+            _graph_node("B"),
+            _graph_node("SECRET", sensitivity="RESTRICTED"),
+            _graph_node("C"),
+        ]
+    )
+    store.upsert_edges(
+        [
+            _graph_edge("A", "B", "rel"),
+            _graph_edge("B", "C", "rel"),
+            _graph_edge("A", "SECRET", "rel"),
+            _graph_edge("SECRET", "C", "rel"),
+        ]
+    )
     assert "SECRET" not in {n.id for n in store.neighbors("A")}
     assert "SECRET" not in {n.id for n in store.traverse("A", max_depth=3)}
     sub = store.subgraph(["A"], depth=3)
@@ -559,9 +590,9 @@ def _trace_records_only_metadata(sink) -> None:
     sink.emit("trace", request_id="r1", route="structured", n_hits=3, took_ms=12)
     events = getattr(sink, "events", [])
     assert events, "允许的元数据 emit 后应有记录"
-    assert all(
-        str(k).strip().lower() not in FORBIDDEN_KEYS for e in events for k in e.fields
-    ), "记录里出现了受限键——只应记 code / 计数 / 耗时 元数据"
+    assert all(str(k).strip().lower() not in FORBIDDEN_KEYS for e in events for k in e.fields), (
+        "记录里出现了受限键——只应记 code / 计数 / 耗时 元数据"
+    )
 
 
 TRACE_SINK_INVARIANTS: "InvariantPack" = (
@@ -656,8 +687,12 @@ def _fact_found_determinism_stable(store) -> None:
     first = store.query("REVENUE", "ACME_HK", "FY", "2024")
     second = store.query("REVENUE", "ACME_HK", "FY", "2024")
     assert first and second, "命中查询应确定返回一条 Fact（found 语义）"
-    assert first[0].value == second[0].value == 4500.0, "命中值必须确定且等于入库值（不臆造/不漂移）"
-    assert store.query("REVENUE", "ACME_HK", "FY", "2099") == [], "未命中必须返回空（绝不臆造一个值）"
+    assert first[0].value == second[0].value == 4500.0, (
+        "命中值必须确定且等于入库值（不臆造/不漂移）"
+    )
+    assert store.query("REVENUE", "ACME_HK", "FY", "2099") == [], (
+        "未命中必须返回空（绝不臆造一个值）"
+    )
 
 
 def _fact_provenance_round_trip(store) -> None:
@@ -669,9 +704,9 @@ def _fact_provenance_round_trip(store) -> None:
     assert hits, "provenance 判定核未命中（应至少回传入库的一条 Fact）"
     for f in hits:
         assert f.source_doc_id == "HK_FIN.pptx", f"found 结果丢了 source_doc_id（血缘根）：{f!r}"
-        assert (
-            f.source_locator == "HK_FIN.pptx!slide3#para2"
-        ), f"found 结果丢了 source_locator（citation 回指）：{f!r}"
+        assert f.source_locator == "HK_FIN.pptx!slide3#para2", (
+            f"found 结果丢了 source_locator（citation 回指）：{f!r}"
+        )
 
 
 FACT_STORE_REGISTRY: "Registry" = Registry("fact_store")

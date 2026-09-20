@@ -24,8 +24,14 @@ from ragspine.retrieval.vector.persistence_policy import (
 
 def _chunk(sensitivity: str) -> Chunk:
     return Chunk(
-        chunk_id="d#c0", doc_id="d", seq=0, text="x", source_locator="d#para1",
-        para_start=1, para_end=1, sensitivity=sensitivity,
+        chunk_id="d#c0",
+        doc_id="d",
+        seq=0,
+        text="x",
+        source_locator="d#para1",
+        para_start=1,
+        para_end=1,
+        sensitivity=sensitivity,
     )
 
 

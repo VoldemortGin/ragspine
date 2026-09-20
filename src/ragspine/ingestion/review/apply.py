@@ -31,12 +31,8 @@ from ragspine.storage.fact_store import (
 
 # Fact 中需要随 payload 往返的持久化字段（身份 + 数值 + 血缘 / v2 / 时效）。
 # 排除 dimensions（内存袋）与 corrected_* 血缘戳（由 applier 在写回时盖，非入口数据）。
-_EXCLUDED_FACT_FIELDS = frozenset(
-    {"dimensions", "corrected_by", "corrected_audit_seq"}
-)
-_PAYLOAD_FACT_FIELDS = tuple(
-    f.name for f in fields(Fact) if f.name not in _EXCLUDED_FACT_FIELDS
-)
+_EXCLUDED_FACT_FIELDS = frozenset({"dimensions", "corrected_by", "corrected_audit_seq"})
+_PAYLOAD_FACT_FIELDS = tuple(f.name for f in fields(Fact) if f.name not in _EXCLUDED_FACT_FIELDS)
 
 
 def fact_to_dict(fact: Fact) -> dict[str, object]:
@@ -129,9 +125,7 @@ class ResolvedReviewApplier:
         self._store.set_review_status(dim_key, REVIEW_REJECTED)
         return "rejected"
 
-    def _apply_correction(
-        self, item_id: int, fact: Fact, dim_key: str, item: ReviewItem
-    ) -> str:
+    def _apply_correction(self, item_id: int, fact: Fact, dim_key: str, item: ReviewItem) -> str:
         seq = self._resolving_seq(item_id)
         current = self._store.get_by_dim_key(dim_key)
         if current is not None and current.corrected_audit_seq == seq:

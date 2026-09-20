@@ -55,6 +55,7 @@ def _assert_chunk_provenance_complete(chunker) -> int:
 # P · Provenance：每个注册 Chunker 的产出都带齐血缘
 # ===========================================================================
 
+
 def test_every_chunk_carries_provenance(chunker):
     """每个注册 Chunker：产出的每个 Chunk 都带非空 doc_id + source_locator。"""
     n = _assert_chunk_provenance_complete(chunker)
@@ -69,6 +70,7 @@ def test_chunker_is_runtime_checkable(chunker):
 # ===========================================================================
 # 非空泛证明：丢血缘的 stub 必须 FAIL（证明 provenance pack 非空泛）
 # ===========================================================================
+
 
 class _LineageDroppingChunker:
     """反证 stub：产出 doc_id / source_locator 皆空的 Chunk——【故意】违反 provenance。"""

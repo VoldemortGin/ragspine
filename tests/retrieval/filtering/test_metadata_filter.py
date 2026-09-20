@@ -27,10 +27,19 @@ from ragspine.service.config import ServiceConfig, open_narrative_retriever
 
 def _chunk(cid: str, **md) -> Chunk:
     base = dict(
-        chunk_id=cid, doc_id=cid.split("#")[0], seq=0, text=f"文本 {cid}",
-        source_locator=f"{cid}#para1", para_start=1, para_end=1,
-        topic="FIN", entity="ACME_HK", geography="HK", period="2024",
-        language="zh", sensitivity="INTERNAL",
+        chunk_id=cid,
+        doc_id=cid.split("#")[0],
+        seq=0,
+        text=f"文本 {cid}",
+        source_locator=f"{cid}#para1",
+        para_start=1,
+        para_end=1,
+        topic="FIN",
+        entity="ACME_HK",
+        geography="HK",
+        period="2024",
+        language="zh",
+        sensitivity="INTERNAL",
     )
     base.update(md)
     return Chunk(**base)
@@ -77,10 +86,14 @@ def test_invalid_op_and_value_shape_raise():
 
 def test_combine_and_or():
     c = _chunk("d#0", topic="FIN", entity="ACME_HK")
-    and_f = MetadataFilter((FilterCondition("topic", "eq", "FIN"),
-                            FilterCondition("entity", "eq", "OTHER")), combine="and")
-    or_f = MetadataFilter((FilterCondition("topic", "eq", "FIN"),
-                           FilterCondition("entity", "eq", "OTHER")), combine="or")
+    and_f = MetadataFilter(
+        (FilterCondition("topic", "eq", "FIN"), FilterCondition("entity", "eq", "OTHER")),
+        combine="and",
+    )
+    or_f = MetadataFilter(
+        (FilterCondition("topic", "eq", "FIN"), FilterCondition("entity", "eq", "OTHER")),
+        combine="or",
+    )
     assert not and_f.matches(c)
     assert or_f.matches(c)
 
@@ -133,8 +146,10 @@ def test_hybrid_search_metadata_filter_narrows(tmp_path):
     r = HybridRetriever(chunks)
     all_hits = {res.chunk.chunk_id for res in r.search("营收")}
     assert all_hits == {"a#0", "b#0"}
-    narrowed = {res.chunk.chunk_id
-                for res in r.search("营收", metadata_filter=make_filter([("period", "eq", "2025")]))}
+    narrowed = {
+        res.chunk.chunk_id
+        for res in r.search("营收", metadata_filter=make_filter([("period", "eq", "2025")]))
+    }
     assert narrowed == {"b#0"}
 
 
@@ -143,7 +158,8 @@ def test_narrative_index_default_byte_identical(tmp_path):
     store = ChunkStore(tmp_path / "c.db")
     store.init_schema()
     store.replace_doc_chunks(
-        "doc.pdf", chunk_document("营收增长强劲。", DocumentMeta(doc_id="doc.pdf", topic="FIN")))
+        "doc.pdf", chunk_document("营收增长强劲。", DocumentMeta(doc_id="doc.pdf", topic="FIN"))
+    )
     idx = NarrativeIndex(store)
     a = idx.retrieve("营收")
     b = idx.retrieve("营收", metadata_filter=None)
@@ -157,9 +173,17 @@ def test_restricted_not_bypassed_by_filter(tmp_path):
     store = ChunkStore(chunk_db)
     store.init_schema()
     store.replace_doc_chunks(
-        "sec.pdf", chunk_document("营收机密。", DocumentMeta(doc_id="sec.pdf", topic="FIN", sensitivity="RESTRICTED")))
+        "sec.pdf",
+        chunk_document(
+            "营收机密。", DocumentMeta(doc_id="sec.pdf", topic="FIN", sensitivity="RESTRICTED")
+        ),
+    )
     store.replace_doc_chunks(
-        "pub.pdf", chunk_document("营收公开。", DocumentMeta(doc_id="pub.pdf", topic="FIN", sensitivity="INTERNAL")))
+        "pub.pdf",
+        chunk_document(
+            "营收公开。", DocumentMeta(doc_id="pub.pdf", topic="FIN", sensitivity="INTERNAL")
+        ),
+    )
     store.close()
 
     cfg = ServiceConfig(db_path=str(tmp_path / "f.db"), chunk_db_path=str(chunk_db))
@@ -180,7 +204,11 @@ def test_restricted_stripped_at_link_exit_even_with_filter(tmp_path):
     store = ChunkStore(tmp_path / "c.db")
     store.init_schema()
     store.replace_doc_chunks(
-        "sec.pdf", chunk_document("营收机密。", DocumentMeta(doc_id="sec.pdf", topic="FIN", sensitivity="RESTRICTED")))
+        "sec.pdf",
+        chunk_document(
+            "营收机密。", DocumentMeta(doc_id="sec.pdf", topic="FIN", sensitivity="RESTRICTED")
+        ),
+    )
     idx = NarrativeIndex(store, filter_extractor=None)
     ret = NarrativeIndexRetriever(idx)
     snippets = ret.retrieve("营收")
@@ -194,9 +222,11 @@ def test_automatic_extractor_wired_into_index(tmp_path):
     store.init_schema()
     # 两块：topic 不同；抽取器从 query 的 REVENUE 词条抽 topic=REVENUE。
     store.replace_doc_chunks(
-        "rev.pdf", chunk_document("REVENUE 数据。", DocumentMeta(doc_id="rev.pdf", topic="REVENUE")))
+        "rev.pdf", chunk_document("REVENUE 数据。", DocumentMeta(doc_id="rev.pdf", topic="REVENUE"))
+    )
     store.replace_doc_chunks(
-        "cost.pdf", chunk_document("REVENUE 数据。", DocumentMeta(doc_id="cost.pdf", topic="COST")))
+        "cost.pdf", chunk_document("REVENUE 数据。", DocumentMeta(doc_id="cost.pdf", topic="COST"))
+    )
     idx = NarrativeIndex(store, filter_extractor=ControlledVocabFilterExtractor())
     hits = {r.chunk.doc_id for r in idx.retrieve("REVENUE 是多少")}
     # 若受控词表把 REVENUE 映射到 topic=REVENUE，则只留 rev.pdf；否则不过滤（宽松断言收窄不扩大）。

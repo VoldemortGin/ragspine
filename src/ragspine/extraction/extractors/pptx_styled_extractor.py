@@ -47,8 +47,8 @@ from ragspine.extraction.ir import StyledCell, StyledGrid
 EXTRACTOR_VERSION = "pptx_styled_v0"
 
 # NoteFragment.source_kind 取值。
-SOURCE_TEXTBOX = "textbox"   # 幻灯片正文文本框。
-SOURCE_NOTES = "notes"       # 演讲者备注（notes slide）。
+SOURCE_TEXTBOX = "textbox"  # 幻灯片正文文本框。
+SOURCE_NOTES = "notes"  # 演讲者备注（notes slide）。
 
 _A_NS = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
 
@@ -56,22 +56,22 @@ _A_NS = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
 # 注意 pptx 的 dk1/lt1 与 BACKGROUND/TEXT 经 clrMap 映射，但显式 accentN 直接对应
 # clrScheme 的同名子元素，是本线（accent1）的关键路径。
 _THEME_SLOT_BY_ENUM: dict[int, str] = {
-    1: "dk1",       # DARK_1
-    2: "lt1",       # LIGHT_1
-    3: "dk2",       # DARK_2
-    4: "lt2",       # LIGHT_2
-    5: "accent1",   # ACCENT_1
-    6: "accent2",   # ACCENT_2
-    7: "accent3",   # ACCENT_3
-    8: "accent4",   # ACCENT_4
-    9: "accent5",   # ACCENT_5
+    1: "dk1",  # DARK_1
+    2: "lt1",  # LIGHT_1
+    3: "dk2",  # DARK_2
+    4: "lt2",  # LIGHT_2
+    5: "accent1",  # ACCENT_1
+    6: "accent2",  # ACCENT_2
+    7: "accent3",  # ACCENT_3
+    8: "accent4",  # ACCENT_4
+    9: "accent5",  # ACCENT_5
     10: "accent6",  # ACCENT_6
-    11: "hlink",    # HYPERLINK
-    12: "folHlink", # FOLLOWED_HYPERLINK
-    13: "dk1",      # TEXT_1（默认 clrMap：tx1 -> dk1）
-    14: "lt1",      # BACKGROUND_1（默认 clrMap：bg1 -> lt1）
-    15: "dk2",      # TEXT_2（默认 clrMap：tx2 -> dk2）
-    16: "lt2",      # BACKGROUND_2（默认 clrMap：bg2 -> lt2）
+    11: "hlink",  # HYPERLINK
+    12: "folHlink",  # FOLLOWED_HYPERLINK
+    13: "dk1",  # TEXT_1（默认 clrMap：tx1 -> dk1）
+    14: "lt1",  # BACKGROUND_1（默认 clrMap：bg1 -> lt1）
+    15: "dk2",  # TEXT_2（默认 clrMap：tx2 -> dk2）
+    16: "lt2",  # BACKGROUND_2（默认 clrMap：bg2 -> lt2）
 }
 
 
@@ -113,6 +113,7 @@ def _normalize_text(text: object) -> str:
 # ---------------------------------------------------------------------------
 # 主题色解析（从 slide 关联的 theme1.xml 的 clrScheme 读取真实 RGB）
 # ---------------------------------------------------------------------------
+
 
 def _scheme_slot_rgb(scheme: ET.Element, slot: str) -> str | None:
     """从 clrScheme 取某槽位的 'RRGGBB' 大写十六进制；无则 None。"""
@@ -192,9 +193,15 @@ def _resolve_cell_fill(cell: _Cell, scheme: ET.Element | None) -> str | None:
     return None
 
 
-def _build_grid(slide: Slide, slide_no: int, table_no: int, table: Table,
-                doc_id: str, file_hash: str,
-                scheme: ET.Element | None) -> StyledGrid:
+def _build_grid(
+    slide: Slide,
+    slide_no: int,
+    table_no: int,
+    table: Table,
+    doc_id: str,
+    file_hash: str,
+    scheme: ET.Element | None,
+) -> StyledGrid:
     """把一张原生表格 shape 构建为 StyledGrid。"""
     n_rows = len(table.rows)
     n_cols = len(table.columns)
@@ -245,8 +252,7 @@ def extract_grids(path: str | Path) -> list[StyledGrid]:
                 continue
             table_no += 1
             grids.append(
-                _build_grid(slide, slide_no, table_no, shape.table,
-                            doc_id, file_hash, scheme)
+                _build_grid(slide, slide_no, table_no, shape.table, doc_id, file_hash, scheme)
             )
     return grids
 
@@ -254,6 +260,7 @@ def extract_grids(path: str | Path) -> list[StyledGrid]:
 # ---------------------------------------------------------------------------
 # 叙述层含数字句段抽取（文本框 + 演讲者备注）
 # ---------------------------------------------------------------------------
+
 
 def _build_glossary_matchers() -> list[tuple[str, re.Pattern[str]]]:
     """为每个指标同义词构建 (metric_code, 大小写不敏感词边界正则)。
@@ -335,23 +342,27 @@ def extract_note_fragments(path: str | Path) -> list[NoteFragment]:
             box_no += 1
             if not _has_digit(text):
                 continue
-            fragments.append(NoteFragment(
-                slide_no=slide_no,
-                source_kind=SOURCE_TEXTBOX,
-                locator=f"slide{slide_no}/textbox{box_no}",
-                text=text,
-                glossary_hits=_glossary_hits(text),
-            ))
+            fragments.append(
+                NoteFragment(
+                    slide_no=slide_no,
+                    source_kind=SOURCE_TEXTBOX,
+                    locator=f"slide{slide_no}/textbox{box_no}",
+                    text=text,
+                    glossary_hits=_glossary_hits(text),
+                )
+            )
 
         notes = _notes_text(slide)
         if notes is not None and _has_digit(notes):
-            fragments.append(NoteFragment(
-                slide_no=slide_no,
-                source_kind=SOURCE_NOTES,
-                locator=f"slide{slide_no}/notes",
-                text=notes,
-                glossary_hits=_glossary_hits(notes),
-            ))
+            fragments.append(
+                NoteFragment(
+                    slide_no=slide_no,
+                    source_kind=SOURCE_NOTES,
+                    locator=f"slide{slide_no}/notes",
+                    text=notes,
+                    glossary_hits=_glossary_hits(notes),
+                )
+            )
 
     fragments.sort(key=lambda f: f.slide_no)
     return fragments

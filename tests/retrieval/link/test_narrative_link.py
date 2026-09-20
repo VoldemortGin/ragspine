@@ -22,31 +22,44 @@ import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
-from ragspine.cli.ask import main as ask_main
+from corespine import ChatCompletion, Choice, ResponseMessage
+
 from ragspine.agent.agent import answer_question
+from ragspine.agent.llm_provider import MockProvider
+from ragspine.cli.ask import main as ask_main
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
 from ragspine.retrieval.chunking.chunking import DocumentMeta
-from ragspine.storage.fact_store import Fact, SqliteFactStore
-from ragspine.agent.llm_provider import MockProvider
-from corespine import ChatCompletion, Choice, ResponseMessage
+from ragspine.retrieval.lexical.retrieval import NarrativeIndex
 from ragspine.retrieval.link.narrative_link import (
     NarrativeIndexRetriever,
     ProviderListwiseJudge,
     build_narrative_retriever,
 )
-from ragspine.retrieval.lexical.retrieval import NarrativeIndex
+from ragspine.storage.fact_store import Fact, SqliteFactStore
 
 REF = date(2026, 6, 12)
 
 REVENUE_HK_FY2025 = Fact(
-    metric_code="REVENUE", entity="ACME_HK", geography="HK", channel="TOTAL",
-    period_type="FY", period="2025", value=1702.0, unit="USD_M",
-    source_doc_id="ACME_FY2025_Results.pptx", source_locator="slide=5,table=1,row=2,col=3",
+    metric_code="REVENUE",
+    entity="ACME_HK",
+    geography="HK",
+    channel="TOTAL",
+    period_type="FY",
+    period="2025",
+    value=1702.0,
+    unit="USD_M",
+    source_doc_id="ACME_FY2025_Results.pptx",
+    source_locator="slide=5,table=1,row=2,col=3",
 )
 
 NARRATIVE_DOC = DocumentMeta(
-    doc_id="HK_QBR_2025Q4.pptx", title="HK QBR 2025Q4", topic="FIN",
-    entity="ACME_HK", geography="HK", period="2025", language="zh",
+    doc_id="HK_QBR_2025Q4.pptx",
+    title="HK QBR 2025Q4",
+    topic="FIN",
+    entity="ACME_HK",
+    geography="HK",
+    period="2025",
+    language="zh",
 )
 NARRATIVE_TEXT = "香港 REVENUE 下降主因是 MCV 客群收缩与银保渠道调整。"
 
@@ -54,6 +67,7 @@ NARRATIVE_TEXT = "香港 REVENUE 下降主因是 MCV 客群收缩与银保渠道
 # ---------------------------------------------------------------------------
 # 测试替身
 # ---------------------------------------------------------------------------
+
 
 class ScriptedProvider:
     """按脚本依次吐文本响应的 LLMProvider 替身，并记录全部调用。"""
@@ -120,6 +134,7 @@ def fact_db(tmp_path):
 # 适配器：字段映射 / 透传 / 降级 / Restricted 出口拦截
 # ===========================================================================
 
+
 def test_adapter_maps_chunk_fields_to_protocol_snippets(tmp_path):
     """真实 NarrativeIndex（无向量后端=纯 BM25）→ A 线协议要求的 dict 字段。"""
     index, store = _build_index(tmp_path)
@@ -152,9 +167,7 @@ def test_adapter_passes_top_k_and_maps_known_filters():
         filters={"entity": "ACME_HK", "period": "2025", "unknown": "x", "topic": None},
         top_k=7,
     )
-    assert spy.calls == [
-        {"query": "q", "entity": "ACME_HK", "period": "2025", "top_k": 7}
-    ]
+    assert spy.calls == [{"query": "q", "entity": "ACME_HK", "period": "2025", "top_k": 7}]
 
 
 def test_adapter_default_top_k_is_50():
@@ -185,9 +198,7 @@ def test_adapter_retries_without_filters_when_empty(tmp_path):
     try:
         index.ingest(NARRATIVE_TEXT, NARRATIVE_DOC)  # entity=ACME_HK
         adapter = NarrativeIndexRetriever(index)
-        snippets = adapter.retrieve(
-            "香港REVENUE为什么下降", filters={"entity": "ACME_TH"}
-        )
+        snippets = adapter.retrieve("香港REVENUE为什么下降", filters={"entity": "ACME_TH"})
         assert snippets  # 回退后召回
         assert snippets[0]["doc_id"] == "HK_QBR_2025Q4.pptx"
     finally:
@@ -199,8 +210,7 @@ def test_adapter_strict_mode_keeps_empty_on_filter_miss(tmp_path):
     try:
         index.ingest(NARRATIVE_TEXT, NARRATIVE_DOC)
         adapter = NarrativeIndexRetriever(index, retry_without_filters=False)
-        assert adapter.retrieve("香港REVENUE为什么下降",
-                                filters={"entity": "ACME_TH"}) == []
+        assert adapter.retrieve("香港REVENUE为什么下降", filters={"entity": "ACME_TH"}) == []
     finally:
         store.close()
 
@@ -212,8 +222,9 @@ def test_adapter_drops_restricted_chunks_at_egress(tmp_path):
         index.ingest(NARRATIVE_TEXT, NARRATIVE_DOC)
         index.ingest(
             "香港 REVENUE 下降的高管 PR 评级讨论 SECRET_TOKEN。",
-            DocumentMeta(doc_id="EXCO_MINUTES.pptx", entity="ACME_HK",
-                         sensitivity="Restricted"),  # 大小写不敏感
+            DocumentMeta(
+                doc_id="EXCO_MINUTES.pptx", entity="ACME_HK", sensitivity="Restricted"
+            ),  # 大小写不敏感
         )
         adapter = NarrativeIndexRetriever(index)
         snippets = adapter.retrieve("香港REVENUE为什么下降")
@@ -227,6 +238,7 @@ def test_adapter_drops_restricted_chunks_at_egress(tmp_path):
 # ===========================================================================
 # ProviderListwiseJudge：成功 / 乱回文退化 / 异常退化
 # ===========================================================================
+
 
 def test_judge_builds_prompt_and_parses_order():
     provider = ScriptedProvider(["2, 0, 1"])
@@ -247,9 +259,7 @@ def test_judge_garbage_response_degrades_to_identity():
 
 def test_judge_exception_degrades_to_rrf_order(tmp_path):
     """provider 抛错 → listwise_rerank 的 B 线退化语义生效：返回 RRF 序，绝不抛死。"""
-    index, store = _build_index(
-        tmp_path, judge=ProviderListwiseJudge(RaisingProvider())
-    )
+    index, store = _build_index(tmp_path, judge=ProviderListwiseJudge(RaisingProvider()))
     try:
         index.ingest(NARRATIVE_TEXT, NARRATIVE_DOC)
         snippets = NarrativeIndexRetriever(index).retrieve("香港REVENUE为什么下降")
@@ -272,10 +282,7 @@ def test_judge_reorders_index_results(tmp_path):
         for doc_id, text in docs:
             index.ingest(text, DocumentMeta(doc_id=doc_id, entity="ACME_HK"))
         # 同一 index 先用 rerank=False 取 RRF 基线序（不消耗 judge 脚本）
-        rrf_order = [
-            r.chunk.doc_id
-            for r in index.retrieve("香港REVENUE为什么下降", rerank=False)
-        ]
+        rrf_order = [r.chunk.doc_id for r in index.retrieve("香港REVENUE为什么下降", rerank=False)]
         reranked = NarrativeIndexRetriever(index).retrieve("香港REVENUE为什么下降")
         assert [s["doc_id"] for s in reranked] == list(reversed(rrf_order))
     finally:
@@ -286,6 +293,7 @@ def test_judge_reorders_index_results(tmp_path):
 # 端到端：composite / narrative / Restricted 不出域
 # ===========================================================================
 
+
 def test_composite_end_to_end_number_with_lineage_and_narrative(tmp_path, fact_db):
     """数字（确定值+血缘）与叙事（原文+来源）在同一回答中端到端汇合。"""
     index, chunk_store = _build_index(tmp_path)
@@ -293,7 +301,9 @@ def test_composite_end_to_end_number_with_lineage_and_narrative(tmp_path, fact_d
     try:
         index.ingest(NARRATIVE_TEXT, NARRATIVE_DOC)
         result = answer_question(
-            "香港去年REVENUE多少，为什么下降了", fs, MockProvider(reference_date=REF),
+            "香港去年REVENUE多少，为什么下降了",
+            fs,
+            MockProvider(reference_date=REF),
             reference_date=REF,
             narrative_retriever=NarrativeIndexRetriever(index),
         )
@@ -321,7 +331,9 @@ def test_narrative_end_to_end_with_real_index(tmp_path, fact_db):
             DocumentMeta(doc_id="REG_WATCH.pptx", entity="ACME_HK", topic="REG"),
         )
         result = answer_question(
-            "香港最近有什么监管动态", fs, MockProvider(reference_date=REF),
+            "香港最近有什么监管动态",
+            fs,
+            MockProvider(reference_date=REF),
             reference_date=REF,
             narrative_retriever=NarrativeIndexRetriever(index),
         )
@@ -339,9 +351,7 @@ def test_narrative_end_to_end_with_real_index(tmp_path, fact_db):
 def test_restricted_text_never_reaches_provider_nor_answer(tmp_path, fact_db):
     """集成链路下 Restricted 仍不出域：judge prompt、合成 prompt、回答、来源全无。"""
     recorder = RecordingProvider(MockProvider(reference_date=REF))
-    index, chunk_store = _build_index(
-        tmp_path, judge=ProviderListwiseJudge(recorder)
-    )
+    index, chunk_store = _build_index(tmp_path, judge=ProviderListwiseJudge(recorder))
     fs = SqliteFactStore(fact_db)
     try:
         index.ingest(
@@ -350,11 +360,12 @@ def test_restricted_text_never_reaches_provider_nor_answer(tmp_path, fact_db):
         )
         index.ingest(
             "香港监管动态背后的高管 PR 评级 SECRET_TOKEN 讨论。",
-            DocumentMeta(doc_id="EXCO_MINUTES.pptx", entity="ACME_HK",
-                         sensitivity="RESTRICTED"),
+            DocumentMeta(doc_id="EXCO_MINUTES.pptx", entity="ACME_HK", sensitivity="RESTRICTED"),
         )
         result = answer_question(
-            "香港最近有什么监管动态", fs, recorder,
+            "香港最近有什么监管动态",
+            fs,
+            recorder,
             reference_date=REF,
             narrative_retriever=NarrativeIndexRetriever(index),
         )
@@ -371,6 +382,7 @@ def test_restricted_text_never_reaches_provider_nor_answer(tmp_path, fact_db):
 # CLI 接线：--chunk-db
 # ===========================================================================
 
+
 def _seed_chunk_db(path) -> None:
     store = ChunkStore(path)
     store.init_schema()
@@ -381,13 +393,19 @@ def _seed_chunk_db(path) -> None:
 def test_ask_cli_with_chunk_db_runs_composite(tmp_path, fact_db, capsys):
     chunk_db = tmp_path / "chunks.db"
     _seed_chunk_db(chunk_db)
-    rc = ask_main([
-        "--provider", "mock",
-        "--db", str(fact_db),
-        "--chunk-db", str(chunk_db),
-        "--reference-date", "2026-06-12",
-        "香港去年REVENUE多少，为什么下降了",
-    ])
+    rc = ask_main(
+        [
+            "--provider",
+            "mock",
+            "--db",
+            str(fact_db),
+            "--chunk-db",
+            str(chunk_db),
+            "--reference-date",
+            "2026-06-12",
+            "香港去年REVENUE多少，为什么下降了",
+        ]
+    )
     assert rc == 0
     out = capsys.readouterr().out
     assert "1702" in out
@@ -398,12 +416,17 @@ def test_ask_cli_with_chunk_db_runs_composite(tmp_path, fact_db, capsys):
 
 def test_ask_cli_without_chunk_db_keeps_degradation(fact_db, capsys):
     """不给 --chunk-db：narrative 路保持既有坦白降级行为。"""
-    rc = ask_main([
-        "--provider", "mock",
-        "--db", str(fact_db),
-        "--reference-date", "2026-06-12",
-        "香港最近有什么监管动态",
-    ])
+    rc = ask_main(
+        [
+            "--provider",
+            "mock",
+            "--db",
+            str(fact_db),
+            "--reference-date",
+            "2026-06-12",
+            "香港最近有什么监管动态",
+        ]
+    )
     assert rc == 0
     assert "未接入" in capsys.readouterr().out
 

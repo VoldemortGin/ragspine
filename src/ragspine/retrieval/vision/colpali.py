@@ -203,9 +203,7 @@ class ColPaliVisualRetriever:
         self.embedder = embedder
         # isolation at the door：RESTRICTED 页从不进视觉索引（大小写不敏感，同两出口口径）。
         self.pages: list[VisualPage] = [
-            p
-            for p in (pages or [])
-            if str(p.sensitivity).upper() != RESTRICTED_SENSITIVITY
+            p for p in (pages or []) if str(p.sensitivity).upper() != RESTRICTED_SENSITIVITY
         ]
 
     def retrieve(self, query: str, *, top_k: int = 10) -> list[dict[str, Any]]:

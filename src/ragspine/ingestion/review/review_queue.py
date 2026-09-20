@@ -123,12 +123,10 @@ class ReviewQueue:
             """
         )
         self._conn.execute(
-            "CREATE INDEX IF NOT EXISTS ix_review_item_status "
-            "ON review_item (status, priority)"
+            "CREATE INDEX IF NOT EXISTS ix_review_item_status ON review_item (status, priority)"
         )
         self._conn.execute(
-            "CREATE INDEX IF NOT EXISTS ix_review_audit_item "
-            "ON review_audit (item_id, seq)"
+            "CREATE INDEX IF NOT EXISTS ix_review_audit_item ON review_audit (item_id, seq)"
         )
         self._conn.commit()
 
@@ -185,15 +183,11 @@ class ReviewQueue:
         corrected_value: object | None = None,
     ) -> None:
         """驳回某项 -> status=rejected，可附 corrected_value，写 reject 审计记录。"""
-        self._transition(
-            item_id, STATUS_REJECTED, "reject", actor, note, corrected_value
-        )
+        self._transition(item_id, STATUS_REJECTED, "reject", actor, note, corrected_value)
 
     def get(self, item_id: int) -> ReviewItem | None:
         """按 id 取队列项；不存在返回 None。"""
-        row = self._conn.execute(
-            "SELECT * FROM review_item WHERE id = ?", (item_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM review_item WHERE id = ?", (item_id,)).fetchone()
         return self._row_to_item(row) if row is not None else None
 
     def audit_trail(self, item_id: int) -> list[AuditRecord]:

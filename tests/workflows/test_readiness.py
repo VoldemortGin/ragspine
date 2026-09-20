@@ -52,9 +52,7 @@ def test_unsupported_workflow_is_blocked_with_compiler_warnings() -> None:
     assert result.workflow_yaml is not None
 
 
-def test_http_workflow_is_blocked_while_http_gate_is_disabled(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_http_workflow_is_blocked_while_http_gate_is_disabled(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.delenv("RAGSPINE_DIFY_HTTP_ENABLED", raising=False)
     source = tmp_path / "http.yml"
     source.write_text(
@@ -131,9 +129,7 @@ def test_blocking_warnings_redact_secret_shaped_node_ids(tmp_path: Path) -> None
     secret = "sk-super-secret-value-123456"
     source = tmp_path / "unsafe.yml"
     source.write_text(
-        (DIFY_FIXTURES / "agent_tool.yml")
-        .read_text(encoding="utf-8")
-        .replace("tool_1", secret),
+        (DIFY_FIXTURES / "agent_tool.yml").read_text(encoding="utf-8").replace("tool_1", secret),
         encoding="utf-8",
     )
 

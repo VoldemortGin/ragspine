@@ -90,7 +90,9 @@ _EXTRACT_JSON = json.dumps(
 def test_extractor_parses_entities_and_relations():
     provider = ScriptedProvider([_text_response(_EXTRACT_JSON)])
     extractor = LLMGraphExtractor(provider)
-    graph = extractor.extract("一些叙事文本", source_doc_id="doc1.pdf", source_locator="doc1.pdf#p1")
+    graph = extractor.extract(
+        "一些叙事文本", source_doc_id="doc1.pdf", source_locator="doc1.pdf#p1"
+    )
     assert isinstance(graph, ExtractedGraph)
     assert {(e.name, e.type) for e in graph.entities} == {("区域A", "region"), ("产品X", "product")}
     assert {(r.source, r.target, r.kind) for r in graph.relations} == {("区域A", "产品X", "sells")}
@@ -117,9 +119,7 @@ def test_extractor_ignores_model_self_reported_provenance():
             "entities": [
                 {"name": "E", "type": "t", "source_doc_id": "FAKE", "source_locator": "FAKE#x"}
             ],
-            "relations": [
-                {"source": "E", "target": "F", "kind": "k", "source_doc_id": "FAKE"}
-            ],
+            "relations": [{"source": "E", "target": "F", "kind": "k", "source_doc_id": "FAKE"}],
         },
         ensure_ascii=False,
     )
@@ -160,11 +160,15 @@ def test_extractor_is_bounded():
     big = json.dumps(
         {
             "entities": [{"name": f"E{i}", "type": "t"} for i in range(50)],
-            "relations": [{"source": f"E{i}", "target": f"E{i + 1}", "kind": "k"} for i in range(50)],
+            "relations": [
+                {"source": f"E{i}", "target": f"E{i + 1}", "kind": "k"} for i in range(50)
+            ],
         },
         ensure_ascii=False,
     )
-    extractor = LLMGraphExtractor(ScriptedProvider([_text_response(big)]), max_entities=5, max_relations=3)
+    extractor = LLMGraphExtractor(
+        ScriptedProvider([_text_response(big)]), max_entities=5, max_relations=3
+    )
     graph = extractor.extract("t", source_doc_id="d", source_locator="l")
     assert len(graph.entities) == 5
     assert len(graph.relations) == 3
@@ -174,7 +178,9 @@ def test_extractor_is_bounded():
 # detect_communities：确定性连通分量
 # ---------------------------------------------------------------------------
 def _rel(source: str, target: str, doc: str = "d", loc: str = "l") -> ExtractedRelation:
-    return ExtractedRelation(source=source, target=target, kind="rel", source_doc_id=doc, source_locator=loc)
+    return ExtractedRelation(
+        source=source, target=target, kind="rel", source_doc_id=doc, source_locator=loc
+    )
 
 
 def test_detect_two_disconnected_clusters():
@@ -221,11 +227,21 @@ def test_detect_communities_is_deterministic():
 def _community_graph() -> tuple[Community, ExtractedGraph]:
     graph = ExtractedGraph(
         entities=(
-            ExtractedEntity(name="区域A", type="region", source_doc_id="r.pdf", source_locator="r.pdf#1"),
-            ExtractedEntity(name="产品X", type="product", source_doc_id="r.pdf", source_locator="r.pdf#1"),
+            ExtractedEntity(
+                name="区域A", type="region", source_doc_id="r.pdf", source_locator="r.pdf#1"
+            ),
+            ExtractedEntity(
+                name="产品X", type="product", source_doc_id="r.pdf", source_locator="r.pdf#1"
+            ),
         ),
         relations=(
-            ExtractedRelation(source="区域A", target="产品X", kind="sells", source_doc_id="r.pdf", source_locator="r.pdf#1"),
+            ExtractedRelation(
+                source="区域A",
+                target="产品X",
+                kind="sells",
+                source_doc_id="r.pdf",
+                source_locator="r.pdf#1",
+            ),
         ),
     )
     [community] = detect_communities(graph)
@@ -235,7 +251,9 @@ def _community_graph() -> tuple[Community, ExtractedGraph]:
 def test_summarizer_flags_synthesis_and_carries_provenance():
     """摘要明确标注为合成（is_synthesis=True，非可引 fact）且携带贡献 source_doc_ids。"""
     community, graph = _community_graph()
-    summarizer = LLMCommunitySummarizer(ScriptedProvider([_text_response("区域A 与产品X 形成销售主题。")]))
+    summarizer = LLMCommunitySummarizer(
+        ScriptedProvider([_text_response("区域A 与产品X 形成销售主题。")])
+    )
     summary = summarizer.summarize(community, graph)
     assert isinstance(summary, CommunitySummary)
     assert summary.is_synthesis is True
@@ -306,10 +324,12 @@ def test_make_narrative_graph_reads_env(monkeypatch):
 # 端到端骨架：extract → detect_communities → summarize（全程带血缘 + 合成标注）
 # ---------------------------------------------------------------------------
 def test_end_to_end_extract_detect_summarize_chain():
-    provider = ScriptedProvider([
-        _text_response(_EXTRACT_JSON),          # extract
-        _text_response("区域A 销售产品X 的主题综述。"),  # summarize
-    ])
+    provider = ScriptedProvider(
+        [
+            _text_response(_EXTRACT_JSON),  # extract
+            _text_response("区域A 销售产品X 的主题综述。"),  # summarize
+        ]
+    )
     pipeline = make_narrative_graph("llm", provider=provider)
     assert pipeline is not None
 
@@ -324,6 +344,6 @@ def test_end_to_end_extract_detect_summarize_chain():
     assert communities[0].member_names == ("产品X", "区域A")
 
     summary = pipeline.summarizer.summarize(communities[0], graph)
-    assert summary.is_synthesis is True          # 合成、永不可引为 fact
+    assert summary.is_synthesis is True  # 合成、永不可引为 fact
     assert "story.pdf" in summary.source_doc_ids  # 血缘可溯
     assert summary.text

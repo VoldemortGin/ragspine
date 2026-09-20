@@ -42,9 +42,9 @@ ALLOWED_IMPORT_ROOTS: frozenset[str] = frozenset(
         "typing",
         "string",
         "concurrent",  # concurrent.futures.ThreadPoolExecutor（并行/iteration 节点）
-        "json",        # parameter-extractor 节点
+        "json",  # parameter-extractor 节点
         "corespine",
-        "ragspine",    # 含 ragspine.retrieval.*（knowledge-retrieval / answer_question 折叠）
+        "ragspine",  # 含 ragspine.retrieval.*（knowledge-retrieval / answer_question 折叠）
         "spineagent",  # tool 节点 @function_tool（占位，实际会因 warning 先被闸 1 拒）
     }
 )
@@ -73,9 +73,7 @@ def _declares_http_slot(source: str) -> bool:
     """
     for node in ast.parse(source).body:
         if isinstance(node, ast.Assign):
-            if any(
-                isinstance(t, ast.Name) and t.id == "_HTTP_CLIENT" for t in node.targets
-            ):
+            if any(isinstance(t, ast.Name) and t.id == "_HTTP_CLIENT" for t in node.targets):
                 return True
         elif isinstance(node, ast.AnnAssign):
             if isinstance(node.target, ast.Name) and node.target.id == "_HTTP_CLIENT":

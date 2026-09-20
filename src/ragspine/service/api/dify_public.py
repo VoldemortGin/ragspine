@@ -54,7 +54,7 @@ class WorkflowRunPublicRequest(BaseModel):
     """POST /v1/workflows/run 请求体（官方字段；多余字段忽略，与 dify 一致宽容）。"""
 
     inputs: dict[str, Any] = Field(default_factory=dict)
-    response_mode: str = "blocking"   # dify 官方缺省即 blocking
+    response_mode: str = "blocking"  # dify 官方缺省即 blocking
     user: str = ""
     files: list[Any] = Field(default_factory=list)  # 接受但不消费（本服务无文件输入）
 
@@ -64,7 +64,7 @@ class WorkflowRunResultData(BaseModel):
 
     id: str
     workflow_id: str
-    status: str                       # "succeeded" | "failed"
+    status: str  # "succeeded" | "failed"
     outputs: dict[str, Any] | None = None
     error: str | None = None
     elapsed_time: float = 0.0
@@ -129,9 +129,7 @@ def _parse_public_apps(raw: str) -> dict[str, str]:
     return apps
 
 
-def _load_app(
-    request: Request, config: ServiceConfig
-) -> tuple[str, str, str] | JSONResponse:
+def _load_app(request: Request, config: ServiceConfig) -> tuple[str, str, str] | JSONResponse:
     """Bearer 鉴权 + 注册表选 app + 读 YAML -> (api_key, yaml_path, yaml_text)。
 
     未带 / 非 Bearer / 未注册 key（含未配置任何 app）-> 401 unauthorized；
@@ -152,7 +150,8 @@ def _load_app(
         yaml_text = Path(yaml_path).read_text(encoding="utf-8")
     except OSError as exc:
         return _dify_error(
-            400, "app_unavailable",
+            400,
+            "app_unavailable",
             f"registered workflow file unreadable: {yaml_path} ({exc})",
         )
     return token, yaml_path, yaml_text
@@ -168,11 +167,11 @@ def _workflow_id(yaml_path: str) -> str:
 # ---------------------------------------------------------------------------
 @dataclass
 class _RunOutcome:
-    status: str                        # "succeeded" | "failed"
+    status: str  # "succeeded" | "failed"
     outputs: dict[str, Any] | None
     error: str | None
-    traces: list[dict[str, Any]]       # 净化后的 NodeTrace dict（可为空）
-    elapsed_time: float                # 墙钟秒
+    traces: list[dict[str, Any]]  # 净化后的 NodeTrace dict（可为空）
+    elapsed_time: float  # 墙钟秒
 
 
 def _execute_workflow(
@@ -207,7 +206,9 @@ def _execute_workflow(
 
     try:
         result = run_workflow_isolated(
-            compiled.code, inputs, provider,
+            compiled.code,
+            inputs,
+            provider,
             timeout_s=config.dify_run_timeout_s,
             isolation=config.dify_run_isolation,
             provider_config=provider_config_dict(config),
@@ -239,9 +240,7 @@ def _run_store(request: Request) -> "OrderedDict[str, dict[str, Any]]":
     return store
 
 
-def _store_run(
-    request: Request, api_key: str, detail: WorkflowRunDetailResponse
-) -> None:
+def _store_run(request: Request, api_key: str, detail: WorkflowRunDetailResponse) -> None:
     store = _run_store(request)
     store[detail.id] = {"api_key": api_key, "detail": detail}
     store.move_to_end(detail.id)
@@ -284,7 +283,7 @@ def _sse_events(
             "node_id": trace.get("node_id", ""),
             "node_type": trace.get("node_type", ""),
             "title": trace.get("title", ""),
-            "index": i + 1,                       # dify 的 index 从 1 起
+            "index": i + 1,  # dify 的 index 从 1 起
             "predecessor_node_id": predecessor,
             "inputs": trace.get("inputs"),
             "created_at": created_at,
@@ -345,7 +344,8 @@ def workflows_run(
 
     if req.response_mode not in _RESPONSE_MODES:
         return _dify_error(
-            400, "invalid_param",
+            400,
+            "invalid_param",
             f"response_mode must be one of {list(_RESPONSE_MODES)}",
         )
     if not req.user:
@@ -353,9 +353,9 @@ def workflows_run(
     # 与 /v1/dify/run 同一信任边界开关；关闭时按 dify 官方形状报 app 不可用。
     if not config.dify_run_enabled:
         return _dify_error(
-            400, "app_unavailable",
-            "workflow execution is disabled on this server "
-            "(set RAGSPINE_DIFY_RUN_ENABLED=true)",
+            400,
+            "app_unavailable",
+            "workflow execution is disabled on this server (set RAGSPINE_DIFY_RUN_ENABLED=true)",
         )
 
     run_id = str(uuid.uuid4())
@@ -367,7 +367,8 @@ def workflows_run(
     total_steps = len(_executed_traces(outcome.traces))
 
     _store_run(
-        request, api_key,
+        request,
+        api_key,
         WorkflowRunDetailResponse(
             id=run_id,
             workflow_id=workflow_id,
@@ -385,8 +386,12 @@ def workflows_run(
 
     if req.response_mode == "streaming":
         events = _sse_events(
-            task_id=task_id, run_id=run_id, workflow_id=workflow_id,
-            outcome=outcome, created_at=created_at, finished_at=finished_at,
+            task_id=task_id,
+            run_id=run_id,
+            workflow_id=workflow_id,
+            outcome=outcome,
+            created_at=created_at,
+            finished_at=finished_at,
         )
         return StreamingResponse(_sse_iter(events), media_type="text/event-stream")
 

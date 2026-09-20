@@ -47,15 +47,21 @@ from ragspine.retrieval.chunking.chunking import (
 _PROFILE = load_company_profile()
 
 # 每文件状态取值。
-STATUS_INGESTED = "ingested"   # 已入库（dry-run 下表示「将要入库」）。
-STATUS_SKIPPED = "skipped"     # hash 未变化，幂等跳过。
-STATUS_FAILED = "failed"       # 读取 / 抽取失败（error 记录原因，不中断整批）。
-STATUS_NO_TEXT = "no_text"     # 抽不出叙事文本（如全扫描 PDF），不落库。
+STATUS_INGESTED = "ingested"  # 已入库（dry-run 下表示「将要入库」）。
+STATUS_SKIPPED = "skipped"  # hash 未变化，幂等跳过。
+STATUS_FAILED = "failed"  # 读取 / 抽取失败（error 记录原因，不中断整批）。
+STATUS_NO_TEXT = "no_text"  # 抽不出叙事文本（如全扫描 PDF），不落库。
 
 # per-doc 元数据映射允许的字段（DocumentMeta 维度 + valid_as_of / title）。
 ALLOWED_META_KEYS = {
-    "title", "topic", "entity", "geography", "period",
-    "language", "sensitivity", "valid_as_of",
+    "title",
+    "topic",
+    "entity",
+    "geography",
+    "period",
+    "language",
+    "sensitivity",
+    "valid_as_of",
 }
 
 # 文件名 period 启发式：只认显式模式，裸年份（如日期 2026-06-11）不算。
@@ -182,6 +188,7 @@ def ingest_narrative(
 # 内部：单文件流程 / 输入解析 / 登记台账
 # ---------------------------------------------------------------------------
 
+
 def _ingest_one(
     path: Path,
     store: ChunkStore,
@@ -268,12 +275,15 @@ def _resolve_inputs(inputs: str | Path | list[str | Path]) -> list[Path]:
     for item in inputs:
         p = Path(item)
         if p.is_dir():
-            paths.extend(sorted(
-                f for f in p.rglob("*")
-                if f.is_file()
-                and f.suffix.lower() in SUPPORTED_SUFFIXES
-                and not f.name.startswith(("~$", "."))
-            ))
+            paths.extend(
+                sorted(
+                    f
+                    for f in p.rglob("*")
+                    if f.is_file()
+                    and f.suffix.lower() in SUPPORTED_SUFFIXES
+                    and not f.name.startswith(("~$", "."))
+                )
+            )
         else:
             paths.append(p)
     return paths
@@ -297,9 +307,7 @@ def _ensure_registry(conn: sqlite3.Connection) -> None:
 
 def _registered_hash(conn: sqlite3.Connection, doc_id: str) -> str | None:
     """取某文档已登记的 file_hash；未登记返回 None。"""
-    row = conn.execute(
-        "SELECT file_hash FROM narrative_doc WHERE doc_id = ?", (doc_id,)
-    ).fetchone()
+    row = conn.execute("SELECT file_hash FROM narrative_doc WHERE doc_id = ?", (doc_id,)).fetchone()
     return row[0] if row is not None else None
 
 
@@ -317,7 +325,6 @@ def _register_doc(
             n_chunks = excluded.n_chunks,
             ingested_at = excluded.ingested_at
         """,
-        (doc_id, file_hash, source_path, n_chunks,
-         datetime.now(UTC).isoformat()),
+        (doc_id, file_hash, source_path, n_chunks, datetime.now(UTC).isoformat()),
     )
     conn.commit()

@@ -22,9 +22,9 @@ def test_lost_in_middle_puts_top_two_at_the_two_ends():
     out = [s["chunk_id"] for s in LostInTheMiddlePostprocessor().postprocess(QUERY, items)]
     # 规范 LITM：head=[d0,d2,d4] + reversed tail=[d3,d1] => [d0,d2,d4,d3,d1]
     assert out == ["d0", "d2", "d4", "d3", "d1"]
-    assert out[0] == "d0"       # 最相关在头端
-    assert out[-1] == "d1"      # 次相关在尾端
-    assert "d4" in out[1:-1]    # 最不相关落中段，不在两端
+    assert out[0] == "d0"  # 最相关在头端
+    assert out[-1] == "d1"  # 次相关在尾端
+    assert "d4" in out[1:-1]  # 最不相关落中段，不在两端
 
 
 def test_lost_in_middle_reorder_preserves_membership():

@@ -156,11 +156,15 @@ class ConversationSession:
 
     def ask(self, question: str) -> AgentResult:
         augmented = resolve_followup(
-            self.memory, question,
-            reference_date=self.reference_date, intent_parser=self._parser,
+            self.memory,
+            question,
+            reference_date=self.reference_date,
+            intent_parser=self._parser,
         )
         result = answer_question(
-            augmented, self.store, self.provider,
+            augmented,
+            self.store,
+            self.provider,
             reference_date=self.reference_date,
             narrative_retriever=self.narrative_retriever,
             intent_parser=self._parser,
@@ -176,7 +180,11 @@ class ConversationSession:
         intent = self._parser.parse(augmented, reference_date=self.reference_date)
         if intent.external_entity is not None:  # 双保险：绝不记竞品轮
             return
-        self.memory.remember(ConversationTurn(
-            question=augmented, route=result.route,
-            entity=intent.entity, period=intent.period,
-        ))
+        self.memory.remember(
+            ConversationTurn(
+                question=augmented,
+                route=result.route,
+                entity=intent.entity,
+                period=intent.period,
+            )
+        )

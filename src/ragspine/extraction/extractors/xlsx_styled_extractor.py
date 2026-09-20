@@ -26,9 +26,18 @@ _A_NS = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
 
 # Excel theme 调色板顺序（clrScheme 子元素顺序，index 与单元格 theme 引用对齐）。
 _THEME_SLOTS = (
-    "dk1", "lt1", "dk2", "lt2",
-    "accent1", "accent2", "accent3", "accent4", "accent5", "accent6",
-    "hlink", "folHlink",
+    "dk1",
+    "lt1",
+    "dk2",
+    "lt2",
+    "accent1",
+    "accent2",
+    "accent3",
+    "accent4",
+    "accent5",
+    "accent6",
+    "hlink",
+    "folHlink",
 )
 
 
@@ -116,9 +125,7 @@ def _resolve_fill_rgb(cell: Cell | MergedCell, theme_rgbs: list[str]) -> str | N
     return None
 
 
-def _build_grid(
-    ws: Worksheet, doc_id: str, file_hash: str, theme_rgbs: list[str]
-) -> StyledGrid:
+def _build_grid(ws: Worksheet, doc_id: str, file_hash: str, theme_rgbs: list[str]) -> StyledGrid:
     grid = StyledGrid(
         sheet=ws.title,
         source_doc_id=doc_id,
@@ -147,9 +154,7 @@ def _build_grid(
                     cf_refs.add(f"{get_column_letter(c)}{r}")
     if cf_ranges:
         grid.add_warning(
-            "检测到条件格式区域 "
-            + ", ".join(cf_ranges)
-            + "：颜色来源不可靠，已跳过颜色语义"
+            "检测到条件格式区域 " + ", ".join(cf_ranges) + "：颜色来源不可靠，已跳过颜色语义"
         )
 
     for row in ws.iter_rows():

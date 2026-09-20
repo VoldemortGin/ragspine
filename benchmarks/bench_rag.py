@@ -210,7 +210,9 @@ def bench_retrieve() -> dict[str, object]:
             "retrieve_stats": retrieve_stats,
             "retrieve_throughput_per_s": 1.0 / retrieve_stats["median_s"],
         }
-    results["desc"] = "NarrativeIndex.ingest(200 docs) + .retrieve(top-k=10) — BM25 vs deterministic-vector hybrid"
+    results["desc"] = (
+        "NarrativeIndex.ingest(200 docs) + .retrieve(top-k=10) — BM25 vs deterministic-vector hybrid"
+    )
     return results
 
 
@@ -293,12 +295,16 @@ def _print_human(result: dict[str, object]) -> None:
         print(f"  throughput: {result['throughput_texts_per_s']:.0f} texts/s")
     elif name == "vector":
         u, q = result["upsert_stats"], result["query_stats"]
-        print(f"  upsert({result['n_records']}): median={_ms(u['median_s'])}  mean={_ms(u['mean_s'])}")
+        print(
+            f"  upsert({result['n_records']}): median={_ms(u['median_s'])}  mean={_ms(u['mean_s'])}"
+        )
         print(f"  query(top-k=10):  median={_ms(q['median_s'])}  mean={_ms(q['mean_s'])}")
         print(f"  query throughput: {result['query_throughput_per_s']:.0f} queries/s")
     elif name == "chunk":
         s = result["stats"]
-        print(f"  median={_ms(s['median_s'])}  mean={_ms(s['mean_s'])}  ({result['n_chunks']} chunks)")
+        print(
+            f"  median={_ms(s['median_s'])}  mean={_ms(s['mean_s'])}  ({result['n_chunks']} chunks)"
+        )
         print(f"  throughput: {result['throughput_chars_per_s'] / 1e6:.2f} M chars/s")
     elif name == "retrieve":
         for label in ("bm25", "hybrid_deterministic_vector"):
@@ -306,12 +312,16 @@ def _print_human(result: dict[str, object]) -> None:
             i, rt = r["ingest_stats"], r["retrieve_stats"]
             print(f"  [{label}] {r['n_chunks']} chunks")
             print(f"     ingest(200 docs): median={_ms(i['median_s'])}  mean={_ms(i['mean_s'])}")
-            print(f"     retrieve(top-k=10): median={_ms(rt['median_s'])}  mean={_ms(rt['mean_s'])}"
-                  f"  ({r['retrieve_throughput_per_s']:.0f} q/s)")
+            print(
+                f"     retrieve(top-k=10): median={_ms(rt['median_s'])}  mean={_ms(rt['mean_s'])}"
+                f"  ({r['retrieve_throughput_per_s']:.0f} q/s)"
+            )
     elif name == "answer":
         s = result["stats"]
         print(f"  route={result['route']}")
-        print(f"  median={_ms(s['median_s'])}  mean={_ms(s['mean_s'])}  ({result['throughput_qps']:.0f} qps)")
+        print(
+            f"  median={_ms(s['median_s'])}  mean={_ms(s['mean_s'])}  ({result['throughput_qps']:.0f} qps)"
+        )
 
 
 def main() -> int:

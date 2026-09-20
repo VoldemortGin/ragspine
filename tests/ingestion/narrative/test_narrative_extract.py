@@ -36,6 +36,7 @@ TABLE_NUMBER = "99999"
 # fixture 构造（测试内现造，确定性）
 # ---------------------------------------------------------------------------
 
+
 def _make_deck(path) -> None:
     """两页 deck：文本框（含多段落 / 空框）+ 表格（哨兵）+ 演讲者备注。"""
     prs = Presentation()
@@ -94,17 +95,21 @@ def deck_path(tmp_path):
 def mixed_pdf_path(tmp_path):
     """3 页 PDF：第 1、3 页有文本层，第 2 页无文本层（扫描页形态）。"""
     path = tmp_path / "report.pdf"
-    _make_pdf(path, [
-        "Regulatory update for Hong Kong insurance market.",
-        None,
-        "The regulator issued new guidance on sales conduct.",
-    ])
+    _make_pdf(
+        path,
+        [
+            "Regulatory update for Hong Kong insurance market.",
+            None,
+            "The regulator issued new guidance on sales conduct.",
+        ],
+    )
     return path
 
 
 # ===========================================================================
 # pptx：文本框 + 备注抽取与定位
 # ===========================================================================
+
 
 def test_pptx_segments_and_locators(deck_path):
     """文本框按 slide/frame 定位、备注 slide=N,notes；空框不产段不占序号。"""
@@ -162,6 +167,7 @@ def test_pptx_empty_deck(tmp_path):
 # PDF：逐页抽取 + 无文本层页跳过计数
 # ===========================================================================
 
+
 def test_pdf_pages_extracted_with_locators(mixed_pdf_path):
     """有文本层的页逐页成段，locator 用真实页号（含被跳过页的占位）。"""
     doc = extract_pdf_narrative(mixed_pdf_path)
@@ -195,6 +201,7 @@ def test_pdf_doc_fields(mixed_pdf_path):
 # ===========================================================================
 # 后缀分发
 # ===========================================================================
+
 
 def test_dispatch_by_suffix(deck_path, mixed_pdf_path):
     """extract_narrative 按后缀分发，结果与专用入口一致。"""

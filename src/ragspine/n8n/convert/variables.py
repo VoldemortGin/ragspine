@@ -28,9 +28,7 @@ _DIFY_REF = re.compile(r"\{\{#\s*([^#}]+?)\s*#\}\}")
 # 取字段的两种写法：.field 或 ['field'] / ["field"]。
 _FIELD = r"""(?:\.([A-Za-z_][\w]*)|\[\s*(?:'([^']*)'|"([^"]*)")\s*\])"""
 _JSON_REF = re.compile(r"\s*\$json" + _FIELD + r"\s*")
-_NODE_REF = re.compile(
-    r"""\s*\$node\[\s*(?:'([^']*)'|"([^"]*)")\s*\]\.json""" + _FIELD + r"\s*"
-)
+_NODE_REF = re.compile(r"""\s*\$node\[\s*(?:'([^']*)'|"([^"]*)")\s*\]\.json""" + _FIELD + r"\s*")
 _CALL_REF = re.compile(
     r"""\s*\$\(\s*(?:'([^']*)'|"([^"]*)")\s*\)\.(?:item|first\(\))\.json""" + _FIELD + r"\s*"
 )
@@ -119,9 +117,7 @@ def dify_text_to_n8n(
             field = DEFAULT_FIELD
         name = id_to_name.get(node_id)
         if name is None:
-            warnings.append(
-                f"变量引用 {{{{#{token}#}}}} 的节点 id {node_id!r} 不在图中，原样保留"
-            )
+            warnings.append(f"变量引用 {{{{#{token}#}}}} 的节点 id {node_id!r} 不在图中，原样保留")
             return match.group(0)
         if node_id in llm_node_ids and field == DIFY_LLM_OUTPUT_FIELD:
             field = N8N_AGENT_OUTPUT_FIELD  # llm 输出字段换算：text → output

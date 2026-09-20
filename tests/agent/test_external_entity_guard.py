@@ -29,15 +29,28 @@ REF = date(2026, 6, 12)
 
 # home 事实（竞品 case 绝不应把这些数字当成竞品答案输出）
 REVENUE_HK_FY2025 = Fact(
-    metric_code="REVENUE", entity="ACME_HK", geography="HK", channel="TOTAL",
-    period_type="FY", period="2025", value=1702.0, unit="USD_M",
+    metric_code="REVENUE",
+    entity="ACME_HK",
+    geography="HK",
+    channel="TOTAL",
+    period_type="FY",
+    period="2025",
+    value=1702.0,
+    unit="USD_M",
     source_doc_id="ACME_FY2025_Results.pptx",
     source_locator="slide=5,table=1,row=2,col=3",
 )
 REVENUE_GROUP_FY2025 = Fact(
-    metric_code="REVENUE", entity="ACME_GROUP", geography="ASIA", channel="TOTAL",
-    period_type="FY", period="2025", value=4500.0, unit="USD_M",
-    source_doc_id="ACME_FY2025_Results.pptx", source_locator="slide=3,table=1",
+    metric_code="REVENUE",
+    entity="ACME_GROUP",
+    geography="ASIA",
+    channel="TOTAL",
+    period_type="FY",
+    period="2025",
+    value=4500.0,
+    unit="USD_M",
+    source_doc_id="ACME_FY2025_Results.pptx",
+    source_locator="slide=3,table=1",
 )
 
 
@@ -61,10 +74,17 @@ class FakeRetriever:
     """duck-typed NarrativeRetriever：记录调用，断言竞品叙事问法不走静默检索。"""
 
     def __init__(self, snippets: list[dict] | None = None):
-        self.snippets = snippets if snippets is not None else [{
-            "text": "占位片段，不应被检索到。",
-            "doc_id": "SHOULD_NOT_BE_USED.pptx", "locator": "slide=1",
-        }]
+        self.snippets = (
+            snippets
+            if snippets is not None
+            else [
+                {
+                    "text": "占位片段，不应被检索到。",
+                    "doc_id": "SHOULD_NOT_BE_USED.pptx",
+                    "locator": "slide=1",
+                }
+            ]
+        )
         self.calls: list[dict] = []
 
     def retrieve(self, query: str, *, filters: dict | None = None, top_k: int = 50):
@@ -80,15 +100,14 @@ _HOME_NUMBERS = ("1702", "4500")
 # EXT-01：竞品（中文）→ 拒答 + 提议改查 ACME，回答不含 home 数字，不调 LLM/tool
 # ---------------------------------------------------------------------------
 
+
 def test_competitor_chinese_refuses_no_home_number(store):
     """user story：高管问"竞安去年REVENUE多少"——竞安是竞品，系统没有其数据。
     必须拒答并提议改查 ACME 等价口径，绝不把 ACME 的 REVENUE（4500/1702）冒充竞安答出，
     且不调用 LLM / tool / 检索（SentinelProvider 不被触碰）。"""
     from ragspine.agent.intent import CLARIFY_OUT_OF_SCOPE_ENTITY
 
-    result = answer_question(
-        "竞安去年REVENUE多少", store, SentinelProvider(), reference_date=REF
-    )
+    result = answer_question("竞安去年REVENUE多少", store, SentinelProvider(), reference_date=REF)
     assert isinstance(result, AgentResult)
     assert result.clarification is not None
     assert result.clarification.mode == CLARIFY_OUT_OF_SCOPE_ENTITY
@@ -102,6 +121,7 @@ def test_competitor_chinese_refuses_no_home_number(store):
 # ---------------------------------------------------------------------------
 # EXT-02：竞品（英文）→ 大小写不敏感，拒答
 # ---------------------------------------------------------------------------
+
 
 def test_competitor_english_case_insensitive_refuses():
     """user story：英文问法"what is Jingcheng's REVENUE" / "jingan revenue"
@@ -127,6 +147,7 @@ def test_competitor_english_case_insensitive_refuses():
 # EXT-03：碰撞——"中国竞安"最长匹配命中外部"竞安"，遮蔽后"中国"不泄露成 ACME_CN
 # ---------------------------------------------------------------------------
 
+
 def test_collision_zhongguo_pingan_not_acme_cn():
     """user story（最关键碰撞）："中国竞安的营收"——"中国竞安"是竞品全称，
     必须最长匹配整体吃掉，遮蔽后剩余文本不再含可泄露为 ACME_CN 的"中国"。
@@ -149,6 +170,7 @@ def test_collision_zhongguo_pingan_not_acme_cn():
 # EXT-04：竞品 + home 同现 → 仍拒答（缺竞品数据），只提议查 home，不进 composite
 # ---------------------------------------------------------------------------
 
+
 def test_competitor_and_home_cooccur_refuses_offers_home_only(store):
     """user story："竞安和ACME的REVENUE对比"——同时提到竞品与 home。因没有竞安数据，
     不能做对比；命中外部实体即拒答，提议只查 ACME，绝不输出 home 数字，
@@ -170,6 +192,7 @@ def test_competitor_and_home_cooccur_refuses_offers_home_only(store):
 # EXT-05：竞品 + 叙事措辞 → 外部检查先于 narrative 早返回，不走静默检索
 # ---------------------------------------------------------------------------
 
+
 def test_competitor_narrative_phrasing_still_refuses(store):
     """user story："竞安最近表现怎么样"——叙事措辞，但主体是竞品。
     外部实体检查必须排在 ROUTE_NARRATIVE 早返回之前，拒答；注入的 retriever 不被调用
@@ -178,8 +201,11 @@ def test_competitor_narrative_phrasing_still_refuses(store):
 
     retriever = FakeRetriever()
     result = answer_question(
-        "竞安最近表现怎么样", store, SentinelProvider(),
-        reference_date=REF, narrative_retriever=retriever,
+        "竞安最近表现怎么样",
+        store,
+        SentinelProvider(),
+        reference_date=REF,
+        narrative_retriever=retriever,
     )
     assert result.clarification is not None
     assert result.clarification.mode == CLARIFY_OUT_OF_SCOPE_ENTITY
@@ -189,6 +215,7 @@ def test_competitor_narrative_phrasing_still_refuses(store):
 # ---------------------------------------------------------------------------
 # EXT-06：回归——无任何实体 "去年REVENUE多少" 行为不变（默认 ACME_GROUP + 诚实假设）
 # ---------------------------------------------------------------------------
+
 
 def test_no_entity_regression_default_home_with_assumptions(store):
     """回归守护：用户根本没提实体时，默认 home 集团口径仍合理——行为零变更。
@@ -211,6 +238,7 @@ def test_no_entity_regression_default_home_with_assumptions(store):
 # EXT-07：回归——home 实体 "香港去年REVENUE" 不变 ACME_HK，端到端命中 1702
 # ---------------------------------------------------------------------------
 
+
 def test_home_entity_regression_acme_hk_unchanged(store):
     """回归守护：home 实体解析与端到端命中血缘不得受外部实体机制影响。
     "香港去年REVENUE" → entity=='ACME_HK'、external_entity is None；
@@ -232,6 +260,7 @@ def test_home_entity_regression_acme_hk_unchanged(store):
 # ---------------------------------------------------------------------------
 # EXT-08：泛化证明——临时 profile（ACME/Globex）无 ACME 硬编码
 # ---------------------------------------------------------------------------
+
 
 def test_profile_generalization_no_acme_hardcode(tmp_path):
     """user story：项目是通用管理 copilot，不专属 ACME。给一份 home='YourCo'、
@@ -273,6 +302,7 @@ def test_profile_generalization_no_acme_hardcode(tmp_path):
 # EXT-09：profile 缺失文件 → 静默回退内置默认（=现有 ACME 值），零行为变更
 # ---------------------------------------------------------------------------
 
+
 def test_profile_missing_file_falls_back_to_acme_defaults(tmp_path):
     """回归守护：指向不存在的路径时 load_company_profile 必须静默回退内置默认 profile
     （不抛错/不打印），其值与现有硬编码 ACME 值字节级等价——保证 import 期零副作用、
@@ -294,6 +324,7 @@ def test_profile_missing_file_falls_back_to_acme_defaults(tmp_path):
 # ---------------------------------------------------------------------------
 # EXT-10：config/company.example.toml 通用模板——无 ACME specifics，可被成功解析
 # ---------------------------------------------------------------------------
+
 
 def test_example_toml_has_no_acme_specifics():
     """user story：为未来开源干净仓库准备的模板必须用虚构占位（ACME/Globex），
@@ -317,6 +348,7 @@ def test_example_toml_has_no_acme_specifics():
 # ---------------------------------------------------------------------------
 # EXT-11：回归——glossary.ENTITY_SYNONYMS / ENTITY_GEOGRAPHY 值逐项不变
 # ---------------------------------------------------------------------------
+
 
 def test_glossary_entity_synonyms_values_unchanged():
     """回归守护（最重要）：ENTITY_SYNONYMS/ENTITY_GEOGRAPHY 改为由默认 profile 构建后，
@@ -360,6 +392,7 @@ def test_glossary_entity_synonyms_values_unchanged():
 # EXT-12：resolve_external_entity 最长匹配 + 大小写不敏感；home 不误判为外部
 # ---------------------------------------------------------------------------
 
+
 def test_resolve_external_entity_longest_match_masking_helper():
     """user story：外部实体解析助手——'中国竞安'/'竞安'/'jingan'/'竞诚'/'JINGCHENG'
     返回对应展示名（最长匹配、大小写不敏感）；home 词 'ACME' 返回 None
@@ -378,6 +411,7 @@ def test_resolve_external_entity_longest_match_masking_helper():
 # CP-01：config/company.toml 默认 profile = ACME（本部署 profile 落档校验）
 # ---------------------------------------------------------------------------
 
+
 def test_load_company_profile_default_is_acme():
     """user story：本部署的 config/company.toml 必须存在且 load_company_profile()
     解析为 ACME profile——home_company_name 含 'ACME'、home_entity_code=='ACME_GROUP'、
@@ -395,6 +429,7 @@ def test_load_company_profile_default_is_acme():
 # EXT-13：回归红线（SPEC 标注「本任务最重要」）——standalone "中国" 绝不被外部机制波及
 # ---------------------------------------------------------------------------
 
+
 def test_standalone_zhongguo_not_masked_stays_acme_cn():
     """user story（最重要回归红线）：标准 home 词"中国"单独出现时，绝不能被外部
     遮蔽机制误伤——必须仍解析为 ACME_CN，external_entity is None。
@@ -403,8 +438,8 @@ def test_standalone_zhongguo_not_masked_stays_acme_cn():
     一个过度贪心的遮蔽实现（把外部"竞安"做成子串匹配后误伤、或把"中国"本身错放进
     外部清单/前缀匹配）会让 13 条专项红测试全绿、只在更下游 qa_eval golden 跑里炸。
     这里在 parse_intent / resolve_external_entity 层直接钉死正向命题。"""
-    from ragspine.common.glossary import resolve_external_entity
     from ragspine.agent.intent import parse_intent
+    from ragspine.common.glossary import resolve_external_entity
 
     pi = parse_intent("中国FY2025的REVENUE是多少", reference_date=REF)
     assert pi.external_entity is None  # 外部机制绝不波及 home 词
@@ -420,6 +455,7 @@ def test_standalone_zhongguo_not_masked_stays_acme_cn():
 # ---------------------------------------------------------------------------
 # EXT-14：碰撞数据完整性——其他"中国"前缀竞品（中国竞寿/中国竞平）也须整体吞掉
 # ---------------------------------------------------------------------------
+
 
 def test_collision_other_china_prefixed_competitors_no_acme_cn_leak():
     """user story：SPEC collision_handling_note 要求外部清单把"中国竞安""中国竞寿"
@@ -442,15 +478,13 @@ def test_collision_other_china_prefixed_competitors_no_acme_cn_leak():
     assert pi_taiping.external_entity == "Jingping"
     assert pi_taiping.entity is None
     assert "ACME_CN" not in pi_taiping.entities
-    assert (
-        clarify_scope(pi_taiping, reference_date=REF).mode
-        == CLARIFY_OUT_OF_SCOPE_ENTITY
-    )
+    assert clarify_scope(pi_taiping, reference_date=REF).mode == CLARIFY_OUT_OF_SCOPE_ENTITY
 
 
 # ---------------------------------------------------------------------------
 # EXT-15：拒答 message 含 metric + home_company_name；narrowing_options 给出可一键收窄项
 # ---------------------------------------------------------------------------
+
 
 def test_out_of_scope_message_contains_metric_and_home_name_when_metric_present():
     """user story：SPEC clarify_scope 契约要求拒答 message『若解析到 metric 则带上
@@ -459,12 +493,12 @@ def test_out_of_scope_message_contains_metric_and_home_name_when_metric_present(
     question/message 含 metric、narrowing_options 非空且用泛化 home_company_name。
     一个只返回模式常量、message 为空/无收窄项的实现会过现有断言但违背契约
     （用户拿不到可一键收窄的"改查 ACME REVENUE"提议）。"""
-    from ragspine.common.company_profile import load_company_profile
     from ragspine.agent.intent import (
         CLARIFY_OUT_OF_SCOPE_ENTITY,
         clarify_scope,
         parse_intent,
     )
+    from ragspine.common.company_profile import load_company_profile
 
     home_name = load_company_profile().home_company_name
 
@@ -484,6 +518,7 @@ def test_out_of_scope_message_contains_metric_and_home_name_when_metric_present(
 # EXT-16：早返回顺序——无期间竞品问法不掉进假设回填（不泄露 home 口径）
 # ---------------------------------------------------------------------------
 
+
 def test_out_of_scope_with_period_does_not_emit_home_assumption_note(store):
     """user story：外部实体检查必须排在 metric-缺失与默认假设回填之前。竞品+缺期间的
     问法（"竞安的REVENUE"，无期间）若先走到 ANSWER_WITH_ASSUMPTIONS，会把"期间默认 FYxxxx /
@@ -492,9 +527,7 @@ def test_out_of_scope_with_period_does_not_emit_home_assumption_note(store):
     真正最前置、不掉进假设回填，也不调 provider。"""
     from ragspine.agent.intent import CLARIFY_OUT_OF_SCOPE_ENTITY
 
-    result = answer_question(
-        "竞安的REVENUE", store, SentinelProvider(), reference_date=REF
-    )
+    result = answer_question("竞安的REVENUE", store, SentinelProvider(), reference_date=REF)
     assert result.clarification is not None
     assert result.clarification.mode == CLARIFY_OUT_OF_SCOPE_ENTITY
     # 绝不出现 home 口径假设回填说明
@@ -508,6 +541,7 @@ def test_out_of_scope_with_period_does_not_emit_home_assumption_note(store):
 # ---------------------------------------------------------------------------
 # EXT-17：qa_eval 双 runner 把 OUT_OF_SCOPE 显式置 refused（关键接线点，易漏）
 # ---------------------------------------------------------------------------
+
 
 def test_qa_eval_runners_mark_out_of_scope_as_refused_both_modes(store):
     """user story：SPEC 把 qa_eval 双模式接线列为『关键接线点(易漏)』——
@@ -548,6 +582,7 @@ def test_qa_eval_runners_mark_out_of_scope_as_refused_both_modes(store):
 # ---------------------------------------------------------------------------
 # EXT-18：外部清单不得污染 retrieval 的 home query 改写词典
 # ---------------------------------------------------------------------------
+
 
 def test_external_entity_does_not_inject_home_query_rewrite_in_retrieval():
     """user story：SPEC collision_handling_note 第 2 点要求 EXTERNAL_ENTITY_SYNONYMS

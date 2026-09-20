@@ -31,16 +31,32 @@ class RecordingQueue:
         self.calls = []  # list[(func_path, payload, kwargs)]
         self._statuses: dict[str, JobStatus] = {}
 
-    def enqueue(self, func_path, payload, *, job_id=None, timeout=None,
-                max_retries=0, result_ttl=None, failure_ttl=None):
-        self.calls.append((func_path, payload, {
-            "job_id": job_id, "timeout": timeout, "max_retries": max_retries,
-            "result_ttl": result_ttl, "failure_ttl": failure_ttl,
-        }))
-        jid = job_id or f"job-{len(self.calls)}"
-        self._statuses.setdefault(
-            jid, JobStatus(id=jid, status="queued", result=None, error=None)
+    def enqueue(
+        self,
+        func_path,
+        payload,
+        *,
+        job_id=None,
+        timeout=None,
+        max_retries=0,
+        result_ttl=None,
+        failure_ttl=None,
+    ):
+        self.calls.append(
+            (
+                func_path,
+                payload,
+                {
+                    "job_id": job_id,
+                    "timeout": timeout,
+                    "max_retries": max_retries,
+                    "result_ttl": result_ttl,
+                    "failure_ttl": failure_ttl,
+                },
+            )
         )
+        jid = job_id or f"job-{len(self.calls)}"
+        self._statuses.setdefault(jid, JobStatus(id=jid, status="queued", result=None, error=None))
         return jid
 
     def get(self, job_id):
@@ -82,9 +98,7 @@ def config(db_path, upload_root, tmp_path):
 
 
 def make_client(config, queue):
-    app = create_app(
-        config, provider=MockProvider(), queue=queue, faq_cache=FAQCache.empty()
-    )
+    app = create_app(config, provider=MockProvider(), queue=queue, faq_cache=FAQCache.empty())
     return TestClient(app)
 
 
@@ -125,10 +139,16 @@ def test_submit_structured_job_passes_options(config, upload_root):
     queue = RecordingQueue()
     client = make_client(config, queue)
     file = _make_file(upload_root, "deck.pptx")
-    resp = client.post("/v1/ingest/structured/jobs", json={
-        "file": file, "dry_run": True, "valid_as_of": "2026-03-31",
-        "batch_id": "B1", "job_id": "myjob",
-    })
+    resp = client.post(
+        "/v1/ingest/structured/jobs",
+        json={
+            "file": file,
+            "dry_run": True,
+            "valid_as_of": "2026-03-31",
+            "batch_id": "B1",
+            "job_id": "myjob",
+        },
+    )
     assert resp.status_code == 200
     assert resp.json()["job_id"] == "myjob"
     _, payload, kwargs = queue.calls[0]
@@ -191,9 +211,14 @@ def test_submit_narrative_job_passes_meta(config, upload_root):
     client = make_client(config, queue)
     file = _make_file(upload_root, "report.pptx")
     meta = {"report.pptx": {"topic": "regulatory"}}
-    resp = client.post("/v1/ingest/narrative/jobs", json={
-        "inputs": [file], "dry_run": True, "meta_by_doc": meta,
-    })
+    resp = client.post(
+        "/v1/ingest/narrative/jobs",
+        json={
+            "inputs": [file],
+            "dry_run": True,
+            "meta_by_doc": meta,
+        },
+    )
     assert resp.status_code == 200
     _, payload, _ = queue.calls[0]
     assert payload["dry_run"] is True
@@ -205,10 +230,13 @@ def test_submit_narrative_job_passes_meta(config, upload_root):
 # ---------------------------------------------------------------------------
 def test_get_job_status_returns_stored(config):
     queue = RecordingQueue()
-    queue.set_status(JobStatus(
-        id="abc", status=JOB_FINISHED,
-        result={"status": "ok", "facts": 3, "warnings": []},
-    ))
+    queue.set_status(
+        JobStatus(
+            id="abc",
+            status=JOB_FINISHED,
+            result={"status": "ok", "facts": 3, "warnings": []},
+        )
+    )
     client = make_client(config, queue)
     resp = client.get("/v1/jobs/abc")
     assert resp.status_code == 200
@@ -221,11 +249,13 @@ def test_get_job_status_returns_stored(config):
 
 def test_get_job_status_failed(config):
     queue = RecordingQueue()
-    queue.set_status(JobStatus(
-        id="bad", status="failed",
-        error={"type": "JobError", "message": "boom", "stage": "execution",
-               "retryable": False},
-    ))
+    queue.set_status(
+        JobStatus(
+            id="bad",
+            status="failed",
+            error={"type": "JobError", "message": "boom", "stage": "execution", "retryable": False},
+        )
+    )
     client = make_client(config, queue)
     body = client.get("/v1/jobs/bad").json()
     assert body["status"] == "failed"

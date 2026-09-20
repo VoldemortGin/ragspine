@@ -97,17 +97,21 @@ def extract_pptx_narrative(path: str | Path) -> NarrativeDoc:
             if not text:
                 continue
             frame_no += 1
-            doc.segments.append(NarrativeSegment(
-                text=text,
-                source_locator=f"slide={slide_no},frame={frame_no}",
-            ))
+            doc.segments.append(
+                NarrativeSegment(
+                    text=text,
+                    source_locator=f"slide={slide_no},frame={frame_no}",
+                )
+            )
         if slide.has_notes_slide:
             notes = _clean_block(slide.notes_slide.notes_text_frame.text)
             if notes:
-                doc.segments.append(NarrativeSegment(
-                    text=notes,
-                    source_locator=f"slide={slide_no},notes",
-                ))
+                doc.segments.append(
+                    NarrativeSegment(
+                        text=notes,
+                        source_locator=f"slide={slide_no},notes",
+                    )
+                )
     return doc
 
 
@@ -133,15 +137,15 @@ def extract_pdf_narrative(path: str | Path) -> NarrativeDoc:
                 page.close()
             text = _clean_block(raw)
             if text:
-                doc.segments.append(NarrativeSegment(
-                    text=text,
-                    source_locator=f"page={idx + 1}",
-                ))
+                doc.segments.append(
+                    NarrativeSegment(
+                        text=text,
+                        source_locator=f"page={idx + 1}",
+                    )
+                )
             else:
                 doc.skipped_pages += 1
-                doc.warnings.append(
-                    f"page={idx + 1}: 无文本层，跳过（扫描页归 OCR 线处理）"
-                )
+                doc.warnings.append(f"page={idx + 1}: 无文本层，跳过（扫描页归 OCR 线处理）")
     finally:
         pdf.close()
     return doc
@@ -169,10 +173,12 @@ def extract_docx_narrative(path: str | Path) -> NarrativeDoc:
         if not text:
             continue
         para_no += 1
-        doc.segments.append(NarrativeSegment(
-            text=text,
-            source_locator=f"para={para_no}",
-        ))
+        doc.segments.append(
+            NarrativeSegment(
+                text=text,
+                source_locator=f"para={para_no}",
+            )
+        )
     return doc
 
 
@@ -193,10 +199,12 @@ def extract_txt_narrative(path: str | Path) -> NarrativeDoc:
         if not text:
             continue
         para_no += 1
-        doc.segments.append(NarrativeSegment(
-            text=text,
-            source_locator=f"para={para_no}",
-        ))
+        doc.segments.append(
+            NarrativeSegment(
+                text=text,
+                source_locator=f"para={para_no}",
+            )
+        )
     return doc
 
 
@@ -212,6 +220,4 @@ def extract_narrative(path: str | Path) -> NarrativeDoc:
         return extract_docx_narrative(path)
     if suffix == ".txt":
         return extract_txt_narrative(path)
-    raise ValueError(
-        f"不支持的叙事来源类型：{path.name}（仅 .pptx / .pdf / .docx / .txt）"
-    )
+    raise ValueError(f"不支持的叙事来源类型：{path.name}（仅 .pptx / .pdf / .docx / .txt）")

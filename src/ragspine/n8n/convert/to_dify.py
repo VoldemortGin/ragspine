@@ -40,9 +40,7 @@ def convert_to_dify(workflow: N8nWorkflow) -> tuple[dict[str, Any], list[str]]:
     """把校验过的 N8nWorkflow 转换为 Dify DSL dict。返回 (dify dict, warnings)。"""
     warnings: list[str] = []
     nodes_by_name: dict[str, N8nNode] = {node.name: node for node in workflow.nodes}
-    raw_by_name: dict[str, dict[str, Any]] = {
-        node.name: node.to_raw() for node in workflow.nodes
-    }
+    raw_by_name: dict[str, dict[str, Any]] = {node.name: node.to_raw() for node in workflow.nodes}
 
     # 1. connections 摊平：主链边 (source, 端口, target) + 非 main 的 attachment 归并表。
     main_edges: list[tuple[str, int, str]] = []
@@ -67,7 +65,8 @@ def convert_to_dify(workflow: N8nWorkflow) -> tuple[dict[str, Any], list[str]]:
 
     # 2. noOp splice：剔除节点，上游（保端口）直连下游。
     main_nodes = [
-        node for node in workflow.nodes
+        node
+        for node in workflow.nodes
         if node.name not in attached_names and node.type != NOOP_TYPE
     ]
     for node in workflow.nodes:
@@ -81,9 +80,7 @@ def convert_to_dify(workflow: N8nWorkflow) -> tuple[dict[str, Any], list[str]]:
     for index, node in enumerate(main_nodes):
         name_to_id[node.name] = _assign_id(node, index, used_ids)
     dify_type_by_name = {node.name: _dify_type(node.type) for node in main_nodes}
-    llm_ids = {
-        name_to_id[name] for name, dtype in dify_type_by_name.items() if dtype == "llm"
-    }
+    llm_ids = {name_to_id[name] for name, dtype in dify_type_by_name.items() if dtype == "llm"}
 
     # 每个节点的唯一主链上游（$json 引用解析用）。
     incoming: dict[str, set[str]] = {}
@@ -105,24 +102,33 @@ def convert_to_dify(workflow: N8nWorkflow) -> tuple[dict[str, Any], list[str]]:
         )
         n8n_raw = dict(raw_by_name[node.name])
         _merge_attachments(
-            data, n8n_raw, node, attachments.get(node.name, []),
-            nodes_by_name=nodes_by_name, raw_by_name=raw_by_name, warnings=warnings,
+            data,
+            n8n_raw,
+            node,
+            attachments.get(node.name, []),
+            nodes_by_name=nodes_by_name,
+            raw_by_name=raw_by_name,
+            warnings=warnings,
         )
         data["_n8n"] = n8n_raw
-        dify_nodes.append({
-            "id": name_to_id[node.name],
-            "position": _position(node, index),
-            "data": data,
-        })
+        dify_nodes.append(
+            {
+                "id": name_to_id[node.name],
+                "position": _position(node, index),
+                "data": data,
+            }
+        )
 
     # 5. 边（sourceHandle：if 端口 0/1 → true/false；switch 端口 i → branch_i）。
     dify_edges: list[dict[str, Any]] = []
     for source_name, port, target_name in main_edges:
-        dify_edges.append({
-            "source": name_to_id[source_name],
-            "target": name_to_id[target_name],
-            "sourceHandle": _source_handle(nodes_by_name[source_name].type, port),
-        })
+        dify_edges.append(
+            {
+                "source": name_to_id[source_name],
+                "target": name_to_id[target_name],
+                "sourceHandle": _source_handle(nodes_by_name[source_name].type, port),
+            }
+        )
 
     # 6. 无 trigger 合成 start；终端接合成 end。
     _add_synthetic_start(dify_nodes, dify_edges, used_ids, warnings)
@@ -147,9 +153,7 @@ def convert_to_dify(workflow: N8nWorkflow) -> tuple[dict[str, Any], list[str]]:
 # ---------------------------------------------------------------------------
 
 
-def _splice_out(
-    edges: list[tuple[str, int, str]], name: str
-) -> list[tuple[str, int, str]]:
+def _splice_out(edges: list[tuple[str, int, str]], name: str) -> list[tuple[str, int, str]]:
     """把 name 从边表中剔除：每条入边 ×（每条出边的 target）直连，保留入边端口。"""
     incoming = [(s, p) for (s, p, t) in edges if t == name]
     outgoing_targets = [t for (s, _p, t) in edges if s == name]
@@ -219,17 +223,13 @@ def _build_data(
     elif dify_type == "llm":
         _fill_llm(data, node, upstream_id, name_to_id, llm_ids, warnings)
     elif dify_type == "if-else":
-        data["cases"] = _convert_if_cases(
-            node, params, upstream_id, name_to_id, llm_ids, warnings
-        )
+        data["cases"] = _convert_if_cases(node, params, upstream_id, name_to_id, llm_ids, warnings)
     elif dify_type == "question-classifier":
         data["classes"] = _convert_switch_classes(node, params, warnings)
     elif dify_type == "code":
         _fill_code(data, node, params, warnings)
     elif dify_type == "template-transform":
-        _fill_template_transform(
-            data, node, params, upstream_id, name_to_id, llm_ids, warnings
-        )
+        _fill_template_transform(data, node, params, upstream_id, name_to_id, llm_ids, warnings)
     else:  # n8n-passthrough
         warnings.append(
             f"未知 n8n 节点类型 {node.type!r}（{node.name!r}），"
@@ -269,10 +269,12 @@ def _fill_llm(
             if not isinstance(message, dict):
                 continue
             text = message.get("content") or message.get("message") or ""
-            prompt.append({
-                "role": str(message.get("role", "user") or "user"),
-                "text": _convert(text),
-            })
+            prompt.append(
+                {
+                    "role": str(message.get("role", "user") or "user"),
+                    "text": _convert(text),
+                }
+            )
     elif node.type.startswith(LMCHAT_PREFIX):
         # lmChat 独立出现：只有 model 信息。
         data["model"] = {
@@ -308,13 +310,16 @@ def _convert_if_cases(
             continue
         left_value = condition.get("leftValue")
         selector = n8n_expr_to_selector(
-            left_value, upstream_id=upstream_id, name_to_id=name_to_id,
+            left_value,
+            upstream_id=upstream_id,
+            name_to_id=name_to_id,
             llm_node_ids=llm_ids,
         )
         operator = condition.get("operator")
         operation = (
             str(operator.get("operation", "equals") or "equals")
-            if isinstance(operator, dict) else "equals"
+            if isinstance(operator, dict)
+            else "equals"
         )
         dify_operator = N8N_TO_DIFY_OPERATOR.get(operation)
         if dify_operator is None:
@@ -332,15 +337,16 @@ def _convert_if_cases(
         else:
             entry["variable_selector"] = left_value  # 保留 Literal
             warnings.append(
-                f"if 节点 {node.name!r} 的 leftValue 无法解析为变量引用，"
-                f"保留字面量：{left_value!r}"
+                f"if 节点 {node.name!r} 的 leftValue 无法解析为变量引用，保留字面量：{left_value!r}"
             )
         conditions_out.append(entry)
-    return [{
-        "case_id": "true",
-        "logical_operator": str(config.get("combinator", "and") or "and"),
-        "conditions": conditions_out,
-    }]
+    return [
+        {
+            "case_id": "true",
+            "logical_operator": str(config.get("combinator", "and") or "and"),
+            "conditions": conditions_out,
+        }
+    ]
 
 
 def _convert_switch_classes(
@@ -360,9 +366,7 @@ def _convert_switch_classes(
             if not label:
                 label = str(rule.get("conditions", "") or "")[:40]
         classes.append({"id": f"branch_{index}", "name": label or f"branch_{index}"})
-    warnings.append(
-        f"switch 节点 {node.name!r} 近似映射为 question-classifier，分支语义可能有出入"
-    )
+    warnings.append(f"switch 节点 {node.name!r} 近似映射为 question-classifier，分支语义可能有出入")
     return classes
 
 
@@ -396,7 +400,9 @@ def _fill_template_transform(
     for assign_name, value in assignments:
         if isinstance(value, str) and value.startswith("="):
             selector = n8n_expr_to_selector(
-                value, upstream_id=upstream_id, name_to_id=name_to_id,
+                value,
+                upstream_id=upstream_id,
+                name_to_id=name_to_id,
                 llm_node_ids=llm_ids,
             )
             if selector is not None:
@@ -516,12 +522,19 @@ def _add_synthetic_start(
     start_id = _fresh_id("start", used_ids)
     has_incoming = {edge["target"] for edge in edges}
     roots = [node["id"] for node in nodes if node["id"] not in has_incoming]
-    nodes.insert(0, {
-        "id": start_id,
-        "position": {"x": -220, "y": 0},
-        "data": {"type": "start", "title": "Start", "variables": [],
-                 "_n8n": {"synthetic": True}},
-    })
+    nodes.insert(
+        0,
+        {
+            "id": start_id,
+            "position": {"x": -220, "y": 0},
+            "data": {
+                "type": "start",
+                "title": "Start",
+                "variables": [],
+                "_n8n": {"synthetic": True},
+            },
+        },
+    )
     for root in roots:
         edges.append({"source": start_id, "target": root, "sourceHandle": "source"})
     warnings.append("工作流缺少 trigger 节点，已合成 start 节点")
@@ -532,7 +545,8 @@ def _add_synthetic_end(
 ) -> None:
     has_outgoing = {edge["source"] for edge in edges}
     terminals = [
-        node for node in nodes
+        node
+        for node in nodes
         if node["id"] not in has_outgoing and node["data"].get("type") != "start"
     ]
     if not terminals:
@@ -548,12 +562,18 @@ def _add_synthetic_end(
         }
         for terminal in terminals
     ]
-    nodes.append({
-        "id": end_id,
-        "position": {"x": 0, "y": 0},
-        "data": {"type": "end", "title": "End", "outputs": outputs,
-                 "_n8n": {"synthetic": True}},
-    })
+    nodes.append(
+        {
+            "id": end_id,
+            "position": {"x": 0, "y": 0},
+            "data": {
+                "type": "end",
+                "title": "End",
+                "outputs": outputs,
+                "_n8n": {"synthetic": True},
+            },
+        }
+    )
     for terminal in terminals:
         edges.append({"source": terminal["id"], "target": end_id, "sourceHandle": "source"})
 
@@ -581,21 +601,20 @@ def _declare_start_variables(doc: dict[str, Any], nodes: list[dict[str, Any]]) -
             continue
         variables = node["data"].setdefault("variables", [])
         existing = {
-            str(variable.get("variable"))
-            for variable in variables if isinstance(variable, dict)
+            str(variable.get("variable")) for variable in variables if isinstance(variable, dict)
         }
         for field in sorted(fields - existing):
-            variables.append({
-                "variable": field,
-                "label": field,
-                "type": "text-input",
-                "required": False,
-            })
+            variables.append(
+                {
+                    "variable": field,
+                    "label": field,
+                    "type": "text-input",
+                    "required": False,
+                }
+            )
 
 
-def _collect_start_refs(
-    obj: object, start_ids: set[str], referenced: dict[str, set[str]]
-) -> None:
+def _collect_start_refs(obj: object, start_ids: set[str], referenced: dict[str, set[str]]) -> None:
     if isinstance(obj, dict):
         for key, value in obj.items():
             if key == "_n8n":

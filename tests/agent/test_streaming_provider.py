@@ -30,7 +30,9 @@ class _ChatOnlyStub:
 
 
 def _narrative_messages() -> list[dict[str, object]]:
-    return [{"role": "user", "content": f"{NARRATIVE_PROMPT_PREFIX}香港REVENUE同比增长因产品组合改善。"}]
+    return [
+        {"role": "user", "content": f"{NARRATIVE_PROMPT_PREFIX}香港REVENUE同比增长因产品组合改善。"}
+    ]
 
 
 def test_mockprovider_is_streaming_provider():

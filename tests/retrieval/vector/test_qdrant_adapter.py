@@ -110,6 +110,7 @@ def test_factory_resolves_qdrant():
 # Native ANN/KNN：native HNSW search 收窄候选池 + 精确重排（大库满足 recall@k 下限）
 # ===========================================================================
 
+
 def test_native_search_pool_narrows_with_recall_floor():
     """大库（count > pool_ceiling）触发 native HNSW search 收窄候选池（limit=pool），精确重排后满足 recall@k 下限。
 

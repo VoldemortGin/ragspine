@@ -242,9 +242,9 @@ def test_run_eval_accepts_list_ground_truth(ground_truth):
 def test_run_eval_multiple_errors_across_channels(ground_truth):
     """story #34：三通道各注入 1 处错误，互不串台、各自扣 1。"""
     facts = _perfect_facts(ground_truth)
-    _locate(facts, "HK_Performance", "D2")["value"] = -1.0            # cell_value
-    _locate(facts, "HK_Performance", "B4")["tags"] = {}              # color_mapping
-    _locate(facts, "MergedHeader", "A2")["merge_span"] = [1, 6]      # header_attribution
+    _locate(facts, "HK_Performance", "D2")["value"] = -1.0  # cell_value
+    _locate(facts, "HK_Performance", "B4")["tags"] = {}  # color_mapping
+    _locate(facts, "MergedHeader", "A2")["merge_span"] = [1, 6]  # header_attribution
 
     report = run_eval(facts, ground_truth)
     for name in CHANNELS:
@@ -330,7 +330,9 @@ def test_compare_to_baseline_regression_detail_for_failing_channel(ground_truth)
 def test_compare_to_baseline_only_checks_channels_in_baseline(ground_truth):
     """story #21：基线只列出部分通道时，未列出的通道不参与门禁判定。"""
     facts = _perfect_facts(ground_truth)
-    _locate(facts, "HK_Performance", "B2")["tags"] = {"product_line": "mature"}  # 只伤 color_mapping
+    _locate(facts, "HK_Performance", "B2")["tags"] = {
+        "product_line": "mature"
+    }  # 只伤 color_mapping
     report = run_eval(facts, ground_truth)
 
     # 基线只关心 cell_value（仍 1.0），color_mapping 不在门禁内 -> 通过
@@ -342,8 +344,8 @@ def test_compare_to_baseline_only_checks_channels_in_baseline(ground_truth):
 def test_compare_to_baseline_multiple_regressions(ground_truth):
     """story #21：多个通道同时低于基线，退化明细逐通道列出。"""
     facts = _perfect_facts(ground_truth)
-    _locate(facts, "HK_Performance", "B2")["value"] = 0.0                # cell_value
-    _locate(facts, "HK_Performance", "B3")["tags"] = {}                 # color_mapping
+    _locate(facts, "HK_Performance", "B2")["value"] = 0.0  # cell_value
+    _locate(facts, "HK_Performance", "B3")["tags"] = {}  # color_mapping
     report = run_eval(facts, ground_truth)
     baseline = {name: 1.0 for name in CHANNELS}
 

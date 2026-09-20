@@ -36,8 +36,8 @@ def test_compression_denoises_into_prompt_text_only():
     s = out[0]
     assert PROMPT_TEXT_KEY in s
     compressed = str(s[PROMPT_TEXT_KEY])
-    assert "MCV" in compressed           # 相关句保留
-    assert "团建" not in compressed       # 噪声句被裁掉
+    assert "MCV" in compressed  # 相关句保留
+    assert "团建" not in compressed  # 噪声句被裁掉
     assert len(compressed) < len(RELEVANT_SENT + NOISE_SENT)
 
 
@@ -46,7 +46,7 @@ def test_compression_never_touches_provenance_fields():
     original = _snip()
     out = CompressionPostprocessor(threshold=0.3).postprocess(QUERY, [original])
     s = out[0]
-    assert s["text"] == RELEVANT_SENT + NOISE_SENT   # 原文 citable 文本不变
+    assert s["text"] == RELEVANT_SENT + NOISE_SENT  # 原文 citable 文本不变
     assert s["source_locator"] == "slide-3"
     assert s["doc_id"] == "HK_QBR.pptx"
     assert s["chunk_id"] == "c1"

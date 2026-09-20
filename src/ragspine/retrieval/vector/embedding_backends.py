@@ -94,9 +94,7 @@ def _select_torch_device(
     if explicit is not None:
         device = explicit.strip().lower()
         if device not in _VALID_DEVICES:
-            raise ValueError(
-                f"非法设备 {explicit!r}（只接受 {'/'.join(_VALID_DEVICES)}）"
-            )
+            raise ValueError(f"非法设备 {explicit!r}（只接受 {'/'.join(_VALID_DEVICES)}）")
         return device
 
     if cuda_available is None or mps_available is None:
@@ -342,7 +340,9 @@ class OnnxEmbeddingBackend:
             return []
 
         model = self._load_model()
-        vectors = [[float(x) for x in row] for row in model.embed(list(texts), batch_size=self.batch_size)]
+        vectors = [
+            [float(x) for x in row] for row in model.embed(list(texts), batch_size=self.batch_size)
+        ]
         if len(vectors) != len(texts):
             raise RuntimeError(
                 f"embedding 返回条数 {len(vectors)} 与请求条数 {len(texts)} 不一致"

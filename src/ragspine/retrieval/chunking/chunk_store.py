@@ -126,9 +126,7 @@ class ChunkStore:
                     f"ALTER TABLE narrative_chunk ADD COLUMN {col} TEXT NOT NULL DEFAULT ''"
                 )
 
-    def replace_doc_chunks(
-        self, doc_id: str, chunks: list[Chunk], valid_as_of: str = ""
-    ) -> int:
+    def replace_doc_chunks(self, doc_id: str, chunks: list[Chunk], valid_as_of: str = "") -> int:
         """同一文档的块整体替换入库（幂等重入）。
 
         旧活跃版本置 inactive，新块以 version=旧最大+1、active=1 写入；
@@ -156,11 +154,27 @@ class ChunkStore:
             """,
             [
                 (
-                    c.chunk_id, c.doc_id, c.seq, c.text, c.source_locator,
-                    c.para_start, c.para_end, c.title, c.topic, c.entity,
-                    c.geography, c.period, c.language, c.sensitivity,
-                    c.parent_id, c.heading, c.window_text, c.parent_locator,
-                    valid_as_of, ingested_at, version,
+                    c.chunk_id,
+                    c.doc_id,
+                    c.seq,
+                    c.text,
+                    c.source_locator,
+                    c.para_start,
+                    c.para_end,
+                    c.title,
+                    c.topic,
+                    c.entity,
+                    c.geography,
+                    c.period,
+                    c.language,
+                    c.sensitivity,
+                    c.parent_id,
+                    c.heading,
+                    c.window_text,
+                    c.parent_locator,
+                    valid_as_of,
+                    ingested_at,
+                    version,
                 )
                 for c in chunks
             ],

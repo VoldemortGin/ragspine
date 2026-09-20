@@ -36,9 +36,7 @@ def _make_client(tmp_path, *, run_enabled=False, provider=None):
         db_path=str(tmp_path / "fact.db"),
         dify_run_enabled=run_enabled,
     )
-    app = create_app(
-        config, provider=provider or MockProvider(), queue=FakeQueue()
-    )
+    app = create_app(config, provider=provider or MockProvider(), queue=FakeQueue())
     return TestClient(app)
 
 
@@ -72,9 +70,7 @@ def test_n8n_convert_to_dify_returns_workflow_and_yaml(client):
 
 def test_n8n_convert_accepts_json_string_workflow(client):
     text = (N8N_FIXTURES / "linear.json").read_text(encoding="utf-8")
-    resp = client.post(
-        "/v1/n8n/convert", json={"direction": "n8n_to_dify", "workflow": text}
-    )
+    resp = client.post("/v1/n8n/convert", json={"direction": "n8n_to_dify", "workflow": text})
     assert resp.status_code == 200
     assert resp.json()["workflow"]["app"]["mode"] == "workflow"
 
@@ -146,7 +142,10 @@ def test_n8n_run_linear_when_enabled(tmp_path):
     traces = body["node_traces"]
     assert isinstance(traces, list)
     assert [t["node_id"] for t in traces] == [
-        "when_clicking_execute_workflow", "ai_agent", "format_output", "end_1",
+        "when_clicking_execute_workflow",
+        "ai_agent",
+        "format_output",
+        "end_1",
     ]
 
 
@@ -172,17 +171,13 @@ def test_n8n_run_provider_from_server_not_client(tmp_path):
 def test_n8n_run_unknown_node_rejected_by_static_gate(tmp_path):
     # unknown.json 的 httpRequest → n8n-passthrough → 编译骨架 + warning → L0 闸 422。
     client = _make_client(tmp_path, run_enabled=True)
-    resp = client.post(
-        "/v1/n8n/run", json={"workflow": _n8n_fixture("unknown"), "inputs": {}}
-    )
+    resp = client.post("/v1/n8n/run", json={"workflow": _n8n_fixture("unknown"), "inputs": {}})
     assert resp.status_code == 422
     assert resp.json()["error"]["type"] == "dify.unsafe"
 
 
 def test_n8n_run_convert_error_is_400(tmp_path):
     client = _make_client(tmp_path, run_enabled=True)
-    resp = client.post(
-        "/v1/n8n/run", json={"workflow": {"foo": "bar"}, "inputs": {}}
-    )
+    resp = client.post("/v1/n8n/run", json={"workflow": {"foo": "bar"}, "inputs": {}})
     assert resp.status_code == 400
     assert resp.json()["error"]["type"] == "n8n.convert"

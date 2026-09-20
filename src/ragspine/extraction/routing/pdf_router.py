@@ -19,25 +19,25 @@ import pypdfium2.raw as pdfium_raw
 from ragspine.extraction.extractors.xlsx_styled_extractor import compute_file_hash
 
 # 逐页判定阈值（沿用 scripts/classify_pdfs.py，库化前后规则一致）。
-TEXT_MIN_CHARS = 50      # 每页判定「有实质文本」的最少字符数（中文按字符计）。
-IMG_COVER_SCAN = 0.55    # 图片覆盖率超过此值视为「扫描底图」。
+TEXT_MIN_CHARS = 50  # 每页判定「有实质文本」的最少字符数（中文按字符计）。
+IMG_COVER_SCAN = 0.55  # 图片覆盖率超过此值视为「扫描底图」。
 
 # 逐页类别取值（与 scripts/classify_pdfs.py 一致）。
-PAGE_DIGITAL = "digital"       # 文本多 + 覆盖低：电子导出页，可程序化解析。
-PAGE_OCR_SCAN = "ocr_scan"     # 文本多 + 覆盖高：扫描底图 + 文本层（多半被 OCR 过）。
-PAGE_IMG_SCAN = "img_scan"     # 文本少 + 覆盖高：纯扫描 / 图片页（需 OCR）。
-PAGE_LOW_TEXT = "low_text"     # 文本少 + 覆盖低：封面 / 纯矢量图表页。
+PAGE_DIGITAL = "digital"  # 文本多 + 覆盖低：电子导出页，可程序化解析。
+PAGE_OCR_SCAN = "ocr_scan"  # 文本多 + 覆盖高：扫描底图 + 文本层（多半被 OCR 过）。
+PAGE_IMG_SCAN = "img_scan"  # 文本少 + 覆盖高：纯扫描 / 图片页（需 OCR）。
+PAGE_LOW_TEXT = "low_text"  # 文本少 + 覆盖低：封面 / 纯矢量图表页。
 
 # 整文件 verdict 取值。
-VERDICT_DIGITAL = "digital"        # 数字型（可程序化解析）。
-VERDICT_SCANNED = "scanned"        # 扫描型（需 OCR 管线）。
-VERDICT_OCR_SCAN = "ocr_scan"      # OCR 过的扫描件（文本层质量存疑）。
-VERDICT_MIXED = "mixed"            # 混合型（需逐页分流）。
+VERDICT_DIGITAL = "digital"  # 数字型（可程序化解析）。
+VERDICT_SCANNED = "scanned"  # 扫描型（需 OCR 管线）。
+VERDICT_OCR_SCAN = "ocr_scan"  # OCR 过的扫描件（文本层质量存疑）。
+VERDICT_MIXED = "mixed"  # 混合型（需逐页分流）。
 VERDICT_UNREADABLE = "unreadable"  # 加密 / 损坏 / 读取失败。
 
 # 逐页路由目标管线名（channel_plan 的取值）。
-PIPELINE_DIGITAL = "digital_extractor"   # 数字型页 -> Docling 数字管线。
-PIPELINE_SCANNED = "scanned_extractor"   # 扫描 / OCR 页 -> 扫描 OCR 管线。
+PIPELINE_DIGITAL = "digital_extractor"  # 数字型页 -> Docling 数字管线。
+PIPELINE_SCANNED = "scanned_extractor"  # 扫描 / OCR 页 -> 扫描 OCR 管线。
 
 # PowerPoint / Keynote / Impress 导出检测的生产者关键字（PRD「原生优先」）。
 _EXPORT_PRODUCER_KEYWORDS = ("PowerPoint", "Keynote", "Impress")
@@ -180,15 +180,11 @@ def route(path: str | Path) -> RoutingDecision:
         meta = doc.get_metadata_dict() or {}
         origin = f"{meta.get('Creator', '')} {meta.get('Producer', '')}".strip()
         decision.origin_meta = origin
-        decision.ask_for_pptx = any(
-            kw in origin for kw in _EXPORT_PRODUCER_KEYWORDS
-        )
+        decision.ask_for_pptx = any(kw in origin for kw in _EXPORT_PRODUCER_KEYWORDS)
 
         decision.verdict = _aggregate_verdict(pages)
         if decision.verdict == VERDICT_MIXED:
-            decision.channel_plan = {
-                p.page_no: _pipeline_for_kind(p.kind) for p in pages
-            }
+            decision.channel_plan = {p.page_no: _pipeline_for_kind(p.kind) for p in pages}
     except Exception as e:  # 读取过程中的任何异常都降级为 unreadable
         decision.verdict = VERDICT_UNREADABLE
         decision.error = str(e)
@@ -209,9 +205,9 @@ def _pipeline_for_kind(kind: str) -> str:
 def _aggregate_verdict(pages: list[PageInfo]) -> str:
     """逐页 kind 汇总为整文件 verdict（阈值沿用 scripts/classify_pdfs.py 的 0.9*n）。
 
-        绝大多数页为 digital                -> 'digital'
-        绝大多数页为扫描（img_scan/ocr_scan）-> 'scanned'（img 占多）或 'ocr_scan'
-        数字 / 扫描混杂                      -> 'mixed'
+    绝大多数页为 digital                -> 'digital'
+    绝大多数页为扫描（img_scan/ocr_scan）-> 'scanned'（img 占多）或 'ocr_scan'
+    数字 / 扫描混杂                      -> 'mixed'
     """
     n = len(pages) or 1
     counts = {
@@ -223,8 +219,6 @@ def _aggregate_verdict(pages: list[PageInfo]) -> str:
         return VERDICT_DIGITAL
     if counts[PAGE_IMG_SCAN] + counts[PAGE_OCR_SCAN] >= 0.9 * n:
         return (
-            VERDICT_SCANNED
-            if counts[PAGE_IMG_SCAN] >= counts[PAGE_OCR_SCAN]
-            else VERDICT_OCR_SCAN
+            VERDICT_SCANNED if counts[PAGE_IMG_SCAN] >= counts[PAGE_OCR_SCAN] else VERDICT_OCR_SCAN
         )
     return VERDICT_MIXED

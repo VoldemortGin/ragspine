@@ -141,9 +141,7 @@ def spineagent_stub() -> Iterator[types.ModuleType]:
         def __init__(self, agents: list[FunctionCallingAgent], *, trace: Any = None) -> None:
             self.agents = agents
 
-        def run_sequential(
-            self, task: str, *, resilient: bool = False
-        ) -> list[AgentResult]:
+        def run_sequential(self, task: str, *, resilient: bool = False) -> list[AgentResult]:
             return [a.step(task) for a in self.agents]
 
     module = types.ModuleType("spineagent")
@@ -183,9 +181,9 @@ def test_knowledge_retrieval_generates_real_retriever(
     assert ".retrieve(" in src
     assert "top_k=3" in src
     assert 'KNOWLEDGE_CHUNK_DB = ":memory:"' in src
-    assert any(
-        "build_narrative_retriever" in imp for imp in code.imports
-    ), "build_narrative_retriever 的 import 应被收集进 code.imports"
+    assert any("build_narrative_retriever" in imp for imp in code.imports), (
+        "build_narrative_retriever 的 import 应被收集进 code.imports"
+    )
 
 
 def test_knowledge_retrieval_source_is_valid_python(
@@ -205,9 +203,7 @@ def test_knowledge_retrieval_runs_offline_no_file_side_effect(
     """exec 后 run_workflow 离线跑通（':memory:' 空库无果亦不崩），且不落任何 .sqlite。"""
     monkeypatch.chdir(tmp_path)
     ns = _exec(_compile(fixture_text, "knowledge").code.source)
-    out = ns["run_workflow"](
-        ns["Inputs"](question="香港REVENUE多少"), provider=MockProvider()
-    )
+    out = ns["run_workflow"](ns["Inputs"](question="香港REVENUE多少"), provider=MockProvider())
     assert isinstance(out, dict)
     assert "answer" in out
     assert _no_sqlite_in(tmp_path), "':memory:' 库不应在 CWD 落任何 .sqlite 文件"
@@ -240,9 +236,7 @@ def test_parameter_extractor_handles_no_tool_calls(
     """MockProvider 对抽取工具不发 tool_calls → 参数抽取分支回退空 dict，run_workflow 不崩。"""
     monkeypatch.chdir(tmp_path)
     ns = _exec(_compile(fixture_text, "knowledge").code.source)
-    out = ns["run_workflow"](
-        ns["Inputs"](question="香港REVENUE多少"), provider=MockProvider()
-    )
+    out = ns["run_workflow"](ns["Inputs"](question="香港REVENUE多少"), provider=MockProvider())
     assert isinstance(out, dict)
     assert "answer" in out
 
@@ -303,9 +297,7 @@ def test_fold_runs_offline(
     """exec 折叠代码离线跑通：answer_question 返回非空 answer 字符串，且不落 .sqlite。"""
     monkeypatch.chdir(tmp_path)
     ns = _exec(_compile(fixture_text, "qa_fold").code.source)
-    out = ns["run_workflow"](
-        ns["Inputs"](question="香港REVENUE多少"), provider=MockProvider()
-    )
+    out = ns["run_workflow"](ns["Inputs"](question="香港REVENUE多少"), provider=MockProvider())
     assert isinstance(out, dict)
     assert "answer" in out
     assert isinstance(out["answer"], str)

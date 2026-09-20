@@ -9,7 +9,6 @@ StyledGrid / StyledCell 直接用 dataclass 构造器从 ground truth 装配—�
 因此本文件期望「收集成功、全部 FAIL」。
 """
 
-import json
 import os
 
 import pytest
@@ -65,7 +64,9 @@ def transposed_grid(ground_truth) -> StyledGrid:
     return _build_grid(ground_truth, "Transposed")
 
 
-def _legend_to_mapping(ground_truth, sheet: str, scope: str, *, status: str = "draft") -> ColorMapping:
+def _legend_to_mapping(
+    ground_truth, sheet: str, scope: str, *, status: str = "draft"
+) -> ColorMapping:
     """把某 sheet 的 legend_expect 真值组装成一份 ColorMapping（用于 apply / 注册表测试）。"""
     entries = [
         LegendEntry(
@@ -83,6 +84,7 @@ def _legend_to_mapping(ground_truth, sheet: str, scope: str, *, status: str = "d
 # ----------------------------------------------------------------------------
 # story #6 —— 同色单元格聚类 / 颜色分组报告
 # ----------------------------------------------------------------------------
+
 
 def test_cluster_colors_groups_match_ground_truth(hk_grid, ground_truth):
     """story #6 同色聚类的分组（rgb→cell_refs）必须与 ground truth 颜色组逐一吻合。"""
@@ -133,6 +135,7 @@ def test_cluster_colors_empty_when_no_fill(transposed_grid):
 # story #7 —— 图例区识别 → 颜色→含义映射草案
 # ----------------------------------------------------------------------------
 
+
 def test_detect_legend_finds_both_entries(hk_grid, ground_truth):
     """story #7 右侧图例区（色块格+文字格）应解出两条「颜色→含义」草案。"""
     entries = detect_legend(hk_grid)
@@ -144,7 +147,9 @@ def test_detect_legend_maps_rgb_to_meaning(hk_grid, ground_truth):
     """story #7 草案须正确绑定 swatch 真实 RGB 与相邻文字含义（黄→新/绿→成熟）。"""
     entries = detect_legend(hk_grid)
     got = {e.rgb: e.meaning for e in entries}
-    expected = {e["rgb"]: e["meaning"] for e in ground_truth["sheets"]["HK_Performance"]["legend_expect"]}
+    expected = {
+        e["rgb"]: e["meaning"] for e in ground_truth["sheets"]["HK_Performance"]["legend_expect"]
+    }
     assert got == expected
 
 
@@ -163,6 +168,7 @@ def test_detect_legend_empty_without_legend(transposed_grid):
 # ----------------------------------------------------------------------------
 # story #7 / #24 / #26 —— MappingRegistry 草案登记、版本自增、确认/驳回留痕
 # ----------------------------------------------------------------------------
+
 
 def test_register_draft_returns_version(tmp_db_path, ground_truth):
     """story #7 登记草案返回版本号，状态为 draft，可被 get_active 之外的流程引用。"""
@@ -226,7 +232,9 @@ def test_get_active_none_before_confirm(tmp_db_path, ground_truth):
     reg = MappingRegistry(tmp_db_path)
     reg.init_schema()
     try:
-        reg.register_draft(_legend_to_mapping(ground_truth, "HK_Performance", scope="HK_Performance"))
+        reg.register_draft(
+            _legend_to_mapping(ground_truth, "HK_Performance", scope="HK_Performance")
+        )
         assert reg.get_active("HK_Performance") is None
     finally:
         reg.close()
@@ -247,7 +255,9 @@ def test_reject_keeps_inactive(tmp_db_path, ground_truth):
     reg = MappingRegistry(tmp_db_path)
     reg.init_schema()
     try:
-        version = reg.register_draft(_legend_to_mapping(ground_truth, "HK_Performance", scope="HK_Performance"))
+        version = reg.register_draft(
+            _legend_to_mapping(ground_truth, "HK_Performance", scope="HK_Performance")
+        )
         reg.reject("HK_Performance", version, actor="sme_fin", note="图例文字有歧义")
         assert reg.get_active("HK_Performance") is None
     finally:
@@ -259,9 +269,13 @@ def test_revision_new_version_does_not_overwrite(tmp_db_path, ground_truth):
     reg = MappingRegistry(tmp_db_path)
     reg.init_schema()
     try:
-        v1 = reg.register_draft(_legend_to_mapping(ground_truth, "HK_Performance", scope="HK_Performance"))
+        v1 = reg.register_draft(
+            _legend_to_mapping(ground_truth, "HK_Performance", scope="HK_Performance")
+        )
         reg.confirm("HK_Performance", v1, actor="sme_fin")
-        v2 = reg.register_draft(_legend_to_mapping(ground_truth, "HK_Performance", scope="HK_Performance"))
+        v2 = reg.register_draft(
+            _legend_to_mapping(ground_truth, "HK_Performance", scope="HK_Performance")
+        )
         reg.confirm("HK_Performance", v2, actor="sme_hr")
         active = reg.get_active("HK_Performance")
         assert active.version == v2
@@ -275,7 +289,9 @@ def test_registry_persists_across_reopen(tmp_db_path, ground_truth):
     reg = MappingRegistry(tmp_db_path)
     reg.init_schema()
     try:
-        version = reg.register_draft(_legend_to_mapping(ground_truth, "HK_Performance", scope="HK_Performance"))
+        version = reg.register_draft(
+            _legend_to_mapping(ground_truth, "HK_Performance", scope="HK_Performance")
+        )
         reg.confirm("HK_Performance", version, actor="sme_fin", note="long-lived")
     finally:
         reg.close()
@@ -295,9 +311,12 @@ def test_registry_persists_across_reopen(tmp_db_path, ground_truth):
 # story #7 / #24 —— apply_mapping：未确认置空+告警；确认后产出正确 tags
 # ----------------------------------------------------------------------------
 
+
 def test_apply_unconfirmed_returns_empty_and_warns(hk_grid, ground_truth):
     """story #7 未确认（draft）映射应用时返回空 tags 并向 grid.warnings 追加告警（不静默入库）。"""
-    mapping = _legend_to_mapping(ground_truth, "HK_Performance", scope="HK_Performance", status="draft")
+    mapping = _legend_to_mapping(
+        ground_truth, "HK_Performance", scope="HK_Performance", status="draft"
+    )
     warnings_before = len(hk_grid.warnings)
     result = apply_mapping(hk_grid, mapping)
     assert result == {}
@@ -306,7 +325,9 @@ def test_apply_unconfirmed_returns_empty_and_warns(hk_grid, ground_truth):
 
 def test_apply_active_produces_correct_tags(hk_grid, ground_truth):
     """story #24 确认（active）映射应用后，每个着色格产出与 ground truth 一致的 tags。"""
-    mapping = _legend_to_mapping(ground_truth, "HK_Performance", scope="HK_Performance", status="active")
+    mapping = _legend_to_mapping(
+        ground_truth, "HK_Performance", scope="HK_Performance", status="active"
+    )
     result = apply_mapping(hk_grid, mapping)
     expected = {
         c["cell_ref"]: c["tags"]
@@ -319,7 +340,9 @@ def test_apply_active_produces_correct_tags(hk_grid, ground_truth):
 
 def test_apply_active_yellow_means_new(hk_grid, ground_truth):
     """story #24 黄色格（B2/C2/D2）必须被翻译成 product_line=new。"""
-    mapping = _legend_to_mapping(ground_truth, "HK_Performance", scope="HK_Performance", status="active")
+    mapping = _legend_to_mapping(
+        ground_truth, "HK_Performance", scope="HK_Performance", status="active"
+    )
     result = apply_mapping(hk_grid, mapping)
     for ref in ("B2", "C2", "D2"):
         assert result.get(ref) == {"product_line": "new"}
@@ -327,7 +350,9 @@ def test_apply_active_yellow_means_new(hk_grid, ground_truth):
 
 def test_apply_active_unmapped_color_gets_no_tag(hk_grid, ground_truth):
     """story #24 边界：映射里没有的颜色（蓝 95B3D7 / 灰 D9D9D9）不得被打 tag。"""
-    mapping = _legend_to_mapping(ground_truth, "HK_Performance", scope="HK_Performance", status="active")
+    mapping = _legend_to_mapping(
+        ground_truth, "HK_Performance", scope="HK_Performance", status="active"
+    )
     result = apply_mapping(hk_grid, mapping)
     for ref in ("B5", "C5", "D5", "B1", "C1", "D1"):
         assert not result.get(ref)
@@ -335,7 +360,9 @@ def test_apply_active_unmapped_color_gets_no_tag(hk_grid, ground_truth):
 
 def test_apply_active_skips_cf_affected(cf_grid, ground_truth):
     """story #24 刁钻形态：CF 受影响格颜色来源不可靠，即便映射 active 也不打颜色 tag。"""
-    mapping = _legend_to_mapping(ground_truth, "HK_Performance", scope="CondFormat", status="active")
+    mapping = _legend_to_mapping(
+        ground_truth, "HK_Performance", scope="CondFormat", status="active"
+    )
     result = apply_mapping(cf_grid, mapping)
     for ref in ("B2", "B3", "B4", "B5"):
         assert not result.get(ref)

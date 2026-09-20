@@ -15,8 +15,8 @@ ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpa
 
 from ragspine.extraction.extractors.pptx_styled_extractor import compute_file_hash
 from ragspine.ingestion.source.connector import (
-    SOURCE_CONNECTOR_ENV,
     SOURCE_CONNECTOR_ENTRY_POINT_GROUP,
+    SOURCE_CONNECTOR_ENV,
     FilesystemConnector,
     RawDoc,
     SourceConnector,
@@ -72,7 +72,10 @@ def test_source_doc_id_is_filename_and_locator_is_path(tree):
 
 def test_suffixes_filter_case_insensitive(tree):
     """suffixes 过滤大小写不敏感：只收 .pdf / .pptx 时排除 c.txt。"""
-    ids = {d.source_doc_id for d in FilesystemConnector(tree, suffixes={".PDF", ".PPTX"}).iter_documents()}
+    ids = {
+        d.source_doc_id
+        for d in FilesystemConnector(tree, suffixes={".PDF", ".PPTX"}).iter_documents()
+    }
     assert ids == {"a.pptx", "b.pdf"}
 
 
@@ -93,6 +96,7 @@ def test_rawdoc_is_frozen():
 # ---------------------------------------------------------------------------
 # make_source_connector 工厂解析
 # ---------------------------------------------------------------------------
+
 
 def test_factory_none_returns_none():
     """spec None / 'none' -> None（未配置连接器）。"""

@@ -355,8 +355,7 @@ def load_company_profile(path: str | Path | None = None) -> DomainProfile:
         home_entity_code=str(home.get("entity_code", default.home_entity_code)),
         home_entity_synonyms=_str_map(home.get("synonyms")) or default.home_entity_synonyms,
         entity_geography=_str_map(home.get("geography")) or default.entity_geography,
-        external_entities=_str_map(data.get("external_entities"))
-        or default.external_entities,
+        external_entities=_str_map(data.get("external_entities")) or default.external_entities,
         home_entity_labels=_str_map(home.get("labels")) or default.home_entity_labels,
         sensitivity=_sensitivity_policy(data),
         # TODO(ADR 0004 fast-follow): 解析 [dimensions] 段。当前无 TOML 维度解析，所有

@@ -129,9 +129,7 @@ def test_legacy_narrative_index_accepts_only_the_historical_default_contract(tmp
     metadata.init_schema()
     metadata.assert_compatible(resolve_config())
     with pytest.raises(ReindexRequiredError, match="chunking"):
-        metadata.assert_compatible(
-            resolve_config(config={"indexing": {"chunker": "parent_child"}})
-        )
+        metadata.assert_compatible(resolve_config(config={"indexing": {"chunker": "parent_child"}}))
 
 
 def test_claim_never_overwrites_a_different_fingerprint_after_stale_validation(

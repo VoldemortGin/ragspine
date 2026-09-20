@@ -17,7 +17,6 @@
 
 import os
 
-import pytest
 import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
@@ -28,10 +27,10 @@ from ragspine.extraction.extractors.xlsx_styled_extractor import (
     resolve_theme_color,
 )
 
-
 # ---------------------------------------------------------------------------
 # 辅助：把抽取出的 grid 列表按 sheet 名索引
 # ---------------------------------------------------------------------------
+
 
 def _grids_by_sheet(path) -> dict:
     return {g.sheet: g for g in extract_grids(path)}
@@ -41,14 +40,13 @@ def _grids_by_sheet(path) -> dict:
 # story #2 — theme 色 + tint -> 真实 RGB（纯函数）
 # ===========================================================================
 
+
 def test_resolve_theme_color_accent1_tint(ground_truth):
     """story #2 —— accent1(index 4) + tint 0.4 必须解析为 '95B3D7'。"""
     palette = ground_truth["theme_palette"]
     theme_rgbs = ["FFFFFF"] * 6
     theme_rgbs[palette["accent1_index"]] = palette["accent1_base_rgb"]
-    out = resolve_theme_color(
-        palette["accent1_index"], palette["accent1_tint"], theme_rgbs
-    )
+    out = resolve_theme_color(palette["accent1_index"], palette["accent1_tint"], theme_rgbs)
     assert out == palette["accent1_resolved_rgb"]
 
 
@@ -73,6 +71,7 @@ def test_resolve_theme_color_returns_uppercase_hex():
 # ===========================================================================
 # story #18 / #27 — source_file_hash 血缘
 # ===========================================================================
+
 
 def test_compute_file_hash_is_hex_string(excel_fixture_path):
     """story #18 —— 文件 hash 是非空十六进制串，可作版本血缘标识。"""
@@ -106,6 +105,7 @@ def test_grids_carry_source_doc_id(excel_fixture_path):
 # story #1 — 统一中间表示：每 sheet 一张 StyledGrid
 # ===========================================================================
 
+
 def test_extract_one_grid_per_sheet(excel_fixture_path):
     """story #1 —— fixture 4 个 sheet 各产出一张 StyledGrid。"""
     grids = extract_grids(excel_fixture_path)
@@ -136,6 +136,7 @@ def test_grid_missing_cell_returns_none(excel_fixture_path):
 # ===========================================================================
 # story #4 + 普通 RGB —— 值/普通填充色/数字格式全部保留
 # ===========================================================================
+
 
 def test_plain_rgb_value_and_number_format(cell_truth, excel_fixture_path):
     """story #4 —— 千分位格 B2：值 2100、黄色 FFFF00、格式 '#,##0' 全保留。"""
@@ -183,6 +184,7 @@ def test_unfilled_cell_rgb_is_none(cell_truth, excel_fixture_path):
 # story #2 —— theme + tint 填充经抽取后落为真实 RGB
 # ===========================================================================
 
+
 def test_theme_tint_fill_resolved_in_grid(cell_truth, excel_fixture_path):
     """story #2 —— ROE 行 theme accent1+tint 填充抽取后 resolved_rgb == '95B3D7'。"""
     grid = _grids_by_sheet(excel_fixture_path)["HK_Performance"]
@@ -202,6 +204,7 @@ def test_cells_by_rgb_groups_theme_cells(excel_fixture_path):
 # ===========================================================================
 # story #3 —— 合并单元格还原为多级表头语义
 # ===========================================================================
+
 
 def test_merge_origins_flagged_with_span(ground_truth, excel_fixture_path):
     """story #3 —— 三级合并表头锚点都标 is_merged_origin + 正确 merge_span。"""
@@ -233,6 +236,7 @@ def test_merged_header_data_row_values_intact(cell_truth, excel_fixture_path):
 # story #5 —— 条件格式区域被检测：cf_affected + grid 告警，而非猜色
 # ===========================================================================
 
+
 def test_cf_cells_flagged_affected(ground_truth, excel_fixture_path):
     """story #5 —— CF 区域 B2:B5 的格都标 cf_affected=True。"""
     grid = _grids_by_sheet(excel_fixture_path)["CondFormat"]
@@ -256,9 +260,7 @@ def test_cf_grid_emits_warning(excel_fixture_path):
 def test_cf_cells_excluded_from_color_clustering(excel_fixture_path):
     """story #5 —— cf_affected 的格不参与 cells_by_rgb 聚类（来源不可靠）。"""
     grid = _grids_by_sheet(excel_fixture_path)["CondFormat"]
-    clustered_refs = {
-        c.cell_ref for cells in grid.cells_by_rgb().values() for c in cells
-    }
+    clustered_refs = {c.cell_ref for cells in grid.cells_by_rgb().values() for c in cells}
     assert clustered_refs.isdisjoint({"B2", "B3", "B4", "B5"})
 
 
@@ -273,12 +275,11 @@ def test_cf_cell_values_still_extracted(cell_truth, excel_fixture_path):
 # story #14 —— 转置表至少被完整读出网格（值不丢，不错读）
 # ===========================================================================
 
+
 def test_transposed_grid_values_complete(ground_truth, excel_fixture_path):
     """story #14 —— 转置表（指标在列、期间在行）逐格值全部读出且对齐真值。"""
     grid = _grids_by_sheet(excel_fixture_path)["Transposed"]
-    transposed_cells = [
-        c for c in ground_truth["cells"] if c["sheet"] == "Transposed"
-    ]
+    transposed_cells = [c for c in ground_truth["cells"] if c["sheet"] == "Transposed"]
     assert transposed_cells
     for t in transposed_cells:
         cell = grid.get(t["cell_ref"])
@@ -296,6 +297,7 @@ def test_transposed_number_format_preserved(cell_truth, excel_fixture_path):
 # ===========================================================================
 # 跨表全量回归 —— 逐格真值全字段比对（值/颜色/格式/合并/CF）
 # ===========================================================================
+
 
 def test_all_ground_truth_cells_match(ground_truth, excel_fixture_path):
     """story #1–#5 —— 对 ground truth 全部 61 个逐格真值做外部行为全量比对。"""

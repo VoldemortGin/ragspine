@@ -52,6 +52,7 @@ QWEN3_MODEL = "Qwen/Qwen3-Embedding-0.6B"
 # DV1 设备矩阵（用注入的 cuda/mps 可用性，不依赖本机真实硬件）
 # ===========================================================================
 
+
 def test_select_device_cuda_when_cuda_available():
     """注入 cuda=True、mps=False -> 'cuda'（cuda 优先级最高）。"""
     assert _select_torch_device(cuda_available=True, mps_available=False) == "cuda"
@@ -76,6 +77,7 @@ def test_select_device_cuda_wins_over_mps():
 # DV2 override 参数优先 + 非法 override 校验
 # ===========================================================================
 
+
 def test_explicit_override_wins_over_autodetect():
     """显式 override 参数压过自动探测：override='mps' 即便 cuda 可用也返回 'mps'。"""
     assert _select_torch_device("mps", cuda_available=True, mps_available=True) == "mps"
@@ -95,6 +97,7 @@ def test_illegal_override_raises_value_error():
 # ===========================================================================
 # DV3 env 优先于自动探测；显式 override 参数又优先于 env
 # ===========================================================================
+
 
 def test_env_overrides_autodetect(monkeypatch):
     """设 RAGSPINE_EMBEDDING_DEVICE=cpu 时，即便注入 cuda=True 也返回 'cpu'。"""
@@ -118,6 +121,7 @@ def test_illegal_env_raises_value_error(monkeypatch):
 # ===========================================================================
 # DV4 ST 后端构造不加载模型（不依赖 sentence-transformers 是否安装）
 # ===========================================================================
+
 
 def test_st_backend_construct_does_not_load_model():
     """SentenceTransformerEmbeddingBackend(device='cpu') 可构造、device=='cpu'，
@@ -147,6 +151,7 @@ def test_st_backend_device_resolved_via_selector(monkeypatch):
 # DV5 工厂接线：qwen3 / sentence-transformers / st
 # ===========================================================================
 
+
 def test_factory_qwen3_returns_st_backend():
     """spec='qwen3' -> SentenceTransformerEmbeddingBackend 实例（构造不加载模型）。"""
     sys.modules.pop("sentence_transformers", None)
@@ -175,9 +180,7 @@ def test_factory_qwen3_default_model_name():
 
 def test_factory_model_name_kwarg_override():
     """model_name 可经 kwargs 覆盖默认 Qwen3。"""
-    backend = make_embedding_backend(
-        "qwen3", device="cpu", model_name="BAAI/bge-small-zh-v1.5"
-    )
+    backend = make_embedding_backend("qwen3", device="cpu", model_name="BAAI/bge-small-zh-v1.5")
     assert backend.model_name == "BAAI/bge-small-zh-v1.5"
 
 
@@ -211,6 +214,7 @@ def test_factory_none_unchanged():
 # DV6 协议一致 + 空输入不触发模型加载
 # ===========================================================================
 
+
 def test_st_backend_satisfies_embedding_protocol():
     """ST 后端满足 EmbeddingBackend 协议（有可调用 embed_texts）。"""
     from ragspine.retrieval.lexical.retrieval import EmbeddingBackend
@@ -237,6 +241,7 @@ def test_st_backend_normalize_attribute_default_true():
 # ===========================================================================
 # DV7 回归：none / deterministic / openai 既有工厂行为不变
 # ===========================================================================
+
 
 def test_regression_factory_deterministic_unchanged():
     """spec='deterministic' 仍返回 DeterministicEmbeddingBackend（既有行为护栏）。"""

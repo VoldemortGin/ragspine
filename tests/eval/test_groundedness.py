@@ -26,10 +26,10 @@ from ragspine.eval.groundedness import (
     split_claims,
 )
 
-
 # ---------------------------------------------------------------------------
 # claim 切分
 # ---------------------------------------------------------------------------
+
 
 def test_split_claims_strips_citation_and_index_markers():
     answer = "[1] 香港监管动态：MPFA 新规要求披露管理费。（来源：REG_WATCH_HK.pptx para1）"
@@ -52,6 +52,7 @@ def test_split_claims_empty_answer():
 # ---------------------------------------------------------------------------
 # 词面重叠蕴含判定器
 # ---------------------------------------------------------------------------
+
 
 def test_lexical_judge_entails_substring_echo():
     judge = LexicalOverlapJudge()

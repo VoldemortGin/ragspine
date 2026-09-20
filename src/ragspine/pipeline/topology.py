@@ -48,24 +48,51 @@ def agent_topology(*, narrative_retriever: object | None = None) -> PipelineGrap
     narrative_retriever 缺省（None）时，叙事分支节点【不】出现——拓扑如实反映 this 装配。
     """
     nodes: list[Node] = [
-        Node(id="parse", label="parse_intent", kind="stage", domain="agent",
-             symbol=_SYM_PARSE_INTENT),
-        Node(id="clarify", label="clarify_scope", kind="gate", domain="agent",
-             symbol=_SYM_CLARIFY_SCOPE),
-        Node(id="gate", label="SecurityGate", kind="gate", domain="agent",
-             symbol=_SYM_SECURITY_GATE),
+        Node(
+            id="parse", label="parse_intent", kind="stage", domain="agent", symbol=_SYM_PARSE_INTENT
+        ),
+        Node(
+            id="clarify",
+            label="clarify_scope",
+            kind="gate",
+            domain="agent",
+            symbol=_SYM_CLARIFY_SCOPE,
+        ),
+        Node(
+            id="gate", label="SecurityGate", kind="gate", domain="agent", symbol=_SYM_SECURITY_GATE
+        ),
         Node(id="refuse", label="拒答（越权/竞品）", kind="stage", domain="agent"),
         Node(id="ask", label="反问澄清", kind="stage", domain="agent"),
         Node(id="route", label="route?", kind="gate", domain="agent"),
         # structured 分支
-        Node(id="tool_loop", label="query_metric tool loop", kind="stage", domain="agent",
-             symbol=_SYM_RUN_TOOL_LOOP),
-        Node(id="exec_metric", label="execute_query_metric", kind="stage", domain="agent",
-             symbol=_SYM_EXECUTE_QUERY_METRIC),
-        Node(id="fact_store", label="FactStore", kind="store", domain="storage",
-             symbol=_SYM_FACT_STORE),
-        Node(id="structured_answer", label="_structured_answer（反幻觉守护）",
-             kind="stage", domain="agent", symbol=_SYM_STRUCTURED_ANSWER),
+        Node(
+            id="tool_loop",
+            label="query_metric tool loop",
+            kind="stage",
+            domain="agent",
+            symbol=_SYM_RUN_TOOL_LOOP,
+        ),
+        Node(
+            id="exec_metric",
+            label="execute_query_metric",
+            kind="stage",
+            domain="agent",
+            symbol=_SYM_EXECUTE_QUERY_METRIC,
+        ),
+        Node(
+            id="fact_store",
+            label="FactStore",
+            kind="store",
+            domain="storage",
+            symbol=_SYM_FACT_STORE,
+        ),
+        Node(
+            id="structured_answer",
+            label="_structured_answer（反幻觉守护）",
+            kind="stage",
+            domain="agent",
+            symbol=_SYM_STRUCTURED_ANSWER,
+        ),
     ]
     edges: list[Edge] = [
         Edge(src="parse", dst="clarify"),
@@ -85,23 +112,41 @@ def agent_topology(*, narrative_retriever: object | None = None) -> PipelineGrap
 
     # 叙事分支：仅当 narrative_retriever 注入时出现（拓扑如实反映 this 装配）。
     if narrative_retriever is not None:
-        nodes.extend([
-            Node(id="retrieve", label="narrative_retriever（hybrid + 精排）",
-                 kind="channel", domain="retrieval"),
-            Node(id="rerank", label="listwise rerank", kind="stage", domain="retrieval",
-                 symbol=_SYM_LISTWISE_RERANK),
-            Node(id="narrative_answer", label="_run_narrative synthesize",
-                 kind="stage", domain="agent", symbol=_SYM_RUN_NARRATIVE),
-        ])
-        edges.extend([
-            Edge(src="route", dst="retrieve", label="route=narrative", kind="conditional"),
-            Edge(src="route", dst="tool_loop", label="route=composite", kind="conditional"),
-            Edge(src="route", dst="retrieve", label="route=composite", kind="conditional"),
-            # listwise 精排在 narrative_retriever.retrieve 内部（data 依赖，judge 条件化）；
-            # 顺序流直接 retrieve -> synthesize（_run_narrative 调 retrieve 后即 synthesize）。
-            Edge(src="retrieve", dst="rerank", label="listwise rerank", kind="data"),
-            Edge(src="retrieve", dst="narrative_answer"),
-        ])
+        nodes.extend(
+            [
+                Node(
+                    id="retrieve",
+                    label="narrative_retriever（hybrid + 精排）",
+                    kind="channel",
+                    domain="retrieval",
+                ),
+                Node(
+                    id="rerank",
+                    label="listwise rerank",
+                    kind="stage",
+                    domain="retrieval",
+                    symbol=_SYM_LISTWISE_RERANK,
+                ),
+                Node(
+                    id="narrative_answer",
+                    label="_run_narrative synthesize",
+                    kind="stage",
+                    domain="agent",
+                    symbol=_SYM_RUN_NARRATIVE,
+                ),
+            ]
+        )
+        edges.extend(
+            [
+                Edge(src="route", dst="retrieve", label="route=narrative", kind="conditional"),
+                Edge(src="route", dst="tool_loop", label="route=composite", kind="conditional"),
+                Edge(src="route", dst="retrieve", label="route=composite", kind="conditional"),
+                # listwise 精排在 narrative_retriever.retrieve 内部（data 依赖，judge 条件化）；
+                # 顺序流直接 retrieve -> synthesize（_run_narrative 调 retrieve 后即 synthesize）。
+                Edge(src="retrieve", dst="rerank", label="listwise rerank", kind="data"),
+                Edge(src="retrieve", dst="narrative_answer"),
+            ]
+        )
 
     return PipelineGraph(
         title="Agent request flow",
@@ -155,10 +200,12 @@ def retriever_topology(retriever: object) -> PipelineGraph:
         )
         edges.append(Edge(src=scoring_src, dst="vector"))
 
-    nodes.extend([
-        Node(id="rrf", label="RRF 融合", kind="stage", domain="retrieval", symbol=_SYM_RRF),
-        Node(id="top_k", label="top_k", kind="stage", domain="retrieval"),
-    ])
+    nodes.extend(
+        [
+            Node(id="rrf", label="RRF 融合", kind="stage", domain="retrieval", symbol=_SYM_RRF),
+            Node(id="top_k", label="top_k", kind="stage", domain="retrieval"),
+        ]
+    )
     edges.append(Edge(src="bm25", dst="rrf"))
     if has_vector:
         edges.append(Edge(src="vector", dst="rrf"))
@@ -182,7 +229,9 @@ def service_topology(app: object) -> PipelineGraph:
     has_faq = getattr(state, "faq_cache", None) is not None
     has_queue = getattr(state, "queue", None) is not None
 
-    nodes: list[Node] = [Node(id="request", label="HTTP /v1/ask", kind="external", domain="service")]
+    nodes: list[Node] = [
+        Node(id="request", label="HTTP /v1/ask", kind="external", domain="service")
+    ]
     edges: list[Edge] = []
 
     if has_faq:
@@ -198,23 +247,39 @@ def service_topology(app: object) -> PipelineGraph:
 
     # agent 在 FAQ 下游（FAQ 短路 upstream of agent）。
     nodes.append(
-        Node(id="agent", label="answer_question", kind="stage", domain="agent",
-             symbol=_SYM_ANSWER_QUESTION)
+        Node(
+            id="agent",
+            label="answer_question",
+            kind="stage",
+            domain="agent",
+            symbol=_SYM_ANSWER_QUESTION,
+        )
     )
     edges.append(Edge(src=agent_src, dst="agent", label=agent_label, kind=agent_kind))
 
     # 异步 ingestion 路径：routes -> queue -> jobs。
     if has_queue:
-        nodes.extend([
-            Node(id="ingest_routes", label="ingestion routes", kind="external", domain="service"),
-            Node(id="queue", label="TaskQueue", kind="store", domain="service",
-                 symbol=_SYM_TASK_QUEUE),
-            Node(id="jobs", label="ingestion jobs", kind="stage", domain="service"),
-        ])
-        edges.extend([
-            Edge(src="ingest_routes", dst="queue"),
-            Edge(src="queue", dst="jobs"),
-        ])
+        nodes.extend(
+            [
+                Node(
+                    id="ingest_routes", label="ingestion routes", kind="external", domain="service"
+                ),
+                Node(
+                    id="queue",
+                    label="TaskQueue",
+                    kind="store",
+                    domain="service",
+                    symbol=_SYM_TASK_QUEUE,
+                ),
+                Node(id="jobs", label="ingestion jobs", kind="stage", domain="service"),
+            ]
+        )
+        edges.extend(
+            [
+                Edge(src="ingest_routes", dst="queue"),
+                Edge(src="queue", dst="jobs"),
+            ]
+        )
 
     return PipelineGraph(
         title="Service topology",

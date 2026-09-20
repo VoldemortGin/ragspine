@@ -29,6 +29,7 @@ from ragspine.retrieval.corrective import (
 # 测试替身
 # ---------------------------------------------------------------------------
 
+
 class FakeBase:
     """NarrativeRetriever 替身：记录每次 retrieve 调用，按 responder(query, filters) 返回片段。"""
 
@@ -54,6 +55,7 @@ QUERY = "香港 REVENUE 下降 MCV"
 # grade→act 环：高分直返 / drop_filters / rewrite_query / 拒答 / 有界 / 确定性
 # ---------------------------------------------------------------------------
 
+
 def test_high_grade_first_attempt_returns_snippets():
     """首次检索即高分 -> 直接返回，恰一次 base 调用，last_actions 仅 retrieve，无拒答。"""
     base = FakeBase(lambda q, f: [RELEVANT])
@@ -70,6 +72,7 @@ def test_high_grade_first_attempt_returns_snippets():
 
 def test_low_grade_with_filters_drops_filters_and_returns():
     """带过滤低分 -> drop_filters 去过滤重检；若达标返回该结果；trace 按序记两步。"""
+
     def responder(q, f):
         return [IRRELEVANT] if f else [RELEVANT]
 
@@ -98,9 +101,7 @@ def test_all_low_grade_refuses_and_is_bounded():
 def test_max_retries_clamped_to_two():
     """max_retries=99 -> clamp 到 2：至多 2 次纠错重检（base 调用 ≤ 3）。"""
     base = FakeBase(lambda q, f: [IRRELEVANT])
-    cr = CorrectiveRetriever(
-        base, max_retries=99, query_rewriter=lambda q: q + " 改写"
-    )
+    cr = CorrectiveRetriever(base, max_retries=99, query_rewriter=lambda q: q + " 改写")
     assert cr.max_retries == 2
     cr.retrieve(QUERY, filters={"entity": "ACME_TH"})
     assert len(base.calls) <= 3
@@ -118,6 +119,7 @@ def test_max_retries_zero_refuses_immediately():
 
 def test_query_rewriter_used_for_third_attempt():
     """drop_filters 仍低分且给了 rewriter -> 用改写后的 query 做第三次尝试。"""
+
     def responder(q, f):
         return [RELEVANT] if "客群收缩" in q else [IRRELEVANT]
 
@@ -126,7 +128,9 @@ def test_query_rewriter_used_for_third_attempt():
     out = cr.retrieve(QUERY, filters={"entity": "ACME_TH"})
     assert out == [RELEVANT]
     assert [a.action for a in cr.last_actions] == [
-        "retrieve", "drop_filters", "rewrite_query",
+        "retrieve",
+        "drop_filters",
+        "rewrite_query",
     ]
     assert base.calls[2]["query"] == QUERY + " 客群收缩"
     assert base.calls[2]["filters"] is None
@@ -168,12 +172,11 @@ def test_last_actions_reset_each_call():
 # 可观测性：emit 仅传非敏感元数据键
 # ---------------------------------------------------------------------------
 
+
 def test_emit_passes_only_nonsensitive_keys(monkeypatch):
     """emit=True -> 仅发 corrective_actions / corrective_grades（非敏感，绝不含片段文本）。"""
     captured: dict = {}
-    monkeypatch.setattr(
-        corrective_mod, "emit_trace", lambda *a, **f: captured.update(f)
-    )
+    monkeypatch.setattr(corrective_mod, "emit_trace", lambda *a, **f: captured.update(f))
     base = FakeBase(lambda q, f: [RELEVANT])
     CorrectiveRetriever(base).retrieve(QUERY)
     assert set(captured) == {"corrective_actions", "corrective_grades"}
@@ -194,6 +197,7 @@ def test_emit_false_suppresses_trace(monkeypatch):
 # ---------------------------------------------------------------------------
 # LexicalOverlapGrader：词面重叠相关性分
 # ---------------------------------------------------------------------------
+
 
 def test_grader_implements_relevance_grader_protocol():
     assert isinstance(LexicalOverlapGrader(), RelevanceGrader)
@@ -238,6 +242,7 @@ def test_grader_partial_overlap_fraction():
 # 工厂 make_corrective_retriever：none 字节不变 / crag 别名 / 未知 / env 驱动
 # ---------------------------------------------------------------------------
 
+
 def test_make_none_returns_same_object(monkeypatch):
     """'none' / 缺省 -> 返回 base 本身（is base，opt-out 字节不变，默认）。"""
     monkeypatch.delenv(CORRECTIVE_ENV, raising=False)
@@ -266,9 +271,7 @@ def test_make_forwards_kwargs_and_grader():
     """crag 路径透传 grader / min_grade / max_retries 等 kwargs。"""
     base = FakeBase(lambda q, f: [])
     grader = LexicalOverlapGrader()
-    cr = make_corrective_retriever(
-        base, "crag", grader=grader, min_grade=0.9, max_retries=1
-    )
+    cr = make_corrective_retriever(base, "crag", grader=grader, min_grade=0.9, max_retries=1)
     assert isinstance(cr, CorrectiveRetriever)
     assert cr.grader is grader
     assert cr.min_grade == 0.9

@@ -28,14 +28,14 @@ import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
-from ragspine.retrieval.chunking.chunk_store import ChunkStore
 from ragspine.common.company_profile import CompanyProfile, load_company_profile
 from ragspine.common.sensitivity import SensitivityPolicy, classify_sensitivity
-
+from ragspine.retrieval.chunking.chunk_store import ChunkStore
 
 # ---------------------------------------------------------------------------
 # 测试用 policy 构造（不依赖部署配置文件，规则就地声明，便于断言 config 驱动）
 # ---------------------------------------------------------------------------
+
 
 def _acme_policy(*, escalate: bool = False) -> SensitivityPolicy:
     """模拟 ACME 部署的 [sensitivity]：中性占位受限文件名/关键词。
@@ -56,6 +56,7 @@ def _acme_policy(*, escalate: bool = False) -> SensitivityPolicy:
 # S1 文件名信号
 # ===========================================================================
 
+
 def test_s1_filename_signal_escalates_to_restricted():
     """user story：作为安全责任人，一份文件名含 'Exco' 的纪要即便正文普通、
     入库时漏标 sensitivity，分级器也必须凭文件名判定 RESTRICTED，避免漏标泄露。"""
@@ -70,15 +71,14 @@ def test_s1_filename_signal_escalates_to_restricted():
 def test_s1_filename_pattern_is_case_insensitive_substring():
     """user story：受限文件名模式按大小写不敏感子串匹配，
     'PR_RATING' 与配置里的 'pr_rating' 等价命中，不因大小写漏判。"""
-    level = classify_sensitivity(
-        "GCE_PR_RATING_FY2025.pptx", "普通正文", _acme_policy()
-    )
+    level = classify_sensitivity("GCE_PR_RATING_FY2025.pptx", "普通正文", _acme_policy())
     assert level == "RESTRICTED"
 
 
 # ===========================================================================
 # S2 正文关键词信号
 # ===========================================================================
+
 
 def test_s2_body_keyword_signal_escalates_to_restricted():
     """user story：文件名看似普通，但正文出现'高管绩效评级'这类受限关键词时，
@@ -105,6 +105,7 @@ def test_s2_body_keyword_is_case_insensitive():
 # S3 不过度分级（关键回归）
 # ===========================================================================
 
+
 def test_s3_normal_financial_report_stays_internal():
     """user story：作为检索质量负责人，普通财报（文件名/正文都无受限信号）
     绝不能被误升级为 RESTRICTED，否则会被出域过滤藏掉、击穿 41 golden 与检索。"""
@@ -119,6 +120,7 @@ def test_s3_normal_financial_report_stays_internal():
 # ===========================================================================
 # S5 strict 开关
 # ===========================================================================
+
 
 def test_s5_strict_switch_escalates_unsignaled_docs():
     """user story：在 strict 部署下（escalate_unknown_to_restricted=True），
@@ -143,6 +145,7 @@ def test_s5_strict_switch_default_false_keeps_internal():
 # S6 配置/泛化：规则真由 config 驱动，非硬编码
 # ===========================================================================
 
+
 def test_s6_acme_specific_keyword_escalates_under_acme():
     """user story：ACME 部署用自己的受限词（'exec_comp'），命中即 RESTRICTED——
     证明规则来自 config 而非任何写死的 ACME 词表。"""
@@ -155,9 +158,7 @@ def test_s6_acme_specific_keyword_escalates_under_acme():
 def test_s6_acme_only_keyword_not_restricted_under_acme():
     """user story：仅在 ACME 配置里受限的词（如 '董事会'）在 ACME 配置下不属受限词，
     不应升级 —— 反证分级器没有硬编码 ACME 词、完全由传入 policy 决定。"""
-    level = classify_sensitivity(
-        "Q3_Pack.pptx", "董事会上讨论了常规事项。", _acme_policy()
-    )
+    level = classify_sensitivity("Q3_Pack.pptx", "董事会上讨论了常规事项。", _acme_policy())
     assert level == "INTERNAL"
 
 
@@ -175,6 +176,7 @@ def test_s6_default_level_respected_per_policy():
 # ===========================================================================
 # A) 配置承载：CompanyProfile.sensitivity + load_company_profile
 # ===========================================================================
+
 
 def test_company_profile_carries_sensitivity_policy():
     """user story：部署 config/company.toml 的 [sensitivity] 段被解析进
@@ -231,6 +233,7 @@ def test_sensitivity_policy_loaded_from_toml(tmp_path):
 # C) 接线 narrative_ingest：分级器决定 / 显式标注优先
 # ===========================================================================
 
+
 def _make_deck(path, paragraphs: list[str], notes: str | None = None) -> None:
     """单页 deck：每段一个文本框（与 test_narrative_ingest 同构造）。"""
     from pptx import Presentation
@@ -239,9 +242,7 @@ def _make_deck(path, paragraphs: list[str], notes: str | None = None) -> None:
     prs = Presentation()
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     for i, text in enumerate(paragraphs):
-        tb = slide.shapes.add_textbox(
-            Inches(0.5), Inches(0.5 + i * 0.9), Inches(8), Inches(0.8)
-        )
+        tb = slide.shapes.add_textbox(Inches(0.5), Inches(0.5 + i * 0.9), Inches(8), Inches(0.8))
         tb.text_frame.text = text
     if notes:
         slide.notes_slide.notes_text_frame.text = notes
@@ -267,7 +268,8 @@ def test_s4_explicit_meta_sensitivity_wins(tmp_path, monkeypatch):
 
     # 用带 ACME 受限规则的 profile，确保若分级器越权会被它升级（从而暴露 bug）
     monkeypatch.setattr(
-        ni, "_PROFILE",
+        ni,
+        "_PROFILE",
         _profile_with_policy(_acme_policy()),
         raising=False,
     )
@@ -288,9 +290,7 @@ def test_c_unlabeled_restricted_doc_is_auto_classified(tmp_path, monkeypatch):
     入库时分级器自动判 RESTRICTED 并写入块——堵住漏标=泄露。"""
     import ragspine.ingestion.narrative.narrative_ingest as ni
 
-    monkeypatch.setattr(
-        ni, "_PROFILE", _profile_with_policy(_acme_policy()), raising=False
-    )
+    monkeypatch.setattr(ni, "_PROFILE", _profile_with_policy(_acme_policy()), raising=False)
     deck = tmp_path / "Exco_Minutes.pptx"
     _make_deck(deck, ["香港业务进展讨论。"])
     store = _store(tmp_path)
@@ -306,9 +306,7 @@ def test_s8_normal_internal_doc_unchanged(tmp_path, monkeypatch):
     sensitivity 仍为 'INTERNAL'，与既有行为一致，不被误升级。"""
     import ragspine.ingestion.narrative.narrative_ingest as ni
 
-    monkeypatch.setattr(
-        ni, "_PROFILE", _profile_with_policy(_acme_policy()), raising=False
-    )
+    monkeypatch.setattr(ni, "_PROFILE", _profile_with_policy(_acme_policy()), raising=False)
     deck = tmp_path / "ACME_FY2025_Results.pptx"
     _make_deck(deck, ["集团 REVENUE 同比增长，香港与中国内地为主要驱动。"])
     store = _store(tmp_path)
@@ -323,17 +321,16 @@ def test_s8_normal_internal_doc_unchanged(tmp_path, monkeypatch):
 # S7 端到端泄露守护（最重要）
 # ===========================================================================
 
+
 def test_s7_unlabeled_restricted_doc_never_egresses(tmp_path, monkeypatch):
     """user story：作为安全责任人，一份带 RESTRICTED 信号但漏标 sensitivity 的
     文档过 narrative_ingest 后，其块必须被自动判为 RESTRICTED，并经
     NarrativeIndexRetriever 出域过滤后【绝不出现】在喂 LLM 的候选/最终来源里。"""
     import ragspine.ingestion.narrative.narrative_ingest as ni
-    from ragspine.retrieval.link.narrative_link import NarrativeIndexRetriever
     from ragspine.retrieval.lexical.retrieval import NarrativeIndex
+    from ragspine.retrieval.link.narrative_link import NarrativeIndexRetriever
 
-    monkeypatch.setattr(
-        ni, "_PROFILE", _profile_with_policy(_acme_policy()), raising=False
-    )
+    monkeypatch.setattr(ni, "_PROFILE", _profile_with_policy(_acme_policy()), raising=False)
     # 一份普通文档（应被检索到）+ 一份漏标的受限文档（含独特泄露标记）
     normal = tmp_path / "HK_QBR_2025Q4.pptx"
     _make_deck(normal, ["香港 REVENUE 下降主因是 MCV 客群收缩与银保渠道调整。"])
@@ -359,6 +356,7 @@ def test_s7_unlabeled_restricted_doc_never_egresses(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # 辅助：把一个 SensitivityPolicy 包成带该策略的 CompanyProfile（其余字段取默认）
 # ---------------------------------------------------------------------------
+
 
 def _profile_with_policy(policy: SensitivityPolicy) -> CompanyProfile:
     base = load_company_profile("definitely-not-a-real-path.toml")

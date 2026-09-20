@@ -21,7 +21,6 @@ import rootutils
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
 from ragspine.agent.agent import answer_question
-from ragspine.storage.fact_store import Fact, SqliteFactStore
 from ragspine.agent.intent import (
     CLARIFY_ANSWER_WITH_ASSUMPTIONS,
     ROUTE_COMPOSITE,
@@ -31,27 +30,63 @@ from ragspine.agent.intent import (
     parse_intent,
 )
 from ragspine.agent.llm_provider import MockProvider
+from ragspine.storage.fact_store import Fact, SqliteFactStore
 
 REF = date(2026, 6, 12)
 
 
 def _fact(metric, entity, geography, period, value, doc, locator, period_type="FY"):
     return Fact(
-        metric_code=metric, entity=entity, geography=geography, channel="TOTAL",
-        period_type=period_type, period=period, value=value, unit="USD_M",
-        source_doc_id=doc, source_locator=locator,
+        metric_code=metric,
+        entity=entity,
+        geography=geography,
+        channel="TOTAL",
+        period_type=period_type,
+        period=period,
+        value=value,
+        unit="USD_M",
+        source_doc_id=doc,
+        source_locator=locator,
     )
 
 
 FACTS = [
-    _fact("REVENUE", "ACME_HK", "HK", "2025", 1702.0,
-          "ACME_FY2025_Results.pptx", "slide=5,table=1,row=2,col=3"),
-    _fact("REVENUE", "ACME_CN", "CN", "2025", 800.0,
-          "ACME_FY2025_Results.pptx", "slide=6,table=1,row=2,col=3"),
-    _fact("NEWSALES", "ACME_HK", "HK", "2025", 2500.0,
-          "ACME_FY2025_Results.pptx", "slide=7,table=1,row=2,col=3"),
-    _fact("REVENUE", "ACME_HK", "HK", "2024", 1400.0,
-          "ACME_FY2024_Results.pptx", "slide=5,table=1,row=2,col=3"),
+    _fact(
+        "REVENUE",
+        "ACME_HK",
+        "HK",
+        "2025",
+        1702.0,
+        "ACME_FY2025_Results.pptx",
+        "slide=5,table=1,row=2,col=3",
+    ),
+    _fact(
+        "REVENUE",
+        "ACME_CN",
+        "CN",
+        "2025",
+        800.0,
+        "ACME_FY2025_Results.pptx",
+        "slide=6,table=1,row=2,col=3",
+    ),
+    _fact(
+        "NEWSALES",
+        "ACME_HK",
+        "HK",
+        "2025",
+        2500.0,
+        "ACME_FY2025_Results.pptx",
+        "slide=7,table=1,row=2,col=3",
+    ),
+    _fact(
+        "REVENUE",
+        "ACME_HK",
+        "HK",
+        "2024",
+        1400.0,
+        "ACME_FY2024_Results.pptx",
+        "slide=5,table=1,row=2,col=3",
+    ),
 ]
 
 
@@ -75,16 +110,19 @@ class FakeRetriever:
     """duck-typed NarrativeRetriever：返回固定片段。"""
 
     def retrieve(self, query, *, filters=None, top_k=50):
-        return [{
-            "text": "香港 REVENUE 下降主因是 MCV 客群收缩。",
-            "doc_id": "HK_QBR_2025Q4.pptx",
-            "locator": "slide=12",
-        }]
+        return [
+            {
+                "text": "香港 REVENUE 下降主因是 MCV 客群收缩。",
+                "doc_id": "HK_QBR_2025Q4.pptx",
+                "locator": "slide=12",
+            }
+        ]
 
 
 # ---------------------------------------------------------------------------
 # 多槽位解析：metrics / entities / periods 列表字段
 # ---------------------------------------------------------------------------
+
 
 def test_parse_multi_entities():
     intent = parse_intent("香港和中国去年REVENUE各是多少", reference_date=REF)
@@ -139,6 +177,7 @@ def test_parse_mixed_relative_and_absolute_periods():
 # 子任务展开：只在明确列举的轴上展开
 # ---------------------------------------------------------------------------
 
+
 def test_expand_multi_entity_single_axis():
     intent = parse_intent("香港和中国去年REVENUE各是多少", reference_date=REF)
     tasks = expand_subtasks(intent)
@@ -153,8 +192,10 @@ def test_expand_cartesian_only_on_enumerated_axes():
     intent = parse_intent("香港和中国2025年的REVENUE和NEWSALES各是多少", reference_date=REF)
     tasks = expand_subtasks(intent)
     assert [(t.entity, t.metric) for t in tasks] == [
-        ("ACME_HK", "REVENUE"), ("ACME_HK", "NEWSALES"),
-        ("ACME_CN", "REVENUE"), ("ACME_CN", "NEWSALES"),
+        ("ACME_HK", "REVENUE"),
+        ("ACME_HK", "NEWSALES"),
+        ("ACME_CN", "REVENUE"),
+        ("ACME_CN", "NEWSALES"),
     ]
     assert all(t.period == ("FY", "2025") for t in tasks)
 
@@ -169,9 +210,7 @@ def test_expand_single_question_yields_one_task():
 
 def test_expand_uses_defaults_for_missing_axes():
     intent = parse_intent("REVENUE和NEWSALES多少", reference_date=REF)
-    tasks = expand_subtasks(
-        intent, default_entity="ACME_GROUP", default_period=("FY", "2025")
-    )
+    tasks = expand_subtasks(intent, default_entity="ACME_GROUP", default_period=("FY", "2025"))
     assert [(t.metric, t.entity, t.period) for t in tasks] == [
         ("REVENUE", "ACME_GROUP", ("FY", "2025")),
         ("NEWSALES", "ACME_GROUP", ("FY", "2025")),
@@ -189,6 +228,7 @@ def test_expand_keeps_channel():
 # agent 多子任务执行：确定性、带血缘、not_found 不拖垮、不调 LLM
 # ---------------------------------------------------------------------------
 
+
 def test_agent_multi_entity_compare_all_found(store):
     result = answer_question(
         "香港和中国去年REVENUE各是多少", store, SentinelProvider(), reference_date=REF
@@ -203,7 +243,9 @@ def test_agent_multi_entity_compare_all_found(store):
 
 def test_agent_multi_metric_compare(store):
     result = answer_question(
-        "ACME HK 去年的 REVENUE 和 NEWSALES 各是多少", store, SentinelProvider(),
+        "ACME HK 去年的 REVENUE 和 NEWSALES 各是多少",
+        store,
+        SentinelProvider(),
         reference_date=REF,
     )
     assert "1702" in result.answer and "2500" in result.answer
@@ -244,8 +286,10 @@ def test_agent_multi_with_assumed_period(store):
 def test_agent_composite_multi_plus_narrative(store):
     """多实体数字 + 归因叙事在同一回答中汇合（composite 路）。"""
     result = answer_question(
-        "香港和中国去年REVENUE各是多少，为什么香港下降了", store,
-        MockProvider(reference_date=REF), reference_date=REF,
+        "香港和中国去年REVENUE各是多少，为什么香港下降了",
+        store,
+        MockProvider(reference_date=REF),
+        reference_date=REF,
         narrative_retriever=FakeRetriever(),
     )
     assert result.route == ROUTE_COMPOSITE
@@ -257,7 +301,9 @@ def test_agent_composite_multi_plus_narrative(store):
 def test_agent_single_question_path_unchanged(store):
     """单槽位问题仍走既有 tool use 循环（MockProvider 行为逐字节不变）。"""
     result = answer_question(
-        "香港去年REVENUE多少", store, MockProvider(reference_date=REF),
+        "香港去年REVENUE多少",
+        store,
+        MockProvider(reference_date=REF),
         reference_date=REF,
     )
     assert "1702" in result.answer

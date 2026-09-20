@@ -44,9 +44,7 @@ def test_corrective_inherits_restricted_isolation_from_base(tmp_path):
         out = cr.retrieve(QUERY)
 
         assert out, "普通块应被召回（grade 达标，输出非空）"
-        assert all(
-            str(s.get("sensitivity")).upper() != RESTRICTED_SENSITIVITY for s in out
-        )
+        assert all(str(s.get("sensitivity")).upper() != RESTRICTED_SENSITIVITY for s in out)
         assert all("SECRET_TOKEN" not in str(s.get("text", "")) for s in out)
         assert all(s.get("doc_id") != "EXCO.pptx" for s in out)
 

@@ -20,7 +20,7 @@ import rootutils
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
 from ragspine.extraction.color.color_semantics import ColorMapping, LegendEntry, MappingRegistry
-from ragspine.storage.fact_store import Fact, SqliteFactStore
+from ragspine.ingestion.review.review_queue import ReviewQueue
 from ragspine.ingestion.structured.ingestion_manifest import (
     BATCH_DONE,
     BATCH_FAILED,
@@ -29,7 +29,7 @@ from ragspine.ingestion.structured.ingestion_manifest import (
     compute_metrics,
     list_versions,
 )
-from ragspine.ingestion.review.review_queue import ReviewQueue
+from ragspine.storage.fact_store import Fact, SqliteFactStore
 
 
 # --------------------------------------------------------------------------- #
@@ -147,9 +147,7 @@ def test_record_input_failure_counts_and_records(manifest):
     _init_all(manifest)
     batch_id = manifest.open_batch()
     manifest.record_input(batch_id, "good.xlsx", "h1", "xlsx", n_facts=12)
-    manifest.record_input(
-        batch_id, "bad.xlsx", None, "xlsx", failed=True, error="corrupt zip"
-    )
+    manifest.record_input(batch_id, "bad.xlsx", None, "xlsx", failed=True, error="corrupt zip")
 
     rec = manifest.get_batch(batch_id)
     assert rec.n_failed == 1
@@ -231,11 +229,13 @@ def test_manifest_persists_across_reopen(tmp_sqlite_factory):
 def test_compute_metrics_total_facts(manifest, queue, store):
     """story #31 —— 抽取量：事实总数从 store 汇总进指标。"""
     _init_all(manifest, queue, store)
-    store.upsert_facts([
-        _fact("REVENUE", "2024", 2680.0, confidence=0.95),
-        _fact("NEWSALES", "2024", 4750.0, confidence=0.9),
-        _fact("PROFIT", "2024", 2210.0, confidence=0.6),
-    ])
+    store.upsert_facts(
+        [
+            _fact("REVENUE", "2024", 2680.0, confidence=0.95),
+            _fact("NEWSALES", "2024", 4750.0, confidence=0.9),
+            _fact("PROFIT", "2024", 2210.0, confidence=0.6),
+        ]
+    )
     metrics = compute_metrics(manifest, queue, store)
     assert metrics["n_facts_total"] == 3
 
@@ -256,12 +256,14 @@ def test_compute_metrics_review_backlog(manifest, queue, store):
 def test_compute_metrics_confidence_buckets(manifest, queue, store):
     """story #31 —— 置信度分布桶：按区间统计事实置信度计数。"""
     _init_all(manifest, queue, store)
-    store.upsert_facts([
-        _fact("REVENUE", "2024", 1.0, confidence=0.95),   # 高
-        _fact("NEWSALES", "2024", 2.0, confidence=0.85),    # 高
-        _fact("PROFIT", "2024", 3.0, confidence=0.7),    # 中
-        _fact("ROE", "2024", 4.0, confidence=0.3),     # 低
-    ])
+    store.upsert_facts(
+        [
+            _fact("REVENUE", "2024", 1.0, confidence=0.95),  # 高
+            _fact("NEWSALES", "2024", 2.0, confidence=0.85),  # 高
+            _fact("PROFIT", "2024", 3.0, confidence=0.7),  # 中
+            _fact("ROE", "2024", 4.0, confidence=0.3),  # 低
+        ]
+    )
     metrics = compute_metrics(manifest, queue, store)
     buckets = metrics["confidence_buckets"]
     # 桶内计数总和 = 有置信度的事实数（此处 4 条都带 confidence）
@@ -298,11 +300,13 @@ def test_compute_metrics_returns_dict(manifest, queue, store):
 def test_list_versions_extractor_versions(store, registry):
     """story #33 —— 事实表中出现过的 extractor_version 去重清单。"""
     _init_all(store, registry)
-    store.upsert_facts([
-        _fact("REVENUE", "2023", 2350.0, extractor_version="xlsx_styled@1"),
-        _fact("REVENUE", "2024", 2680.0, extractor_version="xlsx_styled@1"),
-        _fact("NEWSALES", "2024", 4750.0, extractor_version="xlsx_styled@2"),
-    ])
+    store.upsert_facts(
+        [
+            _fact("REVENUE", "2023", 2350.0, extractor_version="xlsx_styled@1"),
+            _fact("REVENUE", "2024", 2680.0, extractor_version="xlsx_styled@1"),
+            _fact("NEWSALES", "2024", 4750.0, extractor_version="xlsx_styled@2"),
+        ]
+    )
     versions = list_versions(store, registry)
     assert set(versions["extractor_versions"]) == {"xlsx_styled@1", "xlsx_styled@2"}
 
@@ -311,8 +315,9 @@ def test_list_versions_active_mappings(store, registry):
     """story #33 —— registry 各 scope 当前 active 的映射版本被列出。"""
     _init_all(store, registry)
     scope = "excel_styled_fixture.xlsx"
-    entries = [LegendEntry(rgb="FFFF00", meaning="黄色=新产品线",
-                           tag_key="product_line", tag_value="new")]
+    entries = [
+        LegendEntry(rgb="FFFF00", meaning="黄色=新产品线", tag_key="product_line", tag_value="new")
+    ]
     v1 = registry.register_draft(ColorMapping(scope=scope, entries=entries))
     registry.confirm(scope, v1, actor="sme_fin")
 
@@ -324,13 +329,17 @@ def test_list_versions_reflects_new_active_version(store, registry):
     """story #33/#26 —— 映射修订生成新 active 版本后，清单反映最新生效版本。"""
     _init_all(store, registry)
     scope = "excel_styled_fixture.xlsx"
-    e1 = [LegendEntry(rgb="FFFF00", meaning="黄色=新产品线",
-                      tag_key="product_line", tag_value="new")]
+    e1 = [
+        LegendEntry(rgb="FFFF00", meaning="黄色=新产品线", tag_key="product_line", tag_value="new")
+    ]
     v1 = registry.register_draft(ColorMapping(scope=scope, entries=e1))
     registry.confirm(scope, v1, actor="sme_fin")
 
-    e2 = e1 + [LegendEntry(rgb="92D050", meaning="绿色=成熟产品线",
-                           tag_key="product_line", tag_value="mature")]
+    e2 = e1 + [
+        LegendEntry(
+            rgb="92D050", meaning="绿色=成熟产品线", tag_key="product_line", tag_value="mature"
+        )
+    ]
     v2 = registry.register_draft(ColorMapping(scope=scope, entries=e2))
     registry.confirm(scope, v2, actor="sme_fin", note="补绿色")
 

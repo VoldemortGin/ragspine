@@ -121,8 +121,7 @@ def make_entailment_judge(kind: str = "lexical", **kwargs: object) -> Entailment
     if kind == "lexical":
         return LexicalOverlapJudge(**kwargs)  # type: ignore[arg-type]
     raise NotImplementedError(
-        f"entailment judge {kind!r} 是 opt-in follow-up（见 PRD W5）；"
-        "当前离线默认为 'lexical'。"
+        f"entailment judge {kind!r} 是 opt-in follow-up（见 PRD W5）；当前离线默认为 'lexical'。"
     )
 
 

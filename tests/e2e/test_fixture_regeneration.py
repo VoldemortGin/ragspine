@@ -30,13 +30,15 @@ from openpyxl import load_workbook
 from ragspine.fixtures.excel import (
     GT_PATH,
     XLSX_PATH,
+)
+from ragspine.fixtures.excel import (
     main as make_excel_fixtures,
 )
-
 
 # ---------------------------------------------------------------------------
 # 安全网：备份真实 fixture -> 运行 generator -> finally 恢复
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def fixture_sandbox(tmp_path):
@@ -72,6 +74,7 @@ def fixture_sandbox(tmp_path):
 # ---------------------------------------------------------------------------
 # 读回辅助：把 openpyxl 的填充归一为可比较表示
 # ---------------------------------------------------------------------------
+
 
 def _effective_fill(cell):
     """返回再生文件中某格填充的可比较表示。
@@ -133,6 +136,7 @@ def _read_workbook_state(xlsx_path) -> dict:
 # ===========================================================================
 # story #20 —— 用例 1：删除后一键再生，且与 ground truth 一致（确定性再生）
 # ===========================================================================
+
 
 def test_regenerate_after_deletion_rebuilds_files(fixture_sandbox):
     """story #20 —— 删除两个产物后调用生成器，文件被重建且非空。"""
@@ -227,6 +231,7 @@ def test_regenerated_legend_text_matches_ground_truth(fixture_sandbox):
 # story #20 —— 用例 2：连续两次再生内容等价（值与样式层面，非字节级）
 # ===========================================================================
 
+
 def test_two_regenerations_workbook_state_equivalent(fixture_sandbox):
     """story #20 —— 连续生成两次，工作簿的值/填充/格式/合并/CF 全等价。"""
     make_excel_fixtures()
@@ -253,6 +258,7 @@ def test_two_regenerations_ground_truth_equivalent(fixture_sandbox):
 # story #20 —— 用例 3：ground truth 逐格清单 与 再生文件 一致性抽查
 # ===========================================================================
 
+
 def test_ground_truth_cell_list_consistent_with_regenerated_file(fixture_sandbox):
     """story #20 —— ground truth 列出的每个格，在再生文件里都真实存在且自洽。
 
@@ -264,8 +270,7 @@ def test_ground_truth_cell_list_consistent_with_regenerated_file(fixture_sandbox
     palette = gt["theme_palette"]
     wb = load_workbook(str(XLSX_PATH))
 
-    assert wb.sheetnames == list(gt["sheets"].keys()), (
-        wb.sheetnames, list(gt["sheets"].keys()))
+    assert wb.sheetnames == list(gt["sheets"].keys()), (wb.sheetnames, list(gt["sheets"].keys()))
 
     for t in gt["cells"]:
         ref = f"{t['sheet']}!{t['cell_ref']}"

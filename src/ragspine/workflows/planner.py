@@ -355,10 +355,7 @@ def _render_archetype(blueprint: WorkflowBlueprint) -> str:
     if not isinstance(app, dict):  # pragma: no cover - packaged invariant
         raise WorkflowInputError(f"workflow archetype {blueprint.archetype!r} 缺少 app")
     app["name"] = blueprint.name
-    app["description"] = (
-        "Spine-authored controlled archetype. "
-        f"Requested goal: {blueprint.goal}"
-    )
+    app["description"] = f"Spine-authored controlled archetype. Requested goal: {blueprint.goal}"
     return dump_dify_yaml(document)
 
 

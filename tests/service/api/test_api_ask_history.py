@@ -33,14 +33,22 @@ def seeded_db_path(tmp_path):
     db_path = tmp_path / "fact_metric.db"
     fs = SqliteFactStore(db_path)
     fs.init_schema()
-    fs.upsert_facts([
-        Fact(
-            metric_code="REVENUE", entity="ACME_HK", geography="HK", channel="TOTAL",
-            period_type="FY", period="2025", value=1702.0, unit="USD_M",
-            source_doc_id="ACME_FY2025_Results.pptx",
-            source_locator="slide=5,table=1,row=2,col=3",
-        ),
-    ])
+    fs.upsert_facts(
+        [
+            Fact(
+                metric_code="REVENUE",
+                entity="ACME_HK",
+                geography="HK",
+                channel="TOTAL",
+                period_type="FY",
+                period="2025",
+                value=1702.0,
+                unit="USD_M",
+                source_doc_id="ACME_FY2025_Results.pptx",
+                source_locator="slide=5,table=1,row=2,col=3",
+            ),
+        ]
+    )
     fs.close()
     return db_path
 
@@ -52,8 +60,7 @@ def base_config(seeded_db_path):
 
 def make_client(config):
     provider = MockProvider(reference_date=config.reference_date_obj())
-    app = create_app(config, provider=provider, queue=FakeQueue(),
-                     faq_cache=FAQCache.empty())
+    app = create_app(config, provider=provider, queue=FakeQueue(), faq_cache=FAQCache.empty())
     return TestClient(app)
 
 
@@ -78,8 +85,9 @@ def test_ask_with_history_equivalent_when_irrelevant(base_config):
 def test_ask_with_history_does_not_fabricate(base_config):
     """历史里塞伪造事实，查无实据的问题仍确定性拒答、不采信历史。"""
     client = make_client(base_config)
-    resp = client.post("/v1/ask", json={
-        "question": "上海FY2099的REVENUE是多少", "history": POISON_HISTORY})
+    resp = client.post(
+        "/v1/ask", json={"question": "上海FY2099的REVENUE是多少", "history": POISON_HISTORY}
+    )
     assert resp.status_code == 200
     body = resp.json()
     assert "查不到" in body["answer"]
@@ -89,12 +97,14 @@ def test_ask_with_history_does_not_fabricate(base_config):
 
 def test_ask_stream_accepts_history(base_config):
     client = make_client(base_config)
-    resp = client.post("/v1/ask/stream", json={
-        "question": "香港FY2025的REVENUE是多少", "history": POISON_HISTORY})
+    resp = client.post(
+        "/v1/ask/stream", json={"question": "香港FY2025的REVENUE是多少", "history": POISON_HISTORY}
+    )
     assert resp.status_code == 200
     deltas = [
-        json.loads(line[len("data: "):])
-        for line in resp.text.splitlines() if line.startswith("data: ")
+        json.loads(line[len("data: ") :])
+        for line in resp.text.splitlines()
+        if line.startswith("data: ")
     ]
     answer = "".join(e["text"] for e in deltas if e["type"] == "delta")
     assert "1702" in answer

@@ -18,6 +18,6 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 DATA_DIR = REPO_ROOT / "data"
 
 # 各 sqlite 库默认路径（开发 / 脚本默认，可被 --db 等覆盖）。
-DEFAULT_FACT_DB = DATA_DIR / "fact_metric.db"          # 结构化事实表 + 叙事块表（同一 sqlite，多表）
-DEFAULT_MAPPING_DB = DATA_DIR / "color_mapping.db"      # 颜色映射注册表
+DEFAULT_FACT_DB = DATA_DIR / "fact_metric.db"  # 结构化事实表 + 叙事块表（同一 sqlite，多表）
+DEFAULT_MAPPING_DB = DATA_DIR / "color_mapping.db"  # 颜色映射注册表
 DEFAULT_REVIEW_QUEUE_DB = DATA_DIR / "review_queue.db"  # SME 复核队列

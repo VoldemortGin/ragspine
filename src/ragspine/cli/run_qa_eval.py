@@ -34,28 +34,33 @@ DEFAULT_BASELINE = ROOT_DIR / "data" / "golden" / "qa_baseline.json"
 def _print_report(report: QAEvalReport) -> None:
     print(f"=== QA 评测报告（mode={report.mode}，{report.n_cases} cases）===")
     for name, metric in report.metrics.items():
-        print(f"  {name}: {metric.passed}/{metric.total} "
-              f"(pass_rate={metric.pass_rate:.4f})")
+        print(f"  {name}: {metric.passed}/{metric.total} (pass_rate={metric.pass_rate:.4f})")
         for failure in metric.failures:
-            print(f"    FAIL {failure['id']}: 期望={failure['expected']} "
-                  f"实际={failure['actual']}")
-    print(f"  {FABRICATION}: {report.fabrication_count} 例编造"
-          f"（拒答类样本 {report.fabrication.total} 条，目标 0）")
+            print(f"    FAIL {failure['id']}: 期望={failure['expected']} 实际={failure['actual']}")
+    print(
+        f"  {FABRICATION}: {report.fabrication_count} 例编造"
+        f"（拒答类样本 {report.fabrication.total} 条，目标 0）"
+    )
     for failure in report.fabrication.failures:
         print(f"    FAIL {failure['id']}: {failure['actual']}")
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="QA 评测闭环：四命门指标 + 基线门禁")
-    parser.add_argument("--mode", choices=EVAL_MODES, default="tool",
-                        help="tool=绕过 LLM 的确定性直测；agent=answer_question+MockProvider")
-    parser.add_argument("--golden", default=str(DEFAULT_GOLDEN),
-                        help="golden set JSONL 路径")
+    parser.add_argument(
+        "--mode",
+        choices=EVAL_MODES,
+        default="tool",
+        help="tool=绕过 LLM 的确定性直测；agent=answer_question+MockProvider",
+    )
+    parser.add_argument("--golden", default=str(DEFAULT_GOLDEN), help="golden set JSONL 路径")
     parser.add_argument("--report", default=None, help="评测报告 JSON 输出路径")
-    parser.add_argument("--baseline", default=str(DEFAULT_BASELINE),
-                        help="基线 JSON 路径（按 mode 分键）")
-    parser.add_argument("--update-baseline", action="store_true",
-                        help="用当前结果重写该 mode 的基线")
+    parser.add_argument(
+        "--baseline", default=str(DEFAULT_BASELINE), help="基线 JSON 路径（按 mode 分键）"
+    )
+    parser.add_argument(
+        "--update-baseline", action="store_true", help="用当前结果重写该 mode 的基线"
+    )
     args = parser.parse_args(argv)
 
     report = run_qa_eval(args.golden, mode=args.mode)
@@ -94,8 +99,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     print("门禁 FAIL：检测到指标退化——")
     for regression in comparison.regressions:
-        print(f"  {regression['metric']}: 基线={regression['baseline']} "
-              f"当前={regression['current']}（delta={regression['delta']:+}）")
+        print(
+            f"  {regression['metric']}: 基线={regression['baseline']} "
+            f"当前={regression['current']}（delta={regression['delta']:+}）"
+        )
     return 1
 
 

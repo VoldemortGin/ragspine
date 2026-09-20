@@ -34,31 +34,38 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="RAGSpine 结构化入库（xlsx/pptx/pdf）")
     parser.add_argument("file", help="待入库的 xlsx/pptx/pdf 文件路径")
     parser.add_argument(
-        "--db", default=str(DEFAULT_FACT_DB),
+        "--db",
+        default=str(DEFAULT_FACT_DB),
         help=f"fact_store sqlite 路径（默认 {DEFAULT_FACT_DB}，fact_metric 表）",
     )
     parser.add_argument(
-        "--mapping-db", default=str(DEFAULT_MAPPING_DB),
+        "--mapping-db",
+        default=str(DEFAULT_MAPPING_DB),
         help=f"MappingRegistry sqlite 路径（默认 {DEFAULT_MAPPING_DB}，颜色映射注册表）",
     )
     parser.add_argument(
-        "--queue-db", default=str(DEFAULT_REVIEW_QUEUE_DB),
+        "--queue-db",
+        default=str(DEFAULT_REVIEW_QUEUE_DB),
         help=f"ReviewQueue sqlite 路径（默认 {DEFAULT_REVIEW_QUEUE_DB}，复核队列）",
     )
     parser.add_argument(
-        "--manifest-db", default=None,
+        "--manifest-db",
+        default=None,
         help="可选 ManifestStore sqlite 路径：传入则把本文件登记进批次台账",
     )
     parser.add_argument(
-        "--batch-id", default=None,
+        "--batch-id",
+        default=None,
         help="可选批次 id（与 --manifest-db 配合，未传则自动分配）",
     )
     parser.add_argument(
-        "--valid-as-of", default=None,
+        "--valid-as-of",
+        default=None,
         help="本批事实的「截至 / 生效」业务日期（ISO，如 2025-12-31），注入每条 fact",
     )
     parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="只跑抽取并产报告，绝不写库 / 队列",
     )
     return parser
@@ -109,7 +116,10 @@ def run(args: argparse.Namespace) -> int:
 
     try:
         report = ingest_file(
-            args.file, store, registry, queue,
+            args.file,
+            store,
+            registry,
+            queue,
             dry_run=args.dry_run,
             manifest=manifest,
             batch_id=batch_id,

@@ -48,6 +48,7 @@ def _edge(src: str, dst: str, etype: str, **md) -> GraphEdge:
 # Protocol / 基本 upsert + count
 # ---------------------------------------------------------------------------
 
+
 def test_in_process_is_runtime_checkable_graph_store():
     assert isinstance(InProcessGraphStore(), GraphStore)
 
@@ -79,14 +80,17 @@ def test_empty_upsert_is_zero():
 # neighbors / provenance round-trip
 # ---------------------------------------------------------------------------
 
+
 def test_neighbors_out_direction_and_edge_type_filter():
     g = InProcessGraphStore()
     g.upsert_nodes([_node("GROUP"), _node("HK"), _node("CN"), _node("JINGAN", "external_entity")])
-    g.upsert_edges([
-        _edge("GROUP", "HK", "parent_of"),
-        _edge("GROUP", "CN", "parent_of"),
-        _edge("GROUP", "JINGAN", "competes_with"),
-    ])
+    g.upsert_edges(
+        [
+            _edge("GROUP", "HK", "parent_of"),
+            _edge("GROUP", "CN", "parent_of"),
+            _edge("GROUP", "JINGAN", "competes_with"),
+        ]
+    )
     subs = g.neighbors("GROUP", edge_type="parent_of")
     assert [n.id for n in subs] == ["CN", "HK"]  # 按 id 升序，确定性
     peers = g.neighbors("GROUP", edge_type="competes_with")
@@ -105,13 +109,23 @@ def test_neighbors_in_direction():
 
 def test_provenance_round_trips_on_nodes_and_edges():
     g = InProcessGraphStore()
-    g.upsert_nodes([
-        _node("HK", "entity", source_doc_id="HK_FIN.pptx", source_locator="HK_FIN.pptx!slide3"),
-    ])
+    g.upsert_nodes(
+        [
+            _node("HK", "entity", source_doc_id="HK_FIN.pptx", source_locator="HK_FIN.pptx!slide3"),
+        ]
+    )
     g.upsert_nodes([_node("GROUP")])
-    g.upsert_edges([
-        _edge("GROUP", "HK", "parent_of", source_doc_id="company.toml", source_locator="company.toml#home"),
-    ])
+    g.upsert_edges(
+        [
+            _edge(
+                "GROUP",
+                "HK",
+                "parent_of",
+                source_doc_id="company.toml",
+                source_locator="company.toml#home",
+            ),
+        ]
+    )
     hk = g.get_node("HK")
     assert hk.metadata["source_doc_id"] == "HK_FIN.pptx"
     assert hk.metadata["source_locator"] == "HK_FIN.pptx!slide3"
@@ -125,9 +139,12 @@ def test_provenance_round_trips_on_nodes_and_edges():
 # RESTRICTED 隔离（新出口，继承两出口的不变量）
 # ---------------------------------------------------------------------------
 
+
 def test_restricted_node_never_surfaces_in_neighbors():
     g = InProcessGraphStore()
-    g.upsert_nodes([_node("DOC", "doc"), _node("SECRET", "doc", sensitivity="RESTRICTED"), _node("PUB", "doc")])
+    g.upsert_nodes(
+        [_node("DOC", "doc"), _node("SECRET", "doc", sensitivity="RESTRICTED"), _node("PUB", "doc")]
+    )
     g.upsert_edges([_edge("DOC", "SECRET", "mentions"), _edge("DOC", "PUB", "mentions")])
     out_ids = {n.id for n in g.neighbors("DOC")}
     assert "SECRET" not in out_ids
@@ -138,10 +155,14 @@ def test_restricted_node_never_surfaces_in_traverse_or_subgraph():
     g = InProcessGraphStore()
     g.upsert_nodes([_node("A"), _node("B"), _node("SECRET", sensitivity="RESTRICTED"), _node("C")])
     # A -> B -> C 链，且 A -> SECRET -> C：SECRET 既不出现、也不作跳板
-    g.upsert_edges([
-        _edge("A", "B", "rel"), _edge("B", "C", "rel"),
-        _edge("A", "SECRET", "rel"), _edge("SECRET", "C", "rel"),
-    ])
+    g.upsert_edges(
+        [
+            _edge("A", "B", "rel"),
+            _edge("B", "C", "rel"),
+            _edge("A", "SECRET", "rel"),
+            _edge("SECRET", "C", "rel"),
+        ]
+    )
     reached = {n.id for n in g.traverse("A", max_depth=3)}
     assert "SECRET" not in reached
     assert {"B", "C"} <= reached
@@ -170,6 +191,7 @@ def test_cannot_traverse_from_restricted_start():
 # where 过滤（可选的通用元数据过滤，叠加在隔离之上）
 # ---------------------------------------------------------------------------
 
+
 def test_where_filter_on_neighbors():
     g = InProcessGraphStore()
     g.upsert_nodes([_node("ROOT"), _node("M1", "metric"), _node("E1", "entity")])
@@ -182,13 +204,18 @@ def test_where_filter_on_neighbors():
 # 多跳遍历（flat top-k + 精确 SQL 做不到的能力）
 # ---------------------------------------------------------------------------
 
+
 def test_traverse_multi_hop_respects_max_depth_and_edge_types():
     g = InProcessGraphStore()
     g.upsert_nodes([_node(x) for x in ("A", "B", "C", "D")])
-    g.upsert_edges([
-        _edge("A", "B", "derives"), _edge("B", "C", "derives"), _edge("C", "D", "derives"),
-        _edge("A", "D", "other"),
-    ])
+    g.upsert_edges(
+        [
+            _edge("A", "B", "derives"),
+            _edge("B", "C", "derives"),
+            _edge("C", "D", "derives"),
+            _edge("A", "D", "other"),
+        ]
+    )
     assert {n.id for n in g.traverse("A", edge_types=["derives"], max_depth=1)} == {"B"}
     assert {n.id for n in g.traverse("A", edge_types=["derives"], max_depth=2)} == {"B", "C"}
     # other 边被 edge_types 过滤掉，D 仅经 3 跳 derives 才可达
@@ -201,6 +228,7 @@ def test_determinism_traverse_stable_across_instances():
         g.upsert_nodes([_node(f"n{i}") for i in range(8)])
         g.upsert_edges([_edge("n0", f"n{i}", "rel") for i in range(1, 8)])
         return g
+
     first = [n.id for n in build().traverse("n0", max_depth=2)]
     second = [n.id for n in build().traverse("n0", max_depth=2)]
     assert first == second == sorted(first)
@@ -219,6 +247,7 @@ def test_subgraph_returns_typed_result():
 # ---------------------------------------------------------------------------
 # make_graph_store 工厂（范式同 make_vector_store）
 # ---------------------------------------------------------------------------
+
 
 def test_make_graph_store_none_returns_none():
     assert make_graph_store(None) is None

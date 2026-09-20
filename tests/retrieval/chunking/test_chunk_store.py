@@ -53,6 +53,7 @@ def store(tmp_db_path):
 # schema / 写入读回
 # ===========================================================================
 
+
 def test_init_schema_idempotent(store):
     """init_schema 可重复调用且初始为空。"""
     store.init_schema()
@@ -93,14 +94,11 @@ def test_valid_as_of_and_ingested_at(store):
 # 幂等重入 / 版本
 # ===========================================================================
 
+
 def test_reingest_replaces_active_set(store):
     """同 doc 重新入库：活跃集 = 最新一批，旧块默认不可见（幂等）。"""
-    store.replace_doc_chunks(
-        "d1", [_chunk(seq=i, text=f"旧块{i}") for i in range(3)]
-    )
-    store.replace_doc_chunks(
-        "d1", [_chunk(seq=i, text=f"新块{i}") for i in range(2)]
-    )
+    store.replace_doc_chunks("d1", [_chunk(seq=i, text=f"旧块{i}") for i in range(3)])
+    store.replace_doc_chunks("d1", [_chunk(seq=i, text=f"新块{i}") for i in range(2)])
     rows = store.iter_chunks(doc_id="d1")
     assert [r.text for r in rows] == ["新块0", "新块1"]
     assert store.count() == 2
@@ -145,16 +143,35 @@ def test_multiple_docs_isolated(store):
 # 元数据过滤遍历（给检索层的预过滤入口）
 # ===========================================================================
 
+
 @pytest.fixture
 def filled(store):
     """跨 topic/entity/period/language 的小语料库。"""
-    store.replace_doc_chunks("d1", [
-        _chunk(doc_id="d1", seq=0, topic="FIN", entity="ACME_HK", period="2025H1", language="zh"),
-        _chunk(doc_id="d1", seq=1, topic="REG", entity="ACME_HK", period="2025H1", language="en"),
-    ])
-    store.replace_doc_chunks("d2", [
-        _chunk(doc_id="d2", seq=0, topic="REG", entity="ACME_CN", geography="CN", period="2024", language="zh"),
-    ])
+    store.replace_doc_chunks(
+        "d1",
+        [
+            _chunk(
+                doc_id="d1", seq=0, topic="FIN", entity="ACME_HK", period="2025H1", language="zh"
+            ),
+            _chunk(
+                doc_id="d1", seq=1, topic="REG", entity="ACME_HK", period="2025H1", language="en"
+            ),
+        ],
+    )
+    store.replace_doc_chunks(
+        "d2",
+        [
+            _chunk(
+                doc_id="d2",
+                seq=0,
+                topic="REG",
+                entity="ACME_CN",
+                geography="CN",
+                period="2024",
+                language="zh",
+            ),
+        ],
+    )
     return store
 
 
@@ -196,6 +213,7 @@ def test_execute_read(filled):
 # ===========================================================================
 # 父子（small-to-big）/ 布局字段持久化（批次 2.2 follow-up）
 # ===========================================================================
+
 
 def test_parent_child_fields_roundtrip(store):
     """parent_id/heading/window_text/parent_locator 写入读回保真（存储级 small-to-big）。"""

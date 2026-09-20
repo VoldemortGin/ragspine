@@ -11,11 +11,13 @@ from __future__ import annotations
 # ---------------------------------------------------------------------------
 
 # 触发器统一映射为 start。
-TRIGGER_TYPES: frozenset[str] = frozenset({
-    "n8n-nodes-base.manualTrigger",
-    "n8n-nodes-base.webhook",
-    "n8n-nodes-base.executeWorkflowTrigger",
-})
+TRIGGER_TYPES: frozenset[str] = frozenset(
+    {
+        "n8n-nodes-base.manualTrigger",
+        "n8n-nodes-base.webhook",
+        "n8n-nodes-base.executeWorkflowTrigger",
+    }
+)
 
 NOOP_TYPE = "n8n-nodes-base.noOp"
 

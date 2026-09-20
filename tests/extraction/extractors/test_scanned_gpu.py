@@ -65,6 +65,7 @@ _REAL_LOW_CONF_THRESHOLD = 0.999
 # 辅助
 # ---------------------------------------------------------------------------
 
+
 def _norm(text) -> str:
     """空白归一化：首尾 strip + 内部连续空白折叠为单空格（与抽取器约定一致）。"""
     return " ".join(str(text).split())
@@ -94,6 +95,7 @@ def real_grids(scanned_pdf_path, real_backend) -> list[StyledGrid]:
 # story #10 —— 真实后端构造 + 抽取产出 list[StyledGrid]
 # ===========================================================================
 
+
 def test_real_backend_constructs(real_backend):
     """story #10 —— 真实 PaddleOcrVlBackend 在 GPU 环境可构造（惰性加载模型）。"""
     assert real_backend is not None
@@ -118,6 +120,7 @@ def test_real_sheet_names_follow_page_table_pattern(real_grids):
 # ===========================================================================
 # story #10 —— 抽取数值与 digital 真值一致（数字精确、文本归一化）
 # ===========================================================================
+
 
 def test_real_table_values_match_digital_truth(real_grids, pdf_ground_truth):
     """story #10 —— OCR 抽出的表格逐格内容与 digital.pdf 真值一致。
@@ -153,6 +156,7 @@ def test_real_numeric_cells_exact(real_grids, pdf_ground_truth):
 # story #10 —— 每个识别格带置信度（OCR 通道专用字段非 None）
 # ===========================================================================
 
+
 def test_real_cells_carry_confidence(real_grids):
     """story #10 —— 每个 OCR 识别格的 StyledCell.confidence 非 None 且在 [0,1]。"""
     for g in real_grids:
@@ -173,6 +177,7 @@ def test_real_cells_resolved_rgb_none(real_grids):
 # story #27 —— 血缘：source_doc_id / source_file_hash 写入每张 grid
 # ===========================================================================
 
+
 def test_real_grids_carry_lineage(real_grids, scanned_pdf_path):
     """story #10 —— 每张 grid 带源文件名与非空 hash 血缘（审计依据）。"""
     for g in real_grids:
@@ -186,6 +191,7 @@ def test_real_grids_carry_lineage(real_grids, scanned_pdf_path):
 # story #10 —— 低置信分流流程可用（入网格 + warning + 入复核队列）
 # ===========================================================================
 
+
 def test_real_low_confidence_flow_enqueues(scanned_pdf_path, real_backend, tmp_db_path):
     """story #10 —— 低置信格仍入网格、grid 追加 warning，并按约定入复核队列。
 
@@ -196,8 +202,10 @@ def test_real_low_confidence_flow_enqueues(scanned_pdf_path, real_backend, tmp_d
     queue.init_schema()
     try:
         grids = extract_grids(
-            scanned_pdf_path, real_backend,
-            min_confidence=_REAL_LOW_CONF_THRESHOLD, queue=queue,
+            scanned_pdf_path,
+            real_backend,
+            min_confidence=_REAL_LOW_CONF_THRESHOLD,
+            queue=queue,
         )
         assert grids
 
@@ -218,9 +226,7 @@ def test_real_low_confidence_flow_enqueues(scanned_pdf_path, real_backend, tmp_d
 
 def test_real_low_confidence_cells_stay_in_grid(scanned_pdf_path, real_backend):
     """story #10 —— 低置信不丢数据：低于阈值的格仍保留在网格中（带其置信度）。"""
-    grids = extract_grids(
-        scanned_pdf_path, real_backend, min_confidence=_REAL_LOW_CONF_THRESHOLD
-    )
+    grids = extract_grids(scanned_pdf_path, real_backend, min_confidence=_REAL_LOW_CONF_THRESHOLD)
     assert grids
     # 至少存在一个置信度低于阈值、却仍在网格中的格（被拦截而非丢弃）。
     low_conf_cells = [

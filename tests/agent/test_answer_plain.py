@@ -22,14 +22,28 @@ from ragspine.storage.fact_store import Fact, SqliteFactStore
 REF = date(2026, 6, 12)
 
 REVENUE_HK_FY2025 = Fact(
-    metric_code="REVENUE", entity="ACME_HK", geography="HK", channel="TOTAL",
-    period_type="FY", period="2025", value=1702.0, unit="USD_M",
-    source_doc_id="ACME_FY2025_Results.pptx", source_locator="slide=5,table=1,row=2,col=3",
+    metric_code="REVENUE",
+    entity="ACME_HK",
+    geography="HK",
+    channel="TOTAL",
+    period_type="FY",
+    period="2025",
+    value=1702.0,
+    unit="USD_M",
+    source_doc_id="ACME_FY2025_Results.pptx",
+    source_locator="slide=5,table=1,row=2,col=3",
 )
 REVENUE_CN_FY2025 = Fact(
-    metric_code="REVENUE", entity="ACME_CN", geography="CN", channel="TOTAL",
-    period_type="FY", period="2025", value=800.0, unit="USD_M",
-    source_doc_id="ACME_FY2025_Results.pptx", source_locator="slide=6,table=1,row=2,col=3",
+    metric_code="REVENUE",
+    entity="ACME_CN",
+    geography="CN",
+    channel="TOTAL",
+    period_type="FY",
+    period="2025",
+    value=800.0,
+    unit="USD_M",
+    source_doc_id="ACME_FY2025_Results.pptx",
+    source_locator="slide=6,table=1,row=2,col=3",
 )
 
 
@@ -49,23 +63,24 @@ class CleanProseProvider:
         msg = ResponseMessage(
             role="assistant", content="香港营收下降主因是 MCV 客群收缩与银保渠道调整。"
         )
-        return ChatCompletion(
-            choices=(Choice(index=0, message=msg, finish_reason="stop"),)
-        )
+        return ChatCompletion(choices=(Choice(index=0, message=msg, finish_reason="stop"),))
 
 
 class FakeRetriever:
     def retrieve(self, query, *, filters=None, top_k=50):
-        return [{
-            "text": "香港 REVENUE 下降主因是 MCV 客群收缩。",
-            "doc_id": "HK_QBR_2025Q4.pptx",
-            "locator": "slide=12",
-        }]
+        return [
+            {
+                "text": "香港 REVENUE 下降主因是 MCV 客群收缩。",
+                "doc_id": "HK_QBR_2025Q4.pptx",
+                "locator": "slide=12",
+            }
+        ]
 
 
 # ---------------------------------------------------------------------------
 # found（结构化单发）
 # ---------------------------------------------------------------------------
+
 
 def test_structured_found_answer_plain_strips_source_suffix(store):
     result = answer_question(
@@ -91,21 +106,23 @@ def test_structured_found_answer_plain_strips_source_suffix(store):
 # multi-subtask 对比
 # ---------------------------------------------------------------------------
 
+
 def test_multi_subtask_answer_plain_strips_source_suffix(store):
     result = answer_question(
-        "香港和中国去年REVENUE各是多少", store, MockProvider(reference_date=REF),
+        "香港和中国去年REVENUE各是多少",
+        store,
+        MockProvider(reference_date=REF),
         reference_date=REF,
     )
     assert "（来源：" in result.answer  # answer 仍内联来源
     assert result.answer_plain == (
-        "对比结果：\n"
-        "- ACME_HK FY2025 REVENUE：1702 USD_M\n"
-        "- ACME_CN FY2025 REVENUE：800 USD_M"
+        "对比结果：\n- ACME_HK FY2025 REVENUE：1702 USD_M\n- ACME_CN FY2025 REVENUE：800 USD_M"
     )
     assert "（来源：" not in result.answer_plain
     assert "（资料来源：" not in result.answer_plain
     assert [s["doc"] for s in result.sources] == [
-        "ACME_FY2025_Results.pptx", "ACME_FY2025_Results.pptx"
+        "ACME_FY2025_Results.pptx",
+        "ACME_FY2025_Results.pptx",
     ]
 
 
@@ -113,10 +130,14 @@ def test_multi_subtask_answer_plain_strips_source_suffix(store):
 # narrative
 # ---------------------------------------------------------------------------
 
+
 def test_narrative_answer_plain_strips_lineage_fallback(store):
     result = answer_question(
-        "香港最近有什么监管动态", store, CleanProseProvider(),
-        reference_date=REF, narrative_retriever=FakeRetriever(),
+        "香港最近有什么监管动态",
+        store,
+        CleanProseProvider(),
+        reference_date=REF,
+        narrative_retriever=FakeRetriever(),
     )
     assert result.route == "narrative"
     # answer 带血缘兜底
@@ -134,6 +155,7 @@ def test_narrative_answer_plain_strips_lineage_fallback(store):
 # not_found（反编造）：answer_plain == answer，均为被守卫的拒答
 # ---------------------------------------------------------------------------
 
+
 def test_not_found_answer_plain_equals_guarded_refusal(store):
     result = answer_question(
         "中国去年ROE多少", store, MockProvider(reference_date=REF), reference_date=REF
@@ -149,6 +171,7 @@ def test_not_found_answer_plain_equals_guarded_refusal(store):
 # ---------------------------------------------------------------------------
 # backward compat：新字段可省略，默认空串
 # ---------------------------------------------------------------------------
+
 
 def test_agent_result_answer_plain_defaults_to_empty():
     result = AgentResult(answer="hi", route="structured")

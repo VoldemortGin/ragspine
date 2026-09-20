@@ -46,6 +46,7 @@ def _meta(**overrides) -> DocumentMeta:
 # is_heading 启发式
 # ===========================================================================
 
+
 def test_is_heading_structural_signals():
     assert is_heading("# 一级标题")
     assert is_heading("## 1.2 收入分析")
@@ -59,9 +60,7 @@ def test_is_heading_short_no_punctuation():
 
 
 def test_is_heading_rejects_sentences_and_blank():
-    assert not is_heading(
-        "本季度香港地区营收同比增长，主要由银保渠道驱动。"
-    )  # 长 + 含标点
+    assert not is_heading("本季度香港地区营收同比增长，主要由银保渠道驱动。")  # 长 + 含标点
     assert not is_heading("营收同比增长，渠道贡献上升。")  # 含逗号/句号
     assert not is_heading("")
     assert not is_heading("   ")
@@ -71,11 +70,10 @@ def test_is_heading_rejects_sentences_and_blank():
 # 标题边界切分 + heading 记录
 # ===========================================================================
 
+
 def test_chunks_on_heading_boundary_not_merging_across():
     """预算 480 足以把四段合一；布局感知须按标题切成 2 节，各不跨标题。"""
-    text = "\n".join(
-        ["# 收入", "香港收入同比增长强劲。", "# 成本", "运营成本保持稳定。"]
-    )
+    text = "\n".join(["# 收入", "香港收入同比增长强劲。", "# 成本", "运营成本保持稳定。"])
     chunks = LayoutAwareChunker().chunk(text, _meta(), max_chars=480, overlap_chars=0)
     assert [c.text for c in chunks] == [
         "# 收入\n香港收入同比增长强劲。",
@@ -98,6 +96,7 @@ def test_preamble_before_first_heading_is_own_section():
 # 父子：parent_id 归组
 # ===========================================================================
 
+
 def test_section_children_share_parent_id():
     """一节内被预算切成多块，子块共享同一 parent_id；group 归组拿回兄弟全集。"""
     text = "\n".join(["# 财务概览", "甲" * 100, "乙" * 100, "丙" * 100, "丁" * 100])
@@ -119,6 +118,7 @@ def test_distinct_sections_distinct_parents():
 # ===========================================================================
 # provenance：全局段号、子串契约
 # ===========================================================================
+
 
 def test_locators_use_global_paragraph_numbers():
     """跨小节 locator 用【全局】段号，不是小节内重置（citation 诚实）。"""
@@ -158,6 +158,7 @@ def test_param_validation_inherited():
 # ===========================================================================
 # 经 make_chunker 选用
 # ===========================================================================
+
 
 def test_make_chunker_resolves_layout():
     assert isinstance(make_chunker("layout"), LayoutAwareChunker)

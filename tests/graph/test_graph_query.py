@@ -76,15 +76,39 @@ def _profile() -> DomainProfile:
 
 def _facts() -> list[Fact]:
     return [
-        Fact("REV", "SUBA", "NORTH", "TOTAL", "FY", "2024", 10.0, "USD_M", "suba_fin.pdf", "suba_fin.pdf#p1"),
-        Fact("REV", "SUBB", "SOUTH", "TOTAL", "FY", "2024", 20.0, "USD_M", "subb_fin.pdf", "subb_fin.pdf#p1"),
+        Fact(
+            "REV",
+            "SUBA",
+            "NORTH",
+            "TOTAL",
+            "FY",
+            "2024",
+            10.0,
+            "USD_M",
+            "suba_fin.pdf",
+            "suba_fin.pdf#p1",
+        ),
+        Fact(
+            "REV",
+            "SUBB",
+            "SOUTH",
+            "TOTAL",
+            "FY",
+            "2024",
+            20.0,
+            "USD_M",
+            "subb_fin.pdf",
+            "subb_fin.pdf#p1",
+        ),
     ]
 
 
 def _chunks() -> list[FakeChunk]:
     return [
         FakeChunk("news1.pdf", entity="SUBA", source_locator="news1.pdf#c1"),
-        FakeChunk("secret.pdf", entity="SUBA", sensitivity="RESTRICTED", source_locator="secret.pdf#c1"),
+        FakeChunk(
+            "secret.pdf", entity="SUBA", sensitivity="RESTRICTED", source_locator="secret.pdf#c1"
+        ),
     ]
 
 

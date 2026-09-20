@@ -34,14 +34,22 @@ def seeded_db_path(tmp_path):
     db_path = tmp_path / "fact_metric.db"
     fs = SqliteFactStore(db_path)
     fs.init_schema()
-    fs.upsert_facts([
-        Fact(
-            metric_code="REVENUE", entity="ACME_HK", geography="HK", channel="TOTAL",
-            period_type="FY", period="2025", value=1702.0, unit="USD_M",
-            source_doc_id="ACME_FY2025_Results.pptx",
-            source_locator="slide=5,table=1,row=2,col=3",
-        ),
-    ])
+    fs.upsert_facts(
+        [
+            Fact(
+                metric_code="REVENUE",
+                entity="ACME_HK",
+                geography="HK",
+                channel="TOTAL",
+                period_type="FY",
+                period="2025",
+                value=1702.0,
+                unit="USD_M",
+                source_doc_id="ACME_FY2025_Results.pptx",
+                source_locator="slide=5,table=1,row=2,col=3",
+            ),
+        ]
+    )
     fs.close()
     return db_path
 
@@ -87,8 +95,10 @@ def test_ask_equivalence_with_workflow(base_config, seeded_db_path):
     store.init_schema()
     ref = base_config.reference_date_obj()
     expected = answer_question(
-        "香港去年REVENUE多少", store,
-        MockProvider(reference_date=ref), reference_date=ref,
+        "香港去年REVENUE多少",
+        store,
+        MockProvider(reference_date=ref),
+        reference_date=ref,
     )
     store.close()
 
@@ -169,14 +179,18 @@ def test_ask_provider_error_degrades_not_500(base_config):
 # ---------------------------------------------------------------------------
 def test_ask_faq_hit(base_config):
     spy = SpyProvider()
-    faq = FAQCache([
-        FAQItem(
-            id="f1", question="RAGSpine 是什么",
-            answer="RAGSpine 是高管经营洞察助手。",
-            source="faq/handbook.md#what-is", version=3,
-            aliases=("什么是 RAGSpine",),
-        ),
-    ])
+    faq = FAQCache(
+        [
+            FAQItem(
+                id="f1",
+                question="RAGSpine 是什么",
+                answer="RAGSpine 是高管经营洞察助手。",
+                source="faq/handbook.md#what-is",
+                version=3,
+                aliases=("什么是 RAGSpine",),
+            ),
+        ]
+    )
     client = make_client(base_config, provider=spy, faq_cache=faq)
     resp = client.post("/v1/ask", json={"question": "RAGSpine 是什么"})
     assert resp.status_code == 200
@@ -195,14 +209,18 @@ def test_ask_faq_hit(base_config):
 
 def test_ask_faq_hit_via_alias(base_config):
     spy = SpyProvider()
-    faq = FAQCache([
-        FAQItem(
-            id="f1", question="RAGSpine 是什么",
-            answer="RAGSpine 是高管经营洞察助手。",
-            source="faq/handbook.md", version=1,
-            aliases=("什么是 RAGSpine",),
-        ),
-    ])
+    faq = FAQCache(
+        [
+            FAQItem(
+                id="f1",
+                question="RAGSpine 是什么",
+                answer="RAGSpine 是高管经营洞察助手。",
+                source="faq/handbook.md",
+                version=1,
+                aliases=("什么是 RAGSpine",),
+            ),
+        ]
+    )
     client = make_client(base_config, provider=spy, faq_cache=faq)
     resp = client.post("/v1/ask", json={"question": "什么是 RAGSpine"})
     body = resp.json()
@@ -235,9 +253,11 @@ def test_ask_faq_miss_equivalent_to_normal(base_config):
 # ---------------------------------------------------------------------------
 def test_ask_faq_does_not_shortcircuit_structured(base_config):
     # 即便 FAQ 里有一条文本恰好等于该结构化数字问题，也不得短路
-    faq = FAQCache([
-        FAQItem(id="bad", question="香港去年REVENUE多少", answer="伪造的缓存答案"),
-    ])
+    faq = FAQCache(
+        [
+            FAQItem(id="bad", question="香港去年REVENUE多少", answer="伪造的缓存答案"),
+        ]
+    )
     client = make_client(base_config, faq_cache=faq)
     resp = client.post("/v1/ask", json={"question": "香港去年REVENUE多少"})
     body = resp.json()
@@ -257,8 +277,12 @@ def test_ask_trace_does_not_leak_sensitive(base_config, caplog):
 
     records = [r for r in caplog.records if r.name == TRACE_LOGGER_NAME]
     assert records  # 确有 trace 产生
-    forbidden = ["香港去年REVENUE多少", "1702", "ACME_FY2025_Results.pptx",
-                 "slide=5,table=1,row=2,col=3"]
+    forbidden = [
+        "香港去年REVENUE多少",
+        "1702",
+        "ACME_FY2025_Results.pptx",
+        "slide=5,table=1,row=2,col=3",
+    ]
     # 只扫我们自己经 extra= 附加的 payload（隐私面）；stdlib LogRecord 内建字段
     # （created/msecs 等墙钟时间戳属允许的 timing 元数据）排除——否则 epoch 数字会
     # 与四位数 fact 值（如 1702）巧合撞串，造成与时间相关的假阳性 flake。
@@ -273,10 +297,16 @@ def test_ask_trace_does_not_leak_sensitive(base_config, caplog):
 
 
 def test_ask_faq_hit_trace_does_not_leak(base_config, caplog):
-    faq = FAQCache([
-        FAQItem(id="f1", question="RAGSpine 是什么",
-                answer="它是高管经营洞察助手机密内容XYZ。", source="faq/x.md"),
-    ])
+    faq = FAQCache(
+        [
+            FAQItem(
+                id="f1",
+                question="RAGSpine 是什么",
+                answer="它是高管经营洞察助手机密内容XYZ。",
+                source="faq/x.md",
+            ),
+        ]
+    )
     client = make_client(base_config, faq_cache=faq)
     with caplog.at_level(logging.INFO, logger=TRACE_LOGGER_NAME):
         client.post("/v1/ask", json={"question": "RAGSpine 是什么"})

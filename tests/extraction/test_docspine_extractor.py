@@ -24,11 +24,14 @@ def test_extract_grids_maps_table_to_styled_grid(make_docx, tmp_path):
     from ragspine.extraction.extractors.docspine_extractor import extract_grids
 
     p = tmp_path / "report.docx"
-    make_docx(p, [
-        ("para", "FY2024 Hong Kong performance review"),
-        ("table", [["ACME Hong Kong", "FY2024"], ["REVENUE", "2680"]]),
-        ("para", "Closing remarks."),
-    ])
+    make_docx(
+        p,
+        [
+            ("para", "FY2024 Hong Kong performance review"),
+            ("table", [["ACME Hong Kong", "FY2024"], ["REVENUE", "2680"]]),
+            ("para", "Closing remarks."),
+        ],
+    )
     grids = extract_grids(p)
     assert len(grids) == 1
     g = grids[0]
@@ -71,11 +74,14 @@ def test_multiple_tables_get_sequential_sheets(make_docx, tmp_path):
     from ragspine.extraction.extractors.docspine_extractor import extract_grids
 
     p = tmp_path / "multi.docx"
-    make_docx(p, [
-        ("table", [["A", "B"]]),
-        ("para", "between"),
-        ("table", [["C", "D"]]),
-    ])
+    make_docx(
+        p,
+        [
+            ("table", [["A", "B"]]),
+            ("para", "between"),
+            ("table", [["C", "D"]]),
+        ],
+    )
     grids = extract_grids(p)
     assert [g.sheet for g in grids] == ["table1", "table2"]
 
@@ -85,12 +91,18 @@ def test_grid_span_recorded_as_merge_span(make_docx, tmp_path):
     from ragspine.extraction.extractors.docspine_extractor import extract_grids
 
     p = tmp_path / "merged.docx"
-    make_docx(p, [
-        ("table", [
-            [{"text": "ACME Hong Kong", "gridspan": 2}],
-            ["FY2023", "FY2024"],
-        ]),
-    ])
+    make_docx(
+        p,
+        [
+            (
+                "table",
+                [
+                    [{"text": "ACME Hong Kong", "gridspan": 2}],
+                    ["FY2023", "FY2024"],
+                ],
+            ),
+        ],
+    )
     g = extract_grids(p)[0]
     origin = g.get("R1C1")
     assert origin.value == "ACME Hong Kong"
@@ -103,12 +115,18 @@ def test_vmerge_recorded_as_vertical_span(make_docx, tmp_path):
     from ragspine.extraction.extractors.docspine_extractor import extract_grids
 
     p = tmp_path / "vmerged.docx"
-    make_docx(p, [
-        ("table", [
-            [{"text": "Region", "vmerge": "restart"}, "FY2024"],
-            [{"text": "", "vmerge": "continue"}, "2680"],
-        ]),
-    ])
+    make_docx(
+        p,
+        [
+            (
+                "table",
+                [
+                    [{"text": "Region", "vmerge": "restart"}, "FY2024"],
+                    [{"text": "", "vmerge": "continue"}, "2680"],
+                ],
+            ),
+        ],
+    )
     g = extract_grids(p)[0]
     origin = g.get("R1C1")
     assert origin.value == "Region"
@@ -158,12 +176,18 @@ def test_cell_fill_resolved_into_rgb(make_docx, tmp_path):
     from ragspine.extraction.extractors.docspine_extractor import extract_grids
 
     p = tmp_path / "filled.docx"
-    make_docx(p, [
-        ("table", [
-            [{"text": "NEW", "fill": "FFFF00"}, {"text": "MATURE", "fill": "92d050"}],
-            ["plain", "2680"],
-        ]),
-    ])
+    make_docx(
+        p,
+        [
+            (
+                "table",
+                [
+                    [{"text": "NEW", "fill": "FFFF00"}, {"text": "MATURE", "fill": "92d050"}],
+                    ["plain", "2680"],
+                ],
+            ),
+        ],
+    )
     g = extract_grids(p)[0]
     assert g.get("R1C1").resolved_rgb == "FFFF00"
     # 小写源色归一为大写（IR 契约：resolved_rgb 恒大写 RRGGBB）。
@@ -180,12 +204,18 @@ def test_cell_fill_flows_into_color_semantics_path(make_docx, tmp_path):
     from ragspine.extraction.extractors.docspine_extractor import extract_grids
 
     p = tmp_path / "legend.docx"
-    make_docx(p, [
-        ("table", [
-            [{"text": "A", "fill": "FFFF00"}, {"text": "B", "fill": "FFFF00"}],
-            [{"text": "C", "fill": "92D050"}, "plain"],
-        ]),
-    ])
+    make_docx(
+        p,
+        [
+            (
+                "table",
+                [
+                    [{"text": "A", "fill": "FFFF00"}, {"text": "B", "fill": "FFFF00"}],
+                    [{"text": "C", "fill": "92D050"}, "plain"],
+                ],
+            ),
+        ],
+    )
     g = extract_grids(p)[0]
     by_rgb = g.cells_by_rgb()
     assert set(by_rgb) == {"FFFF00", "92D050"}
@@ -201,14 +231,26 @@ def test_nested_table_emitted_as_independent_grid(make_docx, tmp_path):
     from ragspine.extraction.extractors.docspine_extractor import extract_grids
 
     p = tmp_path / "nested.docx"
-    make_docx(p, [
-        ("table", [
-            ["Region", "FY2024"],
-            [{"text": "OUTER", "nested": [
-                [["INNER-A", "INNER-B"], ["REVENUE", "2680"]],
-            ]}, "tail"],
-        ]),
-    ])
+    make_docx(
+        p,
+        [
+            (
+                "table",
+                [
+                    ["Region", "FY2024"],
+                    [
+                        {
+                            "text": "OUTER",
+                            "nested": [
+                                [["INNER-A", "INNER-B"], ["REVENUE", "2680"]],
+                            ],
+                        },
+                        "tail",
+                    ],
+                ],
+            ),
+        ],
+    )
     grids = extract_grids(p)
     # 父表 + 一张嵌套表 = 2 张 StyledGrid。
     sheets = [g.sheet for g in grids]
@@ -230,15 +272,33 @@ def test_deeply_nested_table_recurses(make_docx, tmp_path):
     from ragspine.extraction.extractors.docspine_extractor import extract_grids
 
     p = tmp_path / "deep.docx"
-    make_docx(p, [
-        ("table", [
-            [{"text": "L0", "nested": [
-                [[{"text": "L1", "nested": [
-                    [["L2", "leaf"]],
-                ]}]],
-            ]}],
-        ]),
-    ])
+    make_docx(
+        p,
+        [
+            (
+                "table",
+                [
+                    [
+                        {
+                            "text": "L0",
+                            "nested": [
+                                [
+                                    [
+                                        {
+                                            "text": "L1",
+                                            "nested": [
+                                                [["L2", "leaf"]],
+                                            ],
+                                        }
+                                    ]
+                                ],
+                            ],
+                        }
+                    ],
+                ],
+            ),
+        ],
+    )
     sheets = [g.sheet for g in extract_grids(p)]
     assert sheets == [
         "table1",

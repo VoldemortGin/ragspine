@@ -419,9 +419,6 @@ def test_env_injection_changes_behavior(
     """同一 IR + 不同注入 env → 结果不同：证明上限来自参数而非真实环境。"""
     ir = lower_to_ir(parse_dify_yaml(fixture_text("iteration")))
     default = {s.rule_id for s in analyze_ir(ir)}
-    tightened = {
-        s.rule_id
-        for s in analyze_ir(ir, env=OptimizeEnv(max_parallel_workers=3))
-    }
+    tightened = {s.rule_id for s in analyze_ir(ir, env=OptimizeEnv(max_parallel_workers=3))}
     assert "RESOURCE_001" not in default
     assert "RESOURCE_001" in tightened

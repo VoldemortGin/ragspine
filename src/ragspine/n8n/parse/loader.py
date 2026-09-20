@@ -101,9 +101,7 @@ def _validate_connections(workflow: N8nWorkflow) -> None:
             )
         for conn_type, ports in conn_types.items():
             if not isinstance(ports, list):
-                raise N8nConvertError(
-                    f"connections[{source_name!r}][{conn_type!r}] 必须是数组。"
-                )
+                raise N8nConvertError(f"connections[{source_name!r}][{conn_type!r}] 必须是数组。")
             for port in ports:
                 if port is None:
                     continue  # n8n 导出里的空端口

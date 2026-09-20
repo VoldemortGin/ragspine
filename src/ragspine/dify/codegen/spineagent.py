@@ -50,20 +50,20 @@ def generate_spineagent_code(
 
     system = _agent_system(ir)
     start_var = _start_first_var(ir)
-    source = "\n".join([
-        *_PRELUDE,
-        *_emit_inputs_class(ir),
-        "",
-        *tool_funcs,
-        *_emit_run_agent(provider_expr, tool_vars, system, start_var),
-    ])
+    source = "\n".join(
+        [
+            *_PRELUDE,
+            *_emit_inputs_class(ir),
+            "",
+            *tool_funcs,
+            *_emit_run_agent(provider_expr, tool_vars, system, start_var),
+        ]
+    )
     source = source.rstrip("\n") + "\n"
     return GeneratedCode(
         source=source,
         entrypoint="run_agent",
-        imports=(
-            "from spineagent import Coordinator, FunctionCallingAgent, function_tool",
-        ),
+        imports=("from spineagent import Coordinator, FunctionCallingAgent, function_tool",),
         warnings=tuple(warnings),
     )
 
@@ -107,9 +107,7 @@ def _emit_run_agent(
 ) -> list[str]:
     """组装 run_agent 入口：构 FunctionCallingAgent + Coordinator，跑顺序编排取首个结果。"""
     tools_lit = ", ".join(tool_vars)
-    task_expr = (
-        f"str(getattr(inputs, {start_var!r}, '') or '')" if start_var else "''"
-    )
+    task_expr = f"str(getattr(inputs, {start_var!r}, '') or '')" if start_var else "''"
     return [
         "def run_agent(",
         "    inputs: Inputs,",

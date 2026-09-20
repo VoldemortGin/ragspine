@@ -47,9 +47,7 @@ def test_analyze_then_compile_then_run_sync(client):
     assert c.json()["warnings"] == []
 
     # 3) run —— 实际受限执行，返回结果
-    r = client.post(
-        "/v1/dify/run", json={"yaml": yaml_text, "inputs": {"question": "你好"}}
-    )
+    r = client.post("/v1/dify/run", json={"yaml": yaml_text, "inputs": {"question": "你好"}})
     assert r.status_code == 200
     result = r.json()["result"]
     assert "result" in result
@@ -65,9 +63,7 @@ def test_compile_then_run_async(client):
     assert "answer_question" in c.json()["code"]
 
     # 异步执行：入队 -> 轮询 GET /v1/jobs/{id}（FakeQueue 内联跑完）
-    sub = client.post(
-        "/v1/dify/run/jobs", json={"yaml": yaml_text, "inputs": {"question": "你好"}}
-    )
+    sub = client.post("/v1/dify/run/jobs", json={"yaml": yaml_text, "inputs": {"question": "你好"}})
     assert sub.status_code == 200
     job_id = sub.json()["job_id"]
 
@@ -86,8 +82,6 @@ def test_run_disabled_path_is_safe(tmp_path):
 
     assert client.post("/v1/dify/analyze", json={"yaml": yaml_text}).status_code == 200
     assert client.post("/v1/dify/compile", json={"yaml": yaml_text}).status_code == 200
-    run = client.post(
-        "/v1/dify/run", json={"yaml": yaml_text, "inputs": {"question": "x"}}
-    )
+    run = client.post("/v1/dify/run", json={"yaml": yaml_text, "inputs": {"question": "x"}})
     assert run.status_code == 403
     assert run.json()["error"]["type"] == "dify.run_disabled"

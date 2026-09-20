@@ -37,8 +37,11 @@ def _real_library(tmp_path, name: str, docs: list[tuple[str, str, str]]) -> Libr
     store.init_schema()
     for doc_id, text, sens in docs:
         store.replace_doc_chunks(
-            doc_id, chunk_document(text, DocumentMeta(doc_id=doc_id, topic="FIN", sensitivity=sens)))
-    return LibraryIndex(name, f"{name} 营收 财务 库", NarrativeIndexRetriever(NarrativeIndex(store)))
+            doc_id, chunk_document(text, DocumentMeta(doc_id=doc_id, topic="FIN", sensitivity=sens))
+        )
+    return LibraryIndex(
+        name, f"{name} 营收 财务 库", NarrativeIndexRetriever(NarrativeIndex(store))
+    )
 
 
 def _assert_isolation_and_provenance(retriever: MultiIndexRetriever) -> None:
@@ -56,10 +59,16 @@ def _assert_isolation_and_provenance(retriever: MultiIndexRetriever) -> None:
 @pytest.mark.parametrize("router_mode", ROUTER_MODES, ids=ROUTER_MODES)
 def test_routing_mode_isolation_and_provenance(tmp_path, router_mode):
     libs = [
-        _real_library(tmp_path, "liba", [("pub_a.pdf", "营收公开A。", "INTERNAL"),
-                                          ("sec_a.pdf", "营收机密A。", "RESTRICTED")]),
-        _real_library(tmp_path, "libb", [("pub_b.pdf", "营收公开B。", "INTERNAL"),
-                                          ("sec_b.pdf", "营收机密B。", "RESTRICTED")]),
+        _real_library(
+            tmp_path,
+            "liba",
+            [("pub_a.pdf", "营收公开A。", "INTERNAL"), ("sec_a.pdf", "营收机密A。", "RESTRICTED")],
+        ),
+        _real_library(
+            tmp_path,
+            "libb",
+            [("pub_b.pdf", "营收公开B。", "INTERNAL"), ("sec_b.pdf", "营收机密B。", "RESTRICTED")],
+        ),
     ]
     retriever = MultiIndexRetriever(libs, router=make_library_router(router_mode))
     _assert_isolation_and_provenance(retriever)
@@ -68,9 +77,18 @@ def test_routing_mode_isolation_and_provenance(tmp_path, router_mode):
 class _LeakyLibraryRetriever:
     """反证 base：直接吐出一个 RESTRICTED snippet（【故意】不剔除）——模拟丢了出口隔离的 base。"""
 
-    def retrieve(self, query: str, *, filters: dict[str, str] | None = None, top_k: int = 50) -> list[dict[str, Any]]:
-        return [{"text": "机密", "doc_id": "leak.pdf", "chunk_id": "leak#0",
-                 "source_locator": "leak.pdf#para1", "sensitivity": "RESTRICTED"}]
+    def retrieve(
+        self, query: str, *, filters: dict[str, str] | None = None, top_k: int = 50
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "text": "机密",
+                "doc_id": "leak.pdf",
+                "chunk_id": "leak#0",
+                "source_locator": "leak.pdf#para1",
+                "sensitivity": "RESTRICTED",
+            }
+        ]
 
 
 def test_leaky_base_fails_isolation_core():

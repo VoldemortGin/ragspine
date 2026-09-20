@@ -53,13 +53,28 @@ from ragspine.dify.parse.schema import DifyDoc, DifyEdge, DifyNode
 # P7 新增 knowledge-retrieval / parameter-extractor / tool 三类真实生成。
 # P9 扩展节点：variable-aggregator（历史别名 variable-assigner，对齐 Dify 上游）/
 # assigner / document-extractor / http-request / loop。
-_MODELED_TYPES: frozenset[str] = frozenset({
-    "start", "end", "answer", "llm", "code", "if-else",
-    "question-classifier", "iteration", "template-transform",
-    "knowledge-retrieval", "parameter-extractor", "tool",
-    "variable-aggregator", "variable-assigner", "assigner",
-    "document-extractor", "http-request", "loop",
-})
+_MODELED_TYPES: frozenset[str] = frozenset(
+    {
+        "start",
+        "end",
+        "answer",
+        "llm",
+        "code",
+        "if-else",
+        "question-classifier",
+        "iteration",
+        "template-transform",
+        "knowledge-retrieval",
+        "parameter-extractor",
+        "tool",
+        "variable-aggregator",
+        "variable-assigner",
+        "assigner",
+        "document-extractor",
+        "http-request",
+        "loop",
+    }
+)
 
 # React Flow 节点顶层 type：普通可执行节点是容器类型 "custom"（语义类型放 data.type，
 # 绝不能把 "custom" 当语义类型用）；"custom-note" 是画布便签（data 里只有文本/主题等
@@ -68,20 +83,44 @@ _CANVAS_NOTE_TYPES: frozenset[str] = frozenset({"custom-note"})
 _NON_SEMANTIC_TOP_TYPES: frozenset[str] = frozenset({"custom"}) | _CANVAS_NOTE_TYPES
 
 # assigner v2 已建模的操作符集合；操作不在集合内 → 整节点落 UnsupportedNode（不猜语义）。
-_ASSIGN_OPERATIONS: frozenset[str] = frozenset({
-    "over-write", "set", "clear", "append", "extend",
-    "remove-first", "remove-last", "+=", "-=", "*=", "/=",
-})
+_ASSIGN_OPERATIONS: frozenset[str] = frozenset(
+    {
+        "over-write",
+        "set",
+        "clear",
+        "append",
+        "extend",
+        "remove-first",
+        "remove-last",
+        "+=",
+        "-=",
+        "*=",
+        "/=",
+    }
+)
 # 无取值的操作（value 为 None）。
 _ASSIGN_VALUELESS: frozenset[str] = frozenset({"clear", "remove-first", "remove-last"})
 
 # http-request 已建模的方法 / body 类型（form-data 多部分与 binary/file 不支持，落钩子）。
-_HTTP_METHODS: frozenset[str] = frozenset({
-    "get", "post", "put", "delete", "patch", "head", "options",
-})
-_HTTP_BODY_TYPES: frozenset[str] = frozenset({
-    "none", "raw-text", "json", "x-www-form-urlencoded",
-})
+_HTTP_METHODS: frozenset[str] = frozenset(
+    {
+        "get",
+        "post",
+        "put",
+        "delete",
+        "patch",
+        "head",
+        "options",
+    }
+)
+_HTTP_BODY_TYPES: frozenset[str] = frozenset(
+    {
+        "none",
+        "raw-text",
+        "json",
+        "x-www-form-urlencoded",
+    }
+)
 
 # loop 最大轮数护栏（对齐 Dify 画布 loop_count 上限；编译期钳制，杜绝死循环）。
 _LOOP_MAX_ROUNDS: int = 100
@@ -117,18 +156,19 @@ def lower_to_ir(doc: DifyDoc) -> WorkflowIR:
     # 主图的边：剔除两端都在某子图内的边（那些边属于子图内部）。
     body_node_ids = {n.id for ns in body_nodes.values() for n in ns}
     top_edges = [
-        e for e in doc.edges
+        e
+        for e in doc.edges
         if e.source not in body_node_ids
         and e.target not in body_node_ids
         and e.source not in structural_node_ids
         and e.target not in structural_node_ids
     ]
 
-    ir_nodes = tuple(
-        _lower_node(n, body_nodes.get(n.id, []), doc.edges) for n in top_nodes
-    )
+    ir_nodes = tuple(_lower_node(n, body_nodes.get(n.id, []), doc.edges) for n in top_nodes)
     return _assemble(
-        doc.mode, ir_nodes, top_edges,
+        doc.mode,
+        ir_nodes,
+        top_edges,
         conversation_defaults=_conversation_defaults(doc),
     )
 
@@ -154,8 +194,7 @@ def _assemble(
 ) -> WorkflowIR:
     """由归一后的节点 + 控制流边组装 IRGraph，并算拓扑/分层。"""
     ir_edges = tuple(
-        IREdge(source=e.source, target=e.target, source_handle=e.source_handle)
-        for e in dify_edges
+        IREdge(source=e.source, target=e.target, source_handle=e.source_handle) for e in dify_edges
     )
     node_ids = [n.id for n in ir_nodes]
     edge_pairs = [(e.source, e.target) for e in ir_edges]
@@ -163,7 +202,10 @@ def _assemble(
     layers = parallel_layers(node_ids, edge_pairs)
     graph = IRGraph(nodes=ir_nodes, edges=ir_edges)
     return WorkflowIR(
-        mode=mode, graph=graph, topo_order=order, parallel_layers=layers,
+        mode=mode,
+        graph=graph,
+        topo_order=order,
+        parallel_layers=layers,
         conversation_defaults=conversation_defaults,
     )
 
@@ -192,9 +234,7 @@ def _effective_node_type(node: DifyNode) -> str:
     return "" if top in _NON_SEMANTIC_TOP_TYPES else top
 
 
-def _lower_node(
-    node: DifyNode, body: list[DifyNode], all_edges: list[DifyEdge]
-) -> IRNode:
+def _lower_node(node: DifyNode, body: list[DifyNode], all_edges: list[DifyEdge]) -> IRNode:
     """单节点 DifyNode → 对应 IRNode 子类。未建模/缺失类型落 UnsupportedNode（不抛异常）。"""
     node_type = _effective_node_type(node)
     data = node.data
@@ -285,8 +325,12 @@ def _lower_llm(node_id: str, title: str, data: dict[str, Any]) -> LLMNode:
     # context（Dify advanced-chat 把上游检索结果作为外部知识喂给 LLM）：context.variable_selector。
     context_ref = _extract_context_ref(data.get("context"))
     return LLMNode(
-        id=node_id, title=title, messages=tuple(messages),
-        model_name=model_name, max_tokens=max_tokens, context_ref=context_ref,
+        id=node_id,
+        title=title,
+        messages=tuple(messages),
+        model_name=model_name,
+        max_tokens=max_tokens,
+        context_ref=context_ref,
     )
 
 
@@ -314,8 +358,12 @@ def _lower_knowledge_retrieval(
     # top_k 藏在 multiple_retrieval_config / single_retrieval_config / 顶层 top_k 之一。
     top_k = _extract_top_k(data)
     return KnowledgeRetrievalNode(
-        id=node_id, title=title, query=query,
-        dataset_ids=dataset_ids, top_k=top_k, output_field="result",
+        id=node_id,
+        title=title,
+        query=query,
+        dataset_ids=dataset_ids,
+        top_k=top_k,
+        output_field="result",
     )
 
 
@@ -342,18 +390,24 @@ def _lower_parameter_extractor(
         name = str(p.get("name") or "")
         if not name:
             continue
-        params.append(ExtractParam(
-            name=name,
-            type=str(p.get("type", "string") or "string"),
-            description=str(p.get("description", "") or ""),
-            required=bool(p.get("required", False)),
-        ))
+        params.append(
+            ExtractParam(
+                name=name,
+                type=str(p.get("type", "string") or "string"),
+                description=str(p.get("description", "") or ""),
+                required=bool(p.get("required", False)),
+            )
+        )
     instruction = str(data.get("instruction", "") or "")
     model = data.get("model", {}) or {}
     model_name = str(model.get("name", "") or "") if isinstance(model, dict) else ""
     return ParameterExtractorNode(
-        id=node_id, title=title, query=query,
-        parameters=tuple(params), instruction=instruction, model_name=model_name,
+        id=node_id,
+        title=title,
+        query=query,
+        parameters=tuple(params),
+        instruction=instruction,
+        model_name=model_name,
     )
 
 
@@ -368,8 +422,11 @@ def _lower_tool(node_id: str, title: str, data: dict[str, Any]) -> ToolNode:
         for name, spec in params.items():
             inputs_map.append((str(name), _tool_param_value(spec)))
     return ToolNode(
-        id=node_id, title=title, tool_name=tool_name,
-        inputs_map=tuple(inputs_map), output_field="text",
+        id=node_id,
+        title=title,
+        tool_name=tool_name,
+        inputs_map=tuple(inputs_map),
+        output_field="text",
     )
 
 
@@ -394,10 +451,12 @@ def _lower_code(node_id: str, title: str, data: dict[str, Any]) -> CodeNode:
                 inputs_map.append((name, _selector_to_value(v.get("value_selector"))))
     outputs = tuple(str(k) for k in (data.get("outputs", {}) or {}).keys())
     return CodeNode(
-        id=node_id, title=title,
+        id=node_id,
+        title=title,
         code=str(data.get("code", "") or ""),
         code_language=str(data.get("code_language", "python3") or "python3"),
-        inputs_map=tuple(inputs_map), outputs=outputs,
+        inputs_map=tuple(inputs_map),
+        outputs=outputs,
     )
 
 
@@ -440,8 +499,11 @@ def _lower_template_transform(
 
 
 def _lower_iteration(
-    node_id: str, title: str, data: dict[str, Any],
-    body: list[DifyNode], all_edges: list[DifyEdge],
+    node_id: str,
+    title: str,
+    data: dict[str, Any],
+    body: list[DifyNode],
+    all_edges: list[DifyEdge],
 ) -> IterationNode:
     """iteration：iterator/output 选择器归一 + 内层子图各自 lower 成嵌套 WorkflowIR。"""
     iterator = _selector_to_value(data.get("iterator_selector"))
@@ -452,18 +514,20 @@ def _lower_iteration(
     sub_ir: WorkflowIR | None = None
     if body:
         sub_node_ids = {n.id for n in body}
-        sub_edges = [
-            e for e in all_edges
-            if e.source in sub_node_ids and e.target in sub_node_ids
-        ]
+        sub_edges = [e for e in all_edges if e.source in sub_node_ids and e.target in sub_node_ids]
         sub_nodes = tuple(_lower_node(n, [], all_edges) for n in body)
         sub_ir = _assemble("workflow", sub_nodes, sub_edges)
 
     is_parallel = bool(data.get("is_parallel", False))
     parallel_nums = _coerce_int(data.get("parallel_nums"), default=1)
     return IterationNode(
-        id=node_id, title=title, iterator=iterator_ref, body=sub_ir,
-        output=output_ref, is_parallel=is_parallel, parallel_nums=parallel_nums,
+        id=node_id,
+        title=title,
+        iterator=iterator_ref,
+        body=sub_ir,
+        output=output_ref,
+        is_parallel=is_parallel,
+        parallel_nums=parallel_nums,
     )
 
 
@@ -479,12 +543,12 @@ def _lower_variable_aggregator(
                 continue
             name = str(g.get("group_name") or g.get("groupId") or "")
             if name:
-                groups.append(
-                    AggregatorGroup(name=name, items=_selector_refs(g.get("variables")))
-                )
+                groups.append(AggregatorGroup(name=name, items=_selector_refs(g.get("variables"))))
     return VariableAggregatorNode(
-        id=node_id, title=title,
-        items=_selector_refs(data.get("variables")), groups=tuple(groups),
+        id=node_id,
+        title=title,
+        items=_selector_refs(data.get("variables")),
+        groups=tuple(groups),
     )
 
 
@@ -509,12 +573,14 @@ def _lower_assigner(node_id: str, title: str, data: dict[str, Any]) -> IRNode:
     if raw_items is None and data.get("assigned_variable_selector") is not None:
         # v1 旧形状：assigned_variable_selector + write_mode + input_variable_selector
         # → 归一成等价的单条 v2 item。
-        raw_items = [{
-            "variable_selector": data.get("assigned_variable_selector"),
-            "operation": data.get("write_mode", "over-write"),
-            "input_type": "variable",
-            "value": data.get("input_variable_selector"),
-        }]
+        raw_items = [
+            {
+                "variable_selector": data.get("assigned_variable_selector"),
+                "operation": data.get("write_mode", "over-write"),
+                "input_type": "variable",
+                "value": data.get("input_variable_selector"),
+            }
+        ]
     items: list[AssignItem] = []
     for raw in raw_items or []:
         if not isinstance(raw, dict):
@@ -525,7 +591,9 @@ def _lower_assigner(node_id: str, title: str, data: dict[str, Any]) -> IRNode:
         operation = str(raw.get("operation", "over-write") or "over-write")
         if operation not in _ASSIGN_OPERATIONS:
             return UnsupportedNode(
-                id=node_id, title=title, node_type="assigner",
+                id=node_id,
+                title=title,
+                node_type="assigner",
                 raw=tuple(sorted((k, v) for k, v in data.items() if k != "type")),
             )
         value: Value | None = None
@@ -543,7 +611,8 @@ def _lower_document_extractor(
 ) -> DocumentExtractorNode:
     """document-extractor：variable_selector → source，is_array_file 透传。"""
     return DocumentExtractorNode(
-        id=node_id, title=title,
+        id=node_id,
+        title=title,
         source=_selector_to_value(data.get("variable_selector")),
         is_array_file=bool(data.get("is_array_file", False)),
     )
@@ -565,7 +634,9 @@ def _lower_http_request(node_id: str, title: str, data: dict[str, Any]) -> IRNod
         body_text, body_ok = _http_body_text(body_type, body_raw.get("data"))
     if method not in _HTTP_METHODS or body_type not in _HTTP_BODY_TYPES or not body_ok:
         return UnsupportedNode(
-            id=node_id, title=title, node_type="http-request",
+            id=node_id,
+            title=title,
+            node_type="http-request",
             raw=tuple(sorted((k, v) for k, v in data.items() if k != "type")),
         )
     headers_text = str(data.get("headers", "") or "")
@@ -573,7 +644,9 @@ def _lower_http_request(node_id: str, title: str, data: dict[str, Any]) -> IRNod
     if auth_line:
         headers_text = f"{headers_text}\n{auth_line}" if headers_text else auth_line
     return HttpRequestNode(
-        id=node_id, title=title, method=method,
+        id=node_id,
+        title=title,
+        method=method,
         url=_template_from_text(str(data.get("url", "") or "")),
         headers=_template_from_text(headers_text),
         params=_template_from_text(str(data.get("params", "") or "")),
@@ -652,26 +725,28 @@ def _extract_http_timeout(raw: Any) -> float | None:
 
 
 def _lower_loop(
-    node_id: str, title: str, data: dict[str, Any],
-    body: list[DifyNode], all_edges: list[DifyEdge],
+    node_id: str,
+    title: str,
+    data: dict[str, Any],
+    body: list[DifyNode],
+    all_edges: list[DifyEdge],
 ) -> LoopNode:
     """loop：内层子图 lower + loop_count 钳制 + break 条件渲染 + 循环变量初值归一。"""
     sub_ir: WorkflowIR | None = None
     if body:
         sub_node_ids = {n.id for n in body}
-        sub_edges = [
-            e for e in all_edges
-            if e.source in sub_node_ids and e.target in sub_node_ids
-        ]
+        sub_edges = [e for e in all_edges if e.source in sub_node_ids and e.target in sub_node_ids]
         sub_nodes = tuple(_lower_node(n, [], all_edges) for n in body)
         sub_ir = _assemble("workflow", sub_nodes, sub_edges)
 
     loop_count = _coerce_int(data.get("loop_count"), default=10)
     loop_count = max(0, min(loop_count, _LOOP_MAX_ROUNDS))
-    break_expr, break_refs = _render_conditions({
-        "conditions": data.get("break_conditions"),
-        "logical_operator": data.get("logical_operator", "and"),
-    })
+    break_expr, break_refs = _render_conditions(
+        {
+            "conditions": data.get("break_conditions"),
+            "logical_operator": data.get("logical_operator", "and"),
+        }
+    )
     loop_vars: list[tuple[str, Value]] = []
     for v in data.get("loop_variables", []) or []:
         if not isinstance(v, dict):
@@ -684,8 +759,13 @@ def _lower_loop(
         else:
             loop_vars.append((name, Literal(value=v.get("value"))))
     return LoopNode(
-        id=node_id, title=title, body=sub_ir, loop_count=loop_count,
-        break_expr=break_expr, break_refs=break_refs, loop_vars=tuple(loop_vars),
+        id=node_id,
+        title=title,
+        body=sub_ir,
+        loop_count=loop_count,
+        break_expr=break_expr,
+        break_refs=break_refs,
+        loop_vars=tuple(loop_vars),
     )
 
 
@@ -714,7 +794,7 @@ def _template_from_text(text: str) -> TemplateValue:
     pos = 0
     for m in _TEMPLATE_REF.finditer(text):
         if m.start() > pos:
-            parts.append(text[pos:m.start()])
+            parts.append(text[pos : m.start()])
         parts.append(_ref_from_token(m.group(1)))
         pos = m.end()
     if pos < len(text):
@@ -731,7 +811,7 @@ def _template_from_jinja(text: str, var_map: dict[str, VarRef]) -> TemplateValue
         if name not in var_map:
             continue  # 不是已知变量，留作普通文本（连同 {{ }}）
         if m.start() > pos:
-            parts.append(text[pos:m.start()])
+            parts.append(text[pos : m.start()])
         parts.append(var_map[name])
         pos = m.end()
     if pos < len(text):
@@ -768,7 +848,7 @@ def _render_conditions(case: dict[str, Any]) -> tuple[str | None, tuple[VarRef, 
         ref = _selector_to_value(sel)
         if isinstance(ref, VarRef):
             refs.append(ref)
-            lhs = f'_var({ref.node_id!r}, {ref.field!r})'
+            lhs = f"_var({ref.node_id!r}, {ref.field!r})"
         else:
             lhs = repr(getattr(ref, "value", None))
         op = str(cond.get("comparison_operator", "=="))
@@ -781,13 +861,21 @@ def _condition_expr(lhs: str, op: str, rhs_raw: Any) -> str:
     """渲染单个比较为 Python 表达式（数值/字符串/包含等常见算子）。"""
     rhs = _render_rhs(rhs_raw)
     mapping = {
-        "==": f"{lhs} == {rhs}", "is": f"{lhs} == {rhs}", "equals": f"{lhs} == {rhs}",
-        "!=": f"{lhs} != {rhs}", "is not": f"{lhs} != {rhs}",
-        ">": f"{_num(lhs)} > {_num(rhs)}", "<": f"{_num(lhs)} < {_num(rhs)}",
-        "≥": f"{_num(lhs)} >= {_num(rhs)}", ">=": f"{_num(lhs)} >= {_num(rhs)}",
-        "≤": f"{_num(lhs)} <= {_num(rhs)}", "<=": f"{_num(lhs)} <= {_num(rhs)}",
-        "contains": f"{rhs} in {lhs}", "not contains": f"{rhs} not in {lhs}",
-        "empty": f"not {lhs}", "not empty": f"bool({lhs})",
+        "==": f"{lhs} == {rhs}",
+        "is": f"{lhs} == {rhs}",
+        "equals": f"{lhs} == {rhs}",
+        "!=": f"{lhs} != {rhs}",
+        "is not": f"{lhs} != {rhs}",
+        ">": f"{_num(lhs)} > {_num(rhs)}",
+        "<": f"{_num(lhs)} < {_num(rhs)}",
+        "≥": f"{_num(lhs)} >= {_num(rhs)}",
+        ">=": f"{_num(lhs)} >= {_num(rhs)}",
+        "≤": f"{_num(lhs)} <= {_num(rhs)}",
+        "<=": f"{_num(lhs)} <= {_num(rhs)}",
+        "contains": f"{rhs} in {lhs}",
+        "not contains": f"{rhs} not in {lhs}",
+        "empty": f"not {lhs}",
+        "not empty": f"bool({lhs})",
         "start with": f"str({lhs}).startswith({rhs})",
         "end with": f"str({lhs}).endswith({rhs})",
     }

@@ -21,7 +21,7 @@ from ragspine.extraction.ir import StyledCell, StyledGrid
 from ragspine.ingestion.review.review_queue import ReviewQueue
 from ragspine.storage.fact_store import VISIBLE_REVIEW_STATUSES, SqliteFactStore
 
-RESOLVABLE_ENTITY_TITLE = "ACME Hong Kong"   # -> ACME_HK
+RESOLVABLE_ENTITY_TITLE = "ACME Hong Kong"  # -> ACME_HK
 
 
 @pytest.fixture
@@ -90,9 +90,7 @@ def test_docx_dispatch_to_fake_extractor_produces_facts(
         calls.append(str(path))
         return [_fake_hk_grid()]
 
-    monkeypatch.setitem(
-        ingestion_mod._EXTRACTOR_BY_SUFFIX, ".docx", (_fake, "docspine@1", "docx")
-    )
+    monkeypatch.setitem(ingestion_mod._EXTRACTOR_BY_SUFFIX, ".docx", (_fake, "docspine@1", "docx"))
     p = tmp_path / "x.docx"
     p.write_bytes(b"stub-never-parsed")  # fake 拦截，绝不真解析
     report = ingestion_mod.ingest_file(p, store, registry, queue)
@@ -126,11 +124,14 @@ def test_docx_facts_ingested_real_docspine(store, registry, queue, make_docx, tm
 
     _init_three(store, registry, queue)
     p = tmp_path / "acme_hk.docx"
-    make_docx(p, [
-        ("para", "FY2024 Hong Kong performance review"),
-        ("table", [[RESOLVABLE_ENTITY_TITLE, "FY2024"], ["REVENUE", "2680"]]),
-        ("para", "Closing remarks."),
-    ])
+    make_docx(
+        p,
+        [
+            ("para", "FY2024 Hong Kong performance review"),
+            ("table", [[RESOLVABLE_ENTITY_TITLE, "FY2024"], ["REVENUE", "2680"]]),
+            ("para", "Closing remarks."),
+        ],
+    )
     assert store.count() == 0
     report = ingest_file(p, store, registry, queue)
     assert report.status == "ok"
@@ -143,9 +144,7 @@ def test_docx_facts_ingested_real_docspine(store, registry, queue, make_docx, tm
     assert rows[0].review_status in VISIBLE_REVIEW_STATUSES
 
 
-def test_colored_docx_triggers_sme_gated_color_review(
-    store, registry, queue, make_docx, tmp_path
-):
+def test_colored_docx_triggers_sme_gated_color_review(store, registry, queue, make_docx, tmp_path):
     """W3d：着色 .docx 单元格的 resolved_rgb 真正流进既有 SME-gated color 通路 —— 文件含
     颜色编码但无 active 映射时入复核（绝不静默把未确认颜色翻成 tag），证明颜色不止步抽取层。"""
     pytest.importorskip("docspine", reason="docspine 未安装（[doc]）")
@@ -153,12 +152,18 @@ def test_colored_docx_triggers_sme_gated_color_review(
 
     _init_three(store, registry, queue)
     p = tmp_path / "colored.docx"
-    make_docx(p, [
-        ("table", [
-            [RESOLVABLE_ENTITY_TITLE, "FY2024"],
-            ["REVENUE", {"text": "2680", "fill": "FFFF00"}],
-        ]),
-    ])
+    make_docx(
+        p,
+        [
+            (
+                "table",
+                [
+                    [RESOLVABLE_ENTITY_TITLE, "FY2024"],
+                    ["REVENUE", {"text": "2680", "fill": "FFFF00"}],
+                ],
+            ),
+        ],
+    )
     report = ingest_file(p, store, registry, queue)
     assert report.status == "ok"
     # 含颜色编码但映射未确认 -> 报告告警 + 入复核（SME 确认图例前不翻译颜色 tag）。

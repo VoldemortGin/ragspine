@@ -38,12 +38,14 @@ def _meta() -> DocumentMeta:
 
 # 两个话题各两段：营收话题（P1/P2 共享词）→ 人事话题（P3/P4 共享词）。
 # 距离谱：d(P1,P2) 低、d(P2,P3) 高（话题切换峰值）、d(P3,P4) 低 → 在 P2|P3 处切一刀。
-_TWO_TOPICS = "\n".join([
-    "本季度收入增长强劲表现良好",
-    "本季度收入增长保持稳定良好",
-    "员工培训计划全面展开推进",
-    "员工福利政策持续优化改进",
-])
+_TWO_TOPICS = "\n".join(
+    [
+        "本季度收入增长强劲表现良好",
+        "本季度收入增长保持稳定良好",
+        "员工培训计划全面展开推进",
+        "员工福利政策持续优化改进",
+    ]
+)
 
 
 def test_is_runtime_checkable():
@@ -113,7 +115,9 @@ def test_injected_embedder_is_used():
             return [[1.0, 0.0] if i % 2 == 0 else [0.0, 1.0] for i, _ in enumerate(texts)]
 
     spy = SpyEmbedder()
-    chunks = SemanticChunker(embedder=spy).chunk(_TWO_TOPICS, _meta(), max_chars=480, overlap_chars=0)
+    chunks = SemanticChunker(embedder=spy).chunk(
+        _TWO_TOPICS, _meta(), max_chars=480, overlap_chars=0
+    )
     assert spy.calls >= 1
     assert len(chunks) == 4  # 四段两两正交 → 每段自成一块
 

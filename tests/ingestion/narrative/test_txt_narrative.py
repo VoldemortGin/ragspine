@@ -14,8 +14,8 @@ import rootutils
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
 from ragspine.ingestion.narrative.narrative_extract import (
-    NarrativeDoc,
     SUPPORTED_SUFFIXES,
+    NarrativeDoc,
     extract_narrative,
     extract_txt_narrative,
 )
@@ -25,8 +25,7 @@ def test_txt_blocks_become_segments(tmp_path):
     """两个空行分隔的段落块 -> 两段，locator='para=1'/'para=2'，内部空白折叠归一化。"""
     p = tmp_path / "memo.txt"
     p.write_text(
-        "FY2024 Hong Kong performance   review\n\n"
-        "REVENUE grew strongly in 2024.",
+        "FY2024 Hong Kong performance   review\n\nREVENUE grew strongly in 2024.",
         encoding="utf-8",
     )
     doc = extract_txt_narrative(p)

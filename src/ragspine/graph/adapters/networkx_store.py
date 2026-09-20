@@ -191,9 +191,7 @@ class NetworkxGraphStore:
             node = self._visible(seed)
             if node is not None and _node_matches(node, where):
                 nodes[seed] = node
-            for reached in self.traverse(
-                seed, edge_types=edge_types, max_depth=depth, where=where
-            ):
+            for reached in self.traverse(seed, edge_types=edge_types, max_depth=depth, where=where):
                 nodes[reached.id] = reached
         edges: list[GraphEdge] = []
         for src, dst, key, obj in self._g.edges(keys=True, data="obj"):

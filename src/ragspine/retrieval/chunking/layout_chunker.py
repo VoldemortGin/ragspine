@@ -31,9 +31,9 @@ from ragspine.retrieval.chunking.chunking import (
 )
 
 # 标题启发式（确定性、零三方依赖）：
-_MD_HEADING_RE = re.compile(r"^#{1,6}\s+\S")                       # markdown ATX：'# 标题'
+_MD_HEADING_RE = re.compile(r"^#{1,6}\s+\S")  # markdown ATX：'# 标题'
 _CHAPTER_RE = re.compile(r"^第[0-9一二三四五六七八九十百千]+[章节篇部回讲]")  # '第三章 ...'
-_NUM_HEADING_RE = re.compile(                                       # '1. ' / '1.2 ' / '一、' / 'IV) '
+_NUM_HEADING_RE = re.compile(  # '1. ' / '1.2 ' / '一、' / 'IV) '
     r"^(\d+(\.\d+)*|[一二三四五六七八九十百千]+|[IVXLCDMivxlcdm]+)[.、)）]\s*\S"
 )
 
@@ -141,9 +141,7 @@ class LayoutAwareChunker:
         paras = _paragraphs(text)
         if not paras:
             # 空 / 纯空白：复用 chunk_document 兼做参数校验（非法参数 -> ValueError）并返回 []。
-            return chunk_document(
-                text, meta, max_chars=max_chars, overlap_chars=overlap_chars
-            )
+            return chunk_document(text, meta, max_chars=max_chars, overlap_chars=overlap_chars)
 
         prefix = meta.source_locator_prefix or meta.doc_id
         out: list[Chunk] = []
@@ -157,18 +155,14 @@ class LayoutAwareChunker:
             parent_id = f"{meta.doc_id}#s{s_idx}"
             # 父小节的真实段落跨度 locator（parent-child 预设经 _child_extra 用之，指向真实 parent 段落）。
             g_first, g_last = globals_[0], globals_[-1]
-            parent_part = (
-                f"para{g_first}" if g_first == g_last else f"para{g_first}-{g_last}"
-            )
+            parent_part = f"para{g_first}" if g_first == g_last else f"para{g_first}-{g_last}"
             parent_locator = f"{prefix}#{parent_part}"
             extra = self._child_extra(section_text, parent_locator)
             for lc in local_chunks:
                 seq = len(out)
                 g_start = globals_[lc.para_start - 1]
                 g_end = globals_[lc.para_end - 1]
-                para_part = (
-                    f"para{g_start}" if g_start == g_end else f"para{g_start}-{g_end}"
-                )
+                para_part = f"para{g_start}" if g_start == g_end else f"para{g_start}-{g_end}"
                 out.append(
                     Chunk(
                         chunk_id=f"{meta.doc_id}#c{seq}",

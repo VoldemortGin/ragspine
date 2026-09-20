@@ -770,9 +770,7 @@ def workflow_readiness(
         status=readiness.report["status"],
         n_warnings=len(cast(list[object], readiness.report["warnings"])),
     )
-    return WorkflowReadinessResponse.model_validate(
-        {"request_id": request_id, **readiness.report}
-    )
+    return WorkflowReadinessResponse.model_validate({"request_id": request_id, **readiness.report})
 
 
 @router.post("/v1/workflow-package", response_model=None)

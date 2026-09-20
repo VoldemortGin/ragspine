@@ -216,6 +216,4 @@ def make_corrective_retriever(
         return base
     if normalized in {"crag", "corrective", "on"}:
         return CorrectiveRetriever(base, grader=grader, **kwargs)  # type: ignore[arg-type]
-    raise ValueError(
-        f"未知 corrective spec {spec!r}；可用：none / crag / corrective / on"
-    )
+    raise ValueError(f"未知 corrective spec {spec!r}；可用：none / crag / corrective / on")

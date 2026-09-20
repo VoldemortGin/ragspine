@@ -44,7 +44,7 @@ def test_dir_lists_all_domains():
 
 def test_unknown_attribute_raises_attribute_error():
     with pytest.raises(AttributeError):
-        getattr(ragspine, "no_such_domain")
+        ragspine.no_such_domain
 
 
 def test_top_import_does_not_eagerly_load_domains():

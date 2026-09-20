@@ -26,14 +26,28 @@ from ragspine.storage.fact_store import Fact, SqliteFactStore
 REF = date(2026, 6, 12)
 
 REVENUE_HK_FY2025 = Fact(
-    metric_code="REVENUE", entity="ACME_HK", geography="HK", channel="TOTAL",
-    period_type="FY", period="2025", value=1702.0, unit="USD_M",
-    source_doc_id="ACME_FY2025_Results.pptx", source_locator="slide=5,table=1,row=2,col=3",
+    metric_code="REVENUE",
+    entity="ACME_HK",
+    geography="HK",
+    channel="TOTAL",
+    period_type="FY",
+    period="2025",
+    value=1702.0,
+    unit="USD_M",
+    source_doc_id="ACME_FY2025_Results.pptx",
+    source_locator="slide=5,table=1,row=2,col=3",
 )
 PROFIT_HK_FY2025 = Fact(
-    metric_code="PROFIT", entity="ACME_HK", geography="HK", channel="TOTAL",
-    period_type="FY", period="2025", value=311.0, unit="USD_M",
-    source_doc_id="ACME_FY2025_Results.pptx", source_locator="slide=6,table=1,row=2,col=3",
+    metric_code="PROFIT",
+    entity="ACME_HK",
+    geography="HK",
+    channel="TOTAL",
+    period_type="FY",
+    period="2025",
+    value=311.0,
+    unit="USD_M",
+    source_doc_id="ACME_FY2025_Results.pptx",
+    source_locator="slide=6,table=1,row=2,col=3",
 )
 
 
@@ -50,11 +64,20 @@ def store(tmp_db_path):
 # ConversationMemory：有界
 # ---------------------------------------------------------------------------
 
+
 def test_memory_is_bounded():
     mem = ConversationMemory(maxlen=2)
-    mem.remember(ConversationTurn(question="q1", route="structured", entity="ACME_HK", period=("FY", "2023")))
-    mem.remember(ConversationTurn(question="q2", route="structured", entity="ACME_CN", period=("FY", "2024")))
-    mem.remember(ConversationTurn(question="q3", route="structured", entity="ACME_GROUP", period=("FY", "2025")))
+    mem.remember(
+        ConversationTurn(question="q1", route="structured", entity="ACME_HK", period=("FY", "2023"))
+    )
+    mem.remember(
+        ConversationTurn(question="q2", route="structured", entity="ACME_CN", period=("FY", "2024"))
+    )
+    mem.remember(
+        ConversationTurn(
+            question="q3", route="structured", entity="ACME_GROUP", period=("FY", "2025")
+        )
+    )
     assert len(mem) == 2
     assert mem.last_entity() == "ACME_GROUP"
     assert mem.last_period() == ("FY", "2025")
@@ -63,7 +86,9 @@ def test_memory_is_bounded():
 def test_memory_last_scans_back_for_non_null():
     """最近一轮若无 entity（如纯叙事），last_entity 回扫到上一条有值的轮。"""
     mem = ConversationMemory()
-    mem.remember(ConversationTurn(question="q1", route="structured", entity="ACME_HK", period=("FY", "2025")))
+    mem.remember(
+        ConversationTurn(question="q1", route="structured", entity="ACME_HK", period=("FY", "2025"))
+    )
     mem.remember(ConversationTurn(question="q2", route="narrative", entity=None, period=None))
     assert mem.last_entity() == "ACME_HK"
     assert mem.last_period() == ("FY", "2025")
@@ -73,11 +98,18 @@ def test_memory_last_scans_back_for_non_null():
 # resolve_followup：确定性回填
 # ---------------------------------------------------------------------------
 
+
 def test_followup_carries_entity_and_period():
     """跟进问句缺 entity/period → 回填上一轮 home 槽位，重解析得回同一受控代码。"""
     mem = ConversationMemory()
-    mem.remember(ConversationTurn(question="香港FY2025 REVENUE多少", route="structured",
-                                  entity="ACME_HK", period=("FY", "2025")))
+    mem.remember(
+        ConversationTurn(
+            question="香港FY2025 REVENUE多少",
+            route="structured",
+            entity="ACME_HK",
+            period=("FY", "2025"),
+        )
+    )
     augmented = resolve_followup(mem, "PROFIT多少", reference_date=REF)
     assert "接续上文" in augmented
     intent = parse_intent(augmented, reference_date=REF)
@@ -89,8 +121,14 @@ def test_followup_carries_entity_and_period():
 def test_followup_no_carry_when_slots_present():
     """跟进问句已自带 entity+period → 不回填（无"接续上文"）。"""
     mem = ConversationMemory()
-    mem.remember(ConversationTurn(question="香港FY2025 REVENUE多少", route="structured",
-                                  entity="ACME_HK", period=("FY", "2025")))
+    mem.remember(
+        ConversationTurn(
+            question="香港FY2025 REVENUE多少",
+            route="structured",
+            entity="ACME_HK",
+            period=("FY", "2025"),
+        )
+    )
     augmented = resolve_followup(mem, "中国FY2024 PROFIT多少", reference_date=REF)
     assert augmented == "中国FY2024 PROFIT多少"
 
@@ -98,8 +136,14 @@ def test_followup_no_carry_when_slots_present():
 def test_followup_no_carry_for_pure_narrative():
     """纯叙事问句（无指标/数字意图）不回填——回填只服务结构化/复合跟进。"""
     mem = ConversationMemory()
-    mem.remember(ConversationTurn(question="香港FY2025 REVENUE多少", route="structured",
-                                  entity="ACME_HK", period=("FY", "2025")))
+    mem.remember(
+        ConversationTurn(
+            question="香港FY2025 REVENUE多少",
+            route="structured",
+            entity="ACME_HK",
+            period=("FY", "2025"),
+        )
+    )
     augmented = resolve_followup(mem, "最近有什么监管动态", reference_date=REF)
     assert augmented == "最近有什么监管动态"
 
@@ -107,8 +151,14 @@ def test_followup_no_carry_for_pure_narrative():
 def test_followup_no_carry_into_competitor_question():
     """跟进问句命中竞品 → 绝不回填 home 上下文（安全门会越权拒答，记忆不得污染）。"""
     mem = ConversationMemory()
-    mem.remember(ConversationTurn(question="香港FY2025 REVENUE多少", route="structured",
-                                  entity="ACME_HK", period=("FY", "2025")))
+    mem.remember(
+        ConversationTurn(
+            question="香港FY2025 REVENUE多少",
+            route="structured",
+            entity="ACME_HK",
+            period=("FY", "2025"),
+        )
+    )
     augmented = resolve_followup(mem, "竞安REVENUE多少", reference_date=REF)
     assert augmented == "竞安REVENUE多少"
     assert "接续上文" not in augmented
@@ -122,6 +172,7 @@ def test_followup_empty_memory_passthrough():
 # ---------------------------------------------------------------------------
 # ConversationSession：多轮端到端 + 每轮过安全门
 # ---------------------------------------------------------------------------
+
 
 def test_session_multi_turn_carries_context(store):
     session = ConversationSession(store, MockProvider(reference_date=REF), reference_date=REF)

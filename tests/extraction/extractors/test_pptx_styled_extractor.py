@@ -20,7 +20,6 @@ raise NotImplementedError 而 FAIL（收集成功、无意外 PASS、无 collect
 import os
 import re
 
-import pytest
 import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
@@ -42,10 +41,10 @@ from ragspine.extraction.extractors.pptx_styled_extractor import (
 )
 from ragspine.extraction.ir import StyledGrid
 
-
 # ---------------------------------------------------------------------------
 # 辅助
 # ---------------------------------------------------------------------------
+
 
 def _norm(text) -> str:
     """空白归一化：首尾 strip + 内部连续空白折叠为单空格（与抽取器约定一致）。"""
@@ -65,6 +64,7 @@ def _slide_truth(pptx_ground_truth: dict, slide_key: str) -> dict:
 # ===========================================================================
 # story #13 —— 每张原生表一个 StyledGrid，sheet 命名 'slide{N}_table{M}'
 # ===========================================================================
+
 
 def test_extract_returns_list_of_styled_grids(styled_deck_path):
     """story #13 —— styled_deck.pptx 抽取结果是 list[StyledGrid]，含两张表。"""
@@ -98,6 +98,7 @@ def test_accepts_str_and_path_equivalently(styled_deck_path):
 # ===========================================================================
 # story #13 —— 表维度与逐格值全量比对（含转置表如实产网格）
 # ===========================================================================
+
 
 def test_slide1_table_dimensions_match_truth(styled_deck_path, pptx_ground_truth):
     """story #13 —— slide1_table1 的逻辑行列数与真值一致（4 行 × 4 列）。"""
@@ -169,6 +170,7 @@ def test_cell_text_is_whitespace_normalized(styled_deck_path):
 # story #13 —— 填充色解析：显式 RGB / theme 色 / 无填充 None 全量比对
 # ===========================================================================
 
+
 def test_slide1_all_resolved_rgb_match_truth(styled_deck_path, pptx_ground_truth):
     """story #13 —— slide1 每格 resolved_rgb 与真值逐格一致（显式 RGB / theme / None 都核）。"""
     truth = _slide_truth(pptx_ground_truth, "slide1")
@@ -234,6 +236,7 @@ def test_native_table_cells_have_no_ocr_confidence(styled_deck_path):
 # story #27 —— 血缘：source_doc_id / source_file_hash 写入每张 grid
 # ===========================================================================
 
+
 def test_grids_carry_source_doc_id(styled_deck_path):
     """story #27 —— 每张 grid 的 source_doc_id 为源文件名（下游血缘根）。"""
     grids = extract_grids(styled_deck_path)
@@ -261,6 +264,7 @@ def test_grids_share_same_source_hash(styled_deck_path):
 # ===========================================================================
 # story #12 —— extract_note_fragments：含数字句段、source_kind、glossary、locator
 # ===========================================================================
+
 
 def test_extract_note_fragments_returns_list(styled_deck_path):
     """story #12 —— 返回 list[NoteFragment]（叙述层数字线索的统一载体）。"""
@@ -367,15 +371,26 @@ def test_extractor_version_tag(styled_deck_path):
 # （PPT 网格走与 Excel 完全相同的颜色映射机制）
 # ===========================================================================
 
+
 def _product_line_mapping(scope: str, *, status: str) -> ColorMapping:
     """组装与 Excel 线同义的 product_line 映射（黄=新、绿=成熟）。"""
     return ColorMapping(
         scope=scope,
         entries=[
-            LegendEntry(rgb="FFFF00", meaning="黄色=新产品线",
-                        tag_key="product_line", tag_value="new", source_ref="legend_new"),
-            LegendEntry(rgb="92D050", meaning="绿色=成熟产品线",
-                        tag_key="product_line", tag_value="mature", source_ref="legend_mature"),
+            LegendEntry(
+                rgb="FFFF00",
+                meaning="黄色=新产品线",
+                tag_key="product_line",
+                tag_value="new",
+                source_ref="legend_new",
+            ),
+            LegendEntry(
+                rgb="92D050",
+                meaning="绿色=成熟产品线",
+                tag_key="product_line",
+                tag_value="mature",
+                source_ref="legend_mature",
+            ),
         ],
         status=status,
     )
@@ -426,7 +441,9 @@ def test_apply_unconfirmed_mapping_on_pptx_empty_and_warns(styled_deck_path, ppt
     assert len(grid.warnings) > warnings_before
 
 
-def test_registry_confirm_then_apply_yellow_is_new(styled_deck_path, pptx_ground_truth, tmp_db_path):
+def test_registry_confirm_then_apply_yellow_is_new(
+    styled_deck_path, pptx_ground_truth, tmp_db_path
+):
     """story #13 —— 注册表 confirm 后取 active 映射应用到 PPT 网格：黄行 -> product_line=new。
 
     走与 Excel 完全相同的机制：register_draft -> confirm -> get_active -> apply_mapping。
@@ -450,7 +467,9 @@ def test_registry_confirm_then_apply_yellow_is_new(styled_deck_path, pptx_ground
         assert result.get(ref) == {"product_line": "new"}, ref
 
 
-def test_registry_confirm_then_apply_green_is_mature(styled_deck_path, pptx_ground_truth, tmp_db_path):
+def test_registry_confirm_then_apply_green_is_mature(
+    styled_deck_path, pptx_ground_truth, tmp_db_path
+):
     """story #13 —— confirm 后应用：绿行 -> product_line=mature（与黄行同机制反向验证）。"""
     truth = _slide_truth(pptx_ground_truth, "slide1")
     grid = _grids_by_sheet(styled_deck_path)[truth["sheet"]]

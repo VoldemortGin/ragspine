@@ -264,9 +264,7 @@ class FactStore(Protocol):
 
     def count(self) -> int: ...
 
-    def execute_read(
-        self, sql: str, params: tuple[object, ...] = ()
-    ) -> list[sqlite3.Row]: ...
+    def execute_read(self, sql: str, params: tuple[object, ...] = ()) -> list[sqlite3.Row]: ...
 
     def delete_by_source_doc(self, source_doc_id: str) -> int: ...
 
@@ -336,8 +334,7 @@ class SqliteFactStore:
         )
         self._migrate_v2()
         self._conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS ux_fact_dim_key "
-            "ON fact_metric (dim_key)"
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_fact_dim_key ON fact_metric (dim_key)"
         )
         self._conn.commit()
 
@@ -453,14 +450,10 @@ class SqliteFactStore:
 
     def count(self) -> int:
         """事实总条数。"""
-        count: int = self._conn.execute(
-            "SELECT COUNT(*) FROM fact_metric"
-        ).fetchone()[0]
+        count: int = self._conn.execute("SELECT COUNT(*) FROM fact_metric").fetchone()[0]
         return count
 
-    def execute_read(
-        self, sql: str, params: tuple[object, ...] = ()
-    ) -> list[sqlite3.Row]:
+    def execute_read(self, sql: str, params: tuple[object, ...] = ()) -> list[sqlite3.Row]:
         """只读查询入口：跑参数化 SELECT 返回行列表（供台账/指标等观测面复用，
         免去外部直访私有连接）。"""
         return self._conn.execute(sql, params).fetchall()

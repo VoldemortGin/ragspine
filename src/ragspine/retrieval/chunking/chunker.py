@@ -64,9 +64,7 @@ class DefaultChunker:
         max_chars: int = DEFAULT_CHUNK_CHARS,
         overlap_chars: int = DEFAULT_OVERLAP_CHARS,
     ) -> list[Chunk]:
-        return chunk_document(
-            text, meta, max_chars=max_chars, overlap_chars=overlap_chars
-        )
+        return chunk_document(text, meta, max_chars=max_chars, overlap_chars=overlap_chars)
 
 
 # ---------------------------------------------------------------------------

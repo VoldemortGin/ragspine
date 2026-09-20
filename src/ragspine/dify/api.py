@@ -89,7 +89,9 @@ def compile_dify_yaml(
         code = generate_spineagent_code(ir, provider_expr=provider_expr)
     else:
         code = generate_code(
-            ir, provider_expr=provider_expr, fold_answer_question=fold_answer_question,
+            ir,
+            provider_expr=provider_expr,
+            fold_answer_question=fold_answer_question,
             emit_node_traces=emit_node_traces,
         )
     suggestions = tuple(analyze_ir(ir)) if analyze else ()

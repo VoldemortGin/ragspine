@@ -26,8 +26,8 @@ from ragspine.dify.optimize.suggestion import Category, Severity, Suggestion
 class OptimizeEnv:
     """注入式部署侧环境上限（不读 os.environ，由调用方显式传入）。"""
 
-    max_parallel_workers: int = 10   # 部署侧并发上限（线程池可用 worker 数上限）
-    max_llm_tokens: int = 8192       # 单次 LLM max_tokens 的合理上界（超过即“极大”）
+    max_parallel_workers: int = 10  # 部署侧并发上限（线程池可用 worker 数上限）
+    max_llm_tokens: int = 8192  # 单次 LLM max_tokens 的合理上界（超过即“极大”）
 
 
 # ---------------------------------------------------------------------------
@@ -43,15 +43,24 @@ def _is_heavy(node: IRNode) -> bool:
     node_type（'http-request'），两者天然被同一判据覆盖。
     """
     return node.kind in (
-        "llm", "code", "iteration",
-        "knowledge-retrieval", "tool", "parameter-extractor", "http-request",
+        "llm",
+        "code",
+        "iteration",
+        "knowledge-retrieval",
+        "tool",
+        "parameter-extractor",
+        "http-request",
     )
 
 
 def _is_io_heavy(node: IRNode) -> bool:
     """I/O 重型节点：llm / 检索 / 工具 / http 请求（迭代体内是否值得并行的判定）。"""
     return node.kind in (
-        "llm", "knowledge-retrieval", "tool", "parameter-extractor", "http-request",
+        "llm",
+        "knowledge-retrieval",
+        "tool",
+        "parameter-extractor",
+        "http-request",
     )
 
 
@@ -116,17 +125,19 @@ def rule_parallel_001(ir: WorkflowIR, env: OptimizeEnv) -> list[Suggestion]:
         heavy = _drop_branch_exclusive(ir, heavy)
         if len(heavy) < 2:
             continue
-        out.append(Suggestion(
-            rule_id="PARALLEL_001",
-            severity=Severity.HIGH,
-            category=Category.PARALLEL,
-            title=f"第 {idx} 层有 {len(heavy)} 个互相独立的重型节点可并发执行",
-            detail=(
-                f"节点 {heavy} 彼此无数据依赖，codegen 会自动用线程池并发执行；"
-                f"请确认部署侧线程池容量（当前注入上限 {env.max_parallel_workers}）足以承载。"
-            ),
-            node_ids=tuple(heavy),
-        ))
+        out.append(
+            Suggestion(
+                rule_id="PARALLEL_001",
+                severity=Severity.HIGH,
+                category=Category.PARALLEL,
+                title=f"第 {idx} 层有 {len(heavy)} 个互相独立的重型节点可并发执行",
+                detail=(
+                    f"节点 {heavy} 彼此无数据依赖，codegen 会自动用线程池并发执行；"
+                    f"请确认部署侧线程池容量（当前注入上限 {env.max_parallel_workers}）足以承载。"
+                ),
+                node_ids=tuple(heavy),
+            )
+        )
     return out
 
 
@@ -138,14 +149,16 @@ def rule_parallel_002(ir: WorkflowIR, env: OptimizeEnv) -> list[Suggestion]:
         if not isinstance(node, IterationNode) or node.is_parallel:
             continue
         if any(_is_io_heavy(inner) for inner in _body_nodes(node)):
-            out.append(Suggestion(
-                rule_id="PARALLEL_002",
-                severity=Severity.MEDIUM,
-                category=Category.PARALLEL,
-                title=f"迭代节点 {node.id!r} 体内含 I/O 重型节点但未开启并行",
-                detail="每轮迭代会串行执行内层 I/O 调用，建议设置 is_parallel=true 以并发提速。",
-                node_ids=(node.id,),
-            ))
+            out.append(
+                Suggestion(
+                    rule_id="PARALLEL_002",
+                    severity=Severity.MEDIUM,
+                    category=Category.PARALLEL,
+                    title=f"迭代节点 {node.id!r} 体内含 I/O 重型节点但未开启并行",
+                    detail="每轮迭代会串行执行内层 I/O 调用，建议设置 is_parallel=true 以并发提速。",
+                    node_ids=(node.id,),
+                )
+            )
     return out
 
 
@@ -203,18 +216,18 @@ def rule_bottle_002(ir: WorkflowIR, env: OptimizeEnv) -> list[Suggestion]:
     for node in ir.graph.nodes:
         if not isinstance(node, IterationNode):
             continue
-        has_http = any(
-            inner.kind == "http-request" for inner in _body_nodes(node)
-        )
+        has_http = any(inner.kind == "http-request" for inner in _body_nodes(node))
         if has_http:
-            out.append(Suggestion(
-                rule_id="BOTTLE_002",
-                severity=Severity.MEDIUM,
-                category=Category.BOTTLENECK,
-                title=f"迭代节点 {node.id!r} 体内每轮发起同步 HTTP 请求",
-                detail="逐项同步 HTTP 会随数组长度线性放大耗时，建议批量化或并行化该请求。",
-                node_ids=(node.id,),
-            ))
+            out.append(
+                Suggestion(
+                    rule_id="BOTTLE_002",
+                    severity=Severity.MEDIUM,
+                    category=Category.BOTTLENECK,
+                    title=f"迭代节点 {node.id!r} 体内每轮发起同步 HTTP 请求",
+                    detail="逐项同步 HTTP 会随数组长度线性放大耗时，建议批量化或并行化该请求。",
+                    node_ids=(node.id,),
+                )
+            )
     return out
 
 
@@ -240,14 +253,16 @@ def rule_cache_001(ir: WorkflowIR, env: OptimizeEnv) -> list[Suggestion]:
     for key, ids in groups.items():
         if len(ids) < 2:
             continue
-        out.append(Suggestion(
-            rule_id="CACHE_001",
-            severity=Severity.LOW,
-            category=Category.CACHE,
-            title=f"{len(ids)} 个知识检索节点查询同一数据集，可加缓存",
-            detail=f"节点 {ids} 均检索数据集 {key!r}，结果可缓存以省去重复检索开销。",
-            node_ids=tuple(ids),
-        ))
+        out.append(
+            Suggestion(
+                rule_id="CACHE_001",
+                severity=Severity.LOW,
+                category=Category.CACHE,
+                title=f"{len(ids)} 个知识检索节点查询同一数据集，可加缓存",
+                detail=f"节点 {ids} 均检索数据集 {key!r}，结果可缓存以省去重复检索开销。",
+                node_ids=tuple(ids),
+            )
+        )
     return out
 
 
@@ -263,17 +278,19 @@ def rule_resource_001(ir: WorkflowIR, env: OptimizeEnv) -> list[Suggestion]:
         if not isinstance(node, IterationNode):
             continue
         if node.is_parallel and node.parallel_nums > env.max_parallel_workers:
-            out.append(Suggestion(
-                rule_id="RESOURCE_001",
-                severity=Severity.MEDIUM,
-                category=Category.RESOURCE,
-                title=f"迭代节点 {node.id!r} 并发数 {node.parallel_nums} 超过部署上限",
-                detail=(
-                    f"配置 parallel_nums={node.parallel_nums}，超过注入的并发上限 "
-                    f"{env.max_parallel_workers}，会过度占用线程池资源；建议调低或扩容。"
-                ),
-                node_ids=(node.id,),
-            ))
+            out.append(
+                Suggestion(
+                    rule_id="RESOURCE_001",
+                    severity=Severity.MEDIUM,
+                    category=Category.RESOURCE,
+                    title=f"迭代节点 {node.id!r} 并发数 {node.parallel_nums} 超过部署上限",
+                    detail=(
+                        f"配置 parallel_nums={node.parallel_nums}，超过注入的并发上限 "
+                        f"{env.max_parallel_workers}，会过度占用线程池资源；建议调低或扩容。"
+                    ),
+                    node_ids=(node.id,),
+                )
+            )
     return out
 
 
@@ -284,14 +301,16 @@ def rule_resource_002(ir: WorkflowIR, env: OptimizeEnv) -> list[Suggestion]:
         if not isinstance(node, IterationNode):
             continue
         if node.is_parallel and node.parallel_nums <= 1:
-            out.append(Suggestion(
-                rule_id="RESOURCE_002",
-                severity=Severity.LOW,
-                category=Category.RESOURCE,
-                title=f"迭代节点 {node.id!r} 声明并行但 parallel_nums={node.parallel_nums}（实为串行）",
-                detail="已开启 is_parallel 却把并发数设为 ≤1，并行未生效；请上调 parallel_nums。",
-                node_ids=(node.id,),
-            ))
+            out.append(
+                Suggestion(
+                    rule_id="RESOURCE_002",
+                    severity=Severity.LOW,
+                    category=Category.RESOURCE,
+                    title=f"迭代节点 {node.id!r} 声明并行但 parallel_nums={node.parallel_nums}（实为串行）",
+                    detail="已开启 is_parallel 却把并发数设为 ≤1，并行未生效；请上调 parallel_nums。",
+                    node_ids=(node.id,),
+                )
+            )
     return out
 
 
@@ -317,26 +336,30 @@ def rule_llm_001(ir: WorkflowIR, env: OptimizeEnv) -> list[Suggestion]:
     out: list[Suggestion] = []
     for node in _llm_nodes(ir):
         if node.max_tokens is None:
-            out.append(Suggestion(
-                rule_id="LLM_001",
-                severity=Severity.LOW,
-                category=Category.LLM,
-                title=f"LLM 节点 {node.id!r} 未设置 max_tokens",
-                detail="未设 max_tokens 时输出长度不可控，可能超额计费；建议显式设置合理上界。",
-                node_ids=(node.id,),
-            ))
+            out.append(
+                Suggestion(
+                    rule_id="LLM_001",
+                    severity=Severity.LOW,
+                    category=Category.LLM,
+                    title=f"LLM 节点 {node.id!r} 未设置 max_tokens",
+                    detail="未设 max_tokens 时输出长度不可控，可能超额计费；建议显式设置合理上界。",
+                    node_ids=(node.id,),
+                )
+            )
         elif node.max_tokens > env.max_llm_tokens:
-            out.append(Suggestion(
-                rule_id="LLM_001",
-                severity=Severity.LOW,
-                category=Category.LLM,
-                title=f"LLM 节点 {node.id!r} 的 max_tokens={node.max_tokens} 偏大",
-                detail=(
-                    f"max_tokens={node.max_tokens} 超过合理上界 {env.max_llm_tokens}，"
-                    "可能造成不必要的延迟与费用；建议按实际需要调小。"
-                ),
-                node_ids=(node.id,),
-            ))
+            out.append(
+                Suggestion(
+                    rule_id="LLM_001",
+                    severity=Severity.LOW,
+                    category=Category.LLM,
+                    title=f"LLM 节点 {node.id!r} 的 max_tokens={node.max_tokens} 偏大",
+                    detail=(
+                        f"max_tokens={node.max_tokens} 超过合理上界 {env.max_llm_tokens}，"
+                        "可能造成不必要的延迟与费用；建议按实际需要调小。"
+                    ),
+                    node_ids=(node.id,),
+                )
+            )
     return out
 
 

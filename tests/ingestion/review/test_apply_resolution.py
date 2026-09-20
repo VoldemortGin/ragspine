@@ -80,9 +80,7 @@ def _base_fact(**overrides) -> Fact:
 
 def _query_one(store: FactStore, fact: Fact) -> Fact | None:
     """按身份查可见事实，命中返回唯一一条，否则 None。"""
-    rows = store.query(
-        fact.metric_code, fact.entity, fact.period_type, fact.period, fact.channel
-    )
+    rows = store.query(fact.metric_code, fact.entity, fact.period_type, fact.period, fact.channel)
     return rows[0] if rows else None
 
 
@@ -136,8 +134,12 @@ def test_reject_without_correction_then_apply_stays_invisible(store, queue, appl
     assert _query_one(store, fact) is None
     # 审计视角（放开状态）能看到这条仍在、状态为 rejected。
     audit = store.query(
-        fact.metric_code, fact.entity, fact.period_type, fact.period,
-        fact.channel, review_statuses=None,
+        fact.metric_code,
+        fact.entity,
+        fact.period_type,
+        fact.period,
+        fact.channel,
+        review_statuses=None,
     )
     assert len(audit) == 1
     assert audit[0].review_status == REVIEW_REJECTED
@@ -264,7 +266,5 @@ def test_apply_does_not_leak_fact_value(store, queue, applier, caplog):
     got = _query_one(store, fact)
     assert got is not None and got.value == sensitive
 
-    blob = "\n".join(
-        rec.getMessage() + " " + str(rec.__dict__) for rec in caplog.records
-    )
+    blob = "\n".join(rec.getMessage() + " " + str(rec.__dict__) for rec in caplog.records)
     assert "987654" not in blob

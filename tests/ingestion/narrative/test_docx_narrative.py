@@ -23,11 +23,14 @@ def test_docx_paragraphs_become_segments(make_docx, tmp_path):
     from ragspine.ingestion.narrative.narrative_extract import extract_docx_narrative
 
     p = tmp_path / "memo.docx"
-    make_docx(p, [
-        ("para", "FY2024 Hong Kong performance review"),
-        ("table", [[TABLE_MARKER, "FY2024"], ["REVENUE", "2680"]]),
-        ("para", "Loss attribution pending review."),
-    ])
+    make_docx(
+        p,
+        [
+            ("para", "FY2024 Hong Kong performance review"),
+            ("table", [[TABLE_MARKER, "FY2024"], ["REVENUE", "2680"]]),
+            ("para", "Loss attribution pending review."),
+        ],
+    )
     doc = extract_docx_narrative(p)
     assert doc.doc_id == "memo.docx"
     assert doc.file_hash
@@ -41,10 +44,13 @@ def test_docx_table_content_skipped(make_docx, tmp_path):
     from ragspine.ingestion.narrative.narrative_extract import extract_docx_narrative
 
     p = tmp_path / "memo.docx"
-    make_docx(p, [
-        ("para", "Intro paragraph."),
-        ("table", [[TABLE_MARKER, "x"]]),
-    ])
+    make_docx(
+        p,
+        [
+            ("para", "Intro paragraph."),
+            ("table", [[TABLE_MARKER, "x"]]),
+        ],
+    )
     doc = extract_docx_narrative(p)
     assert TABLE_MARKER not in doc.to_text()
 
@@ -84,11 +90,14 @@ def test_docx_ingests_into_chunks(make_docx, tmp_path, tmp_db_path):
     from ragspine.retrieval.chunking.chunk_store import ChunkStore
 
     p = tmp_path / "qbr_FY2024.docx"
-    make_docx(p, [
-        ("para", "FY2024 Hong Kong performance review and loss attribution."),
-        ("table", [["ACME Hong Kong", "FY2024"], ["REVENUE", "2680"]]),
-        ("para", "Closing narrative remarks for the quarter ahead."),
-    ])
+    make_docx(
+        p,
+        [
+            ("para", "FY2024 Hong Kong performance review and loss attribution."),
+            ("table", [["ACME Hong Kong", "FY2024"], ["REVENUE", "2680"]]),
+            ("para", "Closing narrative remarks for the quarter ahead."),
+        ],
+    )
     store = ChunkStore(tmp_db_path)
     store.init_schema()
     try:

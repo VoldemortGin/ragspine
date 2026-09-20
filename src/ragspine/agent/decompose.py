@@ -47,9 +47,7 @@ class QueryDecomposer(Protocol):
     实现可为非确定（LLM），故只作 opt-in 注入件——默认 None＝不分解，主流程字节不变。
     """
 
-    def decompose(
-        self, question: str, *, reference_date: date | None = None
-    ) -> list[str]: ...
+    def decompose(self, question: str, *, reference_date: date | None = None) -> list[str]: ...
 
 
 class LLMQueryDecomposer:
@@ -65,14 +63,14 @@ class LLMQueryDecomposer:
         self.provider = provider
         self.max_subquestions = max(1, max_subquestions)
 
-    def decompose(
-        self, question: str, *, reference_date: date | None = None
-    ) -> list[str]:
+    def decompose(self, question: str, *, reference_date: date | None = None) -> list[str]:
         try:
-            resp = self.provider.chat([
-                {"role": "system", "content": _DECOMPOSE_SYSTEM},
-                {"role": "user", "content": question},
-            ])
+            resp = self.provider.chat(
+                [
+                    {"role": "system", "content": _DECOMPOSE_SYSTEM},
+                    {"role": "user", "content": question},
+                ]
+            )
         except ProviderError:
             return [question]
         text = resp.choices[0].message.content or ""

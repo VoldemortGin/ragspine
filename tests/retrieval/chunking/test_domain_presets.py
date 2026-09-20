@@ -72,10 +72,7 @@ def test_laws_clause_text_is_paragraph_join_substring():
     """条内正文随条款同块：text 为原文段落连接（子串契约）。"""
     chunks = LawsChunker().chunk(_LAWS_TEXT, _meta(), max_chars=480, overlap_chars=0)
     clause1 = next(c for c in chunks if c.heading.startswith("第一条"))
-    assert (
-        clause1.text
-        == "第一条 为了保护个人信息权益，制定本法。\n本条明确立法目的"
-    )
+    assert clause1.text == "第一条 为了保护个人信息权益，制定本法。\n本条明确立法目的"
 
 
 def test_laws_short_substantive_line_not_split_out():
@@ -196,6 +193,7 @@ def test_qa_long_answer_keeps_pair_parent_id():
 # 工厂解析 + 别名
 # ===========================================================================
 
+
 def test_make_chunker_resolves_presets():
     assert isinstance(make_chunker("laws"), LawsChunker)
     assert isinstance(make_chunker("qa"), QaChunker)
@@ -219,6 +217,7 @@ def test_presets_are_chunkers():
 # 确定性
 # ===========================================================================
 
+
 def test_presets_deterministic():
     cases = [
         (LawsChunker, _LAWS_TEXT),
@@ -228,20 +227,19 @@ def test_presets_deterministic():
     for cls, text in cases:
         first = cls().chunk(text, _meta(), max_chars=480, overlap_chars=0)
         second = cls().chunk(text, _meta(), max_chars=480, overlap_chars=0)
-        assert [
-            (c.text, c.heading, c.parent_id, c.source_locator) for c in first
-        ] == [(c.text, c.heading, c.parent_id, c.source_locator) for c in second]
+        assert [(c.text, c.heading, c.parent_id, c.source_locator) for c in first] == [
+            (c.text, c.heading, c.parent_id, c.source_locator) for c in second
+        ]
 
 
 # ===========================================================================
 # 基座 LayoutAwareChunker 重构后逐位不变（refactor 不改默认行为）
 # ===========================================================================
 
+
 def test_layout_chunker_byte_identical_after_refactor():
     """复用 test_layout_chunker.py 的标题边界用例：基座输出结构逐位不变。"""
-    text = "\n".join(
-        ["# 收入", "香港收入同比增长强劲。", "# 成本", "运营成本保持稳定。"]
-    )
+    text = "\n".join(["# 收入", "香港收入同比增长强劲。", "# 成本", "运营成本保持稳定。"])
     chunks = LayoutAwareChunker().chunk(text, _meta(), max_chars=480, overlap_chars=0)
     assert [c.text for c in chunks] == [
         "# 收入\n香港收入同比增长强劲。",

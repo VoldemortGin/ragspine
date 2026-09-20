@@ -133,15 +133,10 @@ def _emit_llm(node: LLMNode, names: NameTable) -> list[str]:
     msg_var = f"_messages_{var}"
     lines.append(f"{msg_var} = [")
     for msg in node.messages:
-        lines.append(
-            f"    {{'role': {msg.role!r}, 'content': {value_expr(msg.text)}}},"
-        )
+        lines.append(f"    {{'role': {msg.role!r}, 'content': {value_expr(msg.text)}}},")
     lines.append("]")
     lines.append(f"_resp_{var} = provider.chat({msg_var})")
-    lines.append(
-        f"_ctx[({node.id!r}, 'text')] = "
-        f"(_resp_{var}.choices[0].message.content or '')"
-    )
+    lines.append(f"_ctx[({node.id!r}, 'text')] = (_resp_{var}.choices[0].message.content or '')")
     return lines
 
 
@@ -163,9 +158,7 @@ def _emit_code(node: CodeNode, names: NameTable) -> list[str]:
         for line in body.splitlines():
             lines.append(f"    {line}")
         # 入参以关键字传入 main。
-        kwargs = ", ".join(
-            f"{name}={value_expr(value)}" for name, value in node.inputs_map
-        )
+        kwargs = ", ".join(f"{name}={value_expr(value)}" for name, value in node.inputs_map)
         lines.append(f"    return main({kwargs})")
         lines.append(f"_out_{var} = {fn}_run()")
     else:
@@ -173,15 +166,12 @@ def _emit_code(node: CodeNode, names: NameTable) -> list[str]:
     # 产出字段写回 _ctx（main 返回 dict）。
     for field_name in node.outputs:
         lines.append(
-            f"_ctx[({node.id!r}, {field_name!r})] = "
-            f"(_out_{var} or {{}}).get({field_name!r})"
+            f"_ctx[({node.id!r}, {field_name!r})] = (_out_{var} or {{}}).get({field_name!r})"
         )
     return lines
 
 
-def _emit_knowledge_retrieval(
-    node: KnowledgeRetrievalNode, names: NameTable
-) -> list[str]:
+def _emit_knowledge_retrieval(node: KnowledgeRetrievalNode, names: NameTable) -> list[str]:
     """knowledge-retrieval → ragspine 叙事检索原语（build_narrative_retriever + retrieve）。
 
     chunk_db 默认 KNOWLEDGE_CHUNK_DB（生成代码顶部一个可改的模块常量，默认 ':memory:'——离线空库
@@ -208,9 +198,7 @@ def _emit_knowledge_retrieval(
     ]
 
 
-def _emit_parameter_extractor(
-    node: ParameterExtractorNode, names: NameTable
-) -> list[str]:
+def _emit_parameter_extractor(node: ParameterExtractorNode, names: NameTable) -> list[str]:
     """parameter-extractor → corespine function-calling 形状（provider.chat(tools=[schema])）。
 
     生成一个 OpenAI function-tool schema dict（参数 → JSON-schema properties + required），调
@@ -255,9 +243,7 @@ def _emit_parameter_extractor(
         f"    {args} = {{}}",
     ]
     for p in node.parameters:
-        lines.append(
-            f"_ctx[({node.id!r}, {p.name!r})] = {args}.get({p.name!r})"
-        )
+        lines.append(f"_ctx[({node.id!r}, {p.name!r})] = {args}.get({p.name!r})")
     return lines
 
 
@@ -298,9 +284,7 @@ def _emit_tool(node: ToolNode, names: NameTable) -> list[str]:
     传入并写回 _ctx。
     """
     var = names.var(node.id)
-    args = ", ".join(
-        f"{name!r}: {value_expr(value)}" for name, value in node.inputs_map
-    )
+    args = ", ".join(f"{name!r}: {value_expr(value)}" for name, value in node.inputs_map)
     return [
         f"# tool: {node.id}（{node.tool_name}）—— spineagent FunctionTool 形状，函数体待补全",
         f"_ctx[({node.id!r}, {node.output_field!r})] = _tool_{var}.invoke({{{args}}})",
@@ -364,9 +348,7 @@ def _emit_template_transform(node: TemplateTransformNode) -> list[str]:
     ]
 
 
-def _emit_variable_aggregator(
-    node: VariableAggregatorNode, names: NameTable
-) -> list[str]:
+def _emit_variable_aggregator(node: VariableAggregatorNode, names: NameTable) -> list[str]:
     """variable-aggregator → 首个已产出且非 None 的候选值（Dify first-non-null 语义）。
 
     「已产出」按 _ctx 键存在判定：未走到的分支不写 _ctx，其候选自然跳过；产出为 None
@@ -405,15 +387,11 @@ def _emit_assigner(node: VariableAssignerNode) -> list[str]:
     for item in node.items:
         key = f"({item.target.node_id!r}, {item.target.field!r})"
         value = value_expr(item.value) if item.value is not None else "None"
-        lines.append(
-            f"_ctx[{key}] = _assign_op(_ctx.get({key}), {item.operation!r}, {value})"
-        )
+        lines.append(f"_ctx[{key}] = _assign_op(_ctx.get({key}), {item.operation!r}, {value})")
     return lines
 
 
-def _emit_document_extractor(
-    node: DocumentExtractorNode, names: NameTable
-) -> list[str]:
+def _emit_document_extractor(node: DocumentExtractorNode, names: NameTable) -> list[str]:
     """document-extractor → 纯计算 str/list→text（受限沙箱零文件 I/O）。
 
     运行期按值类型分派：list/tuple → 逐项 _doc_text 输出 array[string]，

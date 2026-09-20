@@ -203,7 +203,11 @@ def execute_fact_query(
         if dim.name == "period":
             parsed_period = normalize_period(raw)
             if parsed_period is None:
-                return {"status": "unrecognized_param", "param": dim.name, "raw": dims.get(dim.name)}
+                return {
+                    "status": "unrecognized_param",
+                    "param": dim.name,
+                    "raw": dims.get(dim.name),
+                }
             period_type, period_norm = parsed_period
             continue
         normalizer = normalize_metric if dim.name == "metric" else normalize_entity

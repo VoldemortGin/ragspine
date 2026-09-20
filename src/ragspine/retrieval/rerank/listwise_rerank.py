@@ -38,8 +38,7 @@ class ListwiseJudge(Protocol):
     parse_listwise_response 解析模型回文）；测试用确定性 fake。
     """
 
-    def judge(self, query: str, candidates: list[str]) -> list[int]:
-        ...
+    def judge(self, query: str, candidates: list[str]) -> list[int]: ...
 
 
 def build_listwise_prompt(query: str, candidates: list[str]) -> str:
@@ -102,9 +101,7 @@ def listwise_rerank(
         return items[:top_n]
 
     restricted_positions = {
-        i
-        for i, r in enumerate(items)
-        if str(r.chunk.sensitivity).upper() == RESTRICTED_SENSITIVITY
+        i for i, r in enumerate(items) if str(r.chunk.sensitivity).upper() == RESTRICTED_SENSITIVITY
     }
     open_items = [r for i, r in enumerate(items) if i not in restricted_positions]
     if not open_items:
@@ -129,7 +126,6 @@ def listwise_rerank(
 
     reordered = iter(open_items[i] for i in order)
     merged = [
-        item if i in restricted_positions else next(reordered)
-        for i, item in enumerate(items)
+        item if i in restricted_positions else next(reordered) for i, item in enumerate(items)
     ]
     return merged[:top_n]

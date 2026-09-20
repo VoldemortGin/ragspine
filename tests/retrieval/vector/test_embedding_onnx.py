@@ -28,10 +28,10 @@ from ragspine.retrieval.vector.embedding_backends import (
     make_embedding_backend,
 )
 
-
 # ---------------------------------------------------------------------------
 # fake fastembed SDK（零网络、零安装）
 # ---------------------------------------------------------------------------
+
 
 def _install_fake_fastembed(monkeypatch, *, dim=4, drop_last=False, dims_split=False):
     """注入 fake fastembed 模块，捕获 TextEmbedding 构造参数与 embed 调用。
@@ -65,6 +65,7 @@ def _install_fake_fastembed(monkeypatch, *, dim=4, drop_last=False, dims_split=F
 # ---------------------------------------------------------------------------
 # 惰性构造 / 友好报错
 # ---------------------------------------------------------------------------
+
 
 def test_ctor_is_lazy_no_fastembed_needed(monkeypatch):
     """构造惰性：模拟未装 fastembed 也能构造（模型在 embed 时才加载）。"""
@@ -115,6 +116,7 @@ def test_invalid_batch_size_rejected():
 # embed_texts：顺序 / 形状 / 校验 / 模型只加载一次
 # ---------------------------------------------------------------------------
 
+
 def test_embed_order_aligned_and_float(monkeypatch):
     """输出与输入顺序对齐，元素为 python float。"""
     _install_fake_fastembed(monkeypatch, dim=4)
@@ -162,6 +164,7 @@ def test_dimension_consistency_check(monkeypatch):
 # 工厂 make_embedding_backend：onnx 别名 + auto 语义
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("spec", ["onnx", "fastembed", "minilm", "ONNX", " onnx "])
 def test_factory_onnx_aliases_return_instance(spec):
     """'onnx' 及其别名（含大小写/留白归一）-> OnnxEmbeddingBackend（构造惰性，无需 fastembed 在场）。"""
@@ -199,6 +202,7 @@ def test_factory_none_still_pure_bm25():
 # 真模型确定性 + 跨语义 conformance（联网首拉，CI 默认 `-m "not network"` 跳过）
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.network
 def test_onnx_real_deterministic_and_crosslingual():
     """真 ONNX 后端：同输入逐位一致（确定性 conformance）+ 跨语言语义可比（真语义）。
@@ -213,8 +217,8 @@ def test_onnx_real_deterministic_and_crosslingual():
 
     texts = [
         "香港业务营收持续增长，主要由代理渠道贡献。",  # zh 文档
-        "revenue growth in Hong Kong",                # en 同义查询
-        "weekend cricket match report 板球比赛",        # 无关
+        "revenue growth in Hong Kong",  # en 同义查询
+        "weekend cricket match report 板球比赛",  # 无关
     ]
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")  # fastembed 第三方 pooling UserWarning，与确定性无关

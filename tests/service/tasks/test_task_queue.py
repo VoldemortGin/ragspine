@@ -5,13 +5,13 @@
 """
 
 from ragspine.service.tasks.task_queue import (
+    JOB_FAILED,
+    JOB_FINISHED,
     JOB_QUEUED,
     JOB_STARTED,
-    JOB_FINISHED,
-    JOB_FAILED,
-    JobStatus,
-    JobError,
     FakeQueue,
+    JobError,
+    JobStatus,
     map_rq_status,
 )
 

@@ -43,7 +43,10 @@ def _spec(name: str, *, emit_node_traces: bool = False, **overrides) -> dict:
 def _run_script(spec: dict) -> dict:
     proc = subprocess.run(
         [sys.executable, str(SCRIPT)],
-        input=json.dumps(spec), capture_output=True, text=True, timeout=30,
+        input=json.dumps(spec),
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     assert proc.returncode == 0, proc.stderr
     return json.loads(proc.stdout)
@@ -52,7 +55,10 @@ def _run_script(spec: dict) -> dict:
 def _run_module(spec: dict) -> dict:
     proc = subprocess.run(
         [sys.executable, "-m", PACKAGE_MODULE],
-        input=json.dumps(spec), capture_output=True, text=True, timeout=30,
+        input=json.dumps(spec),
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     assert proc.returncode == 0, proc.stderr
     return json.loads(proc.stdout)
@@ -107,10 +113,17 @@ def test_subprocess_script_runtime_error_is_structured():
         "def run_workflow(inputs, *, provider=None):\n"
         "    raise ValueError('boom')\n"
     )
-    out = _run_script({
-        "source": src, "entrypoint": "run_workflow", "imports": [], "warnings": [],
-        "inputs": {}, "timeout_s": 5.0, "provider_type": "mock",
-    })
+    out = _run_script(
+        {
+            "source": src,
+            "entrypoint": "run_workflow",
+            "imports": [],
+            "warnings": [],
+            "inputs": {},
+            "timeout_s": 5.0,
+            "provider_type": "mock",
+        }
+    )
     assert out["ok"] is False
     assert "boom" in out["error"]["message"]
 
@@ -128,7 +141,7 @@ def test_subprocess_script_result_carries_node_traces():
 
 def test_subprocess_script_failure_carries_node_traces():
     fail_yaml = (
-        "app:\n  mode: workflow\n  name: fail\nkind: app\nversion: \"0.1.5\"\n"
+        'app:\n  mode: workflow\n  name: fail\nkind: app\nversion: "0.1.5"\n'
         "workflow:\n  graph:\n    nodes:\n"
         "      - id: start_1\n"
         "        data:\n"
@@ -156,11 +169,17 @@ def test_subprocess_script_failure_carries_node_traces():
         "      - {source: code_1, target: end_1, sourceHandle: source}\n"
     )
     code = compile_dify_yaml(fail_yaml, emit_node_traces=True).code
-    out = _run_script({
-        "source": code.source, "entrypoint": code.entrypoint,
-        "imports": list(code.imports), "warnings": list(code.warnings),
-        "inputs": {"question": "q"}, "timeout_s": 5.0, "provider_type": "mock",
-    })
+    out = _run_script(
+        {
+            "source": code.source,
+            "entrypoint": code.entrypoint,
+            "imports": list(code.imports),
+            "warnings": list(code.warnings),
+            "inputs": {"question": "q"},
+            "timeout_s": 5.0,
+            "provider_type": "mock",
+        }
+    )
     assert out["ok"] is False
     traces = out["error"]["node_traces"]
     assert isinstance(traces, list) and traces
@@ -173,8 +192,11 @@ def test_subprocess_script_failure_carries_node_traces():
 def test_isolated_subprocess_runs_or_falls_back():
     code = compile_dify_yaml((FIXTURES / "seq.yml").read_text(encoding="utf-8")).code
     out = run_workflow_isolated(
-        code, {"question": "hi"}, MockProvider(),
-        timeout_s=10.0, isolation="subprocess",
+        code,
+        {"question": "hi"},
+        MockProvider(),
+        timeout_s=10.0,
+        isolation="subprocess",
         provider_config={"provider_type": "mock"},
     )
     # 无论真子进程（Linux）还是回落 L1（macOS/Windows），结果一致
@@ -183,9 +205,7 @@ def test_isolated_subprocess_runs_or_falls_back():
 
 def test_isolated_inprocess_runs():
     code = compile_dify_yaml((FIXTURES / "seq.yml").read_text(encoding="utf-8")).code
-    out = run_workflow_isolated(
-        code, {"question": "hi"}, MockProvider(), isolation="inprocess"
-    )
+    out = run_workflow_isolated(code, {"question": "hi"}, MockProvider(), isolation="inprocess")
     assert "result" in out
 
 
@@ -193,8 +213,11 @@ def test_isolated_subprocess_without_config_falls_back_l1():
     # provider_config=None -> 即便 isolation=subprocess 也回落 L1（用 live provider）
     code = compile_dify_yaml((FIXTURES / "seq.yml").read_text(encoding="utf-8")).code
     out = run_workflow_isolated(
-        code, {"question": "hi"}, MockProvider(),
-        isolation="subprocess", provider_config=None,
+        code,
+        {"question": "hi"},
+        MockProvider(),
+        isolation="subprocess",
+        provider_config=None,
     )
     assert "result" in out
 

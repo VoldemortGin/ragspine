@@ -26,9 +26,7 @@ def _main_topology(workflow: dict[str, Any]) -> set[tuple[str, int, str]]:
 
 
 @pytest.mark.parametrize("name", ["linear", "branch"])
-def test_roundtrip_lossless(
-    name: str, fixture_json: Callable[[str], dict[str, Any]]
-) -> None:
+def test_roundtrip_lossless(name: str, fixture_json: Callable[[str], dict[str, Any]]) -> None:
     src = fixture_json(name)
     back, _, _ = _roundtrip(src)
     # 节点 name 集合保持。

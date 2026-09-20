@@ -28,12 +28,15 @@ ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpa
 # upsert：计数 / 替换 / 空输入
 # ===========================================================================
 
+
 def test_upsert_returns_count(vector_store, make_record):
     """upsert 返回写入条数。"""
-    n = vector_store.upsert([
-        make_record("a#0", [1.0, 0.0, 0.0]),
-        make_record("b#0", [0.0, 1.0, 0.0]),
-    ])
+    n = vector_store.upsert(
+        [
+            make_record("a#0", [1.0, 0.0, 0.0]),
+            make_record("b#0", [0.0, 1.0, 0.0]),
+        ]
+    )
     assert n == 2
     assert vector_store.count() == 2
 
@@ -58,6 +61,7 @@ def test_upsert_same_id_replaces(vector_store, make_record):
 # query：基础 / 排序 / 分值 / k
 # ===========================================================================
 
+
 def test_query_empty_store_returns_empty(vector_store):
     """空库查询返回 []（无维度可校验，也不应抛错）。"""
     assert vector_store.query([1.0, 0.0, 0.0], k=5) == []
@@ -75,11 +79,13 @@ def test_query_returns_hit_type_and_id(vector_store, make_record):
 
 def test_query_ranks_by_descending_cosine(vector_store, make_record):
     """按 cosine 降序：近的在前。query=[1,0,0]，期望 near > mid > far。"""
-    vector_store.upsert([
-        make_record("near#0", [1.0, 0.0, 0.0]),   # cos 1.0
-        make_record("mid#0", [1.0, 1.0, 0.0]),    # cos ~0.707
-        make_record("far#0", [0.0, 1.0, 0.0]),    # cos 0.0
-    ])
+    vector_store.upsert(
+        [
+            make_record("near#0", [1.0, 0.0, 0.0]),  # cos 1.0
+            make_record("mid#0", [1.0, 1.0, 0.0]),  # cos ~0.707
+            make_record("far#0", [0.0, 1.0, 0.0]),  # cos 0.0
+        ]
+    )
     hits = vector_store.query([1.0, 0.0, 0.0], k=5)
     assert [h.id for h in hits] == ["near#0", "mid#0", "far#0"]
     scores = [h.score for h in hits]
@@ -125,13 +131,16 @@ def test_default_k_is_fifty(vector_store, make_record):
 # tie-break：同分按 id 升序，确定性
 # ===========================================================================
 
+
 def test_tie_break_id_ascending(vector_store, make_record):
     """同分（相同向量）按 id 升序破除平分，确定性。"""
-    vector_store.upsert([
-        make_record("c#0", [1.0, 0.0, 0.0]),
-        make_record("a#0", [1.0, 0.0, 0.0]),
-        make_record("b#0", [1.0, 0.0, 0.0]),
-    ])
+    vector_store.upsert(
+        [
+            make_record("c#0", [1.0, 0.0, 0.0]),
+            make_record("a#0", [1.0, 0.0, 0.0]),
+            make_record("b#0", [1.0, 0.0, 0.0]),
+        ]
+    )
     hits = vector_store.query([1.0, 0.0, 0.0], k=3)
     assert [h.id for h in hits] == ["a#0", "b#0", "c#0"]
 
@@ -140,23 +149,28 @@ def test_tie_break_id_ascending(vector_store, make_record):
 # where：过滤下推（AND·缺键排除·最近邻也排除·无命中空表）
 # ===========================================================================
 
+
 def test_where_single_key_exact_match(vector_store, make_record):
     """where 单键精确匹配：只回该键命中的记录。"""
-    vector_store.upsert([
-        make_record("fin#0", [1.0, 0.0, 0.0], topic="FIN"),
-        make_record("reg#0", [1.0, 0.0, 0.0], topic="REG"),
-    ])
+    vector_store.upsert(
+        [
+            make_record("fin#0", [1.0, 0.0, 0.0], topic="FIN"),
+            make_record("reg#0", [1.0, 0.0, 0.0], topic="REG"),
+        ]
+    )
     hits = vector_store.query([1.0, 0.0, 0.0], k=5, where={"topic": "REG"})
     assert {h.id for h in hits} == {"reg#0"}
 
 
 def test_where_multi_key_is_and(vector_store, make_record):
     """where 多键为 AND：topic=REG 且 entity=ACME_HK 只剩一条。"""
-    vector_store.upsert([
-        make_record("x#0", [1.0, 0.0, 0.0], topic="REG", entity="ACME_HK"),
-        make_record("y#0", [1.0, 0.0, 0.0], topic="REG", entity="ACME_CN"),
-        make_record("z#0", [1.0, 0.0, 0.0], topic="FIN", entity="ACME_HK"),
-    ])
+    vector_store.upsert(
+        [
+            make_record("x#0", [1.0, 0.0, 0.0], topic="REG", entity="ACME_HK"),
+            make_record("y#0", [1.0, 0.0, 0.0], topic="REG", entity="ACME_CN"),
+            make_record("z#0", [1.0, 0.0, 0.0], topic="FIN", entity="ACME_HK"),
+        ]
+    )
     hits = vector_store.query([1.0, 0.0, 0.0], k=5, where={"topic": "REG", "entity": "ACME_HK"})
     assert {h.id for h in hits} == {"x#0"}
 
@@ -166,10 +180,12 @@ def test_where_excludes_filtered_even_if_nearest(vector_store, make_record):
 
     near 与查询完全同向（cos 1.0）但 topic=REG 被排除；只回 topic=FIN 的 far。
     """
-    vector_store.upsert([
-        make_record("near#0", [1.0, 0.0, 0.0], topic="REG"),   # 最近邻，但被过滤
-        make_record("far#0", [0.0, 1.0, 0.0], topic="FIN"),    # 远，但通过过滤
-    ])
+    vector_store.upsert(
+        [
+            make_record("near#0", [1.0, 0.0, 0.0], topic="REG"),  # 最近邻，但被过滤
+            make_record("far#0", [0.0, 1.0, 0.0], topic="FIN"),  # 远，但通过过滤
+        ]
+    )
     hits = vector_store.query([1.0, 0.0, 0.0], k=5, where={"topic": "FIN"})
     assert [h.id for h in hits] == ["far#0"]
     assert "near#0" not in {h.id for h in hits}
@@ -193,13 +209,16 @@ def test_where_absent_key_excludes_record(vector_store):
 # delete / 再入幂等 / count
 # ===========================================================================
 
+
 def test_delete_by_where_removes_and_counts(vector_store, make_record):
     """delete(where=) 删除命中记录并返回删除条数。"""
-    vector_store.upsert([
-        make_record("a#0", [1.0, 0.0, 0.0], doc_id="d1"),
-        make_record("b#0", [0.0, 1.0, 0.0], doc_id="d1"),
-        make_record("c#0", [0.0, 0.0, 1.0], doc_id="d2"),
-    ])
+    vector_store.upsert(
+        [
+            make_record("a#0", [1.0, 0.0, 0.0], doc_id="d1"),
+            make_record("b#0", [0.0, 1.0, 0.0], doc_id="d1"),
+            make_record("c#0", [0.0, 0.0, 1.0], doc_id="d2"),
+        ]
+    )
     removed = vector_store.delete(where={"doc_id": "d1"})
     assert removed == 2
     assert vector_store.count() == 1
@@ -208,10 +227,12 @@ def test_delete_by_where_removes_and_counts(vector_store, make_record):
 
 def test_reingest_idempotent_via_delete_then_upsert(vector_store, make_record):
     """再入幂等：delete(doc_id) + upsert 后无重复、count 正确。"""
-    vector_store.upsert([
-        make_record("doc#0", [1.0, 0.0, 0.0], doc_id="doc"),
-        make_record("doc#1", [0.0, 1.0, 0.0], doc_id="doc"),
-    ])
+    vector_store.upsert(
+        [
+            make_record("doc#0", [1.0, 0.0, 0.0], doc_id="doc"),
+            make_record("doc#1", [0.0, 1.0, 0.0], doc_id="doc"),
+        ]
+    )
     vector_store.delete(where={"doc_id": "doc"})
     vector_store.upsert([make_record("doc#0", [1.0, 0.0, 0.0], doc_id="doc")])
     assert vector_store.count() == 1
@@ -232,13 +253,16 @@ def test_count_tracks_upsert_and_delete(vector_store, make_record):
 # 维度校验 / 零向量健壮性
 # ===========================================================================
 
+
 def test_mixed_dims_in_one_upsert_raises(vector_store, make_record):
     """同一 upsert 内向量维度不一致 -> ValueError。"""
     with pytest.raises(ValueError):
-        vector_store.upsert([
-            make_record("a#0", [1.0, 0.0, 0.0]),
-            make_record("b#0", [1.0, 0.0]),
-        ])
+        vector_store.upsert(
+            [
+                make_record("a#0", [1.0, 0.0, 0.0]),
+                make_record("b#0", [1.0, 0.0]),
+            ]
+        )
 
 
 def test_inconsistent_dim_across_upserts_raises(vector_store, make_record):
@@ -257,10 +281,12 @@ def test_query_dim_mismatch_raises(vector_store, make_record):
 
 def test_zero_query_vector_scores_zero_no_crash(vector_store, make_record):
     """零查询向量：所有 cosine=0，不崩。"""
-    vector_store.upsert([
-        make_record("a#0", [1.0, 0.0, 0.0]),
-        make_record("b#0", [0.0, 1.0, 0.0]),
-    ])
+    vector_store.upsert(
+        [
+            make_record("a#0", [1.0, 0.0, 0.0]),
+            make_record("b#0", [0.0, 1.0, 0.0]),
+        ]
+    )
     hits = vector_store.query([0.0, 0.0, 0.0], k=5)
     assert len(hits) == 2
     assert all(h.score == 0.0 for h in hits)
@@ -268,10 +294,12 @@ def test_zero_query_vector_scores_zero_no_crash(vector_store, make_record):
 
 def test_zero_stored_vector_no_crash(vector_store, make_record):
     """库内零向量：对其 cosine=0，不崩，仍可被返回。"""
-    vector_store.upsert([
-        make_record("zero#0", [0.0, 0.0, 0.0]),
-        make_record("a#0", [1.0, 0.0, 0.0]),
-    ])
+    vector_store.upsert(
+        [
+            make_record("zero#0", [0.0, 0.0, 0.0]),
+            make_record("a#0", [1.0, 0.0, 0.0]),
+        ]
+    )
     hits = vector_store.query([1.0, 0.0, 0.0], k=5)
     by_id = {h.id: h.score for h in hits}
     assert by_id["zero#0"] == 0.0
@@ -281,6 +309,7 @@ def test_zero_stored_vector_no_crash(vector_store, make_record):
 # ===========================================================================
 # metadata 血缘回传
 # ===========================================================================
+
 
 def test_metadata_round_trips_on_hit(vector_store, make_record):
     """命中回传记录的 metadata（含 doc_id / source_locator 等血缘字段）。"""

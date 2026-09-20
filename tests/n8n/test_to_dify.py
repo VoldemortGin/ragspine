@@ -22,9 +22,7 @@ def _edges(doc: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 @pytest.mark.parametrize("name", ["linear", "branch", "unknown"])
-def test_output_passes_dify_parse_and_lower(
-    name: str, fixture_text: Callable[[str], str]
-) -> None:
+def test_output_passes_dify_parse_and_lower(name: str, fixture_text: Callable[[str], str]) -> None:
     doc, _warnings = n8n_to_dify(fixture_text(name))
     dumped = yaml.safe_dump(doc, allow_unicode=True)
     parsed = parse_dify_yaml(dumped)
@@ -114,9 +112,7 @@ def test_branch_if_and_source_handles(
     assert cond["comparison_operator"] == ">"
     assert cond["value"] == "60"
     # sourceHandle：if 端口 0 → "true"、1 → "false"。
-    handles = {
-        (e["source"], e["target"]): e["sourceHandle"] for e in _edges(doc)
-    }
+    handles = {(e["source"], e["target"]): e["sourceHandle"] for e in _edges(doc)}
     assert handles[("check_score", "approve")] == "true"
     assert handles[("check_score", "reject")] == "false"
     # 后置 pass：if 条件里对 start 的 value_selector 引用声明进 start.variables。

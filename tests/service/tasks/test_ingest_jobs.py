@@ -106,9 +106,7 @@ def test_structured_job_owns_and_closes_its_store(tmp_path, excel_fixture_path):
 def test_structured_job_rejects_path_outside_allowed_root(tmp_path, excel_fixture_path):
     allowed = tmp_path / "allowed"
     allowed.mkdir()
-    payload = _structured_payload(
-        tmp_path, excel_fixture_path, allowed_upload_root=str(allowed)
-    )
+    payload = _structured_payload(tmp_path, excel_fixture_path, allowed_upload_root=str(allowed))
     with pytest.raises(JobError) as exc_info:
         run_structured_ingest_job(payload)
     assert exc_info.value.stage == "validation"

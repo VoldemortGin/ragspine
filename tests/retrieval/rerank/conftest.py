@@ -38,7 +38,9 @@ def fake_cross_encoder(monkeypatch):
             def rerank(self, query, documents, **kwargs):
                 docs = list(documents)
                 captured["rerank_calls"].append({"query": query, "documents": docs, **kwargs})
-                out = list(score_fn(docs)) if score_fn is not None else [float(len(d)) for d in docs]
+                out = (
+                    list(score_fn(docs)) if score_fn is not None else [float(len(d)) for d in docs]
+                )
                 if drop_last:
                     out = out[:-1]
                 return iter(out)

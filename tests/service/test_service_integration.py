@@ -34,9 +34,7 @@ def client(tmp_path, excel_fixture_path):
         queue_db_path=str(tmp_path / "review.db"),
         allowed_upload_root=str(excel_fixture_path.parent),
     )
-    app = create_app(
-        config, provider=MockProvider(), queue=FakeQueue(), faq_cache=FAQCache.empty()
-    )
+    app = create_app(config, provider=MockProvider(), queue=FakeQueue(), faq_cache=FAQCache.empty())
     return TestClient(app), config
 
 
@@ -44,9 +42,7 @@ def test_structured_ingest_job_runs_through_routes_to_jobs(client, excel_fixture
     """提交 → FakeQueue 内联跑 jobs → 查状态：完成态且真实写入了事实。"""
     test_client, config = client
 
-    submit = test_client.post(
-        "/v1/ingest/structured/jobs", json={"file": str(excel_fixture_path)}
-    )
+    submit = test_client.post("/v1/ingest/structured/jobs", json={"file": str(excel_fixture_path)})
     assert submit.status_code == 200
     job_id = submit.json()["job_id"]
     assert job_id

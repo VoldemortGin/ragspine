@@ -36,10 +36,10 @@ from ragspine.extraction.extractors.pdf_scanned_extractor import (
 from ragspine.extraction.ir import StyledGrid
 from ragspine.ingestion.review.review_queue import ReviewQueue
 
-
 # ---------------------------------------------------------------------------
 # 测试专用 fake backend（定义在测试文件内，不放 src）
 # ---------------------------------------------------------------------------
+
 
 class FakeOcrBackend:
     """实现 OcrBackend 协议的确定性替身。
@@ -85,6 +85,7 @@ class FakeOcrBackend:
 # fixtures / 辅助
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def ocr_fake(pptx_ground_truth) -> dict:
     """OCR fake 测试向量（内嵌在 pptx ground truth 的 ocr_fake 段）。"""
@@ -105,6 +106,7 @@ def _grids_by_sheet(path, backend, **kwargs) -> dict[str, StyledGrid]:
 # ===========================================================================
 # story #10 —— 每张 OcrTable 一个 StyledGrid，sheet 命名 'page{N}_table{M}'
 # ===========================================================================
+
 
 def test_returns_list_of_styled_grids(scanned_pdf_path, fake_backend):
     """story #10 —— scanned.pdf 经 fake backend 抽取，结果是非空 list[StyledGrid]。"""
@@ -142,6 +144,7 @@ def test_expected_sheet_names_present(scanned_pdf_path, fake_backend, ocr_fake):
 # story #10 —— 逐格值 / cell_ref / 维度与 ground truth 精确一致
 # ===========================================================================
 
+
 def test_grid_dimensions_match_truth(scanned_pdf_path, fake_backend, ocr_fake):
     """story #10 —— 每张 grid 的 n_rows/n_cols 与向量维度一致（4×4）。"""
     by_sheet = _grids_by_sheet(scanned_pdf_path, fake_backend)
@@ -153,9 +156,7 @@ def test_grid_dimensions_match_truth(scanned_pdf_path, fake_backend, ocr_fake):
 
 def test_cell_refs_use_R_C_notation(scanned_pdf_path, fake_backend, ocr_fake):
     """story #10 —— 单元格坐标用 'R{行}C{列}'（1-based），cell_ref 自洽。"""
-    grid = _grids_by_sheet(scanned_pdf_path, fake_backend)[
-        ocr_fake["expected_grids"][0]["sheet"]
-    ]
+    grid = _grids_by_sheet(scanned_pdf_path, fake_backend)[ocr_fake["expected_grids"][0]["sheet"]]
     for ref in ocr_fake["cell_values"]:
         cell = grid.get(ref)
         assert cell is not None, f"{ref} 缺失"
@@ -195,12 +196,11 @@ def test_resolved_rgb_always_none(scanned_pdf_path, fake_backend):
 # story #10 —— 置信度落在 StyledCell.confidence（OCR 通道专用字段）
 # ===========================================================================
 
+
 def test_high_confidence_lands_on_cell(scanned_pdf_path, fake_backend, ocr_fake):
     """story #10 —— 高置信格的 OCR 置信度写入 StyledCell.confidence（如 0.99）。"""
     high = ocr_fake["high_confidence_value"]
-    grid = _grids_by_sheet(scanned_pdf_path, fake_backend)[
-        ocr_fake["expected_grids"][0]["sheet"]
-    ]
+    grid = _grids_by_sheet(scanned_pdf_path, fake_backend)[ocr_fake["expected_grids"][0]["sheet"]]
     cell = grid.get("R2C3")  # 向量中为高置信格
     assert cell is not None
     assert cell.confidence == high
@@ -209,9 +209,7 @@ def test_high_confidence_lands_on_cell(scanned_pdf_path, fake_backend, ocr_fake)
 def test_low_confidence_lands_on_cell(scanned_pdf_path, fake_backend, ocr_fake):
     """story #10 —— 低置信格的置信度同样写入 StyledCell.confidence（如 0.40）。"""
     low = ocr_fake["low_confidence_value"]
-    grid = _grids_by_sheet(scanned_pdf_path, fake_backend)[
-        ocr_fake["expected_grids"][0]["sheet"]
-    ]
+    grid = _grids_by_sheet(scanned_pdf_path, fake_backend)[ocr_fake["expected_grids"][0]["sheet"]]
     for ref in ocr_fake["expected_grids"][0]["low_confidence_refs"]:
         cell = grid.get(ref)
         assert cell is not None, f"低置信格 {ref} 不应被丢弃"
@@ -228,6 +226,7 @@ def test_every_cell_carries_confidence(scanned_pdf_path, fake_backend):
 # ===========================================================================
 # story #10 —— 低置信格仍入网格，但 grid 追加 warning
 # ===========================================================================
+
 
 def test_low_confidence_cells_stay_in_grid(scanned_pdf_path, fake_backend, ocr_fake):
     """story #10 —— 低置信不丢数据：低置信格仍出现在网格中（仅标记，不删除）。"""
@@ -251,6 +250,7 @@ def test_grid_with_low_confidence_has_warning(scanned_pdf_path, fake_backend, oc
 # story #10 / #22 —— 给 queue 时低置信格入队（reason / priority / payload）
 # ===========================================================================
 
+
 def test_low_confidence_enqueued_when_queue_given(
     scanned_pdf_path, fake_backend, ocr_fake, tmp_db_path
 ):
@@ -263,9 +263,7 @@ def test_low_confidence_enqueued_when_queue_given(
     queue.close()
 
 
-def test_enqueued_items_reason_and_priority(
-    scanned_pdf_path, fake_backend, ocr_fake, tmp_db_path
-):
+def test_enqueued_items_reason_and_priority(scanned_pdf_path, fake_backend, ocr_fake, tmp_db_path):
     """story #22 —— 入队项 reason='low_confidence_ocr'、priority=30（与契约常量一致）。"""
     queue = ReviewQueue(tmp_db_path)
     queue.init_schema()
@@ -315,9 +313,7 @@ def _ref_in(locator: str, refs: set[str]) -> str:
     raise AssertionError(f"locator {locator!r} 未含任何低置信 cell_ref {refs}")
 
 
-def test_high_confidence_not_enqueued(
-    scanned_pdf_path, fake_backend, ocr_fake, tmp_db_path
-):
+def test_high_confidence_not_enqueued(scanned_pdf_path, fake_backend, ocr_fake, tmp_db_path):
     """story #22 —— 高置信格不入队（仅低置信被拦截，避免淹没复核队列）。"""
     queue = ReviewQueue(tmp_db_path)
     queue.init_schema()
@@ -333,9 +329,8 @@ def test_high_confidence_not_enqueued(
 # story #10 —— min_confidence 阈值可调（调低后低置信格不再触发拦截）
 # ===========================================================================
 
-def test_lower_threshold_disables_enqueue(
-    scanned_pdf_path, fake_backend, ocr_fake, tmp_db_path
-):
+
+def test_lower_threshold_disables_enqueue(scanned_pdf_path, fake_backend, ocr_fake, tmp_db_path):
     """story #10 —— 把 min_confidence 调到低于全部置信度后，无格入队（阈值可调）。"""
     queue = ReviewQueue(tmp_db_path)
     queue.init_schema()
@@ -352,9 +347,7 @@ def test_lower_threshold_no_grid_warning(scanned_pdf_path, fake_backend):
         assert g.warnings == []
 
 
-def test_higher_threshold_enqueues_more(
-    scanned_pdf_path, fake_backend, ocr_fake, tmp_db_path
-):
+def test_higher_threshold_enqueues_more(scanned_pdf_path, fake_backend, ocr_fake, tmp_db_path):
     """story #10 —— 把阈值抬到高于全部置信度后，每张表所有格都被拦截入队（阈值双向可调）。"""
     queue = ReviewQueue(tmp_db_path)
     queue.init_schema()
@@ -367,6 +360,7 @@ def test_higher_threshold_enqueues_more(
 # ===========================================================================
 # story #10 —— 不给 queue 零副作用（仍正常出网格，含低置信标记）
 # ===========================================================================
+
 
 def test_no_queue_no_error(scanned_pdf_path, fake_backend):
     """story #10 —— 不传 queue 时不抛异常，仍正常返回网格（队列是可选副作用）。"""
@@ -389,6 +383,7 @@ def test_no_queue_still_marks_low_confidence(scanned_pdf_path, fake_backend, ocr
 # story #27 —— 血缘：source_doc_id / source_file_hash 写入每张 grid
 # ===========================================================================
 
+
 def test_grids_carry_source_doc_id(scanned_pdf_path, fake_backend):
     """story #27 —— 每张 grid 的 source_doc_id 为源文件名（下游血缘根）。"""
     for g in extract_grids(scanned_pdf_path, fake_backend):
@@ -406,6 +401,7 @@ def test_grids_share_nonempty_source_hash(scanned_pdf_path, fake_backend):
 # ===========================================================================
 # story #10 —— backend 被逐页调用，且页号正确（1-based、按页序）
 # ===========================================================================
+
 
 def test_backend_called_once_per_page(scanned_pdf_path, fake_backend):
     """story #10 —— 3 页 PDF -> backend.recognize 恰好被调用 3 次（逐页渲染识别）。"""
@@ -430,6 +426,7 @@ def test_backend_receives_image_bytes(scanned_pdf_path, fake_backend):
 # ===========================================================================
 # 边界 —— 空文件 / 不可读 PDF 返回 []（不抛异常、不调用 backend）
 # ===========================================================================
+
 
 def test_empty_file_returns_empty(tmp_path, fake_backend):
     """story #10 —— 零字节 / 空 PDF 文件输入返回 []，不抛异常。"""

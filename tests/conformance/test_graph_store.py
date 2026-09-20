@@ -53,6 +53,7 @@ def _edge(src: str, dst: str, etype: str, **md) -> GraphEdge:
 # 机制层：corespine 套件消费者（实现 × 脊柱不变量 笛卡尔积；范式同 test_vector_store_suite）
 # ===========================================================================
 
+
 @pytest.mark.parametrize(**GRAPH_STORE_SUITE.parametrize_kwargs())
 def test_graph_store_conformance(case):
     """每个 (实现 × 不变量) 格子：调用 thunk，满足静默、违反原样抛。"""
@@ -63,21 +64,40 @@ def test_graph_store_conformance(case):
 # 领域层判定核：provenance / isolation / determinism（参数化用例与反证 stub 共用同一核）
 # ===========================================================================
 
+
 def _assert_provenance_complete(store) -> None:
     """判定核：neighbors/traverse/subgraph 返回的每个节点/边都带非空 source_doc_id + source_locator。
 
     先建一条带血缘的两跳链（GROUP -parent_of-> HK -reports-> METRIC），再从三种遍历出口收集
     返回的节点与边，逐个断言血缘非空；并断言收集集非空，杜绝「无返回的空泛通过」。
     """
-    store.upsert_nodes([
-        _node("GROUP", source_doc_id="company.toml", source_locator="company.toml#home"),
-        _node("HK", source_doc_id="HK_FIN.pptx", source_locator="HK_FIN.pptx!slide3"),
-        _node("METRIC", "metric", source_doc_id="HK_FIN.pptx", source_locator="HK_FIN.pptx!slide5"),
-    ])
-    store.upsert_edges([
-        _edge("GROUP", "HK", "parent_of", source_doc_id="company.toml", source_locator="company.toml#home"),
-        _edge("HK", "METRIC", "reports", source_doc_id="HK_FIN.pptx", source_locator="HK_FIN.pptx!slide5"),
-    ])
+    store.upsert_nodes(
+        [
+            _node("GROUP", source_doc_id="company.toml", source_locator="company.toml#home"),
+            _node("HK", source_doc_id="HK_FIN.pptx", source_locator="HK_FIN.pptx!slide3"),
+            _node(
+                "METRIC", "metric", source_doc_id="HK_FIN.pptx", source_locator="HK_FIN.pptx!slide5"
+            ),
+        ]
+    )
+    store.upsert_edges(
+        [
+            _edge(
+                "GROUP",
+                "HK",
+                "parent_of",
+                source_doc_id="company.toml",
+                source_locator="company.toml#home",
+            ),
+            _edge(
+                "HK",
+                "METRIC",
+                "reports",
+                source_doc_id="HK_FIN.pptx",
+                source_locator="HK_FIN.pptx!slide5",
+            ),
+        ]
+    )
 
     nodes = list(store.neighbors("GROUP")) + list(store.traverse("GROUP", max_depth=2))
     sub = store.subgraph(["GROUP"], depth=2)
@@ -99,19 +119,31 @@ def _assert_restricted_isolated(store) -> None:
     建 A -rel-> SECRET(RESTRICTED) -rel-> C 与 A -rel-> B -rel-> C：SECRET 既是 A 的直接邻、又是
     A->C 的潜在跳板，故同时压住「邻居泄漏」「跳板泄漏」「子图节点/边泄漏」四面。
     """
-    store.upsert_nodes([
-        _node("A"), _node("B"),
-        _node("SECRET", "doc", sensitivity="RESTRICTED"), _node("C"),
-    ])
-    store.upsert_edges([
-        _edge("A", "B", "rel"), _edge("B", "C", "rel"),
-        _edge("A", "SECRET", "rel"), _edge("SECRET", "C", "rel"),
-    ])
+    store.upsert_nodes(
+        [
+            _node("A"),
+            _node("B"),
+            _node("SECRET", "doc", sensitivity="RESTRICTED"),
+            _node("C"),
+        ]
+    )
+    store.upsert_edges(
+        [
+            _edge("A", "B", "rel"),
+            _edge("B", "C", "rel"),
+            _edge("A", "SECRET", "rel"),
+            _edge("SECRET", "C", "rel"),
+        ]
+    )
     assert "SECRET" not in {n.id for n in store.neighbors("A")}, "neighbors 泄漏了 RESTRICTED 节点"
-    assert "SECRET" not in {n.id for n in store.traverse("A", max_depth=3)}, "traverse 泄漏了 RESTRICTED 节点"
+    assert "SECRET" not in {n.id for n in store.traverse("A", max_depth=3)}, (
+        "traverse 泄漏了 RESTRICTED 节点"
+    )
     sub = store.subgraph(["A"], depth=3)
     assert "SECRET" not in {n.id for n in sub.nodes}, "subgraph.nodes 泄漏了 RESTRICTED 节点"
-    assert all("SECRET" not in (e.src, e.dst) for e in sub.edges), "subgraph.edges 触及了 RESTRICTED 节点"
+    assert all("SECRET" not in (e.src, e.dst) for e in sub.edges), (
+        "subgraph.edges 触及了 RESTRICTED 节点"
+    )
 
 
 def _assert_traverse_deterministic(store) -> None:
@@ -127,6 +159,7 @@ def _assert_traverse_deterministic(store) -> None:
 # ---------------------------------------------------------------------------
 # 领域断言：在每个注册实现（in_process + networkx）上各跑一遍
 # ---------------------------------------------------------------------------
+
 
 def test_provenance_round_trips(graph_store):
     """每个注册 GraphStore：遍历出口回传的节点/边都带齐血缘。"""
@@ -146,6 +179,7 @@ def test_traverse_is_deterministic(graph_store):
 # ===========================================================================
 # 诚实反证：故意破不变量的 stub 喂进同一判定核必须 FAIL（证明断言非空泛）
 # ===========================================================================
+
 
 class _LeakyGraphStore(InProcessGraphStore):
     """反证 stub：neighbors/traverse/subgraph 【故意】不施 RESTRICTED 隔离，泄漏一切入库节点/边。"""
@@ -210,6 +244,7 @@ def test_lineage_dropping_store_fails_provenance():
 # Deliverable 3：make_graph_store("networkx" / "nx") 解析到 NetworkxGraphStore
 # （in_process 工厂语义已在 tests/graph/test_graph_store.py 覆盖，此处不重复）
 # ===========================================================================
+
 
 def test_make_graph_store_networkx_aliases():
     """make_graph_store('networkx' / 'nx') -> NetworkxGraphStore 实例（networkx 缺则 skip）。"""

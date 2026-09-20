@@ -28,33 +28,41 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="RAGSpine 单条提问")
     parser.add_argument("question", help="用户问题，如：香港去年REVENUE多少")
     parser.add_argument(
-        "--provider", choices=["mock", "anthropic"], default="mock",
+        "--provider",
+        choices=["mock", "anthropic"],
+        default="mock",
         help="mock=离线确定性（默认）；anthropic=真实 Claude 调用",
     )
     parser.add_argument("--db", default=str(DEFAULT_FACT_DB), help="fact_metric sqlite 路径")
     parser.add_argument(
-        "--chunk-db", default=None,
+        "--chunk-db",
+        default=None,
         help="叙事块库 sqlite 路径；提供时 narrative/composite 问题走真实检索"
-             "（纯 BM25+RRF + listwise 二审），不提供时保持坦白降级",
+        "（纯 BM25+RRF + listwise 二审），不提供时保持坦白降级",
     )
     parser.add_argument(
-        "--embedding", choices=["none", "auto", "onnx", "deterministic", "openai"], default="none",
+        "--embedding",
+        choices=["none", "auto", "onnx", "deterministic", "openai"],
+        default="none",
         help="叙事检索向量通道后端：none=纯 BM25（默认，现状不变）；"
-             "auto=装了 [embed-onnx] 走真语义 ONNX、否则回落纯 BM25；"
-             "onnx=真语义 ONNX 句向量（fastembed，需 [embed-onnx]）；"
-             "deterministic=离线词法散列后端（非语义，打通管线用）；"
-             "openai=OpenAI embeddings（需装 SDK 与配置）",
+        "auto=装了 [embed-onnx] 走真语义 ONNX、否则回落纯 BM25；"
+        "onnx=真语义 ONNX 句向量（fastembed，需 [embed-onnx]）；"
+        "deterministic=离线词法散列后端（非语义，打通管线用）；"
+        "openai=OpenAI embeddings（需装 SDK 与配置）",
     )
     parser.add_argument(
-        "--reference-date", default=None,
+        "--reference-date",
+        default=None,
         help="相对期间换算基准日 YYYY-MM-DD（默认今天）",
     )
     parser.add_argument(
-        "--model", default=DEFAULT_ANTHROPIC_MODEL,
+        "--model",
+        default=DEFAULT_ANTHROPIC_MODEL,
         help=f"anthropic 模型名（默认 {DEFAULT_ANTHROPIC_MODEL}）",
     )
     parser.add_argument(
-        "--base-url", default=None,
+        "--base-url",
+        default=None,
         help="覆盖 Anthropic API base_url（适配企业网关）",
     )
     return parser
@@ -75,9 +83,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    reference_date = (
-        date.fromisoformat(args.reference_date) if args.reference_date else None
-    )
+    reference_date = date.fromisoformat(args.reference_date) if args.reference_date else None
 
     provider: LLMProvider
     if args.provider == "anthropic":
@@ -97,7 +103,10 @@ def main(argv: list[str] | None = None) -> int:
     store.init_schema()
     try:
         result = answer_question(
-            args.question, store, provider, reference_date=reference_date,
+            args.question,
+            store,
+            provider,
+            reference_date=reference_date,
             narrative_retriever=narrative_retriever,
         )
     finally:

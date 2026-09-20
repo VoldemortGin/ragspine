@@ -15,18 +15,14 @@ from ragspine.service.tasks.task_queue import FakeQueue
 def make_client(tmp_path, *, studio_dir=None):
     kwargs = {} if studio_dir is None else {"studio_dir": studio_dir}
     config = ServiceConfig(db_path=str(tmp_path / "fact.db"), **kwargs)
-    app = create_app(
-        config, provider=MockProvider(), queue=FakeQueue(), faq_cache=FAQCache.empty()
-    )
+    app = create_app(config, provider=MockProvider(), queue=FakeQueue(), faq_cache=FAQCache.empty())
     return TestClient(app)
 
 
 def test_studio_serves_index_when_configured(tmp_path):
     dist = tmp_path / "dist"
     dist.mkdir()
-    (dist / "index.html").write_text(
-        "<html><body>studio-ok</body></html>", encoding="utf-8"
-    )
+    (dist / "index.html").write_text("<html><body>studio-ok</body></html>", encoding="utf-8")
     client = make_client(tmp_path, studio_dir=str(dist))
     resp = client.get("/studio/")
     assert resp.status_code == 200

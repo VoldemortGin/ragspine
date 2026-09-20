@@ -33,9 +33,16 @@ from ragspine.storage.fact_store import Fact, SqliteFactStore
 REF = date(2026, 6, 12)
 
 REVENUE_HK_FY2025 = Fact(
-    metric_code="REVENUE", entity="ACME_HK", geography="HK", channel="TOTAL",
-    period_type="FY", period="2025", value=1702.0, unit="USD_M",
-    source_doc_id="ACME_FY2025_Results.pptx", source_locator="slide=5,table=1,row=2,col=3",
+    metric_code="REVENUE",
+    entity="ACME_HK",
+    geography="HK",
+    channel="TOTAL",
+    period_type="FY",
+    period="2025",
+    value=1702.0,
+    unit="USD_M",
+    source_doc_id="ACME_FY2025_Results.pptx",
+    source_locator="slide=5,table=1,row=2,col=3",
 )
 
 
@@ -88,6 +95,7 @@ def _text_response(text: str) -> ChatCompletion:
 # 默认行为字节不变（不注入 decomposer / decomposer=None）
 # ---------------------------------------------------------------------------
 
+
 def test_default_no_decomposer_is_byte_identical(store):
     """不传 decomposer 与显式 decomposer=None 必须逐字段等价（默认 loop 字节不变）。"""
     q = "香港去年REVENUE多少"
@@ -96,7 +104,10 @@ def test_default_no_decomposer_is_byte_identical(store):
         q, store, MockProvider(reference_date=REF), reference_date=REF, decomposer=None
     )
     assert (a.answer, a.route, a.sources, a.tool_results) == (
-        b.answer, b.route, b.sources, b.tool_results
+        b.answer,
+        b.route,
+        b.sources,
+        b.tool_results,
     )
     assert a.route == "structured"
 
@@ -105,8 +116,11 @@ def test_single_subquestion_falls_through_to_normal_route(store):
     """分解器只返回一个子问题（不可分解）→ 走正常路由，不是 decomposed。"""
     decomposer = FakeDecomposer(["香港去年REVENUE多少"])
     result = answer_question(
-        "香港去年REVENUE多少", store, MockProvider(reference_date=REF),
-        reference_date=REF, decomposer=decomposer,
+        "香港去年REVENUE多少",
+        store,
+        MockProvider(reference_date=REF),
+        reference_date=REF,
+        decomposer=decomposer,
     )
     assert result.route == "structured"
     assert "1702" in result.answer
@@ -116,12 +130,16 @@ def test_single_subquestion_falls_through_to_normal_route(store):
 # 分解 fan-out：多子问题分别回答再确定性合成
 # ---------------------------------------------------------------------------
 
+
 def test_decompose_fans_out_and_aggregates(store):
     """注入分解器把问题拆成 2 个子问题 → 各自走结构化通路、确定性合成、来源聚合。"""
     decomposer = FakeDecomposer(["香港FY2025 REVENUE多少", "香港FY2025 PROFIT多少"])
     result = answer_question(
-        "香港FY2025经营怎么样", store, MockProvider(reference_date=REF),
-        reference_date=REF, decomposer=decomposer,
+        "香港FY2025经营怎么样",
+        store,
+        MockProvider(reference_date=REF),
+        reference_date=REF,
+        decomposer=decomposer,
     )
     assert isinstance(result, AgentResult)
     assert result.route == ROUTE_DECOMPOSED
@@ -131,8 +149,10 @@ def test_decompose_fans_out_and_aggregates(store):
     # 子问题 2 查不到（确定性"查不到"改写，绝不编造）
     assert "查不到" in result.answer
     # 来源聚合（命中子项的血缘进 sources）
-    assert {"doc": "ACME_FY2025_Results.pptx",
-            "locator": "slide=5,table=1,row=2,col=3"} in result.sources
+    assert {
+        "doc": "ACME_FY2025_Results.pptx",
+        "locator": "slide=5,table=1,row=2,col=3",
+    } in result.sources
     # 原问句被分解器消费
     assert decomposer.seen == ["香港FY2025经营怎么样"]
 
@@ -141,24 +161,31 @@ def test_decompose_subanswers_keep_anti_fabrication_guard(store):
     """子答案仍走防编造 guard：not_found 子问题绝不出现编造数字。"""
     decomposer = FakeDecomposer(["香港FY2025 REVENUE多少", "中国FY2024 ROE多少"])
     result = answer_question(
-        "整体经营如何", store, MockProvider(reference_date=REF),
-        reference_date=REF, decomposer=decomposer,
+        "整体经营如何",
+        store,
+        MockProvider(reference_date=REF),
+        reference_date=REF,
+        decomposer=decomposer,
     )
     assert result.route == ROUTE_DECOMPOSED
-    assert "1702" in result.answer        # found 子项
-    assert "查不到" in result.answer       # not_found 子项被确定性改写
+    assert "1702" in result.answer  # found 子项
+    assert "查不到" in result.answer  # not_found 子项被确定性改写
 
 
 # ---------------------------------------------------------------------------
 # 隔离继承：分解产出的竞品子问题仍被安全门拒答（不绕过越权拒答）
 # ---------------------------------------------------------------------------
 
+
 def test_decompose_competitor_subquestion_is_refused(store):
     """分解器若产出竞品子问题，该子问题必须被安全门越权拒答，绝不用 home 数字作答。"""
     decomposer = FakeDecomposer(["香港FY2025 REVENUE多少", "竞安FY2025 REVENUE多少"])
     result = answer_question(
-        "对比一下", store, MockProvider(reference_date=REF),
-        reference_date=REF, decomposer=decomposer,
+        "对比一下",
+        store,
+        MockProvider(reference_date=REF),
+        reference_date=REF,
+        decomposer=decomposer,
     )
     assert result.route == ROUTE_DECOMPOSED
     # home 子问题正常命中
@@ -172,10 +199,13 @@ def test_decompose_competitor_subquestion_is_refused(store):
 # LLMQueryDecomposer：解析 + 有界 + 确定性降级
 # ---------------------------------------------------------------------------
 
+
 def test_llm_decomposer_parses_json_array():
-    provider = ScriptedProvider([
-        _text_response('["哪个区域增长最快", "增长最快的区域为什么增长"]'),
-    ])
+    provider = ScriptedProvider(
+        [
+            _text_response('["哪个区域增长最快", "增长最快的区域为什么增长"]'),
+        ]
+    )
     dec = LLMQueryDecomposer(provider)
     subs = dec.decompose("哪个区域增长最快、为什么", reference_date=REF)
     assert subs == ["哪个区域增长最快", "增长最快的区域为什么增长"]
@@ -209,6 +239,7 @@ def test_llm_decomposer_single_item_passthrough():
 # ---------------------------------------------------------------------------
 # make_decomposer 工厂 + env 选型
 # ---------------------------------------------------------------------------
+
 
 def test_make_decomposer_none_default():
     assert make_decomposer(None) is None

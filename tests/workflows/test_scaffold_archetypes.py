@@ -13,10 +13,7 @@ from ragspine.workflows.scaffold import scaffold_workflow
 
 def _node_data(result: ScaffoldResult) -> list[dict[str, Any]]:
     workflow = result.workflow
-    return [
-        node["data"]
-        for node in workflow["workflow"]["graph"]["nodes"]
-    ]
+    return [node["data"] for node in workflow["workflow"]["graph"]["nodes"]]
 
 
 def _run_generated(yaml_text: str, **inputs: object) -> dict[str, object]:
@@ -128,9 +125,7 @@ def test_archetype_rendering_neutralizes_template_injection_as_data() -> None:
     assert first.warnings == ("archetype=structured_extraction",)
     assert "{{ attacker }}" not in first.yaml
     app = cast(dict[str, str], first.workflow["app"])
-    assert app["description"].endswith(
-        "workflow: { { attacker } }\nsecret: ${OPENAI_API_KEY}"
-    )
+    assert app["description"].endswith("workflow: { { attacker } }\nsecret: ${OPENAI_API_KEY}")
     assert [node["type"] for node in _node_data(first)] == [
         "start",
         "parameter-extractor",

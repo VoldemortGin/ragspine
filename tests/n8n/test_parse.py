@@ -42,8 +42,14 @@ def test_parse_connections_unknown_target_raises() -> None:
     source = {
         "name": "bad",
         "nodes": [
-            {"id": "1", "name": "A", "type": "n8n-nodes-base.noOp", "typeVersion": 1,
-             "position": [0, 0], "parameters": {}},
+            {
+                "id": "1",
+                "name": "A",
+                "type": "n8n-nodes-base.noOp",
+                "typeVersion": 1,
+                "position": [0, 0],
+                "parameters": {},
+            },
         ],
         "connections": {"A": {"main": [[{"node": "Ghost", "type": "main", "index": 0}]]}},
     }
@@ -57,8 +63,14 @@ def test_parse_connections_unknown_source_raises() -> None:
     source = {
         "name": "bad",
         "nodes": [
-            {"id": "1", "name": "A", "type": "n8n-nodes-base.noOp", "typeVersion": 1,
-             "position": [0, 0], "parameters": {}},
+            {
+                "id": "1",
+                "name": "A",
+                "type": "n8n-nodes-base.noOp",
+                "typeVersion": 1,
+                "position": [0, 0],
+                "parameters": {},
+            },
         ],
         "connections": {"Ghost": {"main": [[{"node": "A", "type": "main", "index": 0}]]}},
     }

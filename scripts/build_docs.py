@@ -23,9 +23,9 @@ import markdown
 from markdown.extensions.toc import slugify_unicode
 
 ROOT = Path(__file__).resolve().parent.parent
-SRC_DIR = ROOT / 'docs' / 'site_src'
-OUT_DIR = ROOT / 'docs' / 'site'
-SITE_NAME = 'RAGSpine Docs'
+SRC_DIR = ROOT / "docs" / "site_src"
+OUT_DIR = ROOT / "docs" / "site"
+SITE_NAME = "RAGSpine Docs"
 
 # ---------------------------------------------------------------- 模板
 
@@ -360,35 +360,35 @@ SEARCH_JS = """\
 
 # ---------------------------------------------------------------- 构建
 
-TAG_RE = re.compile(r'<[^>]+>')
-WS_RE = re.compile(r'\s+')
+TAG_RE = re.compile(r"<[^>]+>")
+WS_RE = re.compile(r"\s+")
 
 
 def html_to_text(html: str) -> str:
     """HTML -> 纯文本（供搜索索引）。"""
-    text = re.sub(r'<(script|style)[^>]*>.*?</\1>', ' ', html, flags=re.S | re.I)
-    text = TAG_RE.sub(' ', text)
+    text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html, flags=re.S | re.I)
+    text = TAG_RE.sub(" ", text)
     text = html_mod.unescape(text)
-    return WS_RE.sub(' ', text).strip()
+    return WS_RE.sub(" ", text).strip()
 
 
 def build_nav(pages: list[dict], current: str) -> str:
     items = []
     for i, p in enumerate(pages, 1):
-        url = Path(p['file']).with_suffix('.html').name
-        cls = ' class="active"' if p['file'] == current else ''
+        url = Path(p["file"]).with_suffix(".html").name
+        cls = ' class="active"' if p["file"] == current else ""
         items.append(
             f'      <li><a href="{url}"{cls}>'
             f'<span class="nav-index">{i}.</span>{html_mod.escape(p["title"])}</a></li>'
         )
-    return '\n'.join(items)
+    return "\n".join(items)
 
 
 def build_pager(pages: list[dict], idx: int) -> str:
     parts = []
     if idx > 0:
         p = pages[idx - 1]
-        url = Path(p['file']).with_suffix('.html').name
+        url = Path(p["file"]).with_suffix(".html").name
         parts.append(
             f'      <a class="pager-prev" href="{url}">'
             f'<span class="pager-label">← 上一页</span>'
@@ -396,13 +396,13 @@ def build_pager(pages: list[dict], idx: int) -> str:
         )
     if idx < len(pages) - 1:
         p = pages[idx + 1]
-        url = Path(p['file']).with_suffix('.html').name
+        url = Path(p["file"]).with_suffix(".html").name
         parts.append(
             f'      <a class="pager-next" href="{url}">'
             f'<span class="pager-label">下一页 →</span>'
             f'<span class="pager-title">{html_mod.escape(p["title"])}</span></a>'
         )
-    return '\n'.join(parts)
+    return "\n".join(parts)
 
 
 MD_LINK_RE = re.compile(r'href="([A-Za-z0-9_\-./]+)\.md(#[^"]*)?"')
@@ -414,25 +414,25 @@ def rewrite_md_links(body: str) -> str:
 
 
 def build() -> int:
-    pages = json.loads((SRC_DIR / '_pages.json').read_text(encoding='utf-8'))
+    pages = json.loads((SRC_DIR / "_pages.json").read_text(encoding="utf-8"))
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    build_time = datetime.now().strftime('%Y-%m-%d %H:%M')
+    build_time = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     md = markdown.Markdown(
-        extensions=['fenced_code', 'tables', 'toc'],
-        extension_configs={'toc': {'slugify': slugify_unicode, 'toc_depth': '2-4'}},
+        extensions=["fenced_code", "tables", "toc"],
+        extension_configs={"toc": {"slugify": slugify_unicode, "toc_depth": "2-4"}},
     )
 
     search_pages = []
-    anchors: dict[str, set[str]] = {}   # html 文件名 -> 该页所有 id
+    anchors: dict[str, set[str]] = {}  # html 文件名 -> 该页所有 id
     out_links: dict[str, list[tuple[str, str]]] = {}  # html 文件名 -> [(目标文件, 锚点)]
     total_chars = 0
     generated = []
 
     for i, page in enumerate(pages):
-        src = SRC_DIR / page['file']
-        out_name = Path(page['file']).with_suffix('.html').name
-        md_text = src.read_text(encoding='utf-8')
+        src = SRC_DIR / page["file"]
+        out_name = Path(page["file"]).with_suffix(".html").name
+        md_text = src.read_text(encoding="utf-8")
 
         md.reset()
         body = md.convert(md_text)
@@ -440,49 +440,49 @@ def build() -> int:
         toc_html = md.toc if md.toc_tokens else '<p style="color:#888">（本页无小节）</p>'
 
         page_html = PAGE_TEMPLATE.format(
-            title=html_mod.escape(page['title']),
+            title=html_mod.escape(page["title"]),
             site_name=SITE_NAME,
             build_time=build_time,
-            nav_items=build_nav(pages, page['file']),
+            nav_items=build_nav(pages, page["file"]),
             body=body,
             pager=build_pager(pages, i),
             toc=toc_html,
         )
-        (OUT_DIR / out_name).write_text(page_html, encoding='utf-8')
+        (OUT_DIR / out_name).write_text(page_html, encoding="utf-8")
         generated.append(out_name)
 
         plain = html_to_text(body)
         total_chars += len(plain)
-        search_pages.append({'url': out_name, 'title': page['title'], 'text': plain})
+        search_pages.append({"url": out_name, "title": page["title"], "text": plain})
 
         anchors[out_name] = set(re.findall(r'\bid="([^"]+)"', page_html))
         links = []
         for href in re.findall(r'href="([^"]+)"', page_html):
-            if href.startswith(('http://', 'https://', 'mailto:')):
+            if href.startswith(("http://", "https://", "mailto:")):
                 continue
-            if href.endswith('.css'):
+            if href.endswith(".css"):
                 continue
-            target, _, frag = href.partition('#')
+            target, _, frag = href.partition("#")
             links.append((target, frag))
         out_links[out_name] = links
 
     # 静态资产
-    (OUT_DIR / 'style.css').write_text(STYLE_CSS, encoding='utf-8')
-    (OUT_DIR / 'search.js').write_text(SEARCH_JS, encoding='utf-8')
-    index_json = json.dumps({'pages': search_pages}, ensure_ascii=False)
-    (OUT_DIR / 'search-index.json').write_text(index_json, encoding='utf-8')
-    (OUT_DIR / 'search-data.js').write_text(
-        'window.__SEARCH_INDEX__ = ' + index_json + ';\n', encoding='utf-8'
+    (OUT_DIR / "style.css").write_text(STYLE_CSS, encoding="utf-8")
+    (OUT_DIR / "search.js").write_text(SEARCH_JS, encoding="utf-8")
+    index_json = json.dumps({"pages": search_pages}, ensure_ascii=False)
+    (OUT_DIR / "search-index.json").write_text(index_json, encoding="utf-8")
+    (OUT_DIR / "search-data.js").write_text(
+        "window.__SEARCH_INDEX__ = " + index_json + ";\n", encoding="utf-8"
     )
 
     # ------------------------------------------------------------ 自检
     errors = []
 
     # 1) 页面齐全
-    expected = {Path(p['file']).with_suffix('.html').name for p in pages}
-    missing = expected - {f.name for f in OUT_DIR.glob('*.html')}
+    expected = {Path(p["file"]).with_suffix(".html").name for p in pages}
+    missing = expected - {f.name for f in OUT_DIR.glob("*.html")}
     if missing:
-        errors.append(f'缺失页面: {sorted(missing)}')
+        errors.append(f"缺失页面: {sorted(missing)}")
 
     # 2) 站内链接有效（文件存在 + 锚点存在）
     for src_page, links in out_links.items():
@@ -490,39 +490,41 @@ def build() -> int:
             t = target or src_page  # 纯锚点链接指向本页
             if t not in anchors:
                 if not (OUT_DIR / t).exists():
-                    errors.append(f'{src_page}: 链接目标不存在 {target}#{frag}')
+                    errors.append(f"{src_page}: 链接目标不存在 {target}#{frag}")
                     continue
             if frag and t in anchors and frag not in anchors[t]:
-                errors.append(f'{src_page}: 锚点不存在 {t}#{frag}')
+                errors.append(f"{src_page}: 锚点不存在 {t}#{frag}")
 
     # 3) 导航两两可达：每页侧边栏必须含全部其他页面的链接
     for src_page in expected:
-        targets = {t for t, _ in out_links[src_page] if t and t.endswith('.html')}
+        targets = {t for t, _ in out_links[src_page] if t and t.endswith(".html")}
         unreachable = expected - targets - {src_page}
         if unreachable:
-            errors.append(f'{src_page}: 导航缺少到 {sorted(unreachable)} 的链接')
+            errors.append(f"{src_page}: 导航缺少到 {sorted(unreachable)} 的链接")
 
     # 4) 搜索索引覆盖全部页面
-    indexed = {p['url'] for p in search_pages}
+    indexed = {p["url"] for p in search_pages}
     if indexed != expected:
-        errors.append(f'搜索索引页面不全: 缺 {sorted(expected - indexed)}')
+        errors.append(f"搜索索引页面不全: 缺 {sorted(expected - indexed)}")
 
     # ------------------------------------------------------------ 报告
-    print(f'生成 {len(generated)} 页 -> {OUT_DIR}')
+    print(f"生成 {len(generated)} 页 -> {OUT_DIR}")
     for name in generated:
         size = (OUT_DIR / name).stat().st_size
-        print(f'  {name:28s} {size:>8,} B')
-    for asset in ('style.css', 'search.js', 'search-index.json', 'search-data.js'):
-        print(f'  {asset:28s} {(OUT_DIR / asset).stat().st_size:>8,} B')
-    print(f'正文纯文本总字数: {total_chars:,}')
+        print(f"  {name:28s} {size:>8,} B")
+    for asset in ("style.css", "search.js", "search-index.json", "search-data.js"):
+        print(f"  {asset:28s} {(OUT_DIR / asset).stat().st_size:>8,} B")
+    print(f"正文纯文本总字数: {total_chars:,}")
     if errors:
-        print(f'\nLINK CHECK FAILED ({len(errors)}):')
+        print(f"\nLINK CHECK FAILED ({len(errors)}):")
         for e in errors:
-            print(f'  - {e}')
+            print(f"  - {e}")
         return 1
-    print('LINK CHECK PASSED: 页面齐全 / 站内链接与锚点全部有效 / 导航两两可达 / 搜索索引覆盖全部页面')
+    print(
+        "LINK CHECK PASSED: 页面齐全 / 站内链接与锚点全部有效 / 导航两两可达 / 搜索索引覆盖全部页面"
+    )
     return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(build())

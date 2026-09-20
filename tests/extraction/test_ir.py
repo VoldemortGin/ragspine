@@ -15,7 +15,6 @@
 
 import os
 
-import pytest
 import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
@@ -122,9 +121,30 @@ def test_iter_cells_yields_all_cells(ground_truth):
     grid = _grid_from_truth(ground_truth, "HK_Performance")
     refs = {c.cell_ref for c in grid.iter_cells()}
     expected = {
-        "B1", "C1", "D1", "A1", "A2", "B2", "C2", "D2",
-        "A3", "B3", "C3", "D3", "A4", "B4", "C4", "D4",
-        "A5", "B5", "C5", "D5", "F2", "G2", "F3", "G3",
+        "B1",
+        "C1",
+        "D1",
+        "A1",
+        "A2",
+        "B2",
+        "C2",
+        "D2",
+        "A3",
+        "B3",
+        "C3",
+        "D3",
+        "A4",
+        "B4",
+        "C4",
+        "D4",
+        "A5",
+        "B5",
+        "C5",
+        "D5",
+        "F2",
+        "G2",
+        "F3",
+        "G3",
     }
     assert refs == expected
 

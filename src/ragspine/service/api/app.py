@@ -156,7 +156,9 @@ def create_app(
     app.include_router(router)
     app.include_router(dify_public_router)  # dify 官方 Workflow API 形状克隆（/v1/workflows/*）
     app.include_router(n8n_public_router)  # n8n 官方 Public API 形状克隆（/api/v1/* + /webhook/*）
-    app.include_router(openai_public_router)  # OpenAI Chat Completions 形状克隆（/v1/chat/completions）
+    app.include_router(
+        openai_public_router
+    )  # OpenAI Chat Completions 形状克隆（/v1/chat/completions）
     # Studio 前端静态站点：默认目录是 wheel 内 ragspine.service 包下的 studio_dist；环境变量
     # RAGSPINE_STUDIO_DIR 可覆盖，显式空串可禁用。目录缺失时 /studio 为 404，API 不受影响。
     if config.studio_dir and Path(config.studio_dir).is_dir():

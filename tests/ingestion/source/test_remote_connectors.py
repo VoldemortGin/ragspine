@@ -112,27 +112,27 @@ def test_http_factory_resolves():
 def _notion_client(page_id: str, base: str = "https://api.notion.com/v1"):
     page = {"object": "page", "id": page_id, "url": f"https://www.notion.so/{page_id}"}
     blocks = {"object": "list", "results": [{"type": "paragraph", "id": "blk1"}]}
-    return _FakeHttpClient(
-        {
-            f"{base}/pages/{page_id}": _FakeResponse(b"", payload=page),
-            f"{base}/blocks/{page_id}/children": _FakeResponse(b"", payload=blocks),
-        }
-    ), page, blocks
+    return (
+        _FakeHttpClient(
+            {
+                f"{base}/pages/{page_id}": _FakeResponse(b"", payload=page),
+                f"{base}/blocks/{page_id}/children": _FakeResponse(b"", payload=blocks),
+            }
+        ),
+        page,
+        blocks,
+    )
 
 
 def test_notion_structural_conformance():
     client, _p, _b = _notion_client("pg1")
-    assert isinstance(
-        NotionConnector(token="t", page_ids=["pg1"], client=client), SourceConnector
-    )
+    assert isinstance(NotionConnector(token="t", page_ids=["pg1"], client=client), SourceConnector)
 
 
 def test_notion_yields_page_json_with_lineage():
     """source_doc_id = page_id；locator = notion URI；content = 页面 JSON 字节；file_hash = sha256。"""
     client, page, blocks = _notion_client("pg1")
-    [doc] = list(
-        NotionConnector(token="secret", page_ids=["pg1"], client=client).iter_documents()
-    )
+    [doc] = list(NotionConnector(token="secret", page_ids=["pg1"], client=client).iter_documents())
     assert doc.source_doc_id == "pg1"
     assert doc.locator.startswith("notion://") or doc.locator == page["url"]
     assert doc.content_type == "application/json"

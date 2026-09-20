@@ -149,9 +149,7 @@ class SemanticChunker:
                 seq = len(out)
                 g_start = globals_[lc.para_start - 1]
                 g_end = globals_[lc.para_end - 1]
-                para_part = (
-                    f"para{g_start}" if g_start == g_end else f"para{g_start}-{g_end}"
-                )
+                para_part = f"para{g_start}" if g_start == g_end else f"para{g_start}-{g_end}"
                 out.append(
                     Chunk(
                         chunk_id=f"{meta.doc_id}#c{seq}",

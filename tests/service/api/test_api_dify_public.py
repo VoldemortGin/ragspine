@@ -91,7 +91,7 @@ def _parse_sse(text: str) -> list:
     for block in text.strip().split("\n\n"):
         block = block.strip()
         assert block.startswith("data: "), f"非法 SSE 块: {block!r}"
-        events.append(json.loads(block[len("data: "):]))
+        events.append(json.loads(block[len("data: ") :]))
     return events
 
 
@@ -109,7 +109,8 @@ def test_run_without_auth_header_is_401(client):
 
 def test_run_with_wrong_key_is_401(client):
     resp = client.post(
-        "/v1/workflows/run", json=_run_body(),
+        "/v1/workflows/run",
+        json=_run_body(),
         headers={"Authorization": "Bearer wrong-key"},
     )
     assert resp.status_code == 401
@@ -118,7 +119,8 @@ def test_run_with_wrong_key_is_401(client):
 
 def test_run_with_non_bearer_scheme_is_401(client):
     resp = client.post(
-        "/v1/workflows/run", json=_run_body(),
+        "/v1/workflows/run",
+        json=_run_body(),
         headers={"Authorization": "Basic app-key-1"},
     )
     assert resp.status_code == 401
@@ -148,9 +150,7 @@ def test_run_missing_user_is_400_invalid_param(client):
 
 
 def test_run_bad_response_mode_is_400_invalid_param(client):
-    resp = client.post(
-        "/v1/workflows/run", json=_run_body(response_mode="nonsense"), headers=AUTH
-    )
+    resp = client.post("/v1/workflows/run", json=_run_body(response_mode="nonsense"), headers=AUTH)
     assert resp.status_code == 400
     assert resp.json()["code"] == "invalid_param"
 
@@ -234,13 +234,12 @@ def test_blocking_compile_error_is_200_with_status_failed(tmp_path):
 def test_multiple_apps_selected_by_key(tmp_path):
     fail_path = tmp_path / "fail.yml"
     fail_path.write_text(FAIL_YAML, encoding="utf-8")
-    client = _make_client(
-        tmp_path, apps=f"app-key-1={SEQ_YML};app-key-2={fail_path}"
-    )
+    client = _make_client(tmp_path, apps=f"app-key-1={SEQ_YML};app-key-2={fail_path}")
     ok = client.post("/v1/workflows/run", json=_run_body(), headers=AUTH)
     assert ok.json()["data"]["status"] == "succeeded"
     bad = client.post(
-        "/v1/workflows/run", json=_run_body(),
+        "/v1/workflows/run",
+        json=_run_body(),
         headers={"Authorization": "Bearer app-key-2"},
     )
     assert bad.json()["data"]["status"] == "failed"
@@ -251,18 +250,14 @@ def test_multiple_apps_selected_by_key(tmp_path):
 # workflow_finished（skipped 节点不发事件）
 # ---------------------------------------------------------------------------
 def test_streaming_run_event_sequence(client):
-    resp = client.post(
-        "/v1/workflows/run", json=_run_body(response_mode="streaming"), headers=AUTH
-    )
+    resp = client.post("/v1/workflows/run", json=_run_body(response_mode="streaming"), headers=AUTH)
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/event-stream")
     events = _parse_sse(resp.text)
 
     kinds = [e["event"] for e in events]
     assert kinds == (
-        ["workflow_started"]
-        + ["node_started", "node_finished"] * 4
-        + ["workflow_finished"]
+        ["workflow_started"] + ["node_started", "node_finished"] * 4 + ["workflow_finished"]
     )
     # 所有事件共享同一 workflow_run_id / task_id
     run_ids = {e["workflow_run_id"] for e in events}
@@ -276,9 +271,7 @@ def test_streaming_run_event_sequence(client):
 
     node_started = [e for e in events if e["event"] == "node_started"]
     node_finished = [e for e in events if e["event"] == "node_finished"]
-    assert [e["data"]["node_id"] for e in node_started] == [
-        "start_1", "llm_1", "tt_1", "end_1"
-    ]
+    assert [e["data"]["node_id"] for e in node_started] == ["start_1", "llm_1", "tt_1", "end_1"]
     assert [e["data"]["index"] for e in node_started] == [1, 2, 3, 4]
 
     llm = node_finished[1]["data"]
@@ -306,9 +299,7 @@ def test_streaming_run_failure_replays_failed_node(tmp_path):
     fail_path = tmp_path / "fail.yml"
     fail_path.write_text(FAIL_YAML, encoding="utf-8")
     client = _make_client(tmp_path, apps=f"app-key-1={fail_path}")
-    resp = client.post(
-        "/v1/workflows/run", json=_run_body(response_mode="streaming"), headers=AUTH
-    )
+    resp = client.post("/v1/workflows/run", json=_run_body(response_mode="streaming"), headers=AUTH)
     assert resp.status_code == 200
     events = _parse_sse(resp.text)
     assert events[0]["event"] == "workflow_started"
@@ -316,15 +307,12 @@ def test_streaming_run_failure_replays_failed_node(tmp_path):
     assert events[-1]["data"]["status"] == "failed"
     assert "ValueError" in events[-1]["data"]["error"]
     failed = [
-        e for e in events
-        if e["event"] == "node_finished" and e["data"]["status"] == "failed"
+        e for e in events if e["event"] == "node_finished" and e["data"]["status"] == "failed"
     ]
     assert failed and failed[0]["data"]["node_id"] == "code_1"
     assert "ValueError" in failed[0]["data"]["error"]
     # skipped 节点（end_1 未执行）不发事件
-    assert "end_1" not in [
-        e["data"]["node_id"] for e in events if e["event"] == "node_started"
-    ]
+    assert "end_1" not in [e["data"]["node_id"] for e in events if e["event"] == "node_started"]
 
 
 # ---------------------------------------------------------------------------
@@ -367,9 +355,7 @@ def test_get_run_detail_requires_auth(client):
 def test_get_run_detail_scoped_to_app_key(tmp_path):
     fail_path = tmp_path / "fail.yml"
     fail_path.write_text(FAIL_YAML, encoding="utf-8")
-    client = _make_client(
-        tmp_path, apps=f"app-key-1={SEQ_YML};app-key-2={fail_path}"
-    )
+    client = _make_client(tmp_path, apps=f"app-key-1={SEQ_YML};app-key-2={fail_path}")
     run = client.post("/v1/workflows/run", json=_run_body(), headers=AUTH)
     run_id = run.json()["workflow_run_id"]
     # 另一个 app 的 key 查不到这个 run（与 dify 一 key 一 app 语义一致）
@@ -386,8 +372,7 @@ def test_run_store_evicts_oldest_beyond_capacity(client, monkeypatch):
 
     monkeypatch.setattr(dify_public, "_MAX_RUNS", 2)
     ids = [
-        client.post("/v1/workflows/run", json=_run_body(), headers=AUTH)
-        .json()["workflow_run_id"]
+        client.post("/v1/workflows/run", json=_run_body(), headers=AUTH).json()["workflow_run_id"]
         for _ in range(3)
     ]
     assert client.get(f"/v1/workflows/run/{ids[0]}", headers=AUTH).status_code == 404

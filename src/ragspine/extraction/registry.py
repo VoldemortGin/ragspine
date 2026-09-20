@@ -55,9 +55,7 @@ class _FunctionExtractor:
     内置抽取器，便于注册表自检与排错。
     """
 
-    def __init__(
-        self, func: Callable[[str | Path], list[StyledGrid]], *, name: str = ""
-    ) -> None:
+    def __init__(self, func: Callable[[str | Path], list[StyledGrid]], *, name: str = "") -> None:
         self._func = func
         self.name = name
 

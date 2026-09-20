@@ -42,8 +42,7 @@ def _check_golden(name: str, source: str) -> None:
         return
     expected = path.read_text(encoding="utf-8")
     assert source == expected, (
-        f"{name} 生成代码与 golden 快照不一致；若属预期变更，删除 "
-        f"{path} 后重跑以刷新基线。"
+        f"{name} 生成代码与 golden 快照不一致；若属预期变更，删除 {path} 后重跑以刷新基线。"
     )
 
 
@@ -51,9 +50,7 @@ def _check_golden(name: str, source: str) -> None:
 
 
 @pytest.mark.parametrize("name", ["seq", "branch"])
-def test_generated_code_is_valid_python(
-    fixture_text: Callable[[str], str], name: str
-) -> None:
+def test_generated_code_is_valid_python(fixture_text: Callable[[str], str], name: str) -> None:
     """生成代码是合法 Python（AST 可解析）且 import 面只用家族原语。"""
     code = _gen(fixture_text, name)
     tree = ast.parse(code.source)  # 非法语法会在此抛
@@ -63,8 +60,13 @@ def test_generated_code_is_valid_python(
         if isinstance(node, ast.ImportFrom) and node.module:
             root = node.module.split(".")[0]
             assert root in {
-                "__future__", "dataclasses", "typing", "string",
-                "concurrent", "corespine", "ragspine",
+                "__future__",
+                "dataclasses",
+                "typing",
+                "string",
+                "concurrent",
+                "corespine",
+                "ragspine",
             }, f"非白名单 import：{node.module}"
 
 

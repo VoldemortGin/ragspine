@@ -10,7 +10,6 @@ make_adaptive_decomposer 返回 None，主流程逐位字节不变。
 - 三个 wrapper 只对 base.retrieve(...) 的输出取舍/融合，隔离继承自 base 出口（RESTRICTED 永不出域）。
 """
 
-import json
 import os
 from datetime import date
 
@@ -46,6 +45,7 @@ REF = date(2026, 6, 12)
 # ---------------------------------------------------------------------------
 # 测试替身
 # ---------------------------------------------------------------------------
+
 
 def _snip(cid: str) -> dict[str, object]:
     return {
@@ -138,13 +138,16 @@ def test_hyde_degrades_to_original_query_on_provider_error():
 # RAG-Fusion：LLM 生成 N 变体 → 各自检索 → RRF 融合
 # ---------------------------------------------------------------------------
 
+
 def test_rag_fusion_generates_variants_and_rrf_fuses():
     orig = "香港REVENUE趋势"
-    base = FakeBase({
-        orig: ["A", "B", "C"],
-        "香港营收变化": ["B", "C", "D"],
-        "香港收入走势": ["C", "D", "A"],
-    })
+    base = FakeBase(
+        {
+            orig: ["A", "B", "C"],
+            "香港营收变化": ["B", "C", "D"],
+            "香港收入走势": ["C", "D", "A"],
+        }
+    )
     provider = ScriptedProvider([_text_response('["香港营收变化", "香港收入走势"]')])
     fusion = RAGFusionRetriever(base, provider)
     out = fusion.retrieve(orig)
@@ -166,11 +169,13 @@ def test_rag_fusion_degrades_to_single_on_provider_error():
 def test_rag_fusion_competitor_variant_is_screened_out():
     """安全门继承（reverse-proof）：竞品变体被剔除、绝不检索；home 变体照常。"""
     orig = "香港REVENUE趋势"
-    base = FakeBase({
-        orig: ["A"],
-        "香港营收变化": ["B"],
-        "竞安FY2025REVENUE多少": ["X"],  # 竞品变体——若未剔除会被检索
-    })
+    base = FakeBase(
+        {
+            orig: ["A"],
+            "香港营收变化": ["B"],
+            "竞安FY2025REVENUE多少": ["X"],  # 竞品变体——若未剔除会被检索
+        }
+    )
     provider = ScriptedProvider([_text_response('["香港营收变化", "竞安FY2025REVENUE多少"]')])
     fusion = RAGFusionRetriever(base, provider)
     out = fusion.retrieve(orig)
@@ -185,6 +190,7 @@ def test_rag_fusion_competitor_variant_is_screened_out():
 # ---------------------------------------------------------------------------
 # step-back：LLM 生成更抽象的退一步问题，原 + 退一步都检索再合并
 # ---------------------------------------------------------------------------
+
 
 def test_step_back_generates_abstract_question_and_merges():
     orig = "香港2025年上半年新单增长几何"
@@ -222,6 +228,7 @@ def test_step_back_competitor_question_is_screened_out():
 # ---------------------------------------------------------------------------
 # Adaptive-RAG：复杂度分类 + 路由（确定性启发式默认 + opt-in LLM）
 # ---------------------------------------------------------------------------
+
 
 def test_heuristic_classifier_simple_single_multi():
     clf = HeuristicComplexityClassifier()
@@ -287,6 +294,7 @@ def test_llm_complexity_classifier_parses_and_degrades():
 # ---------------------------------------------------------------------------
 # make_query_transform 工厂 + env 选型（默认 none = 返回 base 本身、字节不变）
 # ---------------------------------------------------------------------------
+
 
 def test_make_query_transform_none_returns_base_identity():
     base = FakeBase({})
@@ -373,9 +381,7 @@ def test_query_transform_inherits_restricted_isolation_from_base(tmp_path):
         out = fusion.retrieve(QUERY)
 
         assert out, "普通块应被召回（输出非空）"
-        assert all(
-            str(s.get("sensitivity")).upper() != RESTRICTED_SENSITIVITY for s in out
-        )
+        assert all(str(s.get("sensitivity")).upper() != RESTRICTED_SENSITIVITY for s in out)
         assert all("SECRET_TOKEN" not in str(s.get("text", "")) for s in out)
         assert all(s.get("doc_id") != "EXCO.pptx" for s in out)
 

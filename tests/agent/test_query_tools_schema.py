@@ -55,9 +55,16 @@ def test_tool_schema_structural_invariants():
 # ---------------------------------------------------------------------------
 
 _FACT = Fact(
-    metric_code="REVENUE", entity="ACME_HK", geography="HK", channel="AGENCY",
-    period_type="FY", period="2024", value=1234.0, unit="USD_M",
-    source_doc_id="ACME_FY2024.pptx", source_locator="slide=1,table=1,row=1,col=1",
+    metric_code="REVENUE",
+    entity="ACME_HK",
+    geography="HK",
+    channel="AGENCY",
+    period_type="FY",
+    period="2024",
+    value=1234.0,
+    unit="USD_M",
+    source_doc_id="ACME_FY2024.pptx",
+    source_locator="slide=1,table=1,row=1,col=1",
 )
 
 
@@ -96,8 +103,12 @@ def test_execute_query_metric_delegates_to_execute_fact_query(store):
     """对外冻结的 execute_query_metric 与泛化 execute_fact_query 同结果（默认 profile）。"""
     via_wrapper = execute_query_metric(store, "REVENUE", "ACME_HK", "FY2024", "AGENCY")
     via_generic = execute_fact_query(
-        store, load_company_profile(),
-        metric="REVENUE", entity="ACME_HK", period="FY2024", channel="AGENCY",
+        store,
+        load_company_profile(),
+        metric="REVENUE",
+        entity="ACME_HK",
+        period="FY2024",
+        channel="AGENCY",
     )
     assert via_wrapper == via_generic
 
@@ -105,15 +116,29 @@ def test_execute_query_metric_delegates_to_execute_fact_query(store):
 def test_empty_channel_defaults_to_total(store):
     """缺省 / 空 channel 才触发 default TOTAL（与 typo 区别对待）。"""
     fs = store
-    fs.upsert_facts([
-        Fact(
-            metric_code="PROFIT", entity="ACME_HK", geography="HK", channel="TOTAL",
-            period_type="FY", period="2024", value=99.0, unit="USD_M",
-            source_doc_id="d", source_locator="loc",
-        )
-    ])
+    fs.upsert_facts(
+        [
+            Fact(
+                metric_code="PROFIT",
+                entity="ACME_HK",
+                geography="HK",
+                channel="TOTAL",
+                period_type="FY",
+                period="2024",
+                value=99.0,
+                unit="USD_M",
+                source_doc_id="d",
+                source_locator="loc",
+            )
+        ]
+    )
     res = execute_fact_query(
-        store, load_company_profile(), metric="PROFIT", entity="ACME_HK", period="FY2024", channel=""
+        store,
+        load_company_profile(),
+        metric="PROFIT",
+        entity="ACME_HK",
+        period="FY2024",
+        channel="",
     )
     assert res["status"] == "found"
     assert res["channel"] == "TOTAL"

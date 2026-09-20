@@ -32,8 +32,10 @@ RESTRICTED_MARK = "机密竞争细节"
 # 带历史 / 不带历史 两形态：历史里【故意】塞 RESTRICTED 字样，验证它既不进检索、也不成为证据。
 HISTORY_FORMS = {
     "no_history": None,
-    "with_history": [("user", f"上一轮聊到{RESTRICTED_MARK}"),
-                     ("assistant", f"{RESTRICTED_MARK}属于受限内容。")],
+    "with_history": [
+        ("user", f"上一轮聊到{RESTRICTED_MARK}"),
+        ("assistant", f"{RESTRICTED_MARK}属于受限内容。"),
+    ],
 }
 
 
@@ -48,12 +50,20 @@ def store(tmp_db_path):
 def _real_retriever(tmp_path) -> NarrativeIndexRetriever:
     cs = ChunkStore(tmp_path / "chunks.db")
     cs.init_schema()
-    cs.replace_doc_chunks("pub.pdf", chunk_document(
-        "行业竞争态势加剧，价格战拖累利润。",
-        DocumentMeta(doc_id="pub.pdf", topic="FIN", sensitivity="INTERNAL")))
-    cs.replace_doc_chunks("sec.pdf", chunk_document(
-        f"行业竞争{RESTRICTED_MARK}：内部渠道数据。",
-        DocumentMeta(doc_id="sec.pdf", topic="FIN", sensitivity="RESTRICTED")))
+    cs.replace_doc_chunks(
+        "pub.pdf",
+        chunk_document(
+            "行业竞争态势加剧，价格战拖累利润。",
+            DocumentMeta(doc_id="pub.pdf", topic="FIN", sensitivity="INTERNAL"),
+        ),
+    )
+    cs.replace_doc_chunks(
+        "sec.pdf",
+        chunk_document(
+            f"行业竞争{RESTRICTED_MARK}：内部渠道数据。",
+            DocumentMeta(doc_id="sec.pdf", topic="FIN", sensitivity="RESTRICTED"),
+        ),
+    )
     return NarrativeIndexRetriever(NarrativeIndex(cs))
 
 
@@ -67,8 +77,14 @@ def _assert_no_restricted(result) -> None:
 @pytest.mark.parametrize("history", list(HISTORY_FORMS.values()), ids=list(HISTORY_FORMS))
 def test_restricted_isolation_holds_with_and_without_history(store, tmp_path, history):
     retriever = _real_retriever(tmp_path)
-    result = answer_question("行业竞争态势怎么样", store, MockProvider(reference_date=REF),
-                             reference_date=REF, narrative_retriever=retriever, history=history)
+    result = answer_question(
+        "行业竞争态势怎么样",
+        store,
+        MockProvider(reference_date=REF),
+        reference_date=REF,
+        narrative_retriever=retriever,
+        history=history,
+    )
     # 公开块应被检索到（叙事路真跑通），RESTRICTED 块绝不出域。
     assert "价格战" in result.answer
     _assert_no_restricted(result)
@@ -77,17 +93,29 @@ def test_restricted_isolation_holds_with_and_without_history(store, tmp_path, hi
 class _LeakyRetriever:
     """反证 retriever：直吐一个 RESTRICTED snippet（【故意】不剔除）。"""
 
-    def retrieve(self, query: str, *, filters: dict[str, str] | None = None,
-                 top_k: int = 50) -> list[dict[str, Any]]:
-        return [{"text": f"泄漏的{RESTRICTED_MARK}", "doc_id": "sec.pdf",
-                 "locator": "sec.pdf#p1", "sensitivity": "RESTRICTED"}]
+    def retrieve(
+        self, query: str, *, filters: dict[str, str] | None = None, top_k: int = 50
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "text": f"泄漏的{RESTRICTED_MARK}",
+                "doc_id": "sec.pdf",
+                "locator": "sec.pdf#p1",
+                "sensitivity": "RESTRICTED",
+            }
+        ]
 
 
 @pytest.mark.parametrize("history", list(HISTORY_FORMS.values()), ids=list(HISTORY_FORMS))
 def test_leaky_retriever_fails_isolation_core(store, history):
     """泄漏 RESTRICTED 的反证 retriever 喂进同一断言核必须 FAIL——两形态都非空泛。"""
-    result = answer_question("行业竞争态势怎么样", store, MockProvider(reference_date=REF),
-                             reference_date=REF, narrative_retriever=_LeakyRetriever(),
-                             history=history)
+    result = answer_question(
+        "行业竞争态势怎么样",
+        store,
+        MockProvider(reference_date=REF),
+        reference_date=REF,
+        narrative_retriever=_LeakyRetriever(),
+        history=history,
+    )
     with pytest.raises(AssertionError):
         _assert_no_restricted(result)

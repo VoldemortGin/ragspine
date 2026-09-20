@@ -22,7 +22,6 @@ from pptx.util import Inches
 from reportlab.pdfgen.canvas import Canvas
 
 from ragspine.cli.ingest_narrative import main as ingest_cli_main
-from ragspine.retrieval.chunking.chunk_store import ChunkStore
 from ragspine.ingestion.narrative.narrative_ingest import (
     STATUS_FAILED,
     STATUS_INGESTED,
@@ -31,20 +30,19 @@ from ragspine.ingestion.narrative.narrative_ingest import (
     ingest_narrative,
     period_from_filename,
 )
-
+from ragspine.retrieval.chunking.chunk_store import ChunkStore
 
 # ---------------------------------------------------------------------------
 # fixture 构造（测试内现造，确定性）
 # ---------------------------------------------------------------------------
+
 
 def _make_deck(path, paragraphs: list[str], notes: str | None = None) -> None:
     """单页 deck：每个段落一个文本框，可选演讲者备注。"""
     prs = Presentation()
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     for i, text in enumerate(paragraphs):
-        tb = slide.shapes.add_textbox(
-            Inches(0.5), Inches(0.5 + i * 0.9), Inches(8), Inches(0.8)
-        )
+        tb = slide.shapes.add_textbox(Inches(0.5), Inches(0.5 + i * 0.9), Inches(8), Inches(0.8))
         tb.text_frame.text = text
     if notes:
         slide.notes_slide.notes_text_frame.text = notes
@@ -77,22 +75,29 @@ def store(tmp_db_path):
 # 文件名 period 启发式
 # ===========================================================================
 
-@pytest.mark.parametrize("name, expected", [
-    ("ACME_HK_FY2024_review.pptx", "2024"),      # FY 模式 -> glossary 规范形
-    ("group_results_2025H1.pdf", "2025H1"),     # 半年模式
-    ("board_pack_2025Q1.pptx", "2025Q1"),       # 季度模式
-    ("update fy2024 final.pptx", "2024"),       # 大小写不敏感
-    ("FY2024H1_digest.pptx", "2024H1"),         # FY 前缀 + 半年后缀
-])
+
+@pytest.mark.parametrize(
+    "name, expected",
+    [
+        ("ACME_HK_FY2024_review.pptx", "2024"),  # FY 模式 -> glossary 规范形
+        ("group_results_2025H1.pdf", "2025H1"),  # 半年模式
+        ("board_pack_2025Q1.pptx", "2025Q1"),  # 季度模式
+        ("update fy2024 final.pptx", "2024"),  # 大小写不敏感
+        ("FY2024H1_digest.pptx", "2024H1"),  # FY 前缀 + 半年后缀
+    ],
+)
 def test_period_from_filename_hit(name, expected):
     assert period_from_filename(name) == expected
 
 
-@pytest.mark.parametrize("name", [
-    "meeting_notes.pptx",            # 无期间线索
-    "2026-06-11 minutes.pdf",        # 裸年份 / 日期不算期间（绝不猜测）
-    "FY2024_vs_FY2023_compare.pptx", # 多个不同期间 -> 歧义留空
-])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "meeting_notes.pptx",  # 无期间线索
+        "2026-06-11 minutes.pdf",  # 裸年份 / 日期不算期间（绝不猜测）
+        "FY2024_vs_FY2023_compare.pptx",  # 多个不同期间 -> 歧义留空
+    ],
+)
 def test_period_from_filename_miss(name):
     assert period_from_filename(name) == ""
 
@@ -101,18 +106,21 @@ def test_period_from_filename_miss(name):
 # 元数据策略 + 透传到 chunk
 # ===========================================================================
 
+
 def test_explicit_meta_passthrough_to_chunks(tmp_path, store):
     """显式 per-doc 元数据（含 valid_as_of）逐字段透传到落库的块。"""
     deck = tmp_path / "qbr_FY2024.pptx"
     _make_deck(deck, ["CPL loss attribution detail."], notes="Follow-up pending.")
-    meta = {"qbr_FY2024.pptx": {
-        "topic": "QBR",
-        "entity": "ACME_CN",
-        "geography": "CN",
-        "language": "en",
-        "sensitivity": "RESTRICTED",
-        "valid_as_of": "2026-06-01",
-    }}
+    meta = {
+        "qbr_FY2024.pptx": {
+            "topic": "QBR",
+            "entity": "ACME_CN",
+            "geography": "CN",
+            "language": "en",
+            "sensitivity": "RESTRICTED",
+            "valid_as_of": "2026-06-01",
+        }
+    }
 
     report = ingest_narrative([deck], store, meta_by_doc=meta)
 
@@ -172,6 +180,7 @@ def test_unknown_meta_key_rejected(tmp_path, store):
 # 幂等重入 / 版本
 # ===========================================================================
 
+
 def test_reingest_unchanged_file_skipped(tmp_path, store):
     """同文件二次入库：hash 未变 -> skipped，库内不重复、版本不递增。"""
     deck = tmp_path / "deck.pptx"
@@ -205,6 +214,7 @@ def test_changed_file_reingested_with_new_version(tmp_path, store):
 # ===========================================================================
 # dry-run / no_text / failed / 文件夹扫描
 # ===========================================================================
+
 
 def test_dry_run_reports_but_writes_nothing(tmp_path, store):
     """dry-run：报告完整（将要入库的 chunk 数），但块库与登记台账零写入。"""
@@ -268,6 +278,7 @@ def test_folder_scan_only_supported_types(tmp_path, store):
 # ===========================================================================
 # CLI（scripts/ingest_narrative.py）
 # ===========================================================================
+
 
 def test_cli_dry_run_then_ingest(tmp_path):
     """CLI：--dry-run 零落库；正式跑落库且 --meta 元数据生效；坏文件时退出码 1。"""

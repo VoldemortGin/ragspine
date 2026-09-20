@@ -124,12 +124,8 @@ def verify(
 
     返回 VerificationResult（n_auto_passed=len(agreed)、n_enqueued=实际入队数）。
     """
-    by_key_a: dict[tuple[str, str, str, str, str], ChannelFact] = {
-        f.dim_key(): f for f in facts_a
-    }
-    by_key_b: dict[tuple[str, str, str, str, str], ChannelFact] = {
-        f.dim_key(): f for f in facts_b
-    }
+    by_key_a: dict[tuple[str, str, str, str, str], ChannelFact] = {f.dim_key(): f for f in facts_a}
+    by_key_b: dict[tuple[str, str, str, str, str], ChannelFact] = {f.dim_key(): f for f in facts_b}
 
     result = VerificationResult()
     # __post_init__ 保证以下列表均已初始化为非 None。

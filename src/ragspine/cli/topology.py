@@ -29,15 +29,21 @@ def _build_parser() -> argparse.ArgumentParser:
         epilog="提示：--out 建议写到 git-ignored 的 docs/generated/（如 docs/generated/topology.mmd）。",
     )
     parser.add_argument(
-        "--of", dest="fmt", choices=["mermaid", "dot", "json"], default="mermaid",
+        "--of",
+        dest="fmt",
+        choices=["mermaid", "dot", "json"],
+        default="mermaid",
         help="导出格式：mermaid（默认，GitHub 内联渲染）| dot（Graphviz）| json（自渲染/喂给别的工具）",
     )
     parser.add_argument(
-        "--which", choices=["agent", "retriever", "service"], default="agent",
+        "--which",
+        choices=["agent", "retriever", "service"],
+        default="agent",
         help="导出哪张拓扑：agent（默认，完整请求流）| retriever（检索子管线）| service（服务层）",
     )
     parser.add_argument(
-        "--out", default=None,
+        "--out",
+        default=None,
         help="输出文件路径（默认写到 stdout）；建议 docs/generated/ 下",
     )
     return parser

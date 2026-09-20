@@ -40,9 +40,9 @@ from ragspine.retrieval.rerank.listwise_rerank import DEFAULT_TOP_N, ListwiseJud
 from ragspine.retrieval.vector.persistence_policy import IsolationFirstPolicy, PersistencePolicy
 from ragspine.retrieval.vector.store import InProcessVectorStore, VectorRecord, VectorStore
 
-DEFAULT_TOP_K = 50      # 拍板召回深度（docs/architecture.md）。
-DEFAULT_RRF_K = 60      # RRF 标准值。
-DEFAULT_BM25_K1 = 1.5   # Okapi 标准参数。
+DEFAULT_TOP_K = 50  # 拍板召回深度（docs/architecture.md）。
+DEFAULT_RRF_K = 60  # RRF 标准值。
+DEFAULT_BM25_K1 = 1.5  # Okapi 标准参数。
 DEFAULT_BM25_B = 0.75
 
 # CJK 统一表意文字（基本区 + 扩展 A + 兼容区），分词用。
@@ -63,8 +63,7 @@ class EmbeddingBackend(Protocol):
 class QueryRewriter(Protocol):
     """multi-query 改写协议：rewrite(query) -> list[str]，须含原 query。"""
 
-    def rewrite(self, query: str) -> list[str]:
-        ...
+    def rewrite(self, query: str) -> list[str]: ...
 
 
 def tokenize(text: str) -> list[str]:
@@ -353,9 +352,7 @@ class HybridRetriever:
             # where 下推与 python 预过滤同口径（`if val is not None`，故 '' 是真实过滤值）；
             # 值 str 归一与 _record_metadata 对称——两侧绝不因类型不一致而错配（今值皆 str，为防御）。
             # 候选已预过滤，where 对每检索器私有默认 store 冗余但无害，对共享/超集 store 则保正确。
-            vector_where = {
-                name: str(val) for name, val in filters.items() if val is not None
-            }
+            vector_where = {name: str(val) for name, val in filters.items() if val is not None}
 
         rankings: list[list[str]] = []
         best_bm25: dict[str, float] = {}
@@ -377,7 +374,9 @@ class HybridRetriever:
                 # 故 best_vector 对每个候选都有显式分（与原内联 zip(sims,candidates) 逐位等价）。
                 vector_hits = [
                     h
-                    for h in self.vector_store.query(query_vec, k=len(candidates), where=vector_where)
+                    for h in self.vector_store.query(
+                        query_vec, k=len(candidates), where=vector_where
+                    )
                     if h.id in by_id  # 兜底：只取当前候选（共享/超集 store 下安全）
                 ]
                 rankings.append([h.id for h in vector_hits])
@@ -514,7 +513,9 @@ class NarrativeIndex:
                     )
                     self.vector_store.upsert(
                         [
-                            VectorRecord(id=c.chunk_id, vector=tuple(vec), metadata=_record_metadata(c))
+                            VectorRecord(
+                                id=c.chunk_id, vector=tuple(vec), metadata=_record_metadata(c)
+                            )
                             for c, vec in zip(persistable, vectors, strict=False)
                         ]
                     )

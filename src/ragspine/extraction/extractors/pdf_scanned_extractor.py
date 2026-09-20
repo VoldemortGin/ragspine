@@ -308,9 +308,7 @@ class PdfSpineOcrBackend:
 
     version = "pdf_spine_ocr@1"
 
-    def __init__(
-        self, *, dpi: int = 150, language: str = "eng", engine: str = "paddle"
-    ) -> None:
+    def __init__(self, *, dpi: int = 150, language: str = "eng", engine: str = "paddle") -> None:
         # 仅保存配置，不在此 import pdfspine（惰性，避免非 [pdf] 平台构造即失败）。
         self._dpi = int(dpi)
         self._language = language
@@ -425,9 +423,7 @@ class PaddleOcrVlBackend:
                       公式识别、指定 GPU device、选择表格结构模型等），缺省用管线默认。
     """
 
-    def __init__(
-        self, model_config: dict[str, object] | None = None, **kwargs: object
-    ) -> None:
+    def __init__(self, model_config: dict[str, object] | None = None, **kwargs: object) -> None:
         # 延迟初始化：仅保存配置，不在此 import / 加载模型（避免非 GPU 平台构造即失败）。
         self._model_config: dict[str, object] = dict(model_config or {})
         self._model_config.update(kwargs)
@@ -493,9 +489,7 @@ class PaddleOcrVlBackend:
         score_by_text: dict[str, list[float]] = {}
         for text, score in zip(rec_texts, rec_scores, strict=False):
             score_by_text.setdefault(_normalize_text(text), []).append(float(score))
-        default_score = (
-            sum(rec_scores) / len(rec_scores) if rec_scores else 1.0
-        )
+        default_score = sum(rec_scores) / len(rec_scores) if rec_scores else 1.0
 
         rows = _parse_html_table_rows(pred_html)
         if not rows:
@@ -511,9 +505,7 @@ class PaddleOcrVlBackend:
                     continue
                 queue = score_by_text.get(value)
                 confidence = queue.pop(0) if queue else default_score
-                cells.append(
-                    OcrCell(row=r, col=c, text=value, confidence=confidence)
-                )
+                cells.append(OcrCell(row=r, col=c, text=value, confidence=confidence))
         return OcrTable(n_rows=len(rows), n_cols=n_cols, cells=cells)
 
 

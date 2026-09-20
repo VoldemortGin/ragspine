@@ -91,9 +91,7 @@ def run_structured_ingest_job(payload: dict[str, Any]) -> dict[str, Any]:
         allowed_upload_root=payload.get("allowed_upload_root"),
     )
     try:
-        file_path = validate_ingest_path(
-            payload["file"], config, suffixes=_STRUCTURED_SUFFIXES
-        )
+        file_path = validate_ingest_path(payload["file"], config, suffixes=_STRUCTURED_SUFFIXES)
     except PathNotAllowedError as exc:
         raise JobError(str(exc), stage="validation", retryable=False) from exc
 
@@ -220,7 +218,9 @@ def run_dify_workflow_job(payload: dict[str, Any]) -> dict[str, Any]:
     provider = build_provider(config)
     try:
         result = run_workflow_isolated(
-            code, payload.get("inputs", {}), provider,
+            code,
+            payload.get("inputs", {}),
+            provider,
             timeout_s=payload.get("timeout_s", 10.0),
             isolation=payload.get("isolation", "inprocess"),
             provider_config=provider_config_dict(config),

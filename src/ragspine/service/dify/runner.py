@@ -49,17 +49,71 @@ DEFAULT_TIMEOUT_S: float = 10.0
 # breakpoint / 裸 __import__ —— 这些是越权 / 逃逸面。
 _SAFE_BUILTIN_NAMES: tuple[str, ...] = (
     # 数值 / 字符串 / 容器
-    "abs", "all", "any", "bool", "bytes", "callable", "chr", "dict", "divmod",
-    "enumerate", "filter", "float", "format", "frozenset", "getattr", "hasattr",
-    "hash", "hex", "int", "isinstance", "issubclass", "iter", "len", "list", "map",
-    "max", "min", "next", "oct", "ord", "pow", "print", "range", "repr", "reversed",
-    "round", "set", "setattr", "slice", "sorted", "str", "sum", "tuple", "type", "zip",
+    "abs",
+    "all",
+    "any",
+    "bool",
+    "bytes",
+    "callable",
+    "chr",
+    "dict",
+    "divmod",
+    "enumerate",
+    "filter",
+    "float",
+    "format",
+    "frozenset",
+    "getattr",
+    "hasattr",
+    "hash",
+    "hex",
+    "int",
+    "isinstance",
+    "issubclass",
+    "iter",
+    "len",
+    "list",
+    "map",
+    "max",
+    "min",
+    "next",
+    "oct",
+    "ord",
+    "pow",
+    "print",
+    "range",
+    "repr",
+    "reversed",
+    "round",
+    "set",
+    "setattr",
+    "slice",
+    "sorted",
+    "str",
+    "sum",
+    "tuple",
+    "type",
+    "zip",
     # 面向对象 / 装饰器支撑（dataclass 等）
-    "object", "super", "property", "staticmethod", "classmethod",
+    "object",
+    "super",
+    "property",
+    "staticmethod",
+    "classmethod",
     # 生成代码 / 折叠链可能触达的异常类型
-    "Exception", "BaseException", "TypeError", "ValueError", "KeyError", "IndexError",
-    "AttributeError", "RuntimeError", "StopIteration", "ArithmeticError",
-    "ZeroDivisionError", "LookupError", "NotImplementedError",
+    "Exception",
+    "BaseException",
+    "TypeError",
+    "ValueError",
+    "KeyError",
+    "IndexError",
+    "AttributeError",
+    "RuntimeError",
+    "StopIteration",
+    "ArithmeticError",
+    "ZeroDivisionError",
+    "LookupError",
+    "NotImplementedError",
 )
 
 
@@ -208,9 +262,7 @@ def run_generated(
     thread.start()
     thread.join(timeout_s)
     if thread.is_alive():
-        raise DifyTimeoutError(
-            f"工作流执行超过 {timeout_s}s 超时上限", timeout_s=timeout_s
-        )
+        raise DifyTimeoutError(f"工作流执行超过 {timeout_s}s 超时上限", timeout_s=timeout_s)
     if error:
         exc = error[0]
         if isinstance(exc, CorespineError):
@@ -235,8 +287,11 @@ def run_workflow_isolated(
     平台（macOS / Windows）自动回落 L1 in-process（这些平台 rlimit 不可靠，硬隔离价值有限）。
     'inprocess' 直接走 L1。无论哪条路径，L0 静态闸都在执行前先跑（受限沙箱叠加，不二选一）。
     """
-    if isolation == "subprocess" and sys.platform.startswith("linux") \
-            and provider_config is not None:
+    if (
+        isolation == "subprocess"
+        and sys.platform.startswith("linux")
+        and provider_config is not None
+    ):
         return _run_subprocess(code, inputs, provider_config, timeout_s=timeout_s)
     # 非 Linux / 无 provider_config / inprocess：回落 L1 in-process（受限 builtins 沙箱）。
     return run_generated(code, inputs, provider, timeout_s=timeout_s)

@@ -32,14 +32,22 @@ def seeded_db_path(tmp_path):
     db_path = tmp_path / "fact_metric.db"
     fs = SqliteFactStore(db_path)
     fs.init_schema()
-    fs.upsert_facts([
-        Fact(
-            metric_code="REVENUE", entity="ACME_HK", geography="HK", channel="TOTAL",
-            period_type="FY", period="2025", value=1702.0, unit="USD_M",
-            source_doc_id="ACME_FY2025_Results.pptx",
-            source_locator="slide=5,table=1,row=2,col=3",
-        ),
-    ])
+    fs.upsert_facts(
+        [
+            Fact(
+                metric_code="REVENUE",
+                entity="ACME_HK",
+                geography="HK",
+                channel="TOTAL",
+                period_type="FY",
+                period="2025",
+                value=1702.0,
+                unit="USD_M",
+                source_doc_id="ACME_FY2025_Results.pptx",
+                source_locator="slide=5,table=1,row=2,col=3",
+            ),
+        ]
+    )
     fs.close()
     return db_path
 
@@ -79,7 +87,7 @@ def parse_sse(body: str) -> list[dict]:
         if not frame:
             continue
         assert frame.startswith("data: "), frame
-        events.append(json.loads(frame[len("data: "):]))
+        events.append(json.loads(frame[len("data: ") :]))
     return events
 
 
@@ -158,13 +166,17 @@ def test_stream_guard_precedes_stream(base_config):
 # ---------------------------------------------------------------------------
 def test_stream_faq_hit(base_config):
     spy = SpyProvider()
-    faq = FAQCache([
-        FAQItem(
-            id="f1", question="RAGSpine 是什么",
-            answer="RAGSpine 是高管经营洞察助手。",
-            source="faq/handbook.md#what-is", version=3,
-        ),
-    ])
+    faq = FAQCache(
+        [
+            FAQItem(
+                id="f1",
+                question="RAGSpine 是什么",
+                answer="RAGSpine 是高管经营洞察助手。",
+                source="faq/handbook.md#what-is",
+                version=3,
+            ),
+        ]
+    )
     client = make_client(base_config, provider=spy, faq_cache=faq)
     resp = client.post("/v1/ask/stream", json={"question": "RAGSpine 是什么"})
     assert resp.status_code == 200

@@ -32,11 +32,6 @@ import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
-from ragspine.retrieval.chunking.chunk_store import ChunkStore
-from ragspine.retrieval.chunking.chunking import DocumentMeta
-from ragspine.retrieval.vector.embedding_backends import DeterministicEmbeddingBackend
-from ragspine.retrieval.lexical.retrieval import NarrativeIndex
-
 from ragspine.cli.eval_retrieval_ab import (
     AB_GOLD_PATH,
     AbGoldCase,
@@ -44,14 +39,20 @@ from ragspine.cli.eval_retrieval_ab import (
     compute_mrr,
     compute_recall_at_k,
     load_ab_gold,
-    main as ab_main,
     run_ab,
 )
-
+from ragspine.cli.eval_retrieval_ab import (
+    main as ab_main,
+)
+from ragspine.retrieval.chunking.chunk_store import ChunkStore
+from ragspine.retrieval.chunking.chunking import DocumentMeta
+from ragspine.retrieval.lexical.retrieval import NarrativeIndex
+from ragspine.retrieval.vector.embedding_backends import DeterministicEmbeddingBackend
 
 # ===========================================================================
 # A1 指标手算例：Recall@k / MRR
 # ===========================================================================
+
 
 def test_recall_at_k_hand_example():
     """Recall@k：retrieved 前 k 命中 relevant 的占比。
@@ -93,10 +94,17 @@ def test_mrr_first_position_and_miss():
 # 合成 KB + gold（就地构造，确定性）
 # ===========================================================================
 
+
 def _meta(doc_id: str, **overrides) -> DocumentMeta:
     kwargs = dict(
-        doc_id=doc_id, title=doc_id, topic="FIN", entity="ACME_HK",
-        geography="HK", period="2025", language="zh", sensitivity="INTERNAL",
+        doc_id=doc_id,
+        title=doc_id,
+        topic="FIN",
+        entity="ACME_HK",
+        geography="HK",
+        period="2025",
+        language="zh",
+        sensitivity="INTERNAL",
     )
     kwargs.update(overrides)
     return DocumentMeta(**kwargs)
@@ -131,19 +139,23 @@ def ab_chunk_db(tmp_path):
 
 @pytest.fixture
 def ab_gold_cases():
-    return [AbGoldCase(query=g["query"], relevant_chunk_ids=g["relevant_chunk_ids"])
-            for g in _AB_GOLD]
+    return [
+        AbGoldCase(query=g["query"], relevant_chunk_ids=g["relevant_chunk_ids"]) for g in _AB_GOLD
+    ]
 
 
 # ===========================================================================
 # A1 harness 跑通：run_ab 产出 BM25-only 与 hybrid 两套指标
 # ===========================================================================
 
+
 def test_run_ab_produces_both_arms(ab_chunk_db, ab_gold_cases):
     """run_ab 同时产出 BM25-only 与 hybrid 两套 Recall@k/MRR，数值在 [0,1]。"""
     report = run_ab(
-        ab_chunk_db, ab_gold_cases,
-        embedding_backend=DeterministicEmbeddingBackend(), k=5,
+        ab_chunk_db,
+        ab_gold_cases,
+        embedding_backend=DeterministicEmbeddingBackend(),
+        k=5,
     )
     assert {"bm25", "hybrid"} <= set(report)
     for arm in ("bm25", "hybrid"):
@@ -162,10 +174,8 @@ def test_run_ab_bm25_hits_expected_on_synthetic(ab_chunk_db, ab_gold_cases):
 
 def test_run_ab_deterministic_reproducible(ab_chunk_db, ab_gold_cases):
     """同一输入两次跑 run_ab 结果完全一致（确定性、可复现）。"""
-    r1 = run_ab(ab_chunk_db, ab_gold_cases,
-                embedding_backend=DeterministicEmbeddingBackend(), k=5)
-    r2 = run_ab(ab_chunk_db, ab_gold_cases,
-                embedding_backend=DeterministicEmbeddingBackend(), k=5)
+    r1 = run_ab(ab_chunk_db, ab_gold_cases, embedding_backend=DeterministicEmbeddingBackend(), k=5)
+    r2 = run_ab(ab_chunk_db, ab_gold_cases, embedding_backend=DeterministicEmbeddingBackend(), k=5)
     assert r1 == r2
 
 
@@ -174,14 +184,16 @@ def test_run_ab_hybrid_does_not_crash_and_keeps_bm25_recall(ab_chunk_db, ab_gold
 
     诚实边界：确定性后端是词法散列、非语义，这里只断言「不破坏」，不主张语义增益。
     """
-    report = run_ab(ab_chunk_db, ab_gold_cases,
-                    embedding_backend=DeterministicEmbeddingBackend(), k=5)
+    report = run_ab(
+        ab_chunk_db, ab_gold_cases, embedding_backend=DeterministicEmbeddingBackend(), k=5
+    )
     assert report["hybrid"]["recall_at_k"] >= report["bm25"]["recall_at_k"]
 
 
 # ===========================================================================
 # fixture：data/golden/retrieval_ab_sample.jsonl
 # ===========================================================================
+
 
 def test_ab_gold_fixture_exists_and_parses():
     """随附合成 gold fixture 存在且可被 load_ab_gold 解析。"""
@@ -210,6 +222,7 @@ def test_ab_gold_fixture_jsonl_well_formed():
 # CLI：scripts/eval_retrieval_ab.py
 # ===========================================================================
 
+
 def test_cli_runs_and_prints_comparison_table(capsys):
     """CLI 对随附合成 gold 实跑：退出码 0，打印同时含 bm25 与 hybrid 的对照表。"""
     rc = ab_main([])
@@ -231,6 +244,7 @@ def test_cli_embedding_deterministic_explicit(capsys):
 # ===========================================================================
 # --corpus 语料构建：从 jsonl 建块库（每篇单段 -> '<doc_id>#c0'），供真实标注 A/B 用
 # ===========================================================================
+
 
 def test_build_corpus_chunk_db_assigns_c0_ids(tmp_path):
     """user story —— 从语料 jsonl 建块库：每篇单段产出稳定 chunk_id '<doc_id>#c0'，

@@ -79,6 +79,5 @@ def make_index_text_fn(spec: str | None = None) -> IndexTextFn | None:
     if normalized in _ON_ALIASES:
         return contextual_index_text
     raise ValueError(
-        f"未知 contextual spec：{normalized!r}"
-        f"（可选 none / {' / '.join(sorted(_ON_ALIASES))}）"
+        f"未知 contextual spec：{normalized!r}（可选 none / {' / '.join(sorted(_ON_ALIASES))}）"
     )

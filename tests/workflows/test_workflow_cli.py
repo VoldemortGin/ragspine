@@ -637,22 +637,18 @@ def test_package_creates_a_deployable_directory_without_secrets(
     assert environment == {
         "RAGSPINE_PROVIDER": "mock",
         "RAGSPINE_DIFY_RUN_ENABLED": "true",
-        "RAGSPINE_DIFY_PUBLIC_APPS": (
-            "${RAGSPINE_APP_KEY:?}=/app/workflows/workflow.yml"
-        ),
+        "RAGSPINE_DIFY_PUBLIC_APPS": ("${RAGSPINE_APP_KEY:?}=/app/workflows/workflow.yml"),
     }
     assert "ghcr.io/voldemortgin/ragspine:${RAGSPINE_TAG:?}" in compose
     assert "./workflow.yml:/app/workflows/workflow.yml:ro" in compose
-    assert "RAGSPINE_DIFY_RUN_ENABLED: \"true\"" in compose
+    assert 'RAGSPINE_DIFY_RUN_ENABLED: "true"' in compose
     assert "RAGSPINE_PROVIDER: mock" in compose
     assert "RAGSPINE_APP_KEY" in compose
     assert "=/app/workflows/workflow.yml" in compose
     assert "RAGSPINE_TAG=latest" in (output / ".env.example").read_text(encoding="utf-8")
     assert "RAGSPINE_APP_KEY=" in (output / ".env.example").read_text(encoding="utf-8")
     assert (output / ".gitignore").read_text(encoding="utf-8") == ".env\n"
-    combined = "\n".join(
-        path.read_text(encoding="utf-8") for path in output.iterdir()
-    )
+    combined = "\n".join(path.read_text(encoding="utf-8") for path in output.iterdir())
     assert "sk-" not in combined
     assert "created" in capsys.readouterr().out
 
@@ -706,10 +702,7 @@ def test_package_rejects_existing_directory_unless_force(
     )
     assert sentinel.read_text(encoding="utf-8") == "keep"
 
-    assert (
-        main(["workflow", "package", str(DIFY_FIXTURES / "seq.yml"), "-o", str(output)])
-        == 2
-    )
+    assert main(["workflow", "package", str(DIFY_FIXTURES / "seq.yml"), "-o", str(output)]) == 2
     assert sentinel.read_text(encoding="utf-8") == "keep"
 
     assert (
@@ -950,7 +943,9 @@ def test_serve_open_opens_browser_exactly_once_after_port_is_ready(
 
     monkeypatch.setattr(cli_module, "_serve_app", fake_serve)
 
-    rc = main(["workflow", "serve", str(DIFY_FIXTURES / "seq.yml"), "--port", str(_free_port()), "--open"])
+    rc = main(
+        ["workflow", "serve", str(DIFY_FIXTURES / "seq.yml"), "--port", str(_free_port()), "--open"]
+    )
 
     assert rc == 0
     assert len(opened) == 1

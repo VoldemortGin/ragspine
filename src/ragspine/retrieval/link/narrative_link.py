@@ -60,10 +60,12 @@ class ProviderListwiseJudge:
     def judge(self, query: str, candidates: list[str]) -> list[int]:
         """构造 listwise prompt → provider 单轮调用 → 鲁棒解析为下标排列。"""
         prompt = build_listwise_prompt(query, candidates)
-        resp = self.provider.chat([
-            {"role": "system", "content": _JUDGE_SYSTEM},
-            {"role": "user", "content": prompt},
-        ])
+        resp = self.provider.chat(
+            [
+                {"role": "system", "content": _JUDGE_SYSTEM},
+                {"role": "user", "content": prompt},
+            ]
+        )
         return parse_listwise_response(resp.choices[0].message.content or "", len(candidates))
 
 
@@ -100,9 +102,7 @@ class NarrativeIndexRetriever:
         - RESTRICTED 块在出口处剔除（不出域，见模块 docstring）；
         - postprocessor（W8，opt-in）在【剔除之后】对已剥离子集做重排/去冗余/压缩（隔离继承）。
         """
-        kwargs = {
-            k: v for k, v in (filters or {}).items() if k in _FILTER_KEYS and v
-        }
+        kwargs = {k: v for k, v in (filters or {}).items() if k in _FILTER_KEYS and v}
         results = self.index.retrieve(query, top_k=top_k, **kwargs)
         if not results and kwargs and self.retry_without_filters:
             results = self.index.retrieve(query, top_k=top_k)

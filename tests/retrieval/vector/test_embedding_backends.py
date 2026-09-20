@@ -20,19 +20,20 @@ import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
+from ragspine.retrieval.link.narrative_link import build_narrative_retriever
 from ragspine.retrieval.vector.embedding_backends import (
     DEFAULT_OPENAI_EMBEDDING_MODEL,
     OpenAIEmbeddingBackend,
 )
-from ragspine.retrieval.link.narrative_link import build_narrative_retriever
-
 
 # ---------------------------------------------------------------------------
 # fake openai SDK
 # ---------------------------------------------------------------------------
 
-def _install_fake_openai(monkeypatch, *, dim=4, dims_per_call=None,
-                         reverse_data=False, drop_last=False):
+
+def _install_fake_openai(
+    monkeypatch, *, dim=4, dims_per_call=None, reverse_data=False, drop_last=False
+):
     """注入 fake openai 模块，捕获 client 构造参数与每次 embeddings.create 调用。
 
     dims_per_call：依次指定每个 create 调用返回的向量维度（测维度一致性校验）；
@@ -71,6 +72,7 @@ def _install_fake_openai(monkeypatch, *, dim=4, dims_per_call=None,
 # ---------------------------------------------------------------------------
 # 延迟 import / 构造
 # ---------------------------------------------------------------------------
+
 
 def test_module_importable_and_ctor_fails_without_sdk(monkeypatch):
     monkeypatch.setitem(sys.modules, "openai", None)  # 模拟未安装
@@ -123,13 +125,16 @@ def test_invalid_batch_size_rejected(monkeypatch):
 # embed_texts：分批 / 顺序 / 校验
 # ---------------------------------------------------------------------------
 
+
 def test_batching_splits_requests(monkeypatch):
     captured = _install_fake_openai(monkeypatch)
     backend = OpenAIEmbeddingBackend(api_key="k", batch_size=2)
     texts = ["t1", "t2", "t3", "t4", "t5"]
     vectors = backend.embed_texts(texts)
     assert [c["input"] for c in captured["create_calls"]] == [
-        ["t1", "t2"], ["t3", "t4"], ["t5"],
+        ["t1", "t2"],
+        ["t3", "t4"],
+        ["t5"],
     ]
     assert len(vectors) == 5
 
@@ -169,6 +174,7 @@ def test_empty_input_no_request(monkeypatch):
 # B 线接入：build_narrative_retriever 的 embedding_backend 参数
 # ---------------------------------------------------------------------------
 
+
 class _FakeBackend:
     """实现 EmbeddingBackend 协议的极简替身。"""
 
@@ -186,9 +192,7 @@ def test_build_narrative_retriever_default_is_pure_bm25(tmp_path):
 
 def test_build_narrative_retriever_accepts_embedding_backend(tmp_path):
     backend = _FakeBackend()
-    retriever, store = build_narrative_retriever(
-        tmp_path / "chunks.db", embedding_backend=backend
-    )
+    retriever, store = build_narrative_retriever(tmp_path / "chunks.db", embedding_backend=backend)
     try:
         assert retriever.index.embedding_backend is backend
     finally:

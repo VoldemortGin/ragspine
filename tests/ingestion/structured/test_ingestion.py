@@ -21,9 +21,12 @@ import rootutils
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
 from ragspine.extraction.color.color_semantics import ColorMapping, LegendEntry, MappingRegistry
-from ragspine.storage.fact_store import SqliteFactStore, REVIEW_AUTO_APPROVED, VISIBLE_REVIEW_STATUSES
-from ragspine.ingestion.structured.ingestion import IngestReport, ingest_excel
 from ragspine.ingestion.review.review_queue import ReviewQueue
+from ragspine.ingestion.structured.ingestion import IngestReport, ingest_excel
+from ragspine.storage.fact_store import (
+    VISIBLE_REVIEW_STATUSES,
+    SqliteFactStore,
+)
 
 # HK_Performance 是 fixture 里唯一 glossary 完整可识别的数据 sheet：
 #   A1='ACME Hong Kong'（实体）/ 首行 FY2022..FY2024（期间）/ 首列 REVENUE/NEWSALES/PROFIT/ROE（指标）
@@ -87,9 +90,7 @@ def _setup_three(store, registry, queue, ground_truth):
 def test_dry_run_returns_report(store, registry, queue, excel_fixture_path, ground_truth):
     """story #16 —— dry_run 返回一份 IngestReport，dry_run 标记为 True。"""
     _setup_three(store, registry, queue, ground_truth)
-    report = ingest_excel(
-        excel_fixture_path, store, registry, queue, dry_run=True
-    )
+    report = ingest_excel(excel_fixture_path, store, registry, queue, dry_run=True)
     assert isinstance(report, IngestReport)
     assert report.dry_run is True
     assert report.status == "ok"
@@ -99,9 +100,7 @@ def test_dry_run_returns_report(store, registry, queue, excel_fixture_path, grou
 def test_dry_run_report_is_complete(store, registry, queue, excel_fixture_path, ground_truth):
     """story #16 —— dry_run 仍完整跑抽取：grid 数、候选事实数、血缘都齐备。"""
     _setup_three(store, registry, queue, ground_truth)
-    report = ingest_excel(
-        excel_fixture_path, store, registry, queue, dry_run=True
-    )
+    report = ingest_excel(excel_fixture_path, store, registry, queue, dry_run=True)
     assert report.source_doc_id == HK_SCOPE
     assert report.file_hash  # 文件 hash 已算出
     assert report.n_grids >= 4  # fixture 有 4 个 worksheet
@@ -113,9 +112,7 @@ def test_dry_run_writes_nothing_to_store(store, registry, queue, excel_fixture_p
     """story #16 —— dry_run 绝不写 fact_store（库内事实数保持 0）。"""
     _setup_three(store, registry, queue, ground_truth)
     assert store.count() == 0
-    report = ingest_excel(
-        excel_fixture_path, store, registry, queue, dry_run=True
-    )
+    report = ingest_excel(excel_fixture_path, store, registry, queue, dry_run=True)
     assert report.n_facts_ingested == 0
     assert store.count() == 0
 
@@ -127,7 +124,9 @@ def test_dry_run_writes_nothing_to_queue(store, registry, queue, excel_fixture_p
     assert queue.list_pending() == []
 
 
-def test_dry_run_then_real_ingest_independent(store, registry, queue, excel_fixture_path, ground_truth):
+def test_dry_run_then_real_ingest_independent(
+    store, registry, queue, excel_fixture_path, ground_truth
+):
     """story #16 —— 先 dry_run 预览、再正式 ingest，正式入库不受 dry_run 影响。"""
     _setup_three(store, registry, queue, ground_truth)
     ingest_excel(excel_fixture_path, store, registry, queue, dry_run=True)
@@ -141,7 +140,9 @@ def test_dry_run_then_real_ingest_independent(store, registry, queue, excel_fixt
 # ===========================================================================
 # story #17 — 重复 ingest 幂等：库内事实数不变
 # ===========================================================================
-def test_real_ingest_writes_expected_facts(store, registry, queue, excel_fixture_path, ground_truth):
+def test_real_ingest_writes_expected_facts(
+    store, registry, queue, excel_fixture_path, ground_truth
+):
     """story #17 —— 正式 ingest 把 HK_Performance 的 12 条事实写入 store。"""
     _setup_three(store, registry, queue, ground_truth)
     report = ingest_excel(excel_fixture_path, store, registry, queue)
@@ -159,7 +160,9 @@ def test_repeat_ingest_is_idempotent(store, registry, queue, excel_fixture_path,
     assert store.count() == count_after_first
 
 
-def test_repeat_ingest_report_visible_idempotent(store, registry, queue, excel_fixture_path, ground_truth):
+def test_repeat_ingest_report_visible_idempotent(
+    store, registry, queue, excel_fixture_path, ground_truth
+):
     """story #17 —— 重复 ingest 的报告仍报告应入库事实数，但不制造重复事实。"""
     _setup_three(store, registry, queue, ground_truth)
     first = ingest_excel(excel_fixture_path, store, registry, queue)
@@ -170,7 +173,9 @@ def test_repeat_ingest_report_visible_idempotent(store, registry, queue, excel_f
     assert store.count() == EXPECTED_HK_FACTS
 
 
-def test_repeat_ingest_no_duplicate_for_same_cell(store, registry, queue, excel_fixture_path, ground_truth):
+def test_repeat_ingest_no_duplicate_for_same_cell(
+    store, registry, queue, excel_fixture_path, ground_truth
+):
     """story #17 —— 同一指标×实体×期间×渠道在重复 ingest 后仍只有 1 条。"""
     _setup_three(store, registry, queue, ground_truth)
     ingest_excel(excel_fixture_path, store, registry, queue)
@@ -187,7 +192,10 @@ def test_ingested_facts_carry_lineage(store, registry, queue, excel_fixture_path
     """story #16/#17 —— 入库事实带版本血缘新字段（hash / extractor_version）。"""
     _setup_three(store, registry, queue, ground_truth)
     report = ingest_excel(
-        excel_fixture_path, store, registry, queue,
+        excel_fixture_path,
+        store,
+        registry,
+        queue,
         extractor_version="xlsx_styled@1",
     )
     rows = store.query("REVENUE", "ACME_HK", "FY", "2024")
@@ -199,7 +207,9 @@ def test_ingested_facts_carry_lineage(store, registry, queue, excel_fixture_path
     assert fact.review_status in VISIBLE_REVIEW_STATUSES
 
 
-def test_color_tags_applied_from_active_mapping(store, registry, queue, excel_fixture_path, ground_truth):
+def test_color_tags_applied_from_active_mapping(
+    store, registry, queue, excel_fixture_path, ground_truth
+):
     """story #17 —— 黄色 REVENUE 行经 active 映射打上 product_line=new 的 tag。"""
     _setup_three(store, registry, queue, ground_truth)
     report = ingest_excel(excel_fixture_path, store, registry, queue)

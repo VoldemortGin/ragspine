@@ -59,8 +59,14 @@ def test_job_execution_error_is_joberror():
         "    raise ValueError('boom')\n"
     )
     payload = {
-        "source": src, "entrypoint": "run_workflow", "imports": [], "warnings": [],
-        "inputs": {}, "timeout_s": 10.0, "isolation": "inprocess", "provider_type": "mock",
+        "source": src,
+        "entrypoint": "run_workflow",
+        "imports": [],
+        "warnings": [],
+        "inputs": {},
+        "timeout_s": 10.0,
+        "isolation": "inprocess",
+        "provider_type": "mock",
     }
     with pytest.raises(JobError) as exc:
         run_dify_workflow_job(payload)

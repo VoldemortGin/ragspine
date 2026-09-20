@@ -41,7 +41,9 @@ def _assert_extractor_carries_provenance(extractor, path) -> int:
         assert g.source_doc_id, f"StyledGrid 缺 source_doc_id（血缘根）：{g!r}"
         assert g.sheet, f"StyledGrid 缺 sheet（粗粒度 locator）：{g!r}"
         if g.source_file_hash is not None:
-            assert g.source_file_hash, f"StyledGrid 的 source_file_hash 为空串（血缘存活失败）：{g!r}"
+            assert g.source_file_hash, (
+                f"StyledGrid 的 source_file_hash 为空串（血缘存活失败）：{g!r}"
+            )
         cells = list(g.iter_cells())
         assert cells, f"StyledGrid 无任何单元格（fixture 表非空，应至少一格）：{g.sheet!r}"
         for cell in cells:
@@ -54,6 +56,7 @@ def _assert_extractor_carries_provenance(extractor, path) -> int:
 # ===========================================================================
 # P · Provenance：每个注册 Extractor 的产出都带齐血缘（over real / 合成最小 fixtures）
 # ===========================================================================
+
 
 def test_every_grid_carries_provenance(extractor_case):
     """每个注册 Extractor：抽出的每张 StyledGrid（及其每格）都带非空 source_doc_id + locator。"""
@@ -88,6 +91,7 @@ def test_extractor_is_runtime_checkable(extractor_case):
 # ===========================================================================
 # 非空泛证明：丢血缘的 stub 必须 FAIL（证明 provenance pack 在【根】与【定位】两维都非空泛）
 # ===========================================================================
+
 
 class _LineageDroppingExtractor:
     """反证 stub：产出 source_doc_id 抹空的 StyledGrid——【故意】丢血缘根。"""

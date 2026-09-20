@@ -181,7 +181,9 @@ def _profile_with_competitor() -> DomainProfile:
         external_entities={"rivalcorp": "RivalCorp"},
         home_entity_labels={"GRP": "Group", "SUBA": "Sub A"},
         dimensions=(
-            DimensionSpec("metric", label="Metric", synonyms={"rev": "REV"}, labels={"REV": "Revenue"}),
+            DimensionSpec(
+                "metric", label="Metric", synonyms={"rev": "REV"}, labels={"REV": "Revenue"}
+            ),
         ),
     )
 
@@ -200,7 +202,9 @@ def test_llm_edges_carry_model_derived_unverified_markers():
 def test_llm_lineage_from_chunk_not_model_self_report():
     """模型即便自报 source_doc_id，也被忽略——血缘只认 chunk（调用方）传入值。"""
     provider = ConstantProvider(
-        _relations_json(("A", "B", "k"), extra={"source_doc_id": "FAKE", "source_locator": "FAKE#x"})
+        _relations_json(
+            ("A", "B", "k"), extra={"source_doc_id": "FAKE", "source_locator": "FAKE#x"}
+        )
     )
     extractor = LLMRelationExtractor(provider)
     chunks = [FakeChunk("real.pdf", source_locator="real.pdf#7", text="t")]
@@ -226,9 +230,7 @@ def test_llm_degrades_on_provider_error():
 
 def test_llm_bounded_by_max_relations():
     """总量有界：max_relations 截断（防发散）。"""
-    provider = ConstantProvider(
-        _relations_json(("A", "B", "k"), ("C", "D", "k"), ("E", "F", "k"))
-    )
+    provider = ConstantProvider(_relations_json(("A", "B", "k"), ("C", "D", "k"), ("E", "F", "k")))
     extractor = LLMRelationExtractor(provider, max_relations=2)
     edges = extractor.extract([FakeChunk("d1.pdf", source_locator="d1.pdf#p1", text="t")])
     assert len(edges) == 2
@@ -240,7 +242,12 @@ def test_llm_never_sends_restricted_chunk_to_provider():
     extractor = LLMRelationExtractor(provider)
     chunks = [
         FakeChunk("open.pdf", source_locator="open.pdf#1", text="OPEN_TEXT"),
-        FakeChunk("secret.pdf", sensitivity="RESTRICTED", source_locator="secret.pdf#1", text="SECRET_TEXT"),
+        FakeChunk(
+            "secret.pdf",
+            sensitivity="RESTRICTED",
+            source_locator="secret.pdf#1",
+            text="SECRET_TEXT",
+        ),
     ]
     extractor.extract(chunks)
     assert "OPEN_TEXT" in provider.seen_user_texts
@@ -289,7 +296,9 @@ def test_make_relation_extractor_llm_needs_provider():
 def test_make_relation_extractor_llm_with_provider():
     ext = make_relation_extractor("llm", provider=ConstantProvider("{}"))
     assert isinstance(ext, LLMRelationExtractor)
-    assert isinstance(make_relation_extractor("on", provider=ConstantProvider("{}")), LLMRelationExtractor)
+    assert isinstance(
+        make_relation_extractor("on", provider=ConstantProvider("{}")), LLMRelationExtractor
+    )
 
 
 def test_make_relation_extractor_reads_env(monkeypatch):
@@ -313,7 +322,9 @@ def _base_profile() -> DomainProfile:
 
 def _base_facts() -> list[Fact]:
     return [
-        Fact("REV", "SUBA", "NORTH", "TOTAL", "FY", "2024", 10.0, "USD_M", "suba.pdf", "suba.pdf#p1"),
+        Fact(
+            "REV", "SUBA", "NORTH", "TOTAL", "FY", "2024", 10.0, "USD_M", "suba.pdf", "suba.pdf#p1"
+        ),
     ]
 
 
@@ -353,7 +364,9 @@ def test_build_with_deterministic_extractor_adds_cooccurs_on_top():
     aug_mentions = {n.id for n in augmented.neighbors("news.pdf", edge_type="mentions")}
     assert base_mentions == aug_mentions  # base mentions 边不受扰
     # GRP 与 SUBA 在 news.pdf 共现 → co_occurs_with 边追加。
-    cooccurs = {n.id for n in augmented.neighbors("GRP", edge_type=CO_OCCURS_EDGE_TYPE, direction="both")}
+    cooccurs = {
+        n.id for n in augmented.neighbors("GRP", edge_type=CO_OCCURS_EDGE_TYPE, direction="both")
+    }
     assert "SUBA" in cooccurs
     # base 图无此边。
     assert not base.neighbors("GRP", edge_type=CO_OCCURS_EDGE_TYPE, direction="both")

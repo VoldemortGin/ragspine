@@ -16,13 +16,12 @@ import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
-from ragspine.agent.llm_provider import MockProvider
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
 from ragspine.retrieval.chunking.chunking import Chunk, DocumentMeta, chunk_document
 from ragspine.retrieval.filtering.automatic import ControlledVocabFilterExtractor
 from ragspine.retrieval.filtering.metadata_filter import MetadataFilter, make_filter
-from ragspine.retrieval.link.narrative_link import NarrativeIndexRetriever
 from ragspine.retrieval.lexical.retrieval import NarrativeIndex
+from ragspine.retrieval.link.narrative_link import NarrativeIndexRetriever
 
 # 每个算子一个「模式」——参数化把每种新算子都纳入覆盖。
 FILTER_MODES = {
@@ -42,9 +41,17 @@ FILTER_MODES = {
 
 def _chunks() -> list[Chunk]:
     return [
-        Chunk(chunk_id=f"d#{i}", doc_id="d", seq=i, text=f"t{i}",
-              source_locator=f"d#para{i + 1}", para_start=i + 1, para_end=i + 1,
-              topic="FIN", period=str(2020 + i))
+        Chunk(
+            chunk_id=f"d#{i}",
+            doc_id="d",
+            seq=i,
+            text=f"t{i}",
+            source_locator=f"d#para{i + 1}",
+            para_start=i + 1,
+            para_end=i + 1,
+            topic="FIN",
+            period=str(2020 + i),
+        )
         for i in range(5)
     ]
 
@@ -72,8 +79,17 @@ class _WideningFilter:
 
     def apply(self, objs):
         out = list(objs)
-        out.append(Chunk(chunk_id="INJECTED", doc_id="x", seq=99, text="x",
-                         source_locator="x#para1", para_start=1, para_end=1))
+        out.append(
+            Chunk(
+                chunk_id="INJECTED",
+                doc_id="x",
+                seq=99,
+                text="x",
+                source_locator="x#para1",
+                para_start=1,
+                para_end=1,
+            )
+        )
         return out
 
 
@@ -88,16 +104,26 @@ def test_restricted_not_bypassed_by_any_filter(tmp_path):
     store = ChunkStore(tmp_path / "c.db")
     store.init_schema()
     store.replace_doc_chunks(
-        "sec.pdf", chunk_document("营收机密。", DocumentMeta(doc_id="sec.pdf", topic="FIN", sensitivity="RESTRICTED")))
+        "sec.pdf",
+        chunk_document(
+            "营收机密。", DocumentMeta(doc_id="sec.pdf", topic="FIN", sensitivity="RESTRICTED")
+        ),
+    )
     store.replace_doc_chunks(
-        "pub.pdf", chunk_document("营收公开。", DocumentMeta(doc_id="pub.pdf", topic="FIN", sensitivity="INTERNAL")))
+        "pub.pdf",
+        chunk_document(
+            "营收公开。", DocumentMeta(doc_id="pub.pdf", topic="FIN", sensitivity="INTERNAL")
+        ),
+    )
     idx = NarrativeIndex(store)
     ret = NarrativeIndexRetriever(idx)
     # NarrativeIndexRetriever.retrieve 不吃 metadata_filter，但底层 index 施加专选 RESTRICTED 的过滤后，
     # 出口仍必须剔除 RESTRICTED（这里直接验证出口对 index 结果的剔除语义）。
     only_restricted = make_filter([("sensitivity", "eq", "RESTRICTED")])
     raw = idx.retrieve("营收", metadata_filter=only_restricted)
-    assert any(str(r.chunk.sensitivity).upper() == "RESTRICTED" for r in raw), "过滤器应已选中 RESTRICTED（绕过前提）"
+    assert any(str(r.chunk.sensitivity).upper() == "RESTRICTED" for r in raw), (
+        "过滤器应已选中 RESTRICTED（绕过前提）"
+    )
     # 而经出口的正常检索绝不含 RESTRICTED。
     snippets = ret.retrieve("营收")
     assert all(str(s["sensitivity"]).upper() != "RESTRICTED" for s in snippets)

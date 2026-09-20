@@ -23,9 +23,22 @@ from ragspine.agent.intent import (
 
 # 实时 / 时效线索：出现即排除短路（缓存的固定答案对这类问题会过时）。
 _REALTIME_CUES = (
-    "今天", "昨天", "现在", "此刻", "当前", "实时", "最新", "目前",
-    "today", "yesterday", "current", "latest", "right now", "as of now",
-    "股价", "price now",
+    "今天",
+    "昨天",
+    "现在",
+    "此刻",
+    "当前",
+    "实时",
+    "最新",
+    "目前",
+    "today",
+    "yesterday",
+    "current",
+    "latest",
+    "right now",
+    "as of now",
+    "股价",
+    "price now",
 )
 
 # 归一化时剥离的尾随标点。
@@ -122,9 +135,7 @@ class FAQCache:
             owner=d.get("owner"),
         )
 
-    def lookup(
-        self, question: str, *, reference_date: date | None = None
-    ) -> FAQHit | None:
+    def lookup(self, question: str, *, reference_date: date | None = None) -> FAQHit | None:
         """归一化精确匹配；排除规则前置（任一命中即 MISS）。纯函数，无副作用。"""
         ref = reference_date or date.today()
 

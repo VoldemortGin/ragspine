@@ -68,16 +68,19 @@ def detect_answer_question_folds(ir: WorkflowIR) -> tuple[FoldPlan, ...]:
         if question is None:
             continue
         folded_kr.add(kr.id)
-        plans.append(FoldPlan(
-            kr_id=kr.id, llm_id=node.id, question=question,
-            answer_field="text", dataset_ids=kr.dataset_ids,
-        ))
+        plans.append(
+            FoldPlan(
+                kr_id=kr.id,
+                llm_id=node.id,
+                question=question,
+                answer_field="text",
+                dataset_ids=kr.dataset_ids,
+            )
+        )
     return tuple(plans)
 
 
-def _has_qa_sink(
-    ir: WorkflowIR, llm_id: str, node_map: dict[str, IRNode]
-) -> bool:
+def _has_qa_sink(ir: WorkflowIR, llm_id: str, node_map: dict[str, IRNode]) -> bool:
     """llm 的下游里存在 AnswerNode/EndNode（问答终点）即认定为问答骨架。"""
     for edge in ir.graph.successors(llm_id):
         target = node_map.get(edge.target)

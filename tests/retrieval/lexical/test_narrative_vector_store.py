@@ -22,8 +22,14 @@ from ragspine.retrieval.vector.store import InProcessVectorStore
 
 def _meta(doc_id: str, **overrides) -> DocumentMeta:
     kwargs = dict(
-        doc_id=doc_id, title=doc_id, topic="FIN", entity="ACME_HK",
-        geography="HK", period="2025H1", language="zh", sensitivity="INTERNAL",
+        doc_id=doc_id,
+        title=doc_id,
+        topic="FIN",
+        entity="ACME_HK",
+        geography="HK",
+        period="2025H1",
+        language="zh",
+        sensitivity="INTERNAL",
     )
     kwargs.update(overrides)
     return DocumentMeta(**kwargs)

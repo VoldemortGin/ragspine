@@ -84,7 +84,7 @@ def test_economy_config_never_constructs_embedding(monkeypatch, tmp_path):
         db_path=str(tmp_path / "fact.db"),
         chunk_db_path=str(tmp_path / "chunk.db"),
         retrieval_mode="economy",
-        embedding="deterministic",   # 即便配了 embedding，economy 也必须无视之
+        embedding="deterministic",  # 即便配了 embedding，economy 也必须无视之
         vector_store="in_process",
     )
     with open_narrative_retriever(cfg, MockProvider()) as retriever:

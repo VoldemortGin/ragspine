@@ -38,9 +38,7 @@ def _adjacency(
     return nodes, succ, indeg
 
 
-def topo_order(
-    node_ids: Iterable[str], edges: Iterable[tuple[str, str]]
-) -> tuple[str, ...]:
+def topo_order(node_ids: Iterable[str], edges: Iterable[tuple[str, str]]) -> tuple[str, ...]:
     """Kahn 拓扑排序，确定性（每步在入度为 0 的节点里取 id 最小者）。环 → CyclicGraph。"""
     nodes, succ, indeg = _adjacency(node_ids, edges)
     ready = sorted(n for n in nodes if indeg[n] == 0)

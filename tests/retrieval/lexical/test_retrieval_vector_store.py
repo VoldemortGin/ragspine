@@ -67,9 +67,13 @@ def _chunk(chunk_id: str, text: str, **overrides) -> Chunk:
 @pytest.fixture
 def corpus() -> list[Chunk]:
     return [
-        _chunk("c1#0", "Nexora 事件对银保渠道的影响评估", topic="REG", entity="ACME_CN", geography="CN"),
+        _chunk(
+            "c1#0", "Nexora 事件对银保渠道的影响评估", topic="REG", entity="ACME_CN", geography="CN"
+        ),
         _chunk("c2#0", "MPFA 强积金新规要求披露管理费", topic="REG", entity="ACME_HK"),
-        _chunk("c3#0", "CPL 渠道归因分析显示银保增长", topic="FIN", entity="ACME_CN", geography="CN"),
+        _chunk(
+            "c3#0", "CPL 渠道归因分析显示银保增长", topic="FIN", entity="ACME_CN", geography="CN"
+        ),
         _chunk("c4#0", "香港 REVENUE 营收持续增长", topic="FIN", entity="ACME_HK"),
         _chunk("c5#0", "weekend cricket match report 板球比赛", topic="OTHER", entity="NONE"),
     ]
@@ -83,10 +87,13 @@ def _triples(results):
 # 缝是活的：注入的 store 被真实填充并查询
 # ---------------------------------------------------------------------------
 
+
 def test_injected_store_is_populated_and_queried(corpus):
     """注入一个 InProcessVectorStore：search 后它装入了候选向量且参与了打分。"""
     store = InProcessVectorStore()
-    retriever = HybridRetriever(corpus, embedding_backend=FakeEmbeddingBackend(), vector_store=store)
+    retriever = HybridRetriever(
+        corpus, embedding_backend=FakeEmbeddingBackend(), vector_store=store
+    )
     results = retriever.search("香港 REVENUE 营收持续增长")
     assert store.count() == len(corpus)
     assert results[0].chunk.chunk_id == "c4#0"
@@ -109,6 +116,7 @@ def test_no_store_when_pure_bm25(corpus):
 # ---------------------------------------------------------------------------
 # 逐位等价
 # ---------------------------------------------------------------------------
+
 
 def test_injected_vs_default_store_identical(corpus):
     """注入显式 store 与用内置默认，检索结果（id/vector/fused）逐位一致。"""
@@ -183,8 +191,14 @@ def test_empty_string_dim_filter_parity():
     """
     corpus = [_chunk("e1#0", "营收 增长 数据", topic=""), _chunk("e2#0", "营收 下滑", topic="FIN")]
     backend = DeterministicEmbeddingBackend(dim=32)
-    none_ids = [r.chunk.chunk_id for r in HybridRetriever(corpus, embedding_backend=backend).search("营收", topic=None)]
-    empty_ids = [r.chunk.chunk_id for r in HybridRetriever(corpus, embedding_backend=backend).search("营收", topic="")]
+    none_ids = [
+        r.chunk.chunk_id
+        for r in HybridRetriever(corpus, embedding_backend=backend).search("营收", topic=None)
+    ]
+    empty_ids = [
+        r.chunk.chunk_id
+        for r in HybridRetriever(corpus, embedding_backend=backend).search("营收", topic="")
+    ]
     assert none_ids == ["e2#0", "e1#0"]
     assert empty_ids == ["e1#0"]
 

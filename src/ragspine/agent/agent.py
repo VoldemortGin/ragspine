@@ -60,6 +60,7 @@ def _usage_dict(usage: Usage | None) -> dict[str, int | None] | None:
         return None
     return {"input_tokens": usage.prompt_tokens, "output_tokens": usage.completion_tokens}
 
+
 # provider 失败时的诚实降级文案（结构化/叙事两路）：绝不含数字、绝不编造。
 _DEGRADE_STRUCTURED = "AI 服务暂时不可用，未能完成本次查询，请稍后再试。"
 _DEGRADE_NARRATIVE = "AI 服务暂时不可用，未能生成归因，请稍后再试。"
@@ -115,9 +116,7 @@ class _TraceCtx:
     chunk_ids: list[object] = field(default_factory=list)
     chunk_scores: list[object] = field(default_factory=list)
 
-    def record_provider(
-        self, seconds: float, usage: dict[str, int | None] | None
-    ) -> None:
+    def record_provider(self, seconds: float, usage: dict[str, int | None] | None) -> None:
         self.provider_seconds += seconds
         if usage:
             self.has_usage = True
@@ -211,24 +210,31 @@ def _run_tool_loop(
         if not message.tool_calls:
             break
         # 回传 assistant 的 tool_calls（OpenAI 形状），携工具结果继续下一轮。
-        messages.append({
-            "role": "assistant",
-            "content": message.content,
-            "tool_calls": [
-                {"id": tc.id, "type": "function",
-                 "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
-                for tc in message.tool_calls
-            ],
-        })
+        messages.append(
+            {
+                "role": "assistant",
+                "content": message.content,
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                    }
+                    for tc in message.tool_calls
+                ],
+            }
+        )
         for tc in message.tool_calls:
             args = cast("dict[str, object]", json.loads(tc.function.arguments))
             result = _execute_tool(store, args, reference_date)
             tool_results.append(result)
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc.id,
-                "content": json.dumps(result, ensure_ascii=False),
-            })
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": json.dumps(result, ensure_ascii=False),
+                }
+            )
 
     return final_text, tool_results
 
@@ -316,9 +322,7 @@ def _period_label(period_type: str, period: str) -> str:
     return f"FY{period}" if period_type == "FY" else period
 
 
-def _run_subtasks(
-    subtasks: list[SubTask], store: FactStore
-) -> list[dict[str, object]]:
+def _run_subtasks(subtasks: list[SubTask], store: FactStore) -> list[dict[str, object]]:
     """确定性执行多个 query_metric 子任务（不经 LLM，参数已是受控代码）。"""
     return [
         execute_query_metric(
@@ -380,9 +384,7 @@ def _multi_subtask_answer(
     # 恰为两期可比（同指标/实体/渠道/单位、期间不同）时给出确定性差值
     if len(tool_results) == 2 and len(found) == 2:
         a, b = found
-        same_scope = all(
-            a[k] == b[k] for k in ("metric_code", "entity", "channel", "unit")
-        )
+        same_scope = all(a[k] == b[k] for k in ("metric_code", "entity", "channel", "unit"))
         if same_scope and (a["period_type"], a["period"]) != (b["period_type"], b["period"]):
             a_value = cast(float, a["value"])
             b_value = cast(float, b["value"])
@@ -407,10 +409,7 @@ def _snippet_text(snippet: dict[str, object]) -> str:
 
 
 def _snippet_source(snippet: dict[str, object]) -> dict[str, object]:
-    doc = (
-        snippet.get("doc_id") or snippet.get("source_doc_id")
-        or snippet.get("doc") or ""
-    )
+    doc = snippet.get("doc_id") or snippet.get("source_doc_id") or snippet.get("doc") or ""
     locator = snippet.get("locator") or snippet.get("source_locator") or ""
     return {"doc": doc, "locator": locator}
 
@@ -430,10 +429,7 @@ def _run_narrative(
     provider 失败（ProviderError）→ 诚实降级文案，不崩、不编造；其他异常照常抛出。
     """
     if retriever is None:
-        degraded = (
-            "叙事检索通路尚未接入，暂时无法回答归因/监管/进展类问题；"
-            "数字类问题可直接提问。"
-        )
+        degraded = "叙事检索通路尚未接入，暂时无法回答归因/监管/进展类问题；数字类问题可直接提问。"
         return degraded, degraded, []
 
     filters: dict[str, str] = {}
@@ -460,13 +456,18 @@ def _run_narrative(
     # 当前 question，历史绝不进检索、绝不成为新“证据”，空历史时消息序列逐字节不变。
     started = time.perf_counter()
     try:
-        resp = provider.chat([
-            {"role": "system",
-             "content": _NARRATIVE_SYSTEM_PROMPT_TEMPLATE.format(
-                 company=_PROFILE.home_company_name)},
-            *history_messages,
-            {"role": "user", "content": prompt},
-        ])
+        resp = provider.chat(
+            [
+                {
+                    "role": "system",
+                    "content": _NARRATIVE_SYSTEM_PROMPT_TEMPLATE.format(
+                        company=_PROFILE.home_company_name
+                    ),
+                },
+                *history_messages,
+                {"role": "user", "content": prompt},
+            ]
+        )
     except ProviderError:
         ctx.provider_error = True
         ctx.record_provider(time.perf_counter() - started, None)
@@ -554,7 +555,9 @@ def _answer_decomposed(
     """
     sub_results = [
         answer_question(
-            sq, store, provider,
+            sq,
+            store,
+            provider,
             reference_date=reference_date,
             narrative_retriever=narrative_retriever,
             intent_parser=intent_parser,
@@ -617,7 +620,9 @@ def answer_question(
         subquestions = decomposer.decompose(question, reference_date=ref0)
         if len(subquestions) > 1:
             return _answer_decomposed(
-                subquestions, store, provider,
+                subquestions,
+                store,
+                provider,
                 reference_date=ref0,
                 narrative_retriever=narrative_retriever,
                 intent_parser=intent_parser,
@@ -638,15 +643,24 @@ def answer_question(
     if clar.mode == CLARIFY_OUT_OF_SCOPE_ENTITY:
         _emit_request_trace(request_id, intent, clar, [], ctx)
         # 拒答文本无内联来源 → answer_plain 与 answer 相同。
-        return AgentResult(answer=clar.question or "", route=intent.route,
-                           clarification=clar, tool_results=[], sources=[],
-                           answer_plain=clar.question or "")
+        return AgentResult(
+            answer=clar.question or "",
+            route=intent.route,
+            clarification=clar,
+            tool_results=[],
+            sources=[],
+            answer_plain=clar.question or "",
+        )
 
     # 前置单选：歧义会导致实质错误，直接反问，不调用 LLM
     if clar.mode == CLARIFY_ASK_FIRST:
         _emit_request_trace(request_id, intent, clar, [], ctx)
-        return AgentResult(answer=clar.question or "", route=intent.route,
-                           clarification=clar, answer_plain=clar.question or "")
+        return AgentResult(
+            answer=clar.question or "",
+            route=intent.route,
+            clarification=clar,
+            answer_plain=clar.question or "",
+        )
 
     # 默认先答：把假设槽位回填进问题（结构化通路按受控代码追加限定）
     effective_question = question
@@ -656,9 +670,7 @@ def answer_question(
             addenda.append(f"实体={clar.assumed_slots['entity']}")
         if "period" in clar.assumed_slots:
             period_type, value = clar.assumed_slots["period"]
-            addenda.append(
-                f"期间={'FY' + value if period_type == 'FY' else value}"
-            )
+            addenda.append(f"期间={'FY' + value if period_type == 'FY' else value}")
         effective_question = f"{question}（按默认口径：{'，'.join(addenda)}）"
 
     if intent.route == ROUTE_NARRATIVE:
@@ -666,9 +678,13 @@ def answer_question(
             question, provider, narrative_retriever, intent, ctx, hist_msgs
         )
         _emit_request_trace(request_id, intent, clar, [], ctx)
-        return AgentResult(answer=answer, route=intent.route,
-                           clarification=clar, sources=sources,
-                           answer_plain=answer_plain)
+        return AgentResult(
+            answer=answer,
+            route=intent.route,
+            clarification=clar,
+            sources=sources,
+            answer_plain=answer_plain,
+        )
 
     # structured / composite 都先跑数字子任务。
     # 多指标/多实体/多期间（用户明确列举的轴）→ 展开为多个子任务确定性执行；
@@ -703,6 +719,11 @@ def answer_question(
         answer_plain = prefix + answer_plain
 
     _emit_request_trace(request_id, intent, clar, tool_results, ctx)
-    return AgentResult(answer=answer, route=intent.route, clarification=clar,
-                       tool_results=tool_results, sources=sources,
-                       answer_plain=answer_plain)
+    return AgentResult(
+        answer=answer,
+        route=intent.route,
+        clarification=clar,
+        tool_results=tool_results,
+        sources=sources,
+        answer_plain=answer_plain,
+    )

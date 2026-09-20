@@ -55,7 +55,9 @@ def _registry_with_active_mapping(tmp_sqlite_factory, ground_truth, scope: str) 
     reg.init_schema()
     legend = ground_truth["sheets"]["HK_Performance"]["legend_expect"]
     entries = [
-        LegendEntry(rgb=e["rgb"], meaning=e["meaning"], tag_key=e["tag_key"], tag_value=e["tag_value"])
+        LegendEntry(
+            rgb=e["rgb"], meaning=e["meaning"], tag_key=e["tag_key"], tag_value=e["tag_value"]
+        )
         for e in legend
     ]
     version = reg.register_draft(ColorMapping(scope=scope, entries=entries))

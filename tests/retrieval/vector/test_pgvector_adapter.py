@@ -124,6 +124,7 @@ def test_factory_resolves_pgvector(pg_url):
 # Native ANN/KNN：HNSW 索引 `ORDER BY <=> LIMIT pool` 收窄 + 精确重排（大库仍回精确 top-k）
 # ===========================================================================
 
+
 def test_native_hnsw_pool_narrows_yet_returns_exact_topk(pg_url):
     """大库（count > pool_ceiling）触发 HNSW `ORDER BY <=> LIMIT pool` 收窄，精确重排后 top-k 与全量覆盖逐位一致。
 

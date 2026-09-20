@@ -94,8 +94,9 @@ def test_agent_topology_clarify_emits_four_modes_and_consults_gate():
     且 SecurityGate 是 clarify_scope 内部调用的依赖（data 边）——忠实于真实接线
     （intent.clarify_scope 在内部 screen，answer_question 按其返回的 mode 分流）。"""
     g = agent_topology()
-    clarify_edges = {(e.src, e.dst, e.label) for e in g.edges if e.src == "clarify"
-                     and e.kind == "conditional"}
+    clarify_edges = {
+        (e.src, e.dst, e.label) for e in g.edges if e.src == "clarify" and e.kind == "conditional"
+    }
     assert ("clarify", "refuse", "out_of_scope") in clarify_edges
     assert ("clarify", "ask", "ask_first") in clarify_edges
     assert ("clarify", "route", "answer_with_assumptions") in clarify_edges
@@ -197,7 +198,7 @@ def test_retriever_topology_multi_query_feeds_scoring_not_dangling():
     g = retriever.topology()
     edges = {(e.src, e.dst) for e in g.edges}
     assert ("prefilter", "multi_query") in edges
-    assert ("multi_query", "bm25") in edges    # 扩写后对每个变体跑 BM25
+    assert ("multi_query", "bm25") in edges  # 扩写后对每个变体跑 BM25
     assert ("multi_query", "vector") in edges  # 也跑向量
     # multi_query 不再是悬空汇点（必有出边）。
     assert any(e.src == "multi_query" for e in g.edges)
@@ -268,8 +269,7 @@ def test_drift_guard_all_declared_constants_resolve():
     即便某符号只挂在未被本测试触发的分支上，也不会漏过（不止 walk 已构建的 graph）。"""
     import ragspine.pipeline.topology as topo
 
-    declared = {v for k, v in vars(topo).items()
-                if k.startswith("_SYM_") and isinstance(v, str)}
+    declared = {v for k, v in vars(topo).items() if k.startswith("_SYM_") and isinstance(v, str)}
     assert declared  # 确有声明的符号
     for symbol in declared:
         assert _resolve_symbol(symbol) is not None
@@ -334,7 +334,8 @@ def test_topology_export_deterministic_across_processes():
     def _run(seed: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [sys.executable, "-c", code],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
             env={**os.environ, "PYTHONHASHSEED": seed},
             cwd=str(ROOT_DIR),
         )

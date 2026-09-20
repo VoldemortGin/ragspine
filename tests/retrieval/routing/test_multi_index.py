@@ -38,8 +38,11 @@ class _FakeRetriever:
 
 def _snip(chunk_id: str, text: str = "t", sensitivity: str = "INTERNAL") -> dict[str, Any]:
     return {
-        "text": text, "doc_id": chunk_id.split("#")[0], "chunk_id": chunk_id,
-        "source_locator": f"{chunk_id}#para1", "sensitivity": sensitivity,
+        "text": text,
+        "doc_id": chunk_id.split("#")[0],
+        "chunk_id": chunk_id,
+        "source_locator": f"{chunk_id}#para1",
+        "sensitivity": sensitivity,
     }
 
 
@@ -59,7 +62,10 @@ def test_fanout_fuses_and_tags_library_id():
     # 每条都带库来源维度。
     assert all(LIBRARY_ID_KEY in s for s in out)
     assert {s["chunk_id"]: s[LIBRARY_ID_KEY] for s in out} == {
-        "a#0": "law", "a#1": "law", "b#0": "fin"}
+        "a#0": "law",
+        "a#1": "law",
+        "b#0": "fin",
+    }
 
 
 def test_top_of_each_library_ranked_high():
@@ -80,10 +86,12 @@ def test_deterministic():
 
 def test_duplicate_library_id_raises():
     with pytest.raises(ValueError):
-        MultiIndexRetriever([
-            LibraryIndex("x", "d", _FakeRetriever([])),
-            LibraryIndex("x", "d", _FakeRetriever([])),
-        ])
+        MultiIndexRetriever(
+            [
+                LibraryIndex("x", "d", _FakeRetriever([])),
+                LibraryIndex("x", "d", _FakeRetriever([])),
+            ]
+        )
 
 
 def test_top_k_truncates():
@@ -120,8 +128,10 @@ def test_keyword_router_selects_by_description_overlap():
 
 
 def test_router_zero_overlap_returns_empty_and_fans_out():
-    libs = [LibraryIndex("a", "xxx", _FakeRetriever([_snip("a#0")])),
-            LibraryIndex("b", "yyy", _FakeRetriever([_snip("b#0")]))]
+    libs = [
+        LibraryIndex("a", "xxx", _FakeRetriever([_snip("a#0")])),
+        LibraryIndex("b", "yyy", _FakeRetriever([_snip("b#0")])),
+    ]
     router = KeywordLibraryRouter()
     assert router.route("完全无关 zzz", libs) == []  # 零重叠
     # MultiIndexRetriever 回落扇出全部库（不饿死召回）。
@@ -142,17 +152,22 @@ def test_routed_mode_restricts_to_selected_library():
 # ---------------- RESTRICTED 隔离继承（真实 base）----------------
 def test_restricted_never_surfaces_across_libraries(tmp_path):
     """每库 base（NarrativeIndexRetriever）出口剔 RESTRICTED；跨库融合恒为其子集，RESTRICTED 绝不出域。"""
+
     def _make_lib(name: str, docs: list[tuple[str, str, str]]) -> LibraryIndex:
         store = ChunkStore(tmp_path / f"{name}.db")
         store.init_schema()
         for doc_id, text, sens in docs:
             store.replace_doc_chunks(
-                doc_id, chunk_document(text, DocumentMeta(doc_id=doc_id, topic="FIN", sensitivity=sens)))
+                doc_id,
+                chunk_document(text, DocumentMeta(doc_id=doc_id, topic="FIN", sensitivity=sens)),
+            )
         idx = NarrativeIndex(store)
         return LibraryIndex(name, f"{name} 营收 库", NarrativeIndexRetriever(idx))
 
-    lib_a = _make_lib("liba", [("pub_a.pdf", "营收公开A。", "INTERNAL"),
-                               ("sec_a.pdf", "营收机密A。", "RESTRICTED")])
+    lib_a = _make_lib(
+        "liba",
+        [("pub_a.pdf", "营收公开A。", "INTERNAL"), ("sec_a.pdf", "营收机密A。", "RESTRICTED")],
+    )
     lib_b = _make_lib("libb", [("sec_b.pdf", "营收机密B。", "RESTRICTED")])
     out = MultiIndexRetriever([lib_a, lib_b]).retrieve("营收")
     assert all(str(s["sensitivity"]).upper() != "RESTRICTED" for s in out)

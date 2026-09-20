@@ -46,16 +46,51 @@ _NUMERIC_CUES = ("多少", "几个", "what is", "what was", "how much", "how man
 
 # 叙事意图线索：归因/监管/评价/进展类
 _NARRATIVE_CUES = (
-    "为什么", "为何", "原因", "归因", "怎么看", "如何看", "怎么样",
-    "监管", "政策", "动态", "进展", "影响", "评价", "趋势", "下降", "上升",
-    "why", "reason", "driver", "regulat", "trend", "impact",
+    "为什么",
+    "为何",
+    "原因",
+    "归因",
+    "怎么看",
+    "如何看",
+    "怎么样",
+    "监管",
+    "政策",
+    "动态",
+    "进展",
+    "影响",
+    "评价",
+    "趋势",
+    "下降",
+    "上升",
+    "why",
+    "reason",
+    "driver",
+    "regulat",
+    "trend",
+    "impact",
 )
 
 # 相对期间词（长词优先匹配，避免"去年上半年"被"去年"截胡）
 _RELATIVE_PERIOD_TOKENS = (
-    "去年上半年", "去年下半年", "今年上半年", "今年下半年", "前年上半年", "前年下半年",
-    "上半年", "下半年", "上个季度", "这个季度", "上季度", "本季度",
-    "去年", "今年", "本年", "上年", "前年", "last year", "this year",
+    "去年上半年",
+    "去年下半年",
+    "今年上半年",
+    "今年下半年",
+    "前年上半年",
+    "前年下半年",
+    "上半年",
+    "下半年",
+    "上个季度",
+    "这个季度",
+    "上季度",
+    "本季度",
+    "去年",
+    "今年",
+    "本年",
+    "上年",
+    "前年",
+    "last year",
+    "this year",
 )
 
 # 绝对期间："FY2024" / "2024年" / "2024H1" / "2024年上半年" / "2025Q1"
@@ -187,9 +222,7 @@ def _match_all(text: str, synonyms: dict[str, str]) -> list[str]:
     return codes
 
 
-def _extract_all_periods(
-    text: str, reference_date: date | None
-) -> list[tuple[str, str]]:
+def _extract_all_periods(text: str, reference_date: date | None) -> list[tuple[str, str]]:
     """找出文本中全部期间（绝对优先占位，相对词不与其重叠），按出现位置去重列出。
 
     与 _extract_period 的单值语义解耦：这里只服务多值槽位 periods。
@@ -239,9 +272,7 @@ def expand_subtasks(
     子任务顺序：实体外层 → 指标 → 期间（与用户列举顺序一致）。
     """
     metrics: list[str | None] = list(intent.metrics) or [intent.metric]
-    entities: list[str | None] = list(intent.entities) or [
-        intent.entity or default_entity
-    ]
+    entities: list[str | None] = list(intent.entities) or [intent.entity or default_entity]
     periods: list[tuple[str, str] | None] = list(intent.periods) or [
         intent.period or default_period
     ]
@@ -251,9 +282,7 @@ def expand_subtasks(
     ]
 
 
-def _extract_period(
-    text: str, reference_date: date | None
-) -> tuple[str, str] | None:
+def _extract_period(text: str, reference_date: date | None) -> tuple[str, str] | None:
     """先试带年份的绝对期间（"2024年上半年"优先于裸"上半年"），再试相对期间词。"""
     for m in _ABS_PERIOD_RE.finditer(text):
         year, h1, h2, h_num, q_num = m.groups()
@@ -300,8 +329,12 @@ def parse_intent(question: str, reference_date: date | None = None) -> ParsedInt
         route = ROUTE_NARRATIVE
 
     return ParsedIntent(
-        route=route, metric=metric, entity=entity, period=period,
-        channel=channel, raw_question=question,
+        route=route,
+        metric=metric,
+        entity=entity,
+        period=period,
+        channel=channel,
+        raw_question=question,
         metrics=_match_all(text, METRIC_SYNONYMS),
         entities=_match_all(entity_text, ENTITY_SYNONYMS),
         periods=_extract_all_periods(text, reference_date),
@@ -309,9 +342,7 @@ def parse_intent(question: str, reference_date: date | None = None) -> ParsedInt
     )
 
 
-def clarify_scope(
-    intent: ParsedIntent, reference_date: date | None = None
-) -> ClarificationResult:
+def clarify_scope(intent: ParsedIntent, reference_date: date | None = None) -> ClarificationResult:
     """澄清网关：结构化/复合路线检查槽位完整性，按"默认先答"原则产出假设或反问。"""
     # 外部/竞品实体越权检查最前置（先于 narrative 早返回、先于 metric 缺失检查）：
     # 委托确定性安全门，从 raw_question 独立复核——不信任解析器产出的 external 字段，
@@ -348,11 +379,7 @@ def clarify_scope(
         default_label = labels.get(_DEFAULT_ENTITY, _DEFAULT_ENTITY)
         notes.append(f"实体默认按 {default_label} 口径")
         # 收窄项 = 改查 labels 中【非默认】的实体（顺序按 labels 插入序，稳定可测）。
-        options.extend(
-            f"改查 {label}"
-            for code, label in labels.items()
-            if code != _DEFAULT_ENTITY
-        )
+        options.extend(f"改查 {label}" for code, label in labels.items() if code != _DEFAULT_ENTITY)
 
     if intent.period is None:
         ref = reference_date or date.today()
@@ -389,15 +416,11 @@ class IntentParser(Protocol):
     独立复核越权/竞品，绝不依赖本协议产出的 external_entity 字段（安全不可托付给可插拔件）。
     """
 
-    def parse(
-        self, question: str, *, reference_date: date | None = None
-    ) -> ParsedIntent: ...
+    def parse(self, question: str, *, reference_date: date | None = None) -> ParsedIntent: ...
 
 
 class RuleIntentParser:
     """默认零-LLM、配置驱动的规则意图解析器（委托模块级 parse_intent）。"""
 
-    def parse(
-        self, question: str, *, reference_date: date | None = None
-    ) -> ParsedIntent:
+    def parse(self, question: str, *, reference_date: date | None = None) -> ParsedIntent:
         return parse_intent(question, reference_date=reference_date)

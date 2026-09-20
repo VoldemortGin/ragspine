@@ -43,8 +43,7 @@ EXTRACTOR_VERSION = "pdf_spine_v0"
 TABLE_STRATEGY = "lines"
 
 
-def _build_grid(table: Any, sheet: str, source_doc_id: str,
-                source_file_hash: str) -> StyledGrid:
+def _build_grid(table: Any, sheet: str, source_doc_id: str, source_file_hash: str) -> StyledGrid:
     """把一个 pdfspine Table 转成 StyledGrid（稀疏：只存非空文本格）。
 
     Table.extract() 返回 row-major 的 list[list]，空格 / 合并续格为 None。
@@ -106,9 +105,7 @@ def extract_grids(path: str | Path) -> list[StyledGrid]:
             finder = page.find_tables(strategy=TABLE_STRATEGY)
             for table_seq, table in enumerate(finder, start=1):
                 sheet = f"page{page_idx + 1}_table{table_seq}"
-                grids.append(
-                    _build_grid(table, sheet, source_doc_id, source_file_hash)
-                )
+                grids.append(_build_grid(table, sheet, source_doc_id, source_file_hash))
     finally:
         doc.close()
     return grids

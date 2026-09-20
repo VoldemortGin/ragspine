@@ -116,11 +116,15 @@ def make_pptx() -> None:
     prs.slide_width = Inches(10)
     prs.slide_height = Inches(7.5)
     _add_table_slide(
-        prs, "ACME Hong Kong — Financial Performance (US$m)", HK_TABLE,
+        prs,
+        "ACME Hong Kong — Financial Performance (US$m)",
+        HK_TABLE,
         ["FY2022", "FY2023", "FY2024"],
     )
     _add_table_slide(
-        prs, "ACME China — Financial Performance (US$m)", CN_TABLE,
+        prs,
+        "ACME China — Financial Performance (US$m)",
+        CN_TABLE,
         ["FY2022", "FY2023", "FY2024"],
     )
     _add_chart_slide(prs, "ACME Group — PROFIT Trend", "PROFIT", GROUP_PROFIT_CHART)
@@ -153,15 +157,17 @@ def make_ground_truth() -> list[dict[str, object]]:
         source: str,
     ) -> None:
         ptype, period = _PERIOD_MAP[period_label]
-        gt.append({
-            "metric": metric,
-            "entity": entity,
-            "period_type": ptype,
-            "period": period,
-            "value": value,
-            "unit": _UNIT[metric],
-            "source": source,
-        })
+        gt.append(
+            {
+                "metric": metric,
+                "entity": entity,
+                "period_type": ptype,
+                "period": period,
+                "value": value,
+                "unit": _UNIT[metric],
+                "source": source,
+            }
+        )
 
     for metric, by_period in HK_TABLE.items():
         for period_label, value in by_period.items():

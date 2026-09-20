@@ -14,7 +14,8 @@ import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
-from ragspine.fixtures.excel import GT_PATH, XLSX_PATH, main as make_excel_fixtures
+from ragspine.fixtures.excel import GT_PATH, XLSX_PATH
+from ragspine.fixtures.excel import main as make_excel_fixtures
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -73,12 +74,18 @@ def tmp_sqlite_factory(tmp_path):
 
 from ragspine.fixtures.pdf import (
     DIGITAL_PATH,
-    GT_PATH as PDF_GT_PATH,
     MIXED_PATH,
     OCR_SCAN_PATH,
-    OUT_DIR as PDF_OUT_DIR,
     PPT_EXPORT_PATH,
     SCANNED_PATH,
+)
+from ragspine.fixtures.pdf import (
+    GT_PATH as PDF_GT_PATH,
+)
+from ragspine.fixtures.pdf import (
+    OUT_DIR as PDF_OUT_DIR,
+)
+from ragspine.fixtures.pdf import (
     main as make_pdf_fixtures,
 )
 
@@ -86,8 +93,7 @@ from ragspine.fixtures.pdf import (
 @pytest.fixture(scope="session", autouse=True)
 def _ensure_pdf_fixtures() -> None:
     """整轮测试前确保 PDF 合成 fixture 与 ground truth 存在（缺失则一键再生）。"""
-    paths = (DIGITAL_PATH, SCANNED_PATH, OCR_SCAN_PATH, MIXED_PATH,
-             PPT_EXPORT_PATH, PDF_GT_PATH)
+    paths = (DIGITAL_PATH, SCANNED_PATH, OCR_SCAN_PATH, MIXED_PATH, PPT_EXPORT_PATH, PDF_GT_PATH)
     if not all(p.exists() for p in paths):
         make_pdf_fixtures()
 
@@ -142,7 +148,11 @@ def ppt_export_pdf_path():
 
 from ragspine.fixtures.pptx import (
     GT_PATH as PPTX_GT_PATH,
+)
+from ragspine.fixtures.pptx import (
     PPTX_PATH,
+)
+from ragspine.fixtures.pptx import (
     main as make_pptx_fixtures,
 )
 
@@ -243,9 +253,7 @@ def _docx_cell_xml(cell) -> str:
 
 
 def _docx_table_xml(rows) -> str:
-    trs = "".join(
-        f"<w:tr>{''.join(_docx_cell_xml(c) for c in row)}</w:tr>" for row in rows
-    )
+    trs = "".join(f"<w:tr>{''.join(_docx_cell_xml(c) for c in row)}</w:tr>" for row in rows)
     return f"<w:tbl>{trs}</w:tbl>"
 
 
@@ -337,9 +345,7 @@ def _pptx_tc_xml(cell) -> str:
     if vmerge:
         attrs.append('vMerge="1"')
     attr_str = (" " + " ".join(attrs)) if attrs else ""
-    body = (
-        f"<a:p><a:r><a:t>{_xml_escape(text)}</a:t></a:r></a:p>" if text else "<a:p/>"
-    )
+    body = f"<a:p><a:r><a:t>{_xml_escape(text)}</a:t></a:r></a:p>" if text else "<a:p/>"
     tcpr = (
         f'<a:tcPr><a:solidFill><a:srgbClr val="{fill}"/></a:solidFill></a:tcPr>'
         if fill
@@ -350,8 +356,7 @@ def _pptx_tc_xml(cell) -> str:
 
 def _pptx_table_xml(rows) -> str:
     trs = "".join(
-        f'<a:tr h="370840">{"".join(_pptx_tc_xml(c) for c in row)}</a:tr>'
-        for row in rows
+        f'<a:tr h="370840">{"".join(_pptx_tc_xml(c) for c in row)}</a:tr>' for row in rows
     )
     return (
         "<p:graphicFrame>"
@@ -381,7 +386,7 @@ def _pptx_slide_xml(shapes) -> str:
     return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         f'<p:sld xmlns:a="{_PPTX_A_NS}" xmlns:r="{_PPTX_R_NS}" xmlns:p="{_PPTX_P_NS}">'
-        f'<p:cSld><p:spTree>{"".join(parts)}</p:spTree></p:cSld></p:sld>'
+        f"<p:cSld><p:spTree>{''.join(parts)}</p:spTree></p:cSld></p:sld>"
     )
 
 
@@ -404,13 +409,11 @@ def _pptx_content_types_xml(n_slides: int) -> str:
 
 
 def _pptx_presentation_xml(n_slides: int) -> str:
-    sld_ids = "".join(
-        f'<p:sldId id="{256 + i}" r:id="rId{i}"/>' for i in range(1, n_slides + 1)
-    )
+    sld_ids = "".join(f'<p:sldId id="{256 + i}" r:id="rId{i}"/>' for i in range(1, n_slides + 1))
     return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         f'<p:presentation xmlns:a="{_PPTX_A_NS}" xmlns:r="{_PPTX_R_NS}" xmlns:p="{_PPTX_P_NS}">'
-        f'<p:sldIdLst>{sld_ids}</p:sldIdLst>'
+        f"<p:sldIdLst>{sld_ids}</p:sldIdLst>"
         '<p:sldSz cx="9144000" cy="6858000" type="screen4x3"/>'
         "</p:presentation>"
     )
@@ -446,9 +449,7 @@ def make_pptx():
             z.writestr("[Content_Types].xml", _pptx_content_types_xml(n))
             z.writestr("_rels/.rels", _PPTX_ROOT_RELS)
             z.writestr("ppt/presentation.xml", _pptx_presentation_xml(n))
-            z.writestr(
-                "ppt/_rels/presentation.xml.rels", _pptx_presentation_rels_xml(n)
-            )
+            z.writestr("ppt/_rels/presentation.xml.rels", _pptx_presentation_rels_xml(n))
             for i, shapes in enumerate(slides, start=1):
                 z.writestr(f"ppt/slides/slide{i}.xml", _pptx_slide_xml(shapes))
                 z.writestr(f"ppt/slides/_rels/slide{i}.xml.rels", _PPTX_EMPTY_RELS)

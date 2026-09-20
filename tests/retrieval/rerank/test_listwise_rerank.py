@@ -10,12 +10,12 @@ judge 全部用测试内确定性替身，零网络、零 SDK。
 
 import os
 
-import pytest
 import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
 from ragspine.retrieval.chunking.chunking import Chunk
+from ragspine.retrieval.lexical.retrieval import RetrievalResult
 from ragspine.retrieval.rerank.listwise_rerank import (
     DEFAULT_TOP_N,
     RESTRICTED_SENSITIVITY,
@@ -23,12 +23,11 @@ from ragspine.retrieval.rerank.listwise_rerank import (
     listwise_rerank,
     parse_listwise_response,
 )
-from ragspine.retrieval.lexical.retrieval import RetrievalResult
-
 
 # ---------------------------------------------------------------------------
 # 测试专用替身与构造器
 # ---------------------------------------------------------------------------
+
 
 class FakeJudge:
     """固定返回预设排序（或调用预设函数）的确定性 judge。"""
@@ -81,9 +80,7 @@ def _result(i: int, text: str, sensitivity: str = "INTERNAL") -> RetrievalResult
         para_end=1,
         sensitivity=sensitivity,
     )
-    return RetrievalResult(
-        chunk=chunk, bm25_score=1.0, vector_score=0.0, fused_score=1.0 / (i + 1)
-    )
+    return RetrievalResult(chunk=chunk, bm25_score=1.0, vector_score=0.0, fused_score=1.0 / (i + 1))
 
 
 def _results(n: int) -> list[RetrievalResult]:
@@ -93,6 +90,7 @@ def _results(n: int) -> list[RetrievalResult]:
 # ===========================================================================
 # prompt 构造
 # ===========================================================================
+
 
 def test_prompt_contains_query_and_candidates():
     """prompt 含查询与全部候选文本。"""
@@ -116,6 +114,7 @@ def test_prompt_deterministic():
 # ===========================================================================
 # 回文解析：鲁棒容错
 # ===========================================================================
+
 
 def test_parse_comma_separated():
     assert parse_listwise_response("2,0,1", 3) == [2, 0, 1]
@@ -159,13 +158,12 @@ def test_parse_empty_inputs():
 # rerank 编排：排序 / top_n / 退化
 # ===========================================================================
 
+
 def test_rerank_orders_by_judge():
     """judge 倒序 -> 输出倒序。"""
     results = _results(5)
     out = listwise_rerank("q", results, ReverseJudge())
-    assert [r.chunk.chunk_id for r in out] == [
-        r.chunk.chunk_id for r in reversed(results)
-    ]
+    assert [r.chunk.chunk_id for r in out] == [r.chunk.chunk_id for r in reversed(results)]
 
 
 def test_rerank_default_top_n_10():
@@ -173,9 +171,7 @@ def test_rerank_default_top_n_10():
     assert DEFAULT_TOP_N == 10
     out = listwise_rerank("q", _results(15), FakeJudge())
     assert len(out) == 10
-    assert [r.chunk.chunk_id for r in out] == [
-        r.chunk.chunk_id for r in _results(15)[:10]
-    ]
+    assert [r.chunk.chunk_id for r in out] == [r.chunk.chunk_id for r in _results(15)[:10]]
 
 
 def test_rerank_top_n_parameterized():
@@ -214,6 +210,7 @@ def test_rerank_empty_results():
 # Restricted 不出域（拍板硬约束，钉死）
 # ===========================================================================
 
+
 def test_restricted_text_never_sent_to_judge():
     """Restricted 块文本绝不出现在 judge 候选里。"""
     secret = "SECRET-EXEC-PR 高管评级"
@@ -248,9 +245,7 @@ def test_restricted_keeps_position_others_reranked():
 
 def test_all_restricted_judge_not_called():
     """候选全 Restricted -> judge 完全不被调用，整体退化为 RRF 序。"""
-    results = [
-        _result(i, f"机密 {i}", sensitivity=RESTRICTED_SENSITIVITY) for i in range(3)
-    ]
+    results = [_result(i, f"机密 {i}", sensitivity=RESTRICTED_SENSITIVITY) for i in range(3)]
     judge = SpyJudge()
     out = listwise_rerank("q", results, judge)
     assert judge.calls == []

@@ -81,8 +81,7 @@ def test_real_end_to_end_retrieve_carries_provenance(real_embedder, digital_pdf_
     """W12 —— 端到端：真 embedder + 渲染真页 -> 视觉命中带 provenance（doc_id / page locator）。"""
     pages = render_pdf_pages(digital_pdf_path)
     visual_pages = [
-        VisualPage(doc_id="digital", page_no=i + 1, image=png)
-        for i, png in enumerate(pages)
+        VisualPage(doc_id="digital", page_no=i + 1, image=png) for i, png in enumerate(pages)
     ]
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")

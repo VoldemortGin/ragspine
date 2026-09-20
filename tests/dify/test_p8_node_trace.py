@@ -162,7 +162,7 @@ def test_branch_skipped_and_ifelse_record(
     # skipped 记录排在已执行记录之后。
     statuses = [t["status"] for t in traces]
     assert statuses.index("skipped") > statuses.index("succeeded")
-    assert all(s == "skipped" for s in statuses[statuses.index("skipped"):])
+    assert all(s == "skipped" for s in statuses[statuses.index("skipped") :])
 
 
 # ---- 失败：failed 记录 + 异常照抛 + 无 sweep --------------------------------

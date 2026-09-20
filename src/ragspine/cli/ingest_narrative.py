@@ -22,15 +22,18 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="RAGSpine 叙事语料批量入库")
     parser.add_argument("inputs", nargs="+", help="文件夹或 pptx/pdf 文件路径")
     parser.add_argument(
-        "--db", default=str(DEFAULT_FACT_DB),
+        "--db",
+        default=str(DEFAULT_FACT_DB),
         help=f"块库 sqlite 路径（默认 {DEFAULT_FACT_DB}，narrative_chunk + narrative_doc 表）",
     )
     parser.add_argument(
-        "--meta", default=None,
+        "--meta",
+        default=None,
         help="per-doc 元数据 JSON 文件：{文件名: {topic/entity/...}}",
     )
     parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="只报告将要做什么，不落库",
     )
     return parser
@@ -48,7 +51,10 @@ def main(argv: list[str] | None = None) -> int:
     store.init_schema()
     try:
         report = ingest_narrative(
-            args.inputs, store, meta_by_doc=meta_by_doc, dry_run=args.dry_run,
+            args.inputs,
+            store,
+            meta_by_doc=meta_by_doc,
+            dry_run=args.dry_run,
         )
     finally:
         store.close()

@@ -28,16 +28,18 @@ import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
+from ragspine.extraction.color.color_semantics import MappingRegistry
 from ragspine.fixtures.excel import (
     GT_PATH,
     XLSX_PATH,
+)
+from ragspine.fixtures.excel import (
     main as make_excel_fixtures,
 )
-from ragspine.extraction.color.color_semantics import MappingRegistry
-from ragspine.storage.fact_store import SqliteFactStore
-from ragspine.ingestion.structured.ingestion_manifest import ManifestStore
-from ragspine.ingestion.structured.ingestion import ingest_file
 from ragspine.ingestion.review.review_queue import ReviewQueue
+from ragspine.ingestion.structured.ingestion import ingest_file
+from ragspine.ingestion.structured.ingestion_manifest import ManifestStore
+from ragspine.storage.fact_store import SqliteFactStore
 
 PY = sys.executable
 INGEST_CLI = str(ROOT_DIR / "scripts" / "ingest.py")
@@ -70,13 +72,19 @@ def test_t7_cli_ingests_xlsx_with_valid_as_of(tmp_path):
     db = tmp_path / "x.db"
     mdb = tmp_path / "m.db"
     qdb = tmp_path / "q.db"
-    proc = _run_cli([
-        str(XLSX_PATH),
-        "--db", str(db),
-        "--mapping-db", str(mdb),
-        "--queue-db", str(qdb),
-        "--valid-as-of", "2025-12-31",
-    ])
+    proc = _run_cli(
+        [
+            str(XLSX_PATH),
+            "--db",
+            str(db),
+            "--mapping-db",
+            str(mdb),
+            "--queue-db",
+            str(qdb),
+            "--valid-as-of",
+            "2025-12-31",
+        ]
+    )
     assert proc.returncode == 0, proc.stderr
 
     fs = SqliteFactStore(str(db))
@@ -94,13 +102,19 @@ def test_t7_cli_prints_report_summary(tmp_path):
     db = tmp_path / "x.db"
     mdb = tmp_path / "m.db"
     qdb = tmp_path / "q.db"
-    proc = _run_cli([
-        str(XLSX_PATH),
-        "--db", str(db),
-        "--mapping-db", str(mdb),
-        "--queue-db", str(qdb),
-        "--valid-as-of", "2025-12-31",
-    ])
+    proc = _run_cli(
+        [
+            str(XLSX_PATH),
+            "--db",
+            str(db),
+            "--mapping-db",
+            str(mdb),
+            "--queue-db",
+            str(qdb),
+            "--valid-as-of",
+            "2025-12-31",
+        ]
+    )
     assert proc.returncode == 0, proc.stderr
     out = proc.stdout
     # 报告摘要应体现入库条数与状态（具体措辞不约定，至少能看到数字与 ok）。
@@ -113,14 +127,20 @@ def test_t7_cli_dry_run_writes_nothing(tmp_path):
     db = tmp_path / "x.db"
     mdb = tmp_path / "m.db"
     qdb = tmp_path / "q.db"
-    proc = _run_cli([
-        str(XLSX_PATH),
-        "--db", str(db),
-        "--mapping-db", str(mdb),
-        "--queue-db", str(qdb),
-        "--valid-as-of", "2025-12-31",
-        "--dry-run",
-    ])
+    proc = _run_cli(
+        [
+            str(XLSX_PATH),
+            "--db",
+            str(db),
+            "--mapping-db",
+            str(mdb),
+            "--queue-db",
+            str(qdb),
+            "--valid-as-of",
+            "2025-12-31",
+            "--dry-run",
+        ]
+    )
     assert proc.returncode == 0, proc.stderr
 
     # 库可能被建出（init_schema），但事实表必须零写入。
@@ -134,15 +154,20 @@ def test_t7_cli_dry_run_writes_nothing(tmp_path):
 def test_t7_cli_creates_db_when_missing(tmp_path):
     """user story：--db 指向尚不存在的库时，CLI 应妥善建库（init_schema）后入库，
     而非因「库不存在」报错——开箱即用。"""
-    db = tmp_path / "nested" / "fresh.db"   # 目录与文件都还不存在
+    db = tmp_path / "nested" / "fresh.db"  # 目录与文件都还不存在
     mdb = tmp_path / "nested" / "m.db"
     qdb = tmp_path / "nested" / "q.db"
-    proc = _run_cli([
-        str(XLSX_PATH),
-        "--db", str(db),
-        "--mapping-db", str(mdb),
-        "--queue-db", str(qdb),
-    ])
+    proc = _run_cli(
+        [
+            str(XLSX_PATH),
+            "--db",
+            str(db),
+            "--mapping-db",
+            str(mdb),
+            "--queue-db",
+            str(qdb),
+        ]
+    )
     assert proc.returncode == 0, proc.stderr
     assert db.exists()
     fs = SqliteFactStore(str(db))
@@ -160,13 +185,19 @@ def test_t7_cli_main_callable_in_process(tmp_path):
     db = tmp_path / "x.db"
     mdb = tmp_path / "m.db"
     qdb = tmp_path / "q.db"
-    rc = ingest_main([
-        str(XLSX_PATH),
-        "--db", str(db),
-        "--mapping-db", str(mdb),
-        "--queue-db", str(qdb),
-        "--valid-as-of", "2025-12-31",
-    ])
+    rc = ingest_main(
+        [
+            str(XLSX_PATH),
+            "--db",
+            str(db),
+            "--mapping-db",
+            str(mdb),
+            "--queue-db",
+            str(qdb),
+            "--valid-as-of",
+            "2025-12-31",
+        ]
+    )
     assert rc == 0
     fs = SqliteFactStore(str(db))
     try:
@@ -200,9 +231,7 @@ def test_t8_unsupported_suffix_marks_manifest_failed(tmp_path):
 
         bad = tmp_path / "notes.txt"
         bad.write_text("这不是一个可抽取的表格文件", encoding="utf-8")
-        report = ingest_file(
-            bad, store, registry, queue, manifest=manifest, batch_id=batch_id
-        )
+        report = ingest_file(bad, store, registry, queue, manifest=manifest, batch_id=batch_id)
         assert report.status == "failed"
 
         rec = manifest.get_batch(batch_id)
@@ -232,9 +261,7 @@ def test_t8_failed_input_not_counted_as_success(tmp_path):
 
         bad = tmp_path / "notes.txt"
         bad.write_text("plain text, no table", encoding="utf-8")
-        ingest_file(
-            bad, store, registry, queue, manifest=manifest, batch_id=batch_id
-        )
+        ingest_file(bad, store, registry, queue, manifest=manifest, batch_id=batch_id)
         rec = manifest.get_batch(batch_id)
         assert rec.n_facts == 0
         assert rec.n_failed == 1

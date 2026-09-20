@@ -72,7 +72,9 @@ def test_delete_by_source_doc_removes_all_facts_of_that_doc(tmp_db_path):
     fs.upsert_facts(
         [
             _base_fact(metric_code="REVENUE", period="2024", source_doc_id="bad.xlsx"),
-            _base_fact(metric_code="NEWSALES", period="2024", value=4750.0, source_doc_id="bad.xlsx"),
+            _base_fact(
+                metric_code="NEWSALES", period="2024", value=4750.0, source_doc_id="bad.xlsx"
+            ),
         ]
     )
     removed = fs.delete_by_source_doc("bad.xlsx")
@@ -109,7 +111,9 @@ def test_delete_by_source_doc_also_removes_unreviewed_facts(tmp_db_path):
     fs = _fresh_store(tmp_db_path)
     fs.upsert_facts(
         [
-            _base_fact(metric_code="REVENUE", source_doc_id="bad.xlsx", review_status=REVIEW_PENDING),
+            _base_fact(
+                metric_code="REVENUE", source_doc_id="bad.xlsx", review_status=REVIEW_PENDING
+            ),
             _base_fact(
                 metric_code="NEWSALES",
                 value=4750.0,
@@ -222,7 +226,9 @@ def test_query_hides_unreviewed_by_default(tmp_db_path):
     fs = _fresh_store(tmp_db_path)
     fs.upsert_facts(
         [
-            _base_fact(metric_code="REVENUE", source_doc_id="d.xlsx", review_status=REVIEW_AUTO_APPROVED),
+            _base_fact(
+                metric_code="REVENUE", source_doc_id="d.xlsx", review_status=REVIEW_AUTO_APPROVED
+            ),
             _base_fact(
                 metric_code="NEWSALES",
                 value=4750.0,
@@ -255,9 +261,7 @@ def test_query_hides_unreviewed_by_default(tmp_db_path):
 def test_query_open_filter_reveals_all_statuses(tmp_db_path):
     """story #36：review_statuses=None 放开全部状态（审计/复核视图可见 pending）。"""
     fs = _fresh_store(tmp_db_path)
-    fs.upsert_facts(
-        [_base_fact(source_doc_id="audit.xlsx", review_status=REVIEW_PENDING)]
-    )
+    fs.upsert_facts([_base_fact(source_doc_id="audit.xlsx", review_status=REVIEW_PENDING)])
     assert fs.query("REVENUE", "ACME_HK", "FY", "2024") == []
     [got] = fs.query("REVENUE", "ACME_HK", "FY", "2024", review_statuses=None)
     assert got.review_status == REVIEW_PENDING
@@ -269,9 +273,7 @@ def test_query_open_filter_reveals_all_statuses(tmp_db_path):
 def test_query_approved_status_visible_after_review(tmp_db_path):
     """story #36：复核 approved 的事实进入默认可见集合。"""
     fs = _fresh_store(tmp_db_path)
-    fs.upsert_facts(
-        [_base_fact(source_doc_id="ok.xlsx", review_status=REVIEW_APPROVED)]
-    )
+    fs.upsert_facts([_base_fact(source_doc_id="ok.xlsx", review_status=REVIEW_APPROVED)])
     [got] = fs.query("REVENUE", "ACME_HK", "FY", "2024")
     assert got.review_status == REVIEW_APPROVED
     assert fs.delete_by_source_doc("ok.xlsx") == 1

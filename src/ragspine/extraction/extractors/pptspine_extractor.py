@@ -84,8 +84,9 @@ def _file_hash(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _build_grid(table: dict[str, Any], sheet: str, source_doc_id: str,
-                source_file_hash: str) -> StyledGrid:
+def _build_grid(
+    table: dict[str, Any], sheet: str, source_doc_id: str, source_file_hash: str
+) -> StyledGrid:
     """把一个 pptspine table 形状 dict 转成 StyledGrid（稀疏：只存非空文本格）。
 
     table['rows'] 为逐行 list；每行 row['cells'] 为逐格 list（含被吞的延续格）。

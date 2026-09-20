@@ -167,9 +167,7 @@ class InProcessVectorStore:
             if expected is None:
                 expected = dim
             elif dim != expected:
-                raise ValueError(
-                    f"向量维度不一致：期望 {expected}，记录 {record.id!r} 为 {dim}"
-                )
+                raise ValueError(f"向量维度不一致：期望 {expected}，记录 {record.id!r} 为 {dim}")
         for record in records:
             self._records[record.id] = record
         self._dim = expected
@@ -191,9 +189,7 @@ class InProcessVectorStore:
             return []
         vector = tuple(vector)
         if self._dim is not None and len(vector) != self._dim:
-            raise ValueError(
-                f"查询向量维度 {len(vector)} 与库内维度 {self._dim} 不一致"
-            )
+            raise ValueError(f"查询向量维度 {len(vector)} 与库内维度 {self._dim} 不一致")
         # 候选按 id 升序遍历：固定浮点求和次序，跨实例 / 跨调用逐位一致。
         scored = [
             (_cosine(vector, record.vector), record)

@@ -70,7 +70,9 @@ def generate_code(
     默认关时生成源码与不带本参数完全相同（字节级）。
     """
     builder = _Emitter(
-        ir, provider_expr=provider_expr, fold_answer_question=fold_answer_question,
+        ir,
+        provider_expr=provider_expr,
+        fold_answer_question=fold_answer_question,
         emit_node_traces=emit_node_traces,
     )
     return builder.build()
@@ -138,8 +140,17 @@ class _Emitter:
         inputs_cls = self._emit_inputs_class()
         prelude = self._emit_prelude()
         source = "\n".join(
-            [*prelude, "", *constants, *trace_block, *inputs_cls, "", *helpers, *hooks,
-             *self._emit_run_workflow(body)]
+            [
+                *prelude,
+                "",
+                *constants,
+                *trace_block,
+                *inputs_cls,
+                "",
+                *helpers,
+                *hooks,
+                *self._emit_run_workflow(body),
+            ]
         )
         source = source.rstrip("\n") + "\n"
         return GeneratedCode(
@@ -147,9 +158,7 @@ class _Emitter:
             entrypoint="run_workflow",
             imports=tuple(sorted(self.imports)),
             warnings=tuple(self.warnings),
-            requires_http=any(
-                isinstance(n, HttpRequestNode) for n in _walk_nodes(self.ir)
-            ),
+            requires_http=any(isinstance(n, HttpRequestNode) for n in _walk_nodes(self.ir)),
         )
 
     def _emit_node_helpers(self) -> list[str]:
@@ -171,9 +180,7 @@ class _Emitter:
 
     def _emit_module_constants(self) -> list[str]:
         """按需的可改模块常量：knowledge-retrieval / 问答折叠用到的库路径（默认离线空库）。"""
-        has_kr = any(
-            isinstance(n, KnowledgeRetrievalNode) for n in self.ir.graph.nodes
-        )
+        has_kr = any(isinstance(n, KnowledgeRetrievalNode) for n in self.ir.graph.nodes)
         lines: list[str] = []
         if has_kr or self.folds_by_llm:
             lines += [
@@ -238,8 +245,7 @@ class _Emitter:
         if not refs:
             return "None"
         items = ", ".join(
-            f"{r.node_id + '.' + r.field!r}: _var({r.node_id!r}, {r.field!r})"
-            for r in refs
+            f"{r.node_id + '.' + r.field!r}: _var({r.node_id!r}, {r.field!r})" for r in refs
         )
         return "{" + items + "}"
 
@@ -267,15 +273,11 @@ class _Emitter:
         else:
             lines.append(f"_trace_in = {self._trace_inputs_expr(node)}")
             records = [(node.id, node.title, node.kind, "_trace_in")]
-        has_stmt = any(
-            ln.strip() and not ln.strip().startswith("#") for ln in body
-        )
+        has_stmt = any(ln.strip() and not ln.strip().startswith("#") for ln in body)
         if not has_stmt:
             lines.extend(body)
             for nid, title, kind, in_var in records:
-                lines.append(
-                    f"_trace_done({nid!r}, {title!r}, {kind!r}, _trace_t0, {in_var})"
-                )
+                lines.append(f"_trace_done({nid!r}, {title!r}, {kind!r}, _trace_t0, {in_var})")
             return lines
         lines.append("try:")
         lines.extend(f"{INDENT}{ln}" if ln else "" for ln in body)
@@ -287,26 +289,25 @@ class _Emitter:
             )
         lines.append(f"{INDENT}raise")
         for nid, title, kind, in_var in records:
-            lines.append(
-                f"_trace_done({nid!r}, {title!r}, {kind!r}, _trace_t0, {in_var})"
-            )
+            lines.append(f"_trace_done({nid!r}, {title!r}, {kind!r}, _trace_t0, {in_var})")
         return lines
 
     def _emit_ifelse_trace(self, node: IfElseNode) -> list[str]:
         """if-else 节点自身的独立 trace 记录（分支判定本身近零耗时，elapsed≈0）。"""
         return [
             f"_trace_in = {self._trace_inputs_expr(node)}",
-            f"_trace_done({node.id!r}, {node.title!r}, {node.kind!r}, "
-            "_trace_now(), _trace_in)",
+            f"_trace_done({node.id!r}, {node.title!r}, {node.kind!r}, _trace_now(), _trace_in)",
         ]
 
     def _emit_inputs_class(self) -> list[str]:
         """从 start 节点变量生成 Inputs dataclass（全可选、默认 None）。"""
-        start = next(
-            (n for n in self.ir.graph.nodes if isinstance(n, StartNode)), None
-        )
+        start = next((n for n in self.ir.graph.nodes if isinstance(n, StartNode)), None)
         variables = start.variables if start else ()
-        lines = ["@dataclass", "class Inputs:", '    """工作流输入（对应 Dify start 节点变量）。"""']
+        lines = [
+            "@dataclass",
+            "class Inputs:",
+            '    """工作流输入（对应 Dify start 节点变量）。"""',
+        ]
         if not variables:
             lines.append("    pass")
         for var in variables:
@@ -329,9 +330,7 @@ class _Emitter:
             head.append(
                 "    # 会话变量池（单发执行无跨请求会话 → 同一次运行内）：按声明序种默认值，"
             )
-            head.append(
-                "    # assigner 节点就地改写，{{#conversation.x#}} 引用即读该池。"
-            )
+            head.append("    # assigner 节点就地改写，{{#conversation.x#}} 引用即读该池。")
             for name, default in self.ir.conversation_defaults:
                 head.append(f"    _ctx[('conversation', {name!r})] = {default!r}")
         if self.emit_node_traces:
@@ -449,9 +448,7 @@ class _Emitter:
             emitted.add(node_id)
         return lines
 
-    def _parallel_groups(
-        self, gated: dict[str, tuple[str, str]]
-    ) -> dict[str, list[str]]:
+    def _parallel_groups(self, gated: dict[str, tuple[str, str]]) -> dict[str, list[str]]:
         """每个可并行节点 → 它所属的并行组（同层、未 gate、≥2 重节点）。键覆盖组内每个成员。
 
         资格：同一 parallel_layer 内、均未被 if-else gate、且组中【重节点】（llm/code/iteration/
@@ -460,10 +457,7 @@ class _Emitter:
         out: dict[str, list[str]] = {}
         for layer in self.ir.parallel_layers:
             # 折叠掉的 knowledge-retrieval 不参与并行分组（其产出由 llm 处的折叠调用统一负责）。
-            members = [
-                nid for nid in layer
-                if nid not in gated and nid not in self.folded_kr
-            ]
+            members = [nid for nid in layer if nid not in gated and nid not in self.folded_kr]
             if len(members) < 2:
                 continue
             heavy = [m for m in members if self._is_heavy(m)]
@@ -565,23 +559,18 @@ class _Emitter:
         lines.append(f"    return {ret}")
         # 逐项执行：先把外层 _ctx 暴露给子图函数（重命名避免 def 内 _ctx=dict(_ctx) 自指）。
         lines.append("_ctx_outer = _ctx")
-        lines.append(
-            f"_iter_items_{var} = list({node_emit.value_expr(node.iterator)} or [])"
-        )
+        lines.append(f"_iter_items_{var} = list({node_emit.value_expr(node.iterator)} or [])")
         if node.is_parallel and node.parallel_nums > 1:
             self.imports.add("from concurrent.futures import ThreadPoolExecutor")
             workers = max(1, node.parallel_nums)
-            lines.append(
-                f"with ThreadPoolExecutor(max_workers={workers}) as _ex_{var}:"
-            )
+            lines.append(f"with ThreadPoolExecutor(max_workers={workers}) as _ex_{var}:")
             lines.append(
                 f"    _ctx[({node.id!r}, 'output')] = "
                 f"list(_ex_{var}.map({body_fn}, _iter_items_{var}))"
             )
         else:
             lines.append(
-                f"_ctx[({node.id!r}, 'output')] = "
-                f"[{body_fn}(_it) for _it in _iter_items_{var}]"
+                f"_ctx[({node.id!r}, 'output')] = [{body_fn}(_it) for _it in _iter_items_{var}]"
             )
         return lines
 
@@ -598,9 +587,7 @@ class _Emitter:
             f"# loop: {node.id} —— 有界 {node.loop_count} 轮；体内写入跨轮累积，终值供下游引用"
         ]
         for name, value in node.loop_vars:
-            lines.append(
-                f"_ctx[({node.id!r}, {name!r})] = {node_emit.value_expr(value)}"
-            )
+            lines.append(f"_ctx[({node.id!r}, {name!r})] = {node_emit.value_expr(value)}")
         lines.append(f"for _loop_round_{var} in range({node.loop_count}):")
         body_lines: list[str] = []
         if node.body is not None:
@@ -609,9 +596,7 @@ class _Emitter:
             body_lines.append("# 退出条件（每轮体执行完后判定，满足即 break）")
             body_lines.append(f"if {node.break_expr}:")
             body_lines.append(f"{INDENT}break")
-        has_stmt = any(
-            ln.strip() and not ln.strip().startswith("#") for ln in body_lines
-        )
+        has_stmt = any(ln.strip() and not ln.strip().startswith("#") for ln in body_lines)
         if not has_stmt:
             body_lines.append("pass")
         lines.extend(f"{INDENT}{ln}" if ln else "" for ln in body_lines)
@@ -650,7 +635,8 @@ class _Emitter:
             first = False
         # else 分支（handle 'false' 或未在 branches 中声明的兜底）。
         else_members = [
-            nid for h, ms in members.items()
+            nid
+            for h, ms in members.items()
             for nid in ms
             if h not in {b.handle for b in node.branches}
         ]
@@ -671,8 +657,7 @@ class _Emitter:
             if nid in emitted:
                 continue
             block.extend(
-                f"{INDENT}{ln}" if ln else ""
-                for ln in self._emit_traced(self.ir.node(nid))
+                f"{INDENT}{ln}" if ln else "" for ln in self._emit_traced(self.ir.node(nid))
             )
             emitted.add(nid)
         return block

@@ -42,9 +42,7 @@ def seeded_db_path(tmp_path):
 
 def make_client(db_path, *, queue):
     config = ServiceConfig(db_path=str(db_path))
-    app = create_app(
-        config, provider=MockProvider(), queue=queue, faq_cache=FAQCache.empty()
-    )
+    app = create_app(config, provider=MockProvider(), queue=queue, faq_cache=FAQCache.empty())
     return TestClient(app)
 
 

@@ -47,9 +47,17 @@ _ANTHROPIC_FINISH = {
 
 
 # re-export corespine 的 LLMProvider 协议与 ProviderError 异常；ragspine 不再自定义。
-__all__ = ["LLMProvider", "AnthropicProvider", "MockProvider", "ProviderError",
-           "DEFAULT_ANTHROPIC_MODEL", "NARRATIVE_PROMPT_PREFIX",
-           "StreamingProvider", "iter_text_chunks", "STREAM_CHUNK_CHARS"]
+__all__ = [
+    "LLMProvider",
+    "AnthropicProvider",
+    "MockProvider",
+    "ProviderError",
+    "DEFAULT_ANTHROPIC_MODEL",
+    "NARRATIVE_PROMPT_PREFIX",
+    "StreamingProvider",
+    "iter_text_chunks",
+    "STREAM_CHUNK_CHARS",
+]
 
 # 确定性定长文本 delta：SSE 逐块推送用，跨平台稳定（按 code point 切片）。
 STREAM_CHUNK_CHARS = 24
@@ -58,7 +66,7 @@ STREAM_CHUNK_CHARS = 24
 def iter_text_chunks(text: str, size: int = STREAM_CHUNK_CHARS) -> Iterator[str]:
     """把 text 切成连续的 size 字符片段。空串不产出 chunk；确定性、跨平台。"""
     for i in range(0, len(text), size):
-        yield text[i:i + size]
+        yield text[i : i + size]
 
 
 @runtime_checkable
@@ -100,32 +108,40 @@ def _openai_messages_to_anthropic(
         if role == "system":
             system_parts.append(str(content or ""))
         elif role == "tool":
-            convo.append({
-                "role": "user",
-                "content": [{
-                    "type": "tool_result",
-                    "tool_use_id": m.get("tool_call_id", ""),
-                    "content": str(content or ""),
-                }],
-            })
+            convo.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": m.get("tool_call_id", ""),
+                            "content": str(content or ""),
+                        }
+                    ],
+                }
+            )
         elif role == "assistant" and m.get("tool_calls"):
             blocks: list[dict[str, Any]] = []
             if content:
                 blocks.append({"type": "text", "text": str(content)})
             for tc in m["tool_calls"]:
                 fn = tc["function"]
-                blocks.append({
-                    "type": "tool_use",
-                    "id": tc["id"],
-                    "name": fn["name"],
-                    "input": json.loads(fn.get("arguments") or "{}"),
-                })
+                blocks.append(
+                    {
+                        "type": "tool_use",
+                        "id": tc["id"],
+                        "name": fn["name"],
+                        "input": json.loads(fn.get("arguments") or "{}"),
+                    }
+                )
             convo.append({"role": "assistant", "content": blocks})
         else:
-            convo.append({
-                "role": "assistant" if role == "assistant" else "user",
-                "content": str(content or ""),
-            })
+            convo.append(
+                {
+                    "role": "assistant" if role == "assistant" else "user",
+                    "content": str(content or ""),
+                }
+            )
     return "\n".join(system_parts), convo
 
 
@@ -178,11 +194,11 @@ class AnthropicProvider:
         except Exception as exc:  # noqa: BLE001 — SDK 网络/API 异常归一到 ProviderError
             raise ProviderError(f"Anthropic 调用失败：{exc}") from exc
 
-        text = "".join(
-            b.text for b in resp.content if b.type == "text"
-        )
+        text = "".join(b.text for b in resp.content if b.type == "text")
         tool_calls = tuple(
-            ToolCall(id=b.id, function=FunctionCall(name=b.name, arguments=json.dumps(dict(b.input))))
+            ToolCall(
+                id=b.id, function=FunctionCall(name=b.name, arguments=json.dumps(dict(b.input)))
+            )
             for b in resp.content
             if b.type == "tool_use"
         )
@@ -279,7 +295,7 @@ class MockProvider:
         text = _last_user_text(messages)
         if text.startswith(NARRATIVE_PROMPT_PREFIX):
             # 叙事合成：确定性地回显检索片段正文
-            body = text[len(NARRATIVE_PROMPT_PREFIX):].strip()
+            body = text[len(NARRATIVE_PROMPT_PREFIX) :].strip()
             return _completion_text(f"基于检索到的资料：\n{body}")
 
         intent = parse_intent(text, reference_date=self.reference_date)

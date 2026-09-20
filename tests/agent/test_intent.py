@@ -11,7 +11,6 @@ import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
-from ragspine.common.glossary import resolve_relative_period
 from ragspine.agent.intent import (
     CLARIFY_ANSWER_WITH_ASSUMPTIONS,
     CLARIFY_ASK_FIRST,
@@ -20,10 +19,10 @@ from ragspine.agent.intent import (
     ROUTE_NARRATIVE,
     ROUTE_STRUCTURED,
     ClarificationResult,
-    ParsedIntent,
     clarify_scope,
     parse_intent,
 )
+from ragspine.common.glossary import resolve_relative_period
 
 REF = date(2026, 6, 12)
 
@@ -31,6 +30,7 @@ REF = date(2026, 6, 12)
 # ---------------------------------------------------------------------------
 # 相对期间解析（src/glossary.py 增量扩展，只加不改）
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize(
     "raw,expected",
@@ -82,6 +82,7 @@ def test_glossary_existing_behavior_untouched():
 # ---------------------------------------------------------------------------
 # 槽位抽取
 # ---------------------------------------------------------------------------
+
 
 def test_parse_full_question():
     intent = parse_intent("香港去年REVENUE多少", reference_date=REF)
@@ -140,6 +141,7 @@ def test_parse_english_question():
 # 三路分流
 # ---------------------------------------------------------------------------
 
+
 def test_route_structured():
     assert parse_intent("香港去年REVENUE多少", reference_date=REF).route == ROUTE_STRUCTURED
 
@@ -169,6 +171,7 @@ def test_route_structured_numeric_cue_without_metric():
 # ---------------------------------------------------------------------------
 # 澄清网关：默认先答 + 显式暴露假设 + 一键收窄；仅实质歧义才前置单选
 # ---------------------------------------------------------------------------
+
 
 def test_clarify_none_when_scope_complete():
     intent = parse_intent("香港去年REVENUE多少", reference_date=REF)
@@ -215,7 +218,10 @@ def test_clarify_narrative_passthrough():
 def test_clarification_result_shape():
     """结构化澄清结果：字段齐备，可序列化给前端做澄清 chips。"""
     clar = ClarificationResult(
-        mode=CLARIFY_NONE, assumed_slots={}, assumption_note=None,
-        narrowing_options=[], question=None,
+        mode=CLARIFY_NONE,
+        assumed_slots={},
+        assumption_note=None,
+        narrowing_options=[],
+        question=None,
     )
     assert clar.mode == CLARIFY_NONE

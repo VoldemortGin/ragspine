@@ -43,7 +43,6 @@ from ragspine.extraction.routing.pdf_router import (
     route,
 )
 
-
 # ---------------------------------------------------------------------------
 # 辅助：把 fixture 文件名映射到对应 path fixture，便于参数化遍历五个文件
 # ---------------------------------------------------------------------------
@@ -82,6 +81,7 @@ def fixture_paths(
 # ===========================================================================
 # 契约常量与 dataclass 结构（不调用行为函数，预期 PASS——锁定冻结接口）
 # ===========================================================================
+
 
 def test_threshold_constants_match_prototype():
     """story #8 —— 阈值常量沿用 scripts/classify_pdfs.py，库化前后规则一致。"""
@@ -132,6 +132,7 @@ def test_page_info_holds_signals():
 # story #8 —— route() 五个 fixture 的整文件 verdict 全对
 # ===========================================================================
 
+
 @pytest.mark.parametrize("name", ALL_FIXTURE_NAMES)
 def test_route_verdict_matches_ground_truth(name, fixture_paths, pdf_ground_truth):
     """story #8 —— 每个 fixture 的 route().verdict 与 ground truth 完全一致。"""
@@ -168,6 +169,7 @@ def test_route_ppt_export_verdict(ppt_export_pdf_path):
 # ===========================================================================
 # story #8 / #9 —— 逐页 kind 分类（含 mixed 的逐页形态）
 # ===========================================================================
+
 
 @pytest.mark.parametrize("name", ALL_FIXTURE_NAMES)
 def test_route_page_kinds_match_ground_truth(name, fixture_paths, pdf_ground_truth):
@@ -215,11 +217,11 @@ def test_ocr_scan_pages_classified_ocr(ocr_scan_pdf_path):
 # story #8 —— 混合型逐页路由计划 channel_plan
 # ===========================================================================
 
+
 def test_mixed_channel_plan_routes_per_page(mixed_pdf_path, pdf_ground_truth):
     """story #8 —— mixed.pdf 的 channel_plan 按页分流：数字页->digital、扫描页->scanned。"""
     expected = {
-        int(k): v
-        for k, v in pdf_ground_truth["files"]["mixed.pdf"]["channel_plan"].items()
+        int(k): v for k, v in pdf_ground_truth["files"]["mixed.pdf"]["channel_plan"].items()
     }
     assert route(mixed_pdf_path).channel_plan == expected
 
@@ -257,14 +259,13 @@ def test_mixed_channel_plan_targets_are_valid_pipelines(mixed_pdf_path):
 # story #11 —— ask_for_pptx：仅 ppt_export.pdf 为 True，其余为 False
 # ===========================================================================
 
+
 def test_ppt_export_asks_for_pptx(ppt_export_pdf_path):
     """story #11 —— PowerPoint 导出 PDF（producer 命中）-> ask_for_pptx=True。"""
     assert route(ppt_export_pdf_path).ask_for_pptx is True
 
 
-@pytest.mark.parametrize(
-    "name", ("digital.pdf", "scanned.pdf", "ocr_scan.pdf", "mixed.pdf")
-)
+@pytest.mark.parametrize("name", ("digital.pdf", "scanned.pdf", "ocr_scan.pdf", "mixed.pdf"))
 def test_non_ppt_files_do_not_ask_for_pptx(name, fixture_paths):
     """story #11 —— 非 PPT 导出文件一律 ask_for_pptx=False（不误报索取原生件）。"""
     assert route(fixture_paths[name]).ask_for_pptx is False
@@ -289,6 +290,7 @@ def test_ppt_export_origin_meta_carries_producer(ppt_export_pdf_path, pdf_ground
 # ===========================================================================
 # story #8 —— file_hash 血缘：非空、确定性、跨文件不同
 # ===========================================================================
+
 
 def test_file_hash_is_nonempty_string(digital_pdf_path):
     """story #18 —— route().file_hash 是非空字符串（版本血缘锚点）。"""
@@ -318,6 +320,7 @@ def test_every_fixture_gets_file_hash(name, fixture_paths):
 # ===========================================================================
 # story #8 / #14 —— 损坏 / 不可读文件：verdict='unreadable'，绝不抛异常
 # ===========================================================================
+
 
 def test_corrupted_file_is_unreadable_not_raising(tmp_path):
     """story #14 —— 非 PDF 字节的损坏文件 -> verdict='unreadable'，不抛异常。"""
@@ -373,6 +376,7 @@ def test_unreadable_file_not_asking_for_pptx(tmp_path):
 # story #8 —— RoutingDecision 的 path 字段回填源路径
 # ===========================================================================
 
+
 def test_route_decision_carries_path(digital_pdf_path):
     """story #8 —— RoutingDecision.path 携带源文件路径（血缘根，str 化可比对）。"""
     decision = route(digital_pdf_path)
@@ -399,6 +403,7 @@ def test_pure_digital_has_no_channel_plan_or_empty(digital_pdf_path):
 # ===========================================================================
 # story #9 —— classify_page() 直接作用于真实 pypdfium2 页对象（逐页信号）
 # ===========================================================================
+
 
 def test_classify_page_digital_table_page(digital_pdf_path):
     """story #9 —— digital.pdf 第 1 页（表格，文本多+低覆盖）-> kind='digital'。"""

@@ -28,9 +28,12 @@ def test_extract_grids_maps_table_to_styled_grid(make_pptx, tmp_path):
     from ragspine.extraction.extractors.pptspine_extractor import extract_grids
 
     p = tmp_path / "deck.pptx"
-    make_pptx(p, [
-        [("table", [["ACME Hong Kong", "FY2024"], ["REVENUE", "2680"]])],
-    ])
+    make_pptx(
+        p,
+        [
+            [("table", [["ACME Hong Kong", "FY2024"], ["REVENUE", "2680"]])],
+        ],
+    )
     grids = extract_grids(p)
     assert len(grids) == 1
     g = grids[0]
@@ -78,11 +81,14 @@ def test_multiple_slides_get_sequential_sheets(make_pptx, tmp_path):
     from ragspine.extraction.extractors.pptspine_extractor import extract_grids
 
     p = tmp_path / "multi.pptx"
-    make_pptx(p, [
-        [("table", [["A", "B"]])],            # slide1 -> slide1_table1
-        [("text", "no table on this slide")],  # slide2 -> 无表，留空号
-        [("text", "intro"), ("table", [["E", "F"]])],  # slide3 -> slide3_table1
-    ])
+    make_pptx(
+        p,
+        [
+            [("table", [["A", "B"]])],  # slide1 -> slide1_table1
+            [("text", "no table on this slide")],  # slide2 -> 无表，留空号
+            [("text", "intro"), ("table", [["E", "F"]])],  # slide3 -> slide3_table1
+        ],
+    )
     grids = extract_grids(p)
     assert [g.sheet for g in grids] == ["slide1_table1", "slide3_table1"]
 
@@ -93,10 +99,20 @@ def test_grid_span_recorded_as_merge_span(make_pptx, tmp_path):
     from ragspine.extraction.extractors.pptspine_extractor import extract_grids
 
     p = tmp_path / "merged.pptx"
-    make_pptx(p, [[("table", [
-        [{"text": "ACME Hong Kong", "gridspan": 2}, {"hmerge": True}],
-        ["FY2023", "FY2024"],
-    ])]])
+    make_pptx(
+        p,
+        [
+            [
+                (
+                    "table",
+                    [
+                        [{"text": "ACME Hong Kong", "gridspan": 2}, {"hmerge": True}],
+                        ["FY2023", "FY2024"],
+                    ],
+                )
+            ]
+        ],
+    )
     g = extract_grids(p)[0]
     origin = g.get("R1C1")
     assert origin.value == "ACME Hong Kong"
@@ -111,10 +127,20 @@ def test_rowspan_recorded_as_vertical_span(make_pptx, tmp_path):
     from ragspine.extraction.extractors.pptspine_extractor import extract_grids
 
     p = tmp_path / "vmerged.pptx"
-    make_pptx(p, [[("table", [
-        [{"text": "Region", "rowspan": 2}, "FY2024"],
-        [{"vmerge": True}, "2680"],
-    ])]])
+    make_pptx(
+        p,
+        [
+            [
+                (
+                    "table",
+                    [
+                        [{"text": "Region", "rowspan": 2}, "FY2024"],
+                        [{"vmerge": True}, "2680"],
+                    ],
+                )
+            ]
+        ],
+    )
     g = extract_grids(p)[0]
     origin = g.get("R1C1")
     assert origin.value == "Region"
@@ -178,10 +204,20 @@ def test_cell_fill_resolved_into_rgb(make_pptx, tmp_path):
     from ragspine.extraction.extractors.pptspine_extractor import extract_grids
 
     p = tmp_path / "filled.pptx"
-    make_pptx(p, [[("table", [
-        [{"text": "NEW", "fill": "FFFF00"}, {"text": "MATURE", "fill": "92d050"}],
-        ["plain", "2680"],
-    ])]])
+    make_pptx(
+        p,
+        [
+            [
+                (
+                    "table",
+                    [
+                        [{"text": "NEW", "fill": "FFFF00"}, {"text": "MATURE", "fill": "92d050"}],
+                        ["plain", "2680"],
+                    ],
+                )
+            ]
+        ],
+    )
     g = extract_grids(p)[0]
     assert g.get("R1C1").resolved_rgb == "FFFF00"
     assert g.get("R1C2").resolved_rgb == "92D050"  # 小写源色归一为大写
@@ -196,10 +232,20 @@ def test_cell_fill_flows_into_color_semantics_path(make_pptx, tmp_path):
     from ragspine.extraction.extractors.pptspine_extractor import extract_grids
 
     p = tmp_path / "legend.pptx"
-    make_pptx(p, [[("table", [
-        [{"text": "A", "fill": "FFFF00"}, {"text": "B", "fill": "FFFF00"}],
-        [{"text": "C", "fill": "92D050"}, "plain"],
-    ])]])
+    make_pptx(
+        p,
+        [
+            [
+                (
+                    "table",
+                    [
+                        [{"text": "A", "fill": "FFFF00"}, {"text": "B", "fill": "FFFF00"}],
+                        [{"text": "C", "fill": "92D050"}, "plain"],
+                    ],
+                )
+            ]
+        ],
+    )
     g = extract_grids(p)[0]
     by_rgb = g.cells_by_rgb()
     assert set(by_rgb) == {"FFFF00", "92D050"}

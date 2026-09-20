@@ -18,7 +18,6 @@ ERROR，直至实现转绿。
 
 import os
 
-import pytest
 import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
@@ -27,6 +26,7 @@ ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpa
 # ===========================================================================
 # P · Provenance：血缘保真
 # ===========================================================================
+
 
 def test_hit_id_non_empty_and_from_upserted_set(vector_store, make_record):
     """每条命中的 id 非空且确为入库过的 id（不臆造、不丢失）。"""
@@ -39,10 +39,16 @@ def test_hit_id_non_empty_and_from_upserted_set(vector_store, make_record):
 
 def test_provenance_doc_id_and_locator_round_trip(vector_store, make_record):
     """provenance 锚点 doc_id + source_locator 经 upsert→query 原样回传。"""
-    vector_store.upsert([
-        make_record("HK_FIN.pptx#3", [1.0, 0.0, 0.0],
-                    doc_id="HK_FIN.pptx", source_locator="HK_FIN.pptx!slide3#para2"),
-    ])
+    vector_store.upsert(
+        [
+            make_record(
+                "HK_FIN.pptx#3",
+                [1.0, 0.0, 0.0],
+                doc_id="HK_FIN.pptx",
+                source_locator="HK_FIN.pptx!slide3#para2",
+            ),
+        ]
+    )
     [hit] = vector_store.query([1.0, 0.0, 0.0], k=1)
     assert hit.metadata["doc_id"] == "HK_FIN.pptx"
     assert hit.metadata["source_locator"] == "HK_FIN.pptx!slide3#para2"
@@ -52,16 +58,19 @@ def test_provenance_doc_id_and_locator_round_trip(vector_store, make_record):
 # I · Isolation：where 过滤下推作为敏感度隔离机制
 # ===========================================================================
 
+
 def test_restricted_excluded_by_filter_even_as_nearest(vector_store, make_record):
     """RESTRICTED 记录即便是【完全同向的最近邻】，也被 sensitivity 过滤排除。
 
     这把 RESTRICTED 隔离能力下推到存储层：secret 与查询同向（cos 1.0），但
     where={'sensitivity':'INTERNAL'} 必须把它挡在结果外，只回 INTERNAL 的 pub。
     """
-    vector_store.upsert([
-        make_record("secret#0", [1.0, 0.0, 0.0], sensitivity="RESTRICTED"),  # 最近邻
-        make_record("pub#0", [0.0, 1.0, 0.0], sensitivity="INTERNAL"),       # 远
-    ])
+    vector_store.upsert(
+        [
+            make_record("secret#0", [1.0, 0.0, 0.0], sensitivity="RESTRICTED"),  # 最近邻
+            make_record("pub#0", [0.0, 1.0, 0.0], sensitivity="INTERNAL"),  # 远
+        ]
+    )
     hits = vector_store.query([1.0, 0.0, 0.0], k=5, where={"sensitivity": "INTERNAL"})
     out_ids = {h.id for h in hits}
     assert "secret#0" not in out_ids
@@ -89,6 +98,7 @@ def test_restricted_present_without_filter(vector_store, make_record):
 # 注：provenance / isolation / where 过滤下推三项不变量对【所有】后端照样全量绑定（见上文），
 # 这里分支的只是「确定性」这一项的强弱口径。
 # ===========================================================================
+
 
 def test_repeated_query_byte_identical(vector_store, vector_store_capability, make_record):
     """同库同查询两次：exact 断言命中 (id, score) 逐位一致；approximate 断言同实例顺序（id 序）稳定。"""

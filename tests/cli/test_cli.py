@@ -21,7 +21,6 @@ ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpa
 from ragspine.cli import main
 from ragspine.storage.fact_store import Fact, SqliteFactStore
 
-
 # ---------------------------------------------------------------------------
 # quickstart：headline 离线演示
 # ---------------------------------------------------------------------------

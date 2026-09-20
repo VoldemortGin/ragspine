@@ -25,9 +25,7 @@ DEFAULT_OVERLAP_CHARS = 80
 _SENTENCE_ENDERS = "。！？；.!?;"
 
 # 一个"句子" = 非句末标点连续串 + 其后的句末标点串（或纯标点串），拼接可还原原文。
-_SENTENCE_RE = re.compile(
-    rf"[^{_SENTENCE_ENDERS}]+[{_SENTENCE_ENDERS}]*|[{_SENTENCE_ENDERS}]+"
-)
+_SENTENCE_RE = re.compile(rf"[^{_SENTENCE_ENDERS}]+[{_SENTENCE_ENDERS}]*|[{_SENTENCE_ENDERS}]+")
 
 
 @dataclass
@@ -198,9 +196,7 @@ def _split_oversized(ptext: str, max_chars: int) -> list[str]:
         if len(sentence) <= max_chars:
             pieces.append(sentence)
         else:
-            pieces.extend(
-                sentence[j : j + max_chars] for j in range(0, len(sentence), max_chars)
-            )
+            pieces.extend(sentence[j : j + max_chars] for j in range(0, len(sentence), max_chars))
 
     out: list[str] = []
     current = ""

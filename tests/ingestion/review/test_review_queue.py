@@ -93,10 +93,7 @@ def test_get_missing_returns_none(queue):
 def test_enqueue_ids_are_unique(queue):
     """story #22 连续入队应分配互不相同的 id。"""
     queue.init_schema()
-    ids = [
-        queue.enqueue("low_confidence", {"i": i}, f"sheet=HK!C{i}")
-        for i in range(5)
-    ]
+    ids = [queue.enqueue("low_confidence", {"i": i}, f"sheet=HK!C{i}") for i in range(5)]
     assert len(set(ids)) == 5
 
 

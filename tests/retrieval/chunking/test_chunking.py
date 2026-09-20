@@ -51,6 +51,7 @@ _FOUR_PARAS = "\n".join([_P1, _P2, _P3, _P4])
 # 基本形态：空文本、短文本、元数据继承
 # ===========================================================================
 
+
 def test_empty_text_returns_empty():
     """空文本 / 纯空白文本 -> []。"""
     assert chunk_document("", _meta()) == []
@@ -89,6 +90,7 @@ def test_metadata_inherited_on_all_chunks():
 # 段落聚合 + 预算 + 重叠
 # ===========================================================================
 
+
 def test_paragraph_aggregation_respects_budget():
     """段落贪心聚合，所有块长度 <= max_chars。"""
     chunks = chunk_document(_FOUR_PARAS, _meta(), max_chars=250, overlap_chars=0)
@@ -118,6 +120,7 @@ def test_zero_overlap_param():
 # source_locator 回指
 # ===========================================================================
 
+
 def test_source_locator_format():
     """locator 格式：单段 'doc1#para1'，跨段 'doc1#para1-2'。"""
     single = chunk_document("只有一段。", _meta())
@@ -138,6 +141,7 @@ def test_source_locator_prefix_override():
 # ===========================================================================
 # 超长单段：句切 / 硬切
 # ===========================================================================
+
 
 def test_oversized_paragraph_split_by_sentence():
     """超长单段按句末标点切分，子块均 <= 预算、locator 都指向该段、拼接还原原文。"""
@@ -160,6 +164,7 @@ def test_hard_cut_when_no_sentence_boundary():
 # ===========================================================================
 # 中英混排 / 编号 / 默认参数 / 参数校验
 # ===========================================================================
+
 
 def test_mixed_cjk_english_content_preserved():
     """中英混排正常切块，每个段落文本都至少出现在一个块里。"""

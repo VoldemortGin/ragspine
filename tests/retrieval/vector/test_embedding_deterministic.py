@@ -38,17 +38,17 @@ ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpa
 
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
 from ragspine.retrieval.chunking.chunking import DocumentMeta
+from ragspine.retrieval.lexical.retrieval import NarrativeIndex, cosine_similarity
 from ragspine.retrieval.vector.embedding_backends import (
     DeterministicEmbeddingBackend,
     OpenAIEmbeddingBackend,
     make_embedding_backend,
 )
-from ragspine.retrieval.lexical.retrieval import NarrativeIndex, cosine_similarity
-
 
 # ===========================================================================
 # E1 确定性
 # ===========================================================================
+
 
 def test_same_text_twice_elementwise_equal():
     """同一文本两次 embed 向量逐元素相等（确定性核心）。"""
@@ -84,6 +84,7 @@ def test_uses_hashlib_not_builtin_hash_stable_value():
 # ===========================================================================
 # E2 形状 / 归一 / 顺序 / 空输入
 # ===========================================================================
+
 
 def test_fixed_dim_default_256():
     """默认维度 256，且每条向量长度都等于该维度。"""
@@ -131,6 +132,7 @@ def test_blank_text_zero_vector_does_not_crash():
 # E3 区分性
 # ===========================================================================
 
+
 def test_identical_text_cosine_one():
     """相同文本向量 cosine==1。"""
     backend = DeterministicEmbeddingBackend()
@@ -141,16 +143,19 @@ def test_identical_text_cosine_one():
 def test_different_text_cosine_below_one():
     """明显不同的两段文本向量 cosine < 1（具备区分性）。"""
     backend = DeterministicEmbeddingBackend()
-    v1, v2 = backend.embed_texts([
-        "香港 REVENUE 营收持续增长",
-        "weekend cricket match report 板球比赛",
-    ])
+    v1, v2 = backend.embed_texts(
+        [
+            "香港 REVENUE 营收持续增长",
+            "weekend cricket match report 板球比赛",
+        ]
+    )
     assert cosine_similarity(v1, v2) < 1.0
 
 
 # ===========================================================================
 # E4 后端工厂 make_embedding_backend
 # ===========================================================================
+
 
 def test_factory_none_spec_returns_none():
     """spec=None / 'none' -> None（纯 BM25，保持现状默认）。"""
@@ -187,6 +192,7 @@ def test_factory_explicit_spec_overrides_env(monkeypatch):
 def test_factory_openai_lazy_import_friendly_error(monkeypatch):
     """spec='openai' 走 OpenAIEmbeddingBackend（延迟 import）；无 SDK 时友好报错。"""
     import sys
+
     monkeypatch.setitem(sys.modules, "openai", None)  # 模拟未安装
     with pytest.raises((ImportError, RuntimeError)) as exc_info:
         make_embedding_backend("openai", api_key="k")
@@ -218,10 +224,17 @@ def test_factory_openai_constructs_with_fake_sdk(monkeypatch):
 # E5 hybrid 端到端（NarrativeIndex 注入确定性后端）
 # ===========================================================================
 
+
 def _meta(doc_id: str, **overrides) -> DocumentMeta:
     kwargs = dict(
-        doc_id=doc_id, title=doc_id, topic="FIN", entity="ACME_HK",
-        geography="HK", period="2025", language="zh", sensitivity="INTERNAL",
+        doc_id=doc_id,
+        title=doc_id,
+        topic="FIN",
+        entity="ACME_HK",
+        geography="HK",
+        period="2025",
+        language="zh",
+        sensitivity="INTERNAL",
     )
     kwargs.update(overrides)
     return DocumentMeta(**kwargs)
@@ -230,7 +243,10 @@ def _meta(doc_id: str, **overrides) -> DocumentMeta:
 def _seed_index(store: ChunkStore, *, backend) -> NarrativeIndex:
     index = NarrativeIndex(store, embedding_backend=backend)
     index.ingest("香港 REVENUE 营收持续增长，银保渠道表现稳健。", _meta("HK_FIN.pptx"))
-    index.ingest("中国 REVENUE 增长由代理人产能提升驱动。", _meta("CN_FIN.pptx", entity="ACME_CN", geography="CN"))
+    index.ingest(
+        "中国 REVENUE 增长由代理人产能提升驱动。",
+        _meta("CN_FIN.pptx", entity="ACME_CN", geography="CN"),
+    )
     return index
 
 
@@ -285,6 +301,7 @@ def test_pure_bm25_path_no_vector_score(tmp_path):
 # E6 ask.py 接线：--embedding deterministic 注入确定性后端
 # ===========================================================================
 
+
 def test_ask_cli_embedding_flag_injects_backend(tmp_path, monkeypatch):
     """--embedding deterministic：build_narrative_retriever 收到 DeterministicEmbeddingBackend。
 
@@ -308,14 +325,21 @@ def test_ask_cli_embedding_flag_injects_backend(tmp_path, monkeypatch):
     store.close()
 
     fact_db = tmp_path / "facts.db"
-    rc = ask_mod.main([
-        "--provider", "mock",
-        "--db", str(fact_db),
-        "--chunk-db", str(chunk_db),
-        "--embedding", "deterministic",
-        "--reference-date", "2026-06-12",
-        "香港去年REVENUE多少",
-    ])
+    rc = ask_mod.main(
+        [
+            "--provider",
+            "mock",
+            "--db",
+            str(fact_db),
+            "--chunk-db",
+            str(chunk_db),
+            "--embedding",
+            "deterministic",
+            "--reference-date",
+            "2026-06-12",
+            "香港去年REVENUE多少",
+        ]
+    )
     assert rc == 0
     assert isinstance(captured.get("embedding_backend"), DeterministicEmbeddingBackend)
 
@@ -341,13 +365,19 @@ def test_ask_cli_embedding_default_is_none(tmp_path, monkeypatch):
     store.close()
 
     fact_db = tmp_path / "facts.db"
-    rc = ask_mod.main([
-        "--provider", "mock",
-        "--db", str(fact_db),
-        "--chunk-db", str(chunk_db),
-        "--reference-date", "2026-06-12",
-        "香港去年REVENUE多少",
-    ])
+    rc = ask_mod.main(
+        [
+            "--provider",
+            "mock",
+            "--db",
+            str(fact_db),
+            "--chunk-db",
+            str(chunk_db),
+            "--reference-date",
+            "2026-06-12",
+            "香港去年REVENUE多少",
+        ]
+    )
     assert rc == 0
     assert captured["set"] is True
     assert captured["embedding_backend"] is None
@@ -356,6 +386,7 @@ def test_ask_cli_embedding_default_is_none(tmp_path, monkeypatch):
 # ===========================================================================
 # R1 回归：默认行为不变
 # ===========================================================================
+
 
 def test_regression_narrative_index_default_pure_bm25(tmp_path):
     """NarrativeIndex 默认 embedding_backend=None（纯 BM25 现状不变）。"""

@@ -18,9 +18,7 @@ from ragspine.service.tasks.task_queue import FakeQueue
 @pytest.fixture
 def client(tmp_path):
     config = ServiceConfig(db_path=str(tmp_path / "fact.db"))
-    app = create_app(
-        config, provider=MockProvider(), queue=FakeQueue(), faq_cache=FAQCache.empty()
-    )
+    app = create_app(config, provider=MockProvider(), queue=FakeQueue(), faq_cache=FAQCache.empty())
     return TestClient(app)
 
 
@@ -52,11 +50,7 @@ def test_topology_agent_scope(client):
     _assert_graph_shape(body)
     node_ids = {n["id"] for n in body["nodes"]}
     assert {"parse", "tool_loop", "retrieve", "narrative_answer"} <= node_ids
-    route_labels = {
-        edge["label"]
-        for edge in body["edges"]
-        if edge["src"] == "route"
-    }
+    route_labels = {edge["label"] for edge in body["edges"] if edge["src"] == "route"}
     assert {"route=structured", "route=narrative", "route=composite"} <= route_labels
 
 

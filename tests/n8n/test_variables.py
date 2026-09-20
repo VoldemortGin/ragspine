@@ -85,15 +85,19 @@ class TestN8nToDify:
 class TestExprToSelector:
     def test_json_ref(self) -> None:
         selector = n8n_expr_to_selector(
-            "={{ $json.score }}", upstream_id="webhook", name_to_id=NAME_TO_ID,
+            "={{ $json.score }}",
+            upstream_id="webhook",
+            name_to_id=NAME_TO_ID,
             llm_node_ids=LLM_IDS,
         )
         assert selector == ["webhook", "score"]
 
     def test_node_ref_with_llm_swap(self) -> None:
         selector = n8n_expr_to_selector(
-            '={{ $node["AI Agent"].json["output"] }}', upstream_id=None,
-            name_to_id=NAME_TO_ID, llm_node_ids=LLM_IDS,
+            '={{ $node["AI Agent"].json["output"] }}',
+            upstream_id=None,
+            name_to_id=NAME_TO_ID,
+            llm_node_ids=LLM_IDS,
         )
         assert selector == ["ai_agent", "text"]
 

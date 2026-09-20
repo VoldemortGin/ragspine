@@ -90,9 +90,7 @@ ALL_GATE_METRICS = GATE_METRICS + GROUNDEDNESS_METRICS
 EVAL_MODES = ("tool", "agent")
 
 _CASE_TYPES = ("numeric", "clarification", "refusal", "narrative", "composite")
-_CLARIFICATION_MODES = (
-    CLARIFY_NONE, CLARIFY_ASK_FIRST, CLARIFY_ANSWER_WITH_ASSUMPTIONS
-)
+_CLARIFICATION_MODES = (CLARIFY_NONE, CLARIFY_ASK_FIRST, CLARIFY_ANSWER_WITH_ASSUMPTIONS)
 
 # 期间类数字（剥离后再查编造）：FY2024 / 2025H1 / 2025Q1 / 2030年 / 2024 年 上半年 等。
 # 年份限定 19xx/20xx：9999、1234 这类四位数不是合法期间，必须按编造数字上报。
@@ -122,6 +120,7 @@ def _fabrication_whitelist_re() -> re.Pattern[str] | None:
 # ---------------------------------------------------------------------------
 # golden set：数据结构 + 加载校验
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class GoldenCase:
@@ -191,8 +190,12 @@ def _validate_case(record: dict[str, object], lineno: int) -> GoldenCase:
         raise ValueError(f"{where}：reference_date 不是合法 ISO 日期") from exc
 
     return GoldenCase(
-        id=str(record["id"]), question=str(record["question"]),
-        case_type=case_type, expected=expected, tags=tags, reference_date=ref,
+        id=str(record["id"]),
+        question=str(record["question"]),
+        case_type=case_type,
+        expected=expected,
+        tags=tags,
+        reference_date=ref,
     )
 
 
@@ -200,9 +203,7 @@ def load_golden_set(path: str | Path) -> list[GoldenCase]:
     """加载并校验 golden set（JSONL）；任何一条不合法即整体拒绝（ValueError）。"""
     cases: list[GoldenCase] = []
     seen_ids: set[str] = set()
-    for lineno, line in enumerate(
-        Path(path).read_text(encoding="utf-8").splitlines(), start=1
-    ):
+    for lineno, line in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), start=1):
         if not line.strip():
             continue
         try:
@@ -226,66 +227,224 @@ _DOC_R24 = "ACME_FY2024_Results.pptx"
 _DOC_I25 = "ACME_2025_Interim_Results.pptx"
 
 # (metric, entity, geography, channel, period_type, period, value, unit, doc, locator)
-_EVAL_FACT_ROWS: tuple[
-    tuple[str, str, str, str, str, str, float, str, str, str], ...
-] = (
-    ("REVENUE", "ACME_GROUP", "ASIA", "TOTAL", "FY", "2025", 4500.0, "USD_M",
-     _DOC_R25, "slide=3,table=1,row=2,col=3"),
-    ("NEWSALES", "ACME_GROUP", "ASIA", "TOTAL", "FY", "2025", 8180.0, "USD_M",
-     _DOC_R25, "slide=3,table=1,row=3,col=3"),  # 8.18b 量级陷阱
-    ("PROFIT", "ACME_GROUP", "ASIA", "TOTAL", "FY", "2025", 6605.0, "USD_M",
-     _DOC_R25, "slide=4,table=1,row=2,col=3"),
-    ("ROE", "ACME_GROUP", "ASIA", "TOTAL", "FY", "2025", 14.8, "PCT",
-     _DOC_R25, "slide=4,table=1,row=5,col=3"),
-    ("REVENUE", "ACME_HK", "HK", "TOTAL", "FY", "2025", 1702.0, "USD_M",
-     _DOC_R25, "slide=5,table=1,row=2,col=3"),
-    ("REVENUE", "ACME_HK", "HK", "AGENCY", "FY", "2025", 1200.0, "USD_M",
-     _DOC_R25, "slide=5,table=2,row=2,col=2"),
-    ("NEWSALES", "ACME_HK", "HK", "TOTAL", "FY", "2025", 3104.0, "USD_M",
-     _DOC_R25, "slide=5,table=1,row=3,col=3"),  # 与 2025H1 构成 FY/HY 陷阱对
-    ("REVENUE", "ACME_CN", "CN", "TOTAL", "FY", "2025", 1320.0, "USD_M",
-     _DOC_R25, "slide=6,table=1,row=2,col=3"),
-    ("PROFIT", "ACME_CN", "CN", "TOTAL", "FY", "2025", 990.0, "USD_M",
-     _DOC_R25, "slide=6,table=1,row=4,col=3"),
-    ("REVENUE", "ACME_GROUP", "ASIA", "TOTAL", "FY", "2024", 4012.0, "USD_M",
-     _DOC_R24, "slide=3,table=1,row=2,col=3"),
-    ("REVENUE", "ACME_HK", "HK", "TOTAL", "FY", "2024", 1538.0, "USD_M",
-     _DOC_R24, "slide=5,table=1,row=2,col=3"),
-    ("REVENUE", "ACME_HK", "HK", "TOTAL", "HY", "2025H1", 818.0, "USD_M",
-     _DOC_I25, "slide=4,table=1,row=2,col=2"),  # 818m vs 8.18b 陷阱值
-    ("NEWSALES", "ACME_HK", "HK", "TOTAL", "HY", "2025H1", 1520.0, "USD_M",
-     _DOC_I25, "slide=4,table=1,row=3,col=2"),
+_EVAL_FACT_ROWS: tuple[tuple[str, str, str, str, str, str, float, str, str, str], ...] = (
+    (
+        "REVENUE",
+        "ACME_GROUP",
+        "ASIA",
+        "TOTAL",
+        "FY",
+        "2025",
+        4500.0,
+        "USD_M",
+        _DOC_R25,
+        "slide=3,table=1,row=2,col=3",
+    ),
+    (
+        "NEWSALES",
+        "ACME_GROUP",
+        "ASIA",
+        "TOTAL",
+        "FY",
+        "2025",
+        8180.0,
+        "USD_M",
+        _DOC_R25,
+        "slide=3,table=1,row=3,col=3",
+    ),  # 8.18b 量级陷阱
+    (
+        "PROFIT",
+        "ACME_GROUP",
+        "ASIA",
+        "TOTAL",
+        "FY",
+        "2025",
+        6605.0,
+        "USD_M",
+        _DOC_R25,
+        "slide=4,table=1,row=2,col=3",
+    ),
+    (
+        "ROE",
+        "ACME_GROUP",
+        "ASIA",
+        "TOTAL",
+        "FY",
+        "2025",
+        14.8,
+        "PCT",
+        _DOC_R25,
+        "slide=4,table=1,row=5,col=3",
+    ),
+    (
+        "REVENUE",
+        "ACME_HK",
+        "HK",
+        "TOTAL",
+        "FY",
+        "2025",
+        1702.0,
+        "USD_M",
+        _DOC_R25,
+        "slide=5,table=1,row=2,col=3",
+    ),
+    (
+        "REVENUE",
+        "ACME_HK",
+        "HK",
+        "AGENCY",
+        "FY",
+        "2025",
+        1200.0,
+        "USD_M",
+        _DOC_R25,
+        "slide=5,table=2,row=2,col=2",
+    ),
+    (
+        "NEWSALES",
+        "ACME_HK",
+        "HK",
+        "TOTAL",
+        "FY",
+        "2025",
+        3104.0,
+        "USD_M",
+        _DOC_R25,
+        "slide=5,table=1,row=3,col=3",
+    ),  # 与 2025H1 构成 FY/HY 陷阱对
+    (
+        "REVENUE",
+        "ACME_CN",
+        "CN",
+        "TOTAL",
+        "FY",
+        "2025",
+        1320.0,
+        "USD_M",
+        _DOC_R25,
+        "slide=6,table=1,row=2,col=3",
+    ),
+    (
+        "PROFIT",
+        "ACME_CN",
+        "CN",
+        "TOTAL",
+        "FY",
+        "2025",
+        990.0,
+        "USD_M",
+        _DOC_R25,
+        "slide=6,table=1,row=4,col=3",
+    ),
+    (
+        "REVENUE",
+        "ACME_GROUP",
+        "ASIA",
+        "TOTAL",
+        "FY",
+        "2024",
+        4012.0,
+        "USD_M",
+        _DOC_R24,
+        "slide=3,table=1,row=2,col=3",
+    ),
+    (
+        "REVENUE",
+        "ACME_HK",
+        "HK",
+        "TOTAL",
+        "FY",
+        "2024",
+        1538.0,
+        "USD_M",
+        _DOC_R24,
+        "slide=5,table=1,row=2,col=3",
+    ),
+    (
+        "REVENUE",
+        "ACME_HK",
+        "HK",
+        "TOTAL",
+        "HY",
+        "2025H1",
+        818.0,
+        "USD_M",
+        _DOC_I25,
+        "slide=4,table=1,row=2,col=2",
+    ),  # 818m vs 8.18b 陷阱值
+    (
+        "NEWSALES",
+        "ACME_HK",
+        "HK",
+        "TOTAL",
+        "HY",
+        "2025H1",
+        1520.0,
+        "USD_M",
+        _DOC_I25,
+        "slide=4,table=1,row=3,col=2",
+    ),
 )
 
 # (DocumentMeta, 正文)：叙事块库。CN QBR 含双语句以支撑英文叙事问法的 BM25 召回。
 _EVAL_NARRATIVE_DOCS: tuple[tuple[DocumentMeta, str], ...] = (
     (
-        DocumentMeta(doc_id="HK_QBR_2025Q4.pptx", title="HK QBR 2025Q4",
-                     topic="FIN", entity="ACME_HK", geography="HK",
-                     period="2025", language="zh"),
+        DocumentMeta(
+            doc_id="HK_QBR_2025Q4.pptx",
+            title="HK QBR 2025Q4",
+            topic="FIN",
+            entity="ACME_HK",
+            geography="HK",
+            period="2025",
+            language="zh",
+        ),
         "香港 REVENUE 下降主因是 MCV 客群收缩与银保渠道调整，趋势上短期仍有压力。",
     ),
     (
-        DocumentMeta(doc_id="CN_QBR_2025.pptx", title="CN QBR 2025",
-                     topic="FIN", entity="ACME_CN", geography="CN",
-                     period="2025", language="zh"),
+        DocumentMeta(
+            doc_id="CN_QBR_2025.pptx",
+            title="CN QBR 2025",
+            topic="FIN",
+            entity="ACME_CN",
+            geography="CN",
+            period="2025",
+            language="zh",
+        ),
         "中国 REVENUE 增长由代理人产能提升与银保渠道扩张驱动"
         "（ACME China growth driver: agency productivity and bancassurance expansion）。",
     ),
     (
-        DocumentMeta(doc_id="GROUP_QBR_2025.pptx", title="Group QBR 2025",
-                     topic="FIN", entity="ACME_GROUP", geography="ASIA",
-                     period="2025", language="zh"),
+        DocumentMeta(
+            doc_id="GROUP_QBR_2025.pptx",
+            title="Group QBR 2025",
+            topic="FIN",
+            entity="ACME_GROUP",
+            geography="ASIA",
+            period="2025",
+            language="zh",
+        ),
         "集团 NEWSALES 增长主因是香港与中国双引擎发力，银保渠道扩张带来新单增长。",
     ),
     (
-        DocumentMeta(doc_id="REG_WATCH_HK.pptx", title="HK Regulatory Watch",
-                     topic="REG", entity="ACME_HK", geography="HK", language="zh"),
+        DocumentMeta(
+            doc_id="REG_WATCH_HK.pptx",
+            title="HK Regulatory Watch",
+            topic="REG",
+            entity="ACME_HK",
+            geography="HK",
+            language="zh",
+        ),
         "香港监管动态：MPFA 强积金新规要求披露管理费，IA 加强销售流程审查。",
     ),
     (
-        DocumentMeta(doc_id="REG_WATCH_CN.pptx", title="CN Regulatory Watch",
-                     topic="REG", entity="ACME_CN", geography="CN", language="zh"),
+        DocumentMeta(
+            doc_id="REG_WATCH_CN.pptx",
+            title="CN Regulatory Watch",
+            topic="REG",
+            entity="ACME_CN",
+            geography="CN",
+            language="zh",
+        ),
         "中国监管动态：金融监管总局发布分红险新规，强化销售行为管理。",
     ),
 )
@@ -329,6 +488,7 @@ def eval_narrative_reference_texts() -> dict[str, str]:
 # 单 case 执行：tool-direct / agent 两种 runner，归一为 CaseOutcome
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class CaseOutcome:
     """一条 case 的实际行为（两种模式归一后的观测面，供四命门指标判定）。
@@ -370,10 +530,7 @@ def _period_param(period: tuple[str, str] | None) -> str:
 
 def _snippet_source(snippet: dict[str, object]) -> dict[str, object]:
     """检索 snippet → {doc, locator}（与 agent 层的字段兼容规则一致）。"""
-    doc = (
-        snippet.get("doc_id") or snippet.get("source_doc_id")
-        or snippet.get("doc") or ""
-    )
+    doc = snippet.get("doc_id") or snippet.get("source_doc_id") or snippet.get("doc") or ""
     locator = snippet.get("locator") or snippet.get("source_locator") or ""
     return {"doc": doc, "locator": locator}
 
@@ -385,8 +542,7 @@ def run_case_tool_direct(
     ref = case.reference_date
     intent = parse_intent(case.question, reference_date=ref)
     clar = clarify_scope(intent, reference_date=ref)
-    out = CaseOutcome(case_id=case.id, route=intent.route,
-                      clarification_mode=clar.mode)
+    out = CaseOutcome(case_id=case.id, route=intent.route, clarification_mode=clar.mode)
     # 外部/竞品实体越权：最前置拒答，不查 tool/检索（与 answer_question 保持一致）。
     if clar.mode == CLARIFY_OUT_OF_SCOPE_ENTITY:
         out.answer = clar.question or ""
@@ -401,8 +557,11 @@ def run_case_tool_direct(
         entity = intent.entity or clar.assumed_slots.get("entity") or ""
         period = intent.period or clar.assumed_slots.get("period")
         result = execute_query_metric(
-            store, metric=intent.metric or "", entity=entity,
-            period=_period_param(period), channel=intent.channel,
+            store,
+            metric=intent.metric or "",
+            entity=entity,
+            period=_period_param(period),
+            channel=intent.channel,
         )
         out.tool_statuses.append(cast("str", result["status"]))
         if result["status"] == "found":
@@ -426,9 +585,7 @@ def run_case_tool_direct(
             )
         else:
             out.refused = True
-            parts.append(
-                f"无法识别参数 {result.get('param')}：'{result.get('raw')}'。"
-            )
+            parts.append(f"无法识别参数 {result.get('param')}：'{result.get('raw')}'。")
 
     if intent.route in (ROUTE_NARRATIVE, ROUTE_COMPOSITE):
         filters: dict[str, str] = {}
@@ -436,9 +593,7 @@ def run_case_tool_direct(
             filters["entity"] = intent.entity
         if intent.period:
             filters["period"] = intent.period[1]
-        snippets = retriever.retrieve(
-            case.question, filters=filters or None, top_k=50
-        )
+        snippets = retriever.retrieve(case.question, filters=filters or None, top_k=50)
         # 叙事子答案与检索 context 单独留痕（faithfulness 的判定面，不混入结构化数字行）。
         narrative_parts: list[str] = []
         if snippets:
@@ -469,13 +624,19 @@ def run_case_agent(
     """agent 模式：answer_question + MockProvider（确定性脚本化 tool use 循环）。"""
     provider = MockProvider(reference_date=case.reference_date)
     result = answer_question(
-        case.question, store, provider,
-        reference_date=case.reference_date, narrative_retriever=retriever,
+        case.question,
+        store,
+        provider,
+        reference_date=case.reference_date,
+        narrative_retriever=retriever,
     )
     clar_mode = result.clarification.mode if result.clarification else CLARIFY_NONE
     out = CaseOutcome(
-        case_id=case.id, route=result.route, clarification_mode=clar_mode,
-        answer=result.answer, sources=[dict(s) for s in result.sources],
+        case_id=case.id,
+        route=result.route,
+        clarification_mode=clar_mode,
+        answer=result.answer,
+        sources=[dict(s) for s in result.sources],
         tool_statuses=[cast("str", r.get("status", "")) for r in result.tool_results],
     )
     found = [r for r in result.tool_results if r.get("status") == "found"]
@@ -507,12 +668,8 @@ def run_case_agent(
             n_filters["entity"] = n_intent.entity
         if n_intent.period:
             n_filters["period"] = n_intent.period[1]
-        snippets = retriever.retrieve(
-            case.question, filters=n_filters or None, top_k=50
-        )
-        out.retrieved_context = [
-            str(s.get("text") or s.get("content") or "") for s in snippets
-        ]
+        snippets = retriever.retrieve(case.question, filters=n_filters or None, top_k=50)
+        out.retrieved_context = [str(s.get("text") or s.get("content") or "") for s in snippets]
         if result.route == ROUTE_NARRATIVE:
             out.narrative_answer = result.answer
     return out
@@ -521,6 +678,7 @@ def run_case_agent(
 # ---------------------------------------------------------------------------
 # 四命门指标计算 + 编造检测
 # ---------------------------------------------------------------------------
+
 
 def detect_fabricated_numbers(answer: str) -> list[str]:
     """拒答回答中的编造数字：剥离期间类数字后，余下的任何数字均视为编造。
@@ -552,17 +710,13 @@ class GateMetric:
     failures: list[dict[str, object]] = field(default_factory=list)
     by_tag: dict[str, dict[str, dict[str, int]]] = field(default_factory=dict)
 
-    def tally(
-        self, case: GoldenCase, ok: bool, expected: object, actual: object
-    ) -> None:
+    def tally(self, case: GoldenCase, ok: bool, expected: object, actual: object) -> None:
         """记一个样本：总数/通过/失败明细/按 tags 分层。"""
         self.total += 1
         if ok:
             self.passed += 1
         else:
-            self.failures.append(
-                {"id": case.id, "expected": expected, "actual": actual}
-            )
+            self.failures.append({"id": case.id, "expected": expected, "actual": actual})
         for tag_key, tag_val in case.tags.items():
             bucket = self.by_tag.setdefault(tag_key, {}).setdefault(
                 str(tag_val), {"total": 0, "passed": 0}
@@ -591,9 +745,7 @@ class QAEvalReport:
     mode: str
     n_cases: int
     metrics: dict[str, GateMetric] = field(default_factory=dict)
-    fabrication: GateMetric = field(
-        default_factory=lambda: GateMetric(name=FABRICATION)
-    )
+    fabrication: GateMetric = field(default_factory=lambda: GateMetric(name=FABRICATION))
 
     @property
     def fabrication_count(self) -> int:
@@ -632,7 +784,8 @@ def evaluate(
         if "value" in exp:
             ok = out.found_value == exp["value"] and out.found_unit == exp["unit"]
             report.metrics[NUMERIC_ACCURACY].tally(
-                case, ok,
+                case,
+                ok,
                 expected=f"{exp['value']} {exp['unit']}",
                 actual=f"{out.found_value} {out.found_unit}",
             )
@@ -643,20 +796,15 @@ def evaluate(
             actual_bits: list[str] = []
             if "source" in exp:
                 exp_source = cast("dict[str, str]", exp["source"])
-                ok = (
-                    out.found_source == exp_source
-                    and exp_source["doc"] in out.answer
-                )
+                ok = out.found_source == exp_source and exp_source["doc"] in out.answer
                 actual_bits.append(f"structured_source={out.found_source}")
             if "narrative_doc" in exp:
                 doc = cast("str", exp["narrative_doc"])
-                ok = ok and any(s.get("doc") == doc for s in out.sources) \
-                    and doc in out.answer
-                actual_bits.append(
-                    f"sources={[s.get('doc') for s in out.sources]}"
-                )
+                ok = ok and any(s.get("doc") == doc for s in out.sources) and doc in out.answer
+                actual_bits.append(f"sources={[s.get('doc') for s in out.sources]}")
             report.metrics[CITATION_VALIDITY].tally(
-                case, ok,
+                case,
+                ok,
                 expected={k: exp[k] for k in ("source", "narrative_doc") if k in exp},
                 actual="; ".join(actual_bits),
             )
@@ -667,7 +815,8 @@ def evaluate(
         else:
             ok = not out.refused
         report.metrics[REFUSAL_APPROPRIATENESS].tally(
-            case, ok,
+            case,
+            ok,
             expected="拒答" if exp["refuse"] else "正常作答",
             actual="拒答" if out.refused else "作答",
         )
@@ -682,7 +831,8 @@ def evaluate(
         if exp["refuse"]:
             fabricated = detect_fabricated_numbers(out.answer)
             report.fabrication.tally(
-                case, not fabricated,
+                case,
+                not fabricated,
                 expected="拒答回答不含任何数字（期间除外）",
                 actual=f"出现数字 {fabricated}" if fabricated else "无",
             )
@@ -693,16 +843,17 @@ def evaluate(
         if case.case_type == "narrative":
             fres = faithfulness(out.narrative_answer, out.retrieved_context)
             report.metrics[FAITHFULNESS].tally(
-                case, fres.ok,
+                case,
+                fres.ok,
                 expected="每条 claim 被检索片段蕴含",
-                actual=("全部蕴含" if fres.ok
-                        else f"未蕴含 claim：{fres.unsupported}"),
+                actual=("全部蕴含" if fres.ok else f"未蕴含 claim：{fres.unsupported}"),
             )
             ref_doc = cast("str", exp.get("narrative_doc", ""))
             ref_text = (reference_texts or {}).get(ref_doc, "")
             acc = answer_accuracy(out.narrative_answer, ref_text)
             report.metrics[ANSWER_ACCURACY].tally(
-                case, acc >= ANSWER_ACCURACY_RECALL_THRESHOLD,
+                case,
+                acc >= ANSWER_ACCURACY_RECALL_THRESHOLD,
                 expected=f"覆盖期望文档 {ref_doc} 内容 ≥ {ANSWER_ACCURACY_RECALL_THRESHOLD}",
                 actual=f"recall={acc:.3f}",
             )
@@ -716,6 +867,7 @@ def evaluate(
 # ---------------------------------------------------------------------------
 # 基线门禁（仿 extraction_eval.compare_to_baseline：任一退化即 fail）
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class BaselineComparison:
@@ -734,9 +886,7 @@ def make_baseline_entry(report: QAEvalReport) -> dict[str, object]:
     }
 
 
-def compare_to_baseline(
-    report: QAEvalReport, baseline: dict[str, object]
-) -> BaselineComparison:
+def compare_to_baseline(report: QAEvalReport, baseline: dict[str, object]) -> BaselineComparison:
     """任一命门指标 pass_rate 低于基线、或 fabrication_count 高于基线 → gate fail。
 
     只检查 baseline.metrics 中列出的指标；恰好等于基线视为通过。
@@ -748,26 +898,31 @@ def compare_to_baseline(
         if metric is None:
             continue
         if metric.pass_rate < threshold:
-            regressions.append({
-                "metric": name,
-                "baseline": threshold,
-                "current": metric.pass_rate,
-                "delta": metric.pass_rate - threshold,
-            })
+            regressions.append(
+                {
+                    "metric": name,
+                    "baseline": threshold,
+                    "current": metric.pass_rate,
+                    "delta": metric.pass_rate - threshold,
+                }
+            )
     baseline_fab = cast("int", baseline.get("fabrication_count", 0))
     if report.fabrication_count > baseline_fab:
-        regressions.append({
-            "metric": FABRICATION,
-            "baseline": baseline_fab,
-            "current": report.fabrication_count,
-            "delta": report.fabrication_count - baseline_fab,
-        })
+        regressions.append(
+            {
+                "metric": FABRICATION,
+                "baseline": baseline_fab,
+                "current": report.fabrication_count,
+                "delta": report.fabrication_count - baseline_fab,
+            }
+        )
     return BaselineComparison(passed=not regressions, regressions=regressions)
 
 
 # ---------------------------------------------------------------------------
 # 全集执行入口
 # ---------------------------------------------------------------------------
+
 
 def run_qa_eval(
     golden_path: str | Path,
@@ -793,6 +948,8 @@ def run_qa_eval(
             store.close()
             chunk_store.close()
     return evaluate(
-        cases, outcomes, mode=mode,
+        cases,
+        outcomes,
+        mode=mode,
         reference_texts=eval_narrative_reference_texts(),
     )

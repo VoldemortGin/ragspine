@@ -42,6 +42,7 @@ Usage (always from the repo root):
 
 Exit code is non-zero when any dead reference is found, so it can gate CI.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -50,23 +51,23 @@ import re
 import tokenize
 from pathlib import Path
 
-SCAN_ROOT = 'src/ragspine'  # only library code; tests/scripts docstrings are lower-stakes
+SCAN_ROOT = "src/ragspine"  # only library code; tests/scripts docstrings are lower-stakes
 
 # Tokens that look like an intra-repo reference. Anchored to known top dirs (plus
 # the dead ``src/``) so prose like "see the agent" is not mistaken for a path.
-_REF_RE = re.compile(r'(?<![\w./-])(src|ragspine|docs|scripts|tests|data)/[\w./§-]*[\w/]')
+_REF_RE = re.compile(r"(?<![\w./-])(src|ragspine|docs|scripts|tests|data)/[\w./§-]*[\w/]")
 
 # References that LOOK like a repo path but point at EXTERNAL docs — not dead links.
 # `docs/version3.x` is PaddleOCR's official documentation, cited in
 # pdf_scanned_extractor as "见官方 docs/version3.x ...", not this repo's docs/ tree.
-_EXTERNAL_ALLOWLIST = frozenset({'docs/version3.x'})
+_EXTERNAL_ALLOWLIST = frozenset({"docs/version3.x"})
 
 
 def find_root(start: Path) -> Path:
     for candidate in (start, *start.parents):
-        if (candidate / '.project-root').exists():
+        if (candidate / ".project-root").exists():
             return candidate
-    raise SystemExit('error: cannot locate .project-root (run from inside the repo)')
+    raise SystemExit("error: cannot locate .project-root (run from inside the repo)")
 
 
 def doc_regions(path: Path) -> list[tuple[int, str]]:
@@ -76,22 +77,31 @@ def doc_regions(path: Path) -> list[tuple[int, str]]:
     ``tokenize`` — deliberately excluding ordinary string literals so runtime
     values are never scanned.
     """
-    source = path.read_text(encoding='utf-8')
+    source = path.read_text(encoding="utf-8")
     regions: list[tuple[int, str]] = []
 
     tree = ast.parse(source, filename=str(path))
-    nodes = [tree, *(n for n in ast.walk(tree)
-                     if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)))]
+    nodes = [
+        tree,
+        *(
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        ),
+    ]
     for node in nodes:
-        body = getattr(node, 'body', None)
+        body = getattr(node, "body", None)
         if not body:
             continue
         first = body[0]
-        if (isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant)
-                and isinstance(first.value.value, str)):
+        if (
+            isinstance(first, ast.Expr)
+            and isinstance(first.value, ast.Constant)
+            and isinstance(first.value.value, str)
+        ):
             regions.append((first.value.lineno, first.value.value))
 
-    with path.open('rb') as fh:
+    with path.open("rb") as fh:
         for tok in tokenize.tokenize(fh.readline):
             if tok.type == tokenize.COMMENT:
                 regions.append((tok.start[0], tok.string))
@@ -100,17 +110,17 @@ def doc_regions(path: Path) -> list[tuple[int, str]]:
 
 def resolves(ref: str, root: Path) -> bool:
     """True if the reference points at something that exists in the current repo."""
-    candidate = ref.split('§')[0].strip().rstrip('/.,;:)')
+    candidate = ref.split("§")[0].strip().rstrip("/.,;:)")
     if not candidate:
         return False
     # data/ 是【运行时数据】目录(gitignored:运行时生成的 DB / fixtures),全新 checkout(CI)
     # 永远没有;docstring 引用它是说明"输入/输出数据落在哪",并非代码移动后的死链。门管的是
     # 代码引用完整性(src/docs/scripts/tests 等 committed 路径),运行时数据不在此列 → 豁免。
-    if candidate.startswith('data/'):
+    if candidate.startswith("data/"):
         return True
     # Try the path as-is, then as a module ('src/ragspine/eval/extraction_eval' ->
     # .py) or a doc citation that dropped its suffix ('docs/architecture' -> .md).
-    return any((root / f'{candidate}{suffix}').exists() for suffix in ('', '.py', '.md'))
+    return any((root / f"{candidate}{suffix}").exists() for suffix in ("", ".py", ".md"))
 
 
 def _actual_children(pkg_dir: Path) -> set[str]:
@@ -118,11 +128,11 @@ def _actual_children(pkg_dir: Path) -> set[str]:
     (excluding __init__.py, caches, dotfiles, and non-package dirs / docs)."""
     out: set[str] = set()
     for child in pkg_dir.iterdir():
-        if child.name in {'__init__.py', '__pycache__'} or child.name.startswith('.'):
+        if child.name in {"__init__.py", "__pycache__"} or child.name.startswith("."):
             continue
-        if child.is_dir() and (child / '__init__.py').exists():
-            out.add(f'{child.name}/')
-        elif child.is_file() and child.suffix == '.py':
+        if child.is_dir() and (child / "__init__.py").exists():
+            out.add(f"{child.name}/")
+        elif child.is_file() and child.suffix == ".py":
             out.add(child.name)
     return out
 
@@ -133,14 +143,14 @@ def _listed_submodules(docstring: str | None) -> set[str] | None:
         return None
     lines = docstring.splitlines()
     try:
-        start = next(i for i, ln in enumerate(lines) if ln.strip() == 'Submodules:')
+        start = next(i for i, ln in enumerate(lines) if ln.strip() == "Submodules:")
     except StopIteration:
         return None
     out: set[str] = set()
-    for ln in lines[start + 1:]:
-        if not ln.strip() or not ln.startswith((' ', '\t')):
+    for ln in lines[start + 1 :]:
+        if not ln.strip() or not ln.startswith((" ", "\t")):
             break  # blank line or dedent ends the section
-        token = re.split(r'\s*[—–-]\s*', ln.strip(), maxsplit=1)[0].strip()
+        token = re.split(r"\s*[—–-]\s*", ln.strip(), maxsplit=1)[0].strip()
         if token:
             out.add(token)
     return out
@@ -152,15 +162,14 @@ def check_package_index(root: Path) -> int:
     Keeps the per-level "what I do + what's below me" self-description from
     silently rotting when modules are added or moved. Returns the issue count."""
     issues = 0
-    for init in sorted((root / SCAN_ROOT).glob('**/__init__.py')):
-        if '__pycache__' in init.parts:
+    for init in sorted((root / SCAN_ROOT).glob("**/__init__.py")):
+        if "__pycache__" in init.parts:
             continue
         actual = _actual_children(init.parent)
         if not actual:
             continue  # leaf package with nothing to index
         rel = init.relative_to(root).as_posix()
-        listed = _listed_submodules(
-            ast.get_docstring(ast.parse(init.read_text(encoding='utf-8'))))
+        listed = _listed_submodules(ast.get_docstring(ast.parse(init.read_text(encoding="utf-8"))))
         if listed is None:
             issues += 1
             print(f'NO-INDEX  {rel}  (no "Submodules:" section)')
@@ -176,14 +185,14 @@ def check_package_index(root: Path) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--quiet', action='store_true', help='print only dead refs')
+    parser.add_argument("--quiet", action="store_true", help="print only dead refs")
     args = parser.parse_args()
 
     root = find_root(Path.cwd())
     scanned = dead = 0
 
-    for path in sorted((root / SCAN_ROOT).glob('**/*.py')):
-        if '__pycache__' in path.parts:
+    for path in sorted((root / SCAN_ROOT).glob("**/*.py")):
+        if "__pycache__" in path.parts:
             continue
         scanned += 1
         rel = path.relative_to(root).as_posix()
@@ -196,15 +205,14 @@ def main() -> int:
                     if resolves(ref, root):
                         continue
                     dead += 1
-                    why = 'path/doc does not exist'
-                    print(f'DEAD  {rel}:{lineno + line_off}  {ref}  ({why})')
+                    why = "path/doc does not exist"
+                    print(f"DEAD  {rel}:{lineno + line_off}  {ref}  ({why})")
 
     issues = check_package_index(root)
     if not args.quiet or dead or issues:
-        print(f'\n{scanned} files scanned · {dead} dead references · '
-              f'{issues} package-index issues')
+        print(f"\n{scanned} files scanned · {dead} dead references · {issues} package-index issues")
     return 1 if (dead or issues) else 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     raise SystemExit(main())

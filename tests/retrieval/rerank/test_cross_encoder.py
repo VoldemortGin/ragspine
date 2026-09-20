@@ -31,10 +31,10 @@ from ragspine.retrieval.rerank.cross_encoder import (
 )
 from ragspine.retrieval.rerank.listwise_rerank import ListwiseJudge
 
-
 # ---------------------------------------------------------------------------
 # 惰性构造 / 友好报错 / 参数校验
 # ---------------------------------------------------------------------------
+
 
 def test_ctor_is_lazy_no_fastembed_needed(monkeypatch):
     """构造惰性：模拟未装 fastembed 也能构造（模型在 judge 时才加载）。"""
@@ -78,6 +78,7 @@ def test_implements_listwise_judge_protocol():
 # ---------------------------------------------------------------------------
 # judge：打分 -> 名次（降序 / 平分稳定 / 确定性 / 校验 / 透传）
 # ---------------------------------------------------------------------------
+
 
 def test_judge_orders_by_score_descending(fake_cross_encoder):
     """分数降序给名次：scores=[0.1,9.0,5.0] -> 名次 [1,2,0]。"""
@@ -159,7 +160,10 @@ def test_model_loaded_once_and_cached(fake_cross_encoder):
 # 工厂 make_reranker：别名 + none + auto 语义 + env 覆盖
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("spec", ["cross_encoder", "cross-encoder", "CROSS_ENCODER", " ce ", "ms_marco"])
+
+@pytest.mark.parametrize(
+    "spec", ["cross_encoder", "cross-encoder", "CROSS_ENCODER", " ce ", "ms_marco"]
+)
 def test_factory_aliases_return_instance(spec):
     """'cross_encoder' 及其别名（含大小写/留白/连字符归一）-> CrossEncoderReranker（构造惰性）。"""
     assert isinstance(make_reranker(spec), CrossEncoderReranker)
@@ -208,6 +212,7 @@ def test_factory_unknown_spec_raises():
 # 接线：build_narrative_retriever 的 reranker 注入（默认行为不变）
 # ---------------------------------------------------------------------------
 
+
 def test_wiring_reranker_overrides_provider_judge(tmp_path):
     """注入 reranker -> 它成为 NarrativeIndex 的 judge（本地大脑替代 LLM judge）。"""
     ce = CrossEncoderReranker()
@@ -250,6 +255,7 @@ def test_service_config_reranker_default_is_none():
 # 真模型确定性 + 相关性 conformance（联网首拉，CI 默认 `-m "not network"` 跳过）
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.network
 def test_cross_encoder_real_deterministic_and_relevant():
     """真 cross-encoder：同输入逐位一致（确定性）+ 相关候选名次靠前（真重排）。
@@ -262,14 +268,14 @@ def test_cross_encoder_real_deterministic_and_relevant():
 
     query = "Hong Kong revenue growth"
     docs = [
-        "Weekend cricket match report 板球比赛。",                          # 无关
+        "Weekend cricket match report 板球比赛。",  # 无关
         "Hong Kong revenue grew strongly this quarter, led by the agency channel.",  # 强相关
-        "A recipe for chocolate cake.",                                    # 无关
+        "A recipe for chocolate cake.",  # 无关
     ]
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")  # fastembed 第三方 UserWarning，与确定性无关
         r1 = CrossEncoderReranker().judge(query, docs)
         r2 = CrossEncoderReranker().judge(query, docs)
 
-    assert r1 == r2          # 确定性：两个独立实例同输入逐位一致
-    assert r1[0] == 1        # 真重排：强相关候选被排到第一
+    assert r1 == r2  # 确定性：两个独立实例同输入逐位一致
+    assert r1[0] == 1  # 真重排：强相关候选被排到第一

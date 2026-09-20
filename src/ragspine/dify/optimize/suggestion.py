@@ -23,11 +23,11 @@ class Severity(str, Enum):
 class Category(str, Enum):
     """建议类别。"""
 
-    PARALLEL = "parallel"      # 并行机会
+    PARALLEL = "parallel"  # 并行机会
     BOTTLENECK = "bottleneck"  # 串行瓶颈
-    CACHE = "cache"            # 缓存机会
-    RESOURCE = "resource"      # 资源配置
-    LLM = "llm"                # LLM 配置
+    CACHE = "cache"  # 缓存机会
+    RESOURCE = "resource"  # 资源配置
+    LLM = "llm"  # LLM 配置
 
 
 # 严重度排序权重（数值越小越靠前）。

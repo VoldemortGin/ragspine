@@ -225,9 +225,7 @@ class InProcessGraphStore:
             if dst == node_id and (edge_type is None or etype == edge_type)
         ]
 
-    def _step(
-        self, node_id: str, edge_type: str | None, direction: str
-    ) -> list[str]:
+    def _step(self, node_id: str, edge_type: str | None, direction: str) -> list[str]:
         """从 node_id 出发一步可达的邻居 id（按方向 + edge_type 过滤；不在此施隔离/where）。"""
         out: list[str] = []
         if direction in (DIRECTION_OUT, DIRECTION_BOTH):
@@ -317,9 +315,7 @@ class InProcessGraphStore:
             node = self._visible(seed)
             if node is not None and _node_matches(node, where):
                 nodes[seed] = node
-            for reached in self.traverse(
-                seed, edge_types=edge_types, max_depth=depth, where=where
-            ):
+            for reached in self.traverse(seed, edge_types=edge_types, max_depth=depth, where=where):
                 nodes[reached.id] = reached
         edges: list[GraphEdge] = []
         for (src, dst, etype), edge in self._edges.items():

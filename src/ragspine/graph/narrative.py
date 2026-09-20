@@ -152,9 +152,7 @@ class GraphExtractor(Protocol):
     实现可为非确定（LLM），故只作 opt-in 注入件——默认不在任何默认路径上。
     """
 
-    def extract(
-        self, text: str, *, source_doc_id: str, source_locator: str
-    ) -> ExtractedGraph: ...
+    def extract(self, text: str, *, source_doc_id: str, source_locator: str) -> ExtractedGraph: ...
 
 
 @runtime_checkable
@@ -188,9 +186,7 @@ class LLMGraphExtractor:
         self.max_entities = max(0, max_entities)
         self.max_relations = max(0, max_relations)
 
-    def extract(
-        self, text: str, *, source_doc_id: str, source_locator: str
-    ) -> ExtractedGraph:
+    def extract(self, text: str, *, source_doc_id: str, source_locator: str) -> ExtractedGraph:
         try:
             resp = self.provider.chat(
                 [
@@ -203,9 +199,7 @@ class LLMGraphExtractor:
         out = resp.choices[0].message.content or ""
         return self._parse(out, source_doc_id=source_doc_id, source_locator=source_locator)
 
-    def _parse(
-        self, text: str, *, source_doc_id: str, source_locator: str
-    ) -> ExtractedGraph:
+    def _parse(self, text: str, *, source_doc_id: str, source_locator: str) -> ExtractedGraph:
         """从模型回文鲁棒解析；任何不合规一律降级（空图 / 跳过该条），绝不抛、绝不编造。"""
         try:
             parsed = json.loads(text.strip())
@@ -327,8 +321,7 @@ def detect_communities(graph: ExtractedGraph) -> tuple[Community, ...]:
         rel_counts[root] = rel_counts.get(root, 0) + 1
 
     ordered = sorted(
-        (tuple(sorted(members)), rel_counts.get(root, 0))
-        for root, members in groups.items()
+        (tuple(sorted(members)), rel_counts.get(root, 0)) for root, members in groups.items()
     )
     return tuple(
         Community(id=f"c{i}", member_names=members, relation_count=count)
@@ -343,9 +336,7 @@ def _community_source_doc_ids(community: Community, graph: ExtractedGraph) -> tu
     """该社区内部关系贡献的 source_doc_id（升序去重）；社区是连通分量，按 source 端筛即覆盖内部边。"""
     members = set(community.member_names)
     ids = {
-        rel.source_doc_id
-        for rel in graph.relations
-        if rel.source in members and rel.source_doc_id
+        rel.source_doc_id for rel in graph.relations if rel.source in members and rel.source_doc_id
     }
     return tuple(sorted(ids))
 
@@ -354,17 +345,13 @@ def _summarize_user_prompt(community: Community, graph: ExtractedGraph) -> str:
     """构造摘要 user 提示：列出成员与内部关系（确定性升序），供模型生成主题综述。"""
     members = set(community.member_names)
     lines = sorted(
-        f"{r.source} --{r.kind}--> {r.target}"
-        for r in graph.relations
-        if r.source in members
+        f"{r.source} --{r.kind}--> {r.target}" for r in graph.relations if r.source in members
     )
     rel_block = "\n".join(lines) if lines else "（无显式关系）"
     return f"社区成员：{'、'.join(community.member_names)}\n关系：\n{rel_block}"
 
 
-def _placeholder_summary(
-    community: Community, source_doc_ids: tuple[str, ...]
-) -> CommunitySummary:
+def _placeholder_summary(community: Community, source_doc_ids: tuple[str, ...]) -> CommunitySummary:
     """provider 不可用时的确定性占位摘要：仍是合成、仍带血缘、绝不含数字。"""
     members = "、".join(community.member_names)
     text = (

@@ -12,16 +12,18 @@ import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
+from ragspine.agent.query_tools import execute_query_metric
+from ragspine.common.core import DEFAULT_FACT_DB
+from ragspine.extraction.extractors import pptx_extractor, xlsx_extractor
 from ragspine.fixtures.synthetic_deck import (
     GT_PATH,
     PPTX_PATH,
     XLSX_PATH,
+)
+from ragspine.fixtures.synthetic_deck import (
     main as make_synthetic,
 )
-from ragspine.extraction.extractors import pptx_extractor, xlsx_extractor
 from ragspine.storage.fact_store import FactStore, SqliteFactStore
-from ragspine.agent.query_tools import execute_query_metric
-from ragspine.common.core import DEFAULT_FACT_DB
 
 
 def _ensure_synthetic() -> None:
@@ -64,8 +66,10 @@ def _fmt_value(value: float, unit: str) -> str:
 
 def _report_found(label: str, res: dict) -> None:
     print(f"  [{label}]")
-    print(f"    -> {_fmt_value(res['value'], res['unit'])}  "
-          f"({res['metric_code']} / {res['entity']} / {res['period']})")
+    print(
+        f"    -> {_fmt_value(res['value'], res['unit'])}  "
+        f"({res['metric_code']} / {res['entity']} / {res['period']})"
+    )
     print(f"    血缘: {res['source']['doc']}  @  {res['source']['locator']}")
 
 
@@ -100,24 +104,36 @@ def main() -> int:
         return res
 
     # (1) 表格路径：REVENUE / ACME_HK / FY2024
-    check_found("1. 表格路径 REVENUE/ACME_HK/FY2024",
-                "REVENUE", "ACME Hong Kong", "FY2024",
-                ("REVENUE", "ACME_HK", "FY", "2024"))
+    check_found(
+        "1. 表格路径 REVENUE/ACME_HK/FY2024",
+        "REVENUE",
+        "ACME Hong Kong",
+        "FY2024",
+        ("REVENUE", "ACME_HK", "FY", "2024"),
+    )
 
     # (2) 中文同义词：营收 / 香港 / 2023
-    check_found("2. 中文同义词 营收/香港/2023",
-                "营收", "香港", "2023",
-                ("REVENUE", "ACME_HK", "FY", "2023"))
+    check_found(
+        "2. 中文同义词 营收/香港/2023", "营收", "香港", "2023", ("REVENUE", "ACME_HK", "FY", "2023")
+    )
 
     # (3) 图表内嵌数据路径：PROFIT / ACME_GROUP / FY2024
-    check_found("3. 图表内嵌数据 PROFIT/ACME_GROUP/FY2024",
-                "PROFIT", "ACME Group", "FY2024",
-                ("PROFIT", "ACME_GROUP", "FY", "2024"))
+    check_found(
+        "3. 图表内嵌数据 PROFIT/ACME_GROUP/FY2024",
+        "PROFIT",
+        "ACME Group",
+        "FY2024",
+        ("PROFIT", "ACME_GROUP", "FY", "2024"),
+    )
 
     # (4) xlsx + HY 期间：NEWSALES / ACME_HK / 2024H1
-    check_found("4. xlsx HY期间 NEWSALES/ACME_HK/2024H1",
-                "NEWSALES", "ACME_HK", "2024H1",
-                ("NEWSALES", "ACME_HK", "HY", "2024H1"))
+    check_found(
+        "4. xlsx HY期间 NEWSALES/ACME_HK/2024H1",
+        "NEWSALES",
+        "ACME_HK",
+        "2024H1",
+        ("NEWSALES", "ACME_HK", "HY", "2024H1"),
+    )
 
     # (5) 防编造：ROE / ACME_CN / FY2024 必须 not_found
     res5 = execute_query_metric(store, "ROE", "ACME China", "FY2024")
@@ -134,8 +150,10 @@ def main() -> int:
     prev = execute_query_metric(store, "REVENUE", "ACME_HK", "FY2023")
     if cur["status"] == "found" and prev["status"] == "found":
         yoy = (cur["value"] - prev["value"]) / prev["value"] * 100
-        print(f"    FY2024={_fmt_value(cur['value'], cur['unit'])}  "
-              f"FY2023={_fmt_value(prev['value'], prev['unit'])}  YoY={yoy:+.1f}%")
+        print(
+            f"    FY2024={_fmt_value(cur['value'], cur['unit'])}  "
+            f"FY2023={_fmt_value(prev['value'], prev['unit'])}  YoY={yoy:+.1f}%"
+        )
         exp_yoy = (2680.0 - 2350.0) / 2350.0 * 100
         if abs(yoy - exp_yoy) > 1e-6:
             failures.append(f"6: YoY 失配 期望 {exp_yoy:.4f} 实际 {yoy:.4f}")
@@ -147,7 +165,9 @@ def main() -> int:
     print(f"全量比对真值（{len(gt)} 条去重事实）...")
     for key, truth in gt.items():
         metric, entity, ptype, period = key
-        res = execute_query_metric(store, metric, entity, period if ptype != "FY" else f"FY{period}")
+        res = execute_query_metric(
+            store, metric, entity, period if ptype != "FY" else f"FY{period}"
+        )
         if res["status"] != "found":
             failures.append(f"全量[{key}]: 期望 found，实际 {res['status']}")
         elif abs(res["value"] - truth["value"]) > 1e-6:

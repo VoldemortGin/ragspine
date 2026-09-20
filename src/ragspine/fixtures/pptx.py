@@ -50,7 +50,7 @@ SCANNED_PDF_PATH = ROOT_DIR / "data" / "fixtures" / "pdf" / "scanned.pdf"
 
 # --- 语义色（与 Excel 线同一套：颜色编码属性，user story 13）-----------------
 YELLOW = "FFFF00"  # 黄色 = 新产品线
-GREEN = "92D050"   # 绿色 = 成熟产品线
+GREEN = "92D050"  # 绿色 = 成熟产品线
 
 _A_NS = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
 
@@ -92,6 +92,7 @@ ACCENT1_FALLBACK = "4F81BD"
 # 主题色解析（从 ppt/theme1.xml 读 accent1，确保 ground truth 与实际写入一致）
 # ---------------------------------------------------------------------------
 
+
 def _resolve_accent1_rgb(prs: PresentationDoc) -> str:
     """从 slide master 关联的 theme1.xml 解析 accent1 的真实 'RRGGBB'。"""
     master = prs.slide_masters[0]
@@ -116,6 +117,7 @@ def _resolve_accent1_rgb(prs: PresentationDoc) -> str:
 # ---------------------------------------------------------------------------
 # 构建幻灯片
 # ---------------------------------------------------------------------------
+
 
 def _set_cell_rgb(cell: _Cell, rgb_hex: str) -> None:
     cell.fill.solid()  # type: ignore[no-untyped-call]
@@ -247,6 +249,7 @@ def _build_slide2(prs: PresentationDoc) -> dict[str, object]:
 # note fragments 期望（含数字句段 + glossary 命中）
 # ---------------------------------------------------------------------------
 
+
 def _note_fragments_truth() -> list[dict[str, object]]:
     """叙述层含数字句段期望（确定性规则：含 digit；glossary_hits 经词典命中）。
 
@@ -277,10 +280,21 @@ def _note_fragments_truth() -> list[dict[str, object]]:
 # scanned.pdf 的三页都是 digital.pdf 表格页的渲染图，真值沿用其表格数值。
 # 表格布局：R1 = 期间表头（C1 空 + FY2022/FY2023/FY2024）；R2..R4 = REVENUE/NEWSALES/PROFIT。
 _OCR_TABLE_LAYOUT = {
-    "R1C2": "FY2022", "R1C3": "FY2023", "R1C4": "FY2024",
-    "R2C1": "REVENUE", "R2C2": "2100", "R2C3": "2350", "R2C4": "2680",
-    "R3C1": "NEWSALES", "R3C2": "3800", "R3C3": "4200", "R3C4": "4750",
-    "R4C1": "PROFIT", "R4C2": "1900", "R4C3": "2050", "R4C4": "2210",
+    "R1C2": "FY2022",
+    "R1C3": "FY2023",
+    "R1C4": "FY2024",
+    "R2C1": "REVENUE",
+    "R2C2": "2100",
+    "R2C3": "2350",
+    "R2C4": "2680",
+    "R3C1": "NEWSALES",
+    "R3C2": "3800",
+    "R3C3": "4200",
+    "R3C4": "4750",
+    "R4C1": "PROFIT",
+    "R4C2": "1900",
+    "R4C3": "2050",
+    "R4C4": "2210",
 }
 # 低置信注入：每页同样两格 confidence < 0.85（其余 0.99）。
 _OCR_LOW_CONF_REFS = {"R2C2", "R4C4"}  # REVENUE·FY2022 与 PROFIT·FY2024
@@ -318,14 +332,16 @@ def _ocr_fake_vectors() -> dict[str, object]:
     pages = [_ocr_page_result(n) for n in (1, 2, 3)]
     expected_grids = []
     for n in (1, 2, 3):
-        expected_grids.append({
-            "sheet": f"page{n}_table1",
-            "n_rows": 4,
-            "n_cols": 4,
-            "n_cells": len(_OCR_TABLE_LAYOUT),
-            "low_confidence_refs": sorted(_OCR_LOW_CONF_REFS),
-            "expect_warning": True,
-        })
+        expected_grids.append(
+            {
+                "sheet": f"page{n}_table1",
+                "n_rows": 4,
+                "n_cols": 4,
+                "n_cells": len(_OCR_TABLE_LAYOUT),
+                "low_confidence_refs": sorted(_OCR_LOW_CONF_REFS),
+                "expect_warning": True,
+            }
+        )
     return {
         "source_pdf": SCANNED_PDF_REL,
         "min_confidence": _OCR_MIN_CONFIDENCE,
@@ -343,6 +359,7 @@ def _ocr_fake_vectors() -> dict[str, object]:
 # ---------------------------------------------------------------------------
 # 组装 + 落盘 + 自校验
 # ---------------------------------------------------------------------------
+
 
 def build_deck() -> dict[str, Any]:
     prs = Presentation()
@@ -364,9 +381,7 @@ def build_deck() -> dict[str, Any]:
         "note_fragments": _note_fragments_truth(),
         "ocr_fake": _ocr_fake_vectors(),
     }
-    GT_PATH.write_text(
-        json.dumps(ground_truth, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    GT_PATH.write_text(json.dumps(ground_truth, ensure_ascii=False, indent=2), encoding="utf-8")
     return ground_truth
 
 
@@ -399,6 +414,7 @@ def self_verify(gt: dict[str, Any]) -> None:
     # theme 行（Term Life）：R4C2(=cell(3,1)) 是 theme 色 accent1
     assert t1.cell(3, 0).text == "Term Life"
     from pptx.enum.dml import MSO_FILL
+
     tc = t1.cell(3, 1).fill.fore_color
     assert tc.type == MSO_COLOR_TYPE.SCHEME, tc.type
     assert tc.theme_color == MSO_THEME_COLOR.ACCENT_1, tc.theme_color
@@ -451,7 +467,9 @@ def main() -> None:
     print(f"  ground_truth: {GT_PATH.name}")
     print(f"  theme accent1 -> {gt['theme']['accent1_resolved_rgb']}")
     print(f"  note fragments: {len(gt['note_fragments'])} 条")
-    print(f"  OCR fake 向量: {len(gt['ocr_fake']['pages'])} 页, 期望入队 {gt['ocr_fake']['expected_total_enqueued']}")
+    print(
+        f"  OCR fake 向量: {len(gt['ocr_fake']['pages'])} 页, 期望入队 {gt['ocr_fake']['expected_total_enqueued']}"
+    )
 
 
 if __name__ == "__main__":

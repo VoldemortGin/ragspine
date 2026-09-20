@@ -137,9 +137,7 @@ def _extract_chart(
     for cat in categories:
         p = normalize_period(cat)
         if p is None:
-            warnings.append(
-                f"slide={slide_idx},chart={chart_idx}: 无法识别图表类目 '{cat}'，跳过"
-            )
+            warnings.append(f"slide={slide_idx},chart={chart_idx}: 无法识别图表类目 '{cat}'，跳过")
         parsed_cats.append(p)
 
     for series in plot.series:
@@ -150,9 +148,7 @@ def _extract_chart(
             )
             continue
         unit = unit_for_metric(metric_code) or "USD_M"
-        for cat_raw, parsed, value in zip(
-            categories, parsed_cats, series.values, strict=False
-        ):
+        for cat_raw, parsed, value in zip(categories, parsed_cats, series.values, strict=False):
             if parsed is None or value is None:
                 continue
             period_type, period = parsed

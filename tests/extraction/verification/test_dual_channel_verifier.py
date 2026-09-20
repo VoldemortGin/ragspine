@@ -334,14 +334,14 @@ def test_no_queue_does_not_raise_on_conflict_and_single():
 def test_n_enqueued_equals_conflicts_plus_single_only(queue):
     """story #22 n_enqueued == 冲突数 + 单通道独有数（agreed 不计入）。"""
     facts_a = [
-        _mk("REVENUE", 2680.0, "a"),   # agreed
-        _mk("NEWSALES", 4750.0, "a"),    # conflict
-        _mk("PROFIT", 2210.0, "a"),   # only_in_a
+        _mk("REVENUE", 2680.0, "a"),  # agreed
+        _mk("NEWSALES", 4750.0, "a"),  # conflict
+        _mk("PROFIT", 2210.0, "a"),  # only_in_a
     ]
     facts_b = [
-        _mk("REVENUE", 2680.0, "b"),   # agreed
-        _mk("NEWSALES", 9999.0, "b"),    # conflict
-        _mk("ROE", 14.0, "b"),      # only_in_b
+        _mk("REVENUE", 2680.0, "b"),  # agreed
+        _mk("NEWSALES", 9999.0, "b"),  # conflict
+        _mk("ROE", 14.0, "b"),  # only_in_b
     ]
     result = verify(facts_a, facts_b, queue=queue)
 
@@ -415,8 +415,6 @@ def test_multiple_metrics_independent_alignment():
     result = verify(facts_a, facts_b)
 
     assert _key_set(result.agreed) == {_mk("REVENUE", 100.0, "a").dim_key()}
-    assert {tuple(c["dim_key"]) for c in result.conflicts} == {
-        _mk("NEWSALES", 0, "a").dim_key()
-    }
+    assert {tuple(c["dim_key"]) for c in result.conflicts} == {_mk("NEWSALES", 0, "a").dim_key()}
     assert _key_set(result.only_in_a) == {_mk("PROFIT", 0, "a").dim_key()}
     assert _key_set(result.only_in_b) == {_mk("ROE", 0, "b").dim_key()}

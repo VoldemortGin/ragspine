@@ -164,9 +164,9 @@ def _grid_has_candidate_data(grid: StyledGrid) -> bool:
     版式演示表」：前者入复核请人工指认实体，后者静默跳过（不滥发复核）。
     """
     periods = [
-        col for col in range(2, grid.n_cols + 1)
-        if (raw := _grid_value(grid, col, 1)) is not None
-        and normalize_period(str(raw)) is not None
+        col
+        for col in range(2, grid.n_cols + 1)
+        if (raw := _grid_value(grid, col, 1)) is not None and normalize_period(str(raw)) is not None
     ]
     if not periods:
         return False
@@ -199,9 +199,7 @@ def _extract_facts_from_grid(
     a1 = cast("str | None", _grid_value(grid, 1, 1))
     entity = normalize_entity(a1) or normalize_entity(grid.sheet)
     if entity is None:
-        warnings.append(
-            f"sheet={grid.sheet}: A1/sheet 名无法解析实体，跳过该表"
-        )
+        warnings.append(f"sheet={grid.sheet}: A1/sheet 名无法解析实体，跳过该表")
         # entity_unresolved=True；第 4 位仅当该表确含可抽取数据（指标×期间×数值）时
         # 报 has_candidate_data，供编排层判断是否「整文件不可归因」入复核（绝不臆造实体）。
         return facts, warnings, n_tags_applied, _grid_has_candidate_data(grid)
@@ -215,8 +213,7 @@ def _extract_facts_from_grid(
         if parsed is None:
             if raw is not None:
                 warnings.append(
-                    f"sheet={grid.sheet}!{get_column_letter(col)}1: "
-                    f"无法识别期间 '{raw}'，跳过该列"
+                    f"sheet={grid.sheet}!{get_column_letter(col)}1: 无法识别期间 '{raw}'，跳过该列"
                 )
             continue
         periods[col] = (parsed, str(raw).strip())
@@ -224,9 +221,7 @@ def _extract_facts_from_grid(
     # 指标行：第 2 行起 A 列。
     for row in range(2, grid.n_rows + 1):
         metric_label = _grid_value(grid, 1, row)
-        metric_code = (
-            normalize_metric(str(metric_label)) if metric_label is not None else None
-        )
+        metric_code = normalize_metric(str(metric_label)) if metric_label is not None else None
         if metric_code is None:
             if metric_label is not None:
                 warnings.append(
@@ -332,8 +327,7 @@ def _ingest_grids(
     active_mapping = registry.get_active(source_doc_id)
     if active_mapping is None:
         report.warnings.append(
-            f"scope={source_doc_id} 无 active 颜色映射（color mapping 未确认），"
-            "相关颜色 tags 置空"
+            f"scope={source_doc_id} 无 active 颜色映射（color mapping 未确认），相关颜色 tags 置空"
         )
 
     all_facts: list[Fact] = []
@@ -344,9 +338,7 @@ def _ingest_grids(
     for grid in grids:
         # grid 级告警（条件格式 / 来源不可靠等）汇聚进报告。
         report.warnings.extend(grid.warnings)
-        cell_tags = (
-            apply_mapping(grid, active_mapping) if active_mapping is not None else {}
-        )
+        cell_tags = apply_mapping(grid, active_mapping) if active_mapping is not None else {}
         facts, warnings, n_tags, unattributable = _extract_facts_from_grid(
             grid, cell_tags, extractor_version
         )
@@ -365,25 +357,29 @@ def _ingest_grids(
     # （绝不臆造实体；多 sheet 工作簿有主数据表时，辅助表按既有语义静默跳过）。
     if not any_entity_resolved:
         for grid in unattributable_grids:
-            enqueues.append((
-                "实体无法解析，需人工指认",
-                {
-                    "source_doc_id": grid.source_doc_id,
-                    "sheet": grid.sheet,
-                    "file_hash": grid.source_file_hash,
-                },
-                f"{grid.source_doc_id}!{grid.sheet}",
-            ))
+            enqueues.append(
+                (
+                    "实体无法解析，需人工指认",
+                    {
+                        "source_doc_id": grid.source_doc_id,
+                        "sheet": grid.sheet,
+                        "file_hash": grid.source_file_hash,
+                    },
+                    f"{grid.source_doc_id}!{grid.sheet}",
+                )
+            )
 
     if needs_color_mapping:
         report.warnings.append(
             f"scope={source_doc_id} 颜色映射未确认但文件含颜色编码，颜色 tag 未翻译，入复核"
         )
-        enqueues.append((
-            "颜色映射未确认，需 SME 确认图例",
-            {"source_doc_id": source_doc_id, "file_hash": report.file_hash},
-            source_doc_id,
-        ))
+        enqueues.append(
+            (
+                "颜色映射未确认，需 SME 确认图例",
+                {"source_doc_id": source_doc_id, "file_hash": report.file_hash},
+                source_doc_id,
+            )
+        )
 
     report.n_facts_extracted = len(all_facts)
 
@@ -455,8 +451,13 @@ def ingest_excel(
         return report
 
     _ingest_grids(
-        report, grids, store, registry, queue,
-        dry_run=dry_run, extractor_version=extractor_version,
+        report,
+        grids,
+        store,
+        registry,
+        queue,
+        dry_run=dry_run,
+        extractor_version=extractor_version,
     )
 
     if dry_run:
@@ -538,14 +539,23 @@ def ingest_file(
 
     if suffix == ".pdf":
         _ingest_pdf(
-            report, path, store, registry, queue,
-            dry_run=dry_run, valid_as_of=valid_as_of,
+            report,
+            path,
+            store,
+            registry,
+            queue,
+            dry_run=dry_run,
+            valid_as_of=valid_as_of,
             grid_extractor=grid_extractor,
             ocr_backend=ocr_backend,
         )
         if not dry_run:
             _record_manifest(
-                report, path, manifest, batch_id, "pdf",
+                report,
+                path,
+                manifest,
+                batch_id,
+                "pdf",
                 failed=report.status == "failed",
             )
         return report
@@ -554,9 +564,7 @@ def ingest_file(
     if spec is None:
         report.status = "failed"
         report.error = f"不支持的文件格式: {suffix or '(无后缀)'}"
-        _record_manifest(
-            report, path, manifest, batch_id, suffix.lstrip(".") or "?", failed=True
-        )
+        _record_manifest(report, path, manifest, batch_id, suffix.lstrip(".") or "?", failed=True)
         return report
 
     extractor, extractor_version, file_type = spec
@@ -574,8 +582,13 @@ def ingest_file(
         return report
 
     _ingest_grids(
-        report, grids, store, registry, queue,
-        dry_run=dry_run, extractor_version=extractor_version,
+        report,
+        grids,
+        store,
+        registry,
+        queue,
+        dry_run=dry_run,
+        extractor_version=extractor_version,
         valid_as_of=valid_as_of,
     )
     if not dry_run:
@@ -622,10 +635,15 @@ def _ingest_pdf(
             "原生优先：请提供 pptx 源后再入库"
         )
         _enqueue_or_count(
-            report, queue, dry_run,
+            report,
+            queue,
+            dry_run,
             "疑似PowerPoint导出PDF，请提供pptx源",
-            {"source_doc_id": report.source_doc_id, "file_hash": report.file_hash,
-             "origin_meta": decision.origin_meta},
+            {
+                "source_doc_id": report.source_doc_id,
+                "file_hash": report.file_hash,
+                "origin_meta": decision.origin_meta,
+            },
             report.source_doc_id,
         )
         return
@@ -638,8 +656,13 @@ def _ingest_pdf(
             report.error = f"{type(exc).__name__}: {exc}"
             return
         _ingest_grids(
-            report, grids, store, registry, queue,
-            dry_run=dry_run, extractor_version=extractor.version,
+            report,
+            grids,
+            store,
+            registry,
+            queue,
+            dry_run=dry_run,
+            extractor_version=extractor.version,
             valid_as_of=valid_as_of,
         )
         return
@@ -649,9 +672,7 @@ def _ingest_pdf(
     # （dry_run 不传 queue -> 零写入）。
     ocr = ocr_backend or pdf_scanned_extractor.PdfSpineOcrBackend()
     try:
-        grids = pdf_scanned_extractor.extract_grids(
-            path, ocr, queue=None if dry_run else queue
-        )
+        grids = pdf_scanned_extractor.extract_grids(path, ocr, queue=None if dry_run else queue)
     except Exception as exc:  # noqa: BLE001 —— 失败不裸抛，落进报告
         report.status = "failed"
         report.error = f"{type(exc).__name__}: {exc}"
@@ -663,16 +684,25 @@ def _ingest_pdf(
             f"{report.source_doc_id} 分诊为 {decision.verdict}，OCR 未识别出任何表格，入复核"
         )
         _enqueue_or_count(
-            report, queue, dry_run,
+            report,
+            queue,
+            dry_run,
             "扫描型PDF OCR未识别出表格，需人工复核",
-            {"source_doc_id": report.source_doc_id, "file_hash": report.file_hash,
-             "verdict": decision.verdict},
+            {
+                "source_doc_id": report.source_doc_id,
+                "file_hash": report.file_hash,
+                "verdict": decision.verdict,
+            },
             report.source_doc_id,
         )
         return
 
     _ingest_grids(
-        report, grids, store, registry, queue,
+        report,
+        grids,
+        store,
+        registry,
+        queue,
         dry_run=dry_run,
         extractor_version=getattr(ocr, "version", pdf_scanned_extractor.EXTRACTOR_VERSION),
         valid_as_of=valid_as_of,
@@ -708,9 +738,7 @@ def _record_manifest(
     if manifest is None or batch_id is None:
         return
     if failed:
-        manifest.record_input(
-            batch_id, str(path), None, file_type, failed=True, error=report.error
-        )
+        manifest.record_input(batch_id, str(path), None, file_type, failed=True, error=report.error)
         return
     manifest.record_input(
         batch_id,

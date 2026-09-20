@@ -49,7 +49,8 @@ def _replace_plan_config(
             path=entry.path,
             source=(
                 "config"
-                if entry.path in overridden or (prefix is not None and entry.path.startswith(prefix))
+                if entry.path in overridden
+                or (prefix is not None and entry.path.startswith(prefix))
                 else entry.source
             ),
         )
@@ -186,19 +187,25 @@ class RAGSpine:
         )
         if retrieval is not None:
             resolved = resolved.model_copy(
-                update={"retrieval": resolved.retrieval.model_copy(update={
-                    "retrieval_mode": retrieval.retrieval_mode,
-                    "embedding": retrieval.embedding,
-                    "vector_store": retrieval.vector_store,
-                    "reranker": retrieval.reranker,
-                    "postprocessor": retrieval.postprocessor,
-                })}
+                update={
+                    "retrieval": resolved.retrieval.model_copy(
+                        update={
+                            "retrieval_mode": retrieval.retrieval_mode,
+                            "embedding": retrieval.embedding,
+                            "vector_store": retrieval.vector_store,
+                            "reranker": retrieval.reranker,
+                            "postprocessor": retrieval.postprocessor,
+                        }
+                    )
+                }
             )
             plan = _replace_plan_config(plan, resolved, prefix="retrieval.")
             assembled_retrieval = retrieval
         if graph is not None:
             resolved = resolved.model_copy(
-                update={"graph": resolved.graph.model_copy(update={"mode": normalize_graph_mode(graph)})}
+                update={
+                    "graph": resolved.graph.model_copy(update={"mode": normalize_graph_mode(graph)})
+                }
             )
             plan = _replace_plan_config(plan, resolved, paths={"graph.mode"})
         selected_provider = provider

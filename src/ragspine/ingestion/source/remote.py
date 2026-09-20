@@ -120,9 +120,7 @@ class NotionConnector:
         client, owns = _http_client(self._client)
         try:
             for page_id in self._page_ids:
-                page = client.get(
-                    f"{self._base_url}/pages/{page_id}", headers=headers
-                ).json()
+                page = client.get(f"{self._base_url}/pages/{page_id}", headers=headers).json()
                 blocks = client.get(
                     f"{self._base_url}/blocks/{page_id}/children", headers=headers
                 ).json()

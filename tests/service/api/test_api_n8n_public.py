@@ -48,9 +48,7 @@ def _make_client(tmp_path, *, run_enabled=False, api_key=API_KEY, provider=None)
         n8n_api_key=api_key,
         n8n_store_path=str(tmp_path / "n8n_store"),
     )
-    app = create_app(
-        config, provider=provider or MockProvider(), queue=FakeQueue()
-    )
+    app = create_app(config, provider=provider or MockProvider(), queue=FakeQueue())
     return TestClient(app)
 
 
@@ -145,9 +143,7 @@ def test_workflow_crud_roundtrip(client):
 
 
 def test_put_missing_workflow_is_404(client):
-    resp = client.put(
-        "/api/v1/workflows/nonexistent", headers=HEADERS, json=_minimal_body()
-    )
+    resp = client.put("/api/v1/workflows/nonexistent", headers=HEADERS, json=_minimal_body())
     assert resp.status_code == 404
     assert resp.json() == {"message": "Not Found"}
 
@@ -164,9 +160,7 @@ def test_create_with_readonly_field_is_400(client):
 
 
 def test_create_with_unknown_field_is_400(client):
-    resp = client.post(
-        "/api/v1/workflows", headers=HEADERS, json=_minimal_body() | {"bogus": 1}
-    )
+    resp = client.post("/api/v1/workflows", headers=HEADERS, json=_minimal_body() | {"bogus": 1})
     assert resp.status_code == 400
     assert resp.json() == {"message": "request/body must NOT have additional properties"}
 
@@ -182,7 +176,8 @@ def test_create_missing_required_is_400(client):
 def test_put_validates_like_post(client):
     wf = _create(client, _minimal_body())
     resp = client.put(
-        f"/api/v1/workflows/{wf['id']}", headers=HEADERS,
+        f"/api/v1/workflows/{wf['id']}",
+        headers=HEADERS,
         json=_minimal_body() | {"id": "injected"},
     )
     assert resp.status_code == 400
@@ -217,14 +212,10 @@ def test_workflow_list_filters(client):
     _create(client, _minimal_body("beta"))
     _activate(client, alpha["id"])
 
-    by_name = client.get(
-        "/api/v1/workflows", headers=HEADERS, params={"name": "alpha"}
-    ).json()
+    by_name = client.get("/api/v1/workflows", headers=HEADERS, params={"name": "alpha"}).json()
     assert [w["name"] for w in by_name["data"]] == ["alpha"]
 
-    by_active = client.get(
-        "/api/v1/workflows", headers=HEADERS, params={"active": "true"}
-    ).json()
+    by_active = client.get("/api/v1/workflows", headers=HEADERS, params={"active": "true"}).json()
     assert [w["id"] for w in by_active["data"]] == [alpha["id"]]
 
 
@@ -232,9 +223,7 @@ def test_workflow_pagination_with_cursor(client):
     for i in range(3):
         _create(client, _minimal_body(f"wf-{i}"))
 
-    page1 = client.get(
-        "/api/v1/workflows", headers=HEADERS, params={"limit": 2}
-    ).json()
+    page1 = client.get("/api/v1/workflows", headers=HEADERS, params={"limit": 2}).json()
     assert len(page1["data"]) == 2
     assert page1["nextCursor"]
     assert json.loads(base64.b64decode(page1["nextCursor"])) == {"limit": 2, "offset": 2}
@@ -250,9 +239,7 @@ def test_workflow_pagination_with_cursor(client):
 
 
 def test_invalid_cursor_is_400(client):
-    resp = client.get(
-        "/api/v1/workflows", headers=HEADERS, params={"cursor": "@@not-base64@@"}
-    )
+    resp = client.get("/api/v1/workflows", headers=HEADERS, params={"cursor": "@@not-base64@@"})
     assert resp.status_code == 400
     assert set(resp.json()) == {"message"}
 
@@ -275,9 +262,7 @@ def test_webhook_trigger_success_and_execution_recorded(tmp_path):
     result = resp.json()
     assert isinstance(result["format_output"], str)
 
-    listed = client.get(
-        "/api/v1/executions", headers=HEADERS, params={"workflowId": wf["id"]}
-    )
+    listed = client.get("/api/v1/executions", headers=HEADERS, params={"workflowId": wf["id"]})
     assert listed.status_code == 200
     body = listed.json()
     assert body["nextCursor"] is None
@@ -295,7 +280,8 @@ def test_webhook_trigger_success_and_execution_recorded(tmp_path):
     assert "data" not in execution  # 不带 includeData 时无 data
 
     detail = client.get(
-        f"/api/v1/executions/{execution['id']}", headers=HEADERS,
+        f"/api/v1/executions/{execution['id']}",
+        headers=HEADERS,
         params={"includeData": "true"},
     )
     assert detail.status_code == 200
@@ -322,7 +308,7 @@ def test_webhook_method_mismatch_is_404(tmp_path):
     _setup_webhook_workflow(client)  # httpMethod=POST
     resp = client.get("/webhook/demo-hook")
     assert resp.status_code == 404
-    assert 'GET demo-hook' in resp.json()["message"]
+    assert "GET demo-hook" in resp.json()["message"]
 
 
 def test_webhook_disabled_run_is_503(tmp_path):
@@ -339,14 +325,29 @@ def test_webhook_default_method_is_get_and_path_stripped(tmp_path):
     body = {
         "name": "Get Hook",
         "nodes": [
-            {"id": "g1", "name": "Hook", "type": "n8n-nodes-base.webhook",
-             "typeVersion": 2, "position": [0, 0],
-             "parameters": {"path": "/get-hook/"}},
-            {"id": "g2", "name": "Echo", "type": "n8n-nodes-base.set",
-             "typeVersion": 3.4, "position": [220, 0],
-             "parameters": {"assignments": {"assignments": [
-                 {"id": "a1", "name": "result", "value": "ok", "type": "string"}]},
-                 "options": {}}},
+            {
+                "id": "g1",
+                "name": "Hook",
+                "type": "n8n-nodes-base.webhook",
+                "typeVersion": 2,
+                "position": [0, 0],
+                "parameters": {"path": "/get-hook/"},
+            },
+            {
+                "id": "g2",
+                "name": "Echo",
+                "type": "n8n-nodes-base.set",
+                "typeVersion": 3.4,
+                "position": [220, 0],
+                "parameters": {
+                    "assignments": {
+                        "assignments": [
+                            {"id": "a1", "name": "result", "value": "ok", "type": "string"}
+                        ]
+                    },
+                    "options": {},
+                },
+            },
         ],
         "connections": {"Hook": {"main": [[{"node": "Echo", "type": "main", "index": 0}]]}},
         "settings": {},
@@ -364,12 +365,22 @@ def test_webhook_run_failure_is_500_and_records_error(tmp_path):
     body = {
         "name": "Err Hook",
         "nodes": [
-            {"id": "e1", "name": "Hook", "type": "n8n-nodes-base.webhook",
-             "typeVersion": 2, "position": [0, 0],
-             "parameters": {"httpMethod": "POST", "path": "err-hook"}},
-            {"id": "e2", "name": "Fetch", "type": "n8n-nodes-base.httpRequest",
-             "typeVersion": 4.2, "position": [220, 0],
-             "parameters": {"url": "https://example.com"}},
+            {
+                "id": "e1",
+                "name": "Hook",
+                "type": "n8n-nodes-base.webhook",
+                "typeVersion": 2,
+                "position": [0, 0],
+                "parameters": {"httpMethod": "POST", "path": "err-hook"},
+            },
+            {
+                "id": "e2",
+                "name": "Fetch",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [220, 0],
+                "parameters": {"url": "https://example.com"},
+            },
         ],
         "connections": {"Hook": {"main": [[{"node": "Fetch", "type": "main", "index": 0}]]}},
         "settings": {},
@@ -382,7 +393,8 @@ def test_webhook_run_failure_is_500_and_records_error(tmp_path):
     assert resp.json() == {"message": "Error in workflow"}
 
     listed = client.get(
-        "/api/v1/executions", headers=HEADERS,
+        "/api/v1/executions",
+        headers=HEADERS,
         params={"workflowId": wf["id"], "includeData": "true"},
     ).json()
     (execution,) = listed["data"]
@@ -412,9 +424,7 @@ def test_executions_list_desc_filter_and_delete(tmp_path):
     client = _make_client(tmp_path, run_enabled=True)
     wf = _setup_webhook_workflow(client)
     for question in ("one", "two"):
-        assert client.post(
-            "/webhook/demo-hook", json={"question": question}
-        ).status_code == 200
+        assert client.post("/webhook/demo-hook", json={"question": question}).status_code == 200
 
     listed = client.get("/api/v1/executions", headers=HEADERS).json()
     ids = [e["id"] for e in listed["data"]]
@@ -454,13 +464,9 @@ def test_executions_pagination_last_id_cursor(tmp_path):
     client = _make_client(tmp_path, run_enabled=True)
     _setup_webhook_workflow(client)
     for question in ("a", "b", "c"):
-        assert client.post(
-            "/webhook/demo-hook", json={"question": question}
-        ).status_code == 200
+        assert client.post("/webhook/demo-hook", json={"question": question}).status_code == 200
 
-    page1 = client.get(
-        "/api/v1/executions", headers=HEADERS, params={"limit": 2}
-    ).json()
+    page1 = client.get("/api/v1/executions", headers=HEADERS, params={"limit": 2}).json()
     assert [e["id"] for e in page1["data"]] == [3, 2]
     assert json.loads(base64.b64decode(page1["nextCursor"])) == {"lastId": 2, "limit": 2}
 
@@ -487,8 +493,6 @@ def test_execution_store_caps_at_200(tmp_path):
 def test_store_skips_corrupt_files(tmp_path):
     root = tmp_path / "n8n_store"
     store = N8nStore(root)
-    store.save_workflow(
-        {"id": "good", "name": "ok", "createdAt": "2026-01-01T00:00:00.000Z"}
-    )
+    store.save_workflow({"id": "good", "name": "ok", "createdAt": "2026-01-01T00:00:00.000Z"})
     (root / "workflows" / "bad.json").write_text("{not json", encoding="utf-8")
     assert [w["id"] for w in store.list_workflows()] == ["good"]

@@ -39,7 +39,6 @@ from ragspine.agent.security_gate import (
 from ragspine.common.company_profile import DimensionSpec, DomainProfile
 from ragspine.storage.fact_store import Fact, SqliteFactStore, _compute_dim_key
 
-
 # ---------------------------------------------------------------------------
 # lab_metrology profile 构造（仿 _acme_profile：构造一个与金融默认完全不同的领域）
 # ---------------------------------------------------------------------------
@@ -164,6 +163,7 @@ def _lab_fact(
 # 证明 1：profile 构造 + frozen + 维度旗标
 # ===========================================================================
 
+
 def test_lab_profile_constructs_and_is_frozen():
     """lab profile 可构造；DomainProfile / DimensionSpec frozen（setattr raises）；
     measurement 维 kind=='measure' 且 whitelist_in_fabrication_check is False
@@ -172,7 +172,11 @@ def test_lab_profile_constructs_and_is_frozen():
     assert profile.home_company_name == "晟测材料实验室"
     assert profile.home_entity_code == "SH_LAB"
     assert tuple(d.name for d in profile.dimensions) == (
-        "measurement", "site", "batch", "specimen", "region"
+        "measurement",
+        "site",
+        "batch",
+        "specimen",
+        "region",
     )
 
     # DomainProfile frozen
@@ -198,6 +202,7 @@ def test_lab_profile_constructs_and_is_frozen():
 # ===========================================================================
 # 证明 2：tool schema 由任意维名驱动；派生维被排除
 # ===========================================================================
+
 
 def test_lab_schema_generalizes_to_arbitrary_dims(monkeypatch):
     """换上 lab profile 后，query_metric tool schema 的 properties 键 ==
@@ -226,15 +231,14 @@ def test_lab_schema_generalizes_to_arbitrary_dims(monkeypatch):
     # OpenAI 格式同样泛化（参数袋在 function.parameters 下）。
     tool_oai = query_tools_mod.build_query_metric_tool_openai(profile)
     oai_params = tool_oai["function"]["parameters"]
-    assert list(oai_params["properties"].keys()) == [
-        "measurement", "site", "batch", "specimen"
-    ]
+    assert list(oai_params["properties"].keys()) == ["measurement", "site", "batch", "specimen"]
     assert oai_params["required"] == ["measurement", "site", "batch"]
 
 
 # ===========================================================================
 # 证明 3：dim_key / 存储确定性读路径（blocker #4 resolution a）
 # ===========================================================================
+
 
 def test_lab_dim_key_distinguishes_non_temporal_identity_dim(tmp_path):
     """两条【仅 batch 不同】的 lab Fact（BATCH_A/BATCH_B）经 period 槽进入 dim_key，
@@ -313,6 +317,7 @@ def test_lab_fact_dimensions_bag_mirrors_identity_columns():
 # 证明 4：反幻觉（无 temporal 维 → 不剥离任何数字，最严格）
 # ===========================================================================
 
+
 def test_lab_fabrication_strips_nothing_without_temporal_dim(monkeypatch):
     """用 lab profile 重绑 qa_eval._PROFILE（_PROFILE_BOUND_MODULES 已含 qa_eval）后：
     - _fabrication_whitelist_re() is None（无 temporal 维 → 无白名单）；
@@ -348,6 +353,7 @@ def test_lab_fabrication_contrast_with_finance_default():
 # 证明 5：安全门泛化（配置驱动拒答，零硬编码金融竞品）
 # ===========================================================================
 
+
 def test_lab_security_gate_refuses_rival_lab():
     """SecurityGate 由 lab profile 的 external_entities + home_company_name 构造：
     问竞品实验室 -> REFUSE_OUT_OF_SCOPE，命中 '竞测实验室(RivalMetro)'，拒答文案含
@@ -355,9 +361,7 @@ def test_lab_security_gate_refuses_rival_lab():
     profile = _lab_profile()
     gate = SecurityGate(profile.external_entities, profile.home_company_name)
 
-    verdict = gate.screen(
-        raw_question="竞测实验室的抗拉强度是多少", metric=None
-    )
+    verdict = gate.screen(raw_question="竞测实验室的抗拉强度是多少", metric=None)
     assert verdict.decision == SECURITY_REFUSE_OUT_OF_SCOPE
     assert verdict.external_entity == "竞测实验室(RivalMetro)"
     assert verdict.message is not None
@@ -373,9 +377,7 @@ def test_lab_security_gate_allows_home_site():
     profile = _lab_profile()
     gate = SecurityGate(profile.external_entities, profile.home_company_name)
 
-    verdict = gate.screen(
-        raw_question="上海实验室 批次A 的抗拉强度是多少", metric=None
-    )
+    verdict = gate.screen(raw_question="上海实验室 批次A 的抗拉强度是多少", metric=None)
     assert verdict.decision == SECURITY_ALLOW
     assert verdict.external_entity is None
 
@@ -383,6 +385,7 @@ def test_lab_security_gate_allows_home_site():
 # ===========================================================================
 # 证明 6：金融默认未受影响（本测试只在自身 scope monkeypatch）
 # ===========================================================================
+
 
 def test_finance_default_profile_untouched_by_lab():
     """守护：lab 用例的 monkeypatch 只在各用例内（pytest fixture 自动还原），

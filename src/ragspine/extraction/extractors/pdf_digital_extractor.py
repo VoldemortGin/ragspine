@@ -37,8 +37,8 @@ from ragspine.extraction.ir import StyledCell, StyledGrid
 EXTRACTOR_VERSION = "pdf_digital_docling_v0"
 
 # 分诊阈值（沿用 pdf_router / scripts/classify_pdfs.py，库化前后规则一致）。
-TEXT_MIN_CHARS = 50      # 每页判定「有实质文本」的最少字符数。
-IMG_COVER_SCAN = 0.55    # 图片覆盖率超过此值视为「扫描底图」。
+TEXT_MIN_CHARS = 50  # 每页判定「有实质文本」的最少字符数。
+IMG_COVER_SCAN = 0.55  # 图片覆盖率超过此值视为「扫描底图」。
 
 
 def _normalize_text(text: object) -> str:
@@ -56,9 +56,7 @@ def _page_image_cover(page: pdfium.PdfPage) -> float:
     width, height = page.get_size()
     page_area = (width * height) or 1.0
     cover = 0.0
-    for obj in page.get_objects(
-        filter=(pdfium_raw.FPDF_PAGEOBJ_IMAGE,), max_depth=15
-    ):
+    for obj in page.get_objects(filter=(pdfium_raw.FPDF_PAGEOBJ_IMAGE,), max_depth=15):
         # 裁剪到页面内
         left, bottom, right, top = obj.get_bounds()
         left, right = max(left, 0.0), min(right, width)
@@ -93,8 +91,7 @@ def _has_digital_page(path: Path) -> bool:
         for idx in range(len(doc)):
             page = doc[idx]
             try:
-                if (_page_chars(page) >= TEXT_MIN_CHARS
-                        and _page_image_cover(page) < IMG_COVER_SCAN):
+                if _page_chars(page) >= TEXT_MIN_CHARS and _page_image_cover(page) < IMG_COVER_SCAN:
                     return True
             finally:
                 page.close()
@@ -113,8 +110,7 @@ def _table_page_no(table: Any) -> int:
     return 1
 
 
-def _build_grid(table: Any, sheet: str, source_doc_id: str,
-                source_file_hash: str) -> StyledGrid:
+def _build_grid(table: Any, sheet: str, source_doc_id: str, source_file_hash: str) -> StyledGrid:
     """把一个 Docling TableItem 转成 StyledGrid（稀疏：只存非空文本格）。
 
     cell_ref = 'R{行}C{列}'（1-based）= Docling 0-based offset + 1。
@@ -169,9 +165,7 @@ def extract_grids(path: str | Path) -> list[StyledGrid]:
     pipeline_options.do_ocr = False  # 本模块只处理数字型，禁用 OCR。
     pipeline_options.do_table_structure = True
     converter = DocumentConverter(
-        format_options={
-            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
-        }
+        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
     )
 
     try:
@@ -189,9 +183,7 @@ def extract_grids(path: str | Path) -> list[StyledGrid]:
         page_no = _table_page_no(table)
         per_page_table_seq[page_no] = per_page_table_seq.get(page_no, 0) + 1
         sheet = f"page{page_no}_table{per_page_table_seq[page_no]}"
-        grids.append(
-            _build_grid(table, sheet, source_doc_id, source_file_hash)
-        )
+        grids.append(_build_grid(table, sheet, source_doc_id, source_file_hash))
     return grids
 
 

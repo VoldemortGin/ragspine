@@ -38,9 +38,9 @@ from tests.conformance.conftest import TRACE_SINK_SUITE
 _SECRET = "机密答案正文：香港 REVENUE=4500 与整段 chunk 全文——绝不得进 trace"
 _SECRET_NUM = 424242.0
 _FORBIDDEN_PAYLOADS: tuple[dict[str, object], ...] = (
-    {"answer": _SECRET},        # 答案正文
-    {"value": _SECRET_NUM},     # 事实数值
-    {"text": _SECRET},          # chunk 文本
+    {"answer": _SECRET},  # 答案正文
+    {"value": _SECRET_NUM},  # 事实数值
+    {"text": _SECRET},  # chunk 文本
     {"content": _SECRET},
     {"chunk": _SECRET},
     {"chunk_text": _SECRET},
@@ -53,6 +53,7 @@ _FORBIDDEN_PAYLOADS: tuple[dict[str, object], ...] = (
 # ===========================================================================
 # 领域层判定核：「绝不泄漏正文」（参数化用例与反证 stub 共用同一核）
 # ===========================================================================
+
 
 def _recorded_leaks(sink: object, payload: dict[str, object]) -> bool:
     """未拒绝的 sink 必须【可自证未泄漏】：其记录里既无受限键、又无受限取值，否则判为泄漏。
@@ -95,6 +96,7 @@ def _assert_sink_never_leaks(sink: object) -> None:
 # 机制层：corespine 套件消费者（实现 × 隐私不变量 笛卡尔积；范式同 test_vector_store_suite）
 # ===========================================================================
 
+
 @pytest.mark.parametrize(**TRACE_SINK_SUITE.parametrize_kwargs())
 def test_trace_sink_conformance(case):
     """每个 (实现 × 隐私不变量) 格子：调用 thunk，满足静默、违反原样抛。"""
@@ -104,6 +106,7 @@ def test_trace_sink_conformance(case):
 # ===========================================================================
 # 领域层：在每个注册实现（in_process + otel）上各跑一遍
 # ===========================================================================
+
 
 def test_registered_sink_never_leaks(trace_sink):
     """每个注册 TraceSink：含 answer/fact value/chunk text 的载荷都被拒绝或擦除，绝不泄漏。"""
@@ -123,6 +126,7 @@ def test_registered_sink_accepts_metadata(trace_sink):
 # ===========================================================================
 # 诚实反证：故意泄漏正文的 stub 喂进同一判定核必须 FAIL（证明隐私断言非空泛）
 # ===========================================================================
+
 
 class _LeakyTraceSink:
     """反证 stub：既不拒绝也不擦除——把含受限正文的载荷【原样】记进 events（故意泄漏正文）。"""
@@ -163,6 +167,7 @@ def test_value_smuggling_sink_fails_privacy_core():
 # ===========================================================================
 # 注册表：make_trace_sink 把「用哪个出口」从改代码降为一个 spec/env（范式同 make_vector_store）
 # ===========================================================================
+
 
 def test_make_trace_sink_default_is_none():
     """None / 'none' -> None（不注入具体 sink；emit_trace 仍走内置隐私兜底，默认行为字节不变）。"""
@@ -261,4 +266,4 @@ def test_unknown_name_lists_discovered(monkeypatch):
         make_trace_sink("nope_no_such_sink")
     msg = str(excinfo.value)
     assert "in_process" in msg  # 内置名字被列出
-    assert "dummy" in msg       # 已发现的 entry-point 名字也被列出
+    assert "dummy" in msg  # 已发现的 entry-point 名字也被列出

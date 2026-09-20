@@ -233,8 +233,7 @@ class MappingRegistry:
         退为 'superseded'，本版本升为 'active'。
         """
         self._conn.execute(
-            "UPDATE color_mapping SET status = 'superseded' "
-            "WHERE scope = ? AND status = 'active'",
+            "UPDATE color_mapping SET status = 'superseded' WHERE scope = ? AND status = 'active'",
             (scope,),
         )
         self._conn.execute(
@@ -255,9 +254,7 @@ class MappingRegistry:
         )
         self._conn.commit()
 
-    def execute_read(
-        self, sql: str, params: tuple[object, ...] = ()
-    ) -> list[sqlite3.Row]:
+    def execute_read(self, sql: str, params: tuple[object, ...] = ()) -> list[sqlite3.Row]:
         """只读查询入口：跑参数化 SELECT 返回行列表（供版本清单等观测面复用，
         免去外部直访私有连接）。"""
         return self._conn.execute(sql, params).fetchall()

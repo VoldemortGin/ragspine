@@ -22,11 +22,9 @@ import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
-from ragspine.cli.run_qa_eval import main as qa_eval_main
 import ragspine.eval.qa_eval as qa_eval_mod
+from ragspine.cli.run_qa_eval import main as qa_eval_main
 from ragspine.common.company_profile import DimensionSpec, DomainProfile
-from ragspine.retrieval.chunking.chunk_store import ChunkStore
-from ragspine.storage.fact_store import SqliteFactStore
 from ragspine.eval.qa_eval import (
     ALL_GATE_METRICS,
     CITATION_VALIDITY,
@@ -44,6 +42,8 @@ from ragspine.eval.qa_eval import (
     load_golden_set,
     run_qa_eval,
 )
+from ragspine.retrieval.chunking.chunk_store import ChunkStore
+from ragspine.storage.fact_store import SqliteFactStore
 
 REF = date(2026, 6, 12)
 GOLDEN_PATH = ROOT_DIR / "data" / "golden" / "qa_golden_set.jsonl"
@@ -52,6 +52,7 @@ GOLDEN_PATH = ROOT_DIR / "data" / "golden" / "qa_golden_set.jsonl"
 # ---------------------------------------------------------------------------
 # 手造 case / outcome 工厂
 # ---------------------------------------------------------------------------
+
 
 def _numeric_case(case_id: str = "c1", **expected_over) -> GoldenCase:
     expected = {
@@ -63,7 +64,9 @@ def _numeric_case(case_id: str = "c1", **expected_over) -> GoldenCase:
     }
     expected.update(expected_over)
     return GoldenCase(
-        id=case_id, question="香港FY2025的REVENUE是多少", case_type="numeric",
+        id=case_id,
+        question="香港FY2025的REVENUE是多少",
+        case_type="numeric",
         expected=expected,
         tags={"topic": "FIN", "scope": "ACME_HK", "qtype": "phrasing"},
         reference_date=REF,
@@ -72,7 +75,9 @@ def _numeric_case(case_id: str = "c1", **expected_over) -> GoldenCase:
 
 def _refusal_case(case_id: str = "r1") -> GoldenCase:
     return GoldenCase(
-        id=case_id, question="中国去年ROE多少", case_type="refusal",
+        id=case_id,
+        question="中国去年ROE多少",
+        case_type="refusal",
         expected={"clarification": "none", "refuse": True},
         tags={"topic": "FIN", "scope": "ACME_CN", "qtype": "adversarial"},
         reference_date=REF,
@@ -81,7 +86,9 @@ def _refusal_case(case_id: str = "r1") -> GoldenCase:
 
 def _clarify_case(case_id: str = "k1", mode: str = "ask_first") -> GoldenCase:
     return GoldenCase(
-        id=case_id, question="香港去年多少", case_type="clarification",
+        id=case_id,
+        question="香港去年多少",
+        case_type="clarification",
         expected={"clarification": mode, "refuse": False},
         tags={"topic": "FIN", "scope": "ACME_HK", "qtype": "should_clarify"},
         reference_date=REF,
@@ -90,9 +97,11 @@ def _clarify_case(case_id: str = "k1", mode: str = "ask_first") -> GoldenCase:
 
 def _ok_numeric_outcome(case_id: str = "c1") -> CaseOutcome:
     return CaseOutcome(
-        case_id=case_id, clarification_mode="none",
+        case_id=case_id,
+        clarification_mode="none",
         answer="ACME_HK FY2025 REVENUE 为 1702 USD_M（来源：R25.pptx · slide=5）",
-        found_value=1702.0, found_unit="USD_M",
+        found_value=1702.0,
+        found_unit="USD_M",
         found_source={"doc": "R25.pptx", "locator": "slide=5"},
         refused=False,
         sources=[{"doc": "R25.pptx", "locator": "slide=5"}],
@@ -101,7 +110,8 @@ def _ok_numeric_outcome(case_id: str = "c1") -> CaseOutcome:
 
 def _ok_refusal_outcome(case_id: str = "r1") -> CaseOutcome:
     return CaseOutcome(
-        case_id=case_id, clarification_mode="none",
+        case_id=case_id,
+        clarification_mode="none",
         answer="查不到：ROE / ACME_CN / 2025（渠道 TOTAL）未在事实表中找到，不提供任何推测数字。",
         refused=True,
     )
@@ -110,6 +120,7 @@ def _ok_refusal_outcome(case_id: str = "r1") -> CaseOutcome:
 # ---------------------------------------------------------------------------
 # golden set 文件：存在性、规模、覆盖面、格式
 # ---------------------------------------------------------------------------
+
 
 def test_golden_set_exists_and_loads_with_min_40_cases():
     cases = load_golden_set(GOLDEN_PATH)
@@ -125,13 +136,26 @@ def test_golden_set_covers_required_question_types():
     cases = load_golden_set(GOLDEN_PATH)
     qtypes = {c.tags["qtype"] for c in cases}
     assert {
-        "phrasing", "relative_period", "mixed_lang", "synonym",
-        "numeric_trap", "period_trap", "channel", "adversarial",
-        "should_clarify", "must_not_clarify", "assume_default",
-        "narrative", "composite",
+        "phrasing",
+        "relative_period",
+        "mixed_lang",
+        "synonym",
+        "numeric_trap",
+        "period_trap",
+        "channel",
+        "adversarial",
+        "should_clarify",
+        "must_not_clarify",
+        "assume_default",
+        "narrative",
+        "composite",
     } <= qtypes
     assert {c.case_type for c in cases} == {
-        "numeric", "clarification", "refusal", "narrative", "composite"
+        "numeric",
+        "clarification",
+        "refusal",
+        "narrative",
+        "composite",
     }
     # 中英都要有
     zh = [c for c in cases if any("一" <= ch <= "鿿" for ch in c.question)]
@@ -157,8 +181,10 @@ _VALID_RECORD = {
     "question": "香港FY2025的REVENUE是多少",
     "case_type": "numeric",
     "expected": {
-        "clarification": "none", "refuse": False,
-        "value": 1702.0, "unit": "USD_M",
+        "clarification": "none",
+        "refuse": False,
+        "value": 1702.0,
+        "unit": "USD_M",
         "source": {"doc": "R25.pptx", "locator": "slide=5"},
     },
     "tags": {"topic": "FIN", "scope": "ACME_HK", "qtype": "phrasing"},
@@ -179,24 +205,34 @@ def test_load_rejects_unknown_case_type(tmp_path):
 
 
 def test_load_rejects_numeric_without_source(tmp_path):
-    bad = {**_VALID_RECORD,
-           "expected": {"clarification": "none", "refuse": False,
-                        "value": 1702.0, "unit": "USD_M"}}
+    bad = {
+        **_VALID_RECORD,
+        "expected": {"clarification": "none", "refuse": False, "value": 1702.0, "unit": "USD_M"},
+    }
     with pytest.raises(ValueError):
         load_golden_set(_write_golden(tmp_path, [bad]))
 
 
 def test_load_rejects_missing_clarification_key(tmp_path):
-    bad = {**_VALID_RECORD,
-           "expected": {"refuse": False, "value": 1702.0, "unit": "USD_M",
-                        "source": {"doc": "R25.pptx", "locator": "slide=5"}}}
+    bad = {
+        **_VALID_RECORD,
+        "expected": {
+            "refuse": False,
+            "value": 1702.0,
+            "unit": "USD_M",
+            "source": {"doc": "R25.pptx", "locator": "slide=5"},
+        },
+    }
     with pytest.raises(ValueError):
         load_golden_set(_write_golden(tmp_path, [bad]))
 
 
 def test_load_rejects_refusal_with_refuse_false(tmp_path):
-    bad = {**_VALID_RECORD, "case_type": "refusal",
-           "expected": {"clarification": "none", "refuse": False}}
+    bad = {
+        **_VALID_RECORD,
+        "case_type": "refusal",
+        "expected": {"clarification": "none", "refuse": False},
+    }
     with pytest.raises(ValueError):
         load_golden_set(_write_golden(tmp_path, [bad]))
 
@@ -204,6 +240,7 @@ def test_load_rejects_refusal_with_refuse_false(tmp_path):
 # ---------------------------------------------------------------------------
 # 命门①：数字准确率（exact match：数值+单位）
 # ---------------------------------------------------------------------------
+
 
 def test_numeric_exact_match_pass():
     case = _numeric_case()
@@ -234,6 +271,7 @@ def test_numeric_unit_mismatch_fails():
 # 命门②：citation validity（答案对 + 来源错 = citation fail，数字仍可 pass）
 # ---------------------------------------------------------------------------
 
+
 def test_citation_valid_pass():
     report = evaluate([_numeric_case()], {"c1": _ok_numeric_outcome()}, mode="tool")
     m = report.metrics[CITATION_VALIDITY]
@@ -246,26 +284,29 @@ def test_right_answer_wrong_source_fails_citation_only():
     outcome.sources = [outcome.found_source]
     outcome.answer = "ACME_HK FY2025 REVENUE 为 1702 USD_M（来源：WRONG.pptx · slide=99）"
     report = evaluate([_numeric_case()], {"c1": outcome}, mode="tool")
-    assert report.metrics[NUMERIC_ACCURACY].passed == 1   # 数字本身是对的
+    assert report.metrics[NUMERIC_ACCURACY].passed == 1  # 数字本身是对的
     assert report.metrics[CITATION_VALIDITY].passed == 0  # 来源错 → citation fail
     assert report.metrics[CITATION_VALIDITY].failures[0]["id"] == "c1"
 
 
 def test_narrative_citation_checks_expected_doc():
     case = GoldenCase(
-        id="n1", question="香港最近有什么监管动态", case_type="narrative",
-        expected={"clarification": "none", "refuse": False,
-                  "narrative_doc": "REG_WATCH_HK.pptx"},
+        id="n1",
+        question="香港最近有什么监管动态",
+        case_type="narrative",
+        expected={"clarification": "none", "refuse": False, "narrative_doc": "REG_WATCH_HK.pptx"},
         tags={"topic": "REG", "scope": "ACME_HK", "qtype": "narrative"},
         reference_date=REF,
     )
     ok = CaseOutcome(
-        case_id="n1", clarification_mode="none",
+        case_id="n1",
+        clarification_mode="none",
         answer="MPFA 新规……（来源：REG_WATCH_HK.pptx REG_WATCH_HK.pptx#para1）",
         sources=[{"doc": "REG_WATCH_HK.pptx", "locator": "REG_WATCH_HK.pptx#para1"}],
     )
     bad = CaseOutcome(
-        case_id="n1", clarification_mode="none",
+        case_id="n1",
+        clarification_mode="none",
         answer="MPFA 新规……（来源：OTHER.pptx OTHER.pptx#para1）",
         sources=[{"doc": "OTHER.pptx", "locator": "OTHER.pptx#para1"}],
     )
@@ -277,6 +318,7 @@ def test_narrative_citation_checks_expected_doc():
 # 命门③：refusal appropriateness（两个方向）
 # ---------------------------------------------------------------------------
 
+
 def test_refusal_expected_and_refused_passes():
     report = evaluate([_refusal_case()], {"r1": _ok_refusal_outcome()}, mode="tool")
     m = report.metrics[REFUSAL_APPROPRIATENESS]
@@ -285,8 +327,11 @@ def test_refusal_expected_and_refused_passes():
 
 def test_refusal_expected_but_answered_fails():
     outcome = CaseOutcome(
-        case_id="r1", clarification_mode="none",
-        answer="ACME_CN FY2025 ROE 为 9.9 PCT", found_value=9.9, found_unit="PCT",
+        case_id="r1",
+        clarification_mode="none",
+        answer="ACME_CN FY2025 ROE 为 9.9 PCT",
+        found_value=9.9,
+        found_unit="PCT",
         refused=False,
     )
     report = evaluate([_refusal_case()], {"r1": outcome}, mode="tool")
@@ -295,8 +340,9 @@ def test_refusal_expected_but_answered_fails():
 
 def test_should_answer_but_refused_fails():
     """不该拒答时拒答 → refusal 方向二 fail。"""
-    outcome = CaseOutcome(case_id="c1", clarification_mode="none",
-                          answer="查不到该数据。", refused=True)
+    outcome = CaseOutcome(
+        case_id="c1", clarification_mode="none", answer="查不到该数据。", refused=True
+    )
     report = evaluate([_numeric_case()], {"c1": outcome}, mode="tool")
     assert report.metrics[REFUSAL_APPROPRIATENESS].passed == 0
 
@@ -310,9 +356,9 @@ def test_should_answer_and_answered_passes():
 # 命门④：clarification appropriateness（两个方向）
 # ---------------------------------------------------------------------------
 
+
 def test_should_clarify_and_asked_first_passes():
-    outcome = CaseOutcome(case_id="k1", clarification_mode="ask_first",
-                          answer="想查询哪个指标？")
+    outcome = CaseOutcome(case_id="k1", clarification_mode="ask_first", answer="想查询哪个指标？")
     report = evaluate([_clarify_case()], {"k1": outcome}, mode="tool")
     assert report.metrics[CLARIFICATION_APPROPRIATENESS].passed == 1
 
@@ -333,8 +379,9 @@ def test_complete_question_must_not_ask_back():
 
 def test_answer_with_assumptions_mode_matched():
     case = _clarify_case("k2", mode="answer_with_assumptions")
-    ok = CaseOutcome(case_id="k2", clarification_mode="answer_with_assumptions",
-                     answer="【假设】……")
+    ok = CaseOutcome(
+        case_id="k2", clarification_mode="answer_with_assumptions", answer="【假设】……"
+    )
     bad = CaseOutcome(case_id="k2", clarification_mode="ask_first", answer="？")
     assert evaluate([case], {"k2": ok}).metrics[CLARIFICATION_APPROPRIATENESS].passed == 1
     assert evaluate([case], {"k2": bad}).metrics[CLARIFICATION_APPROPRIATENESS].passed == 0
@@ -344,9 +391,14 @@ def test_answer_with_assumptions_mode_matched():
 # 编造数字检测（拒答类 case 单列报告，目标 0）
 # ---------------------------------------------------------------------------
 
+
 def test_detect_fabricated_numbers_ignores_period_tokens():
-    assert detect_fabricated_numbers(
-        "查不到：REVENUE / ACME_HK / 2030（渠道 TOTAL）未在事实表中找到。") == []
+    assert (
+        detect_fabricated_numbers(
+            "查不到：REVENUE / ACME_HK / 2030（渠道 TOTAL）未在事实表中找到。"
+        )
+        == []
+    )
     assert detect_fabricated_numbers("查不到 FY2024 与 2025H1 的数据。") == []
     assert detect_fabricated_numbers("查不到 2025Q1 数据，不提供推测数字。") == []
 
@@ -375,9 +427,7 @@ def test_fabrication_zero_when_clean():
 # ---------------------------------------------------------------------------
 
 # 期间白名单字面（年份锚 19xx/20xx 是 '9999' 能被判编造的唯一原因，绝不可丢）。
-_PERIOD_LITERAL = (
-    r"(?:FY\s*)?(?:19|20)\d{2}\s*年?\s*(?:H\s*[12]|Q\s*[1-4]|上半年|下半年)?"
-)
+_PERIOD_LITERAL = r"(?:FY\s*)?(?:19|20)\d{2}\s*年?\s*(?:H\s*[12]|Q\s*[1-4]|上半年|下半年)?"
 
 
 def test_period_token_re_and_profile_regex_are_byte_identical():
@@ -387,10 +437,7 @@ def test_period_token_re_and_profile_regex_are_byte_identical():
     by_name = {d.name: d for d in qa_eval_mod._PROFILE.dimensions}
     assert by_name["period"].fabrication_whitelist_regex == _PERIOD_LITERAL
     # 两者 byte-for-byte 相等（同一字面源）。
-    assert (
-        by_name["period"].fabrication_whitelist_regex
-        == qa_eval_mod._PERIOD_TOKEN_RE.pattern
-    )
+    assert by_name["period"].fabrication_whitelist_regex == qa_eval_mod._PERIOD_TOKEN_RE.pattern
 
 
 def test_detect_reads_profile_at_call_time_no_temporal_dim_flags_period_digits(
@@ -416,6 +463,7 @@ def test_detect_reads_profile_at_call_time_no_temporal_dim_flags_period_digits(
 # 报告结构：分层细分 + JSON 可序列化
 # ---------------------------------------------------------------------------
 
+
 def test_report_by_tag_breakdown():
     trap = _numeric_case("c2")
     trap.tags = {"topic": "FIN", "scope": "ACME_GROUP", "qtype": "numeric_trap"}
@@ -430,7 +478,8 @@ def test_report_by_tag_breakdown():
 def test_report_is_json_serializable():
     report = evaluate(
         [_numeric_case(), _refusal_case()],
-        {"c1": _ok_numeric_outcome(), "r1": _ok_refusal_outcome()}, mode="tool",
+        {"c1": _ok_numeric_outcome(), "r1": _ok_refusal_outcome()},
+        mode="tool",
     )
     data = json.loads(json.dumps(report.to_dict(), ensure_ascii=False))
     assert data["mode"] == "tool"
@@ -446,11 +495,15 @@ def test_report_is_json_serializable():
 # 基线门禁：任一命门指标退化即 gate fail
 # ---------------------------------------------------------------------------
 
+
 def _perfect_report():
     return evaluate(
         [_numeric_case(), _refusal_case(), _clarify_case()],
-        {"c1": _ok_numeric_outcome(), "r1": _ok_refusal_outcome(),
-         "k1": CaseOutcome(case_id="k1", clarification_mode="ask_first", answer="？")},
+        {
+            "c1": _ok_numeric_outcome(),
+            "r1": _ok_refusal_outcome(),
+            "k1": CaseOutcome(case_id="k1", clarification_mode="ask_first", answer="？"),
+        },
         mode="tool",
     )
 
@@ -480,7 +533,8 @@ def test_baseline_single_gate_regression_blocks():
     outcome.answer = "1702 USD_M（来源：WRONG.pptx）"
     report = evaluate(
         [_numeric_case(), _refusal_case()],
-        {"c1": outcome, "r1": _ok_refusal_outcome()}, mode="tool",
+        {"c1": outcome, "r1": _ok_refusal_outcome()},
+        mode="tool",
     )
     cmp = compare_to_baseline(report, _perfect_baseline())
     assert not cmp.passed
@@ -501,6 +555,7 @@ def test_baseline_fabrication_increase_blocks():
 # ---------------------------------------------------------------------------
 # 合成 KB 构建器：确定性 + 幂等 + 与 golden set 对齐
 # ---------------------------------------------------------------------------
+
 
 def test_build_eval_kb_deterministic_and_idempotent(tmp_path):
     fact_db, chunk_db = build_eval_kb(tmp_path)
@@ -529,6 +584,7 @@ def test_build_eval_kb_deterministic_and_idempotent(tmp_path):
 # 端到端：双模式整套 golden set 全指标满分（KB 与 golden 严格对齐的自证）
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("mode", ["tool", "agent"])
 def test_e2e_full_golden_all_gates_perfect(tmp_path, mode):
     report = run_qa_eval(GOLDEN_PATH, mode=mode, kb_dir=tmp_path)
@@ -550,14 +606,20 @@ def test_run_qa_eval_rejects_unknown_mode(tmp_path):
 # CLI：首跑生成基线 → 复跑过门禁 → 篡改基线触发退化拦截 → --update-baseline 重置
 # ---------------------------------------------------------------------------
 
+
 def test_cli_first_run_creates_baseline_then_passes(tmp_path, capsys):
     baseline = tmp_path / "qa_baseline.json"
     report_path = tmp_path / "report.json"
-    rc = qa_eval_main([
-        "--mode", "tool",
-        "--baseline", str(baseline),
-        "--report", str(report_path),
-    ])
+    rc = qa_eval_main(
+        [
+            "--mode",
+            "tool",
+            "--baseline",
+            str(baseline),
+            "--report",
+            str(report_path),
+        ]
+    )
     assert rc == 0
     data = json.loads(baseline.read_text(encoding="utf-8"))
     assert "tool" in data
@@ -586,8 +648,7 @@ def test_cli_gate_fails_on_baseline_regression(tmp_path, capsys):
     rc = qa_eval_main(["--mode", "tool", "--baseline", str(baseline)])
     assert rc == 1
     # --update-baseline：显式重置基线为当前结果 → 过
-    assert qa_eval_main(["--mode", "tool", "--baseline", str(baseline),
-                         "--update-baseline"]) == 0
+    assert qa_eval_main(["--mode", "tool", "--baseline", str(baseline), "--update-baseline"]) == 0
     data = json.loads(baseline.read_text(encoding="utf-8"))
     assert data["tool"]["metrics"][NUMERIC_ACCURACY] == 1.0
 

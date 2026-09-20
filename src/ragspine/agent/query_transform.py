@@ -72,8 +72,19 @@ _COMPLEXITY_LABELS = frozenset({COMPLEXITY_SIMPLE, COMPLEXITY_SINGLE, COMPLEXITY
 
 # 显式比较/对比线索：出现即倾向多跳（与 intent 的多值槽位互补）。
 _COMPARISON_CUES = (
-    "对比", "相比", "比较", "各自", "分别", "谁更", "哪个更", "哪个最", "哪些",
-    "vs", "versus", "compare", "comparison",
+    "对比",
+    "相比",
+    "比较",
+    "各自",
+    "分别",
+    "谁更",
+    "哪个更",
+    "哪个最",
+    "哪些",
+    "vs",
+    "versus",
+    "compare",
+    "comparison",
 )
 
 # 各 LLM 变换的系统提示（编排层与 provider 约定；MockProvider 不解析这些、走确定性脚本）。
@@ -206,10 +217,12 @@ class HyDERetriever:
 
     def _hypothetical_document(self, query: str) -> str | None:
         try:
-            resp = self.provider.chat([
-                {"role": "system", "content": _HYDE_SYSTEM},
-                {"role": "user", "content": query},
-            ])
+            resp = self.provider.chat(
+                [
+                    {"role": "system", "content": _HYDE_SYSTEM},
+                    {"role": "user", "content": query},
+                ]
+            )
         except ProviderError:
             return None
         text = (resp.choices[0].message.content or "").strip()
@@ -253,10 +266,12 @@ class RAGFusionRetriever:
 
     def _variants(self, query: str) -> list[str]:
         try:
-            resp = self.provider.chat([
-                {"role": "system", "content": _FUSION_SYSTEM},
-                {"role": "user", "content": query},
-            ])
+            resp = self.provider.chat(
+                [
+                    {"role": "system", "content": _FUSION_SYSTEM},
+                    {"role": "user", "content": query},
+                ]
+            )
         except ProviderError:
             return []
         return _parse_json_string_array(resp.choices[0].message.content or "")[: self.max_variants]
@@ -303,10 +318,12 @@ class StepBackRetriever:
 
     def _step_back_question(self, query: str) -> str | None:
         try:
-            resp = self.provider.chat([
-                {"role": "system", "content": _STEPBACK_SYSTEM},
-                {"role": "user", "content": query},
-            ])
+            resp = self.provider.chat(
+                [
+                    {"role": "system", "content": _STEPBACK_SYSTEM},
+                    {"role": "user", "content": query},
+                ]
+            )
         except ProviderError:
             return None
         text = (resp.choices[0].message.content or "").strip().splitlines()
@@ -349,9 +366,7 @@ class HeuristicComplexityClassifier:
 
     def classify(self, question: str, *, reference_date: date | None = None) -> str:
         intent = parse_intent(question, reference_date=reference_date)
-        multi_axis = any(
-            len(lst) > 1 for lst in (intent.metrics, intent.entities, intent.periods)
-        )
+        multi_axis = any(len(lst) > 1 for lst in (intent.metrics, intent.entities, intent.periods))
         lowered = question.lower()
         has_comparison = any(cue in lowered for cue in _COMPARISON_CUES)
         if multi_axis or has_comparison:
@@ -374,10 +389,12 @@ class LLMComplexityClassifier:
 
     def classify(self, question: str, *, reference_date: date | None = None) -> str:
         try:
-            resp = self.provider.chat([
-                {"role": "system", "content": _COMPLEXITY_SYSTEM},
-                {"role": "user", "content": question},
-            ])
+            resp = self.provider.chat(
+                [
+                    {"role": "system", "content": _COMPLEXITY_SYSTEM},
+                    {"role": "user", "content": question},
+                ]
+            )
         except ProviderError:
             return self._fallback.classify(question, reference_date=reference_date)
         text = (resp.choices[0].message.content or "").strip().lower()

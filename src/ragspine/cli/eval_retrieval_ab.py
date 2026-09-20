@@ -157,8 +157,14 @@ def _build_sample_chunk_db(path: Path) -> None:
             index.ingest(
                 text,
                 DocumentMeta(
-                    doc_id=doc_id, title=doc_id, topic="FIN", entity="ACME_HK",
-                    geography="HK", period="2025", language="zh", sensitivity="INTERNAL",
+                    doc_id=doc_id,
+                    title=doc_id,
+                    topic="FIN",
+                    entity="ACME_HK",
+                    geography="HK",
+                    period="2025",
+                    language="zh",
+                    sensitivity="INTERNAL",
                 ),
             )
     finally:
@@ -199,7 +205,11 @@ def _build_corpus_chunk_db(path: Path, corpus_jsonl: str | Path) -> None:
 
 
 def _format_table(
-    report: dict[str, dict[str, float]], k: int, *, label: str = "合成 gold", note: str | None = None
+    report: dict[str, dict[str, float]],
+    k: int,
+    *,
+    label: str = "合成 gold",
+    note: str | None = None,
 ) -> str:
     """对照表（纯文本，确定性）：两臂 Recall@k / MRR 并列。
 
@@ -226,24 +236,36 @@ def _format_table(
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="BM25-only vs hybrid 检索 A/B harness")
     parser.add_argument(
-        "--chunk-db", default=None,
+        "--chunk-db",
+        default=None,
         help="块库 sqlite 路径；不传则就地建与合成 gold 同源的小型块库",
     )
     parser.add_argument(
-        "--gold", default=str(AB_GOLD_PATH),
+        "--gold",
+        default=str(AB_GOLD_PATH),
         help=f"gold jsonl 路径（默认随附合成 gold {AB_GOLD_PATH}）",
     )
     parser.add_argument(
-        "--corpus", default=None,
+        "--corpus",
+        default=None,
         help="语料 jsonl（每行 {doc_id, text, ...可选 meta}）；传入则由它建块库，"
-             "每篇单段 -> chunk_id '<doc_id>#c0'，gold 的 relevant_chunk_ids 据此写",
+        "每篇单段 -> chunk_id '<doc_id>#c0'，gold 的 relevant_chunk_ids 据此写",
     )
     parser.add_argument(
         "--embedding",
-        choices=["none", "auto", "onnx", "deterministic", "openai", "qwen3", "sentence-transformers", "st"],
+        choices=[
+            "none",
+            "auto",
+            "onnx",
+            "deterministic",
+            "openai",
+            "qwen3",
+            "sentence-transformers",
+            "st",
+        ],
         default="deterministic",
         help="hybrid 臂的向量后端（deterministic＝离线词法散列非语义；onnx/auto＝真语义 ONNX，"
-             "fastembed，需 [embed-onnx]；qwen3＝SentenceTransformer 真语义，需 [embed]）",
+        "fastembed，需 [embed-onnx]；qwen3＝SentenceTransformer 真语义，需 [embed]）",
     )
     parser.add_argument("--k", type=int, default=10, help="Recall@k 的 k（默认 10）")
     return parser

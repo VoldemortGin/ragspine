@@ -28,9 +28,16 @@ def _chunk_db(tmp_path):
     store = ChunkStore(chunk_db)
     store.init_schema()
     store.replace_doc_chunks(
-        "pub.pdf", chunk_document("营收增长强劲，毛利率提升。", DocumentMeta(doc_id="pub.pdf", topic="FIN")))
+        "pub.pdf",
+        chunk_document("营收增长强劲，毛利率提升。", DocumentMeta(doc_id="pub.pdf", topic="FIN")),
+    )
     store.replace_doc_chunks(
-        "sec.pdf", chunk_document("营收机密评级 A。", DocumentMeta(doc_id="sec.pdf", topic="FIN", sensitivity="RESTRICTED")))
+        "sec.pdf",
+        chunk_document(
+            "营收机密评级 A。",
+            DocumentMeta(doc_id="sec.pdf", topic="FIN", sensitivity="RESTRICTED"),
+        ),
+    )
     store.close()
     return chunk_db
 
@@ -57,6 +64,7 @@ def test_mode_isolation_provenance_determinism(tmp_path, mode):
 
 def test_economy_mode_zero_embedding(tmp_path, monkeypatch):
     """economy 模式【绝不】构造 embedding 后端 / 向量库（零 embedding 成本）。"""
+
     def _boom(spec):
         raise AssertionError("economy 模式不应构造 embedding/向量库")
 

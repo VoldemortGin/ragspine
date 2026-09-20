@@ -35,10 +35,10 @@ from ragspine.retrieval.rerank.colbert import (
 from ragspine.retrieval.rerank.cross_encoder import make_reranker
 from ragspine.retrieval.rerank.listwise_rerank import ListwiseJudge
 
-
 # ---------------------------------------------------------------------------
 # maxsim：晚交互打分纯函数（sum over query tokens of max cosine to any doc token）
 # ---------------------------------------------------------------------------
+
 
 def test_maxsim_sum_of_max_cosine():
     """MaxSim = 逐 query token 取其对任一 doc token 的最大 cosine 之和。"""
@@ -74,6 +74,7 @@ def test_maxsim_zero_vector_is_zero_cosine():
 # ---------------------------------------------------------------------------
 # 惰性构造 / 友好报错 / 参数校验
 # ---------------------------------------------------------------------------
+
 
 def test_ctor_is_lazy_no_fastembed_needed(monkeypatch):
     """构造惰性：模拟未装 fastembed 也能构造（模型在 judge 时才加载）。"""
@@ -117,6 +118,7 @@ def test_implements_listwise_judge_protocol():
 # ---------------------------------------------------------------------------
 # judge：MaxSim 打分 -> 名次（降序 / 平分稳定 / 确定性 / 校验 / 透传）
 # ---------------------------------------------------------------------------
+
 
 def test_judge_orders_by_maxsim_descending(fake_colbert):
     """晚交互打分降序给名次：query 'a b'，候选按共享字母词数排序。
@@ -209,7 +211,10 @@ def test_query_uses_query_embed(fake_colbert):
 # 工厂 make_reranker：colbert 别名（复用 W2 reranker 缝）+ none/auto 不受影响
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("spec", ["colbert", "colbertv2", "late_interaction", "COLBERT", " colbert "])
+
+@pytest.mark.parametrize(
+    "spec", ["colbert", "colbertv2", "late_interaction", "COLBERT", " colbert "]
+)
 def test_factory_aliases_return_instance(spec):
     """'colbert' 及其别名（含大小写/留白归一）-> ColbertReranker（构造惰性）。"""
     assert isinstance(make_reranker(spec), ColbertReranker)
@@ -247,6 +252,7 @@ def test_factory_via_env(monkeypatch):
 # 接线：build_narrative_retriever 的 reranker 注入（默认行为不变）
 # ---------------------------------------------------------------------------
 
+
 def test_wiring_colbert_overrides_provider_judge(tmp_path):
     """注入 ColbertReranker -> 它成为 NarrativeIndex 的 judge（晚交互替代 LLM judge）。"""
     cb = ColbertReranker()
@@ -280,6 +286,7 @@ def test_service_config_reranker_default_is_none():
 # 真模型确定性 + 相关性 conformance（联网首拉，CI 默认 `-m "not network"` 跳过）
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.network
 def test_colbert_real_deterministic_and_relevant():
     """真 ColBERT：同输入逐位一致（确定性）+ 相关候选名次靠前（真晚交互重排）。
@@ -301,5 +308,5 @@ def test_colbert_real_deterministic_and_relevant():
         r1 = ColbertReranker().judge(query, docs)
         r2 = ColbertReranker().judge(query, docs)
 
-    assert r1 == r2          # 确定性：两个独立实例同输入逐位一致
-    assert r1[0] == 1        # 真重排：强相关候选被排到第一
+    assert r1 == r2  # 确定性：两个独立实例同输入逐位一致
+    assert r1[0] == 1  # 真重排：强相关候选被排到第一

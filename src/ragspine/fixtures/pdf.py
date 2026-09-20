@@ -90,6 +90,7 @@ NARRATIVE_TEXT = (
 # 绘制原语（reportlab 原点在左下角；沿用旧版「顶部起算」坐标语义，统一换算）
 # ---------------------------------------------------------------------------
 
+
 def _y(y_top: float) -> float:
     """顶部起算的 y 坐标 -> reportlab 左下角原点坐标。"""
     return PAGE_H - y_top
@@ -108,8 +109,8 @@ def _draw_clean_table(c: Canvas, origin_x: float, origin_y: float) -> None:
     标准字体、宽松间距、完整表格线 —— 务必规整，供 Docling 解析。
     origin_y 为表格上沿（顶部起算），与旧版坐标语义一致。
     """
-    n_rows = 1 + len(TABLE_ROW_HEADERS)   # 表头行 + 指标行
-    n_cols = 1 + len(TABLE_COL_HEADERS)   # 行标签列 + 期间列
+    n_rows = 1 + len(TABLE_ROW_HEADERS)  # 表头行 + 指标行
+    n_cols = 1 + len(TABLE_COL_HEADERS)  # 行标签列 + 期间列
     col_w = 110.0
     row_h = 34.0
 
@@ -166,8 +167,7 @@ def _draw_digital_text_page(c: Canvas) -> None:
     c.showPage()
 
 
-def _draw_scanned_page(c: Canvas, png_bytes: bytes,
-                       hidden_text: str | None = None) -> None:
+def _draw_scanned_page(c: Canvas, png_bytes: bytes, hidden_text: str | None = None) -> None:
     """画一页：整页位图铺满页面；可选隐形文本层（text render mode 3）。
 
     hidden_text 非空时模拟「OCR 过的扫描件」：文本层存在但视觉不可见
@@ -175,8 +175,7 @@ def _draw_scanned_page(c: Canvas, png_bytes: bytes,
     """
     from reportlab.lib.utils import ImageReader
 
-    c.drawImage(ImageReader(io.BytesIO(png_bytes)), 0, 0,
-                width=PAGE_W, height=PAGE_H)
+    c.drawImage(ImageReader(io.BytesIO(png_bytes)), 0, 0, width=PAGE_W, height=PAGE_H)
     if hidden_text:
         t = c.beginText(60, _y(80))
         t.setFont("Helvetica", 12)
@@ -209,6 +208,7 @@ def _render_page_to_png(path: Path, page_no: int) -> bytes:
 # ---------------------------------------------------------------------------
 # 各 fixture 构建
 # ---------------------------------------------------------------------------
+
 
 def _make_digital() -> None:
     c = _new_canvas(DIGITAL_PATH)
@@ -263,6 +263,7 @@ def _make_ppt_export() -> None:
 # ground truth
 # ---------------------------------------------------------------------------
 
+
 def _digital_table_truth() -> dict[str, object]:
     """digital.pdf 第 1 页表格逐格真值（'R{行}C{列}' 1-based，含行列名 + 数值）。
 
@@ -301,8 +302,8 @@ def _dual_channel_vectors() -> dict[str, object]:
            PROFIT        -> only_in_a
            ROE         -> only_in_b
     """
-    def _fact(metric: str, value: int, locator: str,
-              channel_name: str) -> dict[str, object]:
+
+    def _fact(metric: str, value: int, locator: str, channel_name: str) -> dict[str, object]:
         return {
             "metric_code": metric,
             "entity": "ACME_HK",
@@ -385,6 +386,7 @@ def _build_ground_truth() -> dict[str, object]:
 # 自校验（pypdfium2 读回，度量口径与 src/ragspine/extraction/routing/pdf_router.py 一致）
 # ---------------------------------------------------------------------------
 
+
 def _page_text(page: pdfium.PdfPage) -> str:
     textpage = page.get_textpage()
     try:
@@ -402,9 +404,7 @@ def _page_cover(page: pdfium.PdfPage) -> float:
     width, height = page.get_size()
     page_area = (width * height) or 1.0
     cover = 0.0
-    for obj in page.get_objects(
-        filter=(pdfium_raw.FPDF_PAGEOBJ_IMAGE,), max_depth=15
-    ):
+    for obj in page.get_objects(filter=(pdfium_raw.FPDF_PAGEOBJ_IMAGE,), max_depth=15):
         left, bottom, right, top = obj.get_bounds()
         left, right = max(left, 0.0), min(right, width)
         bottom, top = max(bottom, 0.0), min(top, height)
@@ -465,7 +465,11 @@ def self_verify(gt: dict[str, object]) -> None:
 
     # ground truth 自洽性
     assert set(cast("dict[str, object]", gt["files"])) == {
-        "digital.pdf", "scanned.pdf", "ocr_scan.pdf", "mixed.pdf", "ppt_export.pdf"
+        "digital.pdf",
+        "scanned.pdf",
+        "ocr_scan.pdf",
+        "mixed.pdf",
+        "ppt_export.pdf",
     }
     dual_channel = cast("dict[str, object]", gt["dual_channel"])
     dc = cast("dict[str, object]", dual_channel["expect"])

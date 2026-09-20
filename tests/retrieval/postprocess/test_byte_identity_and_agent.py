@@ -26,10 +26,14 @@ def test_default_none_postprocessor_is_byte_identical(tmp_path):
     store.init_schema()
     try:
         index = NarrativeIndex(store)
-        index.ingest("香港 REVENUE 下降 MCV 客群 收缩 银保 渠道 调整。",
-                     DocumentMeta(doc_id="A.pptx", entity="ACME_HK"))
-        index.ingest("新单 价值 NBV 提升 与 产品 结构 优化。",
-                     DocumentMeta(doc_id="B.pptx", entity="ACME_HK"))
+        index.ingest(
+            "香港 REVENUE 下降 MCV 客群 收缩 银保 渠道 调整。",
+            DocumentMeta(doc_id="A.pptx", entity="ACME_HK"),
+        )
+        index.ingest(
+            "新单 价值 NBV 提升 与 产品 结构 优化。",
+            DocumentMeta(doc_id="B.pptx", entity="ACME_HK"),
+        )
         base = NarrativeIndexRetriever(index)
         with_none = NarrativeIndexRetriever(index, postprocessor=None)
         assert base.retrieve(QUERY) == with_none.retrieve(QUERY)

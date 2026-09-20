@@ -41,10 +41,10 @@ RAPTOR_SUMMARIZER_ENV = "RAGSPINE_RAPTOR_SUMMARIZER"
 
 # 建树默认参数。
 DEFAULT_SIMILARITY_THRESHOLD = 0.5  # 余弦 ≥ 此值即建边（同簇）
-DEFAULT_MAX_LEVELS = 3              # 最多向上递归层数（有界）
-DEFAULT_MIN_CLUSTER_SIZE = 2       # 小于此的簇不生成摘要节点（单例上带）
-DEFAULT_SUMMARY_TOP_K = 5          # RaptorRetriever 追加的合成节点数上限
-_EXTRACT_EXCERPT_CHARS = 240       # extractive 摘要每成员摘录上限
+DEFAULT_MAX_LEVELS = 3  # 最多向上递归层数（有界）
+DEFAULT_MIN_CLUSTER_SIZE = 2  # 小于此的簇不生成摘要节点（单例上带）
+DEFAULT_SUMMARY_TOP_K = 5  # RaptorRetriever 追加的合成节点数上限
+_EXTRACT_EXCERPT_CHARS = 240  # extractive 摘要每成员摘录上限
 
 # 摘要提示（同 W7b：主题综述、明确禁止具体数字——数字属结构化通道）。
 _SUMMARIZE_SYSTEM = (

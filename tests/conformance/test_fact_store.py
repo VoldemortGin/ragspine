@@ -61,6 +61,7 @@ def _fact(**over) -> Fact:
 # 领域层判定核：反编造（found-determinism）/ provenance（参数化用例与反证 stub 共用同一核）
 # ===========================================================================
 
+
 def _assert_found_determinism(store) -> None:
     """判定核：命中→确定值（跨调用逐位一致 + 等于入库值）；未命中→空（绝不臆造）。
 
@@ -71,9 +72,9 @@ def _assert_found_determinism(store) -> None:
     first = store.query("REVENUE", "ACME_HK", "FY", "2024")
     second = store.query("REVENUE", "ACME_HK", "FY", "2024")
     assert first and second, "命中查询应确定返回一条 Fact（found 语义）"
-    assert (
-        first[0].value == second[0].value == 4500.0
-    ), "命中值必须确定且等于入库值（反编造根：不臆造 / 不漂移）"
+    assert first[0].value == second[0].value == 4500.0, (
+        "命中值必须确定且等于入库值（反编造根：不臆造 / 不漂移）"
+    )
     miss = store.query("REVENUE", "ACME_HK", "FY", "2099")
     assert miss == [], "未命中必须返回空（绝不臆造一个值）——反编造的存储侧根基"
 
@@ -87,14 +88,15 @@ def _assert_provenance_survives(store) -> None:
     assert hits, "provenance 判定核未命中（应至少回传入库的一条 Fact）"
     for f in hits:
         assert f.source_doc_id == "HK_FIN.pptx", f"found 结果丢了 source_doc_id（血缘根）：{f!r}"
-        assert (
-            f.source_locator == "HK_FIN.pptx!slide3#para2"
-        ), f"found 结果丢了 source_locator（citation 回指）：{f!r}"
+        assert f.source_locator == "HK_FIN.pptx!slide3#para2", (
+            f"found 结果丢了 source_locator（citation 回指）：{f!r}"
+        )
 
 
 # ===========================================================================
 # 机制层：corespine 套件消费者（实现 × 反编造/provenance 笛卡尔积；范式同 test_graph_store）
 # ===========================================================================
+
 
 @pytest.mark.parametrize(**FACT_STORE_SUITE.parametrize_kwargs())
 def test_fact_store_conformance(case):
@@ -105,6 +107,7 @@ def test_fact_store_conformance(case):
 # ===========================================================================
 # 领域层：在每个注册实现（sqlite …）上各跑一遍
 # ===========================================================================
+
 
 def test_found_determinism_holds(fact_store):
     """每个注册 FactStore：命中→确定值、未命中→空（反编造存储侧根基）。"""
@@ -125,6 +128,7 @@ def test_registered_fact_store_is_runtime_checkable(fact_store):
 # 诚实反证：故意破不变量的 stub 喂进同一判定核必须 FAIL（证明断言非空泛、有牙齿）
 # ===========================================================================
 
+
 class _FabricatingFactStore(SqliteFactStore):
     """反证 stub：查询【未命中】时不返回空，反而臆造一个值——必须触 found-determinism 判定核 FAIL。"""
 
@@ -140,8 +144,7 @@ class _LineageDroppingFactStore(SqliteFactStore):
 
     def query(self, *args, **kwargs):  # type: ignore[override]
         return [
-            replace(f, source_doc_id="", source_locator="")
-            for f in super().query(*args, **kwargs)
+            replace(f, source_doc_id="", source_locator="") for f in super().query(*args, **kwargs)
         ]
 
 
@@ -164,6 +167,7 @@ def test_lineage_dropping_store_fails_provenance():
 # ===========================================================================
 # 注册表：make_fact_store 把「用哪个结构化后端」从改代码降为一个 spec/env（范式同 make_graph_store）
 # ===========================================================================
+
 
 def test_make_fact_store_default_is_sqlite():
     """缺省 spec -> sqlite 默认实现（默认结构化通路字节不变），且满足 FactStore Protocol。"""
@@ -222,7 +226,9 @@ class _DummyFactStore:
     def upsert_facts(self, facts, ingested_at=None) -> int:
         return len(list(facts))
 
-    def query(self, metric_code, entity, period_type, period, channel="TOTAL", review_statuses=None) -> list:
+    def query(
+        self, metric_code, entity, period_type, period, channel="TOTAL", review_statuses=None
+    ) -> list:
         return []
 
     def count(self) -> int:

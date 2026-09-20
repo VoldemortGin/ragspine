@@ -13,10 +13,10 @@ import rootutils
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
 from ragspine.common.company_profile import (
+    _DEFAULT_METRIC_SYNONYMS,
     CompanyProfile,
     DimensionSpec,
     DomainProfile,
-    _DEFAULT_METRIC_SYNONYMS,
     load_company_profile,
 )
 
@@ -59,9 +59,7 @@ def test_default_profile_carries_five_named_dimensions():
     assert isinstance(prof, DomainProfile)
     dims = prof.dimensions
     assert len(dims) == 5
-    assert [d.name for d in dims] == [
-        "metric", "entity", "period", "channel", "geography"
-    ]
+    assert [d.name for d in dims] == ["metric", "entity", "period", "channel", "geography"]
     by_name = {d.name: d for d in dims}
     assert by_name["period"].kind == "temporal"
     assert by_name["period"].whitelist_in_fabrication_check is True

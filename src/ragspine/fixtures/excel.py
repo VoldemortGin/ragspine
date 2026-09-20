@@ -44,8 +44,8 @@ THEME_TINT = 0.4  # 「Accent1, Lighter 40%」
 
 # --- 语义色（普通 RGB 填充，颜色编码属性）---------------------------------
 YELLOW = "FFFF00"  # 黄色 = 新产品线
-GREEN = "92D050"   # 绿色 = 成熟产品线
-GREY = "D9D9D9"    # 表头底色（无属性语义）
+GREEN = "92D050"  # 绿色 = 成熟产品线
+GREY = "D9D9D9"  # 表头底色（无属性语义）
 
 # 数字格式串
 FMT_PCT = "0.0%"
@@ -91,6 +91,7 @@ def _truth(sheet: str, ref: str, **kw: object) -> None:
 # Sheet 1: 正常指标×期间数据区 + 语义色 + 图例 + theme/tint 填充 + 各类数字格式
 # ---------------------------------------------------------------------------
 
+
 def _build_data_sheet(wb: Workbook) -> tuple[str, dict[str, object]]:
     sheet = "HK_Performance"
     ws = wb.create_sheet(sheet)
@@ -103,50 +104,98 @@ def _build_data_sheet(wb: Workbook) -> tuple[str, dict[str, object]]:
     for j, p in enumerate(periods, start=2):
         c = ws.cell(row=1, column=j, value=p)
         c.fill = _rgb_fill(GREY)
-        _truth(sheet, f"{get_column_letter(j)}1", value=p, resolved_rgb=GREY,
-               number_format=FMT_GENERAL, is_merged_origin=False, merge_span=None,
-               cf_affected=False, tags={})
+        _truth(
+            sheet,
+            f"{get_column_letter(j)}1",
+            value=p,
+            resolved_rgb=GREY,
+            number_format=FMT_GENERAL,
+            is_merged_origin=False,
+            merge_span=None,
+            cf_affected=False,
+            tags={},
+        )
 
     # A1 真值（实体标签）
-    _truth(sheet, "A1", value="ACME Hong Kong", resolved_rgb=None,
-           number_format=FMT_GENERAL, is_merged_origin=False, merge_span=None,
-           cf_affected=False, tags={})
+    _truth(
+        sheet,
+        "A1",
+        value="ACME Hong Kong",
+        resolved_rgb=None,
+        number_format=FMT_GENERAL,
+        is_merged_origin=False,
+        merge_span=None,
+        cf_affected=False,
+        tags={},
+    )
 
     # 指标行：REVENUE(新产品线,黄)/NEWSALES(成熟,绿)/PROFIT(成熟,绿)/ROE(百分比,theme底)
     # 数值硬编码
     data = {
         "REVENUE": ([2100.0, 2350.0, 2680.0], FMT_THOUSANDS, YELLOW, {"product_line": "new"}),
-        "NEWSALES":  ([3800.0, 4200.0, 4750.0], FMT_THOUSANDS, GREEN, {"product_line": "mature"}),
+        "NEWSALES": ([3800.0, 4200.0, 4750.0], FMT_THOUSANDS, GREEN, {"product_line": "mature"}),
         "PROFIT": ([1900.0, 2050.0, 2210.0], FMT_CURRENCY, GREEN, {"product_line": "mature"}),
     }
     row = 2
     for metric, (vals, fmt, rgb, tags) in data.items():
         ws.cell(row=row, column=1, value=metric)
-        _truth(sheet, f"A{row}", value=metric, resolved_rgb=None,
-               number_format=FMT_GENERAL, is_merged_origin=False, merge_span=None,
-               cf_affected=False, tags={})
+        _truth(
+            sheet,
+            f"A{row}",
+            value=metric,
+            resolved_rgb=None,
+            number_format=FMT_GENERAL,
+            is_merged_origin=False,
+            merge_span=None,
+            cf_affected=False,
+            tags={},
+        )
         for j, v in enumerate(vals, start=2):
             c = ws.cell(row=row, column=j, value=v)
             c.number_format = fmt
             c.fill = _rgb_fill(rgb)
-            _truth(sheet, f"{get_column_letter(j)}{row}", value=v, resolved_rgb=rgb,
-                   number_format=fmt, is_merged_origin=False, merge_span=None,
-                   cf_affected=False, tags=dict(tags))
+            _truth(
+                sheet,
+                f"{get_column_letter(j)}{row}",
+                value=v,
+                resolved_rgb=rgb,
+                number_format=fmt,
+                is_merged_origin=False,
+                merge_span=None,
+                cf_affected=False,
+                tags=dict(tags),
+            )
         row += 1
 
     # ROE 行：百分比格式 + theme+tint 填充（专门考验 theme 解析）
     ws.cell(row=row, column=1, value="ROE")
-    _truth(sheet, f"A{row}", value="ROE", resolved_rgb=None,
-           number_format=FMT_GENERAL, is_merged_origin=False, merge_span=None,
-           cf_affected=False, tags={})
+    _truth(
+        sheet,
+        f"A{row}",
+        value="ROE",
+        resolved_rgb=None,
+        number_format=FMT_GENERAL,
+        is_merged_origin=False,
+        merge_span=None,
+        cf_affected=False,
+        tags={},
+    )
     roe_vals = [0.125, 0.131, 0.138]
     for j, v in enumerate(roe_vals, start=2):
         c = ws.cell(row=row, column=j, value=v)
         c.number_format = FMT_PCT
         c.fill = _theme_fill(THEME_ACCENT1_INDEX, THEME_TINT)
-        _truth(sheet, f"{get_column_letter(j)}{row}", value=v,
-               resolved_rgb=THEME_ACCENT1_RESOLVED, number_format=FMT_PCT,
-               is_merged_origin=False, merge_span=None, cf_affected=False, tags={})
+        _truth(
+            sheet,
+            f"{get_column_letter(j)}{row}",
+            value=v,
+            resolved_rgb=THEME_ACCENT1_RESOLVED,
+            number_format=FMT_PCT,
+            is_merged_origin=False,
+            merge_span=None,
+            cf_affected=False,
+            tags={},
+        )
 
     # 图例区（右侧 F/G 列）：色块格 + 文字
     legend = [
@@ -160,15 +209,38 @@ def _build_data_sheet(wb: Workbook) -> tuple[str, dict[str, object]]:
         sc = ws[swatch_ref]
         sc.fill = _rgb_fill(rgb)
         ws[text_ref] = text
-        _truth(sheet, swatch_ref, value=None, resolved_rgb=rgb,
-               number_format=FMT_GENERAL, is_merged_origin=False, merge_span=None,
-               cf_affected=False, tags={})
-        _truth(sheet, text_ref, value=text, resolved_rgb=None,
-               number_format=FMT_GENERAL, is_merged_origin=False, merge_span=None,
-               cf_affected=False, tags={})
-        legend_expect.append({"rgb": rgb, "meaning": text, "tag_key": tk,
-                              "tag_value": tv, "swatch_ref": swatch_ref,
-                              "text_ref": text_ref})
+        _truth(
+            sheet,
+            swatch_ref,
+            value=None,
+            resolved_rgb=rgb,
+            number_format=FMT_GENERAL,
+            is_merged_origin=False,
+            merge_span=None,
+            cf_affected=False,
+            tags={},
+        )
+        _truth(
+            sheet,
+            text_ref,
+            value=text,
+            resolved_rgb=None,
+            number_format=FMT_GENERAL,
+            is_merged_origin=False,
+            merge_span=None,
+            cf_affected=False,
+            tags={},
+        )
+        legend_expect.append(
+            {
+                "rgb": rgb,
+                "meaning": text,
+                "tag_key": tk,
+                "tag_value": tv,
+                "swatch_ref": swatch_ref,
+                "text_ref": text_ref,
+            }
+        )
 
     return sheet, {
         "legend_expect": legend_expect,
@@ -187,13 +259,13 @@ def _expected_clusters(sheet: str) -> list[dict[str, object]]:
             continue
         by_rgb.setdefault(cast(str, rgb), []).append(cast(str, t["cell_ref"]))
     ordered = sorted(by_rgb.items(), key=lambda item: (-len(item[1]), item[0]))
-    return [{"rgb": rgb, "cell_refs": sorted(refs), "count": len(refs)}
-            for rgb, refs in ordered]
+    return [{"rgb": rgb, "cell_refs": sorted(refs), "count": len(refs)} for rgb, refs in ordered]
 
 
 # ---------------------------------------------------------------------------
 # Sheet 2: 三级合并表头
 # ---------------------------------------------------------------------------
+
 
 def _build_merged_header_sheet(wb: Workbook) -> tuple[str, dict[str, object]]:
     sheet = "MergedHeader"
@@ -207,41 +279,80 @@ def _build_merged_header_sheet(wb: Workbook) -> tuple[str, dict[str, object]]:
 
     ws.merge_cells("A1:F1")
     ws["A1"] = "ACME Hong Kong"
-    _truth(sheet, "A1", value="ACME Hong Kong", resolved_rgb=None,
-           number_format=FMT_GENERAL, is_merged_origin=True, merge_span=[1, 6],
-           cf_affected=False, tags={})
-    merges.append({"range": "A1:F1", "origin": "A1", "value": "ACME Hong Kong",
-                   "span": [1, 6]})
+    _truth(
+        sheet,
+        "A1",
+        value="ACME Hong Kong",
+        resolved_rgb=None,
+        number_format=FMT_GENERAL,
+        is_merged_origin=True,
+        merge_span=[1, 6],
+        cf_affected=False,
+        tags={},
+    )
+    merges.append({"range": "A1:F1", "origin": "A1", "value": "ACME Hong Kong", "span": [1, 6]})
 
     ws.merge_cells("A2:C2")
     ws["A2"] = "Agency"
-    _truth(sheet, "A2", value="Agency", resolved_rgb=None,
-           number_format=FMT_GENERAL, is_merged_origin=True, merge_span=[1, 3],
-           cf_affected=False, tags={})
+    _truth(
+        sheet,
+        "A2",
+        value="Agency",
+        resolved_rgb=None,
+        number_format=FMT_GENERAL,
+        is_merged_origin=True,
+        merge_span=[1, 3],
+        cf_affected=False,
+        tags={},
+    )
     merges.append({"range": "A2:C2", "origin": "A2", "value": "Agency", "span": [1, 3]})
 
     ws.merge_cells("D2:F2")
     ws["D2"] = "Banca"
-    _truth(sheet, "D2", value="Banca", resolved_rgb=None,
-           number_format=FMT_GENERAL, is_merged_origin=True, merge_span=[1, 3],
-           cf_affected=False, tags={})
+    _truth(
+        sheet,
+        "D2",
+        value="Banca",
+        resolved_rgb=None,
+        number_format=FMT_GENERAL,
+        is_merged_origin=True,
+        merge_span=[1, 3],
+        cf_affected=False,
+        tags={},
+    )
     merges.append({"range": "D2:F2", "origin": "D2", "value": "Banca", "span": [1, 3]})
 
     periods = ["FY2022", "FY2023", "FY2024", "FY2022", "FY2023", "FY2024"]
     for j, p in enumerate(periods, start=1):
         c = ws.cell(row=3, column=j, value=p)
-        _truth(sheet, f"{get_column_letter(j)}3", value=p, resolved_rgb=None,
-               number_format=FMT_GENERAL, is_merged_origin=False, merge_span=None,
-               cf_affected=False, tags={})
+        _truth(
+            sheet,
+            f"{get_column_letter(j)}3",
+            value=p,
+            resolved_rgb=None,
+            number_format=FMT_GENERAL,
+            is_merged_origin=False,
+            merge_span=None,
+            cf_affected=False,
+            tags={},
+        )
 
     # 一行数据（REVENUE），证明合并表头下数字不张冠李戴
     revenue = [1200.0, 1320.0, 1450.0, 900.0, 1030.0, 1230.0]
     for j, v in enumerate(revenue, start=1):
         c = ws.cell(row=4, column=j, value=v)
         c.number_format = FMT_THOUSANDS
-        _truth(sheet, f"{get_column_letter(j)}4", value=v, resolved_rgb=None,
-               number_format=FMT_THOUSANDS, is_merged_origin=False, merge_span=None,
-               cf_affected=False, tags={})
+        _truth(
+            sheet,
+            f"{get_column_letter(j)}4",
+            value=v,
+            resolved_rgb=None,
+            number_format=FMT_THOUSANDS,
+            is_merged_origin=False,
+            merge_span=None,
+            cf_affected=False,
+            tags={},
+        )
 
     return sheet, {"merges_expect": merges}
 
@@ -249,6 +360,7 @@ def _build_merged_header_sheet(wb: Workbook) -> tuple[str, dict[str, object]]:
 # ---------------------------------------------------------------------------
 # Sheet 3: 转置表（指标在列、期间在行）
 # ---------------------------------------------------------------------------
+
 
 def _build_transposed_sheet(wb: Workbook) -> tuple[str, dict[str, object]]:
     sheet = "Transposed"
@@ -258,11 +370,28 @@ def _build_transposed_sheet(wb: Workbook) -> tuple[str, dict[str, object]]:
     metrics = ["REVENUE", "NEWSALES", "PROFIT"]
     for j, m in enumerate(metrics, start=2):
         ws.cell(row=1, column=j, value=m)
-        _truth(sheet, f"{get_column_letter(j)}1", value=m, resolved_rgb=None,
-               number_format=FMT_GENERAL, is_merged_origin=False, merge_span=None,
-               cf_affected=False, tags={})
-    _truth(sheet, "A1", value="Period", resolved_rgb=None, number_format=FMT_GENERAL,
-           is_merged_origin=False, merge_span=None, cf_affected=False, tags={})
+        _truth(
+            sheet,
+            f"{get_column_letter(j)}1",
+            value=m,
+            resolved_rgb=None,
+            number_format=FMT_GENERAL,
+            is_merged_origin=False,
+            merge_span=None,
+            cf_affected=False,
+            tags={},
+        )
+    _truth(
+        sheet,
+        "A1",
+        value="Period",
+        resolved_rgb=None,
+        number_format=FMT_GENERAL,
+        is_merged_origin=False,
+        merge_span=None,
+        cf_affected=False,
+        tags={},
+    )
 
     rows = {
         "FY2023": [2350.0, 4200.0, 2050.0],
@@ -270,14 +399,31 @@ def _build_transposed_sheet(wb: Workbook) -> tuple[str, dict[str, object]]:
     }
     for i, (period, vals) in enumerate(rows.items(), start=2):
         ws.cell(row=i, column=1, value=period)
-        _truth(sheet, f"A{i}", value=period, resolved_rgb=None, number_format=FMT_GENERAL,
-               is_merged_origin=False, merge_span=None, cf_affected=False, tags={})
+        _truth(
+            sheet,
+            f"A{i}",
+            value=period,
+            resolved_rgb=None,
+            number_format=FMT_GENERAL,
+            is_merged_origin=False,
+            merge_span=None,
+            cf_affected=False,
+            tags={},
+        )
         for j, v in enumerate(vals, start=2):
             c = ws.cell(row=i, column=j, value=v)
             c.number_format = FMT_THOUSANDS
-            _truth(sheet, f"{get_column_letter(j)}{i}", value=v, resolved_rgb=None,
-                   number_format=FMT_THOUSANDS, is_merged_origin=False, merge_span=None,
-                   cf_affected=False, tags={})
+            _truth(
+                sheet,
+                f"{get_column_letter(j)}{i}",
+                value=v,
+                resolved_rgb=None,
+                number_format=FMT_THOUSANDS,
+                is_merged_origin=False,
+                merge_span=None,
+                cf_affected=False,
+                tags={},
+            )
 
     return sheet, {"orientation_expect": "transposed"}
 
@@ -286,36 +432,77 @@ def _build_transposed_sheet(wb: Workbook) -> tuple[str, dict[str, object]]:
 # Sheet 4: 条件格式区域（色阶）—— 受影响格须打 cf_affected 并产 grid 告警
 # ---------------------------------------------------------------------------
 
+
 def _build_cf_sheet(wb: Workbook) -> tuple[str, dict[str, object]]:
     sheet = "CondFormat"
     ws = wb.create_sheet(sheet)
 
     ws["A1"] = "Metric"
     ws["B1"] = "FY2024"
-    _truth(sheet, "A1", value="Metric", resolved_rgb=None, number_format=FMT_GENERAL,
-           is_merged_origin=False, merge_span=None, cf_affected=False, tags={})
-    _truth(sheet, "B1", value="FY2024", resolved_rgb=None, number_format=FMT_GENERAL,
-           is_merged_origin=False, merge_span=None, cf_affected=False, tags={})
+    _truth(
+        sheet,
+        "A1",
+        value="Metric",
+        resolved_rgb=None,
+        number_format=FMT_GENERAL,
+        is_merged_origin=False,
+        merge_span=None,
+        cf_affected=False,
+        tags={},
+    )
+    _truth(
+        sheet,
+        "B1",
+        value="FY2024",
+        resolved_rgb=None,
+        number_format=FMT_GENERAL,
+        is_merged_origin=False,
+        merge_span=None,
+        cf_affected=False,
+        tags={},
+    )
 
     vals = [("REVENUE", 2680.0), ("NEWSALES", 4750.0), ("PROFIT", 2210.0), ("ROE", 0.138)]
     cf_range = "B2:B5"
     for i, (metric, v) in enumerate(vals, start=2):
         ws.cell(row=i, column=1, value=metric)
-        _truth(sheet, f"A{i}", value=metric, resolved_rgb=None, number_format=FMT_GENERAL,
-               is_merged_origin=False, merge_span=None, cf_affected=False, tags={})
+        _truth(
+            sheet,
+            f"A{i}",
+            value=metric,
+            resolved_rgb=None,
+            number_format=FMT_GENERAL,
+            is_merged_origin=False,
+            merge_span=None,
+            cf_affected=False,
+            tags={},
+        )
         fmt = FMT_PCT if metric == "ROE" else FMT_THOUSANDS
         c = ws.cell(row=i, column=2, value=v)
         c.number_format = fmt
         # CF 区域内的格：resolved_rgb 不可信 -> None，cf_affected=True
-        _truth(sheet, f"B{i}", value=v, resolved_rgb=None, number_format=fmt,
-               is_merged_origin=False, merge_span=None, cf_affected=True, tags={})
+        _truth(
+            sheet,
+            f"B{i}",
+            value=v,
+            resolved_rgb=None,
+            number_format=fmt,
+            is_merged_origin=False,
+            merge_span=None,
+            cf_affected=True,
+            tags={},
+        )
 
     ws.conditional_formatting.add(
         cf_range,
         ColorScaleRule(
-            start_type="min", start_color="FFF8696B",
-            mid_type="percentile", mid_value=50, mid_color="FFFFEB84",
-            end_type="max", end_color="FF63BE7B",
+            start_type="min",
+            start_color="FFF8696B",
+            mid_type="percentile",
+            mid_value=50,
+            mid_color="FFFFEB84",
+            end_type="max",
+            end_color="FF63BE7B",
         ),
     )
 
@@ -325,6 +512,7 @@ def _build_cf_sheet(wb: Workbook) -> tuple[str, dict[str, object]]:
 # ---------------------------------------------------------------------------
 # 组装 + 真值落盘 + 自校验
 # ---------------------------------------------------------------------------
+
 
 def build_workbook() -> dict[str, object]:
     wb = Workbook()
@@ -356,8 +544,7 @@ def build_workbook() -> dict[str, object]:
         },
         "cells": list(_cell_truth.values()),
     }
-    GT_PATH.write_text(json.dumps(ground_truth, ensure_ascii=False, indent=2),
-                       encoding="utf-8")
+    GT_PATH.write_text(json.dumps(ground_truth, ensure_ascii=False, indent=2), encoding="utf-8")
     return ground_truth
 
 

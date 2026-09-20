@@ -111,9 +111,7 @@ def test_scanned_pdf_ocr_produces_facts(store, registry, queue, scanned_pdf_path
 
     _init_three(store, registry, queue)
     assert store.count() == 0
-    report = ingest_file(
-        scanned_pdf_path, store, registry, queue, ocr_backend=_FakeOcrBackend()
-    )
+    report = ingest_file(scanned_pdf_path, store, registry, queue, ocr_backend=_FakeOcrBackend())
     assert report.status == "ok"
     assert report.error is None
     assert report.n_facts_ingested >= 1
@@ -133,18 +131,14 @@ def test_scanned_pdf_ocr_fact_retrievable(store, registry, queue, scanned_pdf_pa
     assert rows[0].review_status in VISIBLE_REVIEW_STATUSES
 
 
-def test_scanned_pdf_ocr_low_confidence_routed_to_review(
-    store, registry, queue, scanned_pdf_path
-):
+def test_scanned_pdf_ocr_low_confidence_routed_to_review(store, registry, queue, scanned_pdf_path):
     """W3a：保留既有纪律——低置信 OCR 格（confidence < min_confidence）仍路由复核队列，
     reason='low_confidence_ocr'，payload 含 locator/text/confidence，绝不静默混入。"""
     from ragspine.ingestion.structured.ingestion import ingest_file
 
     _init_three(store, registry, queue)
     ingest_file(scanned_pdf_path, store, registry, queue, ocr_backend=_FakeOcrBackend())
-    low_conf = [
-        it for it in queue.list_pending() if it.reason == LOW_CONFIDENCE_REASON
-    ]
+    low_conf = [it for it in queue.list_pending() if it.reason == LOW_CONFIDENCE_REASON]
     assert low_conf, "低置信 OCR 格未路由进复核队列"
     item = low_conf[0]
     assert "R3C2" in item.payload["locator"]
@@ -185,9 +179,9 @@ def test_default_ocr_backend_is_family_pdfspine(
     """W3a：未注入 ocr_backend 时，扫描分支默认走【家族 OCR】PdfSpineOcrBackend
     （pdfspine 的离线确定性 PP-OCRv5），而非 GPU-gated PaddleOCR-VL——离线即用。
     用 spy 捕获传入 extract_grids 的后端类型，短路返回 [] 以免真跑 OCR。"""
-    from ragspine.ingestion.structured.ingestion import ingest_file
     import ragspine.ingestion.structured.ingestion as ingestion_mod
     from ragspine.extraction.extractors.pdf_scanned_extractor import PdfSpineOcrBackend
+    from ragspine.ingestion.structured.ingestion import ingest_file
 
     _init_three(store, registry, queue)
     captured: dict[str, object] = {}
@@ -203,17 +197,19 @@ def test_default_ocr_backend_is_family_pdfspine(
     assert real is not _spy  # sanity：确有真实实现被替换
 
 
-def test_scanned_pdf_ocr_dry_run_writes_nothing(
-    store, registry, queue, scanned_pdf_path
-):
+def test_scanned_pdf_ocr_dry_run_writes_nothing(store, registry, queue, scanned_pdf_path):
     """W3a：扫描型 PDF 的 dry_run 仍是「只看不动」——store 与 queue 都零写入，
     n_facts_ingested == 0 且 n_enqueued_review == 0（含低置信入队也不发生）。"""
     from ragspine.ingestion.structured.ingestion import ingest_file
 
     _init_three(store, registry, queue)
     report = ingest_file(
-        scanned_pdf_path, store, registry, queue,
-        dry_run=True, ocr_backend=_FakeOcrBackend(),
+        scanned_pdf_path,
+        store,
+        registry,
+        queue,
+        dry_run=True,
+        ocr_backend=_FakeOcrBackend(),
     )
     assert report.dry_run is True
     assert report.n_facts_ingested == 0
@@ -234,16 +230,17 @@ def test_scanned_pdf_ocr_idempotent(store, registry, queue, scanned_pdf_path):
     assert store.count() == first
 
 
-def test_scanned_pdf_empty_ocr_not_silently_dropped(
-    store, registry, queue, scanned_pdf_path
-):
+def test_scanned_pdf_empty_ocr_not_silently_dropped(store, registry, queue, scanned_pdf_path):
     """W3a：若 OCR 未识别出任何表格，扫描件绝不被静默丢弃——必须留下复核项或告警，
     让运营看到「这份文件被挡下、原因是什么」。"""
     from ragspine.ingestion.structured.ingestion import ingest_file
 
     _init_three(store, registry, queue)
     report = ingest_file(
-        scanned_pdf_path, store, registry, queue,
+        scanned_pdf_path,
+        store,
+        registry,
+        queue,
         ocr_backend=_FakeOcrBackend(empty=True),
     )
     assert report.n_facts_ingested == 0

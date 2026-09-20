@@ -42,8 +42,12 @@ _DEFAULT_SENSITIVITY = "INTERNAL"
 __all__ = ["build_relation_graph"]
 
 
-def _node_meta(source_locator: str, *, source_doc_id: str = _PROFILE_DOC_ID,
-               sensitivity: str = _DEFAULT_SENSITIVITY) -> dict[str, str]:
+def _node_meta(
+    source_locator: str,
+    *,
+    source_doc_id: str = _PROFILE_DOC_ID,
+    sensitivity: str = _DEFAULT_SENSITIVITY,
+) -> dict[str, str]:
     """节点血缘 + 隔离判据元数据（三键皆非空）。"""
     return {
         "source_doc_id": source_doc_id,
@@ -84,9 +88,7 @@ def _rank(sensitivity: str) -> int:
     return _SENSITIVITY_RANK.get(sensitivity.upper(), _SENSITIVITY_RANK[_DEFAULT_SENSITIVITY])
 
 
-def _doc_sensitivities(
-    facts: Iterable[Fact], chunks: Iterable[object]
-) -> dict[str, str]:
+def _doc_sensitivities(facts: Iterable[Fact], chunks: Iterable[object]) -> dict[str, str]:
     """每个 doc_id 的敏感度：事实来源 → INTERNAL，chunk 来源 → chunk.sensitivity；
     同 doc 多来源取【最严】（按 (rank, 串) 比较，与来源遍历顺序无关，确定性）。"""
     sens: dict[str, str] = {}
@@ -160,9 +162,7 @@ def _add_doc_nodes(facts: Iterable[Fact], chunks: Iterable[object], build: _Buil
             id=doc_id,
             type="doc",
             label=doc_id,
-            metadata=_node_meta(
-                f"{doc_id}#doc", source_doc_id=doc_id, sensitivity=sensitivity
-            ),
+            metadata=_node_meta(f"{doc_id}#doc", source_doc_id=doc_id, sensitivity=sensitivity),
         )
 
 

@@ -23,6 +23,7 @@ def _cache(*items: FAQItem) -> FAQCache:
 
 # --- 基础命中 -----------------------------------------------------------------
 
+
 def test_exact_question_hit_returns_provenance():
     item = FAQItem(
         id="faq-1",
@@ -72,6 +73,7 @@ def test_empty_cache_misses():
 
 # --- 排除规则（即使存在文本匹配条目也必须 MISS） -----------------------------
 
+
 def test_exclude_structured_numeric_question():
     # 文本完全匹配，但这是结构化数字查询 → 必须交回 fact table，不得短路。
     item = FAQItem(id="bad", question="香港去年REVENUE多少", answer="伪造的 1702")
@@ -81,8 +83,7 @@ def test_exclude_structured_numeric_question():
 def test_exclude_external_competitor_entity():
     q = "竞安今年表现怎么样"
     # 经 intent 验证此问法触发外部实体/越权
-    from ragspine.agent.intent import parse_intent, clarify_scope
-    from ragspine.agent.intent import CLARIFY_OUT_OF_SCOPE_ENTITY
+    from ragspine.agent.intent import CLARIFY_OUT_OF_SCOPE_ENTITY, clarify_scope, parse_intent
 
     intent = parse_intent(q, reference_date=REF)
     assert intent.external_entity is not None
@@ -157,9 +158,7 @@ def test_exclude_restricted_sensitivity_is_case_insensitive():
     """RESTRICTED 门必须大小写无关：小写 / 混合 / 带首尾空白的 'restricted' 同样
     绝不得短路——否则一条手写 JSON 里 sensitivity='restricted' 的机密条目会泄露。"""
     for sens in ("restricted", "Restricted", " RESTRICTED "):
-        item = FAQItem(
-            id="r", question="RAGSpine 是什么", answer="机密", sensitivity=sens
-        )
+        item = FAQItem(id="r", question="RAGSpine 是什么", answer="机密", sensitivity=sens)
         assert _cache(item).lookup("RAGSpine 是什么", reference_date=REF) is None, (
             f"sensitivity={sens!r} 漏短路 RESTRICTED 内容"
         )
@@ -174,18 +173,18 @@ def test_exclude_realtime_cue_is_nfkc_symmetric():
 
 # --- 纯函数性：lookup 不触达 provider/store/retriever -------------------------
 
+
 def test_lookup_is_pure_no_side_channels(monkeypatch):
     import ragspine.service.faq.faq_cache as mod
 
     # lookup 只允许调用 parse_intent/clarify_scope；不得引用 provider/store/retriever。
-    src = (
-        __import__("pathlib").Path(mod.__file__).read_text(encoding="utf-8")
-    )
+    src = __import__("pathlib").Path(mod.__file__).read_text(encoding="utf-8")
     for forbidden in ("answer_question", "FactStore", "MockProvider", "Retriever"):
         assert forbidden not in src
 
 
 # --- from_file 往返 -----------------------------------------------------------
+
 
 def test_from_file_roundtrip_items_key(tmp_path):
     p = tmp_path / "faq.json"

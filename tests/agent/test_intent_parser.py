@@ -55,6 +55,7 @@ class _RecordingParser:
 # 1) 规则实现等价 + 满足 Protocol
 # --------------------------------------------------------------------------
 
+
 def test_rule_parser_matches_parse_intent():
     parser = RuleIntentParser()
     for q in (
@@ -65,10 +66,23 @@ def test_rule_parser_matches_parse_intent():
     ):
         got = parser.parse(q, reference_date=REF)
         want = parse_intent(q, reference_date=REF)
-        assert (got.route, got.metric, got.entity, got.period, got.channel,
-                got.external_entity, got.raw_question) == (
-            want.route, want.metric, want.entity, want.period, want.channel,
-            want.external_entity, want.raw_question)
+        assert (
+            got.route,
+            got.metric,
+            got.entity,
+            got.period,
+            got.channel,
+            got.external_entity,
+            got.raw_question,
+        ) == (
+            want.route,
+            want.metric,
+            want.entity,
+            want.period,
+            want.channel,
+            want.external_entity,
+            want.raw_question,
+        )
 
 
 def test_rule_parser_satisfies_protocol():
@@ -79,19 +93,27 @@ def test_rule_parser_satisfies_protocol():
 # 2) answer_question 使用注入的 parser
 # --------------------------------------------------------------------------
 
+
 def test_answer_question_uses_injected_parser(tmp_db_path):
     store = SqliteFactStore(str(tmp_db_path))
     store.init_schema()
     fake_intent = ParsedIntent(
-        route=ROUTE_NARRATIVE, metric=None, entity=None, period=None,
-        channel="TOTAL", raw_question="香港最近有什么监管动态",
+        route=ROUTE_NARRATIVE,
+        metric=None,
+        entity=None,
+        period=None,
+        channel="TOTAL",
+        raw_question="香港最近有什么监管动态",
     )
     parser = _RecordingParser(intent=fake_intent)
 
     # narrative 路 + 无 retriever → 坦白降级，不触达 provider。
     result = answer_question(
-        "随便问点什么", store, _SentinelProvider(),
-        reference_date=REF, intent_parser=parser,
+        "随便问点什么",
+        store,
+        _SentinelProvider(),
+        reference_date=REF,
+        intent_parser=parser,
     )
     assert isinstance(result, AgentResult)
     assert parser.calls == ["随便问点什么"]  # 注入的 parser 被调用
@@ -102,6 +124,7 @@ def test_answer_question_uses_injected_parser(tmp_db_path):
 # 3) 安全门独立于注入 parser（核心解耦不变量）
 # --------------------------------------------------------------------------
 
+
 def test_security_gate_independent_of_pluggable_parser(tmp_db_path):
     """注入一个【故意漏判竞品】的 parser（external_entity=None），但 raw_question
     含竞品；编排层仍必须确定性拒答——安全门从 raw_question 独立复核，不信任 parser。"""
@@ -109,15 +132,22 @@ def test_security_gate_independent_of_pluggable_parser(tmp_db_path):
     store.init_schema()
     # 假 parser：把竞品问句当成普通结构化查询，external_entity 留空。
     blind_intent = ParsedIntent(
-        route=ROUTE_STRUCTURED, metric="REVENUE", entity="ACME_HK",
-        period=("FY", "2025"), channel="TOTAL",
-        raw_question="竞安去年REVENUE多少", external_entity=None,
+        route=ROUTE_STRUCTURED,
+        metric="REVENUE",
+        entity="ACME_HK",
+        period=("FY", "2025"),
+        channel="TOTAL",
+        raw_question="竞安去年REVENUE多少",
+        external_entity=None,
     )
     parser = _RecordingParser(intent=blind_intent)
 
     result = answer_question(
-        "竞安去年REVENUE多少", store, _SentinelProvider(),
-        reference_date=REF, intent_parser=parser,
+        "竞安去年REVENUE多少",
+        store,
+        _SentinelProvider(),
+        reference_date=REF,
+        intent_parser=parser,
     )
     assert result.clarification is not None
     assert result.clarification.mode == CLARIFY_OUT_OF_SCOPE_ENTITY
@@ -130,9 +160,7 @@ def test_default_answer_question_still_refuses_competitor(tmp_db_path):
     """不注入 parser 时，默认 RuleIntentParser 行为不变：竞品照常拒答。"""
     store = SqliteFactStore(str(tmp_db_path))
     store.init_schema()
-    result = answer_question(
-        "竞安去年REVENUE多少", store, MockProvider(), reference_date=REF
-    )
+    result = answer_question("竞安去年REVENUE多少", store, MockProvider(), reference_date=REF)
     assert result.clarification is not None
     assert result.clarification.mode == CLARIFY_OUT_OF_SCOPE_ENTITY
     assert result.tool_results == []

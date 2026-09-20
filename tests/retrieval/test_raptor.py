@@ -13,7 +13,6 @@
 """
 
 import os
-from dataclasses import replace
 
 import pytest
 import rootutils
@@ -74,7 +73,13 @@ class BoomProvider:
 
 def _text_response(text: str) -> ChatCompletion:
     return ChatCompletion(
-        choices=(Choice(index=0, message=ResponseMessage(role="assistant", content=text), finish_reason="stop"),)
+        choices=(
+            Choice(
+                index=0,
+                message=ResponseMessage(role="assistant", content=text),
+                finish_reason="stop",
+            ),
+        )
     )
 
 
@@ -133,7 +138,9 @@ def test_tree_has_leaves_and_synthesis_summaries():
     assert all(leaf.is_synthesis is False and leaf.level == 0 for leaf in leaves)
     summaries = tree.summaries
     assert summaries, "应至少建一层合成摘要节点"
-    assert all(isinstance(s, RaptorNode) and s.is_synthesis is True and s.level >= 1 for s in summaries)
+    assert all(
+        isinstance(s, RaptorNode) and s.is_synthesis is True and s.level >= 1 for s in summaries
+    )
 
 
 def test_summary_nodes_carry_provenance():
@@ -181,7 +188,9 @@ def test_build_tree_no_embedder_is_leaves_only():
 # isolation：RESTRICTED 不进树 + 反证
 # ---------------------------------------------------------------------------
 def test_restricted_never_enters_tree():
-    chunks = _four_chunks() + [_chunk(4, "机密 水果 内部数字 42", "secret.pdf", sensitivity="RESTRICTED")]
+    chunks = _four_chunks() + [
+        _chunk(4, "机密 水果 内部数字 42", "secret.pdf", sensitivity="RESTRICTED")
+    ]
     tree = build_raptor_tree(chunks, embedder=FakeEmbedder())
     assert all("机密" not in n.text for n in tree.nodes)
     assert all("secret.pdf" not in n.source_doc_ids for n in tree.nodes)
@@ -204,9 +213,9 @@ def test_retrieve_multi_granularity():
     hits = tree.retrieve("哪些是水果", emb, top_k=10)
     assert hits and all(isinstance(h, RaptorHit) for h in hits)
     assert any(not h.node.is_synthesis for h in hits)  # 细节叶片
-    assert any(h.node.is_synthesis for h in hits)       # 高层摘要
+    assert any(h.node.is_synthesis for h in hits)  # 高层摘要
     scores = [h.score for h in hits]
-    assert scores == sorted(scores, reverse=True)       # 打分降序确定
+    assert scores == sorted(scores, reverse=True)  # 打分降序确定
 
 
 def test_retrieve_granularity_filter():
@@ -260,7 +269,9 @@ def test_make_summarizer_extractive():
 
 def test_make_summarizer_llm_needs_provider():
     assert make_raptor_summarizer("llm", provider=None) is None
-    assert isinstance(make_raptor_summarizer("llm", provider=ScriptedProvider([])), LLMRaptorSummarizer)
+    assert isinstance(
+        make_raptor_summarizer("llm", provider=ScriptedProvider([])), LLMRaptorSummarizer
+    )
 
 
 def test_make_summarizer_unknown_raises():
@@ -291,7 +302,12 @@ class FakeBase:
 
 
 def _leaf_snippet(doc_id: str, text: str) -> dict[str, object]:
-    return {"text": text, "doc_id": doc_id, "source_locator": f"{doc_id}#para1", "sensitivity": "INTERNAL"}
+    return {
+        "text": text,
+        "doc_id": doc_id,
+        "source_locator": f"{doc_id}#para1",
+        "sensitivity": "INTERNAL",
+    }
 
 
 def test_make_raptor_retriever_default_off_byte_identical():

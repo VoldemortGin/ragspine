@@ -31,9 +31,7 @@ def test_missing_file_falls_back_to_builtin_default(tmp_path):
     assert profile.home_entity_code == "ACME_GROUP"
     assert profile.home_entity_synonyms["香港"] == "ACME_HK"
     assert profile.home_entity_synonyms["中国"] == "ACME_CN"
-    assert profile.entity_geography == {
-        "ACME_GROUP": "ASIA", "ACME_HK": "HK", "ACME_CN": "CN"
-    }
+    assert profile.entity_geography == {"ACME_GROUP": "ASIA", "ACME_HK": "HK", "ACME_CN": "CN"}
     assert "竞安" in profile.external_entities
 
 

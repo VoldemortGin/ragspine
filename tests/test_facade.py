@@ -203,9 +203,7 @@ def test_parent_child_config_expands_a_child_hit_to_its_parent_context(tmp_path)
         "# 营收\n营收增长来自渠道扩张。\n毛利改善来自产品组合。\n# 风险\n汇率仍有波动。",
         encoding="utf-8",
     )
-    config = {
-        "indexing": {"chunker": "parent_child", "max_chars": 16, "overlap_chars": 0}
-    }
+    config = {"indexing": {"chunker": "parent_child", "max_chars": 16, "overlap_chars": 0}}
 
     with RAGSpine.local(tmp_path / "knowledge-base", config=config) as rag:
         rag.ingest(source)
@@ -226,9 +224,7 @@ def test_reopen_refuses_to_query_with_an_incompatible_indexing_contract(tmp_path
     workspace = tmp_path / "knowledge-base"
     source = tmp_path / "review.txt"
     source.write_text("# 营收\n营收增长来自渠道扩张。\n毛利改善。", encoding="utf-8")
-    parent_child = {
-        "indexing": {"chunker": "parent_child", "max_chars": 16, "overlap_chars": 0}
-    }
+    parent_child = {"indexing": {"chunker": "parent_child", "max_chars": 16, "overlap_chars": 0}}
 
     with RAGSpine.local(workspace, config=parent_child) as rag:
         rag.ingest(source)
@@ -257,7 +253,9 @@ def test_reopen_refuses_incremental_ingest_with_an_incompatible_contract(tmp_pat
             incompatible.ingest(second)
 
     with RAGSpine.local(workspace, config=parent_child) as compatible:
-        assert compatible.ask("Why did the first narrative change?").sources[0]["doc"] == "first.txt"
+        assert (
+            compatible.ask("Why did the first narrative change?").sources[0]["doc"] == "first.txt"
+        )
 
 
 def test_structured_only_ingest_ignores_narrative_index_contract_mismatch(tmp_path):
@@ -290,12 +288,8 @@ def test_parent_child_context_survives_a_compatible_reopen(tmp_path):
 
     workspace = tmp_path / "knowledge-base"
     source = tmp_path / "review.txt"
-    source.write_text(
-        "# 营收\n营收增长来自渠道扩张。\n毛利改善来自产品组合。", encoding="utf-8"
-    )
-    config = {
-        "indexing": {"chunker": "parent_child", "max_chars": 16, "overlap_chars": 0}
-    }
+    source.write_text("# 营收\n营收增长来自渠道扩张。\n毛利改善来自产品组合。", encoding="utf-8")
+    config = {"indexing": {"chunker": "parent_child", "max_chars": 16, "overlap_chars": 0}}
     with RAGSpine.local(workspace, config=config) as rag:
         rag.ingest(source)
 
@@ -313,9 +307,7 @@ def test_dry_run_does_not_claim_the_workspace_index_contract(tmp_path):
     workspace = tmp_path / "knowledge-base"
     source = tmp_path / "review.txt"
     source.write_text("Revenue improved after channel expansion.", encoding="utf-8")
-    parent_child = {
-        "indexing": {"chunker": "parent_child", "max_chars": 16, "overlap_chars": 0}
-    }
+    parent_child = {"indexing": {"chunker": "parent_child", "max_chars": 16, "overlap_chars": 0}}
 
     with RAGSpine.local(workspace, config=parent_child) as preview:
         report = preview.ingest(source, dry_run=True)

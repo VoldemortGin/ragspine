@@ -22,7 +22,7 @@ from pathlib import Path
 import pypdfium2 as pdfium
 import pypdfium2.raw as pdfium_raw
 
-TEXT_MIN_CHARS = 50   # 每页判定"有实质文本"的最少字符数（中文也适用，按字符计）
+TEXT_MIN_CHARS = 50  # 每页判定"有实质文本"的最少字符数（中文也适用，按字符计）
 IMG_COVER_SCAN = 0.55  # 图片覆盖率超过此值视为"扫描底图"
 
 
@@ -67,12 +67,19 @@ def classify_pdf(path: Path) -> dict:
         finally:
             page.close()
     n = len(pages) or 1
-    counts = {k: sum(1 for p in pages if p["kind"] == k) for k in ("digital", "ocr_scan", "img_scan", "low_text")}
+    counts = {
+        k: sum(1 for p in pages if p["kind"] == k)
+        for k in ("digital", "ocr_scan", "img_scan", "low_text")
+    }
 
     if counts["digital"] >= 0.9 * n:
         verdict = "数字型PDF(可程序化解析)"
     elif counts["img_scan"] + counts["ocr_scan"] >= 0.9 * n:
-        verdict = "扫描型PDF(需OCR管线)" if counts["img_scan"] >= counts["ocr_scan"] else "OCR过的扫描件(文本层质量存疑)"
+        verdict = (
+            "扫描型PDF(需OCR管线)"
+            if counts["img_scan"] >= counts["ocr_scan"]
+            else "OCR过的扫描件(文本层质量存疑)"
+        )
     else:
         verdict = "混合型(需逐页分流)"
 
@@ -81,7 +88,9 @@ def classify_pdf(path: Path) -> dict:
     # 项目特别关注点：PDF 若由 PowerPoint/Keynote 导出，应回头去要原生 pptx
     ask_for_source = any(s in origin for s in ("PowerPoint", "Keynote", "Impress"))
 
-    chart_pages = sum(1 for p in pages if p["vector_paths"] > 50 and p["kind"] in ("digital", "low_text"))
+    chart_pages = sum(
+        1 for p in pages if p["vector_paths"] > 50 and p["kind"] in ("digital", "low_text")
+    )
     doc.close()
 
     return {
@@ -118,10 +127,12 @@ def main() -> None:
 
     for r in rows:
         flag = "  ←建议去要原生pptx" if r.get("ask_for_pptx") else ""
-        print(f"[{r['verdict']}] {r['file']}  ({r['pages']}页, "
-              f"digital={r.get('digital', '-')}, ocr_scan={r.get('ocr_scan', '-')}, "
-              f"img_scan={r.get('img_scan', '-')}, low_text={r.get('low_text', '-')}, "
-              f"图表密集页={r.get('chart_like_pages', '-')}){flag}")
+        print(
+            f"[{r['verdict']}] {r['file']}  ({r['pages']}页, "
+            f"digital={r.get('digital', '-')}, ocr_scan={r.get('ocr_scan', '-')}, "
+            f"img_scan={r.get('img_scan', '-')}, low_text={r.get('low_text', '-')}, "
+            f"图表密集页={r.get('chart_like_pages', '-')}){flag}"
+        )
 
     if csv_out and rows:
         with open(csv_out, "w", newline="", encoding="utf-8-sig") as f:

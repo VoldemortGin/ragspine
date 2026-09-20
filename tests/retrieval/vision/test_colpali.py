@@ -31,10 +31,10 @@ from ragspine.retrieval.vision.colpali import (
     render_pdf_pages,
 )
 
-
 # ---------------------------------------------------------------------------
 # 视觉 MaxSim 复用 W11 colbert.maxsim（同一 sum-of-max-cosine 逻辑，不重复造轮子）
 # ---------------------------------------------------------------------------
+
 
 def test_visual_maxsim_reuses_colbert_maxsim():
     """W12 视觉 MaxSim 打分【复用】W11 colbert.py 的 maxsim（同一函数对象，非复制）。"""
@@ -51,6 +51,7 @@ def test_visual_maxsim_sum_of_max_cosine():
 # ---------------------------------------------------------------------------
 # VisualPage：页图像候选 + provenance locator
 # ---------------------------------------------------------------------------
+
 
 def test_visual_page_default_locator():
     """未显式给 source_locator 时，locator 取 '{doc_id}#page{N}'（provenance 缺省）。"""
@@ -73,6 +74,7 @@ def test_visual_page_default_sensitivity_internal():
 # render_pdf_pages：page→image 渲染复用 pypdfium2（已是基础依赖，离线可测）
 # ---------------------------------------------------------------------------
 
+
 def test_render_pdf_pages_returns_png_bytes(digital_pdf_path):
     """digital.pdf 逐页渲染为非空 PNG bytes（PNG magic 头），页数 >= 1。"""
     pages = render_pdf_pages(digital_pdf_path)
@@ -92,12 +94,13 @@ def test_render_pdf_pages_unreadable_returns_empty(tmp_path):
 # ColPaliVisualRetriever：视觉晚交互检索编排（MaxSim 打分 + provenance + is_visual）
 # ---------------------------------------------------------------------------
 
+
 def _pages():
     """三页伪内容（bytes 承载 ASCII，fake 视觉 embedder 按文本 token 首字母 one-hot 编码）。"""
     return [
-        VisualPage(doc_id="d0", page_no=1, image=b"x y z"),      # 与 'a b' 无共享 -> 0
-        VisualPage(doc_id="d1", page_no=2, image=b"a b c"),      # 命中 a,b -> 2（最强）
-        VisualPage(doc_id="d2", page_no=3, image=b"a"),          # 命中 a -> 1
+        VisualPage(doc_id="d0", page_no=1, image=b"x y z"),  # 与 'a b' 无共享 -> 0
+        VisualPage(doc_id="d1", page_no=2, image=b"a b c"),  # 命中 a,b -> 2（最强）
+        VisualPage(doc_id="d2", page_no=3, image=b"a"),  # 命中 a -> 1
     ]
 
 
@@ -185,6 +188,7 @@ def test_retriever_only_embeds_once_per_query(fake_visual_embedder):
 # ---------------------------------------------------------------------------
 # ColPaliVisualEmbedder：真 fastembed 后端（惰性构造 / 友好报错 / 透传 / 校验）
 # ---------------------------------------------------------------------------
+
 
 def test_embedder_ctor_is_lazy_no_fastembed(monkeypatch):
     """构造惰性：未装 fastembed 也能构造（模型在首次编码时才加载）。"""
@@ -294,6 +298,7 @@ def test_embedder_model_loaded_once(fake_colpali, tiny_png):
 # ---------------------------------------------------------------------------
 # 工厂 make_visual_embedder：opt-in（默认 None）+ 别名 + env + 模型覆盖
 # ---------------------------------------------------------------------------
+
 
 def test_factory_none_returns_none():
     """默认（None / 'none'）-> None：不启用视觉检索，opt-in，默认 loop 字节不变。"""

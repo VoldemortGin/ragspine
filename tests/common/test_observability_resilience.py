@@ -28,22 +28,36 @@ from corespine import (
 )
 
 from ragspine.agent.agent import AgentResult, answer_question
-from ragspine.storage.fact_store import Fact, SqliteFactStore
 from ragspine.agent.llm_provider import MockProvider
+from ragspine.storage.fact_store import Fact, SqliteFactStore
 
 REF = date(2026, 6, 12)
 
 REVENUE_HK_FY2025 = Fact(
-    metric_code="REVENUE", entity="ACME_HK", geography="HK", channel="TOTAL",
-    period_type="FY", period="2025", value=1702.0, unit="USD_M",
-    source_doc_id="ACME_FY2025_Results.pptx", source_locator="slide=5,table=1,row=2,col=3",
+    metric_code="REVENUE",
+    entity="ACME_HK",
+    geography="HK",
+    channel="TOTAL",
+    period_type="FY",
+    period="2025",
+    value=1702.0,
+    unit="USD_M",
+    source_doc_id="ACME_FY2025_Results.pptx",
+    source_locator="slide=5,table=1,row=2,col=3",
 )
 
 # 组级 REVENUE（用于触发 CLARIFY_ANSWER_WITH_ASSUMPTIONS 路径，含敏感数值 4500）
 REVENUE_GROUP_FY2025 = Fact(
-    metric_code="REVENUE", entity="ACME_GROUP", geography="ASIA", channel="TOTAL",
-    period_type="FY", period="2025", value=4500.0, unit="USD_M",
-    source_doc_id="ACME_FY2025_Results.pptx", source_locator="slide=3,table=1",
+    metric_code="REVENUE",
+    entity="ACME_GROUP",
+    geography="ASIA",
+    channel="TOTAL",
+    period_type="FY",
+    period="2025",
+    value=4500.0,
+    unit="USD_M",
+    source_doc_id="ACME_FY2025_Results.pptx",
+    source_locator="slide=3,table=1",
 )
 
 
@@ -64,9 +78,7 @@ def _tool_use_response(input_: dict) -> ChatCompletion:
         ),
     )
     msg = ResponseMessage(role="assistant", content=None, tool_calls=(tc,))
-    return ChatCompletion(
-        choices=(Choice(index=0, message=msg, finish_reason="tool_calls"),)
-    )
+    return ChatCompletion(choices=(Choice(index=0, message=msg, finish_reason="tool_calls"),))
 
 
 def _text_response(text: str) -> ChatCompletion:
@@ -78,11 +90,17 @@ class FakeRetriever:
     """duck-typed NarrativeRetriever：返回固定片段。"""
 
     def __init__(self, snippets: list[dict] | None = None):
-        self.snippets = snippets if snippets is not None else [{
-            "text": "香港 REVENUE 下降主因是 MCV 客群收缩与银保渠道调整。",
-            "doc_id": "HK_QBR_2025Q4.pptx",
-            "locator": "slide=12",
-        }]
+        self.snippets = (
+            snippets
+            if snippets is not None
+            else [
+                {
+                    "text": "香港 REVENUE 下降主因是 MCV 客群收缩与银保渠道调整。",
+                    "doc_id": "HK_QBR_2025Q4.pptx",
+                    "locator": "slide=12",
+                }
+            ]
+        )
         self.calls: list[dict] = []
 
     def retrieve(self, query: str, *, filters: dict | None = None, top_k: int = 50):
@@ -100,6 +118,7 @@ def _has_digit(text: str) -> bool:
 # "暂时不可用"，也绝不能看到系统崩溃或被编造出来的数字。
 # ===========================================================================
 
+
 def test_provider_error_degrades_structured_route(store):
     from ragspine.agent.llm_provider import ProviderError
 
@@ -107,9 +126,7 @@ def test_provider_error_degrades_structured_route(store):
         def chat(self, messages, *, tools=None):
             raise ProviderError("模拟网关 503")
 
-    result = answer_question(
-        "香港2025年REVENUE多少", store, ErroringProvider(), reference_date=REF
-    )
+    result = answer_question("香港2025年REVENUE多少", store, ErroringProvider(), reference_date=REF)
     assert isinstance(result, AgentResult)
     # 不抛异常、route 保持结构化
     assert result.route == "structured"
@@ -126,6 +143,7 @@ def test_provider_error_degrades_structured_route(store):
 # user story：归因/监管类问题走叙事合成，provider 失败时同样要诚实降级，不能崩。
 # ===========================================================================
 
+
 def test_provider_error_degrades_narrative_route(store):
     from ragspine.agent.llm_provider import ProviderError
 
@@ -135,8 +153,11 @@ def test_provider_error_degrades_narrative_route(store):
 
     retriever = FakeRetriever()
     result = answer_question(
-        "香港最近有什么监管动态", store, ErroringProvider(),
-        reference_date=REF, narrative_retriever=retriever,
+        "香港最近有什么监管动态",
+        store,
+        ErroringProvider(),
+        reference_date=REF,
+        narrative_retriever=retriever,
     )
     assert result.route == "narrative"
     assert "AI 服务暂时不可用" in result.answer
@@ -148,6 +169,7 @@ def test_provider_error_degrades_narrative_route(store):
 # user story：韧性兜底只能吃 provider 网络/API 异常（ProviderError），编排层自身的
 # 逻辑 bug（KeyError 等）必须照常冒泡，绝不能被宽泛 except 吞掉而静默降级。
 # ===========================================================================
+
 
 def test_logic_bug_not_swallowed_by_resilience(store):
     class BuggyProvider:
@@ -163,6 +185,7 @@ def test_logic_bug_not_swallowed_by_resilience(store):
 # user story：运维要能为 Anthropic 调用配置超时与重试上限，直接交给 SDK 原生退避，
 # 不自造退避逻辑——因此构造参数必须如实透传给 anthropic.Anthropic()。
 # ===========================================================================
+
 
 def test_anthropic_timeout_and_retries_passed_to_client(monkeypatch):
     import ragspine.agent.llm_provider as llm_provider
@@ -189,6 +212,7 @@ def test_anthropic_timeout_and_retries_passed_to_client(monkeypatch):
 # user story：为做成本/容量可观测，ProviderResponse 要带 usage（input/output tokens），
 # AnthropicProvider 从 SDK resp.usage 映射出来；缺失则 None（防御式，不崩）。
 # ===========================================================================
+
 
 def test_provider_response_has_usage_field():
     resp = ChatCompletion(choices=(Choice(index=0, message=ResponseMessage(content="hi")),))
@@ -240,10 +264,13 @@ def test_anthropic_maps_token_usage(monkeypatch):
 # 以便事后做端到端追踪与质量分析。
 # ===========================================================================
 
+
 def test_trace_emitted_with_fields(store, caplog):
     with caplog.at_level(logging.INFO, logger="ragspine.trace"):
         answer_question(
-            "香港2025年REVENUE多少", store, MockProvider(reference_date=REF),
+            "香港2025年REVENUE多少",
+            store,
+            MockProvider(reference_date=REF),
             reference_date=REF,
         )
     traces = [r for r in caplog.records if r.name == "ragspine.trace"]
@@ -267,6 +294,7 @@ def test_trace_emitted_with_fields(store, caplog):
 def test_trace_fabrication_guard_flag_true_on_not_found(store, caplog):
     """user story：not_found 触发防编造强制改写时，trace 的 fabrication_guard_triggered=True，
     便于统计有多少次模型试图越界、被编排层拦下。"""
+
     class ScriptedProvider:
         def __init__(self, responses):
             self._responses = list(responses)
@@ -274,10 +302,12 @@ def test_trace_fabrication_guard_flag_true_on_not_found(store, caplog):
         def chat(self, messages, *, tools=None):
             return self._responses.pop(0)
 
-    provider = ScriptedProvider([
-        _tool_use_response({"metric": "ROE", "entity": "ACME_CN", "period": "FY2024"}),
-        _text_response("ACME 中国 FY2024 ROE 为 9999%，表现亮眼。"),  # 对抗：编造
-    ])
+    provider = ScriptedProvider(
+        [
+            _tool_use_response({"metric": "ROE", "entity": "ACME_CN", "period": "FY2024"}),
+            _text_response("ACME 中国 FY2024 ROE 为 9999%，表现亮眼。"),  # 对抗：编造
+        ]
+    )
     with caplog.at_level(logging.INFO, logger="ragspine.trace"):
         result = answer_question("中国2024年ROE多少", store, provider, reference_date=REF)
     assert "查不到" in result.answer
@@ -291,6 +321,7 @@ def test_trace_fabrication_guard_flag_true_on_not_found(store, caplog):
 # user story：trace 是给运维/审计看的元数据，绝不能把事实数值与答案正文写进 INFO 日志，
 # 否则日志即成为受限数据的泄露面。
 # ===========================================================================
+
 
 def test_trace_does_not_leak_sensitive_values(store, caplog):
     # 组级 REVENUE（4500）会走"默认先答"，答案正文含敏感数字
@@ -314,10 +345,13 @@ def test_trace_does_not_leak_sensitive_values(store, caplog):
 # user story：单次 answer_question 内 request_id 必须稳定唯一，作为整条链路的关联键。
 # ===========================================================================
 
+
 def test_request_id_present_and_stable(store, caplog):
     with caplog.at_level(logging.INFO, logger="ragspine.trace"):
         answer_question(
-            "香港2025年REVENUE多少", store, MockProvider(reference_date=REF),
+            "香港2025年REVENUE多少",
+            store,
+            MockProvider(reference_date=REF),
             reference_date=REF,
         )
     traces = [r for r in caplog.records if r.name == "ragspine.trace"]
@@ -358,6 +392,7 @@ def test_emit_trace_rejects_forbidden_content_keys(caplog):
     """user story：隐私由机制强制——载荷含正文字段（answer/text/content/...）时 emit_trace
     直接抛 TraceError 且【绝不落盘】，而不是悄悄把受限正文写进 INFO 日志。"""
     from corespine import CorespineError
+
     from ragspine.common import observability
 
     for forbidden_key in ("answer", "text", "content"):
@@ -374,6 +409,7 @@ def test_emit_trace_rejects_forbidden_content_keys(caplog):
 # user story：加了观测/韧性后，既有正常路径（找数 / not_found）的对外行为必须逐字节不变。
 # ===========================================================================
 
+
 def test_regression_mock_found_path_unchanged(store):
     result = answer_question(
         "香港去年REVENUE多少", store, MockProvider(reference_date=REF), reference_date=REF
@@ -382,8 +418,9 @@ def test_regression_mock_found_path_unchanged(store):
     assert "1702" in result.answer
     assert "ACME_FY2025_Results.pptx" in result.answer
     assert result.tool_results[0]["status"] == "found"
-    assert result.sources == [{"doc": "ACME_FY2025_Results.pptx",
-                               "locator": "slide=5,table=1,row=2,col=3"}]
+    assert result.sources == [
+        {"doc": "ACME_FY2025_Results.pptx", "locator": "slide=5,table=1,row=2,col=3"}
+    ]
 
 
 def test_regression_mock_not_found_path_unchanged(store):

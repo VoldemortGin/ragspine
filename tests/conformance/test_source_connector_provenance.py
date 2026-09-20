@@ -35,6 +35,7 @@ def _assert_provenance_complete(connector) -> int:
 # P · Provenance：每个注册 SourceConnector 的产出都带齐血缘
 # ===========================================================================
 
+
 def test_every_rawdoc_carries_provenance(source_connector):
     """每个注册 SourceConnector：产出的每个 RawDoc 都带非空 source_doc_id + locator。"""
     n = _assert_provenance_complete(source_connector)
@@ -57,6 +58,7 @@ def test_deterministic_order_across_calls(source_connector):
 # ===========================================================================
 # 非空泛证明：丢血缘的 stub 必须 FAIL（证明 provenance pack 非空泛）
 # ===========================================================================
+
 
 class _LineageDroppingConnector:
     """反证 stub：产出 source_doc_id / locator 皆空的 RawDoc——【故意】违反 provenance。"""

@@ -11,15 +11,16 @@ import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
-from ragspine.fixtures.synthetic_deck import GT_PATH, PPTX_PATH, XLSX_PATH, main as make_synthetic
-from ragspine.extraction.extractors import pptx_extractor, xlsx_extractor
-from ragspine.storage.fact_store import SqliteFactStore
-from ragspine.common.glossary import normalize_entity, normalize_metric, normalize_period
 from ragspine.agent.query_tools import (
     QUERY_METRIC_TOOL_ANTHROPIC,
     QUERY_METRIC_TOOL_OPENAI,
     execute_query_metric,
 )
+from ragspine.common.glossary import normalize_entity, normalize_metric, normalize_period
+from ragspine.extraction.extractors import pptx_extractor, xlsx_extractor
+from ragspine.fixtures.synthetic_deck import GT_PATH, PPTX_PATH, XLSX_PATH
+from ragspine.fixtures.synthetic_deck import main as make_synthetic
+from ragspine.storage.fact_store import SqliteFactStore
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -174,7 +175,11 @@ def test_normalize_entity(raw, expected):
 def test_tool_schemas_shape():
     """function-calling schema：两种格式都齐备且参数定义对齐。"""
     assert QUERY_METRIC_TOOL_ANTHROPIC["name"] == "query_metric"
-    assert set(QUERY_METRIC_TOOL_ANTHROPIC["input_schema"]["required"]) == {"metric", "entity", "period"}
+    assert set(QUERY_METRIC_TOOL_ANTHROPIC["input_schema"]["required"]) == {
+        "metric",
+        "entity",
+        "period",
+    }
 
     assert QUERY_METRIC_TOOL_OPENAI["type"] == "function"
     assert QUERY_METRIC_TOOL_OPENAI["function"]["name"] == "query_metric"

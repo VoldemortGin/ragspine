@@ -135,9 +135,7 @@ class QdrantVectorStore:
             if expected is None:
                 expected = dim
             elif dim != expected:
-                raise ValueError(
-                    f"向量维度不一致：期望 {expected}，记录 {record.id!r} 为 {dim}"
-                )
+                raise ValueError(f"向量维度不一致：期望 {expected}，记录 {record.id!r} 为 {dim}")
         assert expected is not None  # records 非空 -> 循环至少一轮，expected 已定维
         self._ensure_collection(expected)
         points = [
@@ -197,9 +195,7 @@ class QdrantVectorStore:
             return []
         vector = tuple(vector)
         if len(vector) != self._dim:
-            raise ValueError(
-                f"查询向量维度 {len(vector)} 与库内维度 {self._dim} 不一致"
-            )
+            raise ValueError(f"查询向量维度 {len(vector)} 与库内维度 {self._dim} 不一致")
         n = self.count()
         if n == 0:
             return []
