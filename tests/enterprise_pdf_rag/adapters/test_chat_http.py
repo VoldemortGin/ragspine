@@ -245,6 +245,13 @@ def test_answer_carries_verified_citations_and_provenance(
         assert citation["evidence_ids"] == [span_id] and citation["quote"] == text
         assert citation["bbox"] is not None and citation["chart_citation"] is None
         assert (envelope["llm_live_calls"], envelope["cache_hit"]) == (1, False)
+        # Every prompt member reports how each channel ranked it (ADR 0012).
+        ranks = envelope["member_ranks"]
+        assert [item["member_id"] for item in ranks] == envelope["member_ids"]
+        assert all(
+            item["vector_rank"] is not None or item["lexical_rank"] is not None for item in ranks
+        )
+        assert all(item["fused_score"] > 0 for item in ranks)
         assert len(prompts) == 1 and _QUESTION in prompts[0]
 
         again = await client.post(_URL, json=_body(model))

@@ -1,9 +1,10 @@
 """Hybrid retrieval over one pinned snapshot: vector channel + BM25 + RRF.
 
 Only the three pure ranking functions and the listwise rerank orchestration are
-borrowed from ``ragspine``; the corpus is each member's embedded description
-text, so both channels score exactly the same text. Rerank is opt-in: with no
-judge injected, no model is consulted.
+borrowed from ``ragspine``; the corpus is each member's embedded index text
+(``member_texts``), so both channels score exactly the same text. Rerank is
+opt-in: with no judge injected, no model is consulted; when it runs, the judge
+reads each candidate's resolved evidence block, not the index text.
 """
 
 from collections.abc import MutableMapping, Sequence
@@ -14,6 +15,7 @@ from typing import Protocol, runtime_checkable
 from enterprise_pdf_rag.adapters.local_models import RerankResult
 from enterprise_pdf_rag.answers.models import FusedHit as FusedHit
 from enterprise_pdf_rag.answers.ports import MountedDocument
+from enterprise_pdf_rag.processing.context_builder import build_context_block
 from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit
 from ragspine.retrieval.lexical.retrieval import bm25_scores, rrf_fuse, tokenize
 from ragspine.retrieval.rerank.listwise_rerank import ListwiseJudge, listwise_rerank
@@ -50,7 +52,7 @@ class LexicalIndex:
 def build_lexical_index(
     document: MountedDocument, *, k1: float = 1.5, b: float = 0.75
 ) -> LexicalIndex:
-    """Tokenize every member's embedded text; empty members stay in the corpus at score 0."""
+    """Tokenize every member's index text; empty members stay in the corpus at score 0."""
     members = sorted(document.member_texts(), key=lambda item: item.member_id)
     return LexicalIndex(
         document.retrieval_snapshot_id,
@@ -159,9 +161,15 @@ class HybridSearch:
         fused = fuse(vector, lexical, k=self._rrf_k)
         if self._reranker is None or not fused:
             return fused[:top_k]
-        texts = dict(zip(self._index.member_ids, self._index.docs_tokens, strict=True))
+        # The judge sees what the answer model would see: a chart candidate's citable
+        # ``points.<id>.value`` lines, a text candidate's spans. Bounded by the fused
+        # set (at most twice the channel limit); every candidate is a verified resolve.
         candidates = [
-            _Candidate(hit, _Chunk(" ".join(texts.get(hit.member_id, ())))) for hit in fused
+            _Candidate(
+                hit,
+                _Chunk(build_context_block(self._document.resolve(hit.as_hit())).prompt_text()),
+            )
+            for hit in fused
         ]
         reranked = listwise_rerank(query, candidates, self._reranker, top_n=top_k)
         return tuple(candidate.hit for candidate in reranked)

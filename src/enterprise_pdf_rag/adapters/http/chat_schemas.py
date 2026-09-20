@@ -17,6 +17,7 @@ from enterprise_pdf_rag.answers.models import (
     AnswerStatus,
     ClaimCitation,
     ClaimKind,
+    FusedHit,
     RejectedClaim,
     VerifiedClaim,
 )
@@ -98,6 +99,28 @@ class RejectedClaimOut(BoundaryModel):
         )
 
 
+class MemberRankOut(BoundaryModel):
+    """How one prompt member ranked in each retrieval channel and after fusion."""
+
+    member_id: str
+    fused_score: float
+    vector_rank: int | None
+    lexical_rank: int | None
+    vector_score: float | None
+    bm25_score: float | None
+
+    @classmethod
+    def from_domain(cls, hit: FusedHit) -> "MemberRankOut":
+        return cls(
+            member_id=hit.member_id,
+            fused_score=hit.fused_score,
+            vector_rank=hit.vector_rank,
+            lexical_rank=hit.lexical_rank,
+            vector_score=hit.vector_score,
+            bm25_score=hit.bm25_score,
+        )
+
+
 class AnswerEnvelope(BoundaryModel):
     """Verified claims, audit rejections and pinned provenance beside the OpenAI shape."""
 
@@ -113,9 +136,12 @@ class AnswerEnvelope(BoundaryModel):
     rejected: tuple[RejectedClaimOut, ...]
     llm_live_calls: int
     cache_hit: bool
+    # One entry per prompt member, in ``member_ids`` order (added after rag-chat-v1 shipped).
+    member_ranks: tuple[MemberRankOut, ...] = ()
 
     @classmethod
     def from_domain(cls, result: AnswerResult) -> "AnswerEnvelope":
+        by_member = {hit.member_id: hit for hit in result.fused}
         return cls(
             status=result.status,
             abstain_reason=result.abstain_reason,
@@ -128,6 +154,11 @@ class AnswerEnvelope(BoundaryModel):
             rejected=tuple(RejectedClaimOut.from_domain(claim) for claim in result.rejected),
             llm_live_calls=result.llm_live_calls,
             cache_hit=result.cache_hit,
+            member_ranks=tuple(
+                MemberRankOut.from_domain(by_member[member_id])
+                for member_id in result.member_ids
+                if member_id in by_member
+            ),
         )
 
 

@@ -232,6 +232,14 @@
             "title": "Member Ids",
             "type": "array"
           },
+          "member_ranks": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/MemberRankOut"
+            },
+            "title": "Member Ranks",
+            "type": "array"
+          },
           "processing_id": {
             "title": "Processing Id",
             "type": "string"
@@ -515,6 +523,74 @@
           "occurrences"
         ],
         "title": "FieldCitation",
+        "type": "object"
+      },
+      "MemberRankOut": {
+        "additionalProperties": false,
+        "description": "How one prompt member ranked in each retrieval channel and after fusion.",
+        "properties": {
+          "bm25_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bm25 Score"
+          },
+          "fused_score": {
+            "title": "Fused Score",
+            "type": "number"
+          },
+          "lexical_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lexical Rank"
+          },
+          "member_id": {
+            "title": "Member Id",
+            "type": "string"
+          },
+          "vector_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vector Rank"
+          },
+          "vector_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vector Score"
+          }
+        },
+        "required": [
+          "member_id",
+          "fused_score",
+          "vector_rank",
+          "lexical_rank",
+          "vector_score",
+          "bm25_score"
+        ],
+        "title": "MemberRankOut",
         "type": "object"
       },
       "RejectedClaimOut": {
@@ -859,6 +935,14 @@
             "title": "Member Ids",
             "type": "array"
           },
+          "member_ranks": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/MemberRankOut"
+            },
+            "title": "Member Ranks",
+            "type": "array"
+          },
           "processing_id": {
             "title": "Processing Id",
             "type": "string"
@@ -1160,6 +1244,74 @@
           "occurrences"
         ],
         "title": "FieldCitation",
+        "type": "object"
+      },
+      "MemberRankOut": {
+        "additionalProperties": false,
+        "description": "How one prompt member ranked in each retrieval channel and after fusion.",
+        "properties": {
+          "bm25_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bm25 Score"
+          },
+          "fused_score": {
+            "title": "Fused Score",
+            "type": "number"
+          },
+          "lexical_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lexical Rank"
+          },
+          "member_id": {
+            "title": "Member Id",
+            "type": "string"
+          },
+          "vector_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vector Rank"
+          },
+          "vector_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vector Score"
+          }
+        },
+        "required": [
+          "member_id",
+          "fused_score",
+          "vector_rank",
+          "lexical_rank",
+          "vector_score",
+          "bm25_score"
+        ],
+        "title": "MemberRankOut",
         "type": "object"
       },
       "RejectedClaimOut": {

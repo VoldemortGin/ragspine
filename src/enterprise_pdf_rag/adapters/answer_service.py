@@ -5,7 +5,7 @@ does so at most once per request; retrieval, hydration and claim verification ar
 deterministic reads of the pinned snapshot.
 """
 
-from collections.abc import Mapping, MutableMapping
+from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 
 from enterprise_pdf_rag.adapters.hybrid_search import HybridSearch, LexicalIndex
@@ -25,11 +25,14 @@ from enterprise_pdf_rag.figures.chart_qa.displayed_models import (
     DisplayedLookupContext,
 )
 from enterprise_pdf_rag.figures.chart_qa.models import ChartContext
+from enterprise_pdf_rag.figures.models import ValueKind
 from enterprise_pdf_rag.processing.context_builder import (
+    BlockKind,
     ContextBlock,
     budget_blocks,
     build_context_block,
 )
+from enterprise_pdf_rag.processing.models import ObjectKind
 from ragspine.retrieval.rerank.listwise_rerank import ListwiseJudge
 
 _TASK = "rag-answer-v1"
@@ -50,6 +53,43 @@ class DependencyUnavailable(RuntimeError):
     def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
+
+
+def _citable_chart(block: ContextBlock) -> bool:
+    """A chart block with at least one explicit value the model could cite."""
+    return block.kind is BlockKind.CHART and any(
+        field.field_path.endswith(".value")
+        and field.value is not None
+        and field.value_kind is ValueKind.EXPLICIT
+        for field in block.chart_fields
+    )
+
+
+def select_context(
+    document: MountedDocument, ranked: Sequence[FusedHit], top_k: int
+) -> tuple[tuple[FusedHit, ...], tuple[ContextBlock, ...]]:
+    """Hydrate the top-k fused hits, with one guaranteed seat for a citable chart.
+
+    When no hit in the top-k is a chart with an explicit value but one sits within the
+    next k fused positions, it replaces the last seat (ADR 0012). A pending or
+    label-only chart never qualifies, and nothing outside ``2 * top_k`` is promoted.
+    Only chart members in that window are resolved for the check.
+    """
+    head = list(ranked[:top_k])
+    blocks = {hit.member_id: build_context_block(document.resolve(hit.as_hit())) for hit in head}
+    if head and not any(_citable_chart(blocks[hit.member_id]) for hit in head):
+        kinds: dict[str, ObjectKind] | None = None
+        for hit in ranked[top_k : 2 * top_k]:
+            if kinds is None:
+                kinds = {member.member_id: member.kind for member in document.member_texts()}
+            if kinds.get(hit.member_id) is not ObjectKind.CHART:
+                continue
+            block = build_context_block(document.resolve(hit.as_hit()))
+            if _citable_chart(block):
+                blocks[hit.member_id] = block
+                head[-1] = hit
+                break
+    return tuple(head), tuple(blocks[hit.member_id] for hit in head)
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,18 +136,16 @@ class AnswerService:
             if self._reranker is None:
                 raise DependencyUnavailable("rerank requested but no reranker is configured")
             reranker = self._reranker
-        fused = HybridSearch(
+        ranked = HybridSearch(
             document,
             channel_limit=request.channel_limit,
             rrf_k=self._settings.rrf_k,
             reranker=reranker,
             index_cache=self._index_cache,
-        ).search(request.question, top_k=request.top_k)
+        ).search(request.question, top_k=2 * request.top_k)
+        fused, selected = select_context(document, ranked, request.top_k)
         hits = {hit.member_id: hit.as_hit() for hit in fused}
-        blocks = budget_blocks(
-            [build_context_block(document.resolve(hit)) for hit in hits.values()],
-            max_chars=self._settings.prompt_budget_chars,
-        )
+        blocks = budget_blocks(selected, max_chars=self._settings.prompt_budget_chars)
         if not blocks:
             return self._abstained(
                 document,

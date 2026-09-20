@@ -32,6 +32,13 @@ from enterprise_pdf_rag.processing.models import ObjectKind
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
     publish_generic_document,
 )
+from tests.enterprise_pdf_rag.answers.fake_document import (
+    DONUT_TITLE,
+    FakeDocument,
+    FakeMember,
+    donut_chart,
+    pending_chart,
+)
 from tests.enterprise_pdf_rag.answers.fake_llm import (
     Script,
     answered,
@@ -74,7 +81,7 @@ def bar(tmp_path: Path) -> tuple[StoreMountedDocument, str]:
 
 def _service(
     tmp_path: Path,
-    document: StoreMountedDocument,
+    document: StoreMountedDocument | FakeDocument,
     script: Script,
     *,
     settings: AnswerSettings | None = None,
@@ -454,3 +461,60 @@ def test_text_quotes_are_verified_verbatim_against_the_published_span(
         AbstainReason.CLAIM_NOT_IN_EVIDENCE,
     )
     assert result.rejected[0].claim_id == "f"
+
+
+def test_request_defaults_widen_the_channel_window_and_the_prompt_seats() -> None:
+    request = AnswerRequest(_QUESTION)
+    assert (request.top_k, request.channel_limit, request.rerank) == (10, 50, False)
+    with pytest.raises(ValueError, match="channel_limit"):
+        AnswerRequest(_QUESTION, channel_limit=0)
+
+
+_TEXT_IDS = tuple(f"text-{index}" for index in range(1, 7))
+
+
+def _seat_document(vector_order: tuple[str, ...]) -> FakeDocument:
+    members = (
+        *(FakeMember(member_id, f"Narrative sentence {member_id}") for member_id in _TEXT_IDS),
+        FakeMember("donut", DONUT_TITLE, donut_chart(("Agency", "72"), ("Partnerships", "28"))),
+        FakeMember("pending", "High-Quality In-Force Portfolio", pending_chart()),
+    )
+    return FakeDocument(members, vector_order)
+
+
+def _seat_result(tmp_path: Path, document: FakeDocument) -> tuple[AnswerResult, list[str]]:
+    # A question no index text contains: the fused order is exactly the vector order.
+    service, prompts = _service(tmp_path, document, lambda prompt: declined())
+    return service.answer(AnswerRequest("zzz-nothing-matches", top_k=2)), prompts
+
+
+def test_a_citable_chart_within_two_top_k_takes_the_last_prompt_seat(tmp_path: Path) -> None:
+    document = _seat_document(("text-1", "text-2", "text-3", "donut", "text-4"))
+    result, prompts = _seat_result(tmp_path, document)
+    assert result.member_ids == ("text-1", "donut")
+    assert [hit.member_id for hit in result.fused] == ["text-1", "donut"]
+    # Only the chart candidates in the window were resolved for the check.
+    assert document.resolved == ["text-1", "text-2", "donut"]
+    assert "points.point-agency.value: series=VONB category=Agency unit=% value=72" in prompts[0]
+    assert "text-2-span" not in prompts[0]
+
+
+def test_no_seat_is_given_beyond_two_top_k_or_to_a_pending_chart(tmp_path: Path) -> None:
+    beyond = _seat_document(("text-1", "text-2", "text-3", "text-4", "donut"))
+    result, prompts = _seat_result(tmp_path, beyond)
+    assert result.member_ids == ("text-1", "text-2")
+    assert "donut" not in beyond.resolved and "kind=chart" not in prompts[0]
+
+    pending = _seat_document(("text-1", "text-2", "pending", "text-3"))
+    result, prompts = _seat_result(tmp_path / "pending", pending)
+    assert result.member_ids == ("text-1", "text-2")
+    assert pending.resolved == ["text-1", "text-2", "pending"]  # checked, not promoted
+    assert "kind=chart" not in prompts[0]
+
+
+def test_a_chart_already_in_the_top_k_needs_no_seat_and_no_extra_reads(tmp_path: Path) -> None:
+    document = _seat_document(("donut", "text-1", "text-2", "pending"))
+    result, _ = _seat_result(tmp_path, document)
+    assert result.member_ids == ("donut", "text-1")
+    assert document.resolved == ["donut", "text-1"]
+    assert document.member_texts_calls == 1  # the lexical index build only

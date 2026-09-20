@@ -1,6 +1,7 @@
 """Hybrid search fuses the pinned vector channel with a snapshot-bound BM25 index."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Never
 
 import pytest
@@ -21,6 +22,13 @@ from enterprise_pdf_rag.figures.chart_qa.models import ChartContext
 from enterprise_pdf_rag.processing.models import ObjectKind, ProcessingManifest
 from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit, RetrievalContext
 from ragspine.retrieval.lexical.retrieval import bm25_scores, rrf_fuse, tokenize
+from tests.enterprise_pdf_rag.answers.fake_document import (
+    DONUT_TITLE,
+    FakeDocument,
+    FakeMember,
+    donut_chart,
+)
+from tests.enterprise_pdf_rag.answers.store_mounted_document import bar_document
 
 _SNAPSHOT = "1" * 64
 _TEXTS = {
@@ -85,10 +93,14 @@ class _FakeDocument:
 
 @dataclass
 class _CountingJudge:
+    """Reverses the fused order and records the candidate texts it was shown."""
+
     calls: int = 0
+    seen: list[list[str]] = field(default_factory=list)
 
     def judge(self, query: str, candidates: list[str]) -> list[int]:
         self.calls += 1
+        self.seen.append(list(candidates))
         return list(reversed(range(len(candidates))))
 
 
@@ -201,16 +213,108 @@ def test_hybrid_search_builds_the_lexical_index_once_per_snapshot() -> None:
 
 
 def test_rerank_is_off_by_default_and_only_an_injected_judge_reorders() -> None:
-    document = _FakeDocument(("m-a", "m-b"))
+    document = FakeDocument(
+        tuple(FakeMember(member_id, text) for member_id, text in _TEXTS.items()), ("m-a", "m-b")
+    )
     plain = HybridSearch(document).search("expense ratio", top_k=3)
     assert [hit.member_id for hit in plain] == ["m-a", "m-b"]
     assert HybridSearch(document, reranker=None).search("expense ratio", top_k=3) == plain
+    assert document.resolved == []  # no evidence is read while rerank is off
 
     judge = _CountingJudge()
     reranked = HybridSearch(document, reranker=judge).search("expense ratio", top_k=3)
     assert judge.calls == 1
     assert [hit.member_id for hit in reranked] == ["m-b", "m-a"]
     assert set(reranked) == set(plain)
+    # The judge read each fused candidate's evidence block, not the tokenized index text.
+    assert document.resolved == ["m-a", "m-b"]
+    (seen,) = judge.seen
+    assert seen[0].startswith("[member ") and "kind=text" in seen[0]
+    assert f"fragments.m-a-span: {_TEXTS['m-a']}" in seen[0]
+    assert f"fragments.m-b-span: {_TEXTS['m-b']}" in seen[1]
+
+
+def test_reranker_reads_a_chart_candidate_as_its_citable_evidence_block(tmp_path: Path) -> None:
+    document, pin = bar_document(tmp_path)
+    judge = _CountingJudge()
+    hits = HybridSearch(document, reranker=judge).search("expense ratio 1H21", top_k=2)
+    assert {hit.member_id for hit in hits} == {
+        pin.member_id,
+        *document.member_ids_by_kind(ObjectKind.TEXT),
+    }
+    (seen,) = judge.seen
+    chart_text = next(text for text in seen if "kind=chart" in text)
+    assert "points.p-1H21.value: series=Expense Ratio category=1H21 unit=% value=15" in chart_text
+    assert "points.p-1H23.value" in chart_text
+    # The lexical corpus scores the projection the displayed-bar admission embedded.
+    (bar_text,) = (item for item in document.member_texts() if item.member_id == pin.member_id)
+    assert (
+        bar_text.text
+        == "Expense Ratio bar chart figure 1H21 Expense Ratio 15% 1H23 Expense Ratio 6%"
+    )
+
+
+_LONG_TEXTS = {
+    f"text-{index:02d}": sentence
+    for index, sentence in enumerate(
+        (
+            "Premier Agency: 55% of VONB and 18% growth in active agents",
+            "Partnerships VONB grew 20% with bancassurance in Hong Kong and Thailand",
+            "Record operating ROE of 17.5% in the first half",
+            "OPAT per share increased 12% on a constant exchange rate basis",
+            "Free surplus generation remained strong across all markets",
+            "Chinese Mainland visitor sales were broadly stable year on year",
+            "New business margin improved in every reportable segment",
+            "Group embedded value rose to a record level at 30 June",
+            "Underlying free surplus generation per share up 10%",
+            "Shareholder allocated equity increased after the buy-back",
+            "Health and protection sales accounted for the majority of ANP",
+            "Thailand delivered double-digit growth through the agency channel",
+            "The interim dividend per share increased in line with policy",
+            "Solvency cover ratio stayed well above the regulatory minimum",
+            "Total weighted premium income grew across the portfolio",
+            "Expense ratio comparatives are shown on an actual exchange rate basis",
+            "Investment income was resilient despite lower interest rates",
+            "Renewal premiums drove growth in total weighted premium income",
+            "Agent productivity rose with the Premier Agency strategy",
+        )
+    )
+}
+_NO_TITLE_QUESTION = "Agency share of VONB 1H26"
+
+
+def _aia_like(chart_text_only: bool) -> FakeDocument:
+    """Nineteen long texts plus one verified donut whose vector rank is 13, as observed on AIA."""
+    chart = FakeMember(
+        "chart-p18",
+        DONUT_TITLE,
+        None if chart_text_only else donut_chart(("Agency", "72"), ("Partnerships", "28")),
+    )
+    texts = tuple(FakeMember(member_id, text) for member_id, text in _LONG_TEXTS.items())
+    vector_order = (*tuple(_LONG_TEXTS)[:12], "chart-p18", *tuple(_LONG_TEXTS)[12:])
+    return FakeDocument((*texts, chart), vector_order)
+
+
+def test_projected_chart_text_lets_a_question_without_the_title_reach_the_top() -> None:
+    """The observed ISSUE-2 mechanism: title-only index text scores zero lexically for a
+    question that names categories, and RRF cannot lift a single-channel rank 13 into the
+    top ten; the projection makes the donut the lexical winner instead."""
+    before = HybridSearch(_aia_like(chart_text_only=True), channel_limit=50)
+    old = before.search(_NO_TITLE_QUESTION, top_k=10)
+    assert all(hit.member_id != "chart-p18" for hit in old)
+    assert lexical_rank(before.index, _NO_TITLE_QUESTION, limit=50) and all(
+        hit.member_id != "chart-p18"
+        for hit in lexical_rank(before.index, _NO_TITLE_QUESTION, limit=50)
+    )
+
+    after = HybridSearch(_aia_like(chart_text_only=False), channel_limit=50)
+    assert lexical_rank(after.index, _NO_TITLE_QUESTION, limit=1)[0].member_id == "chart-p18"
+    new = after.search(_NO_TITLE_QUESTION, top_k=10)
+    chart = next(hit for hit in new if hit.member_id == "chart-p18")
+    assert (chart.vector_rank, chart.lexical_rank) == (13, 1)
+    # Lexical rank 1 plus vector rank 13 lands well inside the default top-10 (and the
+    # old top-6); a single-channel hit at rank 13 could never have (1/73 < 2/110).
+    assert new.index(chart) < 6
 
 
 def test_search_with_no_hits_in_either_channel_returns_empty() -> None:

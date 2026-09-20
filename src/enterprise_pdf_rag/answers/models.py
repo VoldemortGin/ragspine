@@ -68,8 +68,8 @@ class FusedHit:
 class AnswerRequest:
     question: str
     document_sha256: str | None = None
-    top_k: int = 6
-    channel_limit: int = 20
+    top_k: int = 10
+    channel_limit: int = 50
     rerank: bool = False
     history: tuple[tuple[str, str], ...] = ()
 
