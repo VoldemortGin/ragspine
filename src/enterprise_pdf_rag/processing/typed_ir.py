@@ -9,6 +9,12 @@ from enterprise_pdf_rag.figures.models import (
     SourceAnchor,
     Verification,
 )
+from enterprise_pdf_rag.processing.formula_models import (
+    FormulaStructure,
+    FormulaToken,
+    ProofLevel,
+    ScriptPosition,
+)
 from enterprise_pdf_rag.processing.models import ObjectKind
 from enterprise_pdf_rag.processing.table_models import TableIR
 
@@ -93,6 +99,35 @@ class FormulaIR:
     source_span_ids: tuple[str, ...]
     diagnostics: tuple[str, ...]
     verification: Verification = Verification.PENDING
+    # Filled by the model-free qualification branch; the model branch keeps the defaults.
+    tokens: tuple[FormulaToken, ...] = ()
+    structures: tuple[FormulaStructure, ...] = ()
+    linear: str | None = None
+    readable: str | None = None
+    proof_level: ProofLevel | None = None
+
+    def __post_init__(self) -> None:
+        qualified = bool(self.tokens)
+        if qualified != (self.linear is not None) or qualified != (self.readable is not None):
+            raise ValueError(
+                "Token IR carries its linear and readable forms; model IR carries neither"
+            )
+        if qualified != (self.proof_level is not None):
+            raise ValueError("Proof level accompanies tokens only")
+        if self.verification is Verification.VERIFIED and self.proof_level != "full":
+            raise ValueError("Only a fully proven formula is verified")
+        if tuple(token.index for token in self.tokens) != tuple(range(len(self.tokens))):
+            raise ValueError("Token indices are dense and ordered")
+        indices = {token.index for token in self.tokens}
+        for token in self.tokens:
+            if token.base_token_index is not None and (
+                token.base_token_index not in indices
+                or self.tokens[token.base_token_index].script is not ScriptPosition.BASE
+            ):
+                raise ValueError("A script token attaches to an existing base token")
+        for structure in self.structures:
+            if not set((*structure.first, *structure.second)) <= indices:
+                raise ValueError("Structure members are existing tokens")
 
 
 type TypedIR = TextIR | ListIR | TableIR | ChartIR | DiagramIR | ImageIR | FormulaIR | GroupIR

@@ -584,7 +584,7 @@
         "description": "The connector and the filled arrowhead that prove one directed edge.",
         "properties": {
           "arrowhead": {
-            "$ref": "#/$defs/PathEvidence"
+            "$ref": "#/$defs/enterprise_pdf_rag__processing__diagram_models__PathEvidence"
           },
           "base_mid": {
             "$ref": "#/$defs/Point"
@@ -594,7 +594,7 @@
             "type": "integer"
           },
           "line": {
-            "$ref": "#/$defs/PathEvidence"
+            "$ref": "#/$defs/enterprise_pdf_rag__processing__diagram_models__PathEvidence"
           },
           "line_end_at_target": {
             "$ref": "#/$defs/Point"
@@ -744,9 +744,44 @@
             ],
             "title": "Latex"
           },
+          "linear": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Linear"
+          },
           "object_id": {
             "title": "Object Id",
             "type": "string"
+          },
+          "proof_level": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ProofLevel"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "readable": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Readable"
           },
           "source": {
             "$ref": "#/$defs/SourceAnchor"
@@ -769,6 +804,22 @@
             "title": "Source Span Ids",
             "type": "array"
           },
+          "structures": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/FormulaStructure"
+            },
+            "title": "Structures",
+            "type": "array"
+          },
+          "tokens": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/FormulaToken"
+            },
+            "title": "Tokens",
+            "type": "array"
+          },
           "verification": {
             "$ref": "#/$defs/Verification",
             "default": "pending"
@@ -783,6 +834,146 @@
           "diagnostics"
         ],
         "title": "FormulaIR",
+        "type": "object"
+      },
+      "FormulaStructure": {
+        "properties": {
+          "first": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "First",
+            "type": "array"
+          },
+          "kind": {
+            "$ref": "#/$defs/StructureKind"
+          },
+          "path": {
+            "$ref": "#/$defs/enterprise_pdf_rag__processing__formula_models__PathEvidence"
+          },
+          "radical_token_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Radical Token Index"
+          },
+          "second": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Second",
+            "type": "array"
+          }
+        },
+        "required": [
+          "kind",
+          "path",
+          "first"
+        ],
+        "title": "FormulaStructure",
+        "type": "object"
+      },
+      "FormulaToken": {
+        "properties": {
+          "base_token_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Base Token Index"
+          },
+          "bbox": {
+            "maxItems": 4,
+            "minItems": 4,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Bbox",
+            "type": "array"
+          },
+          "char_end": {
+            "title": "Char End",
+            "type": "integer"
+          },
+          "char_start": {
+            "title": "Char Start",
+            "type": "integer"
+          },
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "role": {
+            "$ref": "#/$defs/TokenRole"
+          },
+          "script": {
+            "$ref": "#/$defs/ScriptPosition",
+            "default": "base"
+          },
+          "script_evidence": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ScriptEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "script_proof": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ScriptProof"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "source_span_id": {
+            "title": "Source Span Id",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "text",
+          "source_span_id",
+          "char_start",
+          "char_end",
+          "bbox",
+          "role"
+        ],
+        "title": "FormulaToken",
         "type": "object"
       },
       "GroupIR": {
@@ -1010,7 +1201,7 @@
             "type": "string"
           },
           "shape": {
-            "$ref": "#/$defs/PathEvidence"
+            "$ref": "#/$defs/enterprise_pdf_rag__processing__diagram_models__PathEvidence"
           }
         },
         "required": [
@@ -1133,59 +1324,6 @@
         "title": "ObservedText",
         "type": "object"
       },
-      "PathEvidence": {
-        "description": "One native SVG <path>, located by its document order; points are page-top-left.",
-        "properties": {
-          "bounds": {
-            "maxItems": 4,
-            "minItems": 4,
-            "prefixItems": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "title": "Bounds",
-            "type": "array"
-          },
-          "kind": {
-            "enum": [
-              "shape",
-              "line",
-              "arrowhead"
-            ],
-            "title": "Kind",
-            "type": "string"
-          },
-          "path_index": {
-            "title": "Path Index",
-            "type": "integer"
-          },
-          "points": {
-            "items": {
-              "$ref": "#/$defs/Point"
-            },
-            "title": "Points",
-            "type": "array"
-          }
-        },
-        "required": [
-          "path_index",
-          "kind",
-          "points",
-          "bounds"
-        ],
-        "title": "PathEvidence",
-        "type": "object"
-      },
       "Point": {
         "maxItems": 2,
         "minItems": 2,
@@ -1198,6 +1336,13 @@
           }
         ],
         "type": "array"
+      },
+      "ProofLevel": {
+        "enum": [
+          "full",
+          "literal"
+        ],
+        "type": "string"
       },
       "RetrievalContext": {
         "properties": {
@@ -1307,6 +1452,58 @@
         "title": "RetrievalMember",
         "type": "object"
       },
+      "ScriptEvidence": {
+        "description": "The three source numbers a script decision is made from; superscript_flag is recorded only.",
+        "properties": {
+          "baseline_offset": {
+            "title": "Baseline Offset",
+            "type": "number"
+          },
+          "rise": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rise"
+          },
+          "size_ratio": {
+            "title": "Size Ratio",
+            "type": "number"
+          },
+          "superscript_flag": {
+            "title": "Superscript Flag",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rise",
+          "size_ratio",
+          "baseline_offset",
+          "superscript_flag"
+        ],
+        "title": "ScriptEvidence",
+        "type": "object"
+      },
+      "ScriptPosition": {
+        "enum": [
+          "base",
+          "superscript",
+          "subscript"
+        ],
+        "title": "ScriptPosition",
+        "type": "string"
+      },
+      "ScriptProof": {
+        "enum": [
+          "text_rise",
+          "derived"
+        ],
+        "type": "string"
+      },
       "SlotState": {
         "enum": [
           "origin",
@@ -1403,6 +1600,14 @@
         ],
         "title": "SourceAnchor",
         "type": "object"
+      },
+      "StructureKind": {
+        "enum": [
+          "fraction",
+          "sqrt"
+        ],
+        "title": "StructureKind",
+        "type": "string"
       },
       "SvgBinding": {
         "properties": {
@@ -1671,6 +1876,20 @@
         "title": "TextIR",
         "type": "object"
       },
+      "TokenRole": {
+        "enum": [
+          "operand",
+          "number",
+          "operator",
+          "relation",
+          "greek",
+          "unit",
+          "bracket",
+          "radical"
+        ],
+        "title": "TokenRole",
+        "type": "string"
+      },
       "TypedIR": {
         "anyOf": [
           {
@@ -1717,6 +1936,105 @@
         ],
         "title": "Verification",
         "type": "string"
+      },
+      "enterprise_pdf_rag__processing__diagram_models__PathEvidence": {
+        "description": "One native SVG <path>, located by its document order; points are page-top-left.",
+        "properties": {
+          "bounds": {
+            "maxItems": 4,
+            "minItems": 4,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Bounds",
+            "type": "array"
+          },
+          "kind": {
+            "enum": [
+              "shape",
+              "line",
+              "arrowhead"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "path_index": {
+            "title": "Path Index",
+            "type": "integer"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/$defs/Point"
+            },
+            "title": "Points",
+            "type": "array"
+          }
+        },
+        "required": [
+          "path_index",
+          "kind",
+          "points",
+          "bounds"
+        ],
+        "title": "PathEvidence",
+        "type": "object"
+      },
+      "enterprise_pdf_rag__processing__formula_models__PathEvidence": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "line",
+              "rect",
+              "polyline"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "path_index": {
+            "title": "Path Index",
+            "type": "integer"
+          },
+          "points": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "width": {
+            "title": "Width",
+            "type": "number"
+          }
+        },
+        "required": [
+          "path_index",
+          "kind",
+          "points",
+          "width"
+        ],
+        "title": "PathEvidence",
+        "type": "object"
       }
     },
     "additionalProperties": false,
