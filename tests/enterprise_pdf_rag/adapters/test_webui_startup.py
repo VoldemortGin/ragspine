@@ -100,6 +100,35 @@ def test_explicit_missing_vendor_runtime_is_not_replaced_by_another_python(
     assert not (root / "data/open-webui-preview/processes.json").exists()
 
 
+def test_state_dir_override_keeps_the_default_record_untouched(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+    default_state = root / "data/open-webui-preview"
+    default_state.mkdir(parents=True)
+    record = {
+        "api": {"pid": os.getpid(), "marker": "enterprise_pdf_rag.adapters.http.app"},
+        "webui": {"pid": os.getpid(), "marker": "unrelated"},
+    }
+    original = json.dumps(record)
+    (default_state / "processes.json").write_text(original)
+    override = tmp_path / "other state"
+    result = subprocess.run(
+        [sys.executable, str(root / "scripts/enterprise_pdf_rag/webui_preview.py"), "start"],
+        cwd=root,
+        env={
+            "PATH": os.defpath,
+            "APP_ROOT_DIR": str(root),
+            "ENTERPRISE_PREVIEW_STATE_DIR": str(override),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "does not match this project" not in result.stderr
+    assert (default_state / "processes.json").read_text() == original
+    assert not (override / "processes.json").exists()
+
+
 def test_status_does_not_trust_http_200_without_a_project_process_record(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

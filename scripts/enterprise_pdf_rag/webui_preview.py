@@ -20,7 +20,10 @@ from urllib.request import ProxyHandler, build_opener
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-STATE = ROOT / "data" / "open-webui-preview"
+# Logs, PID record and vendor data; override to run beside another recorded preview.
+STATE = Path(
+    os.environ.get("ENTERPRISE_PREVIEW_STATE_DIR") or ROOT / "data" / "open-webui-preview"
+).resolve()
 PROCESS_FILE = STATE / "processes.json"
 GATE = ROOT / "src" / "enterprise_pdf_rag" / "adapters" / "http" / "webui_gate.py"
 # Loopback ports; override both start and status with the same environment.
@@ -211,6 +214,8 @@ def show_links(processing_id: str | None, profile: str = "aia-source-review") ->
     ports = ""
     if (API_PORT, WEBUI_PORT) != (8766, 8767):
         ports = f"ENTERPRISE_API_PORT={API_PORT} ENTERPRISE_WEBUI_PORT={WEBUI_PORT} "
+    if os.environ.get("ENTERPRISE_PREVIEW_STATE_DIR"):
+        ports = f"ENTERPRISE_PREVIEW_STATE_DIR={quote(str(STATE))} {ports}"
     command = f"{ports}uv run --directory {quote(str(ROOT))} --locked python scripts/enterprise_pdf_rag/webui_preview.py"
     option = "" if profile == "aia-source-review" else f" --profile {profile}"
     print(f"Status: {command} status{option}")
