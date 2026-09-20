@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pdfspine
 import pytest
+from pydantic import TypeAdapter
 
 from enterprise_pdf_rag.adapters.pdfspine_document import PdfspineDocumentAdapter
 from enterprise_pdf_rag.adapters.pdfspine_tables import (
@@ -15,7 +16,7 @@ from enterprise_pdf_rag.adapters.pdfspine_tables import (
 )
 from enterprise_pdf_rag.documents.models import AssetRef, TextSidecar
 from enterprise_pdf_rag.figures.models import Confidence, Verification
-from enterprise_pdf_rag.processing.geometry import Axis
+from enterprise_pdf_rag.processing.geometry import Axis, Segment
 from enterprise_pdf_rag.processing.models import LayoutObject, ObjectKind, PageInput
 from enterprise_pdf_rag.processing.table_models import (
     CellContentState,
@@ -23,6 +24,7 @@ from enterprise_pdf_rag.processing.table_models import (
     HeaderStrength,
     MergeProof,
     SlotState,
+    TableIR,
 )
 from tests.enterprise_pdf_rag.adapters.test_pdf_ingestion import (
     FILL_HEADER_TABLE,
@@ -37,6 +39,30 @@ from tests.enterprise_pdf_rag.adapters.test_pdf_ingestion import (
 SAMPLE = Path("data/samples/aia-group-2026-interim-results-presentation.pdf")
 EXPECTED_SHA256 = "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e"
 P20_SENSITIVITY_CANDIDATE = (654.0, 125.0, 934.0, 466.0)
+# A published v2 ingestion snapshot whose page 2 holds a fully ruled 4x2 table: its stored
+# ir.json predates ADR 0014 and must stay pending, while re-extracting the same region from
+# the same source PDF must prove the grid and keep every cell id.
+INGESTION_ROOT = Path(
+    "data/ingestion/3f7233e3a7e40ad75f9579740b89bf7d88087528f3f9760fcd7b576d24c71813"
+)
+INGESTION_TABLE_REGION = (19.5, 119.8, 300.5, 224.3)
+INGESTION_TABLE_OBJECT_ID = (
+    "layout-object-v1:e8081a0a33af593215fc1e4bb50c7f7c00d4648dde811255b0d9ce1038f061d0"
+)
+INGESTION_TABLE_OBJECT_DIR = "object-ba0576f0dd0a758eb2b1"
+
+
+def _center_in(region: tuple[float, float, float, float], bbox: tuple[float, ...]) -> bool:
+    return (
+        region[0] <= (bbox[0] + bbox[2]) / 2 <= region[2]
+        and region[1] <= (bbox[1] + bbox[3]) / 2 <= region[3]
+    )
+
+
+def _segment_bounds(segment: Segment) -> tuple[float, float, float, float]:
+    if segment.axis is Axis.HORIZONTAL:
+        return (segment.start, segment.position, segment.end, segment.position)
+    return (segment.position, segment.start, segment.position, segment.end)
 
 
 def _table_pdf(*, page_index: int = 0) -> bytes:
@@ -423,3 +449,77 @@ def test_real_p20_sensitivity_region_reports_native_grid_unavailable() -> None:
     assert result.diagnostics == (
         f"pdfspine/{pdfspine.__version__} native lines found 1 page table(s) and 0 exact region match(es); typed table unavailable.",
     )
+
+    # Read-only diagnosis of *why* the region has no native grid, printed under ``-s``.
+    document = pdfspine.open(stream=pdf, filetype="pdf")
+    try:
+        source_page = document.load_page(19)
+        segments = ruling_segments(source_page)
+        inside = [
+            segment
+            for segment in segments
+            if _center_in(P20_SENSITIVITY_CANDIDATE, _segment_bounds(segment))
+        ]
+        found = tuple(tuple(table.bbox) for table in source_page.find_tables(strategy="lines"))
+        fills = len(fill_rectangles(source_page))
+    finally:
+        document.close()
+    # A deliberate diagnostic for `pytest -s`: this real page is the reference case for
+    # "detected as no table at all", and the counts are what the handoff records.
+    print(  # noqa: T201
+        f"p20 diagnosis: page_rulings={len(segments)} rulings_in_region={len(inside)} "
+        f"fills={fills} found_table_bboxes={found}"
+    )
+
+
+def test_synthetic_ingestion_table_reproves_verified() -> None:
+    source = INGESTION_ROOT / "source" / "source.pdf"
+    if not source.is_file():
+        pytest.skip(
+            "Optional local ingestion store is absent; provision data/ingestion to run this snapshot check. No download is performed."
+        )
+    pdf = source.read_bytes()
+    page = _page_input(pdf, page_index=2)
+    spans = tuple(
+        span.span_id for span in page.text.spans if _center_in(INGESTION_TABLE_REGION, span.bbox)
+    )
+    item = LayoutObject(
+        INGESTION_TABLE_OBJECT_ID,
+        ObjectKind.TABLE,
+        INGESTION_TABLE_REGION,
+        spans,
+        "Four-row, two-column table with headers Metric and Value.",
+        Confidence(None, "uncalibrated model layout inference"),
+    )
+
+    result = PdfspineTableAdapter().extract(pdf, page=page, item=item)
+
+    assert result.table is not None
+    table = result.table
+    assert table.verification is Verification.VERIFIED
+    evidence = table.grid_evidence
+    assert evidence is not None
+    assert evidence.rows == (120.0, 146.0, 172.0, 198.0, 224.0)
+    assert evidence.cols == (20.0, 150.0, 300.0)
+    assert evidence.segment_count == 8
+    # Every rule is 1pt and no band is filled, so the header row is a hint, never a proof.
+    assert evidence.proved_header_rows() == frozenset()
+    assert {header.strength for header in evidence.headers} == {HeaderStrength.HEURISTIC}
+
+    run = (INGESTION_ROOT / "processing" / "current-processing").read_text(encoding="utf-8").strip()
+    stored_ir = (
+        INGESTION_ROOT
+        / "processing"
+        / "runs"
+        / run
+        / "page-003"
+        / "objects"
+        / INGESTION_TABLE_OBJECT_DIR
+        / "ir.json"
+    )
+    stored = TypeAdapter(TableIR).validate_json(stored_ir.read_bytes())
+
+    assert stored.verification is Verification.PENDING
+    assert stored.grid_evidence is None
+    assert all(cell.border is None for cell in stored.cells)
+    assert {cell.cell_id for cell in stored.cells} == {cell.cell_id for cell in table.cells}

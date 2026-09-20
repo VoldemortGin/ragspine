@@ -147,6 +147,8 @@ calls a provider; and `TableIR` / `TableCell.verification` are pinned `PENDING` 
 - **A `VERIFIED` `TableIR`.** The grid's rows, columns and merges are inferred and pinned
   `PENDING`; verifying them is a new qualification with no source rule. Verifying the literal
   transcription is what makes a cell citation always resolve to real spans.
+  Superseded for ruled tables by [ADR 0014](0014-ruled-table-grid-proof.md), which supplies the
+  source rule.
 - **Mounting `/v1/documents*` and the RAG chat inside the AIA app.** That app is bound to one
   store root and one model id. A second mode keeps the acceptance profile byte-identical and
   makes the catalog explicit.

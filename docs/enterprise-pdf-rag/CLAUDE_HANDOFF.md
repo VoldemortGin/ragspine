@@ -4,6 +4,28 @@
 
 > 阅读顺序：先看下方“恢复开发记录”；后续旧暂停快照保留作证据，不能作为实时发布或服务状态。
 
+## 划线表格的网格来源证明（2026-09-20，分支 `feat/table-grid-proof`，ADR 0014）
+
+> 本节只讲表格网格；上下两节的状态不受影响。
+
+**做了什么**（[ADR 0014](adr/0014-ruled-table-grid-proof.md)）：补上 ADR 0011 Rejected alternatives 里说"缺一条来源规则"的那条规则，让**划线表**的 `TableIR.verification` 有资格成为 `VERIFIED`。`processing/geometry.py` 新增线段词汇（`Axis` / `Segment` / `rulings_at` / `covering_segments` / `segments_crossing` / `ruling_digest` / `RULING_TOLERANCE = 0.5`）；`adapters/pdfspine_tables.py` 新增 `ruling_segments(page)`（`get_drawings()` 的轴对齐实线、细填充矩形、描边矩形四边；虚线 / 曲线 / 斜线 / 线宽 > 3.0 一律不算线）与 `fill_rectangles(page)`；新纯模块 `processing/table_grid_proof.py` 是规则本体——每条行/列边界必须有 0.5pt 内的真实线，每个 cell 四边必须被线**连续覆盖**（可拼接多段），每个合并格跨过的内部边界必须**确实没有线穿过**，表头证据分 `proved`（粗内线 / 填充带）与 `heuristic`（粗体 / 首行），表头等级**不**影响 `VERIFIED`。`table_models.py` 解除 `PENDING` 硬钉，改为 `VERIFIED ⇔ 有证据`（`TableCell.border` / `TableIR.grid_evidence`，两者默认 `None`，旧 JSON 照常解析为 `PENDING`）；`cell_id` 的 `content_id` 输入未变，重建后 cell id 不变。回执 `LiteralQualification` 加 `grid_scope` / `ruling_digest`，`literal_qualification._reprove_table_grid` 在每次 `resolve` 打开 pinned 源 PDF **重新证一遍**并要求整体相等，pending 网格带这两个字段直接拒。消费侧：`ContextBlock.grid_verification` + `CellEvidence.headers`，prompt 首行 `grid=verified|pending`、只有 verified 块才打 `row=… col=… header="…"` 后缀；`ModelClaim` 加可选 `row`/`col`/`header`，`verify.py` 对 PENDING 网格、对不上的 row/col、非已证表头一律拒；引用带 `row`/`col`/`header`/`header_cell_id`。检索资格（`eligibility`）与 index-text policy **都没改**，PENDING 表照常可检索、照常可用 `cells.<id>` 纯文本引用。
+
+**本分支的 5 个代码提交**：`7f13bfe`（纯规则：geometry + table_models + table_grid_proof）、`38fa184`（producer + `TableSpec` 夹具）、`83509e5`（回执绑定 + resolve 重证）、`0e41007`（消费侧 prompt / claim / verify / 引用字段）、`268aedb`（表头比对改用折叠空白、保留大小写的字面转写口径 `_literal`），外加本次的文档 + 真实样本 smoke 提交。
+
+**真实样本只读 smoke（本次，未写入 `data/`）**：
+- `data/ingestion/3f7233e3…`（合成 `meridian-capital-1h26.pdf`，3 页）page 2 的 4×2 表：按快照 `layout.json` 的真实区域 `[19.5, 119.8, 300.5, 224.3]` 与真实 `object_id` 重新提取 → **VERIFIED**，`grid_evidence.rows == (120, 146, 172, 198, 224)`、`cols == (20, 150, 300)`、`segment_count == 8`、`tolerance == 0.5`；8 个 cell 全部带 border；cell id 与快照里旧 `ir.json` 的 8 个**完全一致**；旧 `ir.json` 仍 `TypeAdapter(TableIR).validate_json` 成功且保持 `PENDING`、`grid_evidence is None`。表头只有 `first_row_rule/heuristic`（线全是 1pt、无填充带），所以这张表**有 row/col 引用但没有 header 引用**——符合设计。
+- AIA 第 20 页敏感度矩阵区域 `(654, 125, 934, 466)`：断言不变（`result.table is None`，检测阶段 0 个区域匹配）。新增的只读诊断打印为 `p20 diagnosis: page_rulings=38 rulings_in_region=0 fills=6 found_table_bboxes=((15.692, 138.69, 325.622, 447.58387500000003),)` —— 该页确实有 38 条线段，但**敏感度矩阵区域内一条都没有**，`find_tables(lines)` 找到的唯一一张表在页面左侧、与该区域无交集。结论：这张矩阵是纯排版对齐、没有画线，属于"无线表"，按 ADR 0014 本来就不该证，与检测召回率无关。
+- **CLI 重建（输入只读，输出全在 scratchpad）**：把快照的 `processing/model-cache` 拷到临时输出目录后，`enterprise-pdf-rag ingest --pdf <临时副本> --pages all --stage semantics --max-live-calls 0 --output-dir <tmp>` **0 次真实调用**跑通（客户端指纹 `8df988f7…` 与快照 producer 一致，`OPENAI_MODEL=gpt-5.6-luna` + shell 里的 `OPENAI_BASE_URL`，layout 全部走缓存回放；ADR 0013 的页级 metadata 不在旧缓存里，3 页 `deferred`，不影响表格）。新 `processing_id = e81e54b7…`，新 `ir.json` 的 `verification == "verified"`、`grid_evidence` 非空（同上数值）、`qualification.json` 带 `grid_scope = "ruled-grid-structure-v1"` 与 `ruling_digest = e493e790…`；`enterprise-pdf-rag qualify` → `eligible_member_count = 8`（Table 1 / Text 7，`skipped_reasons` 空），与旧快照一致。再用 `ProcessingRetrieval.build(..., OfflineDescriptionEmbedder())` 对新 draft 跑一遍资格化，`validate_literal_member` 的**重证路径真实执行并通过**。旧快照 `ProcessingStore(<主树>/processing).load(50d1d985…)` 仍成功、8 个对象照旧。
+- **没做的**：CLI `index` 需要本地 embedding 服务（SSH 隧道），`publish` 又必须先 `index`，本次按纪律不起隧道 / 不碰服务，这两步**跳过**；主树 `data/` 全程只读，重建产物只在 scratchpad。
+
+**遗留**
+1. 三份契约 JSON（`aia-processing-v1` / `document-catalog-v1` / `rag-chat-v1`）没有生成脚本，`check_schema.py` 只做全等比对、没有 `--write`，只能手工重生成并自行保持缩进与键序；diagram / formula 两份方案合并后应统一重生成一次。
+2. `literal_qualification` 只在 TABLE 分支检查回执的 `grid_scope` / `ruling_digest`；TEXT / LIST / GROUP 的回执即使伪造了这两个字段也不会被拒（现状无处写入，属防御性缺口）。
+3. 回答路径重证成本：每个 VERIFIED 表成员在**每次** `resolve` 都要 `pdfspine.open` + `get_drawings()` 重证一遍。样本里表成员极少（≤1/页）故 v1 接受；若成瓶颈，把 digest 比对留在 `resolve`、完整重证挪到 `build`。
+4. `answers/verify.py` 现在并存三种文本比对口径：cell 文本 `_norm`（折叠空白 + casefold）、表头 `_literal`（折叠空白、保留大小写）、以及散文门里的数字比较。各有理由，本次不统一（ADR 0014 Decision 8 写明）。
+5. `data/ingestion` 两个 v2 快照、以及 AIA 发布的重建归属未定：要吃到网格能力必须重跑 `semantics → index → publish`，谁在什么时候触发没有归属。本次只在 scratchpad 做了验证性重建，**没有**动任何已发布指针。
+6. `SYSTEM_RULES` 变了 → `request_fingerprint` 变 → 旧回答缓存全部 miss（预期）。
+
 ## 页级自动元数据与前置过滤（2026-09-21，分支 `feat/page-metadata`，ADR 0013）
 
 > 本节是最新状态；下方 2026-09-20 的收尾状态仍有效，只是 AIA 发布指针已再次前移。
@@ -43,7 +65,7 @@
 - 阶段 4（本 session，TABLE 放行）：`processing/table_transcription.py`（纯规则 `table_span_ids` / `check_table_transcription`，producer 与 validator 共用）；`adapters/source_objects.py::source_table_description()`；`semantic_objects.py::_table` 提取后尝试转写，失败保留 ir、description/qualification 两 stage `UNAVAILABLE` 带原因；`literal_qualification.py` TABLE 分支；`processing_retrieval.py::eligibility` 收 TABLE（非 VERIFIED 理由 `Table transcription is not verified; only verified tables are retrievable`），`_POLICY` → `source-transcription-and-scoped-chart-qualification-v2`（进 `RetrievalPlan.qualification_policy` 与 snapshot_id 哈希）；`draft_publication.py::DraftQualification.qualification_policy` → `retrieval-eligibility-kind-and-stage-completeness-v2`；`context_builder.py` TABLE 块 verification 取 description。测试：`processing/test_table_transcription.py`（3）、`test_pdf_ingestion.py::authored_pdf(table_page=)`、e2e +2、`test_draft_publication.py` +2、`test_context_builder.py` +1、`test_verify.py` +1。多 span cell 按 span 顺序拼接，顺序不同则拒绝而非误验。
 
 **偏离计划与理由**
-- **TABLE 的 “VERIFIED” 定义**：原计划放行“VERIFIED 的 TableIR”，但 `TableIR.verification`/`TableCell.verification` 在 `processing/table_models.py` 的 `__post_init__` 钉死 `PENDING`，“已验证网格”不可实现。改为与 TEXT/LIST/GROUP 同标准的**字面转写 VERIFIED**（`ObjectDescription.verification == VERIFIED`、producer `exact-source-transcription-v1`、`LiteralQualification` 回执、qualification stage SUCCEEDED），网格结构仍 PENDING；单元格引用只证明原文，不证明行列关系。
+- **TABLE 的 “VERIFIED” 定义**：原计划放行“VERIFIED 的 TableIR”，但 `TableIR.verification`/`TableCell.verification` 在 `processing/table_models.py` 的 `__post_init__` 钉死 `PENDING`，“已验证网格”不可实现。改为与 TEXT/LIST/GROUP 同标准的**字面转写 VERIFIED**（`ObjectDescription.verification == VERIFIED`、producer `exact-source-transcription-v1`、`LiteralQualification` 回执、qualification stage SUCCEEDED），网格结构仍 PENDING；单元格引用只证明原文，不证明行列关系。 **已于 2026-09-20 部分推翻**：[ADR 0014](adr/0014-ruled-table-grid-proof.md) 补上了来源规则，**划线表**的网格可以 `VERIFIED` 并支持 `row`/`col`/`header` 引用；无线表、吸附 / 双线边界仍按本条保持 PENDING、只证明原文。
 - **`mounted=True` 的“仅证据挂载”语义**：缺 `EMBEDDING_*` 时文档仍 `mounted=true`、`embedding_configured=false`，manifest/context 可用，search/chat 503；只有指纹不符、非 ready、证据损坏才 `mounted=false` 并带 `mount_error`。证据读取本身不需要 embedder，且目录必须如实区分“未配置检索”与“拒绝挂载”。
 - **契约名 `rag-chat-v1`**：与 plans/item3 §5 一致，未改。
 - **`FusedHit` 归属**：迁到 `answers/models.py`（`AnswerResult` 要引用它）并在 `hybrid_search` 回导，计划已预留该选项。
