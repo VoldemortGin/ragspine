@@ -373,19 +373,29 @@ ban-relative-imports = "all"
 "src/ragspine/**" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20"]
 # ragspine 的 tests/ scripts/ benchmarks/ examples/ 此前从不在 ruff 门内：除严格集外，再豁免其既有的
 # E402（conftest/脚本先 setup_root 再 import 的既定写法）、B017、B018、B023、B905、F841。
-"tests/*.py" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20", "E402", "B017", "B018", "B023", "B905", "F841"]
+# 注意：ruff 的 per-file-ignores 用 globset，`*` 会跨越 `/`（`tests/*.py` 等于 `tests/**/*.py`），
+# 直接写 `tests/*.py` / `scripts/*.py` 会把 tests/enterprise_pdf_rag 与 scripts/enterprise_pdf_rag 一并放宽，
+# 所以顶层文件逐个列出，enterprise_pdf_rag 子树才真正落在严格集内。
+"tests/{__init__,conftest,test_facade,test_facade_graph_auto,test_package_api,test_workspace_config}.py" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20", "E402", "B017", "B018", "B023", "B905", "F841"]
 "tests/{agent,budget,cli,common,compat,conformance,diagnostics,dify,e2e,eval,extraction,graph,ingestion,n8n,pipeline,retrieval,service,storage,workflows}/**" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20", "E402", "B017", "B018", "B023", "B905", "F841"]
-"scripts/*.py" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20", "E402", "B017", "B018", "B023", "B905", "F841"]
+"scripts/{ask,build_docs,check_doc_drift,check_docstring_refs,classify_pdfs,eval_retrieval_ab,export_workflow_catalog,generate_workflow_catalog,ingest,ingest_narrative,make_fixtures_excel,make_fixtures_pdf,make_fixtures_pptx,make_synthetic_deck,run_demo,run_dify_workflow,run_qa_eval,run_server,run_worker,topology}.py" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20", "E402", "B017", "B018", "B023", "B905", "F841"]
 "benchmarks/**" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20", "E402", "B017", "B018", "B023", "B905", "F841"]
 "examples/**" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20", "E402", "B017", "B018", "B023", "B905", "F841"]
 # ---- enterprise_pdf_rag 的 scripts/ 是命令行工具层：stdout 就是输出契约，放行 print ----
 "scripts/enterprise_pdf_rag/*.py" = ["T20"]
 
 # Strict static typing on the library (ADR 0004 quality bar: "no warnings = qualified").
-# Gate: `mypy ragspine` (ci.sh). tests/ + scripts/ are intentionally out of scope.
+# Gate: `python -m mypy` (ci.sh). ragspine's tests/ + scripts/ are intentionally out of scope.
 [tool.mypy]
 python_version = "3.12"
-files = ["src/ragspine", "src/enterprise_pdf_rag"]
+# enterprise_pdf_rag 原门是 `mypy .`，其 tests/ 与 scripts/ 同在严格覆盖内，并包后照旧；
+# ragspine 自己的 tests/ scripts/ 仍按 ADR 0004 留在门外。
+files = [
+    "src/ragspine",
+    "src/enterprise_pdf_rag",
+    "tests/enterprise_pdf_rag",
+    "scripts/enterprise_pdf_rag",
+]
 strict = true
 # enterprise_pdf_rag 的两项加严（全局开、对 ragspine.* 经下方 override 关回去）：
 # warn_unreachable：不可达分支即错；ignore-without-code：裸 `# type: ignore` 直接报错，
