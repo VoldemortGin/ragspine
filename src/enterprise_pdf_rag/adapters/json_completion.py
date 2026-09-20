@@ -114,6 +114,11 @@ def _schema_arrays(value: object) -> object:
         result["items"] = prefix[0]
         result["minItems"] = len(prefix)
         result["maxItems"] = len(prefix)
+    properties = result.get("properties")
+    if result.get("type") == "object" and isinstance(properties, dict):
+        # Strict structured output rejects a schema whose ``required`` omits a declared
+        # property; a model field with a default stays nullable but is always emitted.
+        result["required"] = list(properties)
     return result
 
 

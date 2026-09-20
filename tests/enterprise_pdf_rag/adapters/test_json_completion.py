@@ -29,6 +29,19 @@ class _BoundsAnswer(BaseModel):
     bbox: tuple[float, float, float, float]
 
 
+class _OptionalItem(BaseModel):
+    model_config = ConfigDict(strict=True, frozen=True, extra="forbid")
+    label: str
+    row: int | None = None
+
+
+class _OptionalAnswer(BaseModel):
+    model_config = ConfigDict(strict=True, frozen=True, extra="forbid")
+    answer: str
+    note: str | None = None
+    items: tuple[_OptionalItem, ...]
+
+
 def test_two_clients_cannot_both_issue_the_one_explicit_retry(tmp_path: Path) -> None:
     def fail_once(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
         raise ProviderRequestError("Provider timed out", category="timeout")
@@ -329,6 +342,24 @@ def test_model_schema_uses_homogeneous_arrays_and_keeps_local_tuple_length_valid
     assert result.parsed.bbox == (1.0, 2.0, 3.0, 4.0)
     with pytest.raises(ValueError):
         _BoundsAnswer.model_validate_json('{"bbox":[1.0,2.0,3.0]}')
+
+
+def test_model_schema_requires_every_declared_property_including_nested_definitions(
+    tmp_path: Path,
+) -> None:
+    """Strict json_schema rejects a schema whose ``required`` omits an optional field."""
+
+    def sender(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
+        schema = json.loads(payload)["response_format"]["json_schema"]["schema"]
+        assert schema["required"] == ["answer", "note", "items"]
+        assert schema["$defs"]["_OptionalItem"]["required"] == ["label", "row"]
+        return _response('{"answer":"a","note":null,"items":[{"label":"l","row":null}]}')
+
+    client = JsonCompletionClient(_config(), cache_dir=tmp_path, max_live_calls=1, sender=sender)
+    result = client.complete_text_json(
+        task="optional-fields", prompt="read", response_model=_OptionalAnswer
+    )
+    assert result.parsed.items[0].row is None
 
 
 @pytest.mark.parametrize(

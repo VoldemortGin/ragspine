@@ -142,11 +142,17 @@ def test_an_unproven_diagram_is_withheld_with_its_verbatim_geometry_diagnostic(
     )
 
 
+# The ADR 0013 release, processed before any diagram proof existed: the one-time migration
+# state this test pins. The current release pointer may already carry the proof.
+_AIA_PRE_ADR_0015_RELEASE = "00d5c714c8059e9c74da32b030ec56813eb3affe6a8414af85ff78af63ae2076"
+
+
 @pytest.mark.skipif(
-    not (_AIA_PROCESSING / "current-processing").is_file(), reason="AIA sample store absent"
+    not (_AIA_PROCESSING / "objects" / "sha256" / _AIA_PRE_ADR_0015_RELEASE).is_file(),
+    reason="AIA sample store absent",
 )
 def test_aia_release_dry_run_proves_one_diagram_and_withholds_the_other() -> None:
-    """Read-only over the real release: the verdicts, and not one byte of store state."""
+    """Read-only over the real pre-ADR-0015 release: the verdicts, and not one byte of store state."""
     before = (
         (_AIA_SOURCES / "current-manifest").read_bytes(),
         (_AIA_PROCESSING / "current-processing").read_bytes(),
@@ -155,7 +161,7 @@ def test_aia_release_dry_run_proves_one_diagram_and_withholds_the_other() -> Non
     )
     sources = LocalDocumentStore(_AIA_SOURCES, activate_on_publish=False)
     outputs = ProcessingStore(_AIA_PROCESSING)
-    processing_id, _ = outputs.load_current()
+    processing_id = _AIA_PRE_ADR_0015_RELEASE
 
     summary = requalify_visual_objects(sources, outputs, processing_id=processing_id, dry_run=True)
 
