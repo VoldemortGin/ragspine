@@ -68,6 +68,11 @@ calls a provider; and `TableIR` / `TableCell.verification` are pinned `PENDING` 
    `ragspine.retrieval.rerank.listwise_rerank.{ListwiseJudge, listwise_rerank}` are reused.
    Rerank is opt-in per request through an injected judge and off by default; a request that
    asks for it without a configured judge is a dependency error, not a silent skip.
+   Amended by [ADR 0016](0016-query-classification-and-translation.md): fusion is no longer
+   unconditional. A short label-and-period question is answered from BM25 alone and a question
+   the lexical channel cannot score from the vector channel alone; the mode is reported in the
+   envelope, and the query embedder became a dependency of the requests that read it rather
+   than of the route.
 
 5. **One model call, then verification** (`processing/context_builder.py`, `answers/`,
    `adapters/answer_service.py`, `adapters/json_completion.py::complete_text_json`). Each
@@ -77,6 +82,10 @@ calls a provider; and `TableIR` / `TableCell.verification` are pinned `PENDING` 
    `ModelAnswer` schema (≤ 16 claims, `extra="forbid"`). `AnswerService.answer` calls the model
    at most once per request through `complete_text_json` (own fingerprint salt
    `bounded-text-json-v1`, optional system prompt, same cache and budget as the vision path).
+   Amended by [ADR 0016](0016-query-classification-and-translation.md): one *synthesis* call
+   per request, plus at most one earlier translation call (task salt `query-translation-v1`)
+   for a question written outside the index's language — bounded and cached the same way, and
+   skipped whenever it is unavailable. Its output reaches the two retrieval channels only.
    `answers/verify.py` then re-reads every claim from stored evidence: a quote must be a verbatim
    (whitespace-folded, case-folded) substring of its span; a cell must equal the stored
    `PRESENT` cell text; a chart value must equal the qualified `Decimal` or its exact source

@@ -348,6 +348,19 @@ curl --fail-with-body http://127.0.0.1:8766/v1/chat/completions \
 
 `"stream": true` 时先完成检索、模型调用与校验，再把正文按 128 字符切片以 SSE 回放：首帧 `delta: {"role":"assistant"}`，倒数第二帧 `finish_reason: "stop"`，最后一帧 `choices: []` 且带完整 `enterprise_pdf_rag` 信封，然后 `data: [DONE]`；`usage` 恒为 `null`。
 
+### 通道选择与查询翻译（[ADR 0016](adr/0016-query-classification-and-translation.md)）
+
+检索不再无条件融合。每个问题由 `answers/query_mode.classify_query` 确定性地选通道（不调模型）：token 数 ≤ 5，或含数字且内容词 ≤ 1 的问题走 **BM25 单通道**；词面通道完全打不出分的问题走 **向量单通道**；其余保持 **RRF 融合**。依据是 `data/validation/coverage-2026-09-21/`：125 条已索引事实、两种问法、reranker 之前，BM25 单通道 recall@10 74.4%、RRF 融合 70.4%、向量单通道 48.0%，且越往名次前面差距越大（r@3 54.4% vs 46.4%）。阈值由 `facts.jsonl` 离线扫参选出，取达到上限的最窄一组（改写 250 条探针查询里的 119 条，其余行为逐字不变）。
+
+信封新增两个**可选**字段（`rag-chat-v1` 契约名不变，只增不删）：`fusion_mode`（`bm25_only` / `rrf` / `vector_only`，实际跑的通道）与 `query_translation`（`{english, source_language, cache_hit}` 或 `null`）。
+
+非本索引语言的问题（中文问英文 deck）先翻译再检索：触发条件是**内容词**（去掉虚词与数字后）在词面通道零命中 —— 只看整句零命中会失效，因为 `2026 上半年 分销渠道 占比` 里的 `2026` 本身就命中。翻译是一次有预算、可缓存的 `complete_text_json` 调用（task 盐 `query-translation-v1`，strict schema `{english_query, source_language}`，规则禁止回答、禁止添加信息、数字 / 期间 / 专有名词逐字保留）。**译文只进两个检索通道**：prompt、period / region 前置过滤、散文数字门用的都还是原问题，claim 仍逐字比对文档原文。翻译不可用（没预算、传输失败、输出不可用、`translate_query=False`）不报错，退回**向量单通道**。一次被翻译的问答因此是**两次** live 调用，`llm_live_calls` 如实计数；重复提问两次都命中缓存。
+
+两个连带后果值得知道：
+
+- **query embedder 变成「用到它的请求」的依赖**，和 opt-in reranker 同一条规则。没有配置 embedder 时，走 BM25 单通道的问题照常 200 作答（答案与配置齐全时逐字相同，不是降级替代品），需要向量通道的问题仍然 503、绝不替代；看 `fusion_mode` 就知道跑了哪些通道。
+- **离线金标 runner 固定 `fusion_mode="rrf"`**。它的向量通道是声明式的，BM25 单通道会拿掉它赖以成立的保证；通道选择改由 `answers/test_query_mode.py`、`adapters/test_hybrid_search.py` 守住，真实召回仍由真实 runner 负责。
+
 ### 状态码
 
 | 状态 | 触发 |

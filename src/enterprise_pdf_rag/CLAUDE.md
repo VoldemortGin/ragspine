@@ -1,6 +1,6 @@
 ---
 covers: src/enterprise_pdf_rag/
-verified-against: a35f362
+verified-against: 093e976
 ---
 
 # enterprise_pdf_rag — agent contract
@@ -22,7 +22,8 @@ the same `pyproject.toml` — import name unchanged, not under `ragspine.*`
    [ADR 0012](../../docs/enterprise-pdf-rag/adr/0012-chart-index-text-and-retrieval-seats.md),
    [ADR 0013](../../docs/enterprise-pdf-rag/adr/0013-page-metadata-and-prefilters.md),
    [ADR 0014](../../docs/enterprise-pdf-rag/adr/0014-ruled-table-grid-proof.md),
-   [ADR 0015](../../docs/enterprise-pdf-rag/adr/0015-diagram-and-formula-retrievable.md)
+   [ADR 0015](../../docs/enterprise-pdf-rag/adr/0015-diagram-and-formula-retrievable.md),
+   [ADR 0016](../../docs/enterprise-pdf-rag/adr/0016-query-classification-and-translation.md)
    and [PRD v0.2](../../docs/enterprise-pdf-rag/PRD-v0.2.md) define scope; the full list is
    [`docs/enterprise-pdf-rag/adr/`](../../docs/enterprise-pdf-rag/adr/).
 4. [`testing-and-ingestion.md`](../../docs/enterprise-pdf-rag/testing-and-ingestion.md) — what is
@@ -52,14 +53,18 @@ processing/   pure page-processing / qualification logic; context_builder.py (ev
               periods.py / document_metadata.py (verbatim page metadata, deterministic period
               forms, zero-model document fold — ADR 0013)
 answers/      pure answer chain — ports.py (MountedDocument, MemberText), models.py
-              (MemberFilters), prompt.py (strict model output schema), verify.py (claim
-              re-read), query_filters.py / member_filter.py (period / region pre-filters
-              derived from the question, relaxed when they starve); stdlib + pydantic only
+              (MemberFilters, TranslatedQuery), prompt.py (strict model output schema),
+              verify.py (claim re-read), query_filters.py / member_filter.py (period /
+              region pre-filters derived from the question, relaxed when they starve),
+              query_mode.py (which retrieval channels a question uses — ADR 0016);
+              stdlib + pydantic only
 adapters/     every SDK and I/O: pdfspine, http/ (FastAPI app factory; documents.py + chat.py
               serve document-catalog mode), local models, stores, draft_publication.py
               (qualify / index / publish), page_metadata_extraction.py (page_metadata stage),
               document_catalog.py (scan / mount), hybrid_search.py (BM25 + RRF + opt-in
-              rerank borrowed from ragspine), answer_service.py (one model call per answer),
+              rerank borrowed from ragspine; the channels a query uses are chosen, not
+              fixed — ADR 0016), query_translation.py (restate a question written outside
+              the index's language), answer_service.py (one synthesis call per answer),
               diagram_geometry.py + diagram_qualification.py + diagram_publication.py and
               pdfspine_formula.py + formula_qualification.py (the ADR 0015 proofs, receipts
               and replays), visual_requalification.py (re-prove a saved snapshot's visual
@@ -112,7 +117,11 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   (verbatim quote, exact cell text, chart value equal to the qualified `Decimal` or its exact
   source display, cited back to SVG elements);
   failed claims are dropped, and any number in the prose outside a verified claim abstains the
-  whole answer (ADR 0011). One model call per answer; nothing is derived or retried.
+  whole answer (ADR 0011). One synthesis call per answer, plus at most one earlier
+  translation call for a question written outside the index's language (bounded, cached,
+  skipped when unavailable — ADR 0016); `llm_live_calls` counts both. Nothing is derived or
+  retried, and a translation only ever reaches the two retrieval channels: the prompt, the
+  pre-filters and the prose gate keep the original question, and claims stay verbatim.
 - **A verified table grid means ink** (ADR 0014) — `TableIR` / `TableCell` are `VERIFIED` only
   with `GridEvidence` / `CellBorderEvidence`: every row and column boundary sits on a real
   ruling, every cell edge is continuously ruled, every merge is proved by the absence of a rule
@@ -134,6 +143,13 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   the single function behind the literal-transcription check, a cited table header (ADR 0014) and
   every diagram / formula claim, so the verify side is never laxer than the qualification side.
   Only cell *content* uses the case-folded `_norm`.
+- **Retrieval channels are chosen per question, and the choice is reported** (ADR 0016) —
+  a short label-and-period question is answered from BM25 alone (measurably better than RRF
+  fusion on this corpus: recall@10 74.4% vs 70.4%), a narrative question keeps fusion, and a
+  question the lexical channel cannot score takes the vector channel alone. `fusion_mode` and
+  `query_translation` in `AnswerEnvelope` say which ran. A query embedder is a dependency of
+  the requests that use it, exactly like the opt-in reranker: a BM25-only question is answered
+  without one, a question needing the vector channel is still 503 with no substitute.
 - **Same-SVG two branches, snapshot binding, no-summary-fallback** — hard invariants of the
   figure chain (ADR 0002). What gets embedded is the **index text** of
   `processing/index_text.py`: the page's contextual header (`display_title | page_title |
