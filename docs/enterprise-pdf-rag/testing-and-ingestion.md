@@ -231,7 +231,9 @@ enterprise-pdf-rag metadata --source-store <src> --processing-store <proc> --pro
   --source-store <src> --processing-store <proc> --processing-id <id> --out <报告.json>
 ```
 
-`requalify_visual_objects` 不调模型、不联网、不切指针：`--dry-run` 一个字节都不写，只打印每个对象的 `qualified` / `withheld` / `unchanged` 与逐字诊断；不带 `--dry-run` 时把重证结果存为**新的内容寻址 draft**（`draft_processing_id`），并把 `retrieval` 置空（成员集合变了，pinned plan 不再描述该快照），接着照常 `index` → `publish` 才会生效。它刻意不进 `semantic_objects` 的 stage 缓存，重跑产出逐字节相同。**它只重证 Diagram**（Formula 需要 pinned PDF 重新观测，留了同样的接口位）；想让 Formula 也有 `qualified_*`，只能重跑 `ingest --stage semantics`。
+`requalify_visual_objects` 不调模型、不联网、不切指针：`--dry-run` 一个字节都不写，只打印每个对象的 `qualified` / `withheld` / `unchanged` 与逐字诊断；不带 `--dry-run` 时把重证结果存为**新的内容寻址 draft**（`draft_processing_id`），并把 `retrieval` 置空（成员集合变了，pinned plan 不再描述该快照），接着照常 `index` → `publish` 才会生效。它刻意不进 `semantic_objects` 的 stage 缓存，重跑产出逐字节相同。**它不重证 Formula**（Formula 需要 pinned PDF 重新观测，留了同样的接口位）；想让 Formula 也有 `qualified_*`，只能重跑 `ingest --stage semantics`。
+
+自 [ADR 0016](adr/0016-verbatim-chart-points.md) 起同一个脚本也重证 **Chart**：命令一字不变（`--source-store <src> --processing-store <proc> --processing-id <id>`，加 `--dry-run` 先看判定），它用快照自己落盘的 `svg` / `ir` / `description` / `model_view` 按新 scope `source-labels-and-verbatim-points-v1` 把每张图重新投影一遍——**零模型、零联网**，已按 [ADR 0008](adr/0008-traceable-chart-qa.md) 几何 + 源涂证明放行的那张图原样跳过。与 Diagram 分支一样，它只写出一个**新的内容寻址 draft**（`draft_processing_id`，`retrieval` 置空）、**不切任何指针**，`--dry-run` 一个字节都不写；之后照常 `qualify` → `index` → `publish` 才会生效。
 
 ### 离线验证 vs 真实验证
 

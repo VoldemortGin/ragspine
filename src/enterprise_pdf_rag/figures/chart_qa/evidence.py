@@ -12,9 +12,11 @@ from enterprise_pdf_rag.figures.chart_qa.models import (
 from enterprise_pdf_rag.figures.models import (
     ChartPoint,
     Evidence,
+    EvidenceKind,
     ExecutionMode,
     Verification,
 )
+from enterprise_pdf_rag.figures.source_label_match import fold_whitespace, read_printed_value
 from enterprise_pdf_rag.figures.validation import (
     evidence_elements,
     validate_pair,
@@ -141,3 +143,80 @@ def source_display(context: ChartContext, point: ChartPoint) -> str:
             "Original percentage display is unavailable or ambiguous",
         )
     return candidates[0].text
+
+
+def check_point_fields(context: ChartContext, point: ChartPoint) -> None:
+    """The per-point closure of ``check_fields``, for a scope that keeps points selectively.
+
+    ``check_fields`` is ADR 0008 donut closure: it demands a title, a period, no axes and a
+    receipt row for *every* field of *every* point. A verbatim-points projection keeps only
+    the points the figure prints, so the closure is asked of the one point being cited —
+    each of its four fields VERIFIED and proved by its own receipt row, nothing inferred.
+    """
+    receipt = context.qualification
+    prefix = f"points.{point.point_id}"
+    fields = {
+        f"{prefix}.series": point.series.evidence,
+        f"{prefix}.category": point.category.evidence,
+        f"{prefix}.unit": point.unit.evidence,
+        f"{prefix}.value": point.value.evidence,
+    }
+    proved = {field.field_path: field.element_ids for field in receipt.fields}
+    if (
+        not receipt.source_geometry_refs
+        or len({item.point_id for item in context.chart.points}) != len(context.chart.points)
+        or any(
+            evidence.verification is not Verification.VERIFIED
+            or proved.get(path) != evidence.element_ids
+            for path, evidence in fields.items()
+        )
+    ):
+        raise ChartQueryError(
+            QueryFailure.INVALID_EVIDENCE, "Receipt does not prove this exact chart point"
+        )
+    if any(
+        item.evidence.verification is not Verification.VERIFIED
+        for item in context.description.claims
+    ):
+        raise ChartQueryError(
+            QueryFailure.INVALID_EVIDENCE, "Description contains an unqualified claim"
+        )
+
+
+def verbatim_display(context: ChartContext, point: ChartPoint) -> str:
+    """How the figure itself prints this point's number, and its unit when printed with it.
+
+    Unlike ``source_display`` the occurrences need not share one span: a value may be a run
+    of adjacent occurrences and its unit may be printed beside the number or read out of an
+    axis caption elsewhere in the figure. What does not relax: every cited occurrence must be
+    a source text observation, and their concatenation must read as exactly this point's value.
+    """
+    value = point.value.value
+    numbers = evidence_elements(context.svg, point.value.evidence)
+    if (
+        value is None
+        or not numbers
+        or any(
+            element.evidence_kind is not EvidenceKind.SOURCE_TEXT_OBSERVATION for element in numbers
+        )
+    ):
+        raise ChartQueryError(
+            QueryFailure.INVALID_EVIDENCE, "Chart value requires exact source occurrences"
+        )
+    printed = fold_whitespace(" ".join(element.text for element in numbers))
+    unit = fold_whitespace(point.unit.text)
+    reading = read_printed_value(printed, unit)
+    if reading is None or reading[0] != value:
+        raise ChartQueryError(
+            QueryFailure.INVALID_EVIDENCE, "Cited occurrences do not print this value"
+        )
+    if not unit or reading[1]:
+        return printed
+    units = evidence_elements(context.svg, point.unit.evidence)
+    if units and fold_whitespace(" ".join(element.text for element in units)) == unit:
+        # Joined the way ``processing.index_text`` projects a value, so the answer's display
+        # and the indexed text are the same string: ``72%`` but ``937 $m``.
+        separator = " " if any(character.isalnum() for character in unit) else ""
+        return f"{printed}{separator}{unit}"
+    # The unit prints inside a larger caption; the number's own display stays the number.
+    return printed

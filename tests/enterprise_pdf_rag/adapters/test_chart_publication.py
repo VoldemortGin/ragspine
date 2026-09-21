@@ -18,6 +18,7 @@ from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.donut_qualification import DonutQualification
 from enterprise_pdf_rag.adapters.figure_label_qualification import (
     FIGURE_LABEL_SCOPE,
+    FIGURE_POINT_SCOPE,
     qualify_source_labels,
 )
 from enterprise_pdf_rag.adapters.figure_reasoning import (
@@ -58,6 +59,7 @@ from enterprise_pdf_rag.processing.models import (
     StageState,
 )
 from enterprise_pdf_rag.processing.retrieval import (
+    RetrievalContext,
     RetrievalMember,
     require_financial_qualification,
 )
@@ -114,6 +116,35 @@ def test_numeric_promotion_reuses_the_exact_label_description_and_vector(
     }
 
 
+def test_a_verbatim_points_member_resolves_and_promotes_under_its_own_scope(
+    tmp_path: Path,
+) -> None:
+    """The newer label policy must replay, and must not disturb the numeric promotion."""
+    sources, assets, scope, member, _ = member_fixture(
+        tmp_path, label_scope=True, actual_pdf=True, label_policy=FIGURE_POINT_SCOPE
+    )
+
+    resolved = resolve_chart_member(sources, assets, scope, member)
+
+    assert resolved.qualification.semantic_scope == FIGURE_POINT_SCOPE
+    assert resolved.chart.points
+    assert all(point.value.value is not None for point in resolved.chart.points)
+    assert resolved.chart.verification is Verification.PENDING
+    with pytest.raises(ValueError, match="financial"):
+        require_financial_qualification(
+            RetrievalContext(
+                "f" * 64, member, resolved.chart, resolved.description, resolved.qualification
+            )
+        )
+
+    numeric = promote_numeric_label_member(sources, assets, scope, member)
+    promoted = resolve_chart_member(sources, assets, scope, numeric)
+
+    # The numeric receipt pins the description asset, not the policy that projected it.
+    assert promoted.qualification.semantic_scope == "explicit-distribution-shares"
+    assert promoted.description == resolved.description
+
+
 def test_self_reported_proof_bytes_cannot_replace_recomputed_font_provenance(
     tmp_path: Path,
 ) -> None:
@@ -167,6 +198,7 @@ def member_fixture(
     label_scope: bool = False,
     context: bool = False,
     actual_pdf: bool = False,
+    label_policy: str = FIGURE_LABEL_SCOPE,
 ) -> tuple[
     LocalDocumentStore,
     LocalDocumentStore,
@@ -241,7 +273,7 @@ def member_fixture(
             DescriptionClaim(raw_chart.title.text, raw_chart.title.evidence),
         ),
     )
-    labels = qualify_source_labels(prepared.svg, raw_chart, raw_description)
+    labels = qualify_source_labels(prepared.svg, raw_chart, raw_description, scope=label_policy)
     proof_ref = None
     if label_scope:
         pair = QualifiedFigurePair(

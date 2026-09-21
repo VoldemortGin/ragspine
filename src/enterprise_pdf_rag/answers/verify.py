@@ -34,8 +34,10 @@ from enterprise_pdf_rag.figures.chart_qa.displayed_models import (
 from enterprise_pdf_rag.figures.chart_qa.evidence import (
     check_context,
     check_fields,
+    check_point_fields,
     citation,
     source_display,
+    verbatim_display,
 )
 from enterprise_pdf_rag.figures.chart_qa.models import (
     ChartContext,
@@ -58,6 +60,10 @@ from enterprise_pdf_rag.processing.table_models import CellContentState
 type ChartEvidence = Callable[[str], ChartContext | DisplayedLookupContext]
 
 _DONUT_SCOPE = "explicit-distribution-shares"
+# ``adapters.figure_label_qualification.FIGURE_POINT_SCOPE``. ``answers`` is a pure package and
+# may not import an adapter, so the string is mirrored here exactly as ``_DONUT_SCOPE`` is;
+# ``tests/enterprise_pdf_rag/answers/test_verify_verbatim_points.py`` pins the two together.
+_POINT_SCOPE = "source-labels-and-verbatim-points-v1"
 # One kind may own several prefixes; ``str.startswith`` accepts the tuple as is.
 _PATH_PREFIX = {
     ClaimKind.QUOTE: ("fragments.",),
@@ -360,21 +366,30 @@ def _chart_citation(
     )
 
 
+def _magnitude_supported(value: Decimal) -> bool:
+    """Any printed magnitude. The 0-100 clamp in ``_precision_supported`` is the donut share's."""
+    exponent = value.as_tuple().exponent
+    return len(value.as_tuple().digits) <= 34 and isinstance(exponent, int) and -28 <= exponent <= 2
+
+
 def _value_claim(
     claim: ModelClaim,
     block: ContextBlock,
     context: ChartContext,
     point: ChartPoint,
     period: tuple[str, Evidence, str] | None,
+    *,
+    printed: Callable[[ChartContext, ChartPoint], str] = source_display,
+    supported: Callable[[Decimal], bool] = _precision_supported,
 ) -> VerifiedClaim | RejectedClaim:
     value = point.value.value
     if point.value.kind is not ValueKind.EXPLICIT or value is None:
         return _reject(
             claim, AbstainReason.UNSUPPORTED_VALUE_KIND, f"value kind is {point.value.kind.value}"
         )
-    if not _precision_supported(value):
+    if not supported(value):
         return _reject(claim, AbstainReason.UNSUPPORTED_PRECISION, "value precision unsupported")
-    display = source_display(context, point)
+    display = printed(context, point)
     claimed = _decimal(claim.text) if _NUMBER_RE.fullmatch(claim.text.strip()) else None
     if _norm(claim.text) != _norm(display) and claimed != value:
         return _reject(
@@ -428,6 +443,41 @@ def _verify_donut(
     )
 
 
+def _verify_verbatim_points(
+    claim: ModelClaim, block: ContextBlock, context: ChartContext, point_id: str
+) -> VerifiedClaim | RejectedClaim:
+    """Re-read one point of a verbatim-points member (ADR 0016), not the ADR 0008 closure.
+
+    The projected chart stays ``PENDING`` on purpose — the category-to-value association is
+    the model's, not a proof — so the verification lives on the *point*: its four fields must
+    each be VERIFIED and proved by the receipt, and its number must be printed in the figure.
+    Grammar is not gated: bar, donut and waterfall all project the same way here.
+    """
+    check_context(context)
+    chart = context.chart
+    if (
+        context.qualification.semantic_scope != _POINT_SCOPE
+        or context.description.verification is not Verification.VERIFIED
+    ):
+        return _reject(claim, AbstainReason.UNQUALIFIED_MEMBER, "member is not source-qualified")
+    point = next((item for item in chart.points if item.point_id == point_id), None)
+    if point is None:
+        return _reject(claim, AbstainReason.UNKNOWN_POINT, f"point {point_id} is not in the chart")
+    if point.value.kind is ValueKind.UNAVAILABLE:
+        return _reject(claim, AbstainReason.VALUE_UNAVAILABLE, "value is unavailable in source")
+    check_point_fields(context, point)
+    period = None if chart.period is None else ("period", chart.period.evidence, chart.period.text)
+    return _value_claim(
+        claim,
+        block,
+        context,
+        point,
+        period,
+        printed=verbatim_display,
+        supported=_magnitude_supported,
+    )
+
+
 def _verify_displayed(
     claim: ModelClaim, block: ContextBlock, context: DisplayedLookupContext, point_id: str
 ) -> VerifiedClaim | RejectedClaim:
@@ -462,6 +512,8 @@ def _verify_chart_value(
     try:
         if isinstance(context, DisplayedLookupContext):
             return _verify_displayed(claim, block, context, point_id)
+        if context.qualification.semantic_scope == _POINT_SCOPE:
+            return _verify_verbatim_points(claim, block, context, point_id)
         return _verify_donut(claim, block, context, point_id)
     except FigureError as error:
         raise ChartQueryError(

@@ -1,8 +1,60 @@
 # Claude 交接：通用文档 RAG 与公开样本验收
 
-更新时间：2026-09-21（末次追加 2026-09-20 的 NL 金标集一节）
+更新时间：2026-09-21（末次追加 2026-09-21 的图表点位逐字放行一节，ADR 0016）
 
 > 阅读顺序：先看下方“恢复开发记录”；后续旧暂停快照保留作证据，不能作为实时发布或服务状态。
+
+## 图表点位逐字放行（2026-09-21，分支 `fix/chart-source-labels`，ADR 0016，未合并 `main`）
+
+> 用新 scope `source-labels-and-verbatim-points-v1` 取代 `figure-source-labels-only-v1` 做默认图表资格；
+> 旧 scope 冻结、已发布成员照常回放。证据在本机 `data/validation/generic-chat-2026-09-21/chart-labels/`
+> 与 `data/validation/coverage-2026-09-21/`（`data/*` 为 git 忽略，同此前各轮）。
+
+> **警告：已发布快照 `22127d0fad13` 只能被带本分支代码的构建挂载。**
+> 旧构建在 `chart_publication.resolve_chart_member` 里遇到新的 `semantic_scope` 会抛
+> `Unsupported chart qualification scope`，整个文档挂载失败。所以线上 8768 / 3200 必须从**含本分支代码**
+> 的工作树启动。回滚就是把指针写回旧发布再重启：
+>
+> ```sh
+> echo 231c904c843e189bd8949ab14c001beaeffc72975e5b1312b39e62d3cb71eb78 > data/output/aia-2026-interim/pages-001-020/current-processing
+> ```
+
+**做了什么**（[ADR 0016](adr/0016-verbatim-chart-points.md)）：`figure-source-labels-only-v1` 只能拿 label 去比**一整条** source span、任何带值或只要含数字的 claim 一律拒、通过后还把图本身清空（`axes=()`、`points=()`、`title=None`）。281 个图表 IR 字段逐字比对该图自己的 span 后发现：真正**页面上没有**的只有 **3** 个，其余都是"值和单位是一个印刷 run"（`33` + `%` 就是单条 span `33%`）、label 折行、尾部括注、单位只印在坐标轴标题里。于是：
+
+1. **新 scope `source-labels-and-verbatim-points-v1`**（常量 `FIGURE_POINT_SCOPE`，`adapters/figure_label_qualification.py`）成为默认；`figure-source-labels-only-v1` **逐字节冻结**，所有门禁两个都收，`chart_publication.resolve_chart_member` 按回执自己声明的 scope 重证，旧成员照常挂载回放。
+2. **新纯模块 `src/enterprise_pdf_rag/figures/source_label_match.py`** 是规则本体：窗口 = 页面阅读序里 1–3 个相邻的 `SOURCE_TEXT_OBSERVATION`（同一印刷行，或折到下一行），折叠空白后拼接必须**等于** label，**保留大小写**，最窄窗口优先；未解析 / 重复引用 / 不相邻 / 只是相似一律 fail closed。它是 [ADR 0013](adr/0013-page-metadata-and-prefilters.md) 页元数据证据窗口的图表同胞，留的是**来源**文本，不是模型的字符串。
+3. **数值与单位算一个印刷 run**：`33%`，或相邻两个 occurrence `33` + `%`，或值本身加上只印在该图坐标轴标题里的单位，都算印过；千分位分隔符逐字保留。**"含数字即非 label" 取消**，唯一剩下的 label 门是 `claim.value is not None`，所以 `1H26`、`+9%`、`VONB ($m)` 都能过——但仍必须逐字印在图里。
+4. **点位逐点存活**：category **和** value（含单位）都逐字印在该图区域内才留这个点，否则只丢这个点；四个点里对一个就以那一个放行，fail-closed **按点不按图**。`title` / `period` / 轴标签同口径，`marks` 仍恒空（那是模型的几何假设）。
+5. **`adapters/visual_requalification.py` 增 Chart 分支**：已发布快照用自己落盘的 `svg` / `ir` / `description` / `model_view` 重投影，零模型、零联网、不切指针；已按 [ADR 0008](adr/0008-traceable-chart-qa.md) 几何 + 源涂证明放行的那张图原样跳过。`answers/verify.py` 增第三条图表数值校验分支（新 scope 专用）。
+6. **本 scope 不证明什么**：category ↔ value 的**关联**仍是模型断言。要"这个 33% 属于这个扇区"的几何证明，只有 ADR 0008 的 `explicit-distribution-shares`——两个 scope 分名、分存、永不合并，看回执就知道一个数字带的是哪种保证。
+
+**真实验收**（AIA 前 20 页钉死发布，8768 + Qwen3-Embedding-4B / Qwen3-Reranker-4B，证据 `data/validation/generic-chat-2026-09-21/chart-labels/`）：
+
+| 口径 | 迁移前（processing `231c904c843e`，snapshot `2f35ca97171a`） | 迁移后（processing `22127d0fad13`，snapshot `42939d6a4e87`） |
+| --- | --- | --- |
+| Chart 对象放行 | **9 / 29**（20 个 `qualification: unavailable`，诊断全是 `no_exact_source_labels`） | **29 / 29**（28 个由 `requalify_visual_objects` 重投影，1 个已有 ADR 0008 几何证明、未动） |
+| 保留的图表点位 | **2** | **53** |
+| `qualify` eligible / skipped / chart 成员 | 190 / 51 / 9 | **210 / 31 / 29** |
+| `required qualification stages are incomplete` | 43 | 23 |
+| 严格索引覆盖（280 条原子事实，`data/validation/coverage-2026-09-21/`） | 44.6 %（125/280） | **81.4 %（228/280）** |
+| 其中图表事实 | 3.7 %（6/161） | **67.7 %（109/161）** |
+| owner 对象未入索引的事实 | 126 | **0** |
+| NL 金标集（对着 8768 实跑） | —— | **20 pass / 0 fail**，退出码 0 |
+
+- **被拒 claim 的普查**（迁移前那 29 张图）：`numeric_claim_not_a_label` 61、`numeric_text_not_a_label` 10、`claim_is_not_one_exact_source_occurrence` 2——都不是在防捏造，是在拒绝 PDF 自己印着的文本。
+- **点位样例**：第 18 页 Product Mix 留 4 个（`Traditional Protection` 33 %、`Participating` 53 %、`Unit-linked` 10 %、`Others` 4 %），第 20 页 Expense Ratio 留 2 个，第 8 页 OPAT 留 12 个。
+- **`index`**：draft `8321a7de0c89` → processing `22127d0fad13`，210 个 member，2560 维，fingerprint `local-http/Qwen/Qwen3-Embedding-4B`。
+- **`publish --no-activate-source`**：`current-processing` 从 `231c904c843e…` 切到 **`22127d0fad13…`**（指针文件 sha1 `19ac8170a983f5eb9e4f5e0c77020c21c0e60b09` → `bf8ce33af56d72cf66968b73aa03fe2992307294`）；`current-manifest` 仍 `e702bf1c…`。
+- **NL 金标集**：22 条可联网用例 **20 pass / 0 fail**，退出码 0；`k01-region-thailand-en` 仍是 known-gap-holds；`k02-region-thailand-zh` 是 **known-gap-moved**——仍然拒答，但 `abstain_detail` 从 `not_in_context` 变成 `ambiguous`，因为泰国那问现在能够到更多可检索成员。金标文件的 `pinned` 块已重钉到新发布（processing / snapshot / `member_count` 190 → 210），**不要重做**。
+
+**离线验证**：新增纯规则用例 `tests/enterprise_pdf_rag/figures/test_source_label_match.py`、新 scope 的资格用例（`tests/enterprise_pdf_rag/adapters/test_figure_label_qualification.py` 扩充，旧 scope 的冻结用例原样保留）、重投影的真实样本只读 smoke `tests/enterprise_pdf_rag/adapters/test_chart_requalification_real_samples.py`、verify 侧 `tests/enterprise_pdf_rag/answers/test_verify_verbatim_points.py`；具体通过数以 `.venv/bin/python -m pytest tests/enterprise_pdf_rag -q` 与 `bash scripts/ci.sh` 为准。
+
+**遗留**
+1. **旧构建挂不上新快照**（见本节开头警告）：起服务的工作树必须含本分支代码，否则 `Unsupported chart qualification scope`；回滚只有"写回 `231c904c843e…` + 重启"这一条。
+2. 9 个 IR 字段因 layout 分区把图的 bbox 裁得太紧而无法匹配；缩写 label 的展开印在裁切之外时仍失败（`qualify_source_labels` 只拿得到该图自己的 observation）。**放宽 bbox 会改变模型当初看到的东西**，会让钉死的视图失效，故留作 follow-up。
+3. category ↔ value 的关联未被证明（见"做了什么" 6）；需要几何保证的数字只能走 ADR 0008 的 scope。
+4. 中文地区词表缺口（`k02`）未修，只是表现从 `not_in_context` 变成 `ambiguous`。
+5. 分支 `fix/chart-source-labels` 未合并 `main`；`src/enterprise_pdf_rag/CLAUDE.md` 的 `verified-against` 暂为 `PENDING_COMMIT`，提交后须换成真实 commit hash。
 
 ## 自然语言问答的冻结金标集与两个 runner（2026-09-20，分支 `feat/nl-gold-set`，未合并 `main`）
 

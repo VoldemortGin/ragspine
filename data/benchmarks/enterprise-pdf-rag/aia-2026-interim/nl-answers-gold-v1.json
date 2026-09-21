@@ -9,8 +9,8 @@
   ],
   "pinned": {
     "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
-    "processing_id": "231c904c843e189bd8949ab14c001beaeffc72975e5b1312b39e62d3cb71eb78",
-    "snapshot_id": "2f35ca97171a02d23c0317c8aca3ccf7bcb628f4862faf5c9198b76449a558f6",
+    "processing_id": "22127d0fad13ccd919c23aa25f4867e24cb742a4fcdd4bb33d4267c327006ad8",
+    "snapshot_id": "42939d6a4e8781bcb45c8e13f2b8d345c1c584a486261fa85dbcd6fe5aeb1d2c",
     "selected_physical_pages": [
       1,
       2,
@@ -33,7 +33,7 @@
       19,
       20
     ],
-    "member_count": 190,
+    "member_count": 210,
     "embedding_fingerprint": "local-http/Qwen/Qwen3-Embedding-4B"
   },
   "minimum_positive_cases": 12,

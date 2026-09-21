@@ -16,18 +16,31 @@ from typing import Literal
 from pydantic import TypeAdapter
 
 from enterprise_pdf_rag.adapters.aia_ingestion import read_text_sidecar
+from enterprise_pdf_rag.adapters.chart_publication import (
+    ChartPublicationReceipt,
+    parse_chart_receipt,
+)
 from enterprise_pdf_rag.adapters.diagram_publication import DiagramPublicationReceipt
 from enterprise_pdf_rag.adapters.diagram_qualification import (
     DiagramQualificationError,
     qualify_diagram,
 )
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
+from enterprise_pdf_rag.adapters.figure_label_qualification import qualify_source_labels
+from enterprise_pdf_rag.adapters.figure_reasoning import (
+    ContextualFigureModelView,
+    FigureModelView,
+    prepare_figure,
+)
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.documents.models import AssetRef, TextSpan
+from enterprise_pdf_rag.documents.models import AssetRef, DocumentSnapshot, TextSpan
+from enterprise_pdf_rag.figures.models import ChartIR, FigureError, TextDescription
 from enterprise_pdf_rag.processing.models import (
     ObjectKind,
     ObjectProcessingRecord,
+    PageInput,
     PageProcessingRecord,
+    ProcessingScope,
     StageOutcome,
     StageState,
 )
@@ -35,9 +48,14 @@ from enterprise_pdf_rag.processing.typed_ir import DiagramIR, ObjectDescription
 
 REQUALIFICATION_PRODUCER = "visual-requalification-v1"
 # The stored branches one Diagram proof reads; all four must already have succeeded.
+# A Chart re-projection reads exactly the same four, for the same reason.
 _DIAGRAM_INPUTS = ("svg", "ir", "description", "model_view")
+_CHART_INPUTS = _DIAGRAM_INPUTS
 # What a proof writes. A record already carrying them is left exactly as it is.
 _PROVEN_STAGES = ("qualified_ir", "qualified_description", "qualification")
+# The one chart scope this module must never touch: it carries the ADR 0008 native-sector
+# and source-paint proof, which is strictly stronger than the verbatim projection here.
+_GEOMETRY_PROVED_SCOPE = "explicit-distribution-shares"
 
 Outcome = Literal["qualified", "withheld", "unchanged"]
 
@@ -208,6 +226,139 @@ def _requalify_diagram(
     return proven, report("qualified", None, claims)
 
 
+def _geometry_proved(outputs: ProcessingStore, record: ObjectProcessingRecord) -> bool:
+    """True for a chart already carrying the ADR 0008 sector + source-paint proof.
+
+    That proof is strictly stronger than the verbatim projection this module applies, so
+    such a member is left exactly as published. Anything unreadable is treated as proved,
+    because re-projecting a receipt we cannot parse would silently weaken it.
+    """
+    refs = _succeeded_refs(record, ("qualification",))
+    if refs is None:
+        return False
+    try:
+        receipt = parse_chart_receipt(outputs.assets.get(refs["qualification"]))
+    except ValueError:
+        return True
+    return receipt.qualification.semantic_scope == _GEOMETRY_PROVED_SCOPE
+
+
+def _requalify_chart(
+    outputs: ProcessingStore,
+    page_index: int,
+    record: ObjectProcessingRecord,
+    *,
+    sources: LocalDocumentStore,
+    source: DocumentSnapshot,
+    scope: ProcessingScope,
+    dry_run: bool,
+) -> tuple[ObjectProcessingRecord, ObjectRequalification]:
+    """Re-project one Chart from its stored branches under the current label scope.
+
+    Unlike the Diagram branch this also revisits a chart that already qualified: the
+    ADR 0016 scope keeps the points that ``figure-source-labels-only-v1`` blanked, so a
+    published labels-only member has facts to gain. A geometry-proved member is skipped.
+    """
+
+    def report(outcome: Outcome, diagnostic: str | None, claims: int) -> ObjectRequalification:
+        return ObjectRequalification(
+            page_index, record.object_id, record.kind, outcome, diagnostic, claims
+        )
+
+    if _geometry_proved(outputs, record):
+        return record, report("unchanged", None, record.qualified_claim_count)
+    inputs = _succeeded_refs(record, _CHART_INPUTS)
+    if inputs is None:
+        return record, report(
+            "unchanged", "Stored chart branches are incomplete; there is nothing to re-prove.", 0
+        )
+    writer = _StageWriter(
+        outputs,
+        record.object_id,
+        scope.source_manifest_id,
+        tuple(inputs[name] for name in _CHART_INPUTS),
+    )
+    view: FigureModelView | ContextualFigureModelView = TypeAdapter(
+        FigureModelView | ContextualFigureModelView
+    ).validate_json(outputs.assets.get(inputs["model_view"]), strict=True, extra="forbid")
+    base = view.base_view if isinstance(view, ContextualFigureModelView) else view
+    page_record = source.manifest.pages[page_index]
+    prepared = prepare_figure(
+        page=PageInput(
+            scope.source_manifest_id,
+            scope.source_sha256,
+            page_index,
+            page_record.width,
+            page_record.height,
+            page_record.svg,
+            read_text_sidecar(sources, source, page_index),
+        ),
+        native_svg=sources.get(page_record.svg),
+        bbox=base.bbox,
+        # The layout item's extraction region is not carried in the record; the object id
+        # identifies the same region and never enters the SVG bytes, which the next check proves.
+        region_id=record.object_id,
+        context_span_ids=(
+            tuple(observation.source_span_id for observation in view.page_context)
+            if isinstance(view, ContextualFigureModelView)
+            else ()
+        ),
+    )
+    chart = TypeAdapter(ChartIR).validate_json(outputs.assets.get(inputs["ir"]), strict=True)
+    description = TypeAdapter(TextDescription).validate_json(
+        outputs.assets.get(inputs["description"]), strict=True
+    )
+    reason: str | None = None
+    if prepared.svg.svg.encode() != outputs.assets.get(inputs["svg"]):
+        reason = "Stored chart SVG does not derive from the pinned source page and model view"
+    else:
+        try:
+            projection = qualify_source_labels(prepared.svg, chart, description)
+        except FigureError as error:
+            reason = str(error)
+    if reason is not None:
+        if dry_run:
+            return record, report("withheld", reason, 0)
+        kept = tuple(stage for stage in record.stages if stage.stage not in _PROVEN_STAGES)
+        withheld = replace(
+            record,
+            stages=(*kept, writer.withheld("qualification", reason)),
+            qualified_claim_count=0,
+        )
+        return withheld, report("withheld", reason, 0)
+    claims = sum(point.value.value is not None for point in projection.chart.points)
+    if dry_run:
+        return record, report("qualified", None, claims)
+    ir_stage = writer.save("qualified_ir", TypeAdapter(ChartIR).dump_json(projection.chart))
+    description_stage = writer.save(
+        "qualified_description", TypeAdapter(TextDescription).dump_json(projection.description)
+    )
+    receipt = ChartPublicationReceipt(
+        object_id=record.object_id,
+        source_manifest_id=scope.source_manifest_id,
+        region_id=record.object_id,
+        ir=_artifact(ir_stage),
+        description=_artifact(description_stage),
+        source_svg=inputs["svg"],
+        raw_chart=inputs["ir"],
+        raw_description=inputs["description"],
+        view=inputs["model_view"],
+        qualification=projection.receipt,
+    )
+    kept = tuple(stage for stage in record.stages if stage.stage not in _PROVEN_STAGES)
+    proven = replace(
+        record,
+        stages=(
+            *kept,
+            ir_stage,
+            description_stage,
+            writer.save("qualification", receipt.model_dump_json().encode()),
+        ),
+        qualified_claim_count=claims,
+    )
+    return proven, report("qualified", None, claims)
+
+
 def requalify_visual_objects(
     sources: LocalDocumentStore,
     outputs: ProcessingStore,
@@ -232,20 +383,34 @@ def requalify_visual_objects(
         objects: list[ObjectProcessingRecord] = []
         for record in page.objects:
             # Kind dispatch for the deterministic visual proofs. ADR 0015 admits Diagram
-            # today; the Formula branch proves its token IR the same way and plugs in here.
-            if record.kind is not ObjectKind.DIAGRAM:
+            # (geometry + verbatim span labels); ADR 0016 re-projects a Chart's verbatim
+            # points. The Formula branch proves its token IR the same way and plugs in here.
+            revised = record
+            verdict: ObjectRequalification | None = None
+            if record.kind is ObjectKind.DIAGRAM:
+                if spans is None:
+                    spans = read_text_sidecar(sources, source, page.page_index).spans
+                revised, verdict = _requalify_diagram(
+                    outputs,
+                    page.page_index,
+                    record,
+                    spans=spans,
+                    source_manifest_id=manifest.scope.source_manifest_id,
+                    dry_run=dry_run,
+                )
+            elif record.kind is ObjectKind.CHART:
+                revised, verdict = _requalify_chart(
+                    outputs,
+                    page.page_index,
+                    record,
+                    sources=sources,
+                    source=source,
+                    scope=manifest.scope,
+                    dry_run=dry_run,
+                )
+            if verdict is None:
                 objects.append(record)
                 continue
-            if spans is None:
-                spans = read_text_sidecar(sources, source, page.page_index).spans
-            revised, verdict = _requalify_diagram(
-                outputs,
-                page.page_index,
-                record,
-                spans=spans,
-                source_manifest_id=manifest.scope.source_manifest_id,
-                dry_run=dry_run,
-            )
             changed = changed or revised != record
             objects.append(revised)
             reports.append(verdict)

@@ -4,6 +4,36 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ## [Unreleased]
 
+### Changed
+
+- **A chart point is retrievable when every one of its strings is printed in the figure**
+  (`enterprise_pdf_rag`, [ADR 0016](docs/enterprise-pdf-rag/adr/0016-verbatim-chart-points.md)).
+  `figure-source-labels-only-v1` could only compare a label against **one whole** source span,
+  rejected any claim carrying a value or even containing a digit, and then blanked the chart
+  (`axes=()`, `points=()`, `title=None`). A coverage measurement over the pinned AIA release
+  (`data/validation/coverage-2026-09-21/`) put the cost at **2.6 % index coverage for chart
+  facts — 4 of 156**: 20 of 29 chart objects were rejected whole, every one with the same
+  `no_exact_source_labels` diagnostic, and the 9 that qualified lost their points anyway.
+  Comparing all 281 chart IR fields verbatim against the figure's own spans showed only
+  **3** were genuinely absent from the page; the rest needed a value and its unit read as one
+  printed run (`33` + `%` is the single span `33%`), a label that wraps over two lines, a
+  trailing parenthetical dropped, or the unit that is printed only in an axis title.
+  A new scope `source-labels-and-verbatim-points-v1` keeps a point when its category **and**
+  its value (with unit) each print verbatim inside the figure region, and drops the point
+  otherwise — fail-closed per point, never per figure. `figures/source_label_match.py` is the
+  rule (the cited occurrences in page reading order, one to three wide, each geometrically
+  adjacent to the next, whitespace-folded concatenation **equal** to the label, case
+  preserved, narrowest window wins); it is the chart sibling of the ADR 0013 page-metadata
+  evidence window. The surviving points reach the ADR 0012 index projection and are citable
+  through `points.<id>.value`. `figure-source-labels-only-v1` is frozen byte-for-byte and every
+  gate accepts both, so snapshots published under it keep mounting and replaying.
+  **What the new scope does not prove:** the category-to-value *association* is still the
+  model's assertion. ADR 0008's `explicit-distribution-shares` — native sector geometry plus
+  complete source-paint accounting — keeps its own name, its own receipt type and its own
+  members, so a receipt always says which of the two guarantees a number carries.
+  `adapters/visual_requalification.py` gained the matching Chart branch, so a published
+  snapshot re-projects from its own stored branches with no model and no network.
+
 ### Added
 
 - **A frozen gold set for natural-language answers, with two runners that share one judge**

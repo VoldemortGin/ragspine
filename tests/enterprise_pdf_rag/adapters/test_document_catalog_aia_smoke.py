@@ -55,15 +55,18 @@ def test_aia_sample_is_one_ready_legacy_document_and_stays_untouched(tmp_path: P
         mount_document(entry, embedder=RecordingEmbedding())
 
     # Evidence-only mount: the lexical corpus is exactly what the snapshot embedded —
-    # projected chart text under policy v3, the description alone under older policies.
+    # projected chart text under policy v3, the description alone under older policies. How
+    # many charts project depends on the release: before ADR 0016 only the geometry-proved
+    # donut kept its points, after it every chart that prints its own numbers does.
     texts = mount_document(entry, embedder=None).member_texts()
     assert len(texts) == entry.member_count == len(plan.members)
     charts = [item for item in texts if item.kind is ObjectKind.CHART]
     assert charts
     projected = [item for item in charts if "chart figure" in item.text]
     if plan.qualification_policy in PROJECTED_CHART_POLICIES:
-        (donut,) = projected
-        assert donut.page_index == 17 and "Agency VONB 72%" in donut.text
+        donuts = [item for item in projected if "Agency VONB 72%" in item.text]
+        assert [item.page_index for item in donuts] == [17]
+        assert all(item.kind is ObjectKind.CHART for item in projected)
     else:
         assert projected == []
     assert _state() == before
