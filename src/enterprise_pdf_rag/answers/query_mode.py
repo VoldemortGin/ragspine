@@ -5,8 +5,14 @@ channel alone recalls 74.4% within ten seats against 70.4% for RRF fusion, and i
 at every cut (r@3 54.4% vs 46.4%, MRR 0.482 vs 0.381). Every query that probe carried
 has one shape — a short label plus a period — so the rule reroutes only that shape and
 leaves longer, narrative questions on fusion, where the probe says nothing.
-``MAX_BM25_ONLY_TOKENS`` and ``MAX_BM25_ONLY_CONTENT_WORDS`` are the narrowest pair of
-thresholds that reached the offline sweep's ceiling; the sweep table is in the ADR.
+
+A token count is only a proxy for that shape, and it is a leaky one: ``Agency share of
+VONB 1H26`` is five tokens but three content words, a phrase rather than a label, and BM25
+alone drops the chart it needs from seat 7 to seat 12. So the short clause spends two
+budgets at once — at most ``MAX_BM25_ONLY_TOKENS`` tokens **and** at most
+``MAX_BM25_ONLY_SHORT_CONTENT_WORDS`` content words — which is what every probe query
+actually was. ``MAX_BM25_ONLY_CONTENT_WORDS`` is the tighter budget the separate figure
+clause spends, where the token count is already over. The sweep table is in the ADR.
 
 A question the lexical channel cannot score at all (``lexical_hits == 0`` — a Chinese
 question over an English index) is no fusion candidate either: fusing an empty ranking
@@ -47,6 +53,7 @@ QueryMode = Literal["bm25_only", "rrf", "vector_only"]
 FusionMode = Literal["auto", "bm25_only", "rrf", "vector_only"]
 
 MAX_BM25_ONLY_TOKENS: Final = 5
+MAX_BM25_ONLY_SHORT_CONTENT_WORDS: Final = 2
 MAX_BM25_ONLY_CONTENT_WORDS: Final = 1
 
 # Function words that carry no retrievable content. Kept deliberately small and English:
@@ -133,10 +140,9 @@ def classify_query(question: str, *, lexical_hits: int) -> QueryMode:
     tokens = tokenize_query(question)
     if lexical_hits == 0 or not tokens:
         return "vector_only"
-    if len(tokens) <= MAX_BM25_ONLY_TOKENS:
+    content = content_words(tokens)
+    if len(tokens) <= MAX_BM25_ONLY_TOKENS and len(content) <= MAX_BM25_ONLY_SHORT_CONTENT_WORDS:
         return "bm25_only"
-    if any(is_numeric(token) for token in tokens) and (
-        len(content_words(tokens)) <= MAX_BM25_ONLY_CONTENT_WORDS
-    ):
+    if any(is_numeric(token) for token in tokens) and (len(content) <= MAX_BM25_ONLY_CONTENT_WORDS):
         return "bm25_only"
     return "rrf"

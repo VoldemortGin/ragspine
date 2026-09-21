@@ -208,6 +208,7 @@ class HybridSearch:
         top_k: int,
         allowed: frozenset[str] | None = None,
         mode: FusionMode = "auto",
+        lexical_query: str | None = None,
     ) -> SearchOutcome:
         """Rank over the channels ``mode`` selects; ``auto`` classifies the query (ADR 0018).
 
@@ -215,16 +216,24 @@ class HybridSearch:
         vector channel is read over the whole corpus and cut to the channel limit after
         filtering, so the filter never starves it. ``bm25_only`` skips the vector channel
         altogether, which is one embedding call the request never makes.
+
+        ``lexical_query`` is what BM25 and the channel classifier score when it differs from
+        the question — a restatement in the index's language, which is the only thing a
+        token-matching channel can score at all. The vector channel and the rerank judge keep
+        ``query``: both read the question as language, so a restatement only trades the
+        asker's wording for someone else's. It defaults to ``query``, which scores both
+        channels on one string exactly as before.
         """
         if top_k < 1:
             raise ValueError("top_k must be at least one")
+        scoreable = query if lexical_query is None else lexical_query
         lexical: tuple[PinnedRetrievalHit, ...] = (
             ()
             if mode == "vector_only"
-            else lexical_rank(self._index, query, limit=self._channel_limit, allowed=allowed)
+            else lexical_rank(self._index, scoreable, limit=self._channel_limit, allowed=allowed)
         )
         resolved: QueryMode = (
-            classify_query(query, lexical_hits=len(lexical)) if mode == "auto" else mode
+            classify_query(scoreable, lexical_hits=len(lexical)) if mode == "auto" else mode
         )
         vector = () if resolved == "bm25_only" else self._vector_rank(query, allowed)
         # Fusing one ranking with an empty one *is* that ranking, scored the same way, so a

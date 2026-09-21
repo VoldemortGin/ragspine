@@ -96,6 +96,11 @@ def _citable_visual(block: ContextBlock) -> ObjectKind | None:
     return None
 
 
+def _within_a_channel(hit: FusedHit, limit: int) -> bool:
+    """Either channel placed this hit inside ``limit`` on its own ranking."""
+    return any(rank is not None and rank <= limit for rank in (hit.vector_rank, hit.lexical_rank))
+
+
 def select_context(
     document: MountedDocument,
     ranked: Sequence[FusedHit],
@@ -104,19 +109,27 @@ def select_context(
 ) -> tuple[tuple[FusedHit, ...], tuple[ContextBlock, ...]]:
     """Hydrate the top-k fused hits, with one guaranteed seat per citable visual kind.
 
-    For each visual kind (chart / diagram / formula) with no citable block in the top-k,
-    the first citable member of that kind within the next k fused positions takes a seat,
-    given up from the last seat backward and never one that already holds a citable visual
-    object (ADR 0012, generalised by ADR 0015's follow-up). A pending or label-only object
-    never qualifies, and nothing outside ``2 * top_k`` is promoted. Only members of a still
-    missing kind in that window are resolved for the check; ``member_texts`` supplies their
-    kinds when the caller already holds them.
+    For each visual kind (chart / diagram / formula) with no citable block in the top-k, the
+    first citable member of that kind in the promotion window takes a seat, given up from the
+    last seat backward and never one that already holds a citable visual object (ADR 0012,
+    generalised by ADR 0015's follow-up). The window is the next k fused positions **plus
+    every hit either channel ranked inside ``2 * top_k`` on its own ranking**: reciprocal rank
+    fusion sorts a hit only one channel scored below every hit both channels contributed to,
+    which is precisely the object the guaranteed seat exists for — one channel sees it, the
+    other cannot score it at all. Candidates are examined in fused order, so the fused window
+    is always offered first. A pending or label-only object never qualifies, and nothing
+    outside both windows is promoted. Only members of a still missing kind are resolved for
+    the check; ``member_texts`` supplies their kinds when the caller already holds them.
     """
     head = list(ranked[:top_k])
     blocks = {hit.member_id: build_context_block(document.resolve(hit.as_hit())) for hit in head}
     seated = {_citable_visual(blocks[hit.member_id]) for hit in head}
     missing = [kind for kind in _VISUAL_KINDS if kind not in seated]
-    window = ranked[top_k : 2 * top_k]
+    window = [
+        hit
+        for position, hit in enumerate(ranked[top_k:], start=top_k)
+        if position < 2 * top_k or _within_a_channel(hit, 2 * top_k)
+    ]
     if missing and window:
         texts = document.member_texts() if member_texts is None else member_texts
         kinds = {member.member_id: member.kind for member in texts}
@@ -142,11 +155,17 @@ def select_context(
 
 @dataclass(frozen=True, slots=True)
 class _QueryPlan:
-    """What the retrieval channels will score, and the translation that produced it."""
+    """What the retrieval channels will score, and the translation that produced it.
+
+    ``query`` is always the question as asked — what the vector channel and the rerank
+    judge read. ``lexical_query`` is the restatement only the token-matching channel and
+    the channel classifier score; ``None`` means both channels score the question.
+    """
 
     query: str
     mode: FusionMode
     translation: TranslatedQuery | None
+    lexical_query: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -192,7 +211,7 @@ class AnswerService:
     def _plan(
         self, request: AnswerRequest, search: HybridSearch, allowed: frozenset[str] | None
     ) -> "_QueryPlan":
-        """Decide what the two channels will score: the question, or an English restatement.
+        """Decide what the lexical channel will score: the question, or an English restatement.
 
         A question is restated only when its *content words* score nothing lexically — the
         signature of a question written outside the index's language, and the one case where
@@ -215,7 +234,11 @@ class AnswerService:
             translate_query(request.question, self._llm) if request.translate_query else None
         )
         if translation is not None:
-            return _QueryPlan(translation.english, request.fusion_mode, translation)
+            # Lexically only: the vector channel reads the question as language, and this
+            # corpus ranks the asker's own wording above a restatement of it (ADR 0018).
+            return _QueryPlan(
+                request.question, request.fusion_mode, translation, translation.english
+            )
         unfused: FusionMode = (
             "vector_only" if request.fusion_mode == "auto" else request.fusion_mode
         )
@@ -254,8 +277,15 @@ class AnswerService:
         if translation is not None and request.filters is None:
             filters = _union(filters, derive_filters(translation.english, vocabulary))
             applied, allowed, relaxed = _narrow(members, filters, request.top_k)
+        # The whole fused ranking, not just its head: a hit's own channel ranks decide the
+        # guaranteed visual seats below, and fusion can bury such a hit anywhere (ADR 0012).
+        # Both channels together rank at most ``2 * channel_limit`` members.
         outcome = search.search(
-            plan.query, top_k=2 * request.top_k, allowed=allowed, mode=plan.mode
+            plan.query,
+            top_k=2 * request.channel_limit,
+            allowed=allowed,
+            mode=plan.mode,
+            lexical_query=plan.lexical_query,
         )
         fused, selected = select_context(document, outcome.hits, request.top_k, members)
         hits = {hit.member_id: hit.as_hit() for hit in fused}

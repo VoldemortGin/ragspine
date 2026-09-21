@@ -4,6 +4,7 @@ import pytest
 
 from enterprise_pdf_rag.answers.query_mode import (
     MAX_BM25_ONLY_CONTENT_WORDS,
+    MAX_BM25_ONLY_SHORT_CONTENT_WORDS,
     MAX_BM25_ONLY_TOKENS,
     classify_query,
     content_words,
@@ -20,8 +21,9 @@ from ragspine.retrieval.lexical.retrieval import tokenize
         "VONB 1H26",
         "VONB margin 1H26",
         "What was VONB in 1H26?",
-        "operating profit after tax",
         "EV equity 2026",
+        "1H26 Distribution Mix",
+        "Thailand 1H26 VONB",
     ],
 )
 def test_short_questions_take_the_lexical_channel_alone(question: str) -> None:
@@ -41,6 +43,54 @@ def test_long_or_narrative_questions_keep_reciprocal_rank_fusion(question: str) 
     assert classify_query(question, lexical_hits=7) == "rrf"
 
 
+@pytest.mark.parametrize(
+    ("question", "mode"),
+    [
+        # Natural phrases the token budget alone mistook for label-and-period probes: three
+        # content words, so the lexical channel has to score a phrase, not a label.
+        ("Agency share of VONB 1H26", "rrf"),
+        ("Agency share of VONB", "rrf"),
+        (
+            "Distribution Mix 1H26: what is the Agency share of VONB, "
+            "and what is the Partnerships share?",
+            "rrf",
+        ),
+        (
+            "In the 1H26 Distribution Mix chart, what percentage of VONB came from Agency?",
+            "rrf",
+        ),
+        # The probe's own shape — a label plus a period — still takes BM25 alone.
+        ("1H26 Distribution Mix", "bm25_only"),
+        ("Thailand 1H26 VONB", "bm25_only"),
+    ],
+)
+def test_the_gold_questions_route_to_the_channel_that_retrieves_them(
+    question: str, mode: str
+) -> None:
+    """Frozen natural-language gold questions, pinned to the channel that finds their evidence.
+
+    ``Agency share of VONB 1H26`` is five tokens, so the token budget alone routed it to BM25,
+    where the donut chart it needs falls to rank 12; fusion keeps it at rank 7, inside the ten
+    prompt seats.
+    """
+    assert classify_query(question, lexical_hits=7) == mode
+
+
+def test_the_short_clause_needs_a_content_word_budget_as_well_as_a_token_budget() -> None:
+    assert MAX_BM25_ONLY_SHORT_CONTENT_WORDS == 2
+    question = "Agency share of VONB 1H26"
+    # Within the token budget, over the content-word budget: not a label-and-period probe.
+    assert len(tokenize_query(question)) <= MAX_BM25_ONLY_TOKENS
+    assert len(content_words(tokenize_query(question))) > MAX_BM25_ONLY_SHORT_CONTENT_WORDS
+    assert classify_query(question, lexical_hits=1) == "rrf"
+    # One content word fewer, and it is a label plus a period again.
+    assert classify_query("share of VONB 1H26", lexical_hits=1) == "bm25_only"
+    # A figure is not required: a bare two-word label is still a label.
+    assert classify_query("expense ratio", lexical_hits=1) == "bm25_only"
+    # Four content words in four tokens: over budget, whether or not it reads like a label.
+    assert classify_query("operating profit after tax", lexical_hits=1) == "rrf"
+
+
 def test_a_question_the_lexical_channel_cannot_score_falls_back_to_the_vector_channel() -> None:
     # A Chinese question over an English corpus: every CJK token misses the index.
     assert classify_query("中国内地的新业务价值是多少", lexical_hits=0) == "vector_only"
@@ -48,10 +98,12 @@ def test_a_question_the_lexical_channel_cannot_score_falls_back_to_the_vector_ch
 
 
 def test_the_token_budget_is_counted_on_ragspine_tokens() -> None:
-    question = "alpha beta gamma delta epsilon"
+    # Two content words, so only the token count decides; the function words pad it to five.
+    question = "alpha beta of the in"
     assert len(tokenize_query(question)) == MAX_BM25_ONLY_TOKENS
+    assert content_words(tokenize_query(question)) == ("alpha", "beta")
     assert classify_query(question, lexical_hits=1) == "bm25_only"
-    assert classify_query(question + " zeta", lexical_hits=1) == "rrf"
+    assert classify_query(question + " of", lexical_hits=1) == "rrf"
 
 
 def test_the_numeric_clause_needs_both_a_figure_and_few_content_words() -> None:

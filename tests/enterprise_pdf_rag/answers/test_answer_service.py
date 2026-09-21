@@ -14,6 +14,7 @@ from enterprise_pdf_rag.adapters.answer_service import (
     AnswerSettings,
     DependencyUnavailable,
     UnknownDocument,
+    select_context,
 )
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.hybrid_search import FusedHit
@@ -44,6 +45,7 @@ from tests.enterprise_pdf_rag.answers.fake_document import (
     DIAGRAM_ANCHOR,
     DIAGRAM_LABELS,
     DONUT_TITLE,
+    SNAPSHOT,
     FakeDocument,
     FakeMember,
     diagram_ir,
@@ -600,6 +602,124 @@ def test_no_visual_seat_beyond_two_top_k_or_for_a_diagram_without_a_citable_labe
     assert "kind=diagram" not in prompts[0]
 
 
+# One channel ranking a visual object high while the other never scores it is exactly what
+# RRF buries: the real p.6 diagram sat at vector rank 12 with no lexical rank at all, and
+# fusion sorted it to rank 30, below every hit both channels contributed to.
+_TOP_K = 10
+_FUSED_TEXTS = tuple(f"t{index:02d}" for index in range(29))
+
+
+def _fused_hit(
+    member_id: str, score: float, *, vector: int | None, lexical: int | None
+) -> FusedHit:
+    return FusedHit(SNAPSHOT, member_id, score, vector, lexical, None, None)
+
+
+def _buried_ranking(
+    *buried: tuple[str, int | None, int | None], seated: tuple[str, ...] = ()
+) -> tuple[FusedHit, ...]:
+    """A ranking whose head both channels rank; each ``buried`` row sits past ``2 * top_k``.
+
+    A row is (member id, vector rank, lexical rank) and lands at fused rank 30 or below,
+    carrying only the channel ranks it is given.
+    """
+    ahead = [*seated, *_FUSED_TEXTS][: len(_FUSED_TEXTS)]
+    ranked = [
+        _fused_hit(member_id, 1.0 - 0.001 * position, vector=position + 1, lexical=position + 1)
+        for position, member_id in enumerate(ahead)
+    ]
+    ranked += [
+        _fused_hit(member_id, 0.0139 - 0.0001 * position, vector=vector, lexical=lexical)
+        for position, (member_id, vector, lexical) in enumerate(buried)
+    ]
+    return tuple(ranked)
+
+
+def _buried_document(*visual: FakeMember) -> FakeDocument:
+    texts = tuple(
+        FakeMember(member_id, f"Narrative sentence {member_id}") for member_id in _FUSED_TEXTS
+    )
+    # The vector order goes unused: these tests hand ``select_context`` a ranking directly.
+    return FakeDocument((*texts, *visual), ())
+
+
+def _proven_diagram(member_id: str) -> FakeMember:
+    return FakeMember(member_id, "Agency technology investment", visual=diagram_ir())
+
+
+@pytest.mark.parametrize(("vector", "lexical"), [(12, None), (None, 12)])
+def test_a_visual_one_channel_ranks_high_is_seated_though_fusion_buried_it(
+    vector: int | None, lexical: int | None
+) -> None:
+    document = _buried_document(_proven_diagram("diagram"))
+    fused, blocks = select_context(
+        document, _buried_ranking(("diagram", vector, lexical)), _TOP_K, document.member_texts()
+    )
+    assert [hit.member_id for hit in fused] == [*_FUSED_TEXTS[: _TOP_K - 1], "diagram"]
+    assert [block.member_id for block in blocks][-1] == "diagram"
+
+
+def test_no_seat_is_given_outside_both_the_fused_window_and_either_channel_window() -> None:
+    document = _buried_document(_proven_diagram("diagram"))
+    fused, _ = select_context(
+        document,
+        _buried_ranking(("diagram", 2 * _TOP_K + 1, None)),
+        _TOP_K,
+        document.member_texts(),
+    )
+    assert [hit.member_id for hit in fused] == list(_FUSED_TEXTS[:_TOP_K])
+    assert "diagram" not in document.resolved  # not even read
+
+
+def test_a_buried_visual_stays_buried_when_its_kind_already_holds_a_seat() -> None:
+    document = _buried_document(_proven_diagram("diagram"), _proven_diagram("diagram-2"))
+    fused, _ = select_context(
+        document,
+        _buried_ranking(("diagram-2", 12, None), seated=("diagram",)),
+        _TOP_K,
+        document.member_texts(),
+    )
+    assert [hit.member_id for hit in fused] == ["diagram", *_FUSED_TEXTS[: _TOP_K - 1]]
+    assert "diagram-2" not in document.resolved
+
+
+def test_several_buried_visuals_are_offered_in_fused_order() -> None:
+    # Fused order decides which one is read, not the member id and not the better channel rank.
+    document = _buried_document(_proven_diagram("diagram"), _proven_diagram("diagram-2"))
+    fused, _ = select_context(
+        document,
+        _buried_ranking(("diagram-2", 8, None), ("diagram", 3, None)),
+        _TOP_K,
+        document.member_texts(),
+    )
+    assert fused[-1].member_id == "diagram-2"
+    assert "diagram" not in document.resolved
+
+    swapped = _buried_document(_proven_diagram("diagram"), _proven_diagram("diagram-2"))
+    reordered, _ = select_context(
+        swapped,
+        _buried_ranking(("diagram", 3, None), ("diagram-2", 8, None)),
+        _TOP_K,
+        swapped.member_texts(),
+    )
+    assert reordered[-1].member_id == "diagram"
+    assert "diagram-2" not in swapped.resolved
+
+
+def test_the_service_offers_the_whole_fused_ranking_to_the_seats(tmp_path: Path) -> None:
+    """End to end: the diagram only the vector channel ranks is still seated (ADR 0012)."""
+    document = _seat_document(
+        ("text-1", "text-2", "text-3", "diagram", "text-4", "text-5", "text-6")
+    )
+    service, prompts = _service(tmp_path, document, lambda prompt: declined())
+    # Every text member matches the question lexically; the diagram matches neither word, so
+    # fusion sorts it below all six though the vector channel ranked it fourth.
+    result = service.answer(AnswerRequest("narrative sentence", top_k=2, fusion_mode="rrf"))
+    assert result.fusion_mode == "rrf"
+    assert result.member_ids == ("text-1", "diagram")
+    assert f"nodes.n1.label: {DIAGRAM_LABELS[0]}" in prompts[0]
+
+
 def _metadata_document(vector_order: tuple[str, ...]) -> FakeDocument:
     # Page metadata is a page-wide fact, so each member sits on a page of its own here.
     members = (
@@ -1091,6 +1211,43 @@ def test_translation_can_be_switched_off_per_request(
     assert translations == [] and result.query_translation is None
     assert result.fusion_mode == "vector_only"
     assert result.llm_live_calls == 1
+
+
+_STAGES_QUESTION = "代理人科技投入的三个阶段分别是什么？"  # noqa: RUF001 — a real Chinese question ends in the fullwidth mark
+_STAGES_ENGLISH = "What are the three stages of the agents' technology investment?"
+
+
+def test_only_the_lexical_channel_reads_the_translation(tmp_path: Path) -> None:
+    """The restatement is a lexical device: the vector channel keeps the question asked."""
+    document = FakeDocument(
+        (
+            FakeMember("agency", "Agency technology investment ran in three stages"),
+            FakeMember("other", "Unrelated closing remarks"),
+        ),
+        ("other", "agency"),
+    )
+    translations: list[str] = []
+    service, _ = _service(
+        tmp_path,
+        document,
+        lambda prompt: declined(),
+        translator=_translator(translations, _STAGES_ENGLISH),
+        max_live_calls=2,
+    )
+
+    result = service.answer(AnswerRequest(_STAGES_QUESTION, top_k=2))
+
+    assert len(translations) == 1
+    assert result.query_translation == TranslatedQuery(_STAGES_ENGLISH, "Chinese", cache_hit=False)
+    assert result.fusion_mode == "rrf"
+    # The embedder was handed the Chinese question verbatim, wording and all...
+    assert [query for query, _ in document.search_calls] == [_STAGES_QUESTION]
+    # ...while BM25, which cannot score a Chinese token, scored the English restatement.
+    assert {hit.member_id for hit in result.fused if hit.lexical_rank is not None} == {"agency"}
+    assert {hit.member_id for hit in result.fused if hit.vector_rank is not None} == {
+        "agency",
+        "other",
+    }
 
 
 _CHINESE_REGION_QUESTION = "泰国的新业务价值是多少？"  # noqa: RUF001 — a real Chinese question ends in the fullwidth mark

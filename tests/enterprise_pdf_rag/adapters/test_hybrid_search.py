@@ -18,6 +18,7 @@ from enterprise_pdf_rag.adapters.hybrid_search import (
 )
 from enterprise_pdf_rag.adapters.local_models import RerankResult
 from enterprise_pdf_rag.answers.ports import MemberText, MountedDocument
+from enterprise_pdf_rag.answers.query_mode import FusionMode
 from enterprise_pdf_rag.figures.chart_qa.displayed_models import DisplayedLookupContext
 from enterprise_pdf_rag.figures.chart_qa.models import ChartContext
 from enterprise_pdf_rag.processing.models import ObjectKind, ProcessingManifest
@@ -98,10 +99,12 @@ class _CountingJudge:
 
     calls: int = 0
     seen: list[list[str]] = field(default_factory=list)
+    queries: list[str] = field(default_factory=list)
 
     def judge(self, query: str, candidates: list[str]) -> list[int]:
         self.calls += 1
         self.seen.append(list(candidates))
+        self.queries.append(query)
         return list(reversed(range(len(candidates))))
 
 
@@ -441,3 +444,56 @@ def test_lexical_hits_counts_what_bm25_can_score() -> None:
     assert search.lexical_hits("expense ratio") == 2
     assert search.lexical_hits("expense ratio", allowed=frozenset({"m-a"})) == 1
     assert search.lexical_hits("中国内地的费用率") == 0
+
+
+_FOREIGN_QUESTION = "代理人科技投入的三个阶段"  # a question outside the index's language
+_RESTATED = "expense ratio"
+
+
+def test_a_lexical_query_feeds_bm25_while_the_vector_channel_keeps_the_question() -> None:
+    document = _FakeDocument(("m-c", "m-a", "m-b"))
+    search = HybridSearch(document, channel_limit=3)
+    outcome = search.search(_FOREIGN_QUESTION, top_k=3, mode="rrf", lexical_query=_RESTATED)
+    # The embedder is handed the question as asked; BM25 scores the restatement.
+    assert document.search_calls == [(_FOREIGN_QUESTION, 3)]
+    assert outcome == search.search(_RESTATED, top_k=3, mode="rrf")
+    assert [hit.member_id for hit in outcome.hits if hit.lexical_rank is not None] == [
+        hit.member_id for hit in lexical_rank(search.index, _RESTATED, limit=3)
+    ]
+
+
+def test_the_classifier_reads_the_lexical_query_not_the_question() -> None:
+    document = _FakeDocument(("m-c", "m-a", "m-b"))
+    search = HybridSearch(document, channel_limit=3)
+    # On its own the question scores nothing lexically and takes the vector channel alone.
+    assert search.search(_FOREIGN_QUESTION, top_k=3).mode == "vector_only"
+    assert document.search_calls == [(_FOREIGN_QUESTION, 3)]
+
+    outcome = search.search(_FOREIGN_QUESTION, top_k=3, lexical_query=_RESTATED)
+    assert outcome.mode == "bm25_only"
+    assert document.search_calls == [(_FOREIGN_QUESTION, 3)]  # routed away from the embedder
+
+
+@pytest.mark.parametrize("mode", ("auto", "rrf", "bm25_only", "vector_only"))
+def test_an_omitted_lexical_query_leaves_every_mode_scoring_the_question(mode: FusionMode) -> None:
+    question = "Which channels drove the change in the expense ratio and why did it move?"
+    plain = _FakeDocument(("m-c", "m-a", "m-b"))
+    echoed = _FakeDocument(("m-c", "m-a", "m-b"))
+    outcome = HybridSearch(plain, channel_limit=3).search(question, top_k=3, mode=mode)
+    restated = HybridSearch(echoed, channel_limit=3).search(
+        question, top_k=3, mode=mode, lexical_query=question
+    )
+    assert outcome == restated
+    assert plain.search_calls == echoed.search_calls
+
+
+def test_the_rerank_judge_is_shown_the_question_the_user_asked() -> None:
+    document = FakeDocument(
+        tuple(FakeMember(member_id, text) for member_id, text in _TEXTS.items()), ("m-a", "m-b")
+    )
+    judge = _CountingJudge()
+    HybridSearch(document, reranker=judge).search(
+        _FOREIGN_QUESTION, top_k=3, mode="rrf", lexical_query=_RESTATED
+    )
+    # The judge ranks candidates against what the user asked, not against the restatement.
+    assert judge.queries == [_FOREIGN_QUESTION]
