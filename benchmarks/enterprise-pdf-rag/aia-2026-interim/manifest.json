@@ -17,6 +17,38 @@
     "full_page_inventory": "docs/samples/aia-2026-interim-inventory.md",
     "ignored_working_data": "data/aia-inventory/"
   },
+  "gold_sets": {
+    "schema_version": "aia-gold-registry-v1",
+    "sets": [
+      {
+        "file": "chart-qa-gold-v1.json",
+        "schema_version": "chart-qa-gold-v1",
+        "scope": "Typed ChartQA v1 over the page-18 donut; deterministic, no service or model.",
+        "evaluator": "python -m enterprise_pdf_rag.adapters.chart_qa_evaluation"
+      },
+      {
+        "file": "chart-qa-bar-gold-v1.json",
+        "schema_version": "chart-qa-bar-gold-v1",
+        "scope": "Typed ChartQA v2 over the page-20 displayed bar.",
+        "evaluator": "python -m enterprise_pdf_rag.adapters.chart_qa_v2_evaluation"
+      },
+      {
+        "file": "nl-answers-gold-v1.json",
+        "schema_version": "nl-answers-gold-v1",
+        "scope": "Natural-language answers over the document-catalog answer chain (ADR 0011-0015): text quotes, chart values, diagram nodes, period / region pre-filters, abstentions and anti-fabrication probes.",
+        "runners": [
+          "tests/enterprise_pdf_rag/answers/test_nl_gold.py (offline replay of the pinned release)",
+          "scripts/enterprise_pdf_rag/nl_gold_eval.py (live document-catalog service)"
+        ],
+        "case_count": 25,
+        "pinned_document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+        "pinned_processing_id": "231c904c843e189bd8949ab14c001beaeffc72975e5b1312b39e62d3cb71eb78",
+        "pinned_snapshot_id": "2f35ca97171a02d23c0317c8aca3ccf7bcb628f4862faf5c9198b76449a558f6",
+        "pinned_member_count": 190,
+        "pinned_embedding_fingerprint": "local-http/Qwen/Qwen3-Embedding-4B"
+      }
+    ]
+  },
   "candidates": [
     {
       "id": "p25-interim-dividend-bars",
