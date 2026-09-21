@@ -1,6 +1,7 @@
 """Published documents are listed, pinned and searched by id with no writes or model calls."""
 
 import shutil
+from collections.abc import Callable
 from dataclasses import replace
 from hashlib import sha256
 from pathlib import Path
@@ -16,10 +17,12 @@ from enterprise_pdf_rag.adapters.document_catalog import (
     mount_document,
     scan_catalog,
 )
+from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.draft_publication import DraftPublication
 from enterprise_pdf_rag.adapters.http.processing_schemas import ProcessingEnvelope
 from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
+from enterprise_pdf_rag.documents.models import AssetRef
 from enterprise_pdf_rag.figures.ports import EmbeddingPort
 from enterprise_pdf_rag.processing.index_text import chart_index_text
 from enterprise_pdf_rag.processing.models import ObjectKind
@@ -513,3 +516,137 @@ def test_label_only_chart_member_is_not_expanded_by_the_index_text_projection(
     assert text.kind is ObjectKind.CHART
     assert text.text == context.description.text == "Distribution Mix"
     assert "chart figure" not in text.text
+
+
+def _count_asset_reads(monkeypatch: pytest.MonkeyPatch) -> Callable[[], int]:
+    """Start counting every content-addressed read any store performs from now on."""
+    reads = [0]
+    get = LocalDocumentStore.get
+    read_content = LocalDocumentStore.read_content
+
+    def counted_get(self: LocalDocumentStore, ref: AssetRef) -> bytes:
+        reads[0] += 1
+        return get(self, ref)
+
+    def counted_read_content(self: LocalDocumentStore, digest: str) -> bytes:
+        reads[0] += 1
+        return read_content(self, digest)
+
+    monkeypatch.setattr(LocalDocumentStore, "get", counted_get)
+    monkeypatch.setattr(LocalDocumentStore, "read_content", counted_read_content)
+    return lambda: reads[0]
+
+
+def _pinned_manifest_path(publication: DraftPublication) -> Path:
+    store = ProcessingStore(Path(publication.processing_store))
+    return store.assets.content_path(publication.current_processing_id)
+
+
+def test_a_warm_mount_re_reads_the_pinned_manifest_object_and_nothing_else(
+    two_published: tuple[Path, DraftPublication, DraftPublication],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The release was verified at mount; a later request only proves it has not drifted."""
+    root, meridian, _ = two_published
+    mounted = mount_document(_ready_entry(root, meridian), embedder=OfflineDescriptionEmbedder())
+    hit = mounted.search("Meridian revenue", limit=1)[0]
+    first = mounted.resolve(hit)
+
+    reads = _count_asset_reads(monkeypatch)
+    assert mounted.manifest().scope.source_sha256 == meridian.source_sha256
+    assert mounted.search("Meridian revenue", limit=1)[0] == hit
+    assert mounted.resolve(hit) == first
+    assert reads() == 0
+
+
+def test_verify_every_request_re_reads_the_whole_release_every_time(
+    two_published: tuple[Path, DraftPublication, DraftPublication],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The audit setting keeps the old behaviour: nothing is reused between requests."""
+    root, meridian, _ = two_published
+    audited = mount_document(
+        _ready_entry(root, meridian),
+        embedder=OfflineDescriptionEmbedder(),
+        verify_every_request=True,
+    )
+    hit = audited.search("Meridian revenue", limit=1)[0]
+    audited.resolve(hit)
+
+    reads = _count_asset_reads(monkeypatch)
+    audited.manifest()
+    after_manifest = reads()
+    audited.resolve(hit)
+    assert after_manifest > 0
+    assert reads() > after_manifest
+
+
+def test_a_rewritten_manifest_object_is_refused_by_the_next_request(
+    two_published: tuple[Path, DraftPublication, DraftPublication],
+) -> None:
+    """Drift is still refused, and the evidence hydrated under the old bytes goes with it."""
+    root, meridian, _ = two_published
+    mounted = mount_document(_ready_entry(root, meridian), embedder=OfflineDescriptionEmbedder())
+    hit = mounted.search("Meridian revenue", limit=1)[0]
+    mounted.resolve(hit)
+
+    path = _pinned_manifest_path(meridian)
+    path.write_bytes(path.read_bytes() + b" ")
+
+    with pytest.raises(ValueError, match="digest mismatch"):
+        mounted.manifest()
+    with pytest.raises(ValueError, match="digest mismatch"):
+        mounted.resolve(hit)
+    with pytest.raises(ValueError, match="digest mismatch"):
+        mounted.search("Meridian revenue", limit=1)
+
+
+def test_a_same_length_rewrite_of_the_manifest_object_is_refused_too(
+    two_published: tuple[Path, DraftPublication, DraftPublication],
+) -> None:
+    """Size alone never clears a file: a touched manifest object is always re-hashed."""
+    root, meridian, _ = two_published
+    mounted = mount_document(_ready_entry(root, meridian), embedder=OfflineDescriptionEmbedder())
+    mounted.manifest()
+
+    path = _pinned_manifest_path(meridian)
+    payload = path.read_bytes()
+    path.write_bytes(payload[:-1] + bytes([payload[-1] ^ 0x20]))
+    assert len(path.read_bytes()) == len(payload)
+
+    with pytest.raises(ValueError, match="digest mismatch"):
+        mounted.manifest()
+
+
+def test_an_untouched_manifest_object_survives_being_restamped(
+    two_published: tuple[Path, DraftPublication, DraftPublication],
+) -> None:
+    """Rewriting the same bytes changes the stamp but not the release, so it still mounts."""
+    root, meridian, _ = two_published
+    mounted = mount_document(_ready_entry(root, meridian), embedder=OfflineDescriptionEmbedder())
+    mounted.manifest()
+
+    path = _pinned_manifest_path(meridian)
+    path.write_bytes(path.read_bytes())
+
+    assert mounted.manifest().scope.source_sha256 == meridian.source_sha256
+
+
+def test_one_retrieval_publication_is_parsed_once_per_store(
+    two_published: tuple[Path, DraftPublication, DraftPublication],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The plan and index are named by content, so their validated parse is reusable."""
+    _, meridian, _ = two_published
+    store = ProcessingStore(Path(meridian.processing_store))
+    publication = store.load(meridian.current_processing_id).retrieval
+    assert publication is not None
+    plan, index = store.load_retrieval(publication)
+
+    reads = _count_asset_reads(monkeypatch)
+    assert store.load_retrieval(publication) == (plan, index)
+    assert reads() == 0
+
+    audited = ProcessingStore(Path(meridian.processing_store), verify_every_request=True)
+    audited.load_retrieval(publication)
+    assert reads() > 0

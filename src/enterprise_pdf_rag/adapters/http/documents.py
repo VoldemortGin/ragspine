@@ -142,13 +142,15 @@ def create_documents_app(
     embedder: EmbeddingPort | None,
     llm: JsonCompletionClient | None = None,
     reranker: ListwiseJudge | None = None,
+    verify_every_request: bool = False,
 ) -> FastAPI:
     """Mount every ready entry once with the shared embedder; ``None`` serves evidence only.
 
     Chat answers through the bounded ``llm`` shared by every request; without one the chat
     routes are 503. ``reranker`` only serves requests that explicitly ask for reranking.
+    ``verify_every_request`` makes each request repeat the whole mount-time verification.
     """
-    mounted = mount_catalog(catalog, embedder=embedder)
+    mounted = mount_catalog(catalog, embedder=embedder, verify_every_request=verify_every_request)
     app = FastAPI(title="Enterprise PDF RAG — document catalog", version="0.1.0.dev0")
     app.include_router(create_documents_router(mounted))
     service = None if llm is None else AnswerService(mounted.documents, llm, reranker=reranker)

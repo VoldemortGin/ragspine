@@ -61,6 +61,10 @@ class LocalDocumentStore:
         """Read an immutable manifest/cache object identified by its actual digest."""
         return self._read_digest(digest)
 
+    def content_path(self, digest: str) -> Path:
+        """Where such an object lives, so a caller can watch that one file for drift."""
+        return self._object_path(digest)
+
     def publish(self, manifest: DocumentManifest) -> str:
         for ref in manifest_assets(manifest):
             self.get(ref)

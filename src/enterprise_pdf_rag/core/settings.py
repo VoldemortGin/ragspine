@@ -92,6 +92,10 @@ class Settings(BaseSettings):
     legacy_document_roots: tuple[Path, ...] = ()
     # document-catalog 聊天端点整个进程的模型真实调用预算(缓存回放不计;用尽即 503)
     answer_max_live_calls: int = 200
+    # 审计开关:每个请求都重做挂载时的全量校验(重读并核对钉死发布的每一个资产摘要、
+    # 重新解析整个向量索引)。默认关闭——挂载时完整校验一次,之后每次请求只比对钉死
+    # 清单这一个文件的摘要,漂移照样拒绝。打开会让真实文档的一次问答慢一个数量级。
+    verify_every_request: bool = False
     # 单次模型调用的等待上限(秒)。默认与 JsonCompletionClient 自身的默认一致;页级上下文
     # (ADR 0017)让"总结某一节"这类问题的 prompt 与生成都更长,超过默认即 503,所以它可配。
     # 上限 180 与该客户端的构造校验一致。

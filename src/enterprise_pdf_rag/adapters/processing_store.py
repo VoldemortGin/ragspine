@@ -32,9 +32,22 @@ from enterprise_pdf_rag.processing.retrieval import (
 
 
 class ProcessingStore:
-    def __init__(self, root: Path) -> None:
+    """Reads are validated; a validated retrieval parse is reused while its bytes are pinned.
+
+    ``verify_every_request`` turns that reuse off, so every read re-parses and re-checks the
+    whole published index from disk — the auditable behaviour, and what this store did
+    unconditionally before.
+    """
+
+    def __init__(self, root: Path, *, verify_every_request: bool = False) -> None:
         self.root = root
         self.assets = LocalDocumentStore(root, activate_on_publish=False)
+        self._verify_every_request = verify_every_request
+        # A publication names its plan and index by content, so one parse stands for those
+        # exact bytes for as long as this process lives; a republished snapshot names other
+        # objects and misses. Re-reading 200-odd embedding artifacts per request cost more
+        # than everything else an answer does.
+        self._retrieval: dict[tuple[str, str], tuple[RetrievalPlan, RetrievalIndex]] = {}
 
     def _cache_path(self, fingerprint: str) -> Path:
         if re.fullmatch(r"[0-9a-f]{64}", fingerprint) is None:
@@ -132,6 +145,18 @@ class ProcessingStore:
         return manifest
 
     def load_retrieval(
+        self, publication: RetrievalPublication
+    ) -> tuple[RetrievalPlan, RetrievalIndex]:
+        if self._verify_every_request:
+            return self._read_retrieval(publication)
+        key = (publication.plan.sha256, publication.index.sha256)
+        loaded = self._retrieval.get(key)
+        if loaded is None:
+            loaded = self._read_retrieval(publication)
+            self._retrieval[key] = loaded
+        return loaded
+
+    def _read_retrieval(
         self, publication: RetrievalPublication
     ) -> tuple[RetrievalPlan, RetrievalIndex]:
         plan = TypeAdapter(RetrievalPlan).validate_json(self.assets.get(publication.plan))

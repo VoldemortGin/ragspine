@@ -113,5 +113,11 @@ def create_configured_app() -> FastAPI:
             reranker = LocalRerankJudge(LocalRerankAdapter(load_local_model_config("rerank")))
         except ProviderConfigurationError:
             reranker = None
-        return create_documents_app(catalog, embedder=shared_embedder, llm=llm, reranker=reranker)
+        return create_documents_app(
+            catalog,
+            embedder=shared_embedder,
+            llm=llm,
+            reranker=reranker,
+            verify_every_request=settings.verify_every_request,
+        )
     return create_app(mode=ExecutionMode(configured))

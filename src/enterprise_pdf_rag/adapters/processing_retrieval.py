@@ -421,6 +421,10 @@ class ProcessingRetrieval:
         query_vector = self.embedder.embed_query(query)
         RetrievalEmbedding("query", self.embedder.fingerprint, query_vector)
         hits: list[PinnedRetrievalHit] = []
+        # The snapshot id is the content address of the whole plan, so asking the plan for
+        # it once per member re-derived it over every member again; it is the same string
+        # for every hit in this ranking.
+        snapshot_id = plan.snapshot_id
         for entry in index.entries:
             if len(query_vector) != len(entry.vector):
                 raise ValueError("Query embedding dimensions differ from the pinned index")
@@ -434,7 +438,7 @@ class ProcessingRetrieval:
                 if divisor
                 else 0.0
             )
-            hits.append(PinnedRetrievalHit(plan.snapshot_id, entry.member_id, score))
+            hits.append(PinnedRetrievalHit(snapshot_id, entry.member_id, score))
         return tuple(sorted(hits, key=lambda hit: (-hit.score, hit.member_id))[:limit])
 
     def resolve(

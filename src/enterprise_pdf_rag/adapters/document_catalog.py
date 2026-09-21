@@ -3,6 +3,7 @@
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 from typing import Literal
 
@@ -93,6 +94,12 @@ class DocumentCatalog(BoundaryModel):
 
 def _pointer(path: Path) -> str | None:
     return path.read_text().strip() if path.is_file() else None
+
+
+def _file_state(path: Path) -> tuple[int, int]:
+    """Size and modification time: what says a pinned file has not been touched at all."""
+    stat = path.stat()
+    return stat.st_size, stat.st_mtime_ns
 
 
 @dataclass(slots=True)
@@ -295,6 +302,8 @@ class MountedDocument:
         manifest: ProcessingManifest,
         publication: RetrievalPublication,
         retrieval: ProcessingRetrieval | None,
+        *,
+        verify_every_request: bool = False,
     ) -> None:
         if entry.current_processing_id is None or entry.embedding_fingerprint is None:
             raise ValueError("A mount requires the pinned processing id and embedding fingerprint")
@@ -311,6 +320,14 @@ class MountedDocument:
         # Immutable with the pinned manifest: read once, reused by every member_texts().
         self._page_metadata = outputs.load_page_metadata(manifest)
         self._contexts = outputs.index_contexts(manifest)
+        self._verify_every_request = verify_every_request
+        # The one file a request must watch: the pinned manifest object. Its name is its
+        # digest, so any rewrite of the release is a digest mismatch here.
+        self._pinned_path = outputs.assets.content_path(self._processing_id)
+        self._pinned_stat = _file_state(self._pinned_path)
+        # Evidence hydrated under this pinned manifest; every entry was fully verified on
+        # its first read, and the manifest guard below invalidates the whole mount on drift.
+        self._resolved: dict[str, RetrievalContext] = {}
 
     @property
     def entry(self) -> CatalogEntry:
@@ -337,7 +354,24 @@ class MountedDocument:
         return self._embedding_fingerprint
 
     def manifest(self) -> ProcessingManifest:
-        """Reload the pinned release by id and refuse any drift from the mounted bytes."""
+        """Re-read what the mounted release is pinned to, and refuse any drift from it.
+
+        The whole release — every asset digest, the source it was cut from, every member's
+        evidence — was verified once when this document was mounted. What a request re-reads
+        is the manifest object that names all of it: the file is content-addressed, so its
+        digest *is* the pinned processing id and no rewrite of the release can keep it. Size
+        and mtime are only a shortcut past re-hashing a file nothing has touched; a file that
+        moved at all is re-hashed, and a digest that no longer matches falls through to the
+        full mount-time validation, which refuses. ``verify_every_request`` skips the
+        shortcut and revalidates the whole release on every call.
+        """
+        if not self._verify_every_request:
+            state = _file_state(self._pinned_path)
+            if state == self._pinned_stat:
+                return self._pinned
+            if sha256(self._pinned_path.read_bytes()).hexdigest() == self._processing_id:
+                self._pinned_stat = state
+                return self._pinned
         manifest = self._outputs.load(self._processing_id)
         if manifest != self._pinned:
             raise ValueError("Immutable processing manifest changed")
@@ -352,8 +386,24 @@ class MountedDocument:
         return self._retrieval.search(self._publication, query, limit=limit)
 
     def resolve(self, hit: PinnedRetrievalHit) -> RetrievalContext:
+        """Hydrate one member's verified evidence; the same member is hydrated once.
+
+        A member's evidence is immutable with the manifest this mount pinned, and the guard
+        above refuses any drift from it, so re-proving the same table or chart several times
+        within one request proves nothing new. The first read still runs the full proof.
+        """
         self.manifest()
-        return resolve_processing_context(self._sources, self._outputs, self._publication, hit)
+        if self._verify_every_request:
+            return resolve_processing_context(self._sources, self._outputs, self._publication, hit)
+        if hit.snapshot_id != self._publication.snapshot_id:
+            raise ValueError("Retrieval hit belongs to another semantic snapshot")
+        context = self._resolved.get(hit.member_id)
+        if context is None:
+            context = resolve_processing_context(
+                self._sources, self._outputs, self._publication, hit
+            )
+            self._resolved[hit.member_id] = context
+        return context
 
     def member_texts(self) -> tuple[MemberText, ...]:
         """Every pinned member's embedded index text, ordered by member id."""
@@ -422,12 +472,21 @@ class MountedDocument:
             return self._sources.get(ref)
 
 
-def mount_document(entry: CatalogEntry, *, embedder: EmbeddingPort | None) -> MountedDocument:
+def mount_document(
+    entry: CatalogEntry,
+    *,
+    embedder: EmbeddingPort | None,
+    verify_every_request: bool = False,
+) -> MountedDocument:
     """Open one ready entry by its pinned ids; the embedder is injected, never built.
 
     ``None`` mounts evidence only: ``resolve`` works and ``search`` raises
     ``QueryEmbeddingUnavailable``. A fingerprint that differs from the published
     index is refused before any store is opened and without any model call.
+
+    The whole release is verified here, once. ``verify_every_request`` makes every later
+    request repeat that verification instead of re-reading the pinned manifest alone — the
+    audit setting, orders of magnitude slower on a real document.
     """
     if (
         entry.retrieval_status != "ready"
@@ -442,7 +501,9 @@ def mount_document(entry: CatalogEntry, *, embedder: EmbeddingPort | None) -> Mo
     if embedder is not None and entry.embedding_fingerprint != embedder.fingerprint:
         raise ValueError(_MOUNT_REFUSAL)
     sources = LocalDocumentStore(Path(entry.source_store), activate_on_publish=False)
-    outputs = ProcessingStore(Path(entry.processing_store))
+    outputs = ProcessingStore(
+        Path(entry.processing_store), verify_every_request=verify_every_request
+    )
     manifest = outputs.load(entry.current_processing_id)
     publication = manifest.retrieval
     if publication is None or publication.snapshot_id != entry.retrieval_snapshot_id:
@@ -462,6 +523,7 @@ def mount_document(entry: CatalogEntry, *, embedder: EmbeddingPort | None) -> Mo
         manifest,
         publication,
         None if embedder is None else ProcessingRetrieval(sources, outputs, embedder),
+        verify_every_request=verify_every_request,
     )
 
 
@@ -473,7 +535,12 @@ class MountedCatalog:
     failures: Mapping[str, str]
 
 
-def mount_catalog(catalog: DocumentCatalog, *, embedder: EmbeddingPort | None) -> MountedCatalog:
+def mount_catalog(
+    catalog: DocumentCatalog,
+    *,
+    embedder: EmbeddingPort | None,
+    verify_every_request: bool = False,
+) -> MountedCatalog:
     """Mount every ready entry; refusals are recorded per document, never hidden or raised."""
     documents: dict[str, MountedDocument] = {}
     failures: dict[str, str] = {}
@@ -482,7 +549,9 @@ def mount_catalog(catalog: DocumentCatalog, *, embedder: EmbeddingPort | None) -
             failures[entry.document_id] = entry.reason or entry.retrieval_status
             continue
         try:
-            documents[entry.document_id] = mount_document(entry, embedder=embedder)
+            documents[entry.document_id] = mount_document(
+                entry, embedder=embedder, verify_every_request=verify_every_request
+            )
         except (ValueError, OSError) as error:
             failures[entry.document_id] = str(error) or type(error).__name__
     return MountedCatalog(
