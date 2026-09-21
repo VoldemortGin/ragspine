@@ -167,7 +167,12 @@ def test_aia_release_dry_run_proves_one_diagram_and_withholds_the_other() -> Non
 
     assert summary.processing_id == processing_id
     assert summary.draft_processing_id is None
-    verdicts = {verdict.page_index: verdict for verdict in summary.objects}
+    # Charts are re-projected by the same pass (ADR 0016); this test is about the diagrams.
+    verdicts = {
+        verdict.page_index: verdict
+        for verdict in summary.objects
+        if verdict.kind is ObjectKind.DIAGRAM
+    }
     assert sorted(verdicts) == [4, 5]
     # Physical page 5: five nodes, one of which labels nothing the page actually prints.
     assert verdicts[4].object_id == "aia-p005-technology-flow-v1"
