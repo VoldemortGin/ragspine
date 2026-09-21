@@ -11,6 +11,7 @@ from enterprise_pdf_rag.adapters.document_catalog import (
     MountedCatalog,
     MountedDocument,
     QueryEmbeddingUnavailable,
+    catalog_trees,
     mount_catalog,
 )
 from enterprise_pdf_rag.adapters.http.catalog_schemas import (
@@ -150,8 +151,10 @@ def create_documents_app(
 
     Chat answers through the bounded ``llm`` shared by every request; without one the chat
     routes are 503. ``reranker`` only serves requests that explicitly ask for reranking.
-    ``verify_every_request`` makes each request repeat the whole mount-time verification.
-    ``audit`` journals every answer locally (``adapters/answer_audit``); ``None`` writes nothing.
+    Each mounted document's routing tree, where one was built, joins as the third retrieval
+    channel (ADR 0019). ``verify_every_request`` makes each request repeat the whole
+    mount-time verification. ``audit`` journals every answer locally
+    (``adapters/answer_audit``); ``None`` writes nothing.
     """
     mounted = mount_catalog(catalog, embedder=embedder, verify_every_request=verify_every_request)
     app = FastAPI(title="Enterprise PDF RAG — document catalog", version="0.1.0.dev0")
@@ -159,7 +162,13 @@ def create_documents_app(
     service = (
         None
         if llm is None
-        else AnswerService(mounted.documents, llm, reranker=reranker, audit=audit)
+        else AnswerService(
+            mounted.documents,
+            llm,
+            reranker=reranker,
+            trees=catalog_trees(mounted),
+            audit=audit,
+        )
     )
     app.include_router(create_chat_router(mounted, service))
 

@@ -10,6 +10,7 @@ from typing import Never
 import pytest
 from fastapi import FastAPI
 from httpx2 import AsyncClient
+from pydantic import TypeAdapter
 
 from enterprise_pdf_rag.adapters.answer_service import AnswerService
 from enterprise_pdf_rag.adapters.document_catalog import (
@@ -23,15 +24,24 @@ from enterprise_pdf_rag.adapters.http import app as app_module
 from enterprise_pdf_rag.adapters.http.chat import create_chat_router, model_id, render_message
 from enterprise_pdf_rag.adapters.http.chat_schemas import ClaimOut
 from enterprise_pdf_rag.adapters.http.documents import create_documents_app
+from enterprise_pdf_rag.adapters.http.processing_schemas import DocumentTreeRecord
 from enterprise_pdf_rag.adapters.json_completion import JsonCompletionClient
 from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
+from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.providers import LLMConfig, LocalModelConfig
+from enterprise_pdf_rag.adapters.tree_retrieval import TreeRouteDTO
 from enterprise_pdf_rag.answers.models import AnswerRequest
 from enterprise_pdf_rag.answers.prompt import ModelAnswer, ModelClaim
 from enterprise_pdf_rag.answers.verify import verify_claims
 from enterprise_pdf_rag.core.settings import get_settings
 from enterprise_pdf_rag.figures.ports import EmbeddingPort
 from enterprise_pdf_rag.processing.context_builder import build_context_block
+from enterprise_pdf_rag.processing.document_tree import (
+    DOCUMENT_TREE_SCHEMA,
+    DocumentTree,
+    TreeNode,
+)
+from enterprise_pdf_rag.processing.models import StageState
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
     publish_generic_document,
 )
@@ -45,6 +55,7 @@ from tests.enterprise_pdf_rag.adapters.test_documents_http import (
 )
 from tests.enterprise_pdf_rag.answers.fake_document import diagram_member
 from tests.enterprise_pdf_rag.answers.fake_llm import (
+    Router,
     Script,
     answered,
     chart_claim,
@@ -197,8 +208,9 @@ def _app(
     reranker: _CountingJudge | _ExplodingJudge | None = None,
     max_live_calls: int = 1,
     catalog: DocumentCatalog | None = None,
+    router: Router | None = None,
 ) -> tuple[FastAPI, list[str]]:
-    client, prompts = scripted_client(llm_dir, script, max_live_calls=max_live_calls)
+    client, prompts = scripted_client(llm_dir, script, max_live_calls=max_live_calls, router=router)
     app = create_documents_app(
         scan_catalog(root) if catalog is None else catalog,
         embedder=embedder,
@@ -575,6 +587,80 @@ def test_a_bm25_only_question_is_answered_without_a_query_embedder(
 
     _run(app, scenario)
     assert len(prompts) == 1
+
+
+def _mount_document_tree(processing_store: Path, processing_id: str, tree: DocumentTree) -> None:
+    """Record ``tree`` as the succeeded routing stage of one processing id (ADR 0019)."""
+    outputs = ProcessingStore(processing_store)
+    artifact = outputs.assets.put(
+        TypeAdapter(DocumentTree).dump_json(tree), media_type="application/json"
+    )
+    outputs.save_document_tree(
+        processing_id,
+        DocumentTreeRecord(
+            processing_id=processing_id,
+            producer="document-tree-v1:test",
+            state=StageState.SUCCEEDED,
+            diagnostic=None,
+            artifact=artifact,
+            summary_calls=0,
+        ),
+    )
+
+
+def test_the_envelope_reports_the_tree_route_and_each_member_rank_in_it(
+    published: Published, tmp_path: Path
+) -> None:
+    """ADR 0019's third channel is an engine decision: no request knob, but a full trace."""
+    root, meridian, _ = published
+    copy = tmp_path / "ingestion"
+    shutil.copytree(root, copy)
+    _mount_document_tree(
+        copy / meridian.source_sha256 / "processing",
+        meridian.current_processing_id,
+        DocumentTree(
+            DOCUMENT_TREE_SCHEMA,
+            meridian.source_sha256,
+            "sections",
+            (
+                TreeNode("n1", "Opening", 1, (0,)),
+                TreeNode("n2", "Revenue detail", 1, (1,)),
+                TreeNode("n3", "Closing", 1, (2,)),
+            ),
+        ),
+    )
+    routes: list[str] = []
+
+    def route(prompt: str) -> TreeRouteDTO:
+        routes.append(prompt)
+        return TreeRouteDTO(node_ids=("n2",), pages=(), rationale="Revenue sits on that page.")
+
+    app, prompts = _app(copy, tmp_path / "llm", router=route, max_live_calls=2)
+
+    async def scenario(client: AsyncClient) -> None:
+        response = await client.post(
+            _URL, json=_body(model_id(meridian.source_sha256), _FUSED_QUESTION)
+        )
+        assert response.status_code == 200, response.text
+        envelope = response.json()["enterprise_pdf_rag"]
+        assert envelope["status"] == "answered"
+        assert envelope["tree_route"] == {
+            "node_ids": ["n2"],
+            "pages": [1],
+            "cache_hit": False,
+            "rationale": "Revenue sits on that page.",
+        }
+        ranks = envelope["member_ranks"]
+        assert [item["member_id"] for item in ranks] == envelope["member_ids"]
+        # Every rank reports the third channel, and the routed page's member ranked in it.
+        assert all("tree_rank" in item for item in ranks)
+        assert [item["tree_rank"] for item in ranks].count(1) == 1
+        # One routing call plus one synthesis call; the outline never reaches the prompt.
+        assert envelope["llm_live_calls"] == 2
+        assert len(routes) == 1 and "n2 p2 Revenue detail" in routes[0]
+        assert len(prompts) == 1 and "Revenue detail" not in prompts[0]
+
+    _run(app, scenario)
 
 
 def test_tampered_pinned_evidence_is_409(published: Published, tmp_path: Path) -> None:

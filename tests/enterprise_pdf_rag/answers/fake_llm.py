@@ -15,6 +15,9 @@ Script = Callable[[str], ModelAnswer | str]
 # The query-translation call (ADR 0018) has its own response schema, so it is scripted
 # separately and stays out of ``prompts``, which keeps meaning "the synthesis prompts".
 Translator = Callable[[str], BaseModel | str]
+# The document-tree routing call (ADR 0019) likewise has its own response schema, so it is
+# scripted separately and stays out of ``prompts`` too: an outline is a map, not a prompt.
+Router = Callable[[str], BaseModel | str]
 
 
 def llm_config() -> LLMConfig:
@@ -31,13 +34,15 @@ def scripted_client(
     *,
     max_live_calls: int = 1,
     translator: Translator | None = None,
+    router: Router | None = None,
 ) -> tuple[JsonCompletionClient, list[str]]:
     """Return a bounded client whose transport replays ``script(prompt)``; prompts are recorded.
 
     A ``str`` script result is sent verbatim as the message content so tests can
-    exercise malformed model output. ``translator`` answers the query-translation call,
-    recognised by its own response schema; without one an attempted translation fails the
-    test rather than silently returning the answer schema.
+    exercise malformed model output. ``translator`` answers the query-translation call and
+    ``router`` the tree-routing one, each recognised by its own response schema; without the
+    matching script an attempted call fails the test rather than silently returning the
+    answer schema.
     """
     prompts: list[str] = []
 
@@ -47,9 +52,13 @@ def scripted_client(
         assert request["response_format"]["json_schema"]["strict"] is True
         prompt = request["messages"][1]["content"]
         assert isinstance(prompt, str)  # text-only completion: no image part
-        if "english_query" in request["response_format"]["json_schema"]["schema"]["properties"]:
+        properties = request["response_format"]["json_schema"]["schema"]["properties"]
+        if "english_query" in properties:
             assert translator is not None, "an unscripted query translation was requested"
             scripted = translator(prompt)
+        elif "node_ids" in properties:
+            assert router is not None, "an unscripted document-tree route was requested"
+            scripted = router(prompt)
         else:
             prompts.append(prompt)
             scripted = script(prompt)

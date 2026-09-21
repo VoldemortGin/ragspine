@@ -359,6 +359,17 @@
           },
           "status": {
             "$ref": "#/$defs/AnswerStatus"
+          },
+          "tree_route": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TreeRouteOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "required": [
@@ -745,6 +756,18 @@
             "title": "Member Id",
             "type": "string"
           },
+          "tree_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tree Rank"
+          },
           "vector_rank": {
             "anyOf": [
               {
@@ -1050,6 +1073,42 @@
         ],
         "title": "SvgElement",
         "type": "object"
+      },
+      "TreeRouteOut": {
+        "additionalProperties": false,
+        "description": "The pages one routing call over the document's outline tree chose to read (ADR 0019).\n\nPresent only when the question was routed. ``pages`` are 0-based page indices, the same\nindices a citation prints. A node's summary is a routing aid written by a model, so it\nnever leaves this channel: nothing here was read as evidence or cited.",
+        "properties": {
+          "cache_hit": {
+            "title": "Cache Hit",
+            "type": "boolean"
+          },
+          "node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Node Ids",
+            "type": "array"
+          },
+          "pages": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Pages",
+            "type": "array"
+          },
+          "rationale": {
+            "title": "Rationale",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_ids",
+          "pages",
+          "cache_hit",
+          "rationale"
+        ],
+        "title": "TreeRouteOut",
+        "type": "object"
       }
     },
     "additionalProperties": false,
@@ -1252,6 +1311,17 @@
           },
           "status": {
             "$ref": "#/$defs/AnswerStatus"
+          },
+          "tree_route": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TreeRouteOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "required": [
@@ -1656,6 +1726,18 @@
             "title": "Member Id",
             "type": "string"
           },
+          "tree_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tree Rank"
+          },
           "vector_rank": {
             "anyOf": [
               {
@@ -1929,6 +2011,42 @@
           "anchor"
         ],
         "title": "SvgElement",
+        "type": "object"
+      },
+      "TreeRouteOut": {
+        "additionalProperties": false,
+        "description": "The pages one routing call over the document's outline tree chose to read (ADR 0019).\n\nPresent only when the question was routed. ``pages`` are 0-based page indices, the same\nindices a citation prints. A node's summary is a routing aid written by a model, so it\nnever leaves this channel: nothing here was read as evidence or cited.",
+        "properties": {
+          "cache_hit": {
+            "title": "Cache Hit",
+            "type": "boolean"
+          },
+          "node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Node Ids",
+            "type": "array"
+          },
+          "pages": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Pages",
+            "type": "array"
+          },
+          "rationale": {
+            "title": "Rationale",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_ids",
+          "pages",
+          "cache_hit",
+          "rationale"
+        ],
+        "title": "TreeRouteOut",
         "type": "object"
       }
     },

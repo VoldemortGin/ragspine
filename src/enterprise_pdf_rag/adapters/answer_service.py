@@ -2,9 +2,10 @@
 
 The service never calls a model except through the injected bounded client: once per
 request to synthesise the answer, plus at most one earlier call to restate a question the
-lexical channel cannot score in the index's language (ADR 0018; bounded and cached like
-any other, and skipped entirely when unavailable). Retrieval, hydration and claim
-verification are deterministic reads of the pinned snapshot.
+lexical channel cannot score in the index's language (ADR 0018) and at most one to route it
+over the document's outline tree (ADR 0019; both bounded and cached like any other, and
+skipped entirely when unavailable). Retrieval, hydration and claim verification are
+deterministic reads of the pinned snapshot.
 """
 
 from collections.abc import Mapping, MutableMapping, Sequence
@@ -15,6 +16,7 @@ from enterprise_pdf_rag.adapters.answer_audit import AnswerAuditContext, AnswerA
 from enterprise_pdf_rag.adapters.hybrid_search import HybridSearch, LexicalIndex
 from enterprise_pdf_rag.adapters.json_completion import JsonCompletionClient, JsonCompletionError
 from enterprise_pdf_rag.adapters.query_translation import is_foreign_script, translate_query
+from enterprise_pdf_rag.adapters.tree_retrieval import route_tree
 from enterprise_pdf_rag.answers.member_filter import candidate_members, region_vocabulary
 from enterprise_pdf_rag.answers.models import (
     AbstainReason,
@@ -25,6 +27,7 @@ from enterprise_pdf_rag.answers.models import (
     MemberFilters,
     PageWindowStat,
     TranslatedQuery,
+    TreeRoute,
     VerifiedClaim,
 )
 from enterprise_pdf_rag.answers.page_window import with_page_context
@@ -37,7 +40,12 @@ from enterprise_pdf_rag.answers.prompt import (
     resolve_member_aliases,
 )
 from enterprise_pdf_rag.answers.query_filters import derive_filters
-from enterprise_pdf_rag.answers.query_mode import FusionMode, QueryMode, content_probe
+from enterprise_pdf_rag.answers.query_mode import (
+    FusionMode,
+    QueryMode,
+    content_probe,
+    is_label_query,
+)
 from enterprise_pdf_rag.answers.verify import decide, verify_claims
 from enterprise_pdf_rag.figures.chart_qa.displayed_models import (
     DISPLAYED_BAR_SCOPE,
@@ -53,6 +61,7 @@ from enterprise_pdf_rag.processing.context_builder import (
     budget_blocks,
     build_context_block,
 )
+from enterprise_pdf_rag.processing.document_tree import DocumentTree
 from enterprise_pdf_rag.processing.models import ObjectKind
 from ragspine.retrieval.rerank.listwise_rerank import ListwiseJudge
 
@@ -104,8 +113,11 @@ def _citable_visual(block: ContextBlock) -> ObjectKind | None:
 
 
 def _within_a_channel(hit: FusedHit, limit: int) -> bool:
-    """Either channel placed this hit inside ``limit`` on its own ranking."""
-    return any(rank is not None and rank <= limit for rank in (hit.vector_rank, hit.lexical_rank))
+    """Any of the three channels placed this hit inside ``limit`` on its own ranking."""
+    return any(
+        rank is not None and rank <= limit
+        for rank in (hit.vector_rank, hit.lexical_rank, hit.tree_rank)
+    )
 
 
 def select_context(
@@ -194,6 +206,7 @@ class AnswerService:
         settings: AnswerSettings | None = None,
         reranker: ListwiseJudge | None = None,
         index_cache: MutableMapping[str, LexicalIndex] | None = None,
+        trees: Mapping[str, DocumentTree] | None = None,
         audit: AnswerAuditStore | None = None,
     ) -> None:
         self._documents = documents
@@ -203,6 +216,8 @@ class AnswerService:
         self._index_cache: MutableMapping[str, LexicalIndex] = (
             {} if index_cache is None else index_cache
         )
+        # Keyed by ``source_sha256``; ``None`` means the ADR 0019 channel does not exist here.
+        self._trees: Mapping[str, DocumentTree] = {} if trees is None else trees
         # Optional local journal (``adapters/answer_audit``): ``None`` writes nothing.
         self._audit = audit
 
@@ -254,6 +269,26 @@ class AnswerService:
         )
         return _QueryPlan(request.question, unfused, None)
 
+    def _route(
+        self, request: AnswerRequest, plan: "_QueryPlan", document: MountedDocument
+    ) -> TreeRoute | None:
+        """The pages this document's outline tree routes the question to; ``None`` when unrouted.
+
+        The channel exists only where a tree was built for the document, so a service mounted
+        without one behaves exactly as it did before ADR 0019. Given a tree, ``tree_route``
+        pins the decision when it is set; left at ``None`` the ADR 0019 rule applies and a
+        short label query is not routed, because BM25 already matches a printed label wherever
+        it appears and a map of the document would buy nothing for a live call. The question
+        routed is the English restatement when there is one: the outline is written in the
+        index's language, which is the only wording a router can match against it.
+        """
+        tree = self._trees.get(document.source_sha256)
+        if tree is None:
+            return None
+        question = request.question if plan.translation is None else plan.translation.english
+        routed = not is_label_query(question) if request.tree_route is None else request.tree_route
+        return route_tree(question, tree, self._llm) if routed else None
+
     def answer(self, request: AnswerRequest) -> AnswerResult:
         document = self._select(request.document_sha256)
         # Spans the whole request: a translated question costs one call before synthesis.
@@ -287,6 +322,7 @@ class AnswerService:
         if translation is not None and request.filters is None:
             filters = _union(filters, derive_filters(translation.english, vocabulary))
             applied, allowed, relaxed = _narrow(members, filters, request.top_k)
+        route = self._route(request, plan, document)
         # The whole fused ranking, not just its head: a hit's own channel ranks decide the
         # guaranteed visual seats below, and fusion can bury such a hit anywhere (ADR 0012).
         # Both channels together rank at most ``2 * channel_limit`` members.
@@ -296,6 +332,7 @@ class AnswerService:
             allowed=allowed,
             mode=plan.mode,
             lexical_query=plan.lexical_query,
+            tree_pages=() if route is None else route.pages,
         )
         fused, selected = select_context(document, outcome.hits, request.top_k, members)
         selected = _with_member_regions(selected, members)
@@ -323,6 +360,7 @@ class AnswerService:
                 filters_relaxed=relaxed,
                 fusion_mode=outcome.mode,
                 query_translation=translation,
+                tree_route=route,
             )
         member_ids = tuple(block.member_id for block in member_blocks)
         # Minted after the budget pass, from the blocks that really reach the prompt.
@@ -374,6 +412,7 @@ class AnswerService:
                     filters_relaxed=relaxed,
                     fusion_mode=outcome.mode,
                     query_translation=translation,
+                    tree_route=route,
                 )
                 self._close_audit(journal, invalid, error=error.code)
                 return invalid
@@ -420,6 +459,7 @@ class AnswerService:
             page_windows,
             outcome.mode,
             translation,
+            route,
         )
         self._close_audit(journal, result, model_output_raw=completion.json_text)
         return result
@@ -452,6 +492,7 @@ class AnswerService:
         filters_relaxed: bool = False,
         fusion_mode: QueryMode = "rrf",
         query_translation: TranslatedQuery | None = None,
+        tree_route: TreeRoute | None = None,
     ) -> AnswerResult:
         return AnswerResult(
             AnswerStatus.ABSTAINED,
@@ -472,6 +513,7 @@ class AnswerService:
             filters_relaxed,
             fusion_mode=fusion_mode,
             query_translation=query_translation,
+            tree_route=tree_route,
         )
 
 

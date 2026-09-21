@@ -23,6 +23,7 @@ from enterprise_pdf_rag.adapters.hybrid_search import FusedHit
 from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.query_translation import QueryTranslationDTO
+from enterprise_pdf_rag.adapters.tree_retrieval import TreeRouteDTO
 from enterprise_pdf_rag.answers.models import (
     AbstainReason,
     AnswerRequest,
@@ -32,11 +33,17 @@ from enterprise_pdf_rag.answers.models import (
     MemberFilters,
     PageWindowStat,
     TranslatedQuery,
+    TreeRoute,
 )
 from enterprise_pdf_rag.answers.ports import MemberText
 from enterprise_pdf_rag.answers.prompt import SYSTEM_RULES, ModelAnswer, ModelClaim
 from enterprise_pdf_rag.figures.models import Verification
 from enterprise_pdf_rag.processing.context_builder import BlockKind
+from enterprise_pdf_rag.processing.document_tree import (
+    DOCUMENT_TREE_SCHEMA,
+    DocumentTree,
+    TreeNode,
+)
 from enterprise_pdf_rag.processing.models import ObjectKind
 from enterprise_pdf_rag.processing.typed_ir import DiagramIR, DiagramNode
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
@@ -57,6 +64,7 @@ from tests.enterprise_pdf_rag.answers.fake_document import (
     pending_chart,
 )
 from tests.enterprise_pdf_rag.answers.fake_llm import (
+    Router,
     Script,
     Translator,
     answered,
@@ -106,13 +114,23 @@ def _service(
     settings: AnswerSettings | None = None,
     reranker: _CountingJudge | _ExplodingJudge | None = None,
     translator: Translator | None = None,
+    router: Router | None = None,
+    trees: Mapping[str, DocumentTree] | None = None,
     max_live_calls: int = 1,
 ) -> tuple[AnswerService, list[str]]:
     client, prompts = scripted_client(
-        tmp_path / "llm", script, max_live_calls=max_live_calls, translator=translator
+        tmp_path / "llm",
+        script,
+        max_live_calls=max_live_calls,
+        translator=translator,
+        router=router,
     )
     service = AnswerService(
-        {document.source_sha256: document}, client, settings=settings, reranker=reranker
+        {document.source_sha256: document},
+        client,
+        settings=settings,
+        reranker=reranker,
+        trees=trees,
     )
     return service, prompts
 
@@ -1530,3 +1548,212 @@ def test_an_explicit_filter_is_never_widened_by_the_translation(tmp_path: Path) 
     assert result.filters_applied == MemberFilters((), ("Hong Kong",))
     assert result.filters_relaxed is False
     assert result.member_ids == ("hk",)
+
+
+_TREE_QUESTION = "How did the agency channel's technology investment progress over the year?"
+_TREE_LABEL_QUESTION = "agency investment"
+_TREE_SHA = "d" * 64  # ``FakeDocument.source_sha256``
+_TREE_RATIONALE = "The back matter defines the term."
+
+
+def _tree_document() -> FakeDocument:
+    """Four one-member pages; ``glossary`` (page 3) is ranked by neither fragment channel."""
+    return FakeDocument(
+        (
+            FakeMember("overview", "Agency technology investment overview", page_index=0),
+            FakeMember("progress", "Progress of the agency channel", page_index=1),
+            FakeMember("noise", "Unrelated closing remarks", page_index=2),
+            FakeMember("glossary", "Glossary of abbreviations", page_index=3),
+        ),
+        ("overview", "progress", "noise"),
+    )
+
+
+def _document_tree() -> DocumentTree:
+    """One root per page group; no node title repeats a member's text, so the two are told apart."""
+    return DocumentTree(
+        DOCUMENT_TREE_SCHEMA,
+        _TREE_SHA,
+        "sections",
+        (
+            TreeNode("n1", "Agency channel", 1, (0, 1)),
+            TreeNode("n2", "Closing remarks", 1, (2,)),
+            TreeNode("n3", "Back matter", 1, (3,)),
+        ),
+    )
+
+
+def _router(calls: list[str], node_ids: tuple[str, ...] = ("n3",)) -> Router:
+    def route(prompt: str) -> TreeRouteDTO:
+        calls.append(prompt)
+        return TreeRouteDTO(node_ids=node_ids, pages=(), rationale=_TREE_RATIONALE)
+
+    return route
+
+
+def test_a_narrative_question_is_routed_and_the_routed_pages_reach_the_prompt(
+    tmp_path: Path,
+) -> None:
+    document = _tree_document()
+    routes: list[str] = []
+    service, prompts = _service(
+        tmp_path,
+        document,
+        lambda prompt: declined(),
+        router=_router(routes),
+        trees={_TREE_SHA: _document_tree()},
+        max_live_calls=2,
+    )
+
+    result = service.answer(AnswerRequest(_TREE_QUESTION, top_k=3))
+
+    # One routing call, reading the rendered outline and the question, before the synthesis.
+    assert len(routes) == 1 and _TREE_QUESTION in routes[0]
+    assert "n3 p4 Back matter" in routes[0]
+    assert result.tree_route == TreeRoute(("n3",), (3,), False, _TREE_RATIONALE)
+    # A member neither BM25 nor the vector channel could rank still reaches the prompt.
+    assert "glossary" in result.member_ids
+    (routed,) = [hit for hit in result.fused if hit.member_id == "glossary"]
+    assert (routed.vector_rank, routed.lexical_rank, routed.tree_rank) == (None, None, 1)
+    # The outline is a map, never evidence: no node title of it reaches the answer prompt.
+    assert len(prompts) == 1 and "Back matter" not in prompts[0]
+    # The routing call is live and counted beside the synthesis call.
+    assert result.llm_live_calls == 2
+
+    # Both calls replay from the immutable cache on a repeat.
+    again = service.answer(AnswerRequest(_TREE_QUESTION, top_k=3))
+    assert len(routes) == 1 and len(prompts) == 1 and again.llm_live_calls == 0
+    assert again.tree_route is not None and again.tree_route.cache_hit is True
+    assert again.member_ids == result.member_ids
+
+
+def test_a_short_label_question_never_spends_a_routing_call(tmp_path: Path) -> None:
+    """ADR 0018's shape test, reused: BM25 already matches a label wherever it is printed."""
+    document = _tree_document()
+    routes: list[str] = []
+    service, prompts = _service(
+        tmp_path,
+        document,
+        lambda prompt: declined(),
+        router=_router(routes),
+        trees={_TREE_SHA: _document_tree()},
+        max_live_calls=2,
+    )
+
+    result = service.answer(AnswerRequest(_TREE_LABEL_QUESTION, top_k=3))
+
+    assert routes == [] and result.tree_route is None
+    assert all(hit.tree_rank is None for hit in result.fused)
+    assert "glossary" not in result.member_ids
+    assert len(prompts) == 1 and result.llm_live_calls == 1
+
+
+def test_the_request_pins_the_routing_decision_over_the_shape_rule(tmp_path: Path) -> None:
+    trees = {_TREE_SHA: _document_tree()}
+    routes: list[str] = []
+    off, _ = _service(
+        tmp_path / "off",
+        _tree_document(),
+        lambda prompt: declined(),
+        router=_router(routes),
+        trees=trees,
+        max_live_calls=2,
+    )
+    narrative = off.answer(AnswerRequest(_TREE_QUESTION, top_k=3, tree_route=False))
+    assert routes == [] and narrative.tree_route is None
+    assert "glossary" not in narrative.member_ids
+
+    on, _ = _service(
+        tmp_path / "on",
+        _tree_document(),
+        lambda prompt: declined(),
+        router=_router(routes),
+        trees=trees,
+        max_live_calls=2,
+    )
+    label = on.answer(AnswerRequest(_TREE_LABEL_QUESTION, top_k=3, tree_route=True))
+    assert len(routes) == 1 and _TREE_LABEL_QUESTION in routes[0]
+    assert label.tree_route is not None and label.tree_route.pages == (3,)
+    assert "glossary" in label.member_ids
+
+
+def test_without_a_mounted_tree_the_channel_does_not_exist(tmp_path: Path) -> None:
+    """No tree, no router, a budget of one: the request is the one it always was."""
+    document = _tree_document()
+    service, prompts = _service(tmp_path, document, lambda prompt: declined())
+
+    result = service.answer(AnswerRequest(_TREE_QUESTION, top_k=3))
+
+    assert result.tree_route is None
+    assert all(hit.tree_rank is None for hit in result.fused)
+    assert "glossary" not in result.member_ids
+    assert len(prompts) == 1 and result.llm_live_calls == 1
+
+
+def test_an_unusable_route_leaves_the_answer_exactly_as_it_was(tmp_path: Path) -> None:
+    document = _tree_document()
+    unrouted, first = _service(tmp_path / "plain", document, lambda prompt: declined())
+    before = unrouted.answer(AnswerRequest(_TREE_QUESTION, top_k=3))
+
+    service, prompts = _service(
+        tmp_path,
+        document,
+        lambda prompt: declined(),
+        router=lambda prompt: "not a route at all",
+        trees={_TREE_SHA: _document_tree()},
+        max_live_calls=2,
+    )
+    result = service.answer(AnswerRequest(_TREE_QUESTION, top_k=3))
+
+    # The channel is absent, not an error: the other two channels answered alone.
+    assert result.tree_route is None
+    assert all(hit.tree_rank is None for hit in result.fused)
+    assert (result.member_ids, result.abstain_reason) == (before.member_ids, before.abstain_reason)
+    assert len(first) == 1 and len(prompts) == 1 and result.llm_live_calls == 2
+
+
+def test_an_exhausted_call_budget_drops_the_route_and_not_the_answer(tmp_path: Path) -> None:
+    """The route is attempted first, so a budget it cannot afford must cost nothing else."""
+    document = _tree_document()
+    unrouted, first = _service(tmp_path, document, lambda prompt: declined())
+    before = unrouted.answer(AnswerRequest(_TREE_QUESTION, top_k=3))
+    assert len(first) == 1
+
+    routes: list[str] = []
+    spent, second = _service(
+        tmp_path,
+        document,
+        lambda prompt: declined(),
+        router=_router(routes),
+        trees={_TREE_SHA: _document_tree()},
+        max_live_calls=0,
+    )
+    result = spent.answer(AnswerRequest(_TREE_QUESTION, top_k=3))
+
+    assert routes == [] and second == []  # nothing could be sent at all
+    assert result.tree_route is None
+    assert (result.member_ids, result.abstain_reason) == (before.member_ids, before.abstain_reason)
+    assert result.llm_live_calls == 0 and result.cache_hit is True
+
+
+def test_a_tree_routed_abstention_keeps_its_route(tmp_path: Path) -> None:
+    document = _tree_document()
+    routes: list[str] = []
+    service, _ = _service(
+        tmp_path,
+        document,
+        lambda prompt: "not json at all",
+        router=_router(routes),
+        trees={_TREE_SHA: _document_tree()},
+        max_live_calls=2,
+    )
+
+    result = service.answer(AnswerRequest(_TREE_QUESTION, top_k=3))
+
+    assert (result.status, result.abstain_reason) == (
+        AnswerStatus.ABSTAINED,
+        AbstainReason.MODEL_OUTPUT_INVALID,
+    )
+    assert len(routes) == 1
+    assert result.tree_route == TreeRoute(("n3",), (3,), False, _TREE_RATIONALE)
+    assert result.llm_live_calls == 2

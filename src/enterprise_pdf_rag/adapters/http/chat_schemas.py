@@ -22,6 +22,7 @@ from enterprise_pdf_rag.answers.models import (
     PageWindowStat,
     RejectedClaim,
     TranslatedQuery,
+    TreeRoute,
     VerifiedClaim,
 )
 from enterprise_pdf_rag.answers.query_mode import QueryMode
@@ -156,6 +157,9 @@ class MemberRankOut(BoundaryModel):
     lexical_rank: int | None
     vector_score: float | None
     bm25_score: float | None
+    # The tree channel's rank, when this question was routed over the outline (ADR 0019).
+    # It carries no score of its own: the router chose a page set, not a similarity.
+    tree_rank: int | None = None
 
     @classmethod
     def from_domain(cls, hit: FusedHit) -> "MemberRankOut":
@@ -166,6 +170,7 @@ class MemberRankOut(BoundaryModel):
             lexical_rank=hit.lexical_rank,
             vector_score=hit.vector_score,
             bm25_score=hit.bm25_score,
+            tree_rank=hit.tree_rank,
         )
 
 
@@ -208,6 +213,29 @@ class QueryTranslationOut(BoundaryModel):
         )
 
 
+class TreeRouteOut(BoundaryModel):
+    """The pages one routing call over the document's outline tree chose to read (ADR 0019).
+
+    Present only when the question was routed. ``pages`` are 0-based page indices, the same
+    indices a citation prints. A node's summary is a routing aid written by a model, so it
+    never leaves this channel: nothing here was read as evidence or cited.
+    """
+
+    node_ids: tuple[str, ...]
+    pages: tuple[int, ...]
+    cache_hit: bool
+    rationale: str
+
+    @classmethod
+    def from_domain(cls, route: TreeRoute) -> "TreeRouteOut":
+        return cls(
+            node_ids=route.node_ids,
+            pages=route.pages,
+            cache_hit=route.cache_hit,
+            rationale=route.rationale,
+        )
+
+
 class AnswerEnvelope(BoundaryModel):
     """Verified claims, audit rejections and pinned provenance beside the OpenAI shape."""
 
@@ -236,6 +264,8 @@ class AnswerEnvelope(BoundaryModel):
     # them when the question was not in the index's language (ADR 0018).
     fusion_mode: QueryMode = "rrf"
     query_translation: QueryTranslationOut | None = None
+    # The pages the document-tree router chose for this question, when it ran (ADR 0019).
+    tree_route: TreeRouteOut | None = None
 
     @classmethod
     def from_domain(cls, result: AnswerResult) -> "AnswerEnvelope":
@@ -266,6 +296,9 @@ class AnswerEnvelope(BoundaryModel):
             query_translation=None
             if result.query_translation is None
             else QueryTranslationOut.from_domain(result.query_translation),
+            tree_route=None
+            if result.tree_route is None
+            else TreeRouteOut.from_domain(result.tree_route),
         )
 
 
