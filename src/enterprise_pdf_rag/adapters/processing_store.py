@@ -244,7 +244,7 @@ class ProcessingStore:
         path = self._document_tree_path(processing_id)
         if not path.is_file():
             return None
-        record = DocumentTreeRecord.model_validate_json(path.read_text())
+        record = DocumentTreeRecord.model_validate_json(path.read_bytes())
         if record.processing_id != processing_id:
             raise ValueError("Document tree record is bound to another processing id")
         return record

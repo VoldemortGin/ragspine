@@ -211,7 +211,7 @@ def test_the_summary_call_is_a_strict_text_only_completion_of_its_own_task(
     schema = request["response_format"]["json_schema"]
     assert schema["strict"] is True
     assert sorted(schema["schema"]["properties"]) == ["key_topics", "summary"]
-    cached = list((tmp_path / "tree-cache" / "contexts").glob("*.json"))
+    cached = sorted((tmp_path / "tree-cache" / "contexts").glob("*.json"))
     assert json.loads(cached[0].read_text())["task"] == DOCUMENT_TREE_SUMMARY_TASK
 
 
