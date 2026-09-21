@@ -1,6 +1,6 @@
 ---
 covers: src/enterprise_pdf_rag/
-verified-against: a35f362
+verified-against: 733ab38
 ---
 
 # enterprise_pdf_rag — agent contract
@@ -22,7 +22,8 @@ the same `pyproject.toml` — import name unchanged, not under `ragspine.*`
    [ADR 0012](../../docs/enterprise-pdf-rag/adr/0012-chart-index-text-and-retrieval-seats.md),
    [ADR 0013](../../docs/enterprise-pdf-rag/adr/0013-page-metadata-and-prefilters.md),
    [ADR 0014](../../docs/enterprise-pdf-rag/adr/0014-ruled-table-grid-proof.md),
-   [ADR 0015](../../docs/enterprise-pdf-rag/adr/0015-diagram-and-formula-retrievable.md)
+   [ADR 0015](../../docs/enterprise-pdf-rag/adr/0015-diagram-and-formula-retrievable.md),
+   [ADR 0016](../../docs/enterprise-pdf-rag/adr/0016-verbatim-chart-points.md)
    and [PRD v0.2](../../docs/enterprise-pdf-rag/PRD-v0.2.md) define scope; the full list is
    [`docs/enterprise-pdf-rag/adr/`](../../docs/enterprise-pdf-rag/adr/).
 4. [`testing-and-ingestion.md`](../../docs/enterprise-pdf-rag/testing-and-ingestion.md) — what is
@@ -40,7 +41,9 @@ acceptance is recorded in the handoff, never assumed here.
 ```
 core/         settings leaf + shared value types (no I/O)
 documents/    pure document model — stdlib immutable values + Protocols only
-figures/      pure figure/chart pipeline — same rule; same-SVG two branches, snapshot binding
+figures/      pure figure/chart pipeline — same rule; same-SVG two branches, snapshot binding,
+              source_label_match.py (the ADR 0016 window rule: one to three adjacent source
+              occurrences, folded and concatenated, must equal the string being kept)
 processing/   pure page-processing / qualification logic; context_builder.py (evidence blocks
               for the prompt), table_transcription.py (literal table transcription rule),
               geometry.py + table_grid_proof.py (the ruled-grid proof: every boundary, cell
@@ -107,7 +110,16 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   `offline-demo` / production is chosen explicitly; the default gate calls no model or network
   service.
 - **Source review ≠ semantic qualification** — only source-qualified facts reach ChartQA
-  (ADR 0008 / 0009); values are never derived.
+  (ADR 0008 / 0009); values are never derived. A chart carries exactly one of **two named
+  scopes**, and its receipt always says which: `explicit-distribution-shares` (native sector
+  geometry plus complete source-paint accounting — ADR 0008) or the default
+  `source-labels-and-verbatim-points-v1` (ADR 0016: a point survives only when its category
+  **and** its value with unit each print verbatim inside the figure, fail-closed per point,
+  never per figure; the category-to-value *association* stays the model's assertion, so the
+  two scopes are named apart, stored apart and never merged). `figure-source-labels-only-v1`
+  is frozen byte-for-byte so already-published members keep mounting and replaying; every gate
+  accepts both, and `chart_publication.resolve_chart_member` re-derives a member under the
+  scope its own receipt declares.
 - **Verified claims only** — every model claim is re-read from stored evidence field by field
   (verbatim quote, exact cell text, chart value equal to the qualified `Decimal` or its exact
   source display, cited back to SVG elements);
