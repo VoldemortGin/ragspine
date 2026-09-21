@@ -8,6 +8,7 @@ from enterprise_pdf_rag.answers.query_mode import (
     MAX_BM25_ONLY_TOKENS,
     classify_query,
     content_words,
+    is_label_query,
     is_numeric,
     tokenize_query,
 )
@@ -165,3 +166,31 @@ def test_a_negative_lexical_hit_count_is_rejected() -> None:
 def test_the_classifier_counts_the_tokens_the_lexical_channel_scores(text: str) -> None:
     """``answers/`` may import no SDK, so the tokenizer is restated; it must not drift."""
     assert tokenize_query(text) == tokenize(text)
+
+
+def test_is_label_query_names_the_shape_that_needs_no_map_of_the_document() -> None:
+    """ADR 0019 spends no tree-routing call on a label: BM25 already matches it verbatim."""
+    assert is_label_query("1H26 Distribution Mix")
+    assert is_label_query("VONB 1H26")
+    assert is_label_query("What was the VONB in 1H26?")
+    assert not is_label_query("Which distribution channels grew new business value this half?")
+    assert not is_label_query("Agency share of VONB 1H26")
+    # Nothing the lexical channel can tokenize is no label either.
+    assert not is_label_query("")
+    assert not is_label_query("   ")
+    assert not is_label_query("— / —")
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "VONB 1H26",
+        "1H26 Distribution Mix",
+        "What was the VONB in 1H26?",
+        "Agency share of VONB 1H26",
+        "Which distribution channels grew new business value this half?",
+        "operating profit after tax",
+    ],
+)
+def test_the_channel_rule_is_the_label_predicate_and_nothing_else(question: str) -> None:
+    assert (classify_query(question, lexical_hits=7) == "bm25_only") == is_label_query(question)

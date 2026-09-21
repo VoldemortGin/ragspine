@@ -44,9 +44,16 @@ _TEXTS = {
 class _FakeDocument:
     """In-memory stand-in for the mounted document seam; counts corpus reads."""
 
-    def __init__(self, vector_order: tuple[str, ...], *, snapshot_id: str = _SNAPSHOT) -> None:
+    def __init__(
+        self,
+        vector_order: tuple[str, ...],
+        *,
+        snapshot_id: str = _SNAPSHOT,
+        members: tuple[MemberText, ...] | None = None,
+    ) -> None:
         self._snapshot_id = snapshot_id
         self._vector_order = vector_order
+        self._members = members
         self.member_texts_calls = 0
         self.search_calls: list[tuple[str, int]] = []
 
@@ -71,6 +78,8 @@ class _FakeDocument:
 
     def member_texts(self) -> tuple[MemberText, ...]:
         self.member_texts_calls += 1
+        if self._members is not None:
+            return self._members
         return tuple(
             MemberText(member_id, ObjectKind.TEXT, 0, text)
             for member_id, text in sorted(_TEXTS.items())
@@ -187,6 +196,66 @@ def test_fuse_orders_equal_scores_by_member_id_and_rejects_mixed_snapshots() -> 
     assert [hit.member_id for hit in fuse(only_vector, only_lexical)] == ["m-y", "m-z"]
     with pytest.raises(ValueError, match="snapshot"):
         fuse(only_vector, (PinnedRetrievalHit("2" * 64, "m-y", 0.5),))
+
+
+def test_an_empty_tree_ranking_fuses_exactly_as_the_two_channel_call_did() -> None:
+    """The third channel is opt-in (ADR 0019): with no pages nothing about the fusion moves."""
+    vector = (
+        PinnedRetrievalHit(_SNAPSHOT, "m-a", 0.9),
+        PinnedRetrievalHit(_SNAPSHOT, "m-b", 0.8),
+    )
+    lexical = (
+        PinnedRetrievalHit(_SNAPSHOT, "m-b", 3.0),
+        PinnedRetrievalHit(_SNAPSHOT, "m-c", 1.0),
+    )
+    two_channel = fuse(vector, lexical, k=60.0)
+    assert fuse(vector, lexical, (), k=60.0) == two_channel
+    assert all(hit.tree_rank is None for hit in two_channel)
+    assert fuse((), (), ()) == ()
+
+
+def test_a_member_only_the_tree_channel_ranks_enters_the_fusion() -> None:
+    vector = (PinnedRetrievalHit(_SNAPSHOT, "m-a", 0.9),)
+    tree = (PinnedRetrievalHit(_SNAPSHOT, "m-t", 1.0),)
+    fused = fuse(vector, (), tree)
+    by_id = {hit.member_id: hit for hit in fused}
+    assert set(by_id) == {"m-a", "m-t"}
+    assert by_id["m-t"].tree_rank == 1
+    assert (by_id["m-t"].vector_rank, by_id["m-t"].lexical_rank) == (None, None)
+    # The tree channel is a page set, not a similarity: it carries a rank and no score.
+    assert (by_id["m-t"].vector_score, by_id["m-t"].bm25_score) == (None, None)
+    assert by_id["m-t"].fused_score == rrf_fuse([["m-t"]], 60)["m-t"]
+    assert by_id["m-a"].tree_rank is None
+    with pytest.raises(ValueError, match="snapshot"):
+        fuse(vector, (), (PinnedRetrievalHit("2" * 64, "m-t", 1.0),))
+
+
+def test_channel_agreement_outranks_depth_in_any_one_channel() -> None:
+    """Ranks are 1-based, so three channels beat two and two beat one however deep the one
+    ranking goes: at most 1/(60 + 1) alone against at least 2/(60 + 50) shared."""
+    triple = tuple(
+        PinnedRetrievalHit(_SNAPSHOT, member_id, 1.0)
+        for member_id in ("m-three", "m-two", "m-vector")
+    )
+    fused = fuse(triple, triple[:2], (triple[0], PinnedRetrievalHit(_SNAPSHOT, "m-tree", 1.0)))
+    assert [hit.member_id for hit in fused][:2] == ["m-three", "m-two"]
+    by_id = {hit.member_id: hit for hit in fused}
+    assert by_id["m-three"].fused_score > by_id["m-two"].fused_score
+    assert by_id["m-two"].fused_score > by_id["m-tree"].fused_score
+    assert by_id["m-two"].fused_score > by_id["m-vector"].fused_score
+    assert (by_id["m-three"].vector_rank, by_id["m-three"].lexical_rank) == (1, 1)
+    assert by_id["m-three"].tree_rank == 1
+
+    # The same property at the depths a real request reaches: a fiftieth seat in two
+    # channels still outscores a first seat in one.
+    filler = tuple(PinnedRetrievalHit(_SNAPSHOT, f"m-{index:02d}", 1.0) for index in range(49))
+    deep = PinnedRetrievalHit(_SNAPSHOT, "m-pair", 1.0)
+    shared = fuse(
+        (*filler, deep), (PinnedRetrievalHit(_SNAPSHOT, "m-solo", 1.0), *filler[:48], deep)
+    )
+    depths = {hit.member_id: hit for hit in shared}
+    assert (depths["m-pair"].vector_rank, depths["m-pair"].lexical_rank) == (50, 50)
+    assert depths["m-pair"].fused_score > depths["m-solo"].fused_score
 
 
 def test_hybrid_search_builds_the_lexical_index_once_per_snapshot() -> None:
@@ -497,3 +566,125 @@ def test_the_rerank_judge_is_shown_the_question_the_user_asked() -> None:
     )
     # The judge ranks candidates against what the user asked, not against the restatement.
     assert judge.queries == [_FOREIGN_QUESTION]
+
+
+# Six members over three pages, laid out so reading order contradicts member-id order on
+# every page: page 0 runs top to bottom, page 1 left to right, and a member with no
+# rectangle sorts after every located one.
+_PAGED_MEMBERS = (
+    MemberText(
+        "m-p0-alpha",
+        ObjectKind.TEXT,
+        0,
+        "Group highlights for the first half",
+        bbox=(10.0, 90.0, 90.0, 110.0),
+    ),
+    MemberText(
+        "m-p0-zeta",
+        ObjectKind.TEXT,
+        0,
+        "Opening summary of the interim results",
+        bbox=(10.0, 10.0, 90.0, 30.0),
+    ),
+    MemberText(
+        "m-p1-alpha",
+        ObjectKind.TEXT,
+        1,
+        "Partnership channel commentary",
+        bbox=(60.0, 50.0, 90.0, 70.0),
+    ),
+    MemberText("m-p1-void", ObjectKind.TEXT, 1, "Footnote without a rectangle"),
+    MemberText(
+        "m-p1-zulu", ObjectKind.TEXT, 1, "Agency channel commentary", bbox=(10.0, 50.0, 40.0, 70.0)
+    ),
+    MemberText(
+        "m-p2-solo",
+        ObjectKind.TEXT,
+        2,
+        "Reconciliation table appendix",
+        bbox=(10.0, 10.0, 90.0, 30.0),
+    ),
+)
+
+
+def test_tree_pages_rank_their_members_page_by_page_in_reading_order() -> None:
+    """The router's page order decides between pages; ``reading_key`` decides within one."""
+    document = _FakeDocument((), members=_PAGED_MEMBERS)
+    search = HybridSearch(document, channel_limit=10)
+    outcome = search.search("q", top_k=10, mode="vector_only", tree_pages=(2, 0, 1))
+    assert [hit.member_id for hit in outcome.hits] == [
+        "m-p2-solo",
+        "m-p0-zeta",
+        "m-p0-alpha",
+        "m-p1-zulu",
+        "m-p1-alpha",
+        "m-p1-void",
+    ]
+    assert [hit.tree_rank for hit in outcome.hits] == [1, 2, 3, 4, 5, 6]
+    assert all(hit.vector_rank is None and hit.lexical_rank is None for hit in outcome.hits)
+    assert all(hit.vector_score is None and hit.bm25_score is None for hit in outcome.hits)
+    # A page the router did not choose contributes nothing, whatever it contains.
+    assert (
+        search.search("q", top_k=10, mode="vector_only", tree_pages=(2,)).hits == outcome.hits[:1]
+    )
+
+
+def test_tree_pages_promote_a_member_neither_other_channel_ranks() -> None:
+    document = _FakeDocument(("m-p0-alpha",), members=_PAGED_MEMBERS)
+    search = HybridSearch(document, channel_limit=10)
+    plain = search.search("agency channel", top_k=5, mode="rrf").hits
+    assert all(hit.member_id != "m-p2-solo" for hit in plain)
+
+    routed = search.search("agency channel", top_k=5, mode="rrf", tree_pages=(2,)).hits
+    promoted = next(hit for hit in routed if hit.member_id == "m-p2-solo")
+    assert (promoted.tree_rank, promoted.vector_rank, promoted.lexical_rank) == (1, None, None)
+    # The members the other two channels already found keep their ranks and their order.
+    assert [hit.member_id for hit in routed if hit.member_id != "m-p2-solo"] == [
+        hit.member_id for hit in plain
+    ]
+
+
+@pytest.mark.parametrize("mode", ("auto", "rrf", "bm25_only", "vector_only"))
+def test_tree_pages_join_whatever_channel_mode_the_query_resolves_to(mode: FusionMode) -> None:
+    """The caller decides whether to route; the resolved mode never vetoes the pages it chose."""
+    document = _FakeDocument(("m-p0-alpha",), members=_PAGED_MEMBERS)
+    search = HybridSearch(document, channel_limit=10)
+    outcome = search.search("agency channel", top_k=6, mode=mode, tree_pages=(2,))
+    routed = next(hit for hit in outcome.hits if hit.member_id == "m-p2-solo")
+    assert routed.tree_rank == 1
+
+
+def test_tree_pages_honour_the_member_narrowing_and_the_channel_limit() -> None:
+    document = _FakeDocument((), members=_PAGED_MEMBERS)
+    narrowed = HybridSearch(document, channel_limit=10).search(
+        "q",
+        top_k=10,
+        mode="vector_only",
+        allowed=frozenset({"m-p1-alpha", "m-p2-solo"}),
+        tree_pages=(1, 2),
+    )
+    assert [hit.member_id for hit in narrowed.hits] == ["m-p1-alpha", "m-p2-solo"]
+    assert [hit.tree_rank for hit in narrowed.hits] == [1, 2]
+
+    capped = HybridSearch(document, channel_limit=2).search(
+        "q", top_k=10, mode="vector_only", tree_pages=(1, 0)
+    )
+    # The cap is spent in the router's order: page 1's first two members, and nothing after.
+    assert [hit.member_id for hit in capped.hits] == ["m-p1-zulu", "m-p1-alpha"]
+
+
+def test_search_without_tree_pages_is_pinned_to_the_two_channel_fusion() -> None:
+    """Every rank, score and seat of a routine request, spelled out: adding the third
+    channel must leave an unrouted question byte for byte where it was."""
+    document = _FakeDocument(("m-c", "m-a", "m-b"))
+    search = HybridSearch(document, channel_limit=3)
+    question = "Which channels drove the change in the expense ratio and why did it move?"
+    bm25 = {hit.member_id: hit.score for hit in lexical_rank(search.index, question, limit=3)}
+    fused = rrf_fuse([["m-c", "m-a", "m-b"], ["m-a", "m-b"]], 60)
+    expected = (
+        FusedHit(_SNAPSHOT, "m-a", fused["m-a"], 2, 1, 0.9, bm25["m-a"], None),
+        FusedHit(_SNAPSHOT, "m-b", fused["m-b"], 3, 2, 0.8, bm25["m-b"], None),
+        FusedHit(_SNAPSHOT, "m-c", fused["m-c"], 1, None, 1.0, None, None),
+    )
+    assert search.search(question, top_k=3, mode="rrf").hits == expected
+    assert search.search(question, top_k=3, mode="rrf", tree_pages=()).hits == expected

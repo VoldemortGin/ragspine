@@ -14,10 +14,12 @@ from enterprise_pdf_rag.adapters.chart_semantic_schemas import (
     ChartObservationsDTO,
     FigureDescriptionDTO,
 )
+from enterprise_pdf_rag.adapters.document_tree_extraction import TreeSummaryDTO
 from enterprise_pdf_rag.adapters.http.layout_schemas import PageLayoutDTO
 from enterprise_pdf_rag.adapters.json_completion import _response_schema
 from enterprise_pdf_rag.adapters.page_metadata_extraction import PageMetadataDTO
 from enterprise_pdf_rag.adapters.query_translation import QueryTranslationDTO
+from enterprise_pdf_rag.adapters.tree_retrieval import TreeRouteDTO
 from enterprise_pdf_rag.adapters.visual_semantic_schemas import (
     DiagramObservationsDTO,
     FormulaObservationsDTO,
@@ -29,6 +31,7 @@ from enterprise_pdf_rag.answers.prompt import ModelAnswer, ModelClaim
 # One entry per ``response_model`` passed to ``complete_json`` / ``complete_text_json``:
 # answer_service (ModelAnswer), query_translation (QueryTranslationDTO),
 # page_metadata_extraction (PageMetadataDTO), page_partition (PageLayoutDTO),
+# tree_retrieval (TreeRouteDTO), document_tree_extraction (TreeSummaryDTO),
 # visual_semantics (three observation DTOs + VisualDescriptionDTO) and chart_semantics
 # (ChartObservationsDTO, FigureDescriptionDTO).
 RESPONSE_MODELS: tuple[type[BaseModel], ...] = (
@@ -36,6 +39,8 @@ RESPONSE_MODELS: tuple[type[BaseModel], ...] = (
     QueryTranslationDTO,
     PageMetadataDTO,
     PageLayoutDTO,
+    TreeRouteDTO,
+    TreeSummaryDTO,
     ImageObservationsDTO,
     DiagramObservationsDTO,
     FormulaObservationsDTO,

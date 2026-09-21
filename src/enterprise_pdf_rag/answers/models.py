@@ -63,6 +63,9 @@ class FusedHit:
     lexical_rank: int | None
     vector_score: float | None
     bm25_score: float | None
+    # The tree channel contributes a rank but no score of its own: it is a page set the
+    # router chose, not a similarity, so there is nothing to record beside the rank.
+    tree_rank: int | None = None
 
     def as_hit(self) -> PinnedRetrievalHit:
         return PinnedRetrievalHit(self.snapshot_id, self.member_id, self.fused_score)
@@ -84,6 +87,22 @@ class TranslatedQuery:
     def __post_init__(self) -> None:
         if not self.english.strip() or not self.source_language.strip():
             raise ValueError("A translation needs a nonempty query and source language")
+
+
+@dataclass(frozen=True, slots=True)
+class TreeRoute:
+    """The pages one routing call over the document tree chose to read (ADR 0019).
+
+    ``pages`` are 0-based page indices in ascending order — the same indices
+    ``MemberText.page_index`` carries — and ``node_ids`` name the tree nodes they came
+    from. A node's summary is a routing aid only: it tells the router where to look and
+    never becomes evidence, so nothing here can be cited.
+    """
+
+    node_ids: tuple[str, ...]
+    pages: tuple[int, ...]
+    cache_hit: bool
+    rationale: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,6 +155,9 @@ class AnswerRequest:
     # Whether a question the lexical channel cannot score may be translated into the index's
     # language first. Off, such a question falls straight through to the vector channel.
     translate_query: bool = True
+    # Whether this question is routed over the document tree first (ADR 0019). ``None`` lets
+    # ADR 0019's rule decide; ``True`` / ``False`` pin the third channel for this request.
+    tree_route: bool | None = None
 
     def __post_init__(self) -> None:
         if not self.question.strip():
@@ -207,3 +229,5 @@ class AnswerResult:
     # them when the question was not in the index's language (ADR 0018).
     fusion_mode: QueryMode = "rrf"
     query_translation: TranslatedQuery | None = None
+    # The pages the tree channel chose, when this answer was routed over the tree (ADR 0019).
+    tree_route: TreeRoute | None = None

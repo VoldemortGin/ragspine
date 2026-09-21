@@ -20,6 +20,11 @@ with one ranking is that one ranking. It takes the vector channel alone, and the
 service prefers translating it into the index's language first, falling back to this
 mode only when no translation is available (``adapters/query_translation``).
 
+ADR 0019 reuses the same shape test through ``is_label_query``: a short label query does
+not spend a tree-routing call either. An exact label lookup needs no map of the document —
+BM25 already matches the label wherever it is printed — so the rule is stated once here and
+read by both the channel decision and the routing decision.
+
 ``answers/`` imports no SDK, so ``tokenize_query`` restates the lexical channel's
 tokenizer rather than importing it; ``test_query_mode`` pins the two to the same output,
 because a token budget is meaningless unless it counts the tokens BM25 actually scores.
@@ -131,18 +136,24 @@ def content_probe(question: str) -> str:
     return " ".join(content_words(tokenize_query(question)))
 
 
+def is_label_query(question: str) -> bool:
+    """Whether the question has the short label-and-period shape ADR 0018 routes to BM25 alone."""
+    tokens = tokenize_query(question)
+    if not tokens:
+        return False
+    content = content_words(tokens)
+    if len(tokens) <= MAX_BM25_ONLY_TOKENS and len(content) <= MAX_BM25_ONLY_SHORT_CONTENT_WORDS:
+        return True
+    carries_figure = any(is_numeric(token) for token in tokens)
+    return carries_figure and len(content) <= MAX_BM25_ONLY_CONTENT_WORDS
+
+
 def classify_query(question: str, *, lexical_hits: int) -> QueryMode:
     """The channel to answer ``question`` from, given how many members BM25 could score."""
     if not question.strip():
         raise ValueError("A nonempty question is required")
     if lexical_hits < 0:
         raise ValueError("A lexical hit count cannot be negative")
-    tokens = tokenize_query(question)
-    if lexical_hits == 0 or not tokens:
+    if lexical_hits == 0 or not tokenize_query(question):
         return "vector_only"
-    content = content_words(tokens)
-    if len(tokens) <= MAX_BM25_ONLY_TOKENS and len(content) <= MAX_BM25_ONLY_SHORT_CONTENT_WORDS:
-        return "bm25_only"
-    if any(is_numeric(token) for token in tokens) and (len(content) <= MAX_BM25_ONLY_CONTENT_WORDS):
-        return "bm25_only"
-    return "rrf"
+    return "bm25_only" if is_label_query(question) else "rrf"

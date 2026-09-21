@@ -10,6 +10,13 @@ Which channels a query actually uses is a decision, not a constant: ``answers/qu
 routes a short label-and-period query to BM25 alone, where the measured recall is higher
 (ADR 0018). A single-channel mode is expressed as a fusion with one empty ranking, so every
 mode shares one scoring path.
+
+A third ranking joins the fusion when the caller supplies ``tree_pages`` (ADR 0019): the
+0-based page indices an LLM chose by reasoning over the document's table-of-contents tree,
+whose members enter the ranking page by page in reading order. It is a page set rather than
+a similarity, so it contributes a rank and no score of its own, and it participates whatever
+channel mode the query resolves to — supplying no pages leaves every existing ranking
+untouched.
 """
 
 from collections.abc import MutableMapping, Sequence
@@ -19,6 +26,7 @@ from typing import Protocol, runtime_checkable
 
 from enterprise_pdf_rag.adapters.local_models import RerankResult
 from enterprise_pdf_rag.answers.models import FusedHit as FusedHit
+from enterprise_pdf_rag.answers.page_window import reading_key
 from enterprise_pdf_rag.answers.ports import MemberText, MountedDocument
 from enterprise_pdf_rag.answers.query_mode import FusionMode, QueryMode, classify_query
 from enterprise_pdf_rag.processing.context_builder import build_context_block
@@ -105,11 +113,16 @@ def lexical_rank(
 def fuse(
     vector: Sequence[PinnedRetrievalHit],
     lexical: Sequence[PinnedRetrievalHit],
+    tree: Sequence[PinnedRetrievalHit] = (),
     *,
     k: float = 60.0,
 ) -> tuple[FusedHit, ...]:
-    """Reciprocal rank fusion of two channel rankings pinned to the same snapshot."""
-    snapshots = {hit.snapshot_id for hit in (*vector, *lexical)}
+    """Reciprocal rank fusion of the channel rankings pinned to the same snapshot.
+
+    ``tree`` is the ADR 0019 page-routing ranking and defaults to empty, which fuses
+    exactly as the two-channel call always did.
+    """
+    snapshots = {hit.snapshot_id for hit in (*vector, *lexical, *tree)}
     if len(snapshots) > 1:
         raise ValueError("Hybrid channels belong to different retrieval snapshots")
     if not snapshots:
@@ -117,7 +130,13 @@ def fuse(
     (snapshot_id,) = snapshots
     vector_ranks = {hit.member_id: (rank, hit.score) for rank, hit in enumerate(vector, start=1)}
     lexical_ranks = {hit.member_id: (rank, hit.score) for rank, hit in enumerate(lexical, start=1)}
-    fused = rrf_fuse([list(vector_ranks), list(lexical_ranks)], k)
+    tree_ranks = {hit.member_id: rank for rank, hit in enumerate(tree, start=1)}
+    # RRF ranks are 1-based, so with ``k`` at 60 and rankings cut to fifty a member only one
+    # channel ranks scores at most 1/(60 + 1) = 0.0164, while a member two channels rank
+    # scores at least 2/(60 + 50) = 0.0182: agreement beats depth. A member all three
+    # channels rank dominates further still. That margin is what ``rrf_k`` buys — do not
+    # change it.
+    fused = rrf_fuse([list(vector_ranks), list(lexical_ranks), list(tree_ranks)], k)
     hits = [
         FusedHit(
             snapshot_id,
@@ -127,6 +146,7 @@ def fuse(
             lexical_ranks[member_id][0] if member_id in lexical_ranks else None,
             vector_ranks[member_id][1] if member_id in vector_ranks else None,
             lexical_ranks[member_id][1] if member_id in lexical_ranks else None,
+            tree_ranks.get(member_id),
         )
         for member_id, score in fused.items()
     ]
@@ -201,6 +221,40 @@ class HybridSearch:
             if hit.member_id in allowed
         )[: self._channel_limit]
 
+    def _tree_rank(
+        self, tree_pages: Sequence[int], allowed: frozenset[str] | None
+    ) -> tuple[PinnedRetrievalHit, ...]:
+        """The members of the routed pages, page by page in the router's order (ADR 0019).
+
+        Within a page the members are read in ``answers.page_window.reading_key`` order, the
+        same order the page context block prints them in. The score is synthetic and strictly
+        descending: the tree channel ranks pages, not similarities, so only the order is real.
+        """
+        if not tree_pages:
+            return ()
+        wanted = set(tree_pages)
+        by_page: dict[int, list[MemberText]] = {page: [] for page in wanted}
+        for member in self._index.members:
+            if member.page_index in wanted:
+                by_page[member.page_index].append(member)
+        hits: list[PinnedRetrievalHit] = []
+        seen: set[str] = set()
+        for page in tree_pages:
+            for member in sorted(by_page.get(page, ()), key=reading_key):
+                if member.member_id in seen or (
+                    allowed is not None and member.member_id not in allowed
+                ):
+                    continue
+                if len(hits) >= self._channel_limit:
+                    return tuple(hits)
+                seen.add(member.member_id)
+                hits.append(
+                    PinnedRetrievalHit(
+                        self._index.snapshot_id, member.member_id, 1.0 / (len(hits) + 1)
+                    )
+                )
+        return tuple(hits)
+
     def search(
         self,
         query: str,
@@ -209,6 +263,7 @@ class HybridSearch:
         allowed: frozenset[str] | None = None,
         mode: FusionMode = "auto",
         lexical_query: str | None = None,
+        tree_pages: Sequence[int] = (),
     ) -> SearchOutcome:
         """Rank over the channels ``mode`` selects; ``auto`` classifies the query (ADR 0018).
 
@@ -223,6 +278,11 @@ class HybridSearch:
         ``query``: both read the question as language, so a restatement only trades the
         asker's wording for someone else's. It defaults to ``query``, which scores both
         channels on one string exactly as before.
+
+        ``tree_pages`` are the 0-based page indices the ADR 0019 router chose, in the order
+        it returned them after its ascending sort; their members join the fusion as a third
+        ranking whatever ``QueryMode`` resolves, since it is the caller that decides whether
+        to route at all. Empty — the default — leaves every ranking exactly as it was.
         """
         if top_k < 1:
             raise ValueError("top_k must be at least one")
@@ -238,7 +298,12 @@ class HybridSearch:
         vector = () if resolved == "bm25_only" else self._vector_rank(query, allowed)
         # Fusing one ranking with an empty one *is* that ranking, scored the same way, so a
         # single-channel mode needs no second ranking path.
-        fused = fuse(vector, () if resolved == "vector_only" else lexical, k=self._rrf_k)
+        fused = fuse(
+            vector,
+            () if resolved == "vector_only" else lexical,
+            self._tree_rank(tree_pages, allowed),
+            k=self._rrf_k,
+        )
         if self._reranker is None or not fused:
             return SearchOutcome(resolved, fused[:top_k])
         # The judge sees what the answer model would see: a chart candidate's citable
