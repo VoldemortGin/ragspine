@@ -130,6 +130,17 @@ def _numbers(text: str) -> tuple[tuple[str, Decimal], ...]:
     return tuple(found)
 
 
+def _written_form(token: str, value: Decimal) -> tuple[Decimal, bool]:
+    """How a figure was written, for the question-number rule — magnitude plus its unit.
+
+    Separators and the punctuation ``_NUMBER_RE`` reads as one (the comma of ``In 2024,``
+    is captured as a thousands separator) are accidents of the surrounding sentence, so
+    ``2024`` and ``2024,`` are the same written figure. The percent sign is not: a bare
+    ``11`` in the question must never ground ``11%`` in the prose.
+    """
+    return value, token.endswith("%")
+
+
 def _reject(claim: ModelClaim, reason: AbstainReason, detail: str) -> RejectedClaim:
     return RejectedClaim(
         claim.claim_id, claim.member_id, claim.field_path, claim.text, reason, detail
@@ -597,8 +608,8 @@ def prose_grounded(
 
     A number is grounded when it equals a verified claim's text number or value, equals a
     number in the evidence text those claims cite (span quote, cell text, chart labels and
-    source display), appears verbatim in the user's question (a restated year or period is
-    not a new figure), or appears in ``context_texts`` — rendered page context (ADR 0017),
+    source display), was written the same way in the user's question (a restated year or
+    period is not a new figure), or appears in ``context_texts`` — rendered page context (ADR 0017),
     which is stored, already verified evidence the prompt printed without a citable path.
     That last relaxation widens what the prose may *repeat*, never what it may *cite*: a
     claim still has to name a member block, so a figure read off the page context can be
@@ -616,10 +627,14 @@ def prose_grounded(
             allowed.update(value for _, value in _numbers(cited.quote))
     for text in context_texts:
         allowed.update(value for _, value in _numbers(text))
-    asked = {token for token, _ in _numbers(question)}
+    asked = {_written_form(token, value) for token, value in _numbers(question)}
     prose = _ENUMERATOR_RE.sub(" ", answer)
     escaped = sorted(
-        {token for token, value in _numbers(prose) if value not in allowed and token not in asked}
+        {
+            token
+            for token, value in _numbers(prose)
+            if value not in allowed and _written_form(token, value) not in asked
+        }
     )
     return not escaped, tuple(escaped)
 

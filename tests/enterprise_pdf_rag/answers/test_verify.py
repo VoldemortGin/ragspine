@@ -893,3 +893,30 @@ def test_decide_passes_the_page_context_through_to_the_prose_gate() -> None:
     assert decide(
         answered, ClaimVerification(verified, ()), blocks_present=True, context_texts=(page,)
     ) == (AnswerStatus.ANSWERED, None, None)
+
+
+def test_a_question_number_is_grounded_whatever_punctuation_follows_it() -> None:
+    """The comma after ``In 2024,`` is sentence punctuation, not a thousands separator.
+
+    ``_NUMBER_RE`` reads thousands separators, so it captures that comma into the token.
+    Matching the question's numbers by their written form alone therefore missed a bare
+    year the model had merely restated (live `p02-year-filter-2024-en`, 2026-09-21).
+    """
+    claims = (_verified("+11%", Decimal("11")),)
+    asked = "What was the VONB growth in 2024?"
+    assert prose_grounded("In 2024, VONB growth was +11%.", claims, question=asked) == (True, ())
+    assert prose_grounded("VONB growth in 2024 was +11%.", claims, question=asked) == (True, ())
+    interim = "What was the VONB growth in 2026?"
+    assert prose_grounded("In 2026, VONB grew +11%.", claims, question=interim) == (True, ())
+    # A thousands separator inside the figure still reads as one, on either side.
+    assert prose_grounded("It reached 1,024 agents.", (), question="How many of 1024?") == (
+        True,
+        (),
+    )
+    # The percent sign stays part of the form: a bare number in the question does not
+    # ground a percentage in the prose.
+    ok, tokens = prose_grounded("Growth was 11%.", (), question="Was the growth 11 or more?")
+    assert not ok and tokens == ("11%",)
+    # A year the question never names still escapes.
+    ok, tokens = prose_grounded("In 2023, VONB grew +11%.", claims, question=asked)
+    assert not ok and tokens == ("2023,",)
