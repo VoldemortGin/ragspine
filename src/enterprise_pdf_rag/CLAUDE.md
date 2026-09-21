@@ -101,7 +101,11 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   processing-store roots listed in `APP_LEGACY_DOCUMENT_ROOTS` (JSON list; the AIA release,
   default empty). `EMBEDDING_*` enables search, `OPENAI_*` enables chat, `RERANK_*` enables
   opt-in rerank; a missing group is a 503 on its routes, never a mock. Model cache
-  `<ingestion_root>/model-cache`, live budget `APP_ANSWER_MAX_LIVE_CALLS` (200).
+  `<ingestion_root>/model-cache` — `requests/<fingerprint>.json` the record, `responses/`
+  the bodies, `contexts/<fingerprint>.json` the **full request body as sent** (system rules,
+  every message, schema, token budget; inline images summarized), written before the call and
+  back-filled on replay, first write wins. It quotes the evidence verbatim: local files, never
+  shared. Live budget `APP_ANSWER_MAX_LIVE_CALLS` (200).
 - **Deploy:** `deploy/enterprise-pdf-rag/open-webui/` — `backend.Dockerfile` is not re-verified
   since the merge (local `../corespine` uv source; see ADR 0021 follow-ups).
 - **Benchmarks / gold:** `data/benchmarks/enterprise-pdf-rag/aia-2026-interim/` (its `manifest.json`

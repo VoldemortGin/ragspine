@@ -67,6 +67,21 @@ All notable changes to RAGSpine are documented here. This project follows Semant
   `rag-chat-v1` `AnswerEnvelope` gained `fusion_mode` and `query_translation` as optional
   fields, and the checked-in schema was regenerated with nothing removed.
 
+- **The model cache keeps the request it sent, not just the answer it got**
+  (`enterprise_pdf_rag`). `JsonCompletionClient` recorded a fingerprint and a byte count for
+  every call, so a cached answer could never be read back against the prompt that produced it.
+  It now writes `model-cache/contexts/<request_fingerprint>.json` beside `requests/` and
+  `responses/`: an envelope of `request_fingerprint` / `created_at` (UTC) / `endpoint_path` /
+  `contract` / `task` around `payload`, the verbatim JSON body sent to the provider — system
+  rules, every message (evidence blocks, page context, the question), the response schema and
+  the token budget. A vision call replaces the inline `image_url` with
+  `{"omitted": true, "sha256", "bytes"}` and keeps every other field untouched. The body is
+  written before the call and back-filled when a cached answer is replayed without one; the
+  first write for a fingerprint wins, and a write that fails (or disagrees) only leaves a code
+  in that record's `diagnostics.context_warning` — it never fails the call. Successful records
+  carry `diagnostics.context_path` back to the file. These files quote the source verbatim, so
+  they stay local.
+
 - **A frozen gold set for natural-language answers, with two runners that share one judge**
   (`enterprise_pdf_rag`, ADR 0011 follow-up). Until now the only frozen sets were the two typed
   ChartQA golds; the whole answer chain was re-measured by hand every round.
