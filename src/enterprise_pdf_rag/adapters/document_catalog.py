@@ -7,6 +7,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Literal
 
+from enterprise_pdf_rag.adapters.aia_ingestion import read_text_sidecar
 from enterprise_pdf_rag.adapters.chart_qa import StoredChartResolver
 from enterprise_pdf_rag.adapters.chart_qa_displayed import StoredDisplayResolver
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
@@ -21,11 +22,20 @@ from enterprise_pdf_rag.adapters.processing_retrieval import (
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.source_publication import validate_processing_source
 from enterprise_pdf_rag.answers.ports import MemberText
-from enterprise_pdf_rag.documents.models import AssetRef
+from enterprise_pdf_rag.documents.models import AssetRef, Bounds
 from enterprise_pdf_rag.figures.chart_qa.displayed_models import DisplayedLookupContext
 from enterprise_pdf_rag.figures.chart_qa.models import ChartContext, QueryPin
 from enterprise_pdf_rag.figures.ports import EmbeddingPort
+from enterprise_pdf_rag.processing.column_regions import (
+    EMPTY,
+    MIN_COLUMNS,
+    ColumnBinding,
+    PageColumn,
+    PageRegionSpan,
+    bind_columns,
+)
 from enterprise_pdf_rag.processing.models import (
+    ObjectKind,
     ProcessingManifest,
     RetrievalPublication,
 )
@@ -94,6 +104,19 @@ class DocumentCatalog(BoundaryModel):
 
 def _pointer(path: Path) -> str | None:
     return path.read_text().strip() if path.is_file() else None
+
+
+def _span_union(span_ids: Sequence[str], boxes: Mapping[str, Bounds]) -> Bounds | None:
+    """The rectangle covering a page value's evidence spans, or ``None`` if none are known."""
+    known = [boxes[span_id] for span_id in span_ids if span_id in boxes]
+    if not known:
+        return None
+    return (
+        min(box[0] for box in known),
+        min(box[1] for box in known),
+        max(box[2] for box in known),
+        max(box[3] for box in known),
+    )
 
 
 def _file_state(path: Path) -> tuple[int, int]:
@@ -320,6 +343,8 @@ class MountedDocument:
         # Immutable with the pinned manifest: read once, reused by every member_texts().
         self._page_metadata = outputs.load_page_metadata(manifest)
         self._contexts = outputs.index_contexts(manifest)
+        # Derived from the same pinned release, on the first ``member_texts()`` that needs it.
+        self._columns: dict[int, ColumnBinding] | None = None
         self._verify_every_request = verify_every_request
         # The one file a request must watch: the pinned manifest object. Its name is its
         # digest, so any rewrite of the release is a digest mismatch here.
@@ -409,14 +434,73 @@ class MountedDocument:
         """Every pinned member's embedded index text, ordered by member id."""
         self.manifest()
         plan, _ = self._outputs.load_retrieval(self._publication)
+        columns = self._column_bindings(plan)
         texts = [
-            self._member_text(plan, member, self._page_metadata.get(member.page_index))
+            self._member_text(
+                plan,
+                member,
+                self._page_metadata.get(member.page_index),
+                columns.get(member.page_index, EMPTY),
+            )
             for member in plan.members
         ]
         return tuple(sorted(texts, key=lambda item: item.member_id))
 
+    def _column_bindings(self, plan: RetrievalPlan) -> dict[int, ColumnBinding]:
+        """Which page region names each chart, on pages that print several side by side.
+
+        Derived from the pinned release itself — the charts' own rectangles and the
+        rectangles of the spans the page's regions were copied from — so a snapshot
+        published before this existed binds its columns without being re-indexed.
+        """
+        if self._columns is not None:
+            return self._columns
+        charts: dict[int, list[PageColumn]] = {}
+        for member in plan.members:
+            if member.kind is not ObjectKind.CHART:
+                continue
+            bbox = member_anchor(self._outputs.assets, member)
+            if bbox is not None:
+                charts.setdefault(member.page_index, []).append(PageColumn(member.member_id, bbox))
+        bindings: dict[int, ColumnBinding] = {}
+        for page_index, columns in charts.items():
+            metadata = self._page_metadata.get(page_index)
+            if metadata is None or len(columns) < MIN_COLUMNS:
+                continue
+            boxes = self._span_boxes(page_index)
+            if boxes is None:
+                continue
+            binding = bind_columns(
+                tuple(
+                    PageRegionSpan(region.text, _span_union(region.evidence.span_ids, boxes))
+                    for region in metadata.regions
+                ),
+                tuple(sorted(columns, key=lambda column: (column.bbox[0], column.member_id))),
+            )
+            if binding is not EMPTY:
+                bindings[page_index] = binding
+        self._columns = bindings
+        return bindings
+
+    def _span_boxes(self, page_index: int) -> dict[str, Bounds] | None:
+        """Every source span's rectangle on one page; ``None`` when the page cannot be read.
+
+        Best-effort, exactly like ``member_anchor``: geometry read for a refinement must
+        never fail a mount the evidence itself supports.
+        """
+        try:
+            source = self._sources.load(self._pinned.scope.source_manifest_id)
+            sidecar = read_text_sidecar(self._sources, source, page_index)
+        except (ValueError, KeyError, OSError, IndexError):
+            return None
+        return {span.span_id: span.bbox for span in sidecar.spans}
+
     def _member_text(
-        self, plan: RetrievalPlan, member: RetrievalMember, metadata: PageMetadata | None
+        self,
+        plan: RetrievalPlan,
+        member: RetrievalMember,
+        metadata: PageMetadata | None,
+        binding: ColumnBinding,
     ) -> MemberText:
         context = self._contexts.get(member.page_index)
         text = member_text(self._outputs.assets, plan, member, context)
@@ -427,6 +511,14 @@ class MountedDocument:
             else ""
         )
         bbox = member_anchor(self._outputs.assets, member)
+        column = binding.by_member.get(member.member_id, ())
+        if column and header:
+            # The lexical channel reads one more phrase than the embedding saw: the column's
+            # own heading, so `Thailand 1H26 VONB` scores the Thailand chart over its
+            # neighbours. The stored vectors are untouched, so no release is re-indexed.
+            body = text[len(header) + 1 :] if text.startswith(header + "\n") else text
+            header = " | ".join((header, *column))
+            text = f"{header}\n{body}"
         if metadata is None:
             return MemberText(
                 member.member_id,
@@ -446,6 +538,7 @@ class MountedDocument:
             page_type=metadata.page_type.value,
             periods=metadata.normalized_periods,
             regions=tuple(region.text for region in metadata.regions),
+            member_regions=binding.regions_for(member.member_id),
             header=header,
             bbox=bbox,
         )

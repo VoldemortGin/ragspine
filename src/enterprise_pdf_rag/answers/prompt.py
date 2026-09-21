@@ -76,7 +76,12 @@ SYSTEM_RULES: Final[str] = (
     "member id for it.\n"
     "7. Write `answer` in the language of the user's question. A claim's `text` is always "
     "the evidence's own wording, copied from the block verbatim and never translated, "
-    "whatever language you answer in."
+    "whatever language you answer in.\n"
+    "8. A header may print `regions=`: the part of the page that block belongs to, read "
+    "from the page's own layout. One page can print several charts side by side, one per "
+    "region, and only this tells them apart. When the question names a region, answer from "
+    "the block whose `regions=` names it and from no other, whatever language the question "
+    "and the region are written in; if none of them names it, abstain rather than pick one."
 )
 
 

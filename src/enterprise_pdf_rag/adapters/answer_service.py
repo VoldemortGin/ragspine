@@ -294,6 +294,7 @@ class AnswerService:
             lexical_query=plan.lexical_query,
         )
         fused, selected = select_context(document, outcome.hits, request.top_k, members)
+        selected = _with_member_regions(selected, members)
         hits = {hit.member_id: hit.as_hit() for hit in fused}
         enabled = self._settings.page_window if request.page_window is None else request.page_window
         windowed: tuple[PromptBlock, ...] = (
@@ -429,6 +430,24 @@ class AnswerService:
             fusion_mode=fusion_mode,
             query_translation=query_translation,
         )
+
+
+def _with_member_regions(
+    blocks: Sequence[ContextBlock], members: Sequence[MemberText]
+) -> tuple[ContextBlock, ...]:
+    """Print the part of the page a block belongs to, where the layout bound it to one.
+
+    A page of side-by-side charts hands every one of them the same page-level regions, and
+    three blocks headed `VONB ($m)` are then indistinguishable — the model has to guess a
+    column, and it cites its guess with real provenance. Where the page geometry named a
+    column (``MemberText.member_regions``), the block says so. Nothing else changes: a
+    member the layout could not name prints exactly what it always printed.
+    """
+    bound = {member.member_id: member.member_regions for member in members if member.member_regions}
+    return tuple(
+        block if block.member_id not in bound else replace(block, regions=bound[block.member_id])
+        for block in blocks
+    )
 
 
 def _narrow(

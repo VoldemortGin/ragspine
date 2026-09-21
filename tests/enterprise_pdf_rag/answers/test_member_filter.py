@@ -18,9 +18,17 @@ def _member(
     page_type: str | None = "text",
     periods: tuple[str, ...] = (),
     regions: tuple[str, ...] = (),
+    member_regions: tuple[str, ...] = (),
 ) -> MemberText:
     return MemberText(
-        member_id, ObjectKind.TEXT, 0, "text", page_type=page_type, periods=periods, regions=regions
+        member_id,
+        ObjectKind.TEXT,
+        0,
+        "text",
+        page_type=page_type,
+        periods=periods,
+        regions=regions,
+        member_regions=member_regions,
     )
 
 
@@ -80,6 +88,47 @@ def test_region_filter_matches_whole_words_so_a_page_may_qualify_the_place_furth
     assert not member_matches(
         _member("th", regions=("Thailand",)), MemberFilters(regions=("AIA Thailand",))
     )
+
+
+# One page of three country charts side by side: the banner names the page, each heading
+# names one column, and every member of the page carries all four (ADR 0013).
+_COLUMN_PAGE = ("ASEAN", "AIA Thailand", "AIA Singapore", "AIA Malaysia")
+
+
+def test_a_member_the_page_geometry_named_answers_on_its_own_regions_alone() -> None:
+    """The chart under the Thailand heading is Thailand, though its page names three markets.
+
+    Without this the model picks one of the three columns and cites it with real provenance,
+    which is a wrong number wearing a correct source.
+    """
+    chart = _member("th-chart", regions=_COLUMN_PAGE, member_regions=("ASEAN", "AIA Thailand"))
+
+    assert member_matches(chart, MemberFilters(regions=("Thailand",)))
+    assert member_matches(chart, MemberFilters(regions=("ASEAN",)))  # the page-wide banner
+    # Its neighbours' headings are still on the page and no longer on this member.
+    assert not member_matches(chart, MemberFilters(regions=("Singapore",)))
+    assert not member_matches(chart, MemberFilters(regions=("AIA Malaysia",)))
+
+
+def test_a_member_the_geometry_could_not_name_still_answers_for_its_whole_page() -> None:
+    """Empty member regions means the page does not read as columns, not that it has none."""
+    paragraph = _member("body", regions=_COLUMN_PAGE)
+
+    assert paragraph.member_regions == ()
+    for wanted in _COLUMN_PAGE:
+        assert member_matches(paragraph, MemberFilters(regions=(wanted,))), wanted
+    assert not member_matches(paragraph, MemberFilters(regions=("Vietnam",)))
+
+
+def test_naming_one_column_does_not_shrink_the_document_region_vocabulary() -> None:
+    """A question is parsed against what the pages print, not against what each member kept."""
+    corpus = (
+        _member("th", regions=_COLUMN_PAGE, member_regions=("ASEAN", "AIA Thailand")),
+        _member("sg", regions=_COLUMN_PAGE, member_regions=("ASEAN", "AIA Singapore")),
+        _member("my", regions=_COLUMN_PAGE, member_regions=("ASEAN", "AIA Malaysia")),
+    )
+
+    assert region_vocabulary(corpus) == _COLUMN_PAGE
 
 
 def test_a_region_that_excludes_a_place_never_matches_it() -> None:

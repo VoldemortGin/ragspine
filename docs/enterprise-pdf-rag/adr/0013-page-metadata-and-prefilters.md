@@ -102,6 +102,82 @@ gate, not a filter — and there is no sensitivity dimension in this package.
    document prints when the question names a year. Exactly one survivor is selected;
    otherwise 422 listing every candidate's display name. An explicit `document` always wins.
 
+## Amendment 1 (2026-09-22): a region descends to the member that stands under it
+
+Decision 5's sentence "a region filter by folded equality with one of its page's region strings"
+and Decision 4's `MemberText` shape are **extended, not superseded**: region metadata is still
+extracted, verified and stored per page, and a member whose column cannot be read still uses its
+page's values. What changes is that a member standing under a column heading now carries that
+heading instead. This closes the gap bullet below, and
+[ADR 0018](0018-query-classification-and-translation.md)'s `k01` / `k02` bullet with it.
+
+**The rule, in one pure module.** `processing/column_regions.py` — no model, no I/O, no page
+metadata rewritten. `bind_columns(regions, columns) -> ColumnBinding` over `PageRegionSpan(text,
+bbox | None)` and `PageColumn(member_id, bbox)`, returning `ColumnBinding(page_wide, by_member)`
+with `.regions_for(member_id)`, plus the `EMPTY` binding. Three constants carry the whole policy:
+`MIN_COLUMNS = 2` (one column is a page), `MAX_COLUMN_HEADING_WIDTH_SHARE = 0.5` (a heading as
+wide as the page is the page's banner — `ASEAN` on p.13 — and stays page-wide), and
+`MIN_HEADING_OVERLAP_SHARE = 0.5` (that much of the heading must sit over the column on the x
+axis).
+
+**All-or-nothing, by design.** Unless *every* column receives a heading and *every* heading finds
+a column, `bind_columns` returns `EMPTY` and the caller keeps the page-level values it has always
+used. A layout that cannot be read must cost nothing, not guess — the same stance Decision 1
+takes on an unverifiable metadata value, applied to geometry.
+
+**Where it is read.** `answers/ports.MemberText` gained `member_regions: tuple[str, ...] = ()`.
+`MemberText` is a pure in-memory mount-time projection — nothing on disk mentions it — so **no
+snapshot id changes and nothing is re-indexed**, and a release published before this module
+existed binds its columns at mount like any other.
+`adapters/document_catalog.MountedDocument` supplies the geometry: `_column_bindings(plan)`
+collects every CHART member's rectangle per page (`member_anchor`), and `_span_boxes(page_index)`
+reads that page's source-text sidecar for the rectangles of the spans each verified region value
+was copied from (`MetadataEvidence.span_ids`, unioned by `_span_union`). Both are best-effort
+throughout, exactly as `member_anchor` already is: geometry read for a refinement must never fail
+a mount that the evidence itself supports.
+
+**Two effects on retrieval.** `answers/member_filter.member_matches` now filters on
+`member.member_regions or member.regions`, so a bound member is matched by its own heading and an
+unbound one by its page exactly as before; `region_vocabulary` still reports the full page-level
+vocabulary, so nothing shrinks what a question can be parsed against. And the bound heading joins
+that member's contextual index header (Decision 4), so BM25 scores `AIA Thailand` on the Thailand
+chart. **The stored vectors are untouched, so the lexical channel reads one phrase the embedding
+never saw.** That asymmetry is deliberate and is the reason no published release needs
+re-indexing: as the rejected alternative below already says of the page header, it is a
+retrieval-time view, not content-addressed evidence.
+
+**A filter was not enough, and the fourth part is what closes `k02`.** `ContextBlock` gained
+`regions`, `answers` stamps a bound member's regions onto its block
+(`adapters/answer_service._with_member_regions`), and `SYSTEM_RULES` gained rule 8: a header's
+`regions=` names the part of the page the block belongs to; a question naming a region is answered
+from the block whose `regions=` names it and no other, whatever language either is written in; and
+when none does, abstain rather than pick one. Without it the model still could not tell three
+blocks all headed `VONB ($m)` apart — see `k02` below.
+
+### Measured on the real AIA release (read-only, pinned `22127d0fad13` / `42939d6a4e87`)
+
+| page_index | bound to a column | kept page-wide |
+| --- | --- | --- |
+| 12 (p.13) | `a05e27202ea4…` → `AIA Thailand`, `36f5b652e8e0…` → `AIA Singapore`, `3e0a86925a4e…` → `AIA Malaysia` | `ASEAN`, whose span runs x 28 → 839 across a 894-point content width — wider than half the page |
+| 11 (p.12) | the page's two charts → `Domestic` and `Chinese Mainland Visitor (CMV)`; its two in-chart annotations (`from New HK Residents`, `from Outside of` / `Greater Bay Area`) also land on the correct chart | nothing |
+
+**Every other multi-chart page in the deck returns `EMPTY` and keeps its page-level regions**,
+which is the safe path working as intended rather than a shortfall to be tuned away. Cost:
+`member_texts()` 0.26s → 0.43s, once per mount; mount time itself is unchanged.
+
+`k01-region-thailand-en` and `k02-region-thailand-zh` now both answer `514` `$m` from
+`points.point-1h26.value` on `a05e27202ea4…`, p.13 — **but for different reasons, and the
+difference is the honest part of this amendment.** `k01` derives `{periods: [1H2026], regions:
+[Thailand]}`, unrelaxed, and the pre-filter admits only the Thailand chart; its prompt carried
+exactly one p.13 chart. `k02` still derives `regions: []` — the vocabulary is verbatim English,
+`泰国` matches none of it, and ADR 0018's content-word probe finds `VONB` scoreable on its own so
+the question is never translated — so all three charts still reach its prompt, and it answers
+correctly only because each block now prints its own `regions=`. The filter side of the gap is
+closed for `k01` and still open for `k02`.
+
+**Still page-level after this amendment:** every non-chart member (only CHART members contribute
+a `PageColumn`), and every member on a multi-chart page that does not read as columns.
+
 ## Rejected alternatives
 
 - **Filtering on entities, page type or metrics.** Entities and metrics were dropped from
@@ -175,14 +251,23 @@ gate, not a filter — and there is no sensitivity dimension in this package.
   on that page and the bounding box is genuine. Across four real cold runs the two Thailand
   questions were answered eight times and **not once correctly**: `$294m` (Singapore) five times,
   `$232m` (Malaysia) three times, `$514m` (Thailand) **zero** — the binding is effectively drawn at
-  random. The gold cases `k01-region-thailand-en` / `k02-region-thailand-zh` therefore keep
+  random. ~~The gold cases `k01-region-thailand-en` / `k02-region-thailand-zh` therefore keep
   `expected: abstained` with `known_gap: true`, and must not be frozen as `answered` while this
-  holds. The chart IR already admits the weaker half of this in its own confidence note (`the
-  category-to-value association is unproven`), but nothing in the model expresses *which column
-  belongs to which country*. The fix, not implemented here, is a **member-level region binding
-  inside the column or card**: the three charts' bounding boxes and the three country headings'
-  bounding boxes are fully separable on the x axis, so the binding is derivable rather than
-  guessed.
+  holds.~~ (They were re-frozen as `answered` on 2026-09-22 — once, and only once, the binding
+  below made `$514m` the answer they actually produce.) The chart IR already admits the weaker
+  half of this in its own confidence note (`the category-to-value association is unproven`), but
+  nothing in the model expresses *which column belongs to which country*. The fix,
+  ~~not implemented here,~~ **implemented 2026-09-22**, is a **member-level region binding inside
+  the column or card**: the three charts' bounding boxes and the three country headings' bounding
+  boxes are fully separable on the x axis, so the binding is derivable rather than guessed.
+  **Closed by Amendment 1 above**: `processing/column_regions.py` binds p.13's three charts to
+  `AIA Thailand` / `AIA Singapore` / `AIA Malaysia` and leaves the page-wide `ASEAN` where it was,
+  `MemberText.member_regions` carries the binding, the pre-filter prefers it, and a block prints
+  its own `regions=` so the model cannot pick a neighbour's column. Both gold cases moved to
+  `case_class: positive` / `status: answered` with `forbidden_numbers: ["294", "232"]`, so a
+  neighbour's number under Thailand's name fails the case by construction. The nuance Amendment 1
+  records rather than hides: `k01` is fixed by the filter, `k02` only by the block header, because
+  `泰国` still derives no region at all.
 - Snapshots published before 2026-09-21 keep their policy and text until re-indexed;
   `metadata` → `index` → `publish` is the whole migration.
 - Offline coverage: `tests/enterprise_pdf_rag/processing/test_periods.py`,

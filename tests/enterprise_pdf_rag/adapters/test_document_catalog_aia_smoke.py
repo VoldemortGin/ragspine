@@ -70,3 +70,40 @@ def test_aia_sample_is_one_ready_legacy_document_and_stays_untouched(tmp_path: P
     else:
         assert projected == []
     assert _state() == before
+
+
+def test_the_three_side_by_side_charts_on_page_thirteen_each_keep_their_own_market(
+    tmp_path: Path,
+) -> None:
+    """The release's one page of columns: three `VONB ($m)` charts, three ASEAN markets.
+
+    Page metadata is page-wide (ADR 0013), so all three charts carry all three country
+    headings and no filter could tell them apart; the page geometry is what says which chart
+    stands under which heading. Read-only, like everything else in this file.
+    """
+    before = _state()
+    catalog = scan_catalog(tmp_path / "empty", legacy_roots=(_AIA_PROCESSING,))
+    entry = catalog.documents[0]
+    assert entry.retrieval_status == "ready", entry.reason
+
+    page = [
+        item
+        for item in mount_document(entry, embedder=None).member_texts()
+        if item.page_index == 12
+    ]
+    charts = [item for item in page if item.kind is ObjectKind.CHART]
+    assert len(charts) == 3
+    markets = {"AIA Thailand", "AIA Singapore", "AIA Malaysia"}
+    named: list[str] = []
+    for chart in charts:
+        # The banner over all three columns stays with every one of them.
+        assert "ASEAN" in chart.member_regions
+        own = markets.intersection(chart.member_regions)
+        assert len(own) == 1, chart.member_regions
+        named.extend(own)
+        # The page-level values are still all there; only what this chart answers for narrowed.
+        assert markets.issubset(chart.regions)
+    assert sorted(named) == sorted(markets)  # one market each, all three accounted for
+    # Everything else on the page — the headings, the bullets, the footnote — stays page-wide.
+    assert all(item.member_regions == () for item in page if item.kind is not ObjectKind.CHART)
+    assert _state() == before

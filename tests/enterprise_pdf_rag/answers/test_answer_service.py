@@ -1,7 +1,8 @@
 """The answer service retrieves, calls the model exactly once, verifies and abstains."""
 
 import re
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from pathlib import Path
 from typing import Never
@@ -14,6 +15,7 @@ from enterprise_pdf_rag.adapters.answer_service import (
     AnswerSettings,
     DependencyUnavailable,
     UnknownDocument,
+    _with_member_regions,
     select_context,
 )
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
@@ -31,6 +33,7 @@ from enterprise_pdf_rag.answers.models import (
     PageWindowStat,
     TranslatedQuery,
 )
+from enterprise_pdf_rag.answers.ports import MemberText
 from enterprise_pdf_rag.answers.prompt import SYSTEM_RULES, ModelAnswer, ModelClaim
 from enterprise_pdf_rag.figures.models import Verification
 from enterprise_pdf_rag.processing.context_builder import BlockKind
@@ -821,6 +824,162 @@ def test_claim_citations_carry_the_verified_page_title(tmp_path: Path) -> None:
     result = service.answer(AnswerRequest("Thailand margin", top_k=1))
     assert result.status is AnswerStatus.ANSWERED
     assert result.claims[0].citations[0].page_title == "Thailand"
+
+
+# A page of side-by-side charts is the case page metadata alone cannot serve: AIA p.13
+# prints three `VONB ($m)` charts under their own headings, every one of them carrying the
+# same page-wide regions. Only the per-member binding the page geometry proves
+# (``MemberText.member_regions``) says which column a block came from.
+_PAGE_REGIONS = ("ASEAN", "AIA Thailand")
+_SIDE_BY_SIDE_ORDER = ("asean", "thailand", "group")
+_BOUND_COLUMNS = {"asean": ("ASEAN",), "thailand": ("AIA Thailand",)}
+_REGION_QUESTION = "VONB"
+
+
+class _ColumnBoundDocument(FakeDocument):
+    """A ``FakeDocument`` whose layout bound some of its members to one column of a page.
+
+    ``FakeMember.regions`` is the page-wide value every member of the page shares;
+    ``bound`` is the narrower per-member value ``bind_columns`` proves at mount, and only
+    that one may reach a block header.
+    """
+
+    def __init__(
+        self,
+        members: tuple[FakeMember, ...],
+        vector_order: tuple[str, ...],
+        bound: Mapping[str, tuple[str, ...]],
+    ) -> None:
+        super().__init__(members, vector_order)
+        self._bound = bound
+
+    def member_texts(self) -> tuple[MemberText, ...]:
+        return tuple(
+            replace(text, member_regions=self._bound.get(text.member_id, ()))
+            for text in super().member_texts()
+        )
+
+
+def _side_by_side_members() -> tuple[FakeMember, ...]:
+    return (
+        FakeMember(
+            "asean",
+            "VONB ($m)",
+            chart=donut_chart(("Agency", "72"), ("Partnerships", "28")),
+            page_index=12,
+            page_title="VONB by segment",
+            regions=_PAGE_REGIONS,
+        ),
+        FakeMember(
+            "thailand",
+            "VONB ($m)",
+            chart=donut_chart(("Agency", "61"), ("Partnerships", "39")),
+            page_index=12,
+            page_title="VONB by segment",
+            regions=_PAGE_REGIONS,
+        ),
+        FakeMember(
+            "group",
+            "VONB ($m) for the group as a whole",
+            page_index=12,
+            page_title="VONB by segment",
+            regions=_PAGE_REGIONS,
+        ),
+    )
+
+
+def _bound_document(bound: Mapping[str, tuple[str, ...]]) -> _ColumnBoundDocument:
+    return _ColumnBoundDocument(_side_by_side_members(), _SIDE_BY_SIDE_ORDER, bound)
+
+
+def _block_header(prompt: str, member_id: str) -> str:
+    (header,) = [
+        line
+        for line in prompt.splitlines()
+        if line.startswith("[") and f"member {member_id}]" in line
+    ]
+    return header
+
+
+def _region_ranking(members: tuple[MemberText, ...]) -> tuple[FusedHit, ...]:
+    return tuple(
+        _fused_hit(member.member_id, 1.0 - 0.01 * rank, vector=rank + 1, lexical=rank + 1)
+        for rank, member in enumerate(members)
+    )
+
+
+def test_a_member_bound_to_a_column_prints_that_region_in_its_block_header(
+    tmp_path: Path,
+) -> None:
+    document = _bound_document(_BOUND_COLUMNS)
+    service, prompts = _service(tmp_path, document, lambda prompt: declined())
+
+    service.answer(AnswerRequest(_REGION_QUESTION, top_k=3))
+
+    (prompt,) = prompts
+    assert _block_header(prompt, "asean").endswith(" regions=ASEAN")
+    assert _block_header(prompt, "thailand").endswith(" regions=AIA Thailand")
+    # The neighbouring column's heading never leaks into a block that is not in it...
+    assert "AIA Thailand" not in _block_header(prompt, "asean")
+    # ...and a member the layout could not bind prints no regions at all.
+    assert "regions=" not in _block_header(prompt, "group")
+    assert [line for line in prompt.splitlines() if "regions=" in line] == [
+        _block_header(prompt, "asean"),
+        _block_header(prompt, "thailand"),
+    ]
+
+
+def test_stamping_the_regions_leaves_an_unbound_block_untouched_and_keeps_the_order() -> None:
+    document = _bound_document(_BOUND_COLUMNS)
+    members = document.member_texts()
+
+    _, blocks = select_context(document, _region_ranking(members), len(members), members)
+    stamped = _with_member_regions(blocks, members)
+
+    assert [block.member_id for block in stamped] == [block.member_id for block in blocks]
+    assert {block.member_id: block.regions for block in stamped} == {
+        "asean": ("ASEAN",),
+        "thailand": ("AIA Thailand",),
+        "group": (),
+    }
+    # An unbound member's block is not even copied, and the blocks handed in are unchanged.
+    for before, after in zip(blocks, stamped, strict=True):
+        assert (after is before) == (before.member_id == "group")
+    assert all(block.regions == () for block in blocks)
+
+
+def test_a_document_no_column_binding_reaches_answers_exactly_as_it_did_before(
+    tmp_path: Path,
+) -> None:
+    # Behaviour parity: where the page geometry named no column, the new field is inert —
+    # same prompt, byte for byte, and the same result.
+    members = _side_by_side_members()
+    baseline, base_prompts = _service(
+        tmp_path / "plain", FakeDocument(members, _SIDE_BY_SIDE_ORDER), lambda prompt: declined()
+    )
+    before = baseline.answer(AnswerRequest(_REGION_QUESTION, top_k=3))
+    service, prompts = _service(
+        tmp_path / "unbound",
+        _ColumnBoundDocument(members, _SIDE_BY_SIDE_ORDER, {}),
+        lambda prompt: declined(),
+    )
+
+    after = service.answer(AnswerRequest(_REGION_QUESTION, top_k=3))
+
+    assert prompts == base_prompts and "regions=" not in prompts[0]
+    assert (after.status, after.member_ids, after.abstain_reason) == (
+        before.status,
+        before.member_ids,
+        before.abstain_reason,
+    )
+
+
+def test_the_system_rules_bind_a_named_region_to_the_block_that_prints_it() -> None:
+    # Rule 8 is the whole defence against choosing among three identical `VONB ($m)`
+    # headers; pin the clauses that carry the contract, not the paragraph's wording.
+    assert "the block whose `regions=` names it and from no other" in SYSTEM_RULES
+    assert "whatever language the question and the region are written in" in SYSTEM_RULES
+    assert "abstain rather than pick one" in SYSTEM_RULES
 
 
 _CELL_LINE = re.compile(

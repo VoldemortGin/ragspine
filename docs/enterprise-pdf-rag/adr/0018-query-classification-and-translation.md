@@ -363,6 +363,59 @@ That is why `p06`'s `filters_expected` must enumerate its observed filter sets r
 freeze one (`any_of` in the gold schema), and why no single run may be read as the retrieval
 behaviour of a translated question.
 
+## Amendment 4 (2026-09-22): the sampling is pinned, and this provider still varies
+
+Amendment 3 closed by saying that a translated question's retrieval input is itself model output,
+and left it there. The follow-up below — "the completion's sampling is not pinned" — is now
+**done**, and doing it produced a sharper result than the follow-up expected: pinning the
+sampling fixes *what is sent*, and does not fix *what comes back*.
+
+`adapters/json_completion.py` gained a module constant `DETERMINISTIC_TEMPERATURE = 0.0` and a
+helper `_sampling(seed)`; `JsonCompletionClient.__init__` takes `seed: int | None = None`; and
+both request bodies — the vision `complete_json` and the text `complete_text_json` — carry
+`**_sampling(self._seed)`, so `temperature` is always sent and `seed` only when one is
+configured. `core/settings.py` gained `answer_seed: int | None = 0` (`APP_ANSWER_SEED`), and
+`adapters/http/app.py` passes `seed=settings.answer_seed` to the one document-catalog client. The
+provider accepts all of it: a direct probe of `gpt-5.6-luna` at
+`https://ai.willer.tech/v1/chat/completions` returned HTTP 200 for no sampling, for
+`temperature=0`, and for `temperature=0` together with `seed=0` — so the `top_p` fallback the
+follow-up contemplated was neither needed nor written.
+
+**The sampling sits inside the request body, which is exactly what the request fingerprint
+digests, so every existing completion cache entry misses.** That is deliberate and accepted: one
+release should have one sampling. It is also visible without re-running anything, because the
+`contexts/<fingerprint>.json` envelope is the wire body as sent (ADR 0018's own by-product) and
+now records `"temperature": 0.0, "seed": 0`. Verified in the real run.
+
+**What it bought, measured.** Two full cold runs over the same pinned release
+(`22127d0fad13` / `42939d6a4e87`), each against its own empty `APP_INGESTION_DIR`, produced
+**byte-identical request fingerprints for 21 of the 22 model calls** — and **9 of the 22 answers
+still differ in prose**. The cleanest single proof is the translation call. Request fingerprint
+`2b1a2d74…` is byte-identical in both runs (same body, `temperature: 0.0`, `seed: 0`), and it
+returned:
+
+| run | response |
+| --- | --- |
+| 1 | `{"english_query":"Distribution channel proportion in 2026 first half"}` |
+| 2 | `{"english_query":"2026 first half distribution channel proportion"}` |
+
+The 22nd fingerprint differed only as a consequence of that one: a different restatement is a
+different lexical query, hence a different BM25 order, hence a different member set for
+`p06-donut-zh`, whose verdict did not change. Verdicts were identical across the two runs, and
+every claim and citation matched except `p06`'s member set.
+
+So `temperature` and `seed` pin **what is sent**, not what this provider returns. **The engine is
+deterministic** — the same question derives the same filters, seats the same members and builds
+the same prompt — **and the model is not.** Amendment 3's sentence therefore stands, but its cause
+is now located: what a translated question inherits is not an artefact of the translation
+*feature*, it is the provider's decoding. The immutable completion cache remains the only real
+repeatability guarantee this package has; `p15-cache-repeat-en` passes on every run with
+`llm_live_calls=0`.
+
+One cost is worth naming beside the cache miss: the alias change of the same branch rewrote
+`SYSTEM_RULES` and `build_prompt`'s lead-in, so the prompt text moved too. The whole completion
+cache is invalid on both counts at once, and the next cold run pays for all of it.
+
 ## Rejected alternatives
 
 - **Dropping the vector channel entirely.** The probe reaches its ceiling at always-BM25, so
@@ -443,14 +496,38 @@ behaviour of a translated question.
   member-level, in-column region binding: the three charts' bboxes are cleanly separable on the
   x axis against the three country headings, so the binding is derivable, and the chart IR
   already admits the weakness in its own confidence note, `the category-to-value association is
-  unproven`. Not implemented. *(The earlier wording here — that `k02` was a smaller gap because
+  unproven`. ~~Not implemented.~~ **Implemented 2026-09-22** on branch
+  `fix/determinism-alias-column` as the pure module `processing/column_regions.py`, recorded in
+  [ADR 0013](0013-page-metadata-and-prefilters.md)'s amendment: a page's verified region spans are
+  bound to the chart column they stand over, all-or-nothing, with no model call, no re-indexing
+  and no snapshot id change. Both cases now answer **$514m**, citing
+  `points.point-1h26.value` on `a05e27202ea4…`, p.13, and both gold cases moved from
+  `case_class: abstain` / `known_gap: true` to `case_class: positive` / `status: answered` with
+  `forbidden_numbers: ["294", "232"]`, so answering a neighbouring column's number under
+  Thailand's name fails by construction. **They are fixed for different reasons, and the
+  difference belongs to this ADR:** `k01` derives `{periods: [1H2026], regions: [Thailand]}`,
+  unrelaxed, and the pre-filter now admits only the Thailand chart — its prompt carried exactly
+  one p.13 chart. `k02` still derives `regions: []` — the vocabulary is verbatim English, `泰国`
+  matches none of it, and Decision 4's content-word probe still finds `VONB` scoreable on its own
+  and never translates the question, so Amendment 1's union has nothing to add — and all three
+  charts still reach its prompt. It answers correctly only because each block now prints its own
+  `regions=` and `SYSTEM_RULES` rule 8 forbids answering a region question from a block whose
+  `regions=` does not name it. **The retrieval-side half of this gap is closed for `k01` and
+  still open for `k02`**; what carries `k02` is the prompt, not the filter.
+  *(The earlier wording here — that `k02` was a smaller gap because
   the region filter matched nothing, and that Amendment 1 had addressed it — is no longer
   true.)*
 - **Follow-up: the completion's sampling is not pinned.** `adapters/json_completion.py` sets no
   `temperature`, `top_p` or `seed`, so synthesis runs on the provider's defaults, and the
-  roughly one flaky case per live run above is the model, not the engine. Pinning them would
+  roughly one flaky case per live run above is the model, not the engine. ~~Pinning them would
   make the gold set repeatable, and would also invalidate the whole completion cache and force
-  a full re-run of the live set — a call to be made deliberately, not in passing. Not done.
+  a full re-run of the live set — a call to be made deliberately, not in passing. Not done.~~
+  **Done, 2026-09-22 — Amendment 4.** The struck sentence was half right: the cache invalidation
+  and the full re-run happened exactly as predicted and were paid. The gold set did **not** become
+  repeatable. Two cold runs sent byte-identical bodies for 21 of 22 calls, under
+  `temperature = 0.0` and `seed = 0`, and still worded 9 of 22 answers differently — including a
+  translation call whose request fingerprint was identical to the byte. What is pinned is the
+  request; this provider does not honour greedy decoding.
 - `answers/` may import no SDK, so `query_mode.tokenize_query` restates the lexical channel's
   tokenizer instead of importing it; `test_query_mode` pins the two to identical output over
   mixed English / CJK input, because a token budget is meaningless unless it counts the tokens

@@ -120,15 +120,40 @@ class PinnedRelease:
             self._blocks[member_id] = block
         return block
 
-    def member_of(self, page_index: int, field_path: str) -> str:
-        """The pinned member whose evidence block prints ``field_path`` on that page."""
+    def member_of(self, page_index: int, field_path: str, text: str | None = None) -> str:
+        """The pinned member whose evidence block prints ``field_path`` on that page.
+
+        A path is unique to a member only *within* a member: a page of side-by-side charts
+        prints the same ``points.<id>.value`` once per chart, so the path alone names three
+        members and picking the first would silently anchor a claim on a neighbour. When a
+        page prints the path more than once, the claim's own ``text`` decides — the member
+        whose printed line actually carries it — and an ambiguity that ``text`` does not
+        settle is an error, never a guess.
+        """
+        printed: dict[str, str] = {}
         for member in self.members:
             if member.page_index != page_index:
                 continue
             for line in self.block(member.member_id).prompt_text().splitlines():
                 if line.startswith(field_path + ":"):
-                    return member.member_id
-        raise AssertionError(f"The pinned release prints no {field_path} on page {page_index}")
+                    printed[member.member_id] = line
+                    break
+        if not printed:
+            raise AssertionError(f"The pinned release prints no {field_path} on page {page_index}")
+        if len(printed) == 1:
+            return next(iter(printed))
+        narrowed = [
+            member_id
+            for member_id, line in printed.items()
+            if text is not None and text in line.removeprefix(field_path + ":")
+        ]
+        if len(narrowed) != 1:
+            raise AssertionError(
+                f"Page {page_index} prints {field_path} on {len(printed)} members and "
+                f"text {text!r} names {len(narrowed)} of them: "
+                + " | ".join(f"{member_id[:12]} {line}" for member_id, line in printed.items())
+            )
+        return narrowed[0]
 
 
 class ReplayMount:
@@ -210,7 +235,7 @@ def _model_answer(release: PinnedRelease, case: NlGoldCase, prompt: str) -> Mode
         claims.append(
             ModelClaim(
                 claim_id=claim.claim_id,
-                member_id=release.member_of(claim.page_index, claim.field_path),
+                member_id=release.member_of(claim.page_index, claim.field_path, claim.text),
                 kind=claim.kind,
                 field_path=claim.field_path,
                 text=claim.text,
@@ -234,7 +259,8 @@ def _replay(
     assert output is not None
     targets = tuple(
         dict.fromkeys(
-            release.member_of(claim.page_index, claim.field_path) for claim in output.claims
+            release.member_of(claim.page_index, claim.field_path, claim.text)
+            for claim in output.claims
         )
     )
     document = ReplayMount(release, targets)
@@ -294,6 +320,8 @@ def test_every_gold_anchor_is_printed_by_the_pinned_evidence(release: PinnedRele
             for required in requirement.alternatives:
                 if required.field_path is None:
                     continue
-                member_id = release.member_of(required.page_index, required.field_path)
+                member_id = release.member_of(
+                    required.page_index, required.field_path, required.text
+                )
                 printed = release.block(member_id).prompt_text()
                 assert required.field_path + ":" in printed

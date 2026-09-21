@@ -27,6 +27,10 @@ class MemberText:
     page_type: str | None = None
     periods: tuple[str, ...] = ()  # canonical forms only (``1H2026``)
     regions: tuple[str, ...] = ()  # verbatim page values
+    # The subset of ``regions`` the page geometry binds to this member alone, for a page
+    # that prints several charts side by side under their own headings. Empty means the
+    # page could not be read as columns, and the page-level values stand.
+    member_regions: tuple[str, ...] = ()
     # The ADR 0013 contextual header prefixed to ``text``; ``body`` is what follows it.
     header: str = ""
     # The member's page rectangle, for reading order within a page; absent on snapshots

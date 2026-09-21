@@ -22,11 +22,22 @@ from enterprise_pdf_rag.adapters.draft_publication import DraftPublication
 from enterprise_pdf_rag.adapters.http.processing_schemas import ProcessingEnvelope
 from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
+from enterprise_pdf_rag.answers.member_filter import (
+    candidate_members,
+    member_matches,
+    region_vocabulary,
+)
+from enterprise_pdf_rag.answers.models import MemberFilters
+from enterprise_pdf_rag.answers.ports import MemberText
 from enterprise_pdf_rag.documents.models import AssetRef
 from enterprise_pdf_rag.figures.ports import EmbeddingPort
 from enterprise_pdf_rag.processing.index_text import chart_index_text
 from enterprise_pdf_rag.processing.models import ObjectKind
 from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit, RetrievalIndex
+from tests.enterprise_pdf_rag.adapters.column_page_helpers import (
+    ColumnPage,
+    publish_column_page,
+)
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
     TABLE_BBOX,
     ingest_generic_semantics,
@@ -449,6 +460,97 @@ def test_member_texts_split_the_contextual_header_from_their_body(
         hit = PinnedRetrievalHit(published.retrieval_snapshot_id, item.member_id, 1.0)
         assert item.body == mounted.resolve(hit).description.text
         assert item.bbox is not None
+
+
+def _mounted_columns(page: ColumnPage) -> MountedDocument:
+    """Mount the authored side-by-side page read-only; the release must scan as ready."""
+    entry = scan_catalog(page.root).entry(page.document_id)
+    assert entry is not None and entry.retrieval_status == "ready", entry
+    return mount_document(entry, embedder=None)
+
+
+def _left_to_right(texts: tuple[MemberText, ...]) -> list[MemberText]:
+    """The page's chart members in the order they are printed across the page."""
+    charts = [item for item in texts if item.kind is ObjectKind.CHART]
+    assert all(item.bbox is not None for item in charts)
+    return sorted(charts, key=lambda item: item.bbox[0] if item.bbox else 0.0)
+
+
+def test_member_texts_bind_each_side_by_side_chart_to_the_heading_standing_over_it(
+    tmp_path: Path,
+) -> None:
+    """Three charts on one page are three different markets, and the geometry says which.
+
+    Page metadata is page-wide (ADR 0013), so all three charts carry all three headings and
+    no filter can tell them apart. The fixture prints the same two labels in every column on
+    purpose: the heading each chart stands under is then the only thing that distinguishes
+    them, so an assertion about it cannot pass by accident.
+    """
+    page = publish_column_page(tmp_path / "ingestion")
+    mounted = _mounted_columns(page)
+
+    texts = mounted.member_texts()
+    charts = _left_to_right(texts)
+    assert len(charts) == len(page.headings)
+    for chart, heading in zip(charts, page.headings, strict=True):
+        # The page's own banner plus this column's heading — never a neighbour's.
+        assert chart.member_regions == (page.banner, heading)
+        assert all(other not in chart.member_regions for other in page.headings if other != heading)
+        # Nothing is lost: the page-level tuple still carries every value the page prints.
+        assert chart.regions == page.page_regions
+        # The lexical channel reads one more phrase; the vectors read exactly what they did.
+        assert chart.header == f"{page.header} | {heading}"
+        assert chart.text == f"{chart.header}\n{chart.body}"
+        assert chart.body == page.chart_body
+        hit = PinnedRetrievalHit(mounted.retrieval_snapshot_id, chart.member_id, 1.0)
+        assert chart.body == mounted.resolve(hit).description.text
+    (band,) = (item for item in texts if item.kind is ObjectKind.TEXT)
+    # A member the geometry places in no column keeps answering for the whole page.
+    assert band.member_regions == ()
+    assert band.regions == page.page_regions
+    assert band.header == page.header and band.text == f"{band.header}\n{band.body}"
+    # Narrowing who a value belongs to must not shrink what a question can be parsed against.
+    assert region_vocabulary(texts) == page.page_regions
+
+
+def test_a_region_filter_admits_the_chart_under_that_heading_and_not_its_neighbours(
+    tmp_path: Path,
+) -> None:
+    """What the binding is for: the column answers for itself, the page still answers too."""
+    page = publish_column_page(tmp_path / "ingestion")
+    mounted = _mounted_columns(page)
+
+    texts = mounted.member_texts()
+    thailand, singapore, malaysia = _left_to_right(texts)
+    (band,) = (item for item in texts if item.kind is ObjectKind.TEXT)
+    filters = MemberFilters(regions=(page.headings[0],))
+
+    assert member_matches(thailand, filters)
+    assert not member_matches(singapore, filters) and not member_matches(malaysia, filters)
+    # The heading band really does print all four values, so it stays a candidate.
+    assert candidate_members(texts, filters) == frozenset({thailand.member_id, band.member_id})
+
+
+@pytest.mark.parametrize("charts", (1, 2))
+def test_a_page_that_does_not_read_as_columns_keeps_every_member_page_wide(
+    tmp_path: Path, charts: int
+) -> None:
+    """One chart is never ambiguous; a heading over no chart means we misread the layout.
+
+    Either way the binding must cost nothing: the page-level values stand, and every member's
+    index text is byte-identical to what it was before any of this existed.
+    """
+    page = publish_column_page(tmp_path / "ingestion", charts=charts)
+    mounted = _mounted_columns(page)
+
+    texts = mounted.member_texts()
+    assert len(_left_to_right(texts)) == charts
+    for item in texts:
+        assert item.member_regions == ()
+        assert item.regions == page.page_regions
+        assert item.header == page.header
+        assert item.text == f"{page.header}\n{item.body}"
+    assert all(item.body == page.chart_body for item in _left_to_right(texts))
 
 
 def test_chart_and_displayed_contexts_requalify_only_pinned_chart_members(

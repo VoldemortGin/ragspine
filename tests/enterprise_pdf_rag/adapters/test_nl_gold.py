@@ -101,8 +101,11 @@ def test_the_frozen_gold_set_loads_and_covers_every_case_class() -> None:
     for case in gold.cases:
         assert case.model_output is not None or case.request.repeat_of is not None
         assert case.question.text
-    known_gaps = [case for case in gold.cases if case.expected.known_gap]
-    assert known_gaps and all(case.expected.known_gap_detail for case in known_gaps)
+    # A gap is a debt, not a fixture: the rule worth pinning is that a case declaring one
+    # says what it is, never that the file still owes one. The frozen set currently declares
+    # no gap at all - the last two were fixed and flipped to positive cases - and this
+    # passes on an empty list while still failing the day a silent gap is added.
+    assert all(case.expected.known_gap_detail for case in gold.cases if case.expected.known_gap)
     adversarial = [case for case in gold.cases if case.case_class == "adversarial"]
     assert adversarial and all(case.offline_only for case in adversarial)
 
@@ -174,9 +177,10 @@ def test_a_grounded_only_case_cannot_also_freeze_a_claim() -> None:
 
 
 def test_a_known_gap_must_say_what_the_gap_is() -> None:
+    # Synthesised rather than found: the frozen set declares no gap, and the loader's rule
+    # must keep being guarded whatever the file happens to contain.
     mutated = payload()
-    case = next(item for item in mutated["cases"] if item["expected"].get("known_gap"))
-    case["expected"]["known_gap_detail"] = None
+    mutated["cases"][0]["expected"] |= {"known_gap": True, "known_gap_detail": None}
 
     with pytest.raises(ValidationError, match="must say what the gap is"):
         reload(mutated)

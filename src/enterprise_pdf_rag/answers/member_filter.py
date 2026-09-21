@@ -60,8 +60,11 @@ def member_matches(member: MemberText, filters: MemberFilters) -> bool:
         for have in member.periods
     ):
         return False
+    # A member the page geometry could name on its own answers for itself; everyone else
+    # still answers for the whole page.
+    have_regions = member.member_regions or member.regions
     return not filters.regions or any(
-        _region_matches(wanted, have) for wanted in filters.regions for have in member.regions
+        _region_matches(wanted, have) for wanted in filters.regions for have in have_regions
     )
 
 

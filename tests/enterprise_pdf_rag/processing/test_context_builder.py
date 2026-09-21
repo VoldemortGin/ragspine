@@ -1,5 +1,6 @@
 """Context blocks carry only stored evidence and are dropped whole under budget."""
 
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -264,6 +265,40 @@ def test_chart_block_exposes_every_ir_field_with_its_element_ids() -> None:
     )
 
 
+_REGIONS = ("ASEAN", "AIA Thailand")
+
+
+def test_a_block_bound_to_a_page_region_prints_it_after_the_verification() -> None:
+    # A page printing three `VONB ($m)` charts side by side renders three identical
+    # headers, and the model then picks a column at random and cites it with genuine
+    # provenance. The region is the only thing in the header that tells them apart.
+    built = build_context_block(_chart_context())
+    block = replace(built, regions=_REGIONS)
+    first = block.prompt_text().splitlines()[0]
+    assert first == (
+        f"[member {block.member_id}] kind=chart page_index=2 "
+        "scope=displayed-percent-bar-lookup-v1 verification=verified "
+        "regions=ASEAN; AIA Thailand"
+    )
+    # The alias renames only the head: the regions stay last and are spelled the same way.
+    aliased = block.prompt_text("m3").splitlines()[0]
+    assert aliased == f"[m3 | member {block.member_id}] " + first.split("] ", 1)[1]
+    # Nothing under the header line moves; the evidence renders exactly as it always did.
+    assert block.prompt_text().splitlines()[1:] == built.prompt_text().splitlines()[1:]
+
+
+def test_a_block_with_no_regions_renders_byte_for_byte_what_it_always_did() -> None:
+    # The field defaults to empty and the default has to be invisible: a block built the
+    # same way with the default spelled out prints exactly the same characters.
+    built = build_context_block(_chart_context())
+    explicit = replace(built, regions=())
+    assert built.regions == ()
+    assert built.prompt_text() == explicit.prompt_text()
+    assert built.prompt_text("m1") == explicit.prompt_text("m1")
+    assert "regions=" not in built.prompt_text()
+    assert built.prompt_text().splitlines()[0].endswith("verification=verified")
+
+
 def test_table_block_lists_cells_with_content_state() -> None:
     block = build_context_block(_table_context())
     assert block.kind is BlockKind.TABLE
@@ -491,6 +526,20 @@ def test_budget_drops_whole_blocks_and_keeps_order() -> None:
         budget_blocks((small,), max_chars=0)
 
 
+def test_budget_sizes_a_block_by_the_rendering_its_regions_lengthen() -> None:
+    plain = build_context_block(_list_context())
+    regioned = replace(plain, regions=_REGIONS)
+    suffix = " regions=ASEAN; AIA Thailand"
+    assert len(regioned.prompt_text()) == len(plain.prompt_text()) + len(suffix)
+    # Sizing reads the rendering, so a region-bound header pays for its own characters.
+    assert budget_blocks((regioned,), max_chars=len(regioned.prompt_text())) == (regioned,)
+    assert budget_blocks((regioned,), max_chars=len(plain.prompt_text())) == ()
+    # And the standing rule still holds around it: a later, smaller block takes the room.
+    text = build_context_block(_text_context())
+    assert len(regioned.prompt_text()) > len(text.prompt_text())
+    assert budget_blocks((regioned, text), max_chars=len(text.prompt_text())) == (text,)
+
+
 def test_blocks_are_immutable_values() -> None:
     block = build_context_block(_text_context())
     assert isinstance(block, ContextBlock)
@@ -576,6 +625,20 @@ def test_page_context_block_prints_neighbours_without_any_citable_path() -> None
     for prefix in _CITABLE_PREFIXES:
         assert prefix not in rendered
     assert block.chars == len(rendered)
+
+
+def test_page_context_block_has_no_region_field_and_prints_none() -> None:
+    # Regions belong to the citable member blocks alone. The page block must stay
+    # uncitable, so it may not grow a header field a claim could try to name.
+    block = build_page_context_block(
+        (_page_member("m-1", "Operating profit rose."),),
+        page_index=12,
+        page_title="VONB by segment",
+        max_chars=500,
+    )
+    assert block is not None
+    assert not hasattr(block, "regions")
+    assert "regions=" not in block.prompt_text()
 
 
 def test_page_context_head_omits_a_missing_title_or_section() -> None:

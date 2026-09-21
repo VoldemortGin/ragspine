@@ -1064,15 +1064,37 @@
     },
     {
       "case_id": "k01-region-thailand-en",
-      "case_class": "abstain",
+      "case_class": "positive",
       "question": {
         "en": "Thailand 1H26 VONB"
       },
       "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
       "expected": {
-        "status": "abstained",
-        "abstain_reason": "model_declined",
-        "abstain_detail_contains": "not_in_context",
+        "status": "answered",
+        "min_claims": 1,
+        "required_claims": [
+          {
+            "kind": "chart_value",
+            "page_index": 12,
+            "field_path": "points.point-1h26.value",
+            "quote": "514",
+            "text": "514",
+            "value": "514",
+            "unit": "$m"
+          }
+        ],
+        "required_citation_fields": [
+          "member_id",
+          "page_index",
+          "field_path",
+          "quote",
+          "evidence_ids",
+          "page_title"
+        ],
+        "forbidden_numbers": [
+          "294",
+          "232"
+        ],
         "filters_expected": {
           "periods": [
             "1H2026"
@@ -1081,44 +1103,78 @@
             "Thailand"
           ]
         },
-        "filters_relaxed": false,
-        "known_gap": true,
-        "known_gap_detail": "Retrieval now reaches the page, and that made this gap worse rather than smaller. Whole-word region matching (ADR 0018 Amendment 1) lets `Thailand` match the verified value `AIA Thailand`, and reading a claim's unit (`294$m` against display `294` + unit `$m`) removed the accidental second guard that used to stop the answer. p.13 prints three `VONB ($m)` charts side by side - AIA Thailand 514, AIA Singapore 294, AIA Malaysia 232 - and region metadata is page-level, so every member on that page carries all four region values and no filter can separate the columns. Across four 2026-09-21 cold re-tests the two Thailand cases answered eight times: `$294m` (Singapore) five times and `$232m` (Malaysia) three times, and Thailand's own `$514m` not once - the model binds a column at random and cites it with real, verbatim provenance. That is a wrong number presented as a sourced one, which is strictly worse than the refusal this case used to record, so the expectation stays `abstained`: it must not be frozen as `answered` until a member-level region binding exists. The three charts are separable on the x axis against the three country headings, so the binding is derivable; the chart IR already admits the weakness in its own confidence note, `the category-to-value association is unproven`."
+        "filters_relaxed": false
       },
       "model_output": {
-        "abstain": true,
-        "abstain_reason": "not_in_context"
+        "answer": "Thailand's 1H26 VONB was $514m.",
+        "claims": [
+          {
+            "claim_id": "c1",
+            "kind": "chart_value",
+            "page_index": 12,
+            "field_path": "points.point-1h26.value",
+            "text": "514"
+          }
+        ]
       },
-      "rationale": "Keeps the region-binding gap visible. The 2026-09-21 re-test moved it from a safe refusal to a wrong sourced number, so freezing today's behaviour would freeze an error; the case reports as a moved known gap until the binding exists.",
-      "evidence": "data/validation/generic-chat-2026-09-21/gold-fix/nl-gold-cold-2"
+      "rationale": "The English half of the column-binding fix: the region pre-filter now admits only the chart the page's own layout binds to Thailand, so the answer is that column's number and not a neighbour's. p.13 prints three `VONB ($m)` charts side by side — AIA Thailand 514, AIA Singapore 294, AIA Malaysia 232 — and until 2026-09-22 page-level region metadata gave all three the same four region values, so nothing could tell the columns apart: across four cold runs the two Thailand questions answered eight times, `$294m` five times and `$232m` three times, and `$514m` not once. A member-level, in-column binding now reads the page's own layout (`processing/column_regions.py`): each chart's rectangle takes the region heading standing over it, and the binding is all-or-nothing, so a page that does not read as columns keeps the page-level values it always had. The chart's own `member_regions` then narrows the pre-filter, the region word joins its index-projection header, and the prompt block prints `regions=` so the model can tell the three charts apart at all. `forbidden_numbers` pins the neighbours out of the prose: answering 294 or 232 under Thailand's name is the exact failure this case was frozen for.",
+      "evidence": "data/validation/generic-chat-2026-09-22/fix3/nl-gold-cold-1"
     },
     {
       "case_id": "k02-region-thailand-zh",
-      "case_class": "abstain",
+      "case_class": "positive",
       "question": {
         "zh": "泰国 1H26 VONB"
       },
       "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
       "expected": {
-        "status": "abstained",
-        "abstain_reason": "model_declined",
-        "abstain_detail_contains": "not_in_context",
+        "status": "answered",
+        "min_claims": 1,
+        "required_claims": [
+          {
+            "kind": "chart_value",
+            "page_index": 12,
+            "field_path": "points.point-1h26.value",
+            "quote": "514",
+            "text": "514",
+            "value": "514",
+            "unit": "$m"
+          }
+        ],
+        "required_citation_fields": [
+          "member_id",
+          "page_index",
+          "field_path",
+          "quote",
+          "evidence_ids",
+          "page_title"
+        ],
+        "forbidden_numbers": [
+          "294",
+          "232"
+        ],
         "filters_expected": {
           "periods": [
             "1H2026"
           ],
           "regions": []
         },
-        "filters_relaxed": false,
-        "known_gap": true,
-        "known_gap_detail": "The Chinese counterpart, and it no longer fails for the reason it was frozen for. `VONB` scores lexically on its own, so the content-word probe (ADR 0018 Decision 4) finds the question scoreable and no translation is made; `regions` is still empty, as recorded. But the question now retrieves p.13 and answers with whichever of the three columns the model happens to bind - `$294m` (Singapore) or `$232m` (Malaysia), never Thailand's own `$514m` - under Thailand's name, exactly as in `k01`. Same root cause (page-level region metadata cannot separate three side-by-side country charts), same decision: the expectation stays `abstained` rather than freeze a wrong number as correct."
+        "filters_relaxed": false
       },
       "model_output": {
-        "abstain": true,
-        "abstain_reason": "not_in_context"
+        "answer": "泰国 1H26 VONB 为 $514m。",
+        "claims": [
+          {
+            "claim_id": "c1",
+            "kind": "chart_value",
+            "page_index": 12,
+            "field_path": "points.point-1h26.value",
+            "text": "514"
+          }
+        ]
       },
-      "rationale": "The Chinese counterpart of the same region-binding gap. It is kept separate because its filter disappears instead of matching, and that difference must stay visible even though both now answer with the wrong column.",
-      "evidence": "data/validation/generic-chat-2026-09-21/gold-fix/nl-gold-cold-2"
+      "rationale": "The Chinese half: `泰国` never derives a region filter (the vocabulary is English) and `VONB` scores lexically on its own, so no translation is made and all three charts reach the prompt — this case is answered only because each block now prints the region its column belongs to. p.13 prints three `VONB ($m)` charts side by side — AIA Thailand 514, AIA Singapore 294, AIA Malaysia 232 — and until 2026-09-22 page-level region metadata gave all three the same four region values, so nothing could tell the columns apart: across four cold runs the two Thailand questions answered eight times, `$294m` five times and `$232m` three times, and `$514m` not once. A member-level, in-column binding now reads the page's own layout (`processing/column_regions.py`): each chart's rectangle takes the region heading standing over it, and the binding is all-or-nothing, so a page that does not read as columns keeps the page-level values it always had. The chart's own `member_regions` then narrows the pre-filter, the region word joins its index-projection header, and the prompt block prints `regions=` so the model can tell the three charts apart at all. `forbidden_numbers` pins the neighbours out of the prose: answering 294 or 232 under Thailand's name is the exact failure this case was frozen for.",
+      "evidence": "data/validation/generic-chat-2026-09-22/fix3/nl-gold-cold-1"
     },
     {
       "case_id": "x01-derived-number-in-prose",

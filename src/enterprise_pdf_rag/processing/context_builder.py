@@ -152,6 +152,9 @@ class ContextBlock:
     formula_proof_level: str | None = None
     formula_tokens: tuple[FormulaTokenEvidence, ...] = ()
     grid_verification: Verification = Verification.PENDING
+    # The part of the page this block belongs to, when the page's own layout binds it to one
+    # (a slide of side-by-side charts under their own headings). Empty on every other block.
+    regions: tuple[str, ...] = ()
 
     def prompt_text(self, alias: str | None = None) -> str:
         """Deterministic rendering; every citable path appears verbatim as a line prefix.
@@ -162,10 +165,13 @@ class ContextBlock:
         the rendering is byte-for-byte what it has always been.
         """
         head = "member " + self.member_id if alias is None else f"{alias} | member {self.member_id}"
-        lines = [
+        first = (
             f"[{head}] kind={self.kind.value} page_index={self.page_index} "
             f"scope={self.scope} verification={self.verification.value}"
-        ]
+        )
+        if self.regions:
+            first += " regions=" + "; ".join(self.regions)
+        lines = [first]
         if self.kind is BlockKind.CHART:
             lines.append(f"chart grammar={self.grammar}")
             fields = {field.field_path: field for field in self.chart_fields}

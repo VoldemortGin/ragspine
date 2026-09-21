@@ -31,6 +31,53 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ### Changed
 
+- **One release, one sampling: every completion request pins `temperature`, and a `seed` where one
+  is configured** (`enterprise_pdf_rag`,
+  [ADR 0018 amendment 4](docs/enterprise-pdf-rag/adr/0018-query-classification-and-translation.md)).
+  `adapters/json_completion.py` sent no sampling at all, so a call ran on whatever the provider's
+  defaults happened to be. Both request bodies — the vision `complete_json` and the text
+  `complete_text_json` — now carry `DETERMINISTIC_TEMPERATURE = 0.0`, and a `seed` when
+  `JsonCompletionClient(seed=…)` was given one: `Settings.answer_seed` (`APP_ANSWER_SEED`, default
+  `0`), passed by the app factory to the one document-catalog client. The configured provider takes
+  every shape of it — a direct probe of `gpt-5.6-luna` returned HTTP 200 for no sampling, for
+  `temperature=0`, and for `temperature=0` with `seed=0` — so the `top_p` fallback this follow-up
+  contemplated was neither needed nor written. **It invalidates every existing completion cache
+  entry**, because the sampling sits inside the request body and the request body is what the
+  fingerprint digests; that is the deliberate price of one release having one sampling, and it
+  needs no re-run to inspect, since the `contexts/<fingerprint>.json` envelope is the wire body as
+  sent and now records `"temperature": 0.0, "seed": 0`. **What it does not buy is a repeatable
+  answer.** Two cold runs over the pinned AIA release, each against its own empty ingestion
+  directory, sent byte-identical request fingerprints for **21 of the 22 model calls** and still
+  worded **9 of the 22 answers** differently. The clearest case is the translation call, whose
+  fingerprint `2b1a2d74…` was identical to the byte and which returned
+  `Distribution channel proportion in 2026 first half` in one run and
+  `2026 first half distribution channel proportion` in the other; the one differing fingerprint is
+  a consequence of that — a different restatement is a different lexical query, a different BM25
+  order and a different member set for `p06-donut-zh`, whose verdict did not change. The engine is
+  deterministic — same question, same filters, same seats, same prompt — and this provider does not
+  honour greedy decoding. The immutable completion cache remains the only real repeatability
+  guarantee (`p15-cache-repeat-en`, `llm_live_calls=0`, every run).
+
+- **A member is cited by a short alias, not by sixty-four hexadecimal characters**
+  (`enterprise_pdf_rag`,
+  [ADR 0011](docs/enterprise-pdf-rag/adr/0011-document-catalog-and-verified-answer-chain.md)
+  follow-up). A claim names its evidence by the member's content address, and the prompt asked the
+  model to transcribe all 64 hex characters of it. On a real run it copied **57** of them and
+  `p05-donut-title-only-en` was lost whole to `model_output_invalid: unknown member` — a correct
+  answer thrown away over a transcription. The prompt now mints `m1 … mN` over the blocks that
+  really reach it: `ContextBlock.prompt_text` takes an optional `alias` and prints
+  `[m3 | member <64hex>] kind=chart page_index=12 …`, `answers/prompt.member_aliases` numbers the
+  citable blocks in printed order (a `page_context` block gets none, since rule 6 forbids citing
+  it), and `resolve_member_aliases` rewrites a claim's alias back to the real id before anything is
+  verified. A full id is still accepted "only when every one of its characters is copied", and a
+  string nobody minted is left exactly as written so the verifier still rejects it as
+  `unknown member`: nothing is guessed or repaired. Called without an alias `prompt_text` is
+  byte-for-byte what it always was, so the listwise rerank judge is untouched. Aliases are minted
+  after `budget_blocks`, from the blocks that really reach the prompt, and resolved before
+  `verify_claims`, so the verifier, `ClaimCitation.member_id`, `AnswerResult.member_ids` and the
+  HTTP contract all keep naming members by their real 64-hex id — the alias never leaves the one
+  call. Cost: the prompt text changed, so this invalidates the completion cache as well.
+
 - **A short question must be a short *label* to take BM25 alone**
   (`enterprise_pdf_rag`, [ADR 0018 amendment 2](docs/enterprise-pdf-rag/adr/0018-query-classification-and-translation.md)).
   `classify_query` sent any question of at most `MAX_BM25_ONLY_TOKENS` (5) tokens to the lexical
@@ -193,6 +240,47 @@ All notable changes to RAGSpine are documented here. This project follows Semant
   bare `11` in the question still cannot ground `11%` in the prose.
 
 ### Added
+
+- **A page's regions are bound to the column they stand over** (`enterprise_pdf_rag`,
+  [ADR 0013 amendment 1](docs/enterprise-pdf-rag/adr/0013-page-metadata-and-prefilters.md)).
+  Region metadata was page-level, so p.13 of the AIA release — three `VONB ($m)` charts side by
+  side, AIA Thailand **514**, AIA Singapore **294**, AIA Malaysia **232** — gave all three charts
+  the same four region values, no filter could tell them apart, and across four cold runs the two
+  Thailand questions were answered eight times and not once correctly. The new pure module
+  `processing/column_regions.py` binds a page's verified region spans to the chart column each one
+  stands over: `bind_columns(regions, columns)` over `PageRegionSpan(text, bbox)` and
+  `PageColumn(member_id, bbox)`, with `MIN_COLUMNS = 2`, `MAX_COLUMN_HEADING_WIDTH_SHARE = 0.5`
+  (a heading as wide as the page is the page's banner — `ASEAN` — and stays page-wide) and
+  `MIN_HEADING_OVERLAP_SHARE = 0.5`. It is **all-or-nothing**: unless every column receives a
+  heading and every heading finds a column it returns `EMPTY` and the caller keeps the page-level
+  values it always used, because a layout that cannot be read must cost nothing rather than guess.
+  No model call, no I/O, nothing on disk rewritten — `MemberText.member_regions` is an in-memory
+  mount-time projection, so **no snapshot id changes and nothing is re-indexed**, and a release
+  published before this module existed binds its columns at mount. `MountedDocument` supplies the
+  geometry best-effort from each CHART member's `member_anchor` and from the page's source-text
+  sidecar (the rectangles of the spans a region value was copied from, `MetadataEvidence.span_ids`),
+  exactly as `member_anchor` already worked: geometry read for a refinement must never fail a mount
+  the evidence itself supports. `member_matches` now filters on `member_regions or regions` while
+  `region_vocabulary` still reports the whole page-level vocabulary, so nothing shrinks what a
+  question can be parsed against; and the bound heading joins that member's contextual index header,
+  so BM25 scores `AIA Thailand` on the Thailand chart. The stored vectors are untouched, so the
+  lexical channel reads one phrase the embedding never saw — deliberate, and exactly why no
+  published release needs re-indexing. A filter alone was not enough: `ContextBlock` also carries
+  `regions`, and `SYSTEM_RULES` rule 8 says a question naming a region is answered from the block
+  whose `regions=` names it and no other, in whatever language either is written, and otherwise
+  abstains. On the real release p.13 binds its three charts to `AIA Thailand` / `AIA Singapore` /
+  `AIA Malaysia` and p.12 binds its two to `Domestic` and `Chinese Mainland Visitor (CMV)`;
+  **every other multi-chart page returns `EMPTY`** and keeps page-level regions, which is the safe
+  path working as intended. `k01-region-thailand-en` and `k02-region-thailand-zh` both answer
+  `514` `$m` from `points.point-1h26.value` on `a05e27202ea4…`, p.13, and move from
+  `case_class: abstain` / `known_gap: true` to `case_class: positive` / `status: answered` with
+  `forbidden_numbers: ["294", "232"]`, so a neighbouring column's number under Thailand's name
+  fails the case by construction — **the gold set now carries zero known gaps**. The two are fixed
+  for different reasons and the ADR says so: `k01` by the pre-filter, which now admits only the
+  Thailand chart, `k02` only by the block header, because `泰国` matches nothing in the verified
+  English vocabulary and the question is never translated. Still page-level: every non-chart member,
+  and every member on a multi-chart page that does not read as columns. Cost: `member_texts()`
+  0.26s → 0.43s, once per mount; mount time itself unchanged.
 
 - **A gold requirement may name alternative anchors, and so may a filter expectation**
   (`enterprise_pdf_rag`, ADR 0011 follow-up). A frozen case asserted exactly one anchor per

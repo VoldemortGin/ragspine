@@ -1,8 +1,150 @@
 # Claude 交接：通用文档 RAG 与公开样本验收
 
-更新时间：2026-09-21（四条分支合入 `main` 并上线；此后五处改动把真实金标修回 **19/22**（run 3，唯一 FAIL 是模型抖动），`k01`/`k02` 的缺口被查实为「带真实 provenance 的错数字」，严重度上调）
+更新时间：2026-09-22（分支 `fix/determinism-alias-column` 三处确定性修复：补全采样钉死、成员短别名、列级地区绑定；真实金标 **22/22、零已知缺口**，但实测证明这个 provider 不遵守贪心解码——引擎确定、模型不确定；**未合入 `main`**，线上服务未重启）
 
 > 阅读顺序：先看下方“恢复开发记录”；后续旧暂停快照保留作证据，不能作为实时发布或服务状态。
+
+## 三处确定性修复：采样、成员别名、列级地区绑定（2026-09-22，分支 `fix/determinism-alias-column`，未合入 `main`）
+
+> 从 `main` `693ee86` 拉出。pinned release `22127d0fad13` / snapshot `42939d6a4e87`，document `df902346791b`。
+> 证据在本机 `data/validation/generic-chat-2026-09-22/fix3/`（`nl-gold-cold-1` / `nl-gold-cold-2` 两轮冷跑，
+> 外加 `nl-gold-replay-1` 一次缓存回放；`data/*` 为 git 忽略，同此前各轮）。两轮冷跑都是**进程内 ASGI**
+> 打到一个全新的空 `APP_INGESTION_DIR`，**没有重启任何服务，线上 8768 / 3200 全程没被碰过**。
+
+**1. 补全调用的采样被钉死**（收掉 ADR 0018 那条 "Follow-up: the completion's sampling is not pinned"）
+
+`adapters/json_completion.py` 新增模块常量 `DETERMINISTIC_TEMPERATURE = 0.0` 与辅助函数 `_sampling(seed)`；
+`JsonCompletionClient.__init__` 收 `seed: int | None = None`；视觉 `complete_json` 与文本 `complete_text_json`
+两条请求体都带上 `**_sampling(self._seed)`——`temperature` 恒发，`seed` 只在配置了才发。`core/settings.py`
+新增 `answer_seed: int | None = 0`（环境变量 `APP_ANSWER_SEED`），`adapters/http/app.py` 把
+`seed=settings.answer_seed` 传给那一个 document-catalog 客户端。
+
+provider 侧全部接受：直接探 `https://ai.willer.tech/v1/chat/completions` 上的 `gpt-5.6-luna`，不带采样、带
+`temperature=0`、带 `temperature=0` + `seed=0` 三种请求都是 HTTP 200。**`top_p` 回退方案没用上，也没有写。**
+
+采样参数落在**请求体内部**，而请求指纹摘的就是请求体，于是**现存的每一条补全缓存条目都会 miss**——有意为之，
+一个发布只该有一套采样。不用重跑任何东西就能看见它：`contexts/<fingerprint>.json` 存的就是原样 wire body，
+里面印着 `"temperature": 0.0, "seed": 0`，真实冷跑里已核对。
+
+**诚实的边界，实测。** 两轮完整冷跑（各自一个空的 `APP_INGESTION_DIR`）里，22 次模型调用有 **21 次请求指纹
+逐字节相同**，可 22 条答案里有 **9 条正文措辞不同**。最干净的那条证据是翻译调用：请求指纹 `2b1a2d74…`
+两轮逐字节相同（同一个 body，`temperature: 0.0`，`seed: 0`），返回却是两个东西——
+
+| 轮次 | 返回 |
+| --- | --- |
+| run 1 | `{"english_query":"Distribution channel proportion in 2026 first half"}` |
+| run 2 | `{"english_query":"2026 first half distribution channel proportion"}` |
+
+所以 `temperature` / `seed` 钉死的是**发出去的东西**，不是这个 provider 返回的东西。**引擎是确定性的**——
+同一个问题、同一组过滤器、同一批席位、同一份 prompt；**模型不是**。真正的可重复性保证仍然只有那个不可变的
+补全缓存（金标 `p15-cache-repeat-en` 每轮都过，`llm_live_calls=0`）。第 22 个指纹的差异只是上面那条的连锁
+后果：译文不同 → 词法查询不同 → BM25 序不同 → `p06-donut-zh` 取到了不同的 `member_ids`；它的判定没变。
+
+**2. 成员改用短别名 `m1 … mN` 引用**
+
+起因是 2026-09-21 run 2：模型把一个 member id 抄成了 **57 位**十六进制而不是 64 位，`p05` 因
+`model_output_invalid: unknown member` 挂掉。64 位十六进制是个太长的东西，不该要求模型逐字转抄。
+
+- `processing/context_builder.py`：`ContextBlock.prompt_text` 新增可选参数 `alias`。给了别名，块头就是
+  `[m3 | member <64hex>] kind=chart page_index=12 scope=… verification=…`；**不给别名时逐字节还是老样子**，
+  所以 listwise rerank 判官（`adapters/hybrid_search.py:250`，它裸调 `prompt_text()`）一点没动。
+- `answers/prompt.py`：新增 `member_aliases(blocks)`（按打印顺序给可引用块铸 `m1…mN`，`page_context` 块不发
+  别名）与 `resolve_member_aliases(model, aliases)`（把 claim 里的别名改写回真 id；写成完整 id 或写成不认识
+  的串都**原样保留**，于是校验器照旧以 `unknown member` 拒掉）。`build_prompt` 新增 `aliases` 参数，引导语
+  改成按 `m` 别名引用。`SYSTEM_RULES` 规则 1 改成让模型把短别名抄进 `member_id`（长 id 仍然接受，
+  "only when every one of its characters is copied"），规则 6 里的块名改成 `[m… | member …]`。
+- `adapters/answer_service.py`：别名在 `budget_blocks` **之后**、按真正进得了 prompt 的那批块铸出来，在
+  `verify_claims` **之前**解析回去。下游——校验器、`ClaimCitation.member_id`、`AnswerResult.member_ids`、
+  HTTP 契约——**一律仍用真 64 位 id 称呼成员**，别名不出那一次调用。
+
+代价：prompt 文本变了，所以这一项**也**让补全缓存失效（叠加在第 1 项之上）。
+
+**3. 页上的区域绑定到它所压着的那一列**（收掉 ADR 0013 / ADR 0018 的 `k01` / `k02` 缺口）
+
+新纯模块 `processing/column_regions.py`——不调模型、不做 I/O、不改写任何页级元数据。
+`bind_columns(regions, columns) -> ColumnBinding`，配 `PageRegionSpan(text, bbox|None)`、
+`PageColumn(member_id, bbox)`、`ColumnBinding(page_wide, by_member)` / `.regions_for(member_id)` 与 `EMPTY`。
+常量 `MIN_COLUMNS = 2`、`MAX_COLUMN_HEADING_WIDTH_SHARE = 0.5`（跟整页一样宽的标题是这一页的横幅，比如
+`ASEAN`，留在页级）、`MIN_HEADING_OVERLAP_SHARE = 0.5`（标题在 x 轴上必须有这么多压在那一列上）。
+
+**设计上全有或全无**：除非每一列都拿到标题、每一个标题都找到列，否则返回 `EMPTY`，调用方继续用它一直在用
+的页级值。**读不懂的版面必须零代价，而不是去猜。**
+
+- `answers/ports.MemberText` 新增 `member_regions: tuple[str, ...] = ()`。`MemberText` 是纯内存的挂载期投影，
+  **磁盘上没有任何东西提到它**，所以**没有任何 snapshot id 变化，也不重建索引**；本特性出现之前发布的
+  release 在挂载时照样绑定它的列。
+- `adapters/document_catalog.MountedDocument`：`_column_bindings(plan)` 逐页收集每个 CHART 成员的矩形
+  （`member_anchor`），`_span_boxes(page_index)` 从该页的源文本 sidecar 读出每条已验证 region 所抄自的那些
+  span 的矩形（`MetadataEvidence.span_ids`，由 `_span_union` 求并）。全程 best-effort，与 `member_anchor`
+  完全一致：为了一项精化去读几何，绝不能让一次证据本身撑得住的挂载失败。
+- `answers/member_filter.member_matches` 改成按 `member.member_regions or member.regions` 过滤；
+  `region_vocabulary` 仍然报完整的页级词表，所以**没有缩小任何一个问题能被解析出的东西**。
+- 绑定到的标题同时进入该成员的上下文索引表头，于是 BM25 能在泰国那张图上给 `AIA Thailand` 打分。**已存的
+  向量没有重算**，所以**词法通道读到了一句 embedding 从没见过的短语**——这是有意的，也正是任何 release 都
+  不需要重新索引的原因。
+
+**第四块，超出了原本的要求，而且它才是真正修好 `k02` 的那块**：`ContextBlock` 新增 `regions`，
+`answer_service._with_member_regions` 把绑定成员的 regions 盖到它的块上，`SYSTEM_RULES` 新增规则 8——块头的
+`regions=` 指明这个块属于页面的哪一部分；问题点名某个地区时，只能从 `regions=` 里有它的那个块作答、不能用
+别的块，不论两边各自写的是什么语言；拿不准就拒答。没有这一块，模型仍然分不清三个都写着 `VONB ($m)` 的块，
+见下面 `k02` 的实测。
+
+**真实 AIA 实测**（只读，打在 pinned release 上）：
+
+| page_index | 绑定到列 | 留在页级 |
+| --- | --- | --- |
+| 12（p.13） | `a05e27202ea4…` → `AIA Thailand`、`36f5b652e8e0…` → `AIA Singapore`、`3e0a86925a4e…` → `AIA Malaysia` | `ASEAN`——它的 span 在 894 点内容宽度上从 x 28 跨到 839，超过半页宽 |
+| 11（p.12） | 两张图分别绑到 `Domestic` 与 `Chinese Mainland Visitor (CMV)`；两条图内标注（`from New HK Residents`、`from Outside of` / `Greater Bay Area`）也各自落在正确的图上 | 无 |
+
+**其余每一个多图页都返回 `EMPTY`、保留页级 regions**，这正是安全路径按设计在工作。
+代价：`member_texts()` 0.26s → 0.43s，每次挂载一次；挂载总耗时不变。
+
+**`k01` 与 `k02` 现在都答对了，但原因不同，这个差别要紧。** `k01`（`Thailand 1H26 VONB`）推出
+`{periods: [1H2026], regions: [Thailand]}`、未 relax，预过滤器现在**只**放行泰国那张图——它的 prompt 里
+p.13 的图就只有一张。`k02`（`泰国 1H26 VONB`）**仍然**推出 `regions: []`（词表是英文的，`泰国` 一个都不
+匹配），**也仍然不会被翻译**（按 ADR 0018 的实词探针，`VONB` 自己就能词法打分），所以三张图全都进了 prompt：
+它答对**只**因为每个块现在各自印着自己的 `regions=`。两例都引 member `a05e27202ea4…`、p.13 的
+`points.point-1h26.value` = `514` `$m`。
+
+**4. 一条断掉的相对链接**
+
+`docs/enterprise-pdf-rag/adr/0016-verbatim-chart-points.md` 指向 `0006-non-chart-visual-inference-two-branches.md`，
+文件实际叫 `0006-non-chart-visual-semantics.md`。已修。**ADR 0017 没有断链**——全仓扫描下来两个 ADR 里只有
+这一处，0017 里另一个正则命中是代码片段 `budget_blocks[BlockT: PromptBlock](...)`，不是链接。只有一处，就说
+一处。
+
+**金标**
+
+`data/benchmarks/enterprise-pdf-rag/aia-2026-interim/nl-answers-gold-v1.json` 里 `k01-region-thailand-en` 与
+`k02-region-thailand-zh` 从 `case_class: abstain` / `known_gap: true` 改成 `case_class: positive` /
+`status: answered`：`required_claims` 是一条 `chart_value`——`page_index 12`、`field_path
+points.point-1h26.value`、`quote` / `text` 为 `514`、`value` `514`、`unit` `$m`；`required_citation_fields`
+与其它 positive 例一致；`filters_expected` 在 `k01` 是 `{periods:[1H2026], regions:[Thailand]}`、在 `k02` 是
+`{periods:[1H2026], regions:[]}`；`filters_relaxed: false`；再加 `forbidden_numbers: ["294", "232"]`——正是
+相邻两栏的数字，于是「顶着泰国的名字答出邻居的数」在构造上就判 FAIL。`schema_version` 未动，仍是
+`nl-answers-gold-v1`。**这套金标现在零已知缺口。**
+
+**三轮判定**
+
+| 轮次 | 金标 | pass / FAIL / known-gap-moved |
+| --- | --- | ---: |
+| cold run 1（`data/validation/generic-chat-2026-09-22/fix3/nl-gold-cold-1`） | 旧 | **20 / 0 / 2** |
+| cold run 2（`…/nl-gold-cold-2`，另一个空 `APP_INGESTION_DIR`） | 旧 | **20 / 0 / 2** |
+| 用新金标重判 run 1 的缓存回放（`…/nl-gold-replay-1`） | 新 | **22 / 0 / 0** |
+
+两轮冷跑把每一条真实用例都跑过了，包括 `p13` 与 `p11`——这两条各自是 2026-09-21 四轮里某一轮的唯一 FAIL。
+两轮的判定逐例相同，除 `p06` 的 member 集合外，每一条 claim 与引用都一致。
+
+**遗留**
+
+1. **provider 不遵守贪心解码。** `temperature=0.0` + `seed=0`、逐字节相同的请求仍然返回不同的译文（见上面
+   那张表），所以这一项买到的是「发出去的东西可复现」，不是「答案可复现」。可重复性仍然只靠不可变补全缓存。
+2. **`k02` 自己仍然推不出 region 过滤器。** 它答对靠的是 prompt 块上的 `regions=` 与规则 8，不是预过滤器；
+   换一个没有英文实词可词法打分的中文问题，这条路径未必还在。
+3. **AIA 这份 deck 里只有 2 个多图页读得成列**（page_index 11 / 12），其余多图页全部按设计落回页级 regions；
+   非图表成员一律仍是页级。
+4. **整个补全缓存作废**（第 1 项改了请求体、第 2 项改了 prompt 文本），下一次冷跑必须整体重跑。
+5. **线上 8768 / 3200 仍跑 `main`，本轮全程没有重启任何服务**；本分支也**未合入 `main`**。
 
 ## 一次问答的延迟：8.8s → 0.7s（2026-09-21，分支 `fix/mount-latency`（`63e3814` + 文档），**未合入 `main`**）
 

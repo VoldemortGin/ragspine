@@ -3,7 +3,7 @@
 Status: Accepted, 2026-09-21. Amends the admission rule of
 [ADR 0008](0008-traceable-chart-qa.md) by adding a **second, weaker and separately named**
 chart scope beside `explicit-distribution-shares`, and supersedes the label projection of
-[ADR 0006](0006-non-chart-visual-inference-two-branches.md) that
+[ADR 0006](0006-non-chart-visual-semantics.md) that
 `figure-source-labels-only-v1` implemented. The geometry + source-paint proof of ADR 0008 and
 the displayed-bar proof of [ADR 0009](0009-source-qualified-expense-ratio-bar-lookup.md) are
 untouched; this ADR does not widen either of them. The real rebuild and its measurements are in
