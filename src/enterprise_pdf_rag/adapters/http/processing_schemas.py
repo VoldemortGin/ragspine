@@ -1,9 +1,12 @@
 """Versioned processing state and model-layout boundaries."""
 
-from pydantic import Field
+from typing import Literal
+
+from pydantic import Field, model_validator
 
 from enterprise_pdf_rag.adapters.http.schemas import BoundaryModel
-from enterprise_pdf_rag.processing.models import ProcessingManifest, StageOutcome
+from enterprise_pdf_rag.documents.models import AssetRef
+from enterprise_pdf_rag.processing.models import ProcessingManifest, StageOutcome, StageState
 
 
 class ProcessingEnvelope(BoundaryModel):
@@ -17,6 +20,26 @@ class ProcessingSnapshotResponse(BoundaryModel):
 
 class StageEnvelope(BoundaryModel):
     outcome: StageOutcome
+
+
+class DocumentTreeRecord(BoundaryModel):
+    """The saved state of one processing id's routing tree (ADR 0019); a later run replaces it."""
+
+    schema_version: Literal["document-tree-v1"] = "document-tree-v1"
+    processing_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    producer: str = Field(min_length=1)
+    state: StageState
+    diagnostic: str | None
+    artifact: AssetRef | None
+    summary_calls: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def _succeeded_records_name_their_tree(self) -> "DocumentTreeRecord":
+        if self.state is StageState.SUCCEEDED and (self.artifact is None or self.diagnostic):
+            raise ValueError("A succeeded document tree names its artifact and no diagnostic")
+        if self.state is not StageState.SUCCEEDED and not (self.diagnostic or "").strip():
+            raise ValueError("An unfinished document tree requires a concrete diagnostic")
+        return self
 
 
 class ProcessingStatusResponse(BoundaryModel):

@@ -34,6 +34,7 @@ from enterprise_pdf_rag.processing.column_regions import (
     PageRegionSpan,
     bind_columns,
 )
+from enterprise_pdf_rag.processing.document_tree import DocumentTree
 from enterprise_pdf_rag.processing.models import (
     ObjectKind,
     ProcessingManifest,
@@ -78,6 +79,8 @@ class CatalogEntry(BoundaryModel):
     language: str | None = None
     years: tuple[int, ...] = ()
     regions: tuple[str, ...] = ()
+    # A routing tree (ADR 0019) was folded and summarised for the pinned processing id.
+    tree_available: bool = False
 
     @property
     def display_name(self) -> str:
@@ -149,6 +152,7 @@ class _Probe:
     language: str | None = None
     years: tuple[int, ...] = ()
     regions: tuple[str, ...] = ()
+    tree_available: bool = False
 
     def entry(self, status: CatalogRetrievalStatus, reason: str | None) -> CatalogEntry:
         return CatalogEntry(
@@ -174,6 +178,7 @@ class _Probe:
             language=self.language,
             years=self.years,
             regions=self.regions,
+            tree_available=self.tree_available,
         )
 
 
@@ -217,6 +222,7 @@ def _inspect(
             probe.language = metadata.language
             probe.years = metadata.years
             probe.regions = tuple(region.text for region in metadata.regions)
+        probe.tree_available = outputs.load_document_tree(processing_id) is not None
         if expected_sha is not None and scope.source_sha256 != expected_sha:
             raise ValueError(
                 "Document directory name does not match the processing scope source sha256"
@@ -345,6 +351,10 @@ class MountedDocument:
         self._contexts = outputs.index_contexts(manifest)
         # Derived from the same pinned release, on the first ``member_texts()`` that needs it.
         self._columns: dict[int, ColumnBinding] | None = None
+        # ADR 0019: the routing tree is immutable with the pinned manifest, so it is read
+        # at most once and its absence is remembered too.
+        self._tree: DocumentTree | None = None
+        self._tree_read = False
         self._verify_every_request = verify_every_request
         # The one file a request must watch: the pinned manifest object. Its name is its
         # digest, so any rewrite of the release is a digest mismatch here.
@@ -557,6 +567,13 @@ class MountedDocument:
         """Requalify a displayed-value bar member; any other member is refused."""
         return self._displayed.resolve(self._pin(hit))
 
+    def document_tree(self) -> DocumentTree | None:
+        """The pinned release's routing tree (ADR 0019), read once; None when none was built."""
+        if not self._tree_read:
+            self._tree = self._outputs.load_document_tree(self._processing_id)
+            self._tree_read = True
+        return self._tree
+
     def read_asset(self, ref: AssetRef) -> bytes:
         """Digest-checked evidence bytes from the processing store, else the source store."""
         try:
@@ -653,3 +670,13 @@ def mount_catalog(
         documents,
         failures,
     )
+
+
+def catalog_trees(catalog: MountedCatalog) -> dict[str, DocumentTree]:
+    """Every mounted document's routing tree, keyed by source sha256; one without a tree is absent."""
+    trees: dict[str, DocumentTree] = {}
+    for document in catalog.documents.values():
+        tree = document.document_tree()
+        if tree is not None:
+            trees[document.source_sha256] = tree
+    return trees

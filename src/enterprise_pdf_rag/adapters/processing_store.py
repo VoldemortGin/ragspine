@@ -9,12 +9,14 @@ from pydantic import TypeAdapter
 
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.http.processing_schemas import (
+    DocumentTreeRecord,
     ProcessingEnvelope,
     StageEnvelope,
 )
 from enterprise_pdf_rag.adapters.source_publication import validate_processing_source
 from enterprise_pdf_rag.documents.models import AssetRef
 from enterprise_pdf_rag.processing.document_metadata import summarize_document
+from enterprise_pdf_rag.processing.document_tree import DocumentTree
 from enterprise_pdf_rag.processing.index_text import PageIndexContext
 from enterprise_pdf_rag.processing.models import (
     ProcessingManifest,
@@ -210,6 +212,57 @@ class ProcessingStore:
                 raise ValueError("Page metadata is bound to another source page")
             pages[page.page_index] = metadata
         return pages
+
+    def _document_tree_path(self, processing_id: str) -> Path:
+        if re.fullmatch(r"[0-9a-f]{64}", processing_id) is None:
+            raise ValueError("A document tree is recorded under a SHA-256 processing id")
+        return self.root / "document-tree" / f"{processing_id}.json"
+
+    def save_document_tree(self, processing_id: str, record: DocumentTreeRecord) -> None:
+        """Record the routing tree (ADR 0019) of one processing id, replacing any earlier one."""
+        if record.processing_id != processing_id:
+            raise ValueError("Document tree record is bound to another processing id")
+        if record.artifact is not None:
+            self.assets.get(record.artifact)
+        target = self._document_tree_path(processing_id)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # Unlike a stage-cache pointer this record is mutable on purpose: a later run with a
+        # real call budget replaces a deferred tree with a summarised one over the same
+        # processing id. So it is replaced atomically rather than linked into place.
+        with tempfile.NamedTemporaryFile(dir=target.parent, delete=False, mode="wb") as stream:
+            temporary = Path(stream.name)
+            stream.write(record.model_dump_json().encode())
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            os.replace(temporary, target)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def document_tree_record(self, processing_id: str) -> DocumentTreeRecord | None:
+        """The saved document-tree state of one processing id, in any state; None if absent."""
+        path = self._document_tree_path(processing_id)
+        if not path.is_file():
+            return None
+        record = DocumentTreeRecord.model_validate_json(path.read_text())
+        if record.processing_id != processing_id:
+            raise ValueError("Document tree record is bound to another processing id")
+        return record
+
+    def load_document_tree(self, processing_id: str) -> DocumentTree | None:
+        """The succeeded routing tree of one processing id; None when absent or unfinished."""
+        record = self.document_tree_record(processing_id)
+        if record is None or record.state is not StageState.SUCCEEDED or record.artifact is None:
+            return None
+        tree = TypeAdapter(DocumentTree).validate_json(
+            self.assets.get(record.artifact), strict=True
+        )
+        scope = ProcessingEnvelope.model_validate_json(
+            self.assets.read_content(processing_id)
+        ).manifest.scope
+        if tree.source_sha256 != scope.source_sha256:
+            raise ValueError("Document tree is bound to another source document")
+        return tree
 
     def index_contexts(self, manifest: ProcessingManifest) -> dict[int, PageIndexContext]:
         """The contextual index-text header of every page that has verified metadata."""

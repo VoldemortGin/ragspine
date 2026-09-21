@@ -18,6 +18,7 @@ from enterprise_pdf_rag.adapters.answer_audit import (
 from enterprise_pdf_rag.adapters.chart_qa import StoredChartResolver
 from enterprise_pdf_rag.adapters.chart_qa_displayed import StoredDisplayResolver
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
+from enterprise_pdf_rag.adapters.document_tree_extraction import annotate_document_tree_draft
 from enterprise_pdf_rag.adapters.draft_publication import (
     index_draft,
     publish_draft,
@@ -117,6 +118,20 @@ def _parser() -> argparse.ArgumentParser:
         help="Explicit model-call budget; 0 permits cached responses only and marks the rest deferred",
     )
     metadata.add_argument("--timeout", type=float, default=180.0)
+    tree = commands.add_parser(
+        "tree",
+        help="Fold a saved draft's page metadata into its table-of-contents tree (ADR 0019) and have a model write each non-leaf node's routing summary; one text-only model call per non-leaf node, no activation",
+    )
+    tree.add_argument("--source-store", type=Path, required=True)
+    tree.add_argument("--processing-store", type=Path, required=True)
+    tree.add_argument("--processing-id", required=True)
+    tree.add_argument(
+        "--max-live-calls",
+        type=int,
+        required=True,
+        help="Explicit model-call budget; 0 permits cached responses only and marks the rest deferred",
+    )
+    tree.add_argument("--timeout", type=float, default=180.0)
     qualify = commands.add_parser(
         "qualify",
         help="Diagnose retrievable members in a saved draft by store paths and processing id; no models or activation",
@@ -305,6 +320,24 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stdout.write(json.dumps({"error": str(error)}, indent=2) + "\n")
                 return 1
             sys.stdout.write(annotated.model_dump_json(indent=2) + "\n")
+            return 0
+        if arguments.command == "tree":
+            try:
+                folded = annotate_document_tree_draft(
+                    source_store=arguments.source_store,
+                    processing_store=arguments.processing_store,
+                    processing_id=arguments.processing_id,
+                    client=JsonCompletionClient(
+                        load_llm_config(),
+                        cache_dir=Path(arguments.processing_store).resolve() / "model-cache",
+                        max_live_calls=arguments.max_live_calls,
+                        timeout=arguments.timeout,
+                    ),
+                )
+            except (ValueError, FileNotFoundError) as error:
+                sys.stdout.write(json.dumps({"error": str(error)}, indent=2) + "\n")
+                return 1
+            sys.stdout.write(folded.model_dump_json(indent=2) + "\n")
             return 0
         if arguments.command == "qualify":
             try:

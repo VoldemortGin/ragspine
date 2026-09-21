@@ -79,7 +79,7 @@ adapters/     every SDK and I/O: pdfspine, http/ (FastAPI app factory; documents
               objects from its stored branches), chart QA v1/v2, nl_gold.py (the frozen
               natural-language gold set's schema and the judge both its runners share)
 resources/    packaged prompts / static data
-cli.py        enterprise-pdf-rag ingest|metadata|qualify|index|publish|serve|audit|chart-qa|demo|extract|llm-smoke
+cli.py        enterprise-pdf-rag ingest|metadata|tree|qualify|index|publish|serve|audit|chart-qa|demo|extract|llm-smoke
               + AIA-sample-only ingest-aia|process-aia-layout|process-aia-semantics|index-aia-processing
 ```
 

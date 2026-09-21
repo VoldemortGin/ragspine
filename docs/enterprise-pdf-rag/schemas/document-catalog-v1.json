@@ -2719,6 +2719,11 @@
             "title": "Source Store",
             "type": "string"
           },
+          "tree_available": {
+            "default": false,
+            "title": "Tree Available",
+            "type": "boolean"
+          },
           "years": {
             "default": [],
             "items": {
@@ -3096,6 +3101,11 @@
           "source_store": {
             "title": "Source Store",
             "type": "string"
+          },
+          "tree_available": {
+            "default": false,
+            "title": "Tree Available",
+            "type": "boolean"
           },
           "years": {
             "default": [],

@@ -13,11 +13,13 @@ from enterprise_pdf_rag.adapters.document_catalog import (
     CatalogEntry,
     MountedDocument,
     QueryEmbeddingUnavailable,
+    catalog_trees,
     mount_catalog,
     mount_document,
     scan_catalog,
 )
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
+from enterprise_pdf_rag.adapters.document_tree_extraction import annotate_document_tree
 from enterprise_pdf_rag.adapters.draft_publication import DraftPublication
 from enterprise_pdf_rag.adapters.http.processing_schemas import ProcessingEnvelope
 from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
@@ -32,7 +34,7 @@ from enterprise_pdf_rag.answers.ports import MemberText
 from enterprise_pdf_rag.documents.models import AssetRef
 from enterprise_pdf_rag.figures.ports import EmbeddingPort
 from enterprise_pdf_rag.processing.index_text import chart_index_text
-from enterprise_pdf_rag.processing.models import ObjectKind
+from enterprise_pdf_rag.processing.models import ObjectKind, StageState
 from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit, RetrievalIndex
 from tests.enterprise_pdf_rag.adapters.column_page_helpers import (
     ColumnPage,
@@ -752,3 +754,37 @@ def test_one_retrieval_publication_is_parsed_once_per_store(
     audited = ProcessingStore(Path(meridian.processing_store), verify_every_request=True)
     audited.load_retrieval(publication)
     assert reads() > 0
+
+
+def test_a_document_tree_is_absent_until_it_is_folded_and_then_mounts_with_its_document(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "ingestion"
+    publication = publish_with_metadata(
+        tmp_path,
+        monkeypatch,
+        filename="meridian.pdf",
+        label="Meridian revenue",
+        page_count=3,
+        output_dir=root,
+    )
+    assert _ready_entry(root, publication).tree_available is False
+
+    folded = annotate_document_tree(
+        LocalDocumentStore(Path(publication.source_store), activate_on_publish=False),
+        ProcessingStore(Path(publication.processing_store)),
+        processing_id=publication.current_processing_id,
+        client=None,
+    )
+    assert folded.state is StageState.SUCCEEDED
+
+    entry = _ready_entry(root, publication)
+    assert entry.tree_available is True
+    mounted = mount_document(entry, embedder=OfflineDescriptionEmbedder())
+    tree = mounted.document_tree()
+    assert tree is not None and tree.source_sha256 == publication.source_sha256
+    assert tree.page_count == 3
+    # Read once and kept: the tree is immutable with the pinned manifest.
+    assert mounted.document_tree() is tree
+    catalog = mount_catalog(scan_catalog(root), embedder=OfflineDescriptionEmbedder())
+    assert catalog_trees(catalog) == {publication.source_sha256: tree}
