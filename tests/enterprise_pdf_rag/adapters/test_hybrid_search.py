@@ -224,27 +224,43 @@ def test_a_member_only_the_tree_channel_ranks_enters_the_fusion() -> None:
     assert (by_id["m-t"].vector_rank, by_id["m-t"].lexical_rank) == (None, None)
     # The tree channel is a page set, not a similarity: it carries a rank and no score.
     assert (by_id["m-t"].vector_score, by_id["m-t"].bm25_score) == (None, None)
-    assert by_id["m-t"].fused_score == rrf_fuse([["m-t"]], 60)["m-t"]
+    # Fused at ``tree_k``, never at ``k``: a routing rank is reading order inside the section
+    # the router chose, not a relevance any channel measured.
+    assert by_id["m-t"].fused_score == rrf_fuse([["m-t"]], 600)["m-t"]
     assert by_id["m-a"].tree_rank is None
     with pytest.raises(ValueError, match="snapshot"):
         fuse(vector, (), (PinnedRetrievalHit("2" * 64, "m-t", 1.0),))
 
 
-def test_channel_agreement_outranks_depth_in_any_one_channel() -> None:
-    """Ranks are 1-based, so three channels beat two and two beat one however deep the one
-    ranking goes: at most 1/(60 + 1) alone against at least 2/(60 + 50) shared."""
-    triple = tuple(
-        PinnedRetrievalHit(_SNAPSHOT, member_id, 1.0)
-        for member_id in ("m-three", "m-two", "m-vector")
+# ``AnswerRequest.channel_limit``, the depth the service actually runs the channels at: the
+# deepest rank either scoring channel can hand ``fuse``, and so the right-hand side of the
+# tree constant's inequality.
+_CHANNEL_LIMIT = 50
+
+
+def test_channel_agreement_outranks_depth_in_any_one_scoring_channel() -> None:
+    """Ranks are 1-based, so the two *scoring* channels agreeing beats depth in either one:
+    at most 1/(60 + 1) alone against at least 2/(60 + 50) shared.
+
+    Until the tree channel was measured this test also claimed the tree as a third peer —
+    that a member all three rankings hold outranks a member two of them hold. That contract
+    is gone. On the frozen gold set the peer weighting scored 17/22 against 21/22 with the
+    channel off, and the five structural questions went 4/5 answered to 3/5, because at the
+    shared ``k`` a tree rank-1 member scored 1/61 = 0.01639 and displaced a member only BM25
+    could reach at rank 2 (1/62 = 0.01613). A tree rank is reading order inside the section
+    the router picked, not a relevance, so it now fuses at its own ``tree_k`` — see
+    ``test_a_routed_member_never_outranks_a_member_a_scoring_channel_reached``.
+    """
+    pair = tuple(
+        PinnedRetrievalHit(_SNAPSHOT, member_id, 1.0) for member_id in ("m-both", "m-vector")
     )
-    fused = fuse(triple, triple[:2], (triple[0], PinnedRetrievalHit(_SNAPSHOT, "m-tree", 1.0)))
-    assert [hit.member_id for hit in fused][:2] == ["m-three", "m-two"]
+    fused = fuse(pair, pair[:1], (pair[0], PinnedRetrievalHit(_SNAPSHOT, "m-tree", 1.0)))
+    assert [hit.member_id for hit in fused] == ["m-both", "m-vector", "m-tree"]
     by_id = {hit.member_id: hit for hit in fused}
-    assert by_id["m-three"].fused_score > by_id["m-two"].fused_score
-    assert by_id["m-two"].fused_score > by_id["m-tree"].fused_score
-    assert by_id["m-two"].fused_score > by_id["m-vector"].fused_score
-    assert (by_id["m-three"].vector_rank, by_id["m-three"].lexical_rank) == (1, 1)
-    assert by_id["m-three"].tree_rank == 1
+    assert by_id["m-both"].fused_score > by_id["m-vector"].fused_score
+    assert by_id["m-vector"].fused_score > by_id["m-tree"].fused_score
+    assert (by_id["m-both"].vector_rank, by_id["m-both"].lexical_rank) == (1, 1)
+    assert by_id["m-both"].tree_rank == 1
 
     # The same property at the depths a real request reaches: a fiftieth seat in two
     # channels still outscores a first seat in one.
@@ -256,6 +272,95 @@ def test_channel_agreement_outranks_depth_in_any_one_channel() -> None:
     depths = {hit.member_id: hit for hit in shared}
     assert (depths["m-pair"].vector_rank, depths["m-pair"].lexical_rank) == (50, 50)
     assert depths["m-pair"].fused_score > depths["m-solo"].fused_score
+
+
+def _ranking(marked: str, at_rank: int, prefix: str) -> tuple[PinnedRetrievalHit, ...]:
+    """A full-depth ranking whose ``at_rank``-th seat is ``marked``; the rest are filler."""
+    return tuple(
+        PinnedRetrievalHit(
+            _SNAPSHOT, marked if rank == at_rank else f"{prefix}{rank:02d}", 1.0 / rank
+        )
+        for rank in range(1, _CHANNEL_LIMIT + 1)
+    )
+
+
+def test_a_routed_member_never_outranks_a_member_a_scoring_channel_reached() -> None:
+    """Exhaustively over the rank grid: no page the router chose can take a seat from a
+    member BM25 or the vector channel scored, however deep that member sits.
+
+    This is the property ``tree_k`` exists for, and it is measured, not cosmetic. Fused as a
+    peer at ``k``, a tree rank-1 member scored 1/(60 + 1) = 0.01639 and beat a member only
+    BM25 reached at rank 2, 1/(60 + 2) = 0.01613 — and a chart only one channel can score is
+    precisely what ADR 0012's guaranteed seat exists for. The frozen gold set fell from
+    21/22 to 17/22 passing, losing ``chart_value p7`` and ``chart_value p17`` outright.
+    Now the best a routed member can earn is 1/(600 + 1) = 0.00166 and the least a scored
+    one earns inside the channel limit is 1/(60 + 50) = 0.00909 — a 5.5x margin.
+    """
+    for real_rank in range(1, _CHANNEL_LIMIT + 1):
+        scored = _ranking("m-scored", real_rank, "m-fill-")
+        for tree_rank in range(1, _CHANNEL_LIMIT + 1):
+            tree = _ranking("m-routed", tree_rank, "m-page-")
+            for vector, lexical in ((scored, ()), ((), scored)):
+                fused = fuse(vector, lexical, tree)
+                by_id = {hit.member_id: hit for hit in fused}
+                assert by_id["m-scored"].fused_score > by_id["m-routed"].fused_score, (
+                    real_rank,
+                    tree_rank,
+                )
+                order = [hit.member_id for hit in fused]
+                assert order.index("m-scored") < order.index("m-routed")
+
+
+def test_a_routed_member_still_outranks_one_no_scoring_channel_ranked_at_all() -> None:
+    """Demoting the tree is not switching it off: a member no channel could score still
+    enters the ranking, underneath them, where nothing stood before."""
+    vector = (PinnedRetrievalHit(_SNAPSHOT, "m-scored", 0.9),)
+    tree = (PinnedRetrievalHit(_SNAPSHOT, "m-routed", 1.0),)
+    assert [hit.member_id for hit in fuse(vector, ())] == ["m-scored"]
+    fused = fuse(vector, (), tree)
+    assert [hit.member_id for hit in fused] == ["m-scored", "m-routed"]
+    by_id = {hit.member_id: hit for hit in fused}
+    assert by_id["m-routed"].fused_score == 1.0 / 601.0 > 0.0
+    # A member nothing ranked is not a low-scoring hit; it is simply not in the fusion.
+    assert "m-unrouted" not in by_id
+
+
+def test_a_tree_ranking_leaves_the_two_scoring_channels_exactly_where_they_were() -> None:
+    """Routing members in never reorders or rescores the members the channels found."""
+    vector = tuple(
+        PinnedRetrievalHit(_SNAPSHOT, f"m-v{rank:02d}", 1.0 / rank) for rank in range(1, 6)
+    )
+    lexical = tuple(PinnedRetrievalHit(_SNAPSHOT, f"m-v{rank:02d}", 1.0) for rank in (3, 1, 5))
+    without = fuse(vector, lexical)
+    with_tree = fuse(
+        vector,
+        lexical,
+        tuple(PinnedRetrievalHit(_SNAPSHOT, f"m-t{rank:02d}", 1.0) for rank in range(1, 4)),
+    )
+    assert [hit.member_id for hit in with_tree][: len(without)] == [
+        hit.member_id for hit in without
+    ]
+    assert [hit.fused_score for hit in with_tree][: len(without)] == [
+        hit.fused_score for hit in without
+    ]
+    assert [hit.member_id for hit in with_tree][len(without) :] == ["m-t01", "m-t02", "m-t03"]
+
+
+def test_the_tree_constant_must_keep_a_routed_page_below_every_scored_seat() -> None:
+    """``tree_rrf_k + 1 > rrf_k + channel_limit``: the best a routed member can earn,
+    1/(tree_rrf_k + 1), must stay strictly under the least a member one scoring channel
+    ranked inside the limit earns, 1/(rrf_k + channel_limit). The defaults leave
+    1/601 = 0.00166 against 1/110 = 0.00909, a 5.5x margin."""
+    document = _FakeDocument(())
+    HybridSearch(document, channel_limit=_CHANNEL_LIMIT)  # 601 > 110: the defaults satisfy it
+    HybridSearch(document, channel_limit=_CHANNEL_LIMIT, rrf_k=60.0, tree_rrf_k=110.0)  # 111 > 110
+    with pytest.raises(ValueError, match=r"tree_rrf_k \+ 1 > rrf_k \+ channel_limit"):
+        # 110 == 110: a routed rank-1 member would tie the weakest scored seat, not lose to it.
+        HybridSearch(document, channel_limit=_CHANNEL_LIMIT, rrf_k=60.0, tree_rrf_k=109.0)
+    with pytest.raises(ValueError, match=r"tree_rrf_k \+ 1 > rrf_k \+ channel_limit"):
+        HybridSearch(document, channel_limit=_CHANNEL_LIMIT, rrf_k=60.0, tree_rrf_k=60.0)
+    with pytest.raises(ValueError, match="positive"):
+        HybridSearch(document, tree_rrf_k=0.0)
 
 
 def test_hybrid_search_builds_the_lexical_index_once_per_snapshot() -> None:

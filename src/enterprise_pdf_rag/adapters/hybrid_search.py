@@ -16,7 +16,11 @@ A third ranking joins the fusion when the caller supplies ``tree_pages`` (ADR 00
 whose members enter the ranking page by page in reading order. It is a page set rather than
 a similarity, so it contributes a rank and no score of its own, and it participates whatever
 channel mode the query resolves to — supplying no pages leaves every existing ranking
-untouched.
+untouched. Because that rank is reading order and not relevance, it is fused with its own,
+much larger RRF constant (``tree_k``): a member **only** the tree reached sorts below every
+member a scoring channel reached, so the tree adds recall at the tail instead of competing
+for the head. The term is still additive, so it can reorder two scored members between
+themselves; what it cannot do is put an unscored page above a scored one.
 """
 
 from collections.abc import MutableMapping, Sequence
@@ -116,11 +120,14 @@ def fuse(
     tree: Sequence[PinnedRetrievalHit] = (),
     *,
     k: float = 60.0,
+    tree_k: float = 600.0,
 ) -> tuple[FusedHit, ...]:
     """Reciprocal rank fusion of the channel rankings pinned to the same snapshot.
 
-    ``tree`` is the ADR 0019 page-routing ranking and defaults to empty, which fuses
-    exactly as the two-channel call always did.
+    The two scoring channels share ``k``; the ADR 0019 ``tree`` ranking is fused with its
+    own, much larger ``tree_k``, because its rank is a page set read in reading order and
+    not a relevance it ever measured. ``tree`` defaults to empty, which fuses exactly as
+    the two-channel call always did.
     """
     snapshots = {hit.snapshot_id for hit in (*vector, *lexical, *tree)}
     if len(snapshots) > 1:
@@ -132,11 +139,21 @@ def fuse(
     lexical_ranks = {hit.member_id: (rank, hit.score) for rank, hit in enumerate(lexical, start=1)}
     tree_ranks = {hit.member_id: rank for rank, hit in enumerate(tree, start=1)}
     # RRF ranks are 1-based, so with ``k`` at 60 and rankings cut to fifty a member only one
-    # channel ranks scores at most 1/(60 + 1) = 0.0164, while a member two channels rank
-    # scores at least 2/(60 + 50) = 0.0182: agreement beats depth. A member all three
-    # channels rank dominates further still. That margin is what ``rrf_k`` buys — do not
-    # change it.
-    fused = rrf_fuse([list(vector_ranks), list(lexical_ranks), list(tree_ranks)], k)
+    # scoring channel ranks scores at most 1/(60 + 1) = 0.0164, while a member both scoring
+    # channels rank scores at least 2/(60 + 50) = 0.0182: agreement beats depth. That margin
+    # is what ``rrf_k`` buys — do not change it.
+    fused = rrf_fuse([list(vector_ranks), list(lexical_ranks)], k)
+    # The tree is not a peer of those two. Its rank orders the routed pages in reading order,
+    # which is not a relevance, so it is fused at ``tree_k`` instead of ``k``: the best a
+    # routed member can earn is 1/(tree_k + 1), and the least a member one scoring channel
+    # ranks inside the channel limit earns is 1/(k + channel_limit). At the constants the
+    # service runs (``tree_k`` 600, ``k`` 60, a channel limit of 50) that reads
+    # 1/601 = 0.00166 against 1/110 = 0.00909 — a 5.5x margin — so a member only the tree
+    # reached lands below every scored seat. The term is additive, so a member a channel
+    # did score can still move relative to another scored member; the guarantee is about
+    # unscored pages only. ``HybridSearch`` keeps ``tree_k + 1 > k + channel_limit`` true.
+    for member_id, rank in tree_ranks.items():
+        fused[member_id] = fused.get(member_id, 0.0) + 1.0 / (tree_k + rank)
     hits = [
         FusedHit(
             snapshot_id,
@@ -182,14 +199,32 @@ class HybridSearch:
         *,
         channel_limit: int = 20,
         rrf_k: float = 60.0,
+        tree_rrf_k: float = 600.0,
         reranker: ListwiseJudge | None = None,
         index_cache: MutableMapping[str, LexicalIndex] | None = None,
     ) -> None:
-        if channel_limit < 1 or rrf_k <= 0:
+        if channel_limit < 1 or rrf_k <= 0 or tree_rrf_k <= 0:
             raise ValueError("Hybrid search requires a positive channel limit and RRF k")
+        # The property the tree channel is allowed to have: a member only it reached sorts
+        # below every member a scoring channel reached. (The term is additive, so two scored
+        # members can still move relative to each other.) The best a routed
+        # member can earn is 1/(tree_rrf_k + 1); the least a member one scoring channel ranked
+        # inside the channel limit earns is 1/(rrf_k + channel_limit). The first must stay
+        # strictly below the second, which is exactly ``tree_rrf_k + 1 > rrf_k + channel_limit``
+        # — at the constants the service runs (``tree_rrf_k`` 600, ``rrf_k`` 60, and the
+        # ``AnswerRequest.channel_limit`` of 50), 1/601 = 0.00166 against 1/110 = 0.00909:
+        # a 5.5x margin.
+        if tree_rrf_k + 1 <= rrf_k + channel_limit:
+            raise ValueError(
+                "The tree RRF k must keep a routed page below every scored seat: "
+                f"tree_rrf_k + 1 > rrf_k + channel_limit, so that the best tree term "
+                f"1/({tree_rrf_k} + 1) stays under the weakest scored term "
+                f"1/({rrf_k} + {channel_limit})"
+            )
         self._document = document
         self._channel_limit = channel_limit
         self._rrf_k = rrf_k
+        self._tree_rrf_k = tree_rrf_k
         self._reranker = reranker
         cache = {} if index_cache is None else index_cache
         key = lexical_index_id(document.retrieval_snapshot_id, k1=1.5, b=0.75)
@@ -282,7 +317,9 @@ class HybridSearch:
         ``tree_pages`` are the 0-based page indices the ADR 0019 router chose, in the order
         it returned them after its ascending sort; their members join the fusion as a third
         ranking whatever ``QueryMode`` resolves, since it is the caller that decides whether
-        to route at all. Empty — the default — leaves every ranking exactly as it was.
+        to route at all, and are fused at ``tree_rrf_k`` so they add recall underneath the
+        scored seats instead of taking them. Empty — the default — leaves every ranking
+        exactly as it was.
         """
         if top_k < 1:
             raise ValueError("top_k must be at least one")
@@ -303,6 +340,7 @@ class HybridSearch:
             () if resolved == "vector_only" else lexical,
             self._tree_rank(tree_pages, allowed),
             k=self._rrf_k,
+            tree_k=self._tree_rrf_k,
         )
         if self._reranker is None or not fused:
             return SearchOutcome(resolved, fused[:top_k])

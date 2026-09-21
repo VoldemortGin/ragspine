@@ -9,6 +9,7 @@ from typing import Never
 
 import pytest
 
+from enterprise_pdf_rag.adapters import answer_service
 from enterprise_pdf_rag.adapters.answer_service import (
     AmbiguousDocument,
     AnswerService,
@@ -632,9 +633,14 @@ _FUSED_TEXTS = tuple(f"t{index:02d}" for index in range(29))
 
 
 def _fused_hit(
-    member_id: str, score: float, *, vector: int | None, lexical: int | None
+    member_id: str,
+    score: float,
+    *,
+    vector: int | None,
+    lexical: int | None,
+    tree: int | None = None,
 ) -> FusedHit:
-    return FusedHit(SNAPSHOT, member_id, score, vector, lexical, None, None)
+    return FusedHit(SNAPSHOT, member_id, score, vector, lexical, None, None, tree)
 
 
 def _buried_ranking(
@@ -726,6 +732,31 @@ def test_several_buried_visuals_are_offered_in_fused_order() -> None:
     )
     assert reordered[-1].member_id == "diagram"
     assert "diagram-2" not in swapped.resolved
+
+
+def test_a_tree_only_visual_below_every_scored_member_still_wins_its_guaranteed_seat() -> None:
+    """ADR 0012's promotion window admits a member on ``tree_rank``, never on fused score.
+
+    The ``tree_rrf_k = 600`` fix puts a member only the tree reached below every scored one,
+    so the fused ordering alone would never have seated it: on the pinned sample each
+    tree-only prompt seat scored exactly 1 / (600 + 11) = 0.001637 and sat past fused
+    position 70, yet reached the prompt. It gets there because the window reads the third
+    channel's rank, and only for a visual kind no block in the head can be cited for.
+    """
+    document = _buried_document(
+        FakeMember("donut", DONUT_TITLE, donut_chart(("Agency", "72"), ("Partnerships", "28")))
+    )
+    routed = _fused_hit("donut", 1.0 / 611, vector=None, lexical=None, tree=1)
+    ranking = (*_buried_ranking(), routed)
+
+    fused, blocks = select_context(document, ranking, _TOP_K, document.member_texts())
+
+    # Last in the ranking, lowest scored of it, and far outside the plain fused window.
+    assert [hit.member_id for hit in ranking].index("donut") == len(_FUSED_TEXTS)
+    assert len(_FUSED_TEXTS) > 2 * _TOP_K
+    assert routed.fused_score < min(hit.fused_score for hit in ranking if hit is not routed)
+    assert [hit.member_id for hit in fused] == [*_FUSED_TEXTS[: _TOP_K - 1], "donut"]
+    assert blocks[-1].member_id == "donut" and blocks[-1].kind is BlockKind.CHART
 
 
 def test_the_service_offers_the_whole_fused_ranking_to_the_seats(tmp_path: Path) -> None:
@@ -1557,13 +1588,21 @@ _TREE_RATIONALE = "The back matter defines the term."
 
 
 def _tree_document() -> FakeDocument:
-    """Four one-member pages; ``glossary`` (page 3) is ranked by neither fragment channel."""
+    """Four one-member pages; ``glossary`` (page 3) is ranked by neither fragment channel.
+
+    ``glossary`` is a citable donut rather than prose because that is the object the routed
+    page has to carry into the prompt. Since the tree fuses at ``tree_rrf_k`` it can no
+    longer outrank the three members the channels did score, so the seat it takes is ADR
+    0012's guaranteed visual one, reached through the promotion window — which is the
+    mechanism this fixture is meant to prove. Its title, period and categories share no
+    token with either tree question, so BM25 still cannot reach it.
+    """
     return FakeDocument(
         (
             FakeMember("overview", "Agency technology investment overview", page_index=0),
             FakeMember("progress", "Progress of the agency channel", page_index=1),
             FakeMember("noise", "Unrelated closing remarks", page_index=2),
-            FakeMember("glossary", "Glossary of abbreviations", page_index=3),
+            FakeMember("glossary", "", chart=donut_chart(("Bancassurance", "62")), page_index=3),
         ),
         ("overview", "progress", "noise"),
     )
@@ -1594,6 +1633,14 @@ def _router(calls: list[str], node_ids: tuple[str, ...] = ("n3",)) -> Router:
 def test_a_narrative_question_is_routed_and_the_routed_pages_reach_the_prompt(
     tmp_path: Path,
 ) -> None:
+    """Asked for by the request: ``ROUTE_BY_DEFAULT`` is off, so nothing else turns it on.
+
+    Measured against the pinned release on 2026-09-21, after the ``tree_rrf_k = 600`` fix
+    that stopped a routed page displacing a scored member: the frozen gold set scored 22/22
+    with the channel off and 22/22 with it on, not one case moving, and five structural
+    questions were answered in both arms citing exactly the same pages — for one extra live
+    call and 4-22 s per question. Provably safe, worth nothing here, one flag away.
+    """
     document = _tree_document()
     routes: list[str] = []
     service, prompts = _service(
@@ -1605,7 +1652,7 @@ def test_a_narrative_question_is_routed_and_the_routed_pages_reach_the_prompt(
         max_live_calls=2,
     )
 
-    result = service.answer(AnswerRequest(_TREE_QUESTION, top_k=3))
+    result = service.answer(AnswerRequest(_TREE_QUESTION, top_k=3, tree_route=True))
 
     # One routing call, reading the rendered outline and the question, before the synthesis.
     assert len(routes) == 1 and _TREE_QUESTION in routes[0]
@@ -1615,20 +1662,28 @@ def test_a_narrative_question_is_routed_and_the_routed_pages_reach_the_prompt(
     assert "glossary" in result.member_ids
     (routed,) = [hit for hit in result.fused if hit.member_id == "glossary"]
     assert (routed.vector_rank, routed.lexical_rank, routed.tree_rank) == (None, None, 1)
+    # Not by outranking: fused at ``tree_rrf_k`` it scores below every member a scoring
+    # channel reached. The seat is ADR 0012's guaranteed visual one, taken from the last
+    # seat backward — so ``noise``, the weakest scored member, is the one that gives it up.
+    assert routed.fused_score < min(
+        hit.fused_score for hit in result.fused if hit.member_id != "glossary"
+    )
+    assert result.member_ids == ("overview", "progress", "glossary")
     # The outline is a map, never evidence: no node title of it reaches the answer prompt.
     assert len(prompts) == 1 and "Back matter" not in prompts[0]
     # The routing call is live and counted beside the synthesis call.
     assert result.llm_live_calls == 2
 
     # Both calls replay from the immutable cache on a repeat.
-    again = service.answer(AnswerRequest(_TREE_QUESTION, top_k=3))
+    again = service.answer(AnswerRequest(_TREE_QUESTION, top_k=3, tree_route=True))
     assert len(routes) == 1 and len(prompts) == 1 and again.llm_live_calls == 0
     assert again.tree_route is not None and again.tree_route.cache_hit is True
     assert again.member_ids == result.member_ids
 
 
 def test_a_short_label_question_never_spends_a_routing_call(tmp_path: Path) -> None:
-    """ADR 0018's shape test, reused: BM25 already matches a label wherever it is printed."""
+    """Unasked, nothing routes at all now ``ROUTE_BY_DEFAULT`` is off — and the shape rule
+    that would spare this question even if the default flipped is pinned separately below."""
     document = _tree_document()
     routes: list[str] = []
     service, prompts = _service(
@@ -1703,7 +1758,8 @@ def test_an_unusable_route_leaves_the_answer_exactly_as_it_was(tmp_path: Path) -
         trees={_TREE_SHA: _document_tree()},
         max_live_calls=2,
     )
-    result = service.answer(AnswerRequest(_TREE_QUESTION, top_k=3))
+    # Asked for explicitly: with the default off (see the routed test above) nothing is tried.
+    result = service.answer(AnswerRequest(_TREE_QUESTION, top_k=3, tree_route=True))
 
     # The channel is absent, not an error: the other two channels answered alone.
     assert result.tree_route is None
@@ -1728,7 +1784,7 @@ def test_an_exhausted_call_budget_drops_the_route_and_not_the_answer(tmp_path: P
         trees={_TREE_SHA: _document_tree()},
         max_live_calls=0,
     )
-    result = spent.answer(AnswerRequest(_TREE_QUESTION, top_k=3))
+    result = spent.answer(AnswerRequest(_TREE_QUESTION, top_k=3, tree_route=True))
 
     assert routes == [] and second == []  # nothing could be sent at all
     assert result.tree_route is None
@@ -1748,7 +1804,7 @@ def test_a_tree_routed_abstention_keeps_its_route(tmp_path: Path) -> None:
         max_live_calls=2,
     )
 
-    result = service.answer(AnswerRequest(_TREE_QUESTION, top_k=3))
+    result = service.answer(AnswerRequest(_TREE_QUESTION, top_k=3, tree_route=True))
 
     assert (result.status, result.abstain_reason) == (
         AnswerStatus.ABSTAINED,
@@ -1757,3 +1813,77 @@ def test_a_tree_routed_abstention_keeps_its_route(tmp_path: Path) -> None:
     assert len(routes) == 1
     assert result.tree_route == TreeRoute(("n3",), (3,), False, _TREE_RATIONALE)
     assert result.llm_live_calls == 2
+
+
+def test_a_mounted_tree_routes_nothing_and_changes_nothing_until_a_request_asks_for_it(
+    tmp_path: Path,
+) -> None:
+    """``ROUTE_BY_DEFAULT`` is off: an unasked narrative question answers as if no tree existed.
+
+    The default is off because it was measured off (2026-09-21, pinned release, after the
+    ``tree_rrf_k = 600`` fix): 22/22 on the frozen gold set in both arms with no case moving,
+    the same pages cited for five structural questions, against one extra live call and
+    4-22 s of latency per question. This is the pin on that decision.
+    """
+    routes: list[str] = []
+    mounted, prompts = _service(
+        tmp_path / "mounted",
+        _tree_document(),
+        lambda prompt: declined(),
+        router=_router(routes),
+        trees={_TREE_SHA: _document_tree()},
+        max_live_calls=2,
+    )
+    plain, plain_prompts = _service(tmp_path / "plain", _tree_document(), lambda prompt: declined())
+
+    result = mounted.answer(AnswerRequest(_TREE_QUESTION, top_k=3))
+    before = plain.answer(AnswerRequest(_TREE_QUESTION, top_k=3))
+
+    # Not one call spent on the channel, and not one rank carried out of it.
+    assert routes == [] and result.tree_route is None
+    assert all(hit.tree_rank is None for hit in result.fused)
+    assert "glossary" not in result.member_ids
+    assert len(prompts) == 1 and result.llm_live_calls == 1
+    # Field for field the answer of a service that has no tree at all — prompt included.
+    assert result == before
+    assert prompts == plain_prompts
+
+
+def test_with_routing_on_by_default_a_narrative_question_routes_and_a_label_query_does_not(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR 0019's shape rule, kept under test while ``ROUTE_BY_DEFAULT`` holds it dormant.
+
+    Nothing reads the rule today; the day the default flips it is the rule that applies, so
+    it is pinned here rather than rediscovered then: a question with a shape BM25 cannot
+    already answer is routed, and a short printed label is not.
+    """
+    monkeypatch.setattr(answer_service, "ROUTE_BY_DEFAULT", True)
+    trees = {_TREE_SHA: _document_tree()}
+    narrative_routes: list[str] = []
+    narrative_service, _ = _service(
+        tmp_path / "narrative",
+        _tree_document(),
+        lambda prompt: declined(),
+        router=_router(narrative_routes),
+        trees=trees,
+        max_live_calls=2,
+    )
+    label_routes: list[str] = []
+    label_service, _ = _service(
+        tmp_path / "label",
+        _tree_document(),
+        lambda prompt: declined(),
+        router=_router(label_routes),
+        trees=trees,
+        max_live_calls=2,
+    )
+
+    narrative = narrative_service.answer(AnswerRequest(_TREE_QUESTION, top_k=3))
+    label = label_service.answer(AnswerRequest(_TREE_LABEL_QUESTION, top_k=3))
+
+    assert len(narrative_routes) == 1 and _TREE_QUESTION in narrative_routes[0]
+    assert narrative.tree_route == TreeRoute(("n3",), (3,), False, _TREE_RATIONALE)
+    assert "glossary" in narrative.member_ids
+    assert label_routes == [] and label.tree_route is None
+    assert "glossary" not in label.member_ids

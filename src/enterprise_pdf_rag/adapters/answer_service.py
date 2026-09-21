@@ -67,6 +67,11 @@ from ragspine.retrieval.rerank.listwise_rerank import ListwiseJudge
 
 _TASK = "rag-answer-v1"
 _MODEL_OUTPUT_FAILURES = frozenset({"invalid_model_json", "truncated_response"})
+# Whether a question with a mounted tree is routed when the request says nothing (ADR 0019).
+# Measured off: a member only the tree reached now sorts below every scored one, and on the sample
+# it changed no citation, so routing by default would spend one live call per question for
+# nothing. A caller asks for it with ``AnswerRequest.tree_route``.
+ROUTE_BY_DEFAULT: Final = False
 
 
 class UnknownDocument(LookupError):
@@ -275,18 +280,25 @@ class AnswerService:
         """The pages this document's outline tree routes the question to; ``None`` when unrouted.
 
         The channel exists only where a tree was built for the document, so a service mounted
-        without one behaves exactly as it did before ADR 0019. Given a tree, ``tree_route``
-        pins the decision when it is set; left at ``None`` the ADR 0019 rule applies and a
-        short label query is not routed, because BM25 already matches a printed label wherever
-        it appears and a map of the document would buy nothing for a live call. The question
-        routed is the English restatement when there is one: the outline is written in the
-        index's language, which is the only wording a router can match against it.
+        without one behaves exactly as it did before ADR 0019. Given a tree, a request must
+        ask for it: ``ROUTE_BY_DEFAULT`` is **False** because on the 20-page sample this was
+        measured against, routing changed not one citation while costing a live call and
+        seconds of latency (ADR 0019 Validation). The rule is written out rather than folded
+        away, because the day the default flips it is the rule that applies: a short label
+        query is still not routed, since BM25 already matches a printed label wherever it
+        appears and a map of the document would buy nothing for that call.
+
+        The question routed is the English restatement when there is one: the outline is
+        written in the index's language, which is the only wording a router can match it on.
         """
         tree = self._trees.get(document.source_sha256)
         if tree is None:
             return None
         question = request.question if plan.translation is None else plan.translation.english
-        routed = not is_label_query(question) if request.tree_route is None else request.tree_route
+        if request.tree_route is None:
+            routed = ROUTE_BY_DEFAULT and not is_label_query(question)
+        else:
+            routed = request.tree_route
         return route_tree(question, tree, self._llm) if routed else None
 
     def answer(self, request: AnswerRequest) -> AnswerResult:
