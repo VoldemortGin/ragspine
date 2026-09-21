@@ -8,9 +8,11 @@ because the translation is short and deterministic-looking, it caches like any o
 bounded call and costs nothing on a repeat.
 
 This is a *query* rewrite, never an evidence rewrite: the translated text only ever
-reaches the two retrieval channels. The prompt, the period / region pre-filters and the
-prose-number gate all keep the original question, and every claim is still verified
-verbatim against the document's own wording (ADR 0011, ADR 0013).
+reaches retrieval — the two channels, and the period / region pre-filters, which derive
+from it as well as from the original question and take the union (an explicitly supplied
+filter is never widened). The prompt and the prose-number gate keep the original question,
+and every claim is still verified verbatim against the document's own wording (ADR 0011,
+ADR 0013).
 
 A translation that cannot be had — no budget, no transport, unusable output — is not an
 error: the caller keeps the original question and the vector channel, exactly as before.

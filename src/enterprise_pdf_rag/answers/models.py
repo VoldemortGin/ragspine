@@ -72,8 +72,9 @@ class FusedHit:
 class TranslatedQuery:
     """One question restated in the index's language by ``adapters/query_translation``.
 
-    ``english`` is what both retrieval channels then score; the original question is what
-    the prompt, the pre-filters and the prose gate keep using (ADR 0018).
+    ``english`` is what both retrieval channels then score, and what the period / region
+    pre-filters are derived from beside the original question; the prompt and the prose
+    gate keep using the question itself (ADR 0018).
     """
 
     english: str
@@ -87,7 +88,7 @@ class TranslatedQuery:
 
 @dataclass(frozen=True, slots=True)
 class MemberFilters:
-    """Equality pre-filters on verified page metadata: periods (any form) and regions.
+    """Pre-filters on verified page metadata: periods (any form) and regions.
 
     Both dimensions are optional; a member matches when it satisfies every dimension
     given. The filter is a candidate narrowing only: when it leaves fewer than ``top_k``

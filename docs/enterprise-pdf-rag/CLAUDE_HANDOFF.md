@@ -4,7 +4,7 @@
 
 > 阅读顺序：先看下方“恢复开发记录”；后续旧暂停快照保留作证据，不能作为实时发布或服务状态。
 
-## 图表点位逐字放行（2026-09-21，分支 `fix/chart-source-labels`，ADR 0016，未合并 `main`）
+## 图表点位逐字放行（2026-09-21，分支 `fix/chart-source-labels`，ADR 0016，**已合入 `main`**：合并提交 `ffcda6c`）
 
 > 用新 scope `source-labels-and-verbatim-points-v1` 取代 `figure-source-labels-only-v1` 做默认图表资格；
 > 旧 scope 冻结、已发布成员照常回放。证据在本机 `data/validation/generic-chat-2026-09-21/chart-labels/`
@@ -54,9 +54,9 @@
 2. 9 个 IR 字段因 layout 分区把图的 bbox 裁得太紧而无法匹配；缩写 label 的展开印在裁切之外时仍失败（`qualify_source_labels` 只拿得到该图自己的 observation）。**放宽 bbox 会改变模型当初看到的东西**，会让钉死的视图失效，故留作 follow-up。
 3. category ↔ value 的关联未被证明（见"做了什么" 6）；需要几何保证的数字只能走 ADR 0008 的 scope。
 4. 中文地区词表缺口（`k02`）未修，只是表现从 `not_in_context` 变成 `ambiguous`。
-5. 分支 `fix/chart-source-labels` 未合并 `main`；`src/enterprise_pdf_rag/CLAUDE.md` 的 `verified-against` 暂为 `PENDING_COMMIT`，提交后须换成真实 commit hash。
+5. ~~分支 `fix/chart-source-labels` 未合并 `main`~~ —— 已于本轮集成合入，`verified-against` 已换成真实 commit hash。
 
-## 页级父子窗口：命中块旁边带上整页（2026-09-21，分支 `feat/page-window`，未合并 `main`）
+## 页级父子窗口：命中块旁边带上整页（2026-09-21，分支 `feat/page-window`，**已合入 `main`**：合并提交 `27fe267`，ADR 编号在合并时由 0016 改为 0017）
 
 > 解决「检索一次只给一个 member 打分，命中块到达 prompt 时脱离了解释它的那一页」——信息太碎。对应 ragspine 的 small-to-big（`src/ragspine/retrieval/link/narrative_link.py`）。设计见 [ADR 0017](adr/0017-page-context-window.md)。代码提交 `2af360c`。证据在本机 `data/validation/generic-chat-2026-09-21/page-window/`（`data/*` 为 git 忽略，同此前各轮），该目录 `NOTES.md` 是本节的原始记录。
 
@@ -92,7 +92,7 @@
 
 **离线验证**：`pytest tests/enterprise_pdf_rag -q` 由 **1077 → 1097 passed**（新增 20 条，另有前置的 `test_context_builder.py` 7 / `test_ports.py` 5 / `test_document_catalog.py` 2）；`mypy` 500 文件零错误；`ruff check` / `ruff format --check` 全过；`check_conformance` / `check_architecture` / `check_schema` / `check_drift` 四个全过；`check_doc_drift` 23 tracked / 0 stale（`src/enterprise_pdf_rag/CLAUDE.md` bump 到 `2af360c`）。
 
-## 通道选择与查询翻译（2026-09-21，分支 `feat/bm25-only-short-queries`，[ADR 0018](adr/0018-query-classification-and-translation.md)）
+## 通道选择与查询翻译（2026-09-21，分支 `feat/bm25-only-short-queries`，[ADR 0018](adr/0018-query-classification-and-translation.md)，**已合入 `main`**：合并提交 `ff4fadd`，ADR 编号在合并时由 0016 改为 0018）
 
 > 依据是本机 `data/validation/coverage-2026-09-21/`（覆盖率与三通道召回度量，`data/*` 为 git 忽略，同此前各轮）。解掉「RRF 无条件融合」这个从未被测过的假设，并把 ADR 0013 已知缺陷 (b)（中文问英文 deck）在**检索侧**补上。
 

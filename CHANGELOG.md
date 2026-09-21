@@ -34,6 +34,40 @@ All notable changes to RAGSpine are documented here. This project follows Semant
   `adapters/visual_requalification.py` gained the matching Chart branch, so a published
   snapshot re-projects from its own stored branches with no model and no network.
 
+### Fixed
+
+- **A region filter matches the page's own qualification of the place, and never its
+  exclusion** (`enterprise_pdf_rag`, [ADR 0018 amendment 1](docs/enterprise-pdf-rag/adr/0018-query-classification-and-translation.md)).
+  Region pre-filters compared the filter value and the page's verified region value for
+  equality. One document prints the same place several ways — `Thailand`, `AIA Thailand`,
+  `Hong Kong`, `Hong Kong Special Administrative Region`, `Taiwan (China)` — so a question
+  naming `Thailand` kept only the pages tagged with the bare word and dropped every page
+  that actually carried the figure (frozen as the known gap `k01-region-thailand-en`). A
+  filter value now matches when every one of its words appears as a whole word in the
+  page's value, which widens `Thailand` from 29 to 51 candidate members on the pinned AIA
+  release. A page value that *excludes* the place — `ex-Thailand`, `Asia ex-Japan`,
+  `non-Hong Kong`, `Group excluding Thailand` — is the opposite claim, not a narrower one,
+  and never matches: all 18 `ex-Thailand` members stay out.
+- **The period and region pre-filters are derived from the translation too**
+  (`enterprise_pdf_rag`, [ADR 0018 amendment 1](docs/enterprise-pdf-rag/adr/0018-query-classification-and-translation.md)).
+  A question written outside the index's language cannot name a value of the document's
+  verified English vocabulary, so no region filter was derived at all. When a translation
+  was produced, `derive_filters` now runs over it as well and the two results are unioned
+  (the question's own values first) before the candidates are recomputed. The pipeline
+  order is unchanged, an explicitly supplied `filters` is never widened, and the prompt,
+  the prose gate and claim verification still see only the question the user asked.
+
+- **A number the question itself printed is grounded by its form, not by its spelling**
+  (`enterprise_pdf_rag`). The prose gate admits a figure the user's own question already
+  carries — a restated year or period is not a new figure — but it compared the captured
+  token strings, and `_NUMBER_RE` reads thousands separators. The comma of "In 2024, VONB
+  grew" was therefore captured into the token, so `2024,` never equalled the question's
+  `2024` and a faithful, fully cited answer abstained (live `p02-year-filter-2024-en`,
+  twice, with `numbers outside verified claims: 2024,`). A question's figures are now
+  matched by the form they were written in — magnitude plus whether a percent sign was
+  attached — so surrounding punctuation and thousands separators no longer count, while a
+  bare `11` in the question still cannot ground `11%` in the prose.
+
 ### Added
 
 - **Retrieval picks its channels per question, and restates a foreign-language question in the

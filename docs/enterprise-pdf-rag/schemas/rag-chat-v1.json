@@ -87,7 +87,7 @@
       },
       "MemberFiltersIn": {
         "additionalProperties": false,
-        "description": "Explicit metadata pre-filters (ADR 0013); omitted, they are derived from the question.\n\n``periods`` take any printed form (``1H26``, ``FY2024``, ``2026``); a bare year matches\nevery period of that year. ``regions`` must match the document's own verified region\nstrings verbatim (case-insensitive). An empty object disables filtering.",
+        "description": "Explicit metadata pre-filters (ADR 0013); omitted, they are derived from the question.\n\n``periods`` take any printed form (``1H26``, ``FY2024``, ``2026``); a bare year matches\nevery period of that year. ``regions`` are matched against the document's own verified\nregion strings by whole word, case-insensitively: every word of the value given must\nappear in the page's value, so ``Thailand`` also matches a page printed as ``AIA\nThailand``, while a page value that *excludes* the place (``ex-Thailand``) never\nmatches it. An empty object disables filtering.",
         "properties": {
           "periods": {
             "items": {

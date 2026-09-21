@@ -139,8 +139,9 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   whole answer (ADR 0011). One synthesis call per answer, plus at most one earlier
   translation call for a question written outside the index's language (bounded, cached,
   skipped when unavailable — ADR 0018); `llm_live_calls` counts both. Nothing is derived or
-  retried, and a translation only ever reaches the two retrieval channels: the prompt, the
-  pre-filters and the prose gate keep the original question, and claims stay verbatim.
+  retried, and a translation only ever reaches retrieval — the two channels and the period /
+  region pre-filters, which union it with what the original question derived; the prompt and
+  the prose gate keep the original question, and claims stay verbatim.
 - **A verified table grid means ink** (ADR 0014) — `TableIR` / `TableCell` are `VERIFIED` only
   with `GridEvidence` / `CellBorderEvidence`: every row and column boundary sits on a real
   ruling, every cell edge is continuously ruled, every merge is proved by the absence of a rule

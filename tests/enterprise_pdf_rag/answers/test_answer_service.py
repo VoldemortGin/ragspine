@@ -948,10 +948,10 @@ _CHINESE_QUESTION = "1H21 的费用率是多少？"  # noqa: RUF001 — a real C
 _CHINESE_ENGLISH = "expense ratio 1H21"
 
 
-def _translator(calls: list[str]) -> Translator:
+def _translator(calls: list[str], english: str = _CHINESE_ENGLISH) -> Translator:
     def translate(prompt: str) -> QueryTranslationDTO:
         calls.append(prompt)
-        return QueryTranslationDTO(english_query=_CHINESE_ENGLISH, source_language="Chinese")
+        return QueryTranslationDTO(english_query=english, source_language="Chinese")
 
     return translate
 
@@ -1091,3 +1091,69 @@ def test_translation_can_be_switched_off_per_request(
     assert translations == [] and result.query_translation is None
     assert result.fusion_mode == "vector_only"
     assert result.llm_live_calls == 1
+
+
+_CHINESE_REGION_QUESTION = "泰国的新业务价值是多少？"  # noqa: RUF001 — a real Chinese question ends in the fullwidth mark
+_ENGLISH_REGION_QUESTION = "Thailand VONB in 1H26"
+_CHINESE_YEAR_REGION_QUESTION = "2026年泰国的新业务价值是多少？"  # noqa: RUF001 — see above
+
+
+def test_the_translation_also_derives_the_pre_filters(tmp_path: Path) -> None:
+    document = _metadata_document(("bare", "cover", "hk", "th", "fy"))
+    translations: list[str] = []
+    service, _ = _service(
+        tmp_path,
+        document,
+        lambda prompt: declined(),
+        translator=_translator(translations, _ENGLISH_REGION_QUESTION),
+        max_live_calls=2,
+    )
+
+    result = service.answer(AnswerRequest(_CHINESE_REGION_QUESTION, top_k=1))
+
+    assert len(translations) == 1
+    # The Chinese question names no vocabulary region on its own; the translation does.
+    assert result.filters_applied == MemberFilters(("1H2026",), ("Thailand",))
+    assert result.filters_relaxed is False
+    assert result.member_ids == ("th",)
+
+
+def test_the_union_keeps_what_the_question_itself_derived(tmp_path: Path) -> None:
+    document = _metadata_document(("bare", "cover", "hk", "th", "fy"))
+    translations: list[str] = []
+    service, _ = _service(
+        tmp_path,
+        document,
+        lambda prompt: declined(),
+        translator=_translator(translations, "Thailand VONB"),
+        max_live_calls=2,
+    )
+
+    result = service.answer(AnswerRequest(_CHINESE_YEAR_REGION_QUESTION, top_k=1))
+
+    assert len(translations) == 1
+    assert result.filters_applied == MemberFilters(("Y2026",), ("Thailand",))
+    assert result.member_ids == ("th",)
+
+
+def test_an_explicit_filter_is_never_widened_by_the_translation(tmp_path: Path) -> None:
+    document = _metadata_document(("bare", "cover", "hk", "th", "fy"))
+    translations: list[str] = []
+    service, _ = _service(
+        tmp_path,
+        document,
+        lambda prompt: declined(),
+        translator=_translator(translations, _ENGLISH_REGION_QUESTION),
+        max_live_calls=2,
+    )
+
+    result = service.answer(
+        AnswerRequest(
+            _CHINESE_REGION_QUESTION, top_k=1, filters=MemberFilters(regions=("Hong Kong",))
+        )
+    )
+
+    assert len(translations) == 1  # translated for the channels, as ever
+    assert result.filters_applied == MemberFilters((), ("Hong Kong",))
+    assert result.filters_relaxed is False
+    assert result.member_ids == ("hk",)

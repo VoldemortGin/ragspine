@@ -400,6 +400,8 @@ bool | None`（`None` 取 settings，`True` / `False` 只覆盖这一次请求�
 
 非本索引语言的问题（中文问英文 deck）先翻译再检索：触发条件是**内容词**（去掉虚词与数字后）在词面通道零命中 —— 只看整句零命中会失效，因为 `2026 上半年 分销渠道 占比` 里的 `2026` 本身就命中。翻译是一次有预算、可缓存的 `complete_text_json` 调用（task 盐 `query-translation-v1`，strict schema `{english_query, source_language}`，规则禁止回答、禁止添加信息、数字 / 期间 / 专有名词逐字保留）。**译文只进两个检索通道**：prompt、period / region 前置过滤、散文数字门用的都还是原问题，claim 仍逐字比对文档原文。翻译不可用（没预算、传输失败、输出不可用、`translate_query=False`）不报错，退回**向量单通道**。一次被翻译的问答因此是**两次** live 调用，`llm_live_calls` 如实计数；重复提问两次都命中缓存。
 
+**修订 1（ADR 0018 Amendment 1）**：period / region 前置过滤现在也从译文推导，与原问题推出的取**并集**（原值在前、新值追加、去重），随后重算 `applied` / `allowed` / `relaxed`；调用方显式传的 `filters` 永不被加宽，prompt、散文数字门与 claim 校验仍只看原问题。同一改动里 region 匹配也从「逐字相等」改成「整词包含」：`Thailand` 也命中 `AIA Thailand`、`Hong Kong` 也命中 `Hong Kong Special Administrative Region`，但**排除式**取值（`ex-Thailand`、`Asia ex-Japan`）永不命中。
+
 两个连带后果值得知道：
 
 - **query embedder 变成「用到它的请求」的依赖**，和 opt-in reranker 同一条规则。没有配置 embedder 时，走 BM25 单通道的问题照常 200 作答（答案与配置齐全时逐字相同，不是降级替代品），需要向量通道的问题仍然 503、绝不替代；看 `fusion_mode` 就知道跑了哪些通道。

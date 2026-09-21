@@ -238,23 +238,22 @@ class AnswerService:
             index_cache=self._index_cache,
         )
         members = search.index.members
+        vocabulary = region_vocabulary(members)
         filters = (
-            derive_filters(request.question, region_vocabulary(members))
+            derive_filters(request.question, vocabulary)
             if request.filters is None
             else request.filters
         )
-        applied: MemberFilters | None = None if filters.is_empty else filters
-        allowed = candidate_members(members, applied)
-        starved = allowed is not None and len(allowed) < request.top_k
-        # Fewer candidates than seats: the narrowing is dropped; when a filter was in play
-        # the result says so (the built-in cover / agenda exclusion is not reported).
-        relaxed = starved and applied is not None
-        if starved:
-            allowed = None
+        applied, allowed, relaxed = _narrow(members, filters, request.top_k)
         plan = self._plan(request, search, allowed)
         translation = plan.translation
-        # Only the two channels see the translation; the prompt, the pre-filters above and
-        # the prose gate below all keep the question the user actually asked.
+        # A translated question is one the vocabulary cannot see either, so the pre-filters
+        # are re-derived from the English and unioned with the question's own; an explicitly
+        # supplied filter is never widened. The prompt and the prose gate below still keep
+        # the question the user actually asked.
+        if translation is not None and request.filters is None:
+            filters = _union(filters, derive_filters(translation.english, vocabulary))
+            applied, allowed, relaxed = _narrow(members, filters, request.top_k)
         outcome = search.search(
             plan.query, top_k=2 * request.top_k, allowed=allowed, mode=plan.mode
         )
@@ -390,6 +389,30 @@ class AnswerService:
             fusion_mode=fusion_mode,
             query_translation=query_translation,
         )
+
+
+def _narrow(
+    members: Sequence[MemberText], filters: MemberFilters, top_k: int
+) -> tuple[MemberFilters | None, frozenset[str] | None, bool]:
+    """What the pre-filters leave for the ranking: applied filter, candidates, relaxed.
+
+    Fewer candidates than seats: the narrowing is dropped; when a filter was in play the
+    result says so (the built-in cover / agenda exclusion is not reported).
+    """
+    applied: MemberFilters | None = None if filters.is_empty else filters
+    allowed = candidate_members(members, applied)
+    if allowed is not None and len(allowed) < top_k:
+        return applied, None, applied is not None
+    return applied, allowed, False
+
+
+def _union(first: MemberFilters, second: MemberFilters) -> MemberFilters:
+    """``first``'s values, then whatever ``second`` adds; order kept, duplicates dropped."""
+
+    def merge(left: tuple[str, ...], right: tuple[str, ...]) -> tuple[str, ...]:
+        return left + tuple(value for value in right if value not in left)
+
+    return MemberFilters(merge(first.periods, second.periods), merge(first.regions, second.regions))
 
 
 def _with_page_titles(

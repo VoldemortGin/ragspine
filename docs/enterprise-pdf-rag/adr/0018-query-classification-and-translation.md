@@ -134,6 +134,31 @@ promotes that noise.
    it is not a degraded substitute for a different answer. `fusion_mode` in the envelope says
    which channels ran.
 
+## Amendment 1 (2026-09-21): the pre-filters are derived from the translation too
+
+Decision 5 above ("the translation reaches the two retrieval channels and nothing else") and
+the rejected alternative below it are **superseded** for the pre-filters alone. A Chinese
+question never names a value of the document's verified English region vocabulary, so no
+region filter was derived at all and `k02-region-thailand-zh` abstained for a second, avoidable
+reason. The translation is now also run through `derive_filters` and the result is **unioned**
+with what the original question derived (original values first, new ones appended,
+deduplicated); `applied` / `allowed` / `relaxed` are recomputed from the union. The ordering of
+the pipeline is unchanged — pre-filters → channel choice / translation → retrieval → seats →
+page window → prompt → verification — so the first derivation still happens before `_plan`,
+whose lexical probe reads `allowed`, and the union lands between the plan and the search. An
+**explicitly supplied** `filters` is never widened: the union runs only when the caller left
+the filters to be derived. The prompt, the prose numeric gate and claim verification still see
+the original question only, so nothing model-generated can reach an answer's wording; a filter
+is a recall aid that is relaxed when it starves the ranking, which bounds what a bad
+translation can cost. The two frozen gold cases this touches (`k01` / `k02`) are re-decided
+with a live re-test, not here.
+
+Region matching itself also stopped being equality in the same change: a filter value matches
+a page's region value when every word of the filter appears as a whole word in it (`Thailand`
+also matches `AIA Thailand`, `Hong Kong` also matches `Hong Kong Special Administrative
+Region`), except that a value which *excludes* a place (`ex-Thailand`, `Asia ex-Japan`) never
+matches it — that is the opposite claim, not a narrower one.
+
 ## Rejected alternatives
 
 - **Dropping the vector channel entirely.** The probe reaches its ceiling at always-BM25, so
@@ -149,10 +174,11 @@ promotes that noise.
 - **Translating on the strict `lexical_hits == 0` test.** It reads well and is wrong: it never
   fires for the very cases it targets, because a Chinese question that names `1H26` or `2026`
   matches that token. The content-word probe is the version that works.
-- **Deriving the period / region pre-filters from the translation too.** That would plausibly
+- **Deriving the period / region pre-filters from the translation too.** ~~That would plausibly
   close ADR 0013's known gap (b) — `泰国` → `Thailand` — but it changes an abstention into an
   answer on a frozen gold case, and it makes a verified-vocabulary filter depend on model
-  output. Left as a follow-up to be decided with evidence.
+  output. Left as a follow-up to be decided with evidence.~~ **Superseded by Amendment 1**: it
+  is now the behaviour.
 - **Reserving the last budget call for synthesis so a translation can never starve it.** It
   makes the retrieval plan depend on mutable budget state, so the same question stops
   replaying from the same cache entry. A translated question simply costs two live calls.
@@ -185,7 +211,8 @@ promotes that noise.
 - **`k02-region-thailand-zh` is still a known gap, for a smaller reason.** Retrieval is now
   translated, but the region pre-filter is still derived from the Chinese question and still
   matches nothing in the document's verified English vocabulary. The ADR 0013 gap (b) wording
-  should be narrowed to the filter when that case is re-frozen.
+  should be narrowed to the filter when that case is re-frozen. *(Addressed by Amendment 1;
+  both Thailand cases are re-frozen against a live re-test.)*
 - `answers/` may import no SDK, so `query_mode.tokenize_query` restates the lexical channel's
   tokenizer instead of importing it; `test_query_mode` pins the two to identical output over
   mixed English / CJK input, because a token budget is meaningless unless it counts the tokens

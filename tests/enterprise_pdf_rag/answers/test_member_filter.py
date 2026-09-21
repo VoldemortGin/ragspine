@@ -62,6 +62,41 @@ def test_region_filter_is_verbatim_case_insensitive_and_misses_untagged_pages() 
     assert not member_matches(_CORPUS[-1], MemberFilters(regions=("Hong Kong",)))
 
 
+def test_region_filter_matches_whole_words_so_a_page_may_qualify_the_place_further() -> None:
+    thailand = MemberFilters(regions=("Thailand",))
+    assert member_matches(_member("aia-th", regions=("AIA Thailand",)), thailand)
+    assert member_matches(_member("th", regions=("Thailand",)), thailand)
+    assert member_matches(
+        _member("hk-sar", regions=("Hong Kong Special Administrative Region",)),
+        MemberFilters(regions=("Hong Kong",)),
+    )
+    assert member_matches(
+        _member("tw", regions=("Taiwan (China)",)), MemberFilters(regions=("Taiwan",))
+    )
+    assert not member_matches(
+        _member("aia-th", regions=("AIA Thailand",)), MemberFilters(regions=("Singapore",))
+    )
+    # Every word of the filter must appear: a narrower filter is not met by a broader value.
+    assert not member_matches(
+        _member("th", regions=("Thailand",)), MemberFilters(regions=("AIA Thailand",))
+    )
+
+
+def test_a_region_that_excludes_a_place_never_matches_it() -> None:
+    thailand = MemberFilters(regions=("Thailand",))
+    assert not member_matches(_member("ex-th", regions=("ex-Thailand",)), thailand)
+    assert not member_matches(_member("excl", regions=("Group excluding Thailand",)), thailand)
+    assert not member_matches(
+        _member("ex-jp", regions=("Asia ex-Japan",)), MemberFilters(regions=("Japan",))
+    )
+    assert not member_matches(
+        _member("non-hk", regions=("non-Hong Kong",)), MemberFilters(regions=("Hong Kong",))
+    )
+    assert member_matches(  # no false positive from the "ex" test
+        _member("sg", regions=("Singapore",)), MemberFilters(regions=("Singapore",))
+    )
+
+
 def test_vocabulary_and_filter_validation() -> None:
     assert region_vocabulary(_CORPUS) == ("Hong Kong", "Thailand", "Group")
     assert region_vocabulary((_member("x", regions=("HONG KONG",)), *_CORPUS)) == (

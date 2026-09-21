@@ -35,8 +35,11 @@ class MemberFiltersIn(BoundaryModel):
     """Explicit metadata pre-filters (ADR 0013); omitted, they are derived from the question.
 
     ``periods`` take any printed form (``1H26``, ``FY2024``, ``2026``); a bare year matches
-    every period of that year. ``regions`` must match the document's own verified region
-    strings verbatim (case-insensitive). An empty object disables filtering.
+    every period of that year. ``regions`` are matched against the document's own verified
+    region strings by whole word, case-insensitively: every word of the value given must
+    appear in the page's value, so ``Thailand`` also matches a page printed as ``AIA
+    Thailand``, while a page value that *excludes* the place (``ex-Thailand``) never
+    matches it. An empty object disables filtering.
     """
 
     periods: list[_FilterValue] = Field(default_factory=list, max_length=8)
