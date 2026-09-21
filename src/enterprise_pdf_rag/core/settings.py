@@ -92,6 +92,19 @@ class Settings(BaseSettings):
     legacy_document_roots: tuple[Path, ...] = ()
     # document-catalog 聊天端点整个进程的模型真实调用预算(缓存回放不计;用尽即 503)
     answer_max_live_calls: int = 200
+    # 单次模型调用的等待上限(秒)。默认与 JsonCompletionClient 自身的默认一致;页级上下文
+    # (ADR 0017)让"总结某一节"这类问题的 prompt 与生成都更长,超过默认即 503,所以它可配。
+    # 上限 180 与该客户端的构造校验一致。
+    answer_timeout_seconds: float = 45.0
+
+    @field_validator("answer_timeout_seconds")
+    @classmethod
+    def bounded_answer_timeout(cls, value: float) -> float:
+        # Same window ``JsonCompletionClient`` enforces; rejected here so a bad environment
+        # fails at startup instead of when the first question arrives.
+        if not 0 < value <= 180:
+            raise ValueError("answer_timeout_seconds must be within (0, 180]")
+        return value
 
     @field_validator("data_dir", "log_dir")
     @classmethod

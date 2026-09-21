@@ -125,7 +125,7 @@ ENTERPRISE_API_PORT=8768 ENTERPRISE_WEBUI_PORT=3200 \
   uv run --locked python scripts/enterprise_pdf_rag/webui_preview.py status --profile document-catalog
 ```
 
-只有 API 子进程继承 `EMBEDDING_*` / `OPENAI_*` / `RERANK_*` / `APP_INGESTION_DIR` / `APP_LEGACY_DOCUMENT_ROOTS` / `APP_ANSWER_MAX_LIVE_CALLS`；Open WebUI 进程只收到构造的环境和占位 key。
+只有 API 子进程继承 `EMBEDDING_*` / `OPENAI_*` / `RERANK_*` / `APP_INGESTION_DIR` / `APP_LEGACY_DOCUMENT_ROOTS` / `APP_ANSWER_MAX_LIVE_CALLS` / `APP_ANSWER_TIMEOUT_SECONDS`；Open WebUI 进程只收到构造的环境和占位 key。
 
 ### 可选：启用 Open WebUI 自带登录（对外暴露时）
 

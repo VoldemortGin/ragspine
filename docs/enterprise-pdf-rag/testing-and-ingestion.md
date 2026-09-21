@@ -259,6 +259,7 @@ export OPENAI_BASE_URL='<https url>' OPENAI_MODEL='<model>' OPENAI_API_KEY='<key
 # 可选 rerank：只在请求显式 "rerank": true 时使用；缺失时该请求 503
 export RERANK_BASE_URL='<loopback url>' RERANK_MODEL='<model>' RERANK_API_KEY='<key>'
 export APP_ANSWER_MAX_LIVE_CALLS=200                 # 进程内模型真实调用预算；缓存回放不计，用尽即 503
+export APP_ANSWER_TIMEOUT_SECONDS=45                 # 单次模型调用等待上限（秒），(0, 180]；超时即 503
 
 enterprise-pdf-rag serve --host 127.0.0.1 --port 8766
 ```

@@ -105,7 +105,9 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   the bodies, `contexts/<fingerprint>.json` the **full request body as sent** (system rules,
   every message, schema, token budget; inline images summarized), written before the call and
   back-filled on replay, first write wins. It quotes the evidence verbatim: local files, never
-  shared. Live budget `APP_ANSWER_MAX_LIVE_CALLS` (200).
+  shared. Live budget `APP_ANSWER_MAX_LIVE_CALLS` (200), per-call wait
+  `APP_ANSWER_TIMEOUT_SECONDS` (45, capped at 180 — a page window makes a "summarise this
+  section" prompt long enough to need more).
 - **Deploy:** `deploy/enterprise-pdf-rag/open-webui/` — `backend.Dockerfile` is not re-verified
   since the merge (local `../corespine` uv source; see ADR 0021 follow-ups).
 - **Benchmarks / gold:** `data/benchmarks/enterprise-pdf-rag/aia-2026-interim/` (its `manifest.json`

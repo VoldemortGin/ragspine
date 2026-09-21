@@ -717,14 +717,14 @@ def test_configured_app_builds_one_answer_client_and_serves_chat(
     published: Published, monkeypatch: pytest.MonkeyPatch, configuration: str
 ) -> None:
     root, meridian, orion = published
-    clients: list[tuple[LLMConfig, Path, int]] = []
+    clients: list[tuple[LLMConfig, Path, int, float]] = []
     rerankers: list[_FakeRerankAdapter] = []
     recorded: list[list[str]] = []
 
     def fake_client(
-        config: LLMConfig, *, cache_dir: Path, max_live_calls: int
+        config: LLMConfig, *, cache_dir: Path, max_live_calls: int, timeout: float
     ) -> JsonCompletionClient:
-        clients.append((config, cache_dir, max_live_calls))
+        clients.append((config, cache_dir, max_live_calls, timeout))
         client, prompts = scripted_client(cache_dir, quote_page_two, max_live_calls=max_live_calls)
         recorded.append(prompts)
         return client
@@ -737,6 +737,7 @@ def test_configured_app_builds_one_answer_client_and_serves_chat(
     monkeypatch.setenv("APP_EXECUTION_MODE", "document-catalog")
     monkeypatch.setenv("APP_INGESTION_DIR", str(root))
     monkeypatch.setenv("APP_ANSWER_MAX_LIVE_CALLS", "7")
+    monkeypatch.setenv("APP_ANSWER_TIMEOUT_SECONDS", "120")
     monkeypatch.delenv("APP_LEGACY_DOCUMENT_ROOTS", raising=False)
     for name, value in {**_EMBEDDING_ENV, **_LLM_ENV, **_RERANK_ENV}.items():
         if configuration == "valid":
@@ -750,11 +751,14 @@ def test_configured_app_builds_one_answer_client_and_serves_chat(
     try:
         application = app_module.create_configured_app()
         if configuration == "valid":
-            ((config, cache_dir, budget),) = clients
+            ((config, cache_dir, budget, timeout),) = clients
             assert config.model == "test-chat-model"
             assert config.api_key.get_secret_value() == _LLM_SECRET
             assert config.chat_completions_url == "https://provider.invalid/v1/chat/completions"
             assert cache_dir == root.resolve() / "model-cache" and budget == 7
+            # A long answer must be able to outlive the 45s default (ADR 0017's page window
+            # makes a "summarise this section" prompt long enough to need it).
+            assert timeout == 120.0
             (reranker,) = rerankers
             assert reranker.config.model == "test-rerank"
         else:

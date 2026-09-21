@@ -70,6 +70,17 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ### Added
 
+- **The wait for one model call is configurable** (`enterprise_pdf_rag`).
+  `JsonCompletionClient` allows up to 180 seconds but `create_configured_app` never passed
+  one, so every deployment was pinned to the 45-second default. The page context window
+  (ADR 0017) makes a "summarise this section" question's prompt and generation long enough
+  to cross it, and such a question then 503s on a default configuration —
+  `Summarise the Growth Engines section for Hong Kong` did, at 48.3s. `AppSettings` gains
+  `answer_timeout_seconds` (`APP_ANSWER_TIMEOUT_SECONDS`, default 45), validated against the
+  same `(0, 180]` window the client enforces so a bad environment fails at startup rather
+  than on the first question, and `scripts/enterprise_pdf_rag/webui_preview.py` passes it
+  through to the API child like the other `APP_*` settings.
+
 - **Retrieval picks its channels per question, and restates a foreign-language question in the
   index's language first**
   (`enterprise_pdf_rag`, [ADR 0018](docs/enterprise-pdf-rag/adr/0018-query-classification-and-translation.md)).
