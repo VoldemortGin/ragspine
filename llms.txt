@@ -83,4 +83,4 @@ for hit in retriever.search("REVENUE 营收 增长"):
 诚实声明：`deterministic` 后端是**非语义**的词法散列后端（与 BM25 高度相关），用于离线 / 测试 /
 打通管线，**绝不**代表真语义召回增益 —— 真语义需 `[embed]` 的真实模型（如 Qwen3，待 GPU）。
 
-更多：完整端到端反捏造演示见 `import ragspine` 后的 `examples/minimal_rag.py`，或 `ragspine quickstart` CLI。
+更多：完整端到端反捏造演示见 `import ragspine` 后的 `scripts/examples/minimal_rag.py`，或 `ragspine quickstart` CLI。

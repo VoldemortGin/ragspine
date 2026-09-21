@@ -2,7 +2,7 @@
 
 Fully offline, no API key, no network. Run from the project root:
 
-    python examples/minimal_rag.py
+    python scripts/examples/minimal_rag.py
 
 The four names below are RAGSpine's entire minimal-viable API.
 """

@@ -374,7 +374,7 @@ ban-relative-imports = "all"
 [tool.ruff.lint.per-file-ignores]
 # ---- ragspine 子树：只保留其原有 E/F/I/W/UP/B，enterprise_pdf_rag 独有的严格规则不套过来 ----
 "src/ragspine/**" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20"]
-# ragspine 的 tests/ scripts/ data/benchmarks/ examples/ 此前从不在 ruff 门内：除严格集外，再豁免其既有的
+# ragspine 的 tests/ scripts/ data/benchmarks/ scripts/examples/ 此前从不在 ruff 门内：除严格集外，再豁免其既有的
 # E402（conftest/脚本先 setup_root 再 import 的既定写法）、B017、B018、B023、B905、F841。
 # 注意：ruff 的 per-file-ignores 用 globset，`*` 会跨越 `/`（`tests/*.py` 等于 `tests/**/*.py`），
 # 直接写 `tests/*.py` / `scripts/*.py` 会把 tests/enterprise_pdf_rag 与 scripts/enterprise_pdf_rag 一并放宽，
@@ -385,7 +385,7 @@ ban-relative-imports = "all"
 # data/benchmarks/：上方 `extend-exclude = ["data"]` 已把它挡在全仓扫描之外，这条只在显式
 # `ruff check data/benchmarks/` 时生效，保留是为了显式跑时仍是同一档豁免。
 "data/benchmarks/**" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20", "E402", "B017", "B018", "B023", "B905", "F841"]
-"examples/**" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20", "E402", "B017", "B018", "B023", "B905", "F841"]
+"scripts/examples/**" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20", "E402", "B017", "B018", "B023", "B905", "F841"]
 # ---- enterprise_pdf_rag 的 scripts/ 是命令行工具层：stdout 就是输出契约，放行 print ----
 "scripts/enterprise_pdf_rag/*.py" = ["T20"]
 

@@ -64,10 +64,10 @@ out = agent.invoke({"messages": [("user", "中国内地FY2030的REVENUE是多少
 # → a fluent answer that may invent a number; provenance is whatever you remembered to thread through.
 ```
 
-The same missing fact in RAGSpine (`examples/minimal_rag.py`, fully offline, no key):
+The same missing fact in RAGSpine (`scripts/examples/minimal_rag.py`, fully offline, no key):
 
 ```bash
-$ python examples/minimal_rag.py
+$ python scripts/examples/minimal_rag.py
 Q: 中国内地FY2024的REVENUE是多少
 A: ACME_CN FY2024 REVENUE：1320 USD_M（来源：ACME_FY2024_Results.pptx · slide=6,table=1,row=2,col=3）
    source: ACME_FY2024_Results.pptx · slide=6,table=1,row=2,col=3
@@ -122,7 +122,7 @@ Route yourself fairly — these are real reasons to stay where you are:
 
 1. Put your numbers in a `FactStore` (sqlite) with their provenance (`source_doc_id` +
    `source_locator`) — RAGSpine's extraction/ingestion layers do this from xlsx/pptx/pdf, or
-   you upsert `Fact`s directly as in `examples/minimal_rag.py`.
+   you upsert `Fact`s directly as in `scripts/examples/minimal_rag.py`.
 2. Replace your graph + tool wiring with a single `answer_question(question, store, provider)`.
 3. Start with `MockProvider` (offline, deterministic) to validate behavior and your tests with
    no key; swap in `AnthropicProvider` (the `[llm]` extra) only when you want a live model for

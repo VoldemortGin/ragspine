@@ -252,4 +252,4 @@ code: provider.error
 
 ---
 
-更复杂的端到端（反捏造 + 引用）见 `examples/minimal_rag.py`，或装后跑 `ragspine quickstart` CLI。
+更复杂的端到端（反捏造 + 引用）见 `scripts/examples/minimal_rag.py`，或装后跑 `ragspine quickstart` CLI。
