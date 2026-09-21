@@ -26,6 +26,7 @@ from enterprise_pdf_rag.answers.models import (
     AnswerStatus,
     ClaimKind,
     MemberFilters,
+    PageWindowStat,
 )
 from enterprise_pdf_rag.answers.prompt import SYSTEM_RULES, ModelAnswer, ModelClaim
 from enterprise_pdf_rag.figures.models import Verification
@@ -593,10 +594,12 @@ def test_no_visual_seat_beyond_two_top_k_or_for_a_diagram_without_a_citable_labe
 
 
 def _metadata_document(vector_order: tuple[str, ...]) -> FakeDocument:
+    # Page metadata is a page-wide fact, so each member sits on a page of its own here.
     members = (
         FakeMember(
             "cover",
             "ACME 2026 Interim Results",
+            page_index=0,
             page_title="ACME 2026 Interim Results",
             page_type="cover",
             periods=("Y2026",),
@@ -604,6 +607,7 @@ def _metadata_document(vector_order: tuple[str, ...]) -> FakeDocument:
         FakeMember(
             "hk",
             "Hong Kong VONB grew strongly",
+            page_index=1,
             page_title="Hong Kong",
             page_type="text",
             periods=("1H2026",),
@@ -612,6 +616,7 @@ def _metadata_document(vector_order: tuple[str, ...]) -> FakeDocument:
         FakeMember(
             "th",
             "Thailand VONB margin expanded",
+            page_index=2,
             page_title="Thailand",
             page_type="text",
             periods=("1H2026",),
@@ -620,12 +625,13 @@ def _metadata_document(vector_order: tuple[str, ...]) -> FakeDocument:
         FakeMember(
             "fy",
             "Full year VONB summary",
+            page_index=3,
             page_title="Group overview",
             page_type="text",
             periods=("FY2024",),
             regions=("Group",),
         ),
-        FakeMember("bare", "Untagged VONB remarks"),
+        FakeMember("bare", "Untagged VONB remarks", page_index=4),
     )
     return FakeDocument(members, vector_order)
 
@@ -761,3 +767,171 @@ def test_table_cell_claim_with_unproved_header_text_is_refused(
     assert result.status is AnswerStatus.ABSTAINED
     assert result.abstain_reason is AbstainReason.CLAIM_NOT_IN_EVIDENCE
     assert result.rejected[0].detail.startswith("claimed header")
+
+
+_PAGE_QUESTION = "zzz-nothing-matches"
+_PAGE_ORDER = ("hit-a", "hit-b", "near", "far", "far-near")
+
+
+def _page_document(vector_order: tuple[str, ...] = _PAGE_ORDER) -> FakeDocument:
+    """Two hits and one neighbour on page four; a second page with a neighbour of its own."""
+    members = (
+        FakeMember("hit-a", "Operating profit rose.", page_index=4, page_title="Group performance"),
+        FakeMember(
+            "hit-b", "VONB grew over the period.", page_index=4, page_title="Group performance"
+        ),
+        FakeMember(
+            "near",
+            "Costs fell 4.2% over the period.",
+            page_index=4,
+            page_title="Group performance",
+        ),
+        FakeMember("far", "The notes open here.", page_index=9, page_title="Notes"),
+        FakeMember(
+            "far-near", "A note on the basis of preparation.", page_index=9, page_title="Notes"
+        ),
+    )
+    return FakeDocument(members, vector_order)
+
+
+def _quote(member_id: str, text: str, *, claim_id: str = "c1") -> ModelClaim:
+    return ModelClaim(
+        claim_id=claim_id,
+        member_id=member_id,
+        kind="quote",
+        field_path=f"fragments.{member_id}-span",
+        text=text,
+    )
+
+
+def _page_script(answer: str, *claims: ModelClaim) -> Script:
+    return lambda prompt: answered(answer, *claims)
+
+
+def _chunks(prompt: str, prefix: str) -> list[str]:
+    return [part for part in prompt.split("\n\n") if part.startswith(prefix)]
+
+
+def test_two_hits_on_one_page_share_a_single_page_context_block(tmp_path: Path) -> None:
+    document = _page_document()
+    service, prompts = _service(
+        tmp_path, document, _page_script("Profit rose.", _quote("hit-a", "Operating profit rose."))
+    )
+    result = service.answer(AnswerRequest(_PAGE_QUESTION, top_k=2))
+    assert result.status is AnswerStatus.ANSWERED, result
+    assert result.member_ids == ("hit-a", "hit-b")
+    assert prompts[0].count("[page_context page_index=4]") == 1
+    assert "[page_context page_index=9]" not in prompts[0]  # nobody hit that page
+    assert "- (text) Costs fell 4.2% over the period." in prompts[0]
+    # A hit's own evidence is its member block; the page context never repeats it.
+    assert prompts[0].count("Operating profit rose.") == 1
+    (window,) = result.page_windows
+    assert (window.page_index, window.member_count, window.truncated) == (4, 1, False)
+    (chunk,) = _chunks(prompts[0], "[page_context")
+    assert window.chars == len(chunk)
+
+
+def test_page_windows_report_every_page_block_that_reached_the_prompt(tmp_path: Path) -> None:
+    document = _page_document(("hit-a", "far", "hit-b", "near", "far-near"))
+    service, prompts = _service(
+        tmp_path, document, _page_script("Profit rose.", _quote("hit-a", "Operating profit rose."))
+    )
+    result = service.answer(AnswerRequest(_PAGE_QUESTION, top_k=2))
+    assert result.status is AnswerStatus.ANSWERED, result
+    assert result.member_ids == ("hit-a", "far")
+    assert [window.page_index for window in result.page_windows] == [4, 9]
+    assert [window.member_count for window in result.page_windows] == [2, 1]
+    assert [window.truncated for window in result.page_windows] == [False, False]
+    assert [len(chunk) for chunk in _chunks(prompts[0], "[page_context")] == [
+        window.chars for window in result.page_windows
+    ]
+    assert result.page_windows == tuple(
+        PageWindowStat(window.page_index, window.member_count, window.chars, window.truncated)
+        for window in result.page_windows
+    )
+
+
+def test_a_tight_prompt_budget_gives_up_the_page_context_before_a_hit(tmp_path: Path) -> None:
+    document = _page_document()
+    script = _page_script("Profit rose.", _quote("hit-a", "Operating profit rose."))
+    whole, prompts = _service(tmp_path / "whole", document, script)
+    assert whole.answer(AnswerRequest(_PAGE_QUESTION, top_k=2)).page_windows != ()
+    hits_only = sum(len(chunk) for chunk in _chunks(prompts[0], "[member "))
+
+    service, tight = _service(
+        tmp_path / "tight",
+        document,
+        script,
+        settings=AnswerSettings(prompt_budget_chars=hits_only),
+    )
+    result = service.answer(AnswerRequest(_PAGE_QUESTION, top_k=2))
+    assert result.status is AnswerStatus.ANSWERED, result
+    assert result.member_ids == ("hit-a", "hit-b")  # both hits survive
+    assert "[page_context" not in tight[0] and result.page_windows == ()
+
+
+def test_the_page_window_switch_lives_in_the_settings_and_the_request(tmp_path: Path) -> None:
+    document = _page_document()
+    script = _page_script("Profit rose.", _quote("hit-a", "Operating profit rose."))
+    off, off_prompts = _service(
+        tmp_path / "off", document, script, settings=AnswerSettings(page_window=False)
+    )
+    assert off.answer(AnswerRequest(_PAGE_QUESTION, top_k=2)).page_windows == ()
+    assert "[page_context" not in off_prompts[0]
+
+    asked_off, off_by_request = _service(tmp_path / "request-off", document, script)
+    assert (
+        asked_off.answer(AnswerRequest(_PAGE_QUESTION, top_k=2, page_window=False)).page_windows
+        == ()
+    )
+    assert "[page_context" not in off_by_request[0]
+
+    asked_on, on_by_request = _service(
+        tmp_path / "request-on", document, script, settings=AnswerSettings(page_window=False)
+    )
+    assert (
+        asked_on.answer(AnswerRequest(_PAGE_QUESTION, top_k=2, page_window=True)).page_windows != ()
+    )
+    assert "[page_context page_index=4]" in on_by_request[0]
+
+
+def test_a_number_only_in_the_page_context_no_longer_abstains_the_answer(tmp_path: Path) -> None:
+    document = _page_document()
+    script = _page_script(
+        "Operating profit rose while costs fell 4.2%.", _quote("hit-a", "Operating profit rose.")
+    )
+    service, _ = _service(tmp_path / "on", document, script)
+    result = service.answer(AnswerRequest(_PAGE_QUESTION, top_k=2))
+    assert result.status is AnswerStatus.ANSWERED, result
+    # The figure is repeatable but still uncited: only the quote claim carries a citation.
+    assert [claim.claim_id for claim in result.claims] == ["c1"]
+    assert all("4.2" not in claim.text for claim in result.claims)
+
+    closed, _ = _service(
+        tmp_path / "off", document, script, settings=AnswerSettings(page_window=False)
+    )
+    shut = closed.answer(AnswerRequest(_PAGE_QUESTION, top_k=2))
+    assert (shut.status, shut.abstain_reason) == (
+        AnswerStatus.ABSTAINED,
+        AbstainReason.CLAIM_NOT_IN_EVIDENCE,
+    )
+    assert shut.abstain_detail is not None and "4.2%" in shut.abstain_detail
+
+
+def test_a_claim_naming_a_page_context_member_is_rejected_as_an_unknown_member(
+    tmp_path: Path,
+) -> None:
+    document = _page_document()
+    script = _page_script("Costs fell 4.2%.", _quote("near", "Costs fell 4.2% over the period."))
+    service, prompts = _service(tmp_path, document, script)
+    result = service.answer(AnswerRequest(_PAGE_QUESTION, top_k=2))
+    assert "[member near]" not in prompts[0]  # printed as page context only
+    (rejected,) = result.rejected
+    assert (rejected.claim_id, rejected.member_id) == ("c1", "near")
+    assert rejected.reason is AbstainReason.MODEL_OUTPUT_INVALID
+    assert rejected.detail == "unknown member"
+    assert (result.status, result.abstain_reason, result.claims) == (
+        AnswerStatus.ABSTAINED,
+        AbstainReason.MODEL_OUTPUT_INVALID,
+        (),
+    )

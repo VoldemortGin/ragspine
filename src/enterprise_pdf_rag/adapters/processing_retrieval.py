@@ -4,12 +4,14 @@ from collections.abc import Mapping
 from hashlib import sha256
 from math import sqrt
 
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
+from enterprise_pdf_rag.adapters.bar_publication import parse_displayed_bar_receipt
 from enterprise_pdf_rag.adapters.chart_member_validation import (
     uses_displayed_bar_policy,
     validate_retrieval_chart_member,
 )
+from enterprise_pdf_rag.adapters.chart_publication import parse_chart_receipt
 from enterprise_pdf_rag.adapters.diagram_publication import validate_diagram_member
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.formula_qualification import (
@@ -18,7 +20,7 @@ from enterprise_pdf_rag.adapters.formula_qualification import (
 )
 from enterprise_pdf_rag.adapters.literal_qualification import validate_literal_member
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.documents.models import AssetRef
+from enterprise_pdf_rag.documents.models import AssetRef, Bounds
 from enterprise_pdf_rag.figures.models import (
     ChartIR,
     FigureQualification,
@@ -125,6 +127,25 @@ def member_text(
     if plan.qualification_policy not in CONTEXTUAL_POLICIES:
         return body
     return contextual_index_text(body, context)
+
+
+def member_anchor(assets: LocalDocumentStore, member: RetrievalMember) -> Bounds | None:
+    """The member's page rectangle, for ordering a page's members as they are read.
+
+    Every kind but ``CHART`` stores it on its description's source anchor; a chart's
+    description is bound to its SVG instead, so its rectangle comes from the figure
+    qualification receipt. ``None`` when the stored evidence carries neither.
+    """
+    try:
+        if member.kind is not ObjectKind.CHART:
+            payload = assets.get(member.description)
+            return TypeAdapter(ObjectDescription).validate_json(payload).source.bbox
+        receipt = assets.get(member.qualification)
+        if uses_displayed_bar_policy(receipt):
+            return parse_displayed_bar_receipt(receipt).qualification.source.bbox
+        return parse_chart_receipt(receipt).qualification.source.bbox
+    except ValidationError:
+        return None
 
 
 def eligibility(record: ObjectProcessingRecord) -> tuple[bool, str | None]:

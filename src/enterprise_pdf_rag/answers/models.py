@@ -89,6 +89,16 @@ class MemberFilters:
 
 
 @dataclass(frozen=True, slots=True)
+class PageWindowStat:
+    """One page context block that reached the prompt (ADR 0016)."""
+
+    page_index: int
+    member_count: int
+    chars: int
+    truncated: bool
+
+
+@dataclass(frozen=True, slots=True)
 class AnswerRequest:
     question: str
     document_sha256: str | None = None
@@ -99,6 +109,9 @@ class AnswerRequest:
     # ``None`` derives filters from the question (``answers/query_filters``); an explicit
     # empty ``MemberFilters()`` disables filtering.
     filters: MemberFilters | None = None
+    # Print the rest of each hit's page beside it (ADR 0016); ``None`` takes the service
+    # default, ``True`` / ``False`` overrides it for this request alone.
+    page_window: bool | None = None
 
     def __post_init__(self) -> None:
         if not self.question.strip():
@@ -165,3 +178,4 @@ class AnswerResult:
     cache_hit: bool
     filters_applied: MemberFilters | None = None
     filters_relaxed: bool = False
+    page_windows: tuple[PageWindowStat, ...] = ()

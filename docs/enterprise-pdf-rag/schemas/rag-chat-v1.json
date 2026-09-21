@@ -165,6 +165,18 @@
         "title": "Model",
         "type": "string"
       },
+      "page_window": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Page Window"
+      },
       "rerank": {
         "default": false,
         "title": "Rerank",
@@ -293,6 +305,14 @@
               "$ref": "#/$defs/MemberRankOut"
             },
             "title": "Member Ranks",
+            "type": "array"
+          },
+          "page_windows": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/PageWindowOut"
+            },
+            "title": "Page Windows",
             "type": "array"
           },
           "processing_id": {
@@ -738,6 +758,36 @@
         "title": "MemberRankOut",
         "type": "object"
       },
+      "PageWindowOut": {
+        "additionalProperties": false,
+        "description": "One page context block that reached the prompt: the rest of a hit's page.",
+        "properties": {
+          "chars": {
+            "title": "Chars",
+            "type": "integer"
+          },
+          "member_count": {
+            "title": "Member Count",
+            "type": "integer"
+          },
+          "page_index": {
+            "title": "Page Index",
+            "type": "integer"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "page_index",
+          "member_count",
+          "chars",
+          "truncated"
+        ],
+        "title": "PageWindowOut",
+        "type": "object"
+      },
       "RejectedClaimOut": {
         "additionalProperties": false,
         "properties": {
@@ -1102,6 +1152,14 @@
               "$ref": "#/$defs/MemberRankOut"
             },
             "title": "Member Ranks",
+            "type": "array"
+          },
+          "page_windows": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/PageWindowOut"
+            },
+            "title": "Page Windows",
             "type": "array"
           },
           "processing_id": {
@@ -1563,6 +1621,36 @@
           "bm25_score"
         ],
         "title": "MemberRankOut",
+        "type": "object"
+      },
+      "PageWindowOut": {
+        "additionalProperties": false,
+        "description": "One page context block that reached the prompt: the rest of a hit's page.",
+        "properties": {
+          "chars": {
+            "title": "Chars",
+            "type": "integer"
+          },
+          "member_count": {
+            "title": "Member Count",
+            "type": "integer"
+          },
+          "page_index": {
+            "title": "Page Index",
+            "type": "integer"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "page_index",
+          "member_count",
+          "chars",
+          "truncated"
+        ],
+        "title": "PageWindowOut",
         "type": "object"
       },
       "RejectedClaimOut": {

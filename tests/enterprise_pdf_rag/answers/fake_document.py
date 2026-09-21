@@ -225,6 +225,8 @@ class FakeMember:
     # A proven diagram / formula member (ADR 0015); ``diagram_member`` / ``formula_member``
     # supply its qualification on resolve.
     visual: DiagramIR | FormulaIR | None = None
+    # The page the member sits on; members sharing one page share its context block.
+    page_index: int = 0
     # Verified page metadata as ``member_texts`` would report it (ADR 0013).
     page_title: str | None = None
     page_type: str | None = None
@@ -287,7 +289,7 @@ class FakeDocument:
             MemberText(
                 member.member_id,
                 member.kind,
-                0,
+                member.page_index,
                 member.index_text,
                 page_title=member.page_title,
                 page_type=member.page_type,
@@ -315,7 +317,7 @@ class FakeDocument:
         if isinstance(member.visual, FormulaIR):
             return replace(formula_member(member.member_id), ir=member.visual)
         retrieval_member = _NamedMember(
-            member.member_id, member.kind, 0, _REF, _REF, _REF, _REF, _REF, "fp", 2
+            member.member_id, member.kind, member.page_index, _REF, _REF, _REF, _REF, _REF, "fp", 2
         )
         if member.chart is None:
             span = ObservedText(f"{member.member_id}-span", member.text, _ANCHOR)
