@@ -364,6 +364,8 @@ curl --fail-with-body http://127.0.0.1:8766/v1/chat/completions \
 
 `JsonCompletionClient` 以请求指纹（盐 `bounded-text-json-v1`）缓存到 `<ingestion_root>/model-cache/`；同一文档、同一问题、同一上下文的重复请求回放缓存（`llm_live_calls=0`、`cache_hit=true`）。客户端以 `retry_failed=False` 构造：真实调用失败也会被缓存并原样回放；要重试须删除 `<ingestion_root>/model-cache/requests/<fingerprint>.json`。这是有意为之，没有自动重试。
 
+`contexts/<fingerprint>.json` 另存**发给模型的最终完整请求体**，用于回溯：信封是 `request_fingerprint` / `created_at`（UTC）/ `endpoint_path` / `contract`（指纹盐）/ `task`（任务名，如 `page-metadata-v1`）+ `payload`，`payload` 即原样的 JSON 请求体（`model`、全部 `messages` 含 system 规则与证据块 / 页上下文 / 问题、`response_format` 的 schema、`max_completion_tokens` 等）；带图片的调用把 `image_url` 换成 `{"omitted": true, "sha256", "bytes"}`，其余字段一字不改。真实调用前写入，命中缓存回放时缺失则补写，同指纹**先写者胜**（不覆盖），写入失败只在该次记录的 `diagnostics.context_warning` 留码、绝不影响调用；记录里另有 `diagnostics.context_path` 指回它（相对 `model-cache/`）。**隐私**：这些文件逐字包含证据原文（报告内容），属本机排障产物，不要外传、不要随快照分发。
+
 ### 离线可测 vs 需真实模型
 
 离线（默认门，零网络）：`tests/enterprise_pdf_rag/adapters/test_document_catalog.py`、`test_documents_http.py`、`test_hybrid_search.py`、`test_chat_http.py`、`test_page_metadata_extraction.py`、`test_chat_metadata_http.py`（页级元数据阶段、v4 索引头、过滤与路由；脚本化的文本模型回复来自 prompt 自己的 span），`tests/enterprise_pdf_rag/answers/`（store 桥 `store_mounted_document.py` + 脚本化 LLM `fake_llm.py`，`test_query_filters.py` / `test_member_filter.py`），`processing/test_periods.py`、`processing/test_page_metadata.py`，`processing/test_context_builder.py`、`processing/test_table_transcription.py`，以及 e2e / draft publication / pdf ingestion 里新增的程序化表格页用例。它们用程序化 PDF、`OfflineDescriptionEmbedder` 和脚本化模型输出，证明契约、状态码、恰好一次模型调用、逐字段校验与拒答策略。

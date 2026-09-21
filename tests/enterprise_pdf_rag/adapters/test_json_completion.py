@@ -1,6 +1,8 @@
 """Bounded vision/JSON calls are explicit and never part of ordinary networking."""
 
+import hashlib
 import json
+import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Event
@@ -493,3 +495,114 @@ def test_explicit_failed_retry_preserves_first_attempt_and_is_limited_to_one(
     assert original.read_bytes() == original_bytes
     assert original.with_name(original.stem + ".retry-1.json").exists()
     assert len(calls) == 2 and calls[0] == calls[1]
+
+
+def test_text_call_stores_the_complete_request_body_for_retrospection(tmp_path: Path) -> None:
+    sent: list[bytes] = []
+
+    def sender(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
+        sent.append(payload)
+        return _response()
+
+    result = JsonCompletionClient(
+        _config(), cache_dir=tmp_path, max_live_calls=1, sender=sender
+    ).complete_text_json(
+        task="page-metadata-v1",
+        prompt="Read the evidence block.",
+        response_model=_Answer,
+        system="Quote every value verbatim.",
+    )
+    relative = f"contexts/{result.request_fingerprint}.json"
+    context = json.loads((tmp_path / relative).read_text("utf-8"))
+    assert context["request_fingerprint"] == result.request_fingerprint
+    assert context["endpoint_path"] == "/v1/chat/completions"
+    assert context["task"] == "page-metadata-v1"
+    assert context["contract"] == "bounded-text-json-v1"
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", context["created_at"])
+    assert context["payload"] == json.loads(sent[0])
+    assert context["payload"]["messages"][0]["content"] == "Quote every value verbatim."
+    assert context["payload"]["messages"][1]["content"] == "Read the evidence block."
+    assert context["payload"]["max_completion_tokens"] == 1024
+    assert context["payload"]["response_format"]["json_schema"]["strict"] is True
+    assert result.diagnostics is not None
+    assert result.diagnostics.context_path == relative
+    assert result.diagnostics.context_warning is None
+    record = json.loads(
+        (tmp_path / "requests" / f"{result.request_fingerprint}.json").read_text("utf-8")
+    )
+    assert record["diagnostics"]["context_path"] == relative
+
+
+def test_image_call_stores_the_request_with_only_the_base64_image_omitted(tmp_path: Path) -> None:
+    sent: list[bytes] = []
+
+    def sender(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
+        sent.append(payload)
+        return _response()
+
+    result = JsonCompletionClient(
+        _config(), cache_dir=tmp_path, max_live_calls=1, sender=sender
+    ).complete_json(
+        task="chart-pilot-v1",
+        prompt="Read the source image.",
+        image_png=PNG,
+        response_model=_Answer,
+    )
+    context = json.loads(
+        (tmp_path / "contexts" / f"{result.request_fingerprint}.json").read_text("utf-8")
+    )
+    content = context["payload"]["messages"][1]["content"]
+    assert content[0] == {"type": "text", "text": "Read the source image."}
+    assert content[1] == {
+        "type": "image_url",
+        "image_url": {
+            "omitted": True,
+            "sha256": hashlib.sha256(PNG).hexdigest(),
+            "bytes": len(PNG),
+        },
+    }
+    assert "base64," not in json.dumps(context["payload"])
+    unsent = json.loads(sent[0])
+    assert unsent["messages"][1]["content"][1]["image_url"]["url"].startswith("data:image/png")
+    unsent["messages"][1]["content"][1] = content[1]
+    assert context["payload"] == unsent
+
+
+def test_stored_context_is_backfilled_on_replay_and_never_rewritten(tmp_path: Path) -> None:
+    def sender(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
+        return _response()
+
+    def forbidden(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
+        raise AssertionError("A cache replay must not reach the provider")
+
+    def invoke(client: JsonCompletionClient) -> str:
+        return client.complete_text_json(
+            task="replay", prompt="read", response_model=_Answer
+        ).request_fingerprint
+
+    fingerprint = invoke(
+        JsonCompletionClient(_config(), cache_dir=tmp_path, max_live_calls=1, sender=sender)
+    )
+    path = tmp_path / "contexts" / f"{fingerprint}.json"
+    sentinel = b'{"request_fingerprint":"kept-as-first-written"}'
+    path.write_bytes(sentinel)
+    invoke(JsonCompletionClient(_config(), cache_dir=tmp_path, max_live_calls=0, sender=forbidden))
+    assert path.read_bytes() == sentinel
+    path.unlink()
+    invoke(JsonCompletionClient(_config(), cache_dir=tmp_path, max_live_calls=0, sender=forbidden))
+    assert json.loads(path.read_text("utf-8"))["request_fingerprint"] == fingerprint
+
+
+def test_a_context_that_cannot_be_written_never_fails_the_call(tmp_path: Path) -> None:
+    (tmp_path / "contexts").write_bytes(b"a file where the context directory would go")
+
+    def sender(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
+        return _response()
+
+    result = JsonCompletionClient(
+        _config(), cache_dir=tmp_path, max_live_calls=1, sender=sender
+    ).complete_text_json(task="unwritable", prompt="read", response_model=_Answer)
+    assert result.parsed.answer == "observed"
+    assert result.diagnostics is not None
+    assert result.diagnostics.context_path is None
+    assert result.diagnostics.context_warning == "context_write_failed"
