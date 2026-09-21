@@ -19,6 +19,7 @@ from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.hybrid_search import FusedHit
 from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
+from enterprise_pdf_rag.adapters.query_translation import QueryTranslationDTO
 from enterprise_pdf_rag.answers.models import (
     AbstainReason,
     AnswerRequest,
@@ -26,6 +27,7 @@ from enterprise_pdf_rag.answers.models import (
     AnswerStatus,
     ClaimKind,
     MemberFilters,
+    TranslatedQuery,
 )
 from enterprise_pdf_rag.answers.prompt import SYSTEM_RULES, ModelAnswer, ModelClaim
 from enterprise_pdf_rag.figures.models import Verification
@@ -50,6 +52,7 @@ from tests.enterprise_pdf_rag.answers.fake_document import (
 )
 from tests.enterprise_pdf_rag.answers.fake_llm import (
     Script,
+    Translator,
     answered,
     chart_claim,
     declined,
@@ -95,8 +98,12 @@ def _service(
     *,
     settings: AnswerSettings | None = None,
     reranker: _CountingJudge | _ExplodingJudge | None = None,
+    translator: Translator | None = None,
+    max_live_calls: int = 1,
 ) -> tuple[AnswerService, list[str]]:
-    client, prompts = scripted_client(tmp_path / "llm", script)
+    client, prompts = scripted_client(
+        tmp_path / "llm", script, max_live_calls=max_live_calls, translator=translator
+    )
     service = AnswerService(
         {document.source_sha256: document}, client, settings=settings, reranker=reranker
     )
@@ -761,3 +768,152 @@ def test_table_cell_claim_with_unproved_header_text_is_refused(
     assert result.status is AnswerStatus.ABSTAINED
     assert result.abstain_reason is AbstainReason.CLAIM_NOT_IN_EVIDENCE
     assert result.rejected[0].detail.startswith("claimed header")
+
+
+_CHINESE_QUESTION = "1H21 的费用率是多少？"  # noqa: RUF001 — a real Chinese question ends in the fullwidth mark
+_CHINESE_ENGLISH = "expense ratio 1H21"
+
+
+def _translator(calls: list[str]) -> Translator:
+    def translate(prompt: str) -> QueryTranslationDTO:
+        calls.append(prompt)
+        return QueryTranslationDTO(english_query=_CHINESE_ENGLISH, source_language="Chinese")
+
+    return translate
+
+
+def test_a_short_question_is_answered_from_the_lexical_channel_alone(
+    tmp_path: Path, bar: tuple[StoreMountedDocument, str]
+) -> None:
+    document, chart_member = bar
+    service, prompts = _service(tmp_path, document, _one_chart_claim("15%"))
+
+    result = service.answer(AnswerRequest("expense ratio 1H21"))
+
+    assert result.status is AnswerStatus.ANSWERED
+    assert result.fusion_mode == "bm25_only"
+    assert result.query_translation is None
+    assert chart_member in result.member_ids
+    assert all(hit.vector_rank is None for hit in result.fused)
+    assert len(prompts) == 1 and result.llm_live_calls == 1
+
+
+def test_a_narrative_question_keeps_both_channels(
+    tmp_path: Path, bar: tuple[StoreMountedDocument, str]
+) -> None:
+    document, _ = bar
+    service, _ = _service(tmp_path, document, _one_chart_claim("15%"))
+    result = service.answer(AnswerRequest(_QUESTION))
+    assert result.fusion_mode == "rrf"
+    assert any(hit.vector_rank is not None for hit in result.fused)
+
+
+def test_an_explicit_fusion_mode_overrides_the_classifier(
+    tmp_path: Path, bar: tuple[StoreMountedDocument, str]
+) -> None:
+    document, _ = bar
+    service, _ = _service(tmp_path, document, _one_chart_claim("15%"))
+    result = service.answer(AnswerRequest("expense ratio 1H21", fusion_mode="rrf"))
+    assert result.fusion_mode == "rrf"
+    assert any(hit.vector_rank is not None for hit in result.fused)
+
+
+def test_a_chinese_question_is_translated_once_and_then_retrieved_lexically(
+    tmp_path: Path, bar: tuple[StoreMountedDocument, str]
+) -> None:
+    document, chart_member = bar
+    translations: list[str] = []
+    service, prompts = _service(
+        tmp_path,
+        document,
+        _one_chart_claim("15%"),
+        translator=_translator(translations),
+        max_live_calls=2,
+    )
+
+    request = AnswerRequest(_CHINESE_QUESTION)
+    result = service.answer(request)
+
+    assert result.status is AnswerStatus.ANSWERED
+    assert result.query_translation == TranslatedQuery(_CHINESE_ENGLISH, "Chinese", cache_hit=False)
+    assert result.fusion_mode == "bm25_only"
+    assert chart_member in result.member_ids
+    # One translation call plus one synthesis call, both live, both counted.
+    assert len(translations) == 1 and _CHINESE_QUESTION in translations[0]
+    assert len(prompts) == 1 and result.llm_live_calls == 2
+    # The prompt carries the question the user asked, not the translation.
+    assert _CHINESE_QUESTION in prompts[0] and _CHINESE_ENGLISH not in prompts[0]
+
+    # Both calls replay from the immutable cache on a repeat.
+    again = service.answer(request)
+    assert again.llm_live_calls == 0 and len(translations) == 1 and len(prompts) == 1
+    assert again.query_translation is not None and again.query_translation.cache_hit is True
+
+
+def test_an_english_question_is_never_translated(
+    tmp_path: Path, bar: tuple[StoreMountedDocument, str]
+) -> None:
+    document, _ = bar
+    translations: list[str] = []
+    service, _ = _service(
+        tmp_path, document, _one_chart_claim("15%"), translator=_translator(translations)
+    )
+    result = service.answer(AnswerRequest(_QUESTION))
+    assert translations == [] and result.query_translation is None
+    assert result.llm_live_calls == 1
+
+
+def test_a_chinese_question_naming_a_period_is_still_translated(
+    tmp_path: Path, bar: tuple[StoreMountedDocument, str]
+) -> None:
+    """``1H21`` matches the index on its own, so the probe must ignore figures."""
+    translations: list[str] = []
+    document, _ = bar
+    service, _ = _service(
+        tmp_path,
+        document,
+        _one_chart_claim("15%"),
+        translator=_translator(translations),
+        max_live_calls=2,
+    )
+    assert "1h21" in _CHINESE_QUESTION.lower()
+    service.answer(AnswerRequest(_CHINESE_QUESTION))
+    assert len(translations) == 1
+
+
+def test_an_unusable_translation_falls_back_to_the_vector_channel_alone(
+    tmp_path: Path, bar: tuple[StoreMountedDocument, str]
+) -> None:
+    document, _ = bar
+    service, prompts = _service(
+        tmp_path,
+        document,
+        _one_chart_claim("15%"),
+        translator=lambda prompt: "not a translation at all",
+        max_live_calls=2,
+    )
+    result = service.answer(AnswerRequest(_CHINESE_QUESTION))
+    assert result.status is AnswerStatus.ANSWERED
+    assert result.query_translation is None
+    # Nothing worth fusing a foreign question with, so the vector channel answers alone.
+    assert result.fusion_mode == "vector_only"
+    assert all(hit.lexical_rank is None for hit in result.fused)
+    assert len(prompts) == 1
+
+
+def test_translation_can_be_switched_off_per_request(
+    tmp_path: Path, bar: tuple[StoreMountedDocument, str]
+) -> None:
+    document, _ = bar
+    translations: list[str] = []
+    service, _ = _service(
+        tmp_path,
+        document,
+        _one_chart_claim("15%"),
+        translator=_translator(translations),
+        max_live_calls=2,
+    )
+    result = service.answer(AnswerRequest(_CHINESE_QUESTION, translate_query=False))
+    assert translations == [] and result.query_translation is None
+    assert result.fusion_mode == "vector_only"
+    assert result.llm_live_calls == 1

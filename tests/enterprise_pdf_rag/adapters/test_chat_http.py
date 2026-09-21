@@ -57,6 +57,9 @@ from tests.enterprise_pdf_rag.processing.test_persistent_retrieval import Record
 _URL = "/v1/chat/completions"
 _CHAT_ROUTES = {"/v1/models", _URL}
 _QUESTION = "What does page 2 say?"
+# Long enough that ``answers/query_mode`` keeps it on both channels (ADR 0016), so it needs
+# the query embedder; ``_QUESTION`` itself is short and is answered from BM25 alone.
+_FUSED_QUESTION = "What does the second page of this document say about revenue, and why?"
 _FRAGMENT = re.compile(r"^fragments\.(\S+): (.*page 2.*)$", re.MULTILINE)
 _OFFLINE = OfflineDescriptionEmbedder()
 _LLM_SECRET = "test-openai-secret"
@@ -476,10 +479,12 @@ def test_missing_dependencies_are_503_and_never_leak_secrets(
     root, meridian, _ = published
     model = model_id(meridian.source_sha256)
     cases: list[tuple[FastAPI, list[str], str, dict[str, object]]] = []
+    # The query embedder, like the opt-in reranker below, is a dependency only of the
+    # requests that actually use it: these two ask a question that needs both channels.
     app, prompts = _app(root, tmp_path / "no-embedder", embedder=None)
-    cases.append((app, prompts, "not configured", _body(model)))
+    cases.append((app, prompts, "not configured", _body(model, _FUSED_QUESTION)))
     app, prompts = _app(root, tmp_path / "failing", embedder=FailingEmbedder())
-    cases.append((app, prompts, "no retry", _body(model)))
+    cases.append((app, prompts, "no retry", _body(model, _FUSED_QUESTION)))
     app, prompts = _app(root, tmp_path / "exhausted", max_live_calls=0)
     cases.append((app, prompts, "call_budget_exhausted", _body(model)))
     app, prompts = _app(root, tmp_path / "no-reranker")
@@ -498,6 +503,31 @@ def test_missing_dependencies_are_503_and_never_leak_secrets(
 
         _run(app, scenario)
         assert prompts == []
+
+
+def test_a_bm25_only_question_is_answered_without_a_query_embedder(
+    published: Published, tmp_path: Path
+) -> None:
+    """A question routed to BM25 alone never reads the vector channel, so it cannot need it.
+
+    The answer is the one a fully configured deployment returns for that question, not a
+    substitute for a different one; ``fusion_mode`` says so in the envelope.
+    """
+    root, meridian, _ = published
+    model = model_id(meridian.source_sha256)
+    app, prompts = _app(root, tmp_path / "no-embedder", embedder=None)
+
+    async def scenario(client: AsyncClient) -> None:
+        response = await client.post(_URL, json=_body(model))
+        assert response.status_code == 200, response.text
+        envelope = response.json()["enterprise_pdf_rag"]
+        assert envelope["fusion_mode"] == "bm25_only"
+        assert envelope["query_translation"] is None
+        assert envelope["status"] == "answered"
+        assert all(rank["vector_rank"] is None for rank in envelope["member_ranks"])
+
+    _run(app, scenario)
+    assert len(prompts) == 1
 
 
 def test_tampered_pinned_evidence_is_409(published: Published, tmp_path: Path) -> None:

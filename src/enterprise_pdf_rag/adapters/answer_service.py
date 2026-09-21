@@ -1,8 +1,10 @@
 """Orchestrate one answer: hybrid search → evidence blocks → one model call → verification.
 
-The service never calls a model except through the injected bounded client, and it
-does so at most once per request; retrieval, hydration and claim verification are
-deterministic reads of the pinned snapshot.
+The service never calls a model except through the injected bounded client: once per
+request to synthesise the answer, plus at most one earlier call to restate a question the
+lexical channel cannot score in the index's language (ADR 0016; bounded and cached like
+any other, and skipped entirely when unavailable). Retrieval, hydration and claim
+verification are deterministic reads of the pinned snapshot.
 """
 
 from collections.abc import Mapping, MutableMapping, Sequence
@@ -11,6 +13,7 @@ from typing import Final
 
 from enterprise_pdf_rag.adapters.hybrid_search import HybridSearch, LexicalIndex
 from enterprise_pdf_rag.adapters.json_completion import JsonCompletionClient, JsonCompletionError
+from enterprise_pdf_rag.adapters.query_translation import is_foreign_script, translate_query
 from enterprise_pdf_rag.answers.member_filter import candidate_members, region_vocabulary
 from enterprise_pdf_rag.answers.models import (
     AbstainReason,
@@ -19,11 +22,13 @@ from enterprise_pdf_rag.answers.models import (
     AnswerStatus,
     FusedHit,
     MemberFilters,
+    TranslatedQuery,
     VerifiedClaim,
 )
 from enterprise_pdf_rag.answers.ports import MemberText, MountedDocument
 from enterprise_pdf_rag.answers.prompt import SYSTEM_RULES, ModelAnswer, build_prompt
 from enterprise_pdf_rag.answers.query_filters import derive_filters
+from enterprise_pdf_rag.answers.query_mode import FusionMode, QueryMode, content_probe
 from enterprise_pdf_rag.answers.verify import decide, verify_claims
 from enterprise_pdf_rag.figures.chart_qa.displayed_models import (
     DISPLAYED_BAR_SCOPE,
@@ -132,6 +137,15 @@ def select_context(
 
 
 @dataclass(frozen=True, slots=True)
+class _QueryPlan:
+    """What the retrieval channels will score, and the translation that produced it."""
+
+    query: str
+    mode: FusionMode
+    translation: TranslatedQuery | None
+
+
+@dataclass(frozen=True, slots=True)
 class AnswerSettings:
     rrf_k: float = 60.0
     prompt_budget_chars: int = 18_000
@@ -168,8 +182,42 @@ class AnswerService:
             )
         return next(iter(self._documents.values()))
 
+    def _plan(
+        self, request: AnswerRequest, search: HybridSearch, allowed: frozenset[str] | None
+    ) -> "_QueryPlan":
+        """Decide what the two channels will score: the question, or an English restatement.
+
+        A question is restated only when its *content words* score nothing lexically — the
+        signature of a question written outside the index's language, and the one case where
+        fusion has nothing to fuse. The probe drops figures deliberately: a Chinese question
+        naming ``1H26`` matches that token and would otherwise look scoreable. Whenever such
+        a question goes untranslated — switched off, or no usable output — the vector channel
+        answers alone rather than fusing a ranking built from a stray year (ADR 0016).
+        """
+        probe = content_probe(request.question)
+        if (
+            not probe
+            or not is_foreign_script(request.question)
+            or search.lexical_hits(probe, allowed=allowed) > 0
+        ):
+            return _QueryPlan(request.question, request.fusion_mode, None)
+        # Foreign to the index's vocabulary from here on. The plan depends on the question
+        # alone, never on how much budget is left, so the same question always replays from
+        # the same cache entries; a translated question simply costs two live calls.
+        translation = (
+            translate_query(request.question, self._llm) if request.translate_query else None
+        )
+        if translation is not None:
+            return _QueryPlan(translation.english, request.fusion_mode, translation)
+        unfused: FusionMode = (
+            "vector_only" if request.fusion_mode == "auto" else request.fusion_mode
+        )
+        return _QueryPlan(request.question, unfused, None)
+
     def answer(self, request: AnswerRequest) -> AnswerResult:
         document = self._select(request.document_sha256)
+        # Spans the whole request: a translated question costs one call before synthesis.
+        before = self._llm.live_call_count
         reranker = None
         if request.rerank:
             if self._reranker is None:
@@ -196,8 +244,14 @@ class AnswerService:
         relaxed = starved and applied is not None
         if starved:
             allowed = None
-        ranked = search.search(request.question, top_k=2 * request.top_k, allowed=allowed)
-        fused, selected = select_context(document, ranked, request.top_k, members)
+        plan = self._plan(request, search, allowed)
+        translation = plan.translation
+        # Only the two channels see the translation; the prompt, the pre-filters above and
+        # the prose gate below all keep the question the user actually asked.
+        outcome = search.search(
+            plan.query, top_k=2 * request.top_k, allowed=allowed, mode=plan.mode
+        )
+        fused, selected = select_context(document, outcome.hits, request.top_k, members)
         hits = {hit.member_id: hit.as_hit() for hit in fused}
         blocks = budget_blocks(selected, max_chars=self._settings.prompt_budget_chars)
         if not blocks:
@@ -208,12 +262,14 @@ class AnswerService:
                 AbstainReason.NO_RELEVANT_MEMBER,
                 "no retrieved member fits the context budget"
                 if fused
-                else "no member matched in either channel",
+                else "no member matched in the channels that ran",
+                llm_live_calls=self._llm.live_call_count - before,
                 filters_applied=applied,
                 filters_relaxed=relaxed,
+                fusion_mode=outcome.mode,
+                query_translation=translation,
             )
         member_ids = tuple(block.member_id for block in blocks)
-        before = self._llm.live_call_count
         try:
             completion = self._llm.complete_text_json(
                 task=_TASK,
@@ -234,6 +290,8 @@ class AnswerService:
                     llm_live_calls=self._llm.live_call_count - before,
                     filters_applied=applied,
                     filters_relaxed=relaxed,
+                    fusion_mode=outcome.mode,
+                    query_translation=translation,
                 )
             raise DependencyUnavailable(error.code) from error
         by_member = {block.member_id: block for block in blocks}
@@ -266,6 +324,8 @@ class AnswerService:
             completion.cache_hit,
             applied,
             relaxed,
+            outcome.mode,
+            translation,
         )
 
     @staticmethod
@@ -280,6 +340,8 @@ class AnswerService:
         llm_live_calls: int = 0,
         filters_applied: MemberFilters | None = None,
         filters_relaxed: bool = False,
+        fusion_mode: QueryMode = "rrf",
+        query_translation: TranslatedQuery | None = None,
     ) -> AnswerResult:
         return AnswerResult(
             AnswerStatus.ABSTAINED,
@@ -298,6 +360,8 @@ class AnswerService:
             False,
             filters_applied,
             filters_relaxed,
+            fusion_mode,
+            query_translation,
         )
 
 

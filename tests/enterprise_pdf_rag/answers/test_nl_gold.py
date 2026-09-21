@@ -31,9 +31,11 @@ from enterprise_pdf_rag.adapters.nl_gold import (
 )
 from enterprise_pdf_rag.adapters.processing_runtime import PROCESSING_OUTPUT
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
+from enterprise_pdf_rag.adapters.query_translation import QueryTranslationDTO
 from enterprise_pdf_rag.answers.models import AnswerRequest, MemberFilters
 from enterprise_pdf_rag.answers.ports import MemberText
 from enterprise_pdf_rag.answers.prompt import ModelAnswer, ModelClaim
+from enterprise_pdf_rag.answers.query_mode import FusionMode
 from enterprise_pdf_rag.figures.chart_qa.displayed_models import DisplayedLookupContext
 from enterprise_pdf_rag.figures.chart_qa.models import ChartContext
 from enterprise_pdf_rag.processing.context_builder import ContextBlock, build_context_block
@@ -51,6 +53,16 @@ GOLD_PATH = (
     / "nl-answers-gold-v1.json"
 )
 GOLD = load_gold(GOLD_PATH.read_bytes())
+# The replay declares its vector channel (see ``ReplayMount``), so it pins fusion on:
+# channel routing is guarded by ``test_query_mode`` / ``test_hybrid_search`` and measured by
+# the live runner, while this runner guards seats, budget, verification and abstention
+# (ADR 0016). The scripted translations below stand in for the model's, for the same reason.
+_FUSION_MODE: FusionMode = "rrf"
+_TRANSLATIONS = {
+    "2026 上半年 分销渠道 占比": "Distribution mix 1H26",
+    "代理人科技投入的三个阶段分别是什么？": "What are the three phases of agency technology?",  # noqa: RUF001 — a real Chinese question ends in the fullwidth mark
+    "泰国 1H26 VONB": "Thailand 1H26 VONB",
+}
 # A case without scripted model output (the cache repeat) can only run against a service.
 OFFLINE_CASES = tuple(case for case in GOLD.cases if case.model_output is not None)
 
@@ -221,8 +233,18 @@ def _replay(
         )
     )
     document = ReplayMount(release, targets)
+
+    def translate(prompt: str) -> QueryTranslationDTO:
+        english = _TRANSLATIONS.get(case.question.text)
+        assert english is not None, f"{case.case_id}: no scripted translation for this question"
+        return QueryTranslationDTO(english_query=english, source_language="Chinese")
+
     client, prompts = scripted_client(
-        cache_dir, lambda prompt: _model_answer(release, case, prompt)
+        cache_dir,
+        lambda prompt: _model_answer(release, case, prompt),
+        # A question outside the index's language spends one call translating it first.
+        max_live_calls=2,
+        translator=translate,
     )
     service = AnswerService(
         {document.source_sha256: document},
@@ -237,9 +259,10 @@ def _replay(
             document_sha256=case.document_sha256,
             rerank=case.request.rerank,
             filters=None if filters is None else MemberFilters(filters.periods, filters.regions),
+            fusion_mode=_FUSION_MODE,
         )
     )
-    assert len(prompts) == 1, "one bounded model call per answer"
+    assert len(prompts) == 1, "one bounded synthesis call per answer"
     envelope = AnswerEnvelope.from_domain(result)
     observed = ObservedAnswer.model_validate(envelope.model_dump(mode="json"))
     return observed, answer_prose(render_message(result))

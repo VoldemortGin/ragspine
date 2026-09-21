@@ -66,7 +66,10 @@ SYSTEM_RULES: Final[str] = (
     "3. Every number in `answer` must also appear in the `text` of one of your claims.\n"
     "4. If the blocks do not contain the answer, set `abstain` to true with an `abstain_reason` "
     "and return no claims. Do not guess.\n"
-    "5. Return only JSON matching the supplied schema. Model confidence is not verification."
+    "5. Return only JSON matching the supplied schema. Model confidence is not verification.\n"
+    "6. Write `answer` in the language of the user's question. A claim's `text` is always "
+    "the evidence's own wording, copied from the block verbatim and never translated, "
+    "whatever language you answer in."
 )
 
 

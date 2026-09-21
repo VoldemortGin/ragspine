@@ -20,8 +20,10 @@ from enterprise_pdf_rag.answers.models import (
     FusedHit,
     MemberFilters,
     RejectedClaim,
+    TranslatedQuery,
     VerifiedClaim,
 )
+from enterprise_pdf_rag.answers.query_mode import QueryMode
 from enterprise_pdf_rag.figures.chart_qa.models import FieldCitation
 from enterprise_pdf_rag.processing.context_builder import BlockKind
 
@@ -161,6 +163,27 @@ class MemberRankOut(BoundaryModel):
         )
 
 
+class QueryTranslationOut(BoundaryModel):
+    """The English restatement the two retrieval channels scored (ADR 0016).
+
+    Present only when the question was not in the index's language. The answer itself is
+    written in the question's language and every claim quotes the evidence verbatim, so
+    nothing here was translated on the way out.
+    """
+
+    english: str
+    source_language: str
+    cache_hit: bool
+
+    @classmethod
+    def from_domain(cls, translation: TranslatedQuery) -> "QueryTranslationOut":
+        return cls(
+            english=translation.english,
+            source_language=translation.source_language,
+            cache_hit=translation.cache_hit,
+        )
+
+
 class AnswerEnvelope(BoundaryModel):
     """Verified claims, audit rejections and pinned provenance beside the OpenAI shape."""
 
@@ -182,6 +205,10 @@ class AnswerEnvelope(BoundaryModel):
     # because they left fewer candidates than prompt seats (ADR 0013).
     filters_applied: MemberFiltersOut | None = None
     filters_relaxed: bool = False
+    # Which retrieval channels produced ``member_ranks``, and the query translation that fed
+    # them when the question was not in the index's language (ADR 0016).
+    fusion_mode: QueryMode = "rrf"
+    query_translation: QueryTranslationOut | None = None
 
     @classmethod
     def from_domain(cls, result: AnswerResult) -> "AnswerEnvelope":
@@ -207,6 +234,10 @@ class AnswerEnvelope(BoundaryModel):
             if result.filters_applied is None
             else MemberFiltersOut.from_domain(result.filters_applied),
             filters_relaxed=result.filters_relaxed,
+            fusion_mode=result.fusion_mode,
+            query_translation=None
+            if result.query_translation is None
+            else QueryTranslationOut.from_domain(result.query_translation),
         )
 
 

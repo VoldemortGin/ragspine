@@ -11,6 +11,7 @@ from enterprise_pdf_rag.adapters.hybrid_search import (
     HybridSearch,
     LexicalIndex,
     LocalRerankJudge,
+    SearchOutcome,
     build_lexical_index,
     fuse,
     lexical_rank,
@@ -193,36 +194,41 @@ def test_hybrid_search_builds_the_lexical_index_once_per_snapshot() -> None:
     assert document.member_texts_calls == 1
     assert len(cache) == 1
 
-    hits = first.search("expense ratio", top_k=2)
+    hits = first.search("expense ratio", top_k=2, mode="rrf").hits
     assert document.search_calls == [("expense ratio", 3)]
     assert all(isinstance(hit, FusedHit) for hit in hits)
     # m-a is in both channels, m-c only in the vector channel, m-b only lexically.
     assert [hit.member_id for hit in hits] == ["m-a", "m-c"]
-    assert [hit.member_id for hit in first.search("expense ratio", top_k=3)] == [
+    assert [hit.member_id for hit in first.search("expense ratio", top_k=3, mode="rrf").hits] == [
         "m-a",
         "m-c",
         "m-b",
     ]
-    assert second.search("expense ratio", top_k=2) == hits
+    assert second.search("expense ratio", top_k=2, mode="rrf").hits == hits
 
     other = _FakeDocument(("m-a",), snapshot_id="2" * 64)
     HybridSearch(other, index_cache=cache)
     assert other.member_texts_calls == 1 and len(cache) == 2
     with pytest.raises(ValueError, match="top_k"):
-        first.search("expense ratio", top_k=0)
+        first.search("expense ratio", top_k=0, mode="rrf")
 
 
 def test_rerank_is_off_by_default_and_only_an_injected_judge_reorders() -> None:
     document = FakeDocument(
         tuple(FakeMember(member_id, text) for member_id, text in _TEXTS.items()), ("m-a", "m-b")
     )
-    plain = HybridSearch(document).search("expense ratio", top_k=3)
+    plain = HybridSearch(document).search("expense ratio", top_k=3, mode="rrf").hits
     assert [hit.member_id for hit in plain] == ["m-a", "m-b"]
-    assert HybridSearch(document, reranker=None).search("expense ratio", top_k=3) == plain
+    assert (
+        HybridSearch(document, reranker=None).search("expense ratio", top_k=3, mode="rrf").hits
+        == plain
+    )
     assert document.resolved == []  # no evidence is read while rerank is off
 
     judge = _CountingJudge()
-    reranked = HybridSearch(document, reranker=judge).search("expense ratio", top_k=3)
+    reranked = (
+        HybridSearch(document, reranker=judge).search("expense ratio", top_k=3, mode="rrf").hits
+    )
     assert judge.calls == 1
     assert [hit.member_id for hit in reranked] == ["m-b", "m-a"]
     assert set(reranked) == set(plain)
@@ -237,7 +243,11 @@ def test_rerank_is_off_by_default_and_only_an_injected_judge_reorders() -> None:
 def test_reranker_reads_a_chart_candidate_as_its_citable_evidence_block(tmp_path: Path) -> None:
     document, pin = bar_document(tmp_path)
     judge = _CountingJudge()
-    hits = HybridSearch(document, reranker=judge).search("expense ratio 1H21", top_k=2)
+    hits = (
+        HybridSearch(document, reranker=judge)
+        .search("expense ratio 1H21", top_k=2, mode="rrf")
+        .hits
+    )
     assert {hit.member_id for hit in hits} == {
         pin.member_id,
         *document.member_ids_by_kind(ObjectKind.TEXT),
@@ -300,7 +310,7 @@ def test_projected_chart_text_lets_a_question_without_the_title_reach_the_top() 
     question that names categories, and RRF cannot lift a single-channel rank 13 into the
     top ten; the projection makes the donut the lexical winner instead."""
     before = HybridSearch(_aia_like(chart_text_only=True), channel_limit=50)
-    old = before.search(_NO_TITLE_QUESTION, top_k=10)
+    old = before.search(_NO_TITLE_QUESTION, top_k=10, mode="rrf").hits
     assert all(hit.member_id != "chart-p18" for hit in old)
     assert lexical_rank(before.index, _NO_TITLE_QUESTION, limit=50) and all(
         hit.member_id != "chart-p18"
@@ -309,7 +319,7 @@ def test_projected_chart_text_lets_a_question_without_the_title_reach_the_top() 
 
     after = HybridSearch(_aia_like(chart_text_only=False), channel_limit=50)
     assert lexical_rank(after.index, _NO_TITLE_QUESTION, limit=1)[0].member_id == "chart-p18"
-    new = after.search(_NO_TITLE_QUESTION, top_k=10)
+    new = after.search(_NO_TITLE_QUESTION, top_k=10, mode="rrf").hits
     chart = next(hit for hit in new if hit.member_id == "chart-p18")
     assert (chart.vector_rank, chart.lexical_rank) == (13, 1)
     # Lexical rank 1 plus vector rank 13 lands well inside the default top-10 (and the
@@ -320,7 +330,7 @@ def test_projected_chart_text_lets_a_question_without_the_title_reach_the_top() 
 def test_search_with_no_hits_in_either_channel_returns_empty() -> None:
     document = _FakeDocument(())
     exploding = HybridSearch(document, reranker=_ExplodingJudge())
-    assert exploding.search("zzz-absent", top_k=3) == ()
+    assert exploding.search("zzz-absent", top_k=3, mode="rrf").hits == ()
 
 
 def test_local_rerank_judge_maps_provider_order_onto_candidate_indices() -> None:
@@ -348,15 +358,86 @@ def test_local_rerank_judge_maps_provider_order_onto_candidate_indices() -> None
 def test_allowed_members_narrow_both_channels_and_widen_the_vector_read() -> None:
     document = _FakeDocument(("m-c", "m-a", "m-b", "m-d"))
     search = HybridSearch(document, channel_limit=2)
-    unfiltered = search.search("expense ratio", top_k=4)
+    unfiltered = search.search("expense ratio", top_k=4, mode="rrf").hits
     assert [hit.member_id for hit in unfiltered] == ["m-a", "m-c", "m-b"]
     assert document.search_calls[-1] == ("expense ratio", 2)
 
-    narrowed = search.search("expense ratio", top_k=4, allowed=frozenset({"m-b", "m-d"}))
+    narrowed = search.search(
+        "expense ratio", top_k=4, allowed=frozenset({"m-b", "m-d"}), mode="rrf"
+    ).hits
     # The vector channel is read over the whole corpus (4 members) before filtering.
     assert document.search_calls[-1] == ("expense ratio", 4)
     assert [hit.member_id for hit in narrowed] == ["m-b", "m-d"]
     assert narrowed[0].lexical_rank == 1 and narrowed[0].vector_rank == 1
     assert narrowed[1].lexical_rank is None  # empty text scores 0 lexically
-    assert search.search("expense ratio", top_k=4, allowed=frozenset()) == ()
+    assert search.search("expense ratio", top_k=4, allowed=frozenset(), mode="rrf").hits == ()
     assert [item.member_id for item in search.index.members] == ["m-a", "m-b", "m-c", "m-d"]
+
+
+def test_a_short_query_is_routed_to_bm25_alone_and_never_embeds() -> None:
+    document = _FakeDocument(("m-c", "m-a", "m-b"))
+    search = HybridSearch(document, channel_limit=3)
+    outcome = search.search("expense ratio", top_k=3)
+    assert isinstance(outcome, SearchOutcome)
+    assert outcome.mode == "bm25_only"
+    # The vector channel is the only remote call in the request; a routed query skips it.
+    assert document.search_calls == []
+    lexical = lexical_rank(search.index, "expense ratio", limit=3)
+    assert [hit.member_id for hit in outcome.hits] == [hit.member_id for hit in lexical]
+    assert [hit.lexical_rank for hit in outcome.hits] == [1, 2]
+    assert all(hit.vector_rank is None and hit.vector_score is None for hit in outcome.hits)
+    assert [hit.bm25_score for hit in outcome.hits] == [hit.score for hit in lexical]
+
+
+def test_a_long_narrative_query_still_fuses_both_channels() -> None:
+    document = _FakeDocument(("m-c", "m-a", "m-b"))
+    search = HybridSearch(document, channel_limit=3)
+    question = "Which channels drove the change in the expense ratio and why did it move?"
+    outcome = search.search(question, top_k=3)
+    assert outcome.mode == "rrf"
+    assert document.search_calls == [(question, 3)]
+    assert outcome.hits == search.search(question, top_k=3, mode="rrf").hits
+
+
+def test_a_query_the_lexical_channel_cannot_score_takes_the_vector_channel_alone() -> None:
+    document = _FakeDocument(("m-c", "m-a"))
+    search = HybridSearch(document, channel_limit=3)
+    outcome = search.search("中国内地的费用率", top_k=3)
+    assert outcome.mode == "vector_only"
+    assert [hit.member_id for hit in outcome.hits] == ["m-c", "m-a"]
+    assert all(hit.lexical_rank is None and hit.bm25_score is None for hit in outcome.hits)
+
+
+def test_an_explicit_mode_overrides_the_classifier_in_both_directions() -> None:
+    document = _FakeDocument(("m-c", "m-a", "m-b"))
+    search = HybridSearch(document, channel_limit=3)
+    # A query ``auto`` would send to BM25 alone, pinned to fusion.
+    fused = search.search("expense ratio", top_k=3, mode="rrf")
+    assert fused.mode == "rrf" and document.search_calls == [("expense ratio", 3)]
+    assert any(hit.vector_rank is not None for hit in fused.hits)
+
+    # A query ``auto`` would fuse, pinned to BM25 alone.
+    question = "Which channels drove the change in the expense ratio and why did it move?"
+    lexical_only = search.search(question, top_k=3, mode="bm25_only")
+    assert lexical_only.mode == "bm25_only"
+    assert document.search_calls == [("expense ratio", 3)]  # still no second embedding call
+    assert all(hit.vector_rank is None for hit in lexical_only.hits)
+
+    pinned_vector = search.search("expense ratio", top_k=3, mode="vector_only")
+    assert pinned_vector.mode == "vector_only"
+    assert all(hit.lexical_rank is None for hit in pinned_vector.hits)
+
+
+def test_single_channel_scores_are_the_fusion_of_that_channel_with_an_empty_one() -> None:
+    document = _FakeDocument(("m-c", "m-a"))
+    search = HybridSearch(document, channel_limit=3)
+    outcome = search.search("expense ratio", top_k=3)
+    lexical = lexical_rank(search.index, "expense ratio", limit=3)
+    assert outcome.hits == fuse((), lexical, k=60.0)[:3]
+
+
+def test_lexical_hits_counts_what_bm25_can_score() -> None:
+    search = HybridSearch(_FakeDocument(()), channel_limit=50)
+    assert search.lexical_hits("expense ratio") == 2
+    assert search.lexical_hits("expense ratio", allowed=frozenset({"m-a"})) == 1
+    assert search.lexical_hits("中国内地的费用率") == 0
