@@ -2,7 +2,7 @@
 
 All notable changes to RAGSpine are documented here. This project follows Semantic Versioning.
 
-## [Unreleased]
+## [0.16.0] - 2026-09-22
 
 ### Added
 
@@ -85,6 +85,185 @@ All notable changes to RAGSpine are documented here. This project follows Semant
   calling a model. Unlike `ragspine`'s privacy-aware traces this file keeps the evidence text —
   that is the point of it — so it stays a local file under the ingestion root, never served or
   shipped.
+
+
+- **A page's regions are bound to the column they stand over** (`enterprise_pdf_rag`,
+  [ADR 0013 amendment 1](docs/enterprise-pdf-rag/adr/0013-page-metadata-and-prefilters.md)).
+  Region metadata was page-level, so p.13 of the AIA release — three `VONB ($m)` charts side by
+  side, AIA Thailand **514**, AIA Singapore **294**, AIA Malaysia **232** — gave all three charts
+  the same four region values, no filter could tell them apart, and across four cold runs the two
+  Thailand questions were answered eight times and not once correctly. The new pure module
+  `processing/column_regions.py` binds a page's verified region spans to the chart column each one
+  stands over: `bind_columns(regions, columns)` over `PageRegionSpan(text, bbox)` and
+  `PageColumn(member_id, bbox)`, with `MIN_COLUMNS = 2`, `MAX_COLUMN_HEADING_WIDTH_SHARE = 0.5`
+  (a heading as wide as the page is the page's banner — `ASEAN` — and stays page-wide) and
+  `MIN_HEADING_OVERLAP_SHARE = 0.5`. It is **all-or-nothing**: unless every column receives a
+  heading and every heading finds a column it returns `EMPTY` and the caller keeps the page-level
+  values it always used, because a layout that cannot be read must cost nothing rather than guess.
+  No model call, no I/O, nothing on disk rewritten — `MemberText.member_regions` is an in-memory
+  mount-time projection, so **no snapshot id changes and nothing is re-indexed**, and a release
+  published before this module existed binds its columns at mount. `MountedDocument` supplies the
+  geometry best-effort from each CHART member's `member_anchor` and from the page's source-text
+  sidecar (the rectangles of the spans a region value was copied from, `MetadataEvidence.span_ids`),
+  exactly as `member_anchor` already worked: geometry read for a refinement must never fail a mount
+  the evidence itself supports. `member_matches` now filters on `member_regions or regions` while
+  `region_vocabulary` still reports the whole page-level vocabulary, so nothing shrinks what a
+  question can be parsed against; and the bound heading joins that member's contextual index header,
+  so BM25 scores `AIA Thailand` on the Thailand chart. The stored vectors are untouched, so the
+  lexical channel reads one phrase the embedding never saw — deliberate, and exactly why no
+  published release needs re-indexing. A filter alone was not enough: `ContextBlock` also carries
+  `regions`, and `SYSTEM_RULES` rule 8 says a question naming a region is answered from the block
+  whose `regions=` names it and no other, in whatever language either is written, and otherwise
+  abstains. On the real release p.13 binds its three charts to `AIA Thailand` / `AIA Singapore` /
+  `AIA Malaysia` and p.12 binds its two to `Domestic` and `Chinese Mainland Visitor (CMV)`;
+  **every other multi-chart page returns `EMPTY`** and keeps page-level regions, which is the safe
+  path working as intended. `k01-region-thailand-en` and `k02-region-thailand-zh` both answer
+  `514` `$m` from `points.point-1h26.value` on `a05e27202ea4…`, p.13, and move from
+  `case_class: abstain` / `known_gap: true` to `case_class: positive` / `status: answered` with
+  `forbidden_numbers: ["294", "232"]`, so a neighbouring column's number under Thailand's name
+  fails the case by construction — **the gold set now carries zero known gaps**. The two are fixed
+  for different reasons and the ADR says so: `k01` by the pre-filter, which now admits only the
+  Thailand chart, `k02` only by the block header, because `泰国` matches nothing in the verified
+  English vocabulary and the question is never translated. Still page-level: every non-chart member,
+  and every member on a multi-chart page that does not read as columns. Cost: `member_texts()`
+  0.26s → 0.43s, once per mount; mount time itself unchanged.
+
+- **A gold requirement may name alternative anchors, and so may a filter expectation**
+  (`enterprise_pdf_rag`, ADR 0011 follow-up). A frozen case asserted exactly one anchor per
+  requirement, which silently asserted more than the evidence does: the pinned release states the
+  record Operating ROE twice — the sentence on p.3 and the chart point on p.7 — and which one a
+  run cites is not stable, so a correct answer failed. An element of `required_claims` and a
+  `filters_expected` may now be written as `{"any_of": [...]}`: at least two alternatives, never
+  nested, and never beside another key. Any single alternative satisfies the requirement, and
+  when none does the report lists why each one failed rather than only the last.
+  `adapters/nl_gold.py` discriminates the two written forms by shape
+  (`Discriminator(_choice_form)` with `Tag`), so a malformed case reports against the form it was
+  actually written in, and the single form parses and judges byte for byte as before —
+  `schema_version` stays `nl-answers-gold-v1`. Three cases are re-pinned against it:
+  `p01-roe-quote-en` and `p15-cache-repeat-en` accept either statement of the ROE, and
+  `p06-donut-zh` enumerates the two period sets that were really observed — `{1H2026}` and
+  `{1H2026, Y2026}` — because its applied pre-filters union what the question derives with what
+  its translation derives (ADR 0018 amendment 1), and the translation is a real model call, so
+  two cold runs derived different sets while giving the same answer from the same citations.
+  Freezing either set alone would have asserted something untrue. The gold's `pinned` release is
+  unchanged.
+
+- **The wait for one model call is configurable** (`enterprise_pdf_rag`).
+  `JsonCompletionClient` allows up to 180 seconds but `create_configured_app` never passed
+  one, so every deployment was pinned to the 45-second default. The page context window
+  (ADR 0017) makes a "summarise this section" question's prompt and generation long enough
+  to cross it, and such a question then 503s on a default configuration —
+  `Summarise the Growth Engines section for Hong Kong` did, at 48.3s. `AppSettings` gains
+  `answer_timeout_seconds` (`APP_ANSWER_TIMEOUT_SECONDS`, default 45), validated against the
+  same `(0, 180]` window the client enforces so a bad environment fails at startup rather
+  than on the first question, and `scripts/enterprise_pdf_rag/webui_preview.py` passes it
+  through to the API child like the other `APP_*` settings.
+
+- **Retrieval picks its channels per question, and restates a foreign-language question in the
+  index's language first**
+  (`enterprise_pdf_rag`, [ADR 0018](docs/enterprise-pdf-rag/adr/0018-query-classification-and-translation.md)).
+  Hybrid retrieval used to fuse the
+  vector and BM25 rankings with RRF unconditionally; nobody had measured whether that helps. The
+  2026-09-21 coverage probe (`data/validation/coverage-2026-09-21/`: 125 indexed facts from the
+  AIA release, each asked two ways, pre-rerank) says it does not — BM25 alone recalls 74.4%
+  within ten seats against fusion's 70.4%, and leads by more at every tighter cut (r@3 54.4% vs
+  46.4%, MRR 0.482 vs 0.381), because RRF weights both rankings equally and the weaker one
+  dilutes the stronger. `answers/query_mode.py` now classifies each question with no model and no
+  I/O: at most five tokens **and** at most two content words, or a figure plus at most one
+  content word, takes BM25 alone; a question the lexical channel cannot score takes the vector
+  channel alone; everything else keeps fusion. Every threshold was swept offline against the
+  probe's per-fact channel ranks, and the content-word budget (amendment 2) deliberately gives
+  up the sweep's 74.4% ceiling for 73.6% — 92 facts of 125 — so that a short *phrase* like
+  `Agency share of VONB 1H26` is no longer routed as though it were a label. 40% of the probe's
+  queries (100 of 250) are rerouted and the rest behave byte-for-byte as before.
+  `HybridSearch.search` gained a `mode` argument and
+  returns a `SearchOutcome`; a single-channel mode is expressed as a fusion with one empty
+  ranking, so scores stay comparable, and `bm25_only` skips the vector channel entirely — one
+  embedding call fewer per request. `adapters/query_translation.py` restates a question written
+  outside the index's language through one bounded, cached `complete_text_json` call (task salt
+  `query-translation-v1`, strict `{english_query, source_language}` schema, rules that forbid
+  answering and require figures and proper names to survive verbatim), triggered when the
+  question's *content words* — function words and figures removed — score nothing lexically, so a
+  Chinese question naming `1H26` is no longer mistaken for a scoreable one. The translation
+  reaches the **lexical** channel only — BM25 and the channel classifier score it, while the
+  vector channel and the rerank judge read the question as asked (amendment 3) — and the period /
+  region pre-filters union what the question derives with what the translation derives
+  (amendment 1). The prompt and the prose-number gate keep the original question, `SYSTEM_RULES`
+  now asks for an answer in the question's language with claim text still copied verbatim from
+  the evidence, and a translation
+  that cannot be had is not an error — the question falls back to the vector channel alone.
+  `AnswerRequest` gained `fusion_mode` and `translate_query`; `AnswerResult` and the
+  `rag-chat-v1` `AnswerEnvelope` gained `fusion_mode` and `query_translation` as optional
+  fields, and the checked-in schema was regenerated with nothing removed.
+
+- **The model cache keeps the request it sent, not just the answer it got**
+  (`enterprise_pdf_rag`). `JsonCompletionClient` recorded a fingerprint and a byte count for
+  every call, so a cached answer could never be read back against the prompt that produced it.
+  It now writes `model-cache/contexts/<request_fingerprint>.json` beside `requests/` and
+  `responses/`: an envelope of `request_fingerprint` / `created_at` (UTC) / `endpoint_path` /
+  `contract` / `task` around `payload`, the verbatim JSON body sent to the provider — system
+  rules, every message (evidence blocks, page context, the question), the response schema and
+  the token budget. A vision call replaces the inline `image_url` with
+  `{"omitted": true, "sha256", "bytes"}` and keeps every other field untouched. The body is
+  written before the call and back-filled when a cached answer is replayed without one; the
+  first write for a fingerprint wins, and a write that fails (or disagrees) only leaves a code
+  in that record's `diagnostics.context_warning` — it never fails the call. Successful records
+  carry `diagnostics.context_path` back to the file. These files quote the source verbatim, so
+  they stay local.
+
+- **A frozen gold set for natural-language answers, with two runners that share one judge**
+  (`enterprise_pdf_rag`, ADR 0011 follow-up). Until now the only frozen sets were the two typed
+  ChartQA golds; the whole answer chain was re-measured by hand every round.
+  `data/benchmarks/enterprise-pdf-rag/aia-2026-interim/nl-answers-gold-v1.json` freezes 25 cases
+  against one pinned release (15 positive, 7 abstaining, 3 adversarial) and is registered in that
+  folder's `manifest.json` (`aia-gold-registry-v1`). It freezes only what is stable across runs —
+  `page_index`, `field_path`, `quote`, the claim's `value` / `unit` and the envelope's
+  `filters_applied` / `filters_relaxed` / `cache_hit` — and never a `claim_id`, a `member_id`, a
+  snapshot id or the prose wording. Where even that is not single-valued, a requirement or a
+  `filters_expected` may name a set of alternatives (`any_of`) instead of one of them.
+  `adapters/nl_gold.py` holds the strict schema (it self-checks
+  on load: unique ids, a positive case must freeze or explicitly declare its claim, a known gap
+  must say what the gap is) and `judge()`, the single pass/fail rule both runners use.
+  `tests/enterprise_pdf_rag/answers/test_nl_gold.py` replays every case offline against the real
+  pinned evidence through the production mount, with a declared vector channel and scripted model
+  output, so the gold's anchors, seat selection, field-level verification, the prose numeric gate
+  and the abstention policy are guarded by the default gate; it skips as a group when the release
+  is absent or no longer the pinned one. `scripts/enterprise_pdf_rag/nl_gold_eval.py` runs the
+  same cases against a live `document-catalog` service and writes a Markdown table, a JSON report
+  and every raw response, exiting 1 on any failure that is not a declared known gap. Cases cover
+  verbatim text quotes, chart values, diagram nodes, English / Chinese / keyword / title-only
+  phrasings, opt-in rerank, derived and explicit pre-filters, a relaxed impossible filter, the
+  completion cache, five abstentions and three probes that script an illegal model output.
+
+- **Every hit is read beside the rest of its page, which is never citable**
+  (`enterprise_pdf_rag`, [ADR 0017](docs/enterprise-pdf-rag/adr/0017-page-context-window.md)).
+  Retrieval scores one member at a time, so a hit reached the
+  prompt stripped of the page that explains it: a chart with no caption, a heading with no body, a
+  bullet with no section. A page-level parent window now widens the generation context the way
+  ragspine already does for narrative chunks (`src/ragspine/retrieval/link/narrative_link.py`: the
+  window goes into a separate `prompt_text`, the citation stays pinned to the fine child).
+  `processing/context_builder.py` gains `PageContextBlock` — one page's remaining members, each
+  folded to a single line of its index-text body, in the reading order a proved diagram already
+  uses (`READING_ROW_QUANTUM`, then left to right), under a `[page_context page_index=N]` head that
+  prints the ADR 0013 page title and section once. `answers/page_window.py` (new, stdlib only)
+  places one block per page after that page's first hit and leaves out members that already have
+  their own block; `answers/ports.MemberText` gains `header` and `bbox` (the description's source
+  anchor, or a chart's qualification receipt) plus a `body` property to feed it. The block
+  deliberately prints **no field path and no member id**, so nothing in it can be the target of a
+  claim: a model that names one anyway lands in the pre-existing `MODEL_OUTPUT_INVALID` /
+  "unknown member" rejection, which no new code was written for and a test now pins. The prose
+  numeric gate is widened to match — a figure the page context printed may be repeated without
+  abstaining the whole answer — but that widens what the prose may *repeat*, never what it may
+  *cite*, and only the members' own text is admitted, never the block rendering, so a head's
+  `page_index=` cannot ground a number; the three adversarial gold cases still abstain unchanged.
+  `budget_blocks` became generic over `PromptBlock` and gives page context up first, whole blocks
+  from the last page backward, so a hit's own evidence is never surrendered to its neighbours'
+  context; within a page, `page_window_budget_chars` (6000, against a total of 18000) drops whole
+  members from the end and the block says `[truncated]`. Switchable at every level
+  (`AnswerSettings.page_window`, `AnswerRequest.page_window`, `rag-chat-v1`'s `page_window`), and
+  `AnswerResult.page_windows` / the envelope report every block that reached the prompt. No policy
+  string moves, no snapshot id changes and no index is rebuilt — a release published earlier gains
+  the capability as it stands, and the contract gains only optional fields.
 
 ### Performance
 
@@ -320,186 +499,6 @@ All notable changes to RAGSpine are documented here. This project follows Semant
   matched by the form they were written in — magnitude plus whether a percent sign was
   attached — so surrounding punctuation and thousands separators no longer count, while a
   bare `11` in the question still cannot ground `11%` in the prose.
-
-### Added
-
-- **A page's regions are bound to the column they stand over** (`enterprise_pdf_rag`,
-  [ADR 0013 amendment 1](docs/enterprise-pdf-rag/adr/0013-page-metadata-and-prefilters.md)).
-  Region metadata was page-level, so p.13 of the AIA release — three `VONB ($m)` charts side by
-  side, AIA Thailand **514**, AIA Singapore **294**, AIA Malaysia **232** — gave all three charts
-  the same four region values, no filter could tell them apart, and across four cold runs the two
-  Thailand questions were answered eight times and not once correctly. The new pure module
-  `processing/column_regions.py` binds a page's verified region spans to the chart column each one
-  stands over: `bind_columns(regions, columns)` over `PageRegionSpan(text, bbox)` and
-  `PageColumn(member_id, bbox)`, with `MIN_COLUMNS = 2`, `MAX_COLUMN_HEADING_WIDTH_SHARE = 0.5`
-  (a heading as wide as the page is the page's banner — `ASEAN` — and stays page-wide) and
-  `MIN_HEADING_OVERLAP_SHARE = 0.5`. It is **all-or-nothing**: unless every column receives a
-  heading and every heading finds a column it returns `EMPTY` and the caller keeps the page-level
-  values it always used, because a layout that cannot be read must cost nothing rather than guess.
-  No model call, no I/O, nothing on disk rewritten — `MemberText.member_regions` is an in-memory
-  mount-time projection, so **no snapshot id changes and nothing is re-indexed**, and a release
-  published before this module existed binds its columns at mount. `MountedDocument` supplies the
-  geometry best-effort from each CHART member's `member_anchor` and from the page's source-text
-  sidecar (the rectangles of the spans a region value was copied from, `MetadataEvidence.span_ids`),
-  exactly as `member_anchor` already worked: geometry read for a refinement must never fail a mount
-  the evidence itself supports. `member_matches` now filters on `member_regions or regions` while
-  `region_vocabulary` still reports the whole page-level vocabulary, so nothing shrinks what a
-  question can be parsed against; and the bound heading joins that member's contextual index header,
-  so BM25 scores `AIA Thailand` on the Thailand chart. The stored vectors are untouched, so the
-  lexical channel reads one phrase the embedding never saw — deliberate, and exactly why no
-  published release needs re-indexing. A filter alone was not enough: `ContextBlock` also carries
-  `regions`, and `SYSTEM_RULES` rule 8 says a question naming a region is answered from the block
-  whose `regions=` names it and no other, in whatever language either is written, and otherwise
-  abstains. On the real release p.13 binds its three charts to `AIA Thailand` / `AIA Singapore` /
-  `AIA Malaysia` and p.12 binds its two to `Domestic` and `Chinese Mainland Visitor (CMV)`;
-  **every other multi-chart page returns `EMPTY`** and keeps page-level regions, which is the safe
-  path working as intended. `k01-region-thailand-en` and `k02-region-thailand-zh` both answer
-  `514` `$m` from `points.point-1h26.value` on `a05e27202ea4…`, p.13, and move from
-  `case_class: abstain` / `known_gap: true` to `case_class: positive` / `status: answered` with
-  `forbidden_numbers: ["294", "232"]`, so a neighbouring column's number under Thailand's name
-  fails the case by construction — **the gold set now carries zero known gaps**. The two are fixed
-  for different reasons and the ADR says so: `k01` by the pre-filter, which now admits only the
-  Thailand chart, `k02` only by the block header, because `泰国` matches nothing in the verified
-  English vocabulary and the question is never translated. Still page-level: every non-chart member,
-  and every member on a multi-chart page that does not read as columns. Cost: `member_texts()`
-  0.26s → 0.43s, once per mount; mount time itself unchanged.
-
-- **A gold requirement may name alternative anchors, and so may a filter expectation**
-  (`enterprise_pdf_rag`, ADR 0011 follow-up). A frozen case asserted exactly one anchor per
-  requirement, which silently asserted more than the evidence does: the pinned release states the
-  record Operating ROE twice — the sentence on p.3 and the chart point on p.7 — and which one a
-  run cites is not stable, so a correct answer failed. An element of `required_claims` and a
-  `filters_expected` may now be written as `{"any_of": [...]}`: at least two alternatives, never
-  nested, and never beside another key. Any single alternative satisfies the requirement, and
-  when none does the report lists why each one failed rather than only the last.
-  `adapters/nl_gold.py` discriminates the two written forms by shape
-  (`Discriminator(_choice_form)` with `Tag`), so a malformed case reports against the form it was
-  actually written in, and the single form parses and judges byte for byte as before —
-  `schema_version` stays `nl-answers-gold-v1`. Three cases are re-pinned against it:
-  `p01-roe-quote-en` and `p15-cache-repeat-en` accept either statement of the ROE, and
-  `p06-donut-zh` enumerates the two period sets that were really observed — `{1H2026}` and
-  `{1H2026, Y2026}` — because its applied pre-filters union what the question derives with what
-  its translation derives (ADR 0018 amendment 1), and the translation is a real model call, so
-  two cold runs derived different sets while giving the same answer from the same citations.
-  Freezing either set alone would have asserted something untrue. The gold's `pinned` release is
-  unchanged.
-
-- **The wait for one model call is configurable** (`enterprise_pdf_rag`).
-  `JsonCompletionClient` allows up to 180 seconds but `create_configured_app` never passed
-  one, so every deployment was pinned to the 45-second default. The page context window
-  (ADR 0017) makes a "summarise this section" question's prompt and generation long enough
-  to cross it, and such a question then 503s on a default configuration —
-  `Summarise the Growth Engines section for Hong Kong` did, at 48.3s. `AppSettings` gains
-  `answer_timeout_seconds` (`APP_ANSWER_TIMEOUT_SECONDS`, default 45), validated against the
-  same `(0, 180]` window the client enforces so a bad environment fails at startup rather
-  than on the first question, and `scripts/enterprise_pdf_rag/webui_preview.py` passes it
-  through to the API child like the other `APP_*` settings.
-
-- **Retrieval picks its channels per question, and restates a foreign-language question in the
-  index's language first**
-  (`enterprise_pdf_rag`, [ADR 0018](docs/enterprise-pdf-rag/adr/0018-query-classification-and-translation.md)).
-  Hybrid retrieval used to fuse the
-  vector and BM25 rankings with RRF unconditionally; nobody had measured whether that helps. The
-  2026-09-21 coverage probe (`data/validation/coverage-2026-09-21/`: 125 indexed facts from the
-  AIA release, each asked two ways, pre-rerank) says it does not — BM25 alone recalls 74.4%
-  within ten seats against fusion's 70.4%, and leads by more at every tighter cut (r@3 54.4% vs
-  46.4%, MRR 0.482 vs 0.381), because RRF weights both rankings equally and the weaker one
-  dilutes the stronger. `answers/query_mode.py` now classifies each question with no model and no
-  I/O: at most five tokens **and** at most two content words, or a figure plus at most one
-  content word, takes BM25 alone; a question the lexical channel cannot score takes the vector
-  channel alone; everything else keeps fusion. Every threshold was swept offline against the
-  probe's per-fact channel ranks, and the content-word budget (amendment 2) deliberately gives
-  up the sweep's 74.4% ceiling for 73.6% — 92 facts of 125 — so that a short *phrase* like
-  `Agency share of VONB 1H26` is no longer routed as though it were a label. 40% of the probe's
-  queries (100 of 250) are rerouted and the rest behave byte-for-byte as before.
-  `HybridSearch.search` gained a `mode` argument and
-  returns a `SearchOutcome`; a single-channel mode is expressed as a fusion with one empty
-  ranking, so scores stay comparable, and `bm25_only` skips the vector channel entirely — one
-  embedding call fewer per request. `adapters/query_translation.py` restates a question written
-  outside the index's language through one bounded, cached `complete_text_json` call (task salt
-  `query-translation-v1`, strict `{english_query, source_language}` schema, rules that forbid
-  answering and require figures and proper names to survive verbatim), triggered when the
-  question's *content words* — function words and figures removed — score nothing lexically, so a
-  Chinese question naming `1H26` is no longer mistaken for a scoreable one. The translation
-  reaches the **lexical** channel only — BM25 and the channel classifier score it, while the
-  vector channel and the rerank judge read the question as asked (amendment 3) — and the period /
-  region pre-filters union what the question derives with what the translation derives
-  (amendment 1). The prompt and the prose-number gate keep the original question, `SYSTEM_RULES`
-  now asks for an answer in the question's language with claim text still copied verbatim from
-  the evidence, and a translation
-  that cannot be had is not an error — the question falls back to the vector channel alone.
-  `AnswerRequest` gained `fusion_mode` and `translate_query`; `AnswerResult` and the
-  `rag-chat-v1` `AnswerEnvelope` gained `fusion_mode` and `query_translation` as optional
-  fields, and the checked-in schema was regenerated with nothing removed.
-
-- **The model cache keeps the request it sent, not just the answer it got**
-  (`enterprise_pdf_rag`). `JsonCompletionClient` recorded a fingerprint and a byte count for
-  every call, so a cached answer could never be read back against the prompt that produced it.
-  It now writes `model-cache/contexts/<request_fingerprint>.json` beside `requests/` and
-  `responses/`: an envelope of `request_fingerprint` / `created_at` (UTC) / `endpoint_path` /
-  `contract` / `task` around `payload`, the verbatim JSON body sent to the provider — system
-  rules, every message (evidence blocks, page context, the question), the response schema and
-  the token budget. A vision call replaces the inline `image_url` with
-  `{"omitted": true, "sha256", "bytes"}` and keeps every other field untouched. The body is
-  written before the call and back-filled when a cached answer is replayed without one; the
-  first write for a fingerprint wins, and a write that fails (or disagrees) only leaves a code
-  in that record's `diagnostics.context_warning` — it never fails the call. Successful records
-  carry `diagnostics.context_path` back to the file. These files quote the source verbatim, so
-  they stay local.
-
-- **A frozen gold set for natural-language answers, with two runners that share one judge**
-  (`enterprise_pdf_rag`, ADR 0011 follow-up). Until now the only frozen sets were the two typed
-  ChartQA golds; the whole answer chain was re-measured by hand every round.
-  `data/benchmarks/enterprise-pdf-rag/aia-2026-interim/nl-answers-gold-v1.json` freezes 25 cases
-  against one pinned release (15 positive, 7 abstaining, 3 adversarial) and is registered in that
-  folder's `manifest.json` (`aia-gold-registry-v1`). It freezes only what is stable across runs —
-  `page_index`, `field_path`, `quote`, the claim's `value` / `unit` and the envelope's
-  `filters_applied` / `filters_relaxed` / `cache_hit` — and never a `claim_id`, a `member_id`, a
-  snapshot id or the prose wording. Where even that is not single-valued, a requirement or a
-  `filters_expected` may name a set of alternatives (`any_of`) instead of one of them.
-  `adapters/nl_gold.py` holds the strict schema (it self-checks
-  on load: unique ids, a positive case must freeze or explicitly declare its claim, a known gap
-  must say what the gap is) and `judge()`, the single pass/fail rule both runners use.
-  `tests/enterprise_pdf_rag/answers/test_nl_gold.py` replays every case offline against the real
-  pinned evidence through the production mount, with a declared vector channel and scripted model
-  output, so the gold's anchors, seat selection, field-level verification, the prose numeric gate
-  and the abstention policy are guarded by the default gate; it skips as a group when the release
-  is absent or no longer the pinned one. `scripts/enterprise_pdf_rag/nl_gold_eval.py` runs the
-  same cases against a live `document-catalog` service and writes a Markdown table, a JSON report
-  and every raw response, exiting 1 on any failure that is not a declared known gap. Cases cover
-  verbatim text quotes, chart values, diagram nodes, English / Chinese / keyword / title-only
-  phrasings, opt-in rerank, derived and explicit pre-filters, a relaxed impossible filter, the
-  completion cache, five abstentions and three probes that script an illegal model output.
-
-- **Every hit is read beside the rest of its page, which is never citable**
-  (`enterprise_pdf_rag`, [ADR 0017](docs/enterprise-pdf-rag/adr/0017-page-context-window.md)).
-  Retrieval scores one member at a time, so a hit reached the
-  prompt stripped of the page that explains it: a chart with no caption, a heading with no body, a
-  bullet with no section. A page-level parent window now widens the generation context the way
-  ragspine already does for narrative chunks (`src/ragspine/retrieval/link/narrative_link.py`: the
-  window goes into a separate `prompt_text`, the citation stays pinned to the fine child).
-  `processing/context_builder.py` gains `PageContextBlock` — one page's remaining members, each
-  folded to a single line of its index-text body, in the reading order a proved diagram already
-  uses (`READING_ROW_QUANTUM`, then left to right), under a `[page_context page_index=N]` head that
-  prints the ADR 0013 page title and section once. `answers/page_window.py` (new, stdlib only)
-  places one block per page after that page's first hit and leaves out members that already have
-  their own block; `answers/ports.MemberText` gains `header` and `bbox` (the description's source
-  anchor, or a chart's qualification receipt) plus a `body` property to feed it. The block
-  deliberately prints **no field path and no member id**, so nothing in it can be the target of a
-  claim: a model that names one anyway lands in the pre-existing `MODEL_OUTPUT_INVALID` /
-  "unknown member" rejection, which no new code was written for and a test now pins. The prose
-  numeric gate is widened to match — a figure the page context printed may be repeated without
-  abstaining the whole answer — but that widens what the prose may *repeat*, never what it may
-  *cite*, and only the members' own text is admitted, never the block rendering, so a head's
-  `page_index=` cannot ground a number; the three adversarial gold cases still abstain unchanged.
-  `budget_blocks` became generic over `PromptBlock` and gives page context up first, whole blocks
-  from the last page backward, so a hit's own evidence is never surrendered to its neighbours'
-  context; within a page, `page_window_budget_chars` (6000, against a total of 18000) drops whole
-  members from the end and the block says `[truncated]`. Switchable at every level
-  (`AnswerSettings.page_window`, `AnswerRequest.page_window`, `rag-chat-v1`'s `page_window`), and
-  `AnswerResult.page_windows` / the envelope report every block that reached the prompt. No policy
-  string moves, no snapshot id changes and no index is rebuilt — a release published earlier gains
-  the capability as it stands, and the contract gains only optional fields.
 
 ## [0.15.0] - 2026-09-21
 
@@ -762,7 +761,8 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 - The package-root API now exposes the `RAGSpine` facade alongside the four original primitives.
 - Installed users can complete ingestion, querying, and local visualization without repository scripts.
 
-[Unreleased]: https://github.com/VoldemortGin/ragspine/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/VoldemortGin/ragspine/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/VoldemortGin/ragspine/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/VoldemortGin/ragspine/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/VoldemortGin/ragspine/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/VoldemortGin/ragspine/compare/v0.12.1...v0.13.0
