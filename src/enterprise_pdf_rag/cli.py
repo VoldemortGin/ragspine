@@ -9,6 +9,12 @@ import uvicorn
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from enterprise_pdf_rag.adapters.aia_ingestion import AIA_OUTPUT, ingest_aia
+from enterprise_pdf_rag.adapters.answer_audit import (
+    format_record,
+    format_summaries,
+    list_answers,
+    read_answer,
+)
 from enterprise_pdf_rag.adapters.chart_qa import StoredChartResolver
 from enterprise_pdf_rag.adapters.chart_qa_displayed import StoredDisplayResolver
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
@@ -52,6 +58,7 @@ from enterprise_pdf_rag.adapters.providers import (
 )
 from enterprise_pdf_rag.adapters.review import write_review
 from enterprise_pdf_rag.adapters.runtime import create_runtime
+from enterprise_pdf_rag.core.settings import get_settings
 from enterprise_pdf_rag.figures.chart_qa.displayed_service import (
     DisplayedChartQAService,
 )
@@ -147,6 +154,31 @@ def _parser() -> argparse.ArgumentParser:
     )
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8766)
+    audit = commands.add_parser(
+        "audit",
+        help="Read the local answer journal: one line per answered question, or one answer in full",
+    )
+    audit.add_argument(
+        "--db",
+        type=Path,
+        default=None,
+        help="Journal file; default APP_ANSWER_AUDIT_PATH, else <ingestion_root>/answers-audit.sqlite",
+    )
+    audit.add_argument("--last", type=int, default=20, help="How many of the most recent answers")
+    audit.add_argument(
+        "--fingerprint",
+        default=None,
+        help="Keep answers whose request fingerprint starts with this",
+    )
+    audit.add_argument(
+        "--question-like", default=None, help="Keep answers whose question contains this text"
+    )
+    audit.add_argument(
+        "--show",
+        type=int,
+        default=None,
+        help="Print one answer in full by id: the prompt as sent and the model's raw output",
+    )
     chart_qa = commands.add_parser(
         "chart-qa",
         help="Answer a pinned structured chart query from qualified saved evidence; no models",
@@ -312,6 +344,37 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stdout.write(json.dumps({"error": str(error)}, indent=2) + "\n")
                 return 1
             sys.stdout.write(published.model_dump_json(indent=2) + "\n")
+            return 0
+        if arguments.command == "audit":
+            database = (
+                arguments.db if arguments.db is not None else get_settings().answer_audit_file
+            )
+            if not database.is_file():
+                sys.stdout.write(
+                    json.dumps({"error": f"no journal at {database}"}, indent=2) + "\n"
+                )
+                return 1
+            if arguments.show is not None:
+                record = read_answer(database, arguments.show)
+                if record is None:
+                    sys.stdout.write(
+                        json.dumps({"error": f"no answer with id {arguments.show}"}, indent=2)
+                        + "\n"
+                    )
+                    return 1
+                sys.stdout.write(format_record(record) + "\n")
+                return 0
+            sys.stdout.write(
+                format_summaries(
+                    list_answers(
+                        database,
+                        last=arguments.last,
+                        fingerprint=arguments.fingerprint,
+                        question_like=arguments.question_like,
+                    )
+                )
+                + "\n"
+            )
             return 0
         if arguments.command == "chart-qa":
             request: ChartQueryRequest | DisplayedChartQueryRequest = TypeAdapter(

@@ -4,6 +4,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from enterprise_pdf_rag.adapters.aia_ingestion import AIA_OUTPUT
+from enterprise_pdf_rag.adapters.answer_audit import open_audit_store
 from enterprise_pdf_rag.adapters.document_catalog import scan_catalog
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.http.aia_review import create_aia_app
@@ -114,11 +115,18 @@ def create_configured_app() -> FastAPI:
             reranker = LocalRerankJudge(LocalRerankAdapter(load_local_model_config("rerank")))
         except ProviderConfigurationError:
             reranker = None
+        # The local answer journal: one row per answer, prompt verbatim (ADR-free local
+        # file under the ingestion root). Disabled it writes nothing; failing to open it
+        # is a warning, never a service that will not start.
+        audit = (
+            open_audit_store(settings.answer_audit_file) if settings.answer_audit_enabled else None
+        )
         return create_documents_app(
             catalog,
             embedder=shared_embedder,
             llm=llm,
             reranker=reranker,
             verify_every_request=settings.verify_every_request,
+            audit=audit,
         )
     return create_app(mode=ExecutionMode(configured))

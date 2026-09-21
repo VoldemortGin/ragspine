@@ -104,6 +104,11 @@ class Settings(BaseSettings):
     # (ADR 0017)让"总结某一节"这类问题的 prompt 与生成都更长,超过默认即 503,所以它可配。
     # 上限 180 与该客户端的构造校验一致。
     answer_timeout_seconds: float = 45.0
+    # 问答审计库(adapters/answer_audit):每次回答开一行,记下送进模型的最终 prompt 原文
+    # 与这次问答的来龙去脉。它是本地回溯用的文件,含证据正文,不外发;写失败只告警。
+    answer_audit_enabled: bool = True
+    # None → <ingestion_root>/answers-audit.sqlite;给绝对路径即用它。
+    answer_audit_path: Path | None = None
 
     @field_validator("answer_timeout_seconds")
     @classmethod
@@ -124,6 +129,11 @@ class Settings(BaseSettings):
     def resolve_optional_directory(cls, value: Path | None) -> Path | None:
         return None if value is None else _resolve_directory(value)
 
+    @field_validator("answer_audit_path")
+    @classmethod
+    def resolve_optional_file(cls, value: Path | None) -> Path | None:
+        return None if value is None else _resolve_directory(value)
+
     @field_validator("legacy_document_roots")
     @classmethod
     def resolve_legacy_roots(cls, value: tuple[Path, ...]) -> tuple[Path, ...]:
@@ -132,6 +142,12 @@ class Settings(BaseSettings):
     @property
     def ingestion_root(self) -> Path:
         return self.ingestion_dir if self.ingestion_dir is not None else self.data_dir / "ingestion"
+
+    @property
+    def answer_audit_file(self) -> Path:
+        if self.answer_audit_path is not None:
+            return self.answer_audit_path
+        return self.ingestion_root / "answers-audit.sqlite"
 
     @classmethod
     def settings_customise_sources(

@@ -11,6 +11,7 @@ from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Final
 
+from enterprise_pdf_rag.adapters.answer_audit import AnswerAuditContext, AnswerAuditStore
 from enterprise_pdf_rag.adapters.hybrid_search import HybridSearch, LexicalIndex
 from enterprise_pdf_rag.adapters.json_completion import JsonCompletionClient, JsonCompletionError
 from enterprise_pdf_rag.adapters.query_translation import is_foreign_script, translate_query
@@ -193,6 +194,7 @@ class AnswerService:
         settings: AnswerSettings | None = None,
         reranker: ListwiseJudge | None = None,
         index_cache: MutableMapping[str, LexicalIndex] | None = None,
+        audit: AnswerAuditStore | None = None,
     ) -> None:
         self._documents = documents
         self._llm = llm
@@ -201,6 +203,8 @@ class AnswerService:
         self._index_cache: MutableMapping[str, LexicalIndex] = (
             {} if index_cache is None else index_cache
         )
+        # Optional local journal (``adapters/answer_audit``): ``None`` writes nothing.
+        self._audit = audit
 
     def _select(self, document_sha256: str | None) -> MountedDocument:
         if document_sha256 is not None:
@@ -323,17 +327,42 @@ class AnswerService:
         member_ids = tuple(block.member_id for block in member_blocks)
         # Minted after the budget pass, from the blocks that really reach the prompt.
         aliases = member_aliases(blocks)
+        prompt = build_prompt(request.question, blocks, request.history, aliases)
+        page_windows = tuple(
+            PageWindowStat(
+                block.page_index, len(block.members), len(block.prompt_text()), block.truncated
+            )
+            for block in page_blocks
+        )
+        # The journal's first write: the prompt exactly as it is about to be sent.
+        journal = self._begin_audit(
+            AnswerAuditContext(
+                request.question,
+                document.source_sha256,
+                document.processing_id,
+                document.retrieval_snapshot_id,
+                SYSTEM_RULES,
+                prompt,
+                member_ids,
+                fused,
+                page_windows,
+                outcome.mode,
+                applied,
+                relaxed,
+                None if translation is None else translation.english,
+            )
+        )
         try:
             completion = self._llm.complete_text_json(
                 task=_TASK,
-                prompt=build_prompt(request.question, blocks, request.history, aliases),
+                prompt=prompt,
                 response_model=ModelAnswer,
                 system=SYSTEM_RULES,
                 max_output_tokens=self._settings.max_output_tokens,
             )
         except JsonCompletionError as error:
             if error.code in _MODEL_OUTPUT_FAILURES:
-                return self._abstained(
+                invalid = self._abstained(
                     document,
                     fused,
                     member_ids,
@@ -346,6 +375,9 @@ class AnswerService:
                     fusion_mode=outcome.mode,
                     query_translation=translation,
                 )
+                self._close_audit(journal, invalid, error=error.code)
+                return invalid
+            self._close_audit(journal, None, error=error.code)
             raise DependencyUnavailable(error.code) from error
         by_member = {block.member_id: block for block in member_blocks}
 
@@ -368,7 +400,7 @@ class AnswerService:
             # metadata about the page, not a figure printed on it.
             context_texts=tuple(member.text for block in page_blocks for member in block.members),
         )
-        return AnswerResult(
+        result = AnswerResult(
             status,
             model.answer if status is AnswerStatus.ANSWERED else None,
             _with_page_titles(verification.verified, members),
@@ -385,15 +417,26 @@ class AnswerService:
             completion.cache_hit,
             applied,
             relaxed,
-            tuple(
-                PageWindowStat(
-                    block.page_index, len(block.members), len(block.prompt_text()), block.truncated
-                )
-                for block in page_blocks
-            ),
+            page_windows,
             outcome.mode,
             translation,
         )
+        self._close_audit(journal, result, model_output_raw=completion.json_text)
+        return result
+
+    def _begin_audit(self, context: AnswerAuditContext) -> int | None:
+        return None if self._audit is None else self._audit.begin(context)
+
+    def _close_audit(
+        self,
+        journal: int | None,
+        result: AnswerResult | None,
+        *,
+        model_output_raw: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        if self._audit is not None and journal is not None:
+            self._audit.finish(journal, result, model_output_raw=model_output_raw, error=error)
 
     @staticmethod
     def _abstained(
