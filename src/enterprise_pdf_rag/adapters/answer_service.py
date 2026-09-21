@@ -19,8 +19,10 @@ from enterprise_pdf_rag.answers.models import (
     AnswerStatus,
     FusedHit,
     MemberFilters,
+    PageWindowStat,
     VerifiedClaim,
 )
+from enterprise_pdf_rag.answers.page_window import with_page_context
 from enterprise_pdf_rag.answers.ports import MemberText, MountedDocument
 from enterprise_pdf_rag.answers.prompt import SYSTEM_RULES, ModelAnswer, build_prompt
 from enterprise_pdf_rag.answers.query_filters import derive_filters
@@ -34,6 +36,8 @@ from enterprise_pdf_rag.figures.models import ValueKind
 from enterprise_pdf_rag.processing.context_builder import (
     BlockKind,
     ContextBlock,
+    PageContextBlock,
+    PromptBlock,
     budget_blocks,
     build_context_block,
 )
@@ -136,6 +140,9 @@ class AnswerSettings:
     rrf_k: float = 60.0
     prompt_budget_chars: int = 18_000
     max_output_tokens: int = 1024
+    # Print the rest of each hit's page beside it (ADR 0017), and how much of one page.
+    page_window: bool = True
+    page_window_budget_chars: int = 6_000
 
 
 class AnswerService:
@@ -199,8 +206,16 @@ class AnswerService:
         ranked = search.search(request.question, top_k=2 * request.top_k, allowed=allowed)
         fused, selected = select_context(document, ranked, request.top_k, members)
         hits = {hit.member_id: hit.as_hit() for hit in fused}
-        blocks = budget_blocks(selected, max_chars=self._settings.prompt_budget_chars)
-        if not blocks:
+        enabled = self._settings.page_window if request.page_window is None else request.page_window
+        windowed: tuple[PromptBlock, ...] = (
+            with_page_context(selected, members, max_chars=self._settings.page_window_budget_chars)
+            if enabled
+            else tuple(selected)
+        )
+        blocks = budget_blocks(windowed, max_chars=self._settings.prompt_budget_chars)
+        member_blocks = tuple(block for block in blocks if isinstance(block, ContextBlock))
+        page_blocks = tuple(block for block in blocks if isinstance(block, PageContextBlock))
+        if not member_blocks:
             return self._abstained(
                 document,
                 fused,
@@ -212,7 +227,7 @@ class AnswerService:
                 filters_applied=applied,
                 filters_relaxed=relaxed,
             )
-        member_ids = tuple(block.member_id for block in blocks)
+        member_ids = tuple(block.member_id for block in member_blocks)
         before = self._llm.live_call_count
         try:
             completion = self._llm.complete_text_json(
@@ -236,7 +251,7 @@ class AnswerService:
                     filters_relaxed=relaxed,
                 )
             raise DependencyUnavailable(error.code) from error
-        by_member = {block.member_id: block for block in blocks}
+        by_member = {block.member_id: block for block in member_blocks}
 
         def chart_evidence(member_id: str) -> ChartContext | DisplayedLookupContext:
             block: ContextBlock = by_member[member_id]
@@ -247,7 +262,13 @@ class AnswerService:
         model = completion.parsed
         verification = verify_claims(model, by_member, chart_evidence=chart_evidence)
         status, reason, detail = decide(
-            model, verification, blocks_present=True, question=request.question
+            model,
+            verification,
+            blocks_present=True,
+            question=request.question,
+            # The members' own text, never the rendering: a block's ``page_index=`` is
+            # metadata about the page, not a figure printed on it.
+            context_texts=tuple(member.text for block in page_blocks for member in block.members),
         )
         return AnswerResult(
             status,
@@ -266,6 +287,12 @@ class AnswerService:
             completion.cache_hit,
             applied,
             relaxed,
+            tuple(
+                PageWindowStat(
+                    block.page_index, len(block.members), len(block.prompt_text()), block.truncated
+                )
+                for block in page_blocks
+            ),
         )
 
     @staticmethod

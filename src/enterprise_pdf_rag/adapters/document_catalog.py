@@ -11,7 +11,9 @@ from enterprise_pdf_rag.adapters.chart_qa_displayed import StoredDisplayResolver
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.http.schemas import BoundaryModel
 from enterprise_pdf_rag.adapters.processing_retrieval import (
+    CONTEXTUAL_POLICIES,
     ProcessingRetrieval,
+    member_anchor,
     member_text,
     resolve_processing_context,
 )
@@ -366,11 +368,24 @@ class MountedDocument:
     def _member_text(
         self, plan: RetrievalPlan, member: RetrievalMember, metadata: PageMetadata | None
     ) -> MemberText:
-        text = member_text(
-            self._outputs.assets, plan, member, self._contexts.get(member.page_index)
+        context = self._contexts.get(member.page_index)
+        text = member_text(self._outputs.assets, plan, member, context)
+        # Reported only when the policy actually prefixed it, so ``body`` stays exact.
+        header = (
+            context.header()
+            if context is not None and plan.qualification_policy in CONTEXTUAL_POLICIES
+            else ""
         )
+        bbox = member_anchor(self._outputs.assets, member)
         if metadata is None:
-            return MemberText(member.member_id, member.kind, member.page_index, text)
+            return MemberText(
+                member.member_id,
+                member.kind,
+                member.page_index,
+                text,
+                header=header,
+                bbox=bbox,
+            )
         return MemberText(
             member.member_id,
             member.kind,
@@ -381,6 +396,8 @@ class MountedDocument:
             page_type=metadata.page_type.value,
             periods=metadata.normalized_periods,
             regions=tuple(region.text for region in metadata.regions),
+            header=header,
+            bbox=bbox,
         )
 
     def _pin(self, hit: PinnedRetrievalHit) -> QueryPin:

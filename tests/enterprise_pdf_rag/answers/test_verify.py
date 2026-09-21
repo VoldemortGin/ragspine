@@ -857,3 +857,39 @@ def test_published_native_table_cells_verify_verbatim_only(
         _answer(exact, answer="Revenue is 1,235."), verification, blocks_present=True
     )
     assert (status, reason) == (AnswerStatus.ABSTAINED, AbstainReason.CLAIM_NOT_IN_EVIDENCE)
+
+
+def test_prose_numbers_from_the_page_context_are_grounded_and_nothing_else_is() -> None:
+    claims = (_verified("17.5%", Decimal("17.5")),)
+    page = (
+        "[page_context page_index=3] title=Group performance\n"
+        "(page context: understanding only; it carries no citable path)\n"
+        "- (text) Costs fell 4.2% in the period."
+    )
+    # The default is unchanged: without the page context the same prose escapes.
+    assert prose_grounded("ROE was 17.5% while costs fell 4.2%.", claims) == (False, ("4.2%",))
+    assert prose_grounded("ROE was 17.5%.", claims) == (True, ())
+    assert prose_grounded(
+        "ROE was 17.5% while costs fell 4.2%.", claims, context_texts=(page,)
+    ) == (
+        True,
+        (),
+    )
+    # The boundary: a number in neither the claims nor the page context still escapes.
+    ok, tokens = prose_grounded("ROE was 17.5%, up from 16.1%.", claims, context_texts=(page,))
+    assert not ok and tokens == ("16.1%",)
+    # A page context alone never grounds an answer that cites nothing.
+    assert prose_grounded("Costs fell 4.2%.", (), context_texts=(page,)) == (True, ())
+
+
+def test_decide_passes_the_page_context_through_to_the_prose_gate() -> None:
+    verified = (_verified("17.5%", Decimal("17.5")),)
+    page = "[page_context page_index=3]\n- (text) Costs fell 4.2% in the period."
+    answered = _answer(answer="ROE was 17.5% while costs fell 4.2%.")
+    assert decide(answered, ClaimVerification(verified, ()), blocks_present=True)[:2] == (
+        AnswerStatus.ABSTAINED,
+        AbstainReason.CLAIM_NOT_IN_EVIDENCE,
+    )
+    assert decide(
+        answered, ClaimVerification(verified, ()), blocks_present=True, context_texts=(page,)
+    ) == (AnswerStatus.ANSWERED, None, None)

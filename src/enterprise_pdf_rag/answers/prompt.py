@@ -9,7 +9,7 @@ from typing import Final, Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
-from enterprise_pdf_rag.processing.context_builder import ContextBlock
+from enterprise_pdf_rag.processing.context_builder import PromptBlock
 
 MAX_CLAIMS: Final = 16
 
@@ -66,13 +66,16 @@ SYSTEM_RULES: Final[str] = (
     "3. Every number in `answer` must also appear in the `text` of one of your claims.\n"
     "4. If the blocks do not contain the answer, set `abstain` to true with an `abstain_reason` "
     "and return no claims. Do not guess.\n"
-    "5. Return only JSON matching the supplied schema. Model confidence is not verification."
+    "5. Return only JSON matching the supplied schema. Model confidence is not verification.\n"
+    "6. A block headed `page_context` is the rest of that page, supplied so you can read a hit "
+    "in context. It prints no citable path and no member id, so it can never be a claim's "
+    "target: claims name `[member \u2026]` blocks alone. Never invent a member id for it."
 )
 
 
 def build_prompt(
     question: str,
-    blocks: Sequence[ContextBlock],
+    blocks: Sequence[PromptBlock],
     history: Sequence[tuple[str, str]] = (),
 ) -> str:
     """Deterministic user message: question, prior turns as data, then every block verbatim."""

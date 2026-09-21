@@ -25,9 +25,12 @@ from enterprise_pdf_rag.processing.index_text import chart_index_text
 from enterprise_pdf_rag.processing.models import ObjectKind
 from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit, RetrievalIndex
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
+    TABLE_BBOX,
     ingest_generic_semantics,
     publish_generic_document,
+    table_region,
 )
+from tests.enterprise_pdf_rag.adapters.page_metadata_helpers import publish_with_metadata
 from tests.enterprise_pdf_rag.adapters.test_chart_qa_store import published_chart
 from tests.enterprise_pdf_rag.processing.test_persistent_retrieval import RecordingEmbedding
 
@@ -388,6 +391,61 @@ def test_member_texts_are_sorted_embedded_descriptions_without_model_calls(
         )
         assert context.description.text == item.text
     assert (embedder.description_calls, embedder.query_calls) == (0, 0)
+
+
+def test_member_texts_carry_the_page_rectangle_that_orders_a_page(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Members expose where they sit on their page, so a page reads in one order."""
+    root = tmp_path / "ingestion"
+    published = publish_generic_document(
+        tmp_path,
+        monkeypatch,
+        filename="meridian.pdf",
+        label="Meridian revenue",
+        page_count=2,
+        embedder=OfflineDescriptionEmbedder(),
+        output_dir=root,
+        table_page=True,
+    )
+    mounted = mount_document(_ready_entry(root, published), embedder=None)
+
+    texts = mounted.member_texts()
+    assert texts and all(item.bbox is not None for item in texts)
+    # Without the page-metadata stage nothing is prefixed, so the body is the whole text.
+    assert all(item.header == "" and item.body == item.text for item in texts)
+    boxed = [(item.bbox, item) for item in texts if item.bbox is not None]
+    last_page = [pair for pair in boxed if pair[1].page_index == 1]  # the authored grid
+    assert {pair[1].kind for pair in last_page} == {ObjectKind.TEXT, ObjectKind.TABLE}
+    ordered = sorted(last_page, key=lambda pair: (round(pair[0][1] / 4.0), pair[0][0]))
+    # The authored caption line is printed above the ruled grid's own layout region.
+    assert [pair[1].kind for pair in ordered] == [ObjectKind.TEXT, ObjectKind.TABLE]
+    assert ordered[1][0] == table_region(TABLE_BBOX)
+    assert ordered[0][0][1] < ordered[1][0][1]
+
+
+def test_member_texts_split_the_contextual_header_from_their_body(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The ADR 0013 header is reported beside the text, never folded into the body."""
+    root = tmp_path / "ingestion"
+    published = publish_with_metadata(
+        tmp_path,
+        monkeypatch,
+        filename="meridian.pdf",
+        label="Meridian 1H26 Hong Kong",
+        page_count=2,
+        output_dir=root,
+    )
+    mounted = mount_document(_ready_entry(root, published), embedder=None)
+
+    texts = mounted.member_texts()
+    assert texts and all(item.header for item in texts)
+    for item in texts:
+        assert item.text == f"{item.header}\n{item.body}"
+        hit = PinnedRetrievalHit(published.retrieval_snapshot_id, item.member_id, 1.0)
+        assert item.body == mounted.resolve(hit).description.text
+        assert item.bbox is not None
 
 
 def test_chart_and_displayed_contexts_requalify_only_pinned_chart_members(

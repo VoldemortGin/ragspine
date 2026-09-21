@@ -1,6 +1,6 @@
 ---
 covers: src/enterprise_pdf_rag/
-verified-against: 733ab38
+verified-against: PENDING_INTEGRATION
 ---
 
 # enterprise_pdf_rag — agent contract
@@ -23,7 +23,8 @@ the same `pyproject.toml` — import name unchanged, not under `ragspine.*`
    [ADR 0013](../../docs/enterprise-pdf-rag/adr/0013-page-metadata-and-prefilters.md),
    [ADR 0014](../../docs/enterprise-pdf-rag/adr/0014-ruled-table-grid-proof.md),
    [ADR 0015](../../docs/enterprise-pdf-rag/adr/0015-diagram-and-formula-retrievable.md),
-   [ADR 0016](../../docs/enterprise-pdf-rag/adr/0016-verbatim-chart-points.md)
+   [ADR 0016](../../docs/enterprise-pdf-rag/adr/0016-verbatim-chart-points.md),
+   [ADR 0017](../../docs/enterprise-pdf-rag/adr/0017-page-context-window.md)
    and [PRD v0.2](../../docs/enterprise-pdf-rag/PRD-v0.2.md) define scope; the full list is
    [`docs/enterprise-pdf-rag/adr/`](../../docs/enterprise-pdf-rag/adr/).
 4. [`testing-and-ingestion.md`](../../docs/enterprise-pdf-rag/testing-and-ingestion.md) — what is
@@ -45,7 +46,8 @@ figures/      pure figure/chart pipeline — same rule; same-SVG two branches, s
               source_label_match.py (the ADR 0016 window rule: one to three adjacent source
               occurrences, folded and concatenated, must equal the string being kept)
 processing/   pure page-processing / qualification logic; context_builder.py (evidence blocks
-              for the prompt), table_transcription.py (literal table transcription rule),
+              for the prompt, plus the uncitable page context block each hit is read
+              beside — ADR 0017), table_transcription.py (literal table transcription rule),
               geometry.py + table_grid_proof.py (the ruled-grid proof: every boundary, cell
               edge and merge bound to a real ruling — ADR 0014), diagram_models.py +
               diagram_description.py and formula_models.py + formula_rules.py (the model-free
@@ -56,8 +58,10 @@ processing/   pure page-processing / qualification logic; context_builder.py (ev
               forms, zero-model document fold — ADR 0013)
 answers/      pure answer chain — ports.py (MountedDocument, MemberText), models.py
               (MemberFilters), prompt.py (strict model output schema), verify.py (claim
-              re-read), query_filters.py / member_filter.py (period / region pre-filters
-              derived from the question, relaxed when they starve); stdlib + pydantic only
+              re-read), page_window.py (one page context block per hit page, its members
+              in the diagram reading order — ADR 0017), query_filters.py / member_filter.py
+              (period / region pre-filters derived from the question, relaxed when they
+              starve); stdlib + pydantic only
 adapters/     every SDK and I/O: pdfspine, http/ (FastAPI app factory; documents.py + chat.py
               serve document-catalog mode), local models, stores, draft_publication.py
               (qualify / index / publish), page_metadata_extraction.py (page_metadata stage),
@@ -156,6 +160,14 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   plus one `<from> -> <to>` per drawn edge, and a proved formula its readable and linear forms plus
   every token text (policy v5, ADR 0015). Both retrieval channels score that same string; the raw
   branch is never embedded; description assets are never rewritten.
+- **Page context informs, it never cites** (ADR 0017) — beside each hit the prompt prints the
+  rest of that hit's page, one line per member in reading order, with no field path and no
+  member id; it is generation context only. A claim naming it is an `unknown member` and is
+  dropped as `MODEL_OUTPUT_INVALID`; the answer abstains only if no verified claim survives.
+  The prose numeric gate admits a figure the page context
+  printed — that widens what the prose may repeat, never what it may cite, so such a figure
+  carries no citation. When the prompt budget overruns, page context is given up first (whole
+  blocks, last page backward); a hit's own evidence is never surrendered.
 - **Metadata is verbatim, automatic and never a hard gate** (ADR 0013) — every page-metadata
   value quotes its page spans (dropped otherwise, with a diagnostic); the model runs only at
   build time, nobody annotates; document metadata is a deterministic fold that is recomputed

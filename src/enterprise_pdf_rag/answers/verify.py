@@ -587,16 +587,25 @@ def verify_claims(
 
 
 def prose_grounded(
-    answer: str, verified: Sequence[VerifiedClaim], *, question: str = ""
+    answer: str,
+    verified: Sequence[VerifiedClaim],
+    *,
+    question: str = "",
+    context_texts: Sequence[str] = (),
 ) -> tuple[bool, tuple[str, ...]]:
     """Every number or percentage in the prose must be grounded.
 
     A number is grounded when it equals a verified claim's text number or value, equals a
     number in the evidence text those claims cite (span quote, cell text, chart labels and
-    source display), or appears verbatim in the user's question (a restated year or period
-    is not a new figure). An enumeration marker opening a line or a sentence (``1.``,
-    ``(2)``, ``第 3``, ``Step 4``) numbers a list item and is not a figure. Anything else
-    escapes and the whole answer abstains.
+    source display), appears verbatim in the user's question (a restated year or period is
+    not a new figure), or appears in ``context_texts`` — rendered page context (ADR 0017),
+    which is stored, already verified evidence the prompt printed without a citable path.
+    That last relaxation widens what the prose may *repeat*, never what it may *cite*: a
+    claim still has to name a member block, so a figure read off the page context can be
+    stated but carries no citation, and nothing outside the printed prompt is admitted.
+    An enumeration marker opening a line or a sentence (``1.``, ``(2)``, ``第 3``,
+    ``Step 4``) numbers a list item and is not a figure. Anything else escapes and the
+    whole answer abstains.
     """
     allowed: set[Decimal] = set()
     for claim in verified:
@@ -605,6 +614,8 @@ def prose_grounded(
             allowed.add(claim.value)
         for cited in claim.citations:
             allowed.update(value for _, value in _numbers(cited.quote))
+    for text in context_texts:
+        allowed.update(value for _, value in _numbers(text))
     asked = {token for token, _ in _numbers(question)}
     prose = _ENUMERATOR_RE.sub(" ", answer)
     escaped = sorted(
@@ -619,6 +630,7 @@ def decide(
     *,
     blocks_present: bool,
     question: str = "",
+    context_texts: Sequence[str] = (),
 ) -> tuple[AnswerStatus, AbstainReason | None, str | None]:
     """Drop failed claims one by one; abstain on no verified claim or on ungrounded prose."""
     if not blocks_present:
@@ -630,7 +642,9 @@ def decide(
             first = verification.rejected[0]
             return AnswerStatus.ABSTAINED, first.reason, f"{first.claim_id}: {first.detail}"
         return AnswerStatus.ABSTAINED, AbstainReason.NO_VERIFIED_CLAIM, "the model cited no claim"
-    grounded, escaped = prose_grounded(model.answer, verification.verified, question=question)
+    grounded, escaped = prose_grounded(
+        model.answer, verification.verified, question=question, context_texts=context_texts
+    )
     if not grounded:
         dropped = ", ".join(claim.claim_id for claim in verification.rejected) or "none"
         return (

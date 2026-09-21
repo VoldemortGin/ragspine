@@ -420,16 +420,116 @@ def build_context_block(context: RetrievalContext) -> ContextBlock:
     raise ValueError(f"{type(ir).__name__} members are not supported as answer context")
 
 
-def budget_blocks(blocks: Sequence[ContextBlock], *, max_chars: int) -> tuple[ContextBlock, ...]:
-    """Keep blocks in fused order while their rendered size fits; never truncate a block."""
+@dataclass(frozen=True, slots=True)
+class PageContextMember:
+    """One neighbour on the page, projected to a single line of its index-text body."""
+
+    member_id: str
+    kind: BlockKind
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class PageContextBlock:
+    """The rest of one page, for understanding only: it prints no citable path.
+
+    A hit tells the model what the page says about one object; this block tells it what
+    the page says around that object. Members are rendered in reading order as plain
+    lines with no field path, so nothing here can be named by a claim — the member
+    blocks remain the only citable evidence.
+    """
+
+    page_index: int
+    page_title: str | None
+    section: str | None
+    members: tuple[PageContextMember, ...]
+    truncated: bool = False
+
+    @property
+    def chars(self) -> int:
+        return len(self.prompt_text())
+
+    def prompt_text(self) -> str:
+        head = f"[page_context page_index={self.page_index}]"
+        if self.page_title is not None:
+            head += f" title={self.page_title}"
+        if self.section is not None:
+            head += f" section={self.section}"
+        lines = [head, "(page context: understanding only; it carries no citable path)"]
+        lines.extend(f"- ({member.kind.value}) {member.text}" for member in self.members)
+        if self.truncated:
+            lines.append("[truncated]")
+        return "\n".join(lines)
+
+
+type PromptBlock = ContextBlock | PageContextBlock
+
+
+def build_page_context_block(
+    members: Sequence[PageContextMember],
+    *,
+    page_index: int,
+    page_title: str | None = None,
+    section: str | None = None,
+    max_chars: int,
+) -> PageContextBlock | None:
+    """Render one page's neighbours in the order given, truncated whole members at the budget.
+
+    ``members`` arrive in reading order; the caller decides who belongs (the page's
+    retrievable members minus the ones that already have their own block). ``None`` when
+    nothing is left to say. Members are dropped from the end until the rendering fits, and
+    the block then says ``[truncated]``.
+    """
+    if max_chars < 1:
+        raise ValueError("Page context budget must allow at least one character")
+    # The page heading is already printed once by the block head, and a title reprinted
+    # inside the page says nothing new.
+    heading = {page_title, section}
+    kept: list[PageContextMember] = []
+    seen: set[str] = set()
+    for member in members:
+        text = " ".join(member.text.split())
+        if not text or text in seen or text in heading:
+            continue
+        seen.add(text)
+        kept.append(PageContextMember(member.member_id, member.kind, text))
+    if not kept:
+        return None
+    truncated = False
+    while True:
+        block = PageContextBlock(page_index, page_title, section, tuple(kept), truncated)
+        if block.chars <= max_chars or not kept:
+            return block
+        kept.pop()
+        truncated = True
+
+
+def budget_blocks[BlockT: PromptBlock](
+    blocks: Sequence[BlockT], *, max_chars: int
+) -> tuple[BlockT, ...]:
+    """Keep blocks in fused order while their rendered size fits; never truncate a block.
+
+    Page context is given up first: when the whole sequence overruns, page blocks are
+    dropped from the last page backward until it fits, so a hit's own evidence is never
+    surrendered to its neighbours' context. What remains then follows the original rule —
+    a block that does not fit is skipped and a later, smaller one may still enter.
+    """
     if max_chars < 1:
         raise ValueError("Context budget must allow at least one character")
-    kept: list[ContextBlock] = []
+    sizes = [len(block.prompt_text()) for block in blocks]
+    order = list(range(len(blocks)))
+    total = sum(sizes)
+    for index in reversed(range(len(blocks))):
+        if total <= max_chars:
+            break
+        if isinstance(blocks[index], PageContextBlock):
+            order.remove(index)
+            total -= sizes[index]
+    kept: list[BlockT] = []
     used = 0
-    for block in blocks:
-        size = len(block.prompt_text())
-        if used + size > max_chars:
+    for index in order:
+        if used + sizes[index] > max_chars:
             continue
-        kept.append(block)
-        used += size
+        kept.append(blocks[index])
+        used += sizes[index]
     return tuple(kept)

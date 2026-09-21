@@ -26,8 +26,11 @@ from enterprise_pdf_rag.figures.models import (
 from enterprise_pdf_rag.processing.context_builder import (
     BlockKind,
     ContextBlock,
+    PageContextBlock,
+    PageContextMember,
     budget_blocks,
     build_context_block,
+    build_page_context_block,
 )
 from enterprise_pdf_rag.processing.diagram_description import describe_diagram
 from enterprise_pdf_rag.processing.diagram_models import (
@@ -531,3 +534,146 @@ def test_published_native_table_member_yields_citable_cell_evidence(
     assert f"cells.{value.cell_id} (1,1): 1,234 row=1 col=1 header=<NONE>" in rendered
     assert f"cells.{blank.cell_id} (2,1): <BLANK> row=2 col=1 header=<NONE>" in rendered
     assert "verification=verified" in rendered.splitlines()[0]
+
+
+_CITABLE_PREFIXES = (
+    "fragments.",
+    "cells.",
+    "points.",
+    "nodes.",
+    "edges.",
+    "tokens.",
+    "formula.",
+    "[member ",
+)
+
+
+def _page_member(member_id: str, text: str, kind: BlockKind = BlockKind.TEXT) -> PageContextMember:
+    return PageContextMember(member_id, kind, text)
+
+
+def test_page_context_block_prints_neighbours_without_any_citable_path() -> None:
+    block = build_page_context_block(
+        (
+            _page_member("m-1", "Operating profit rose."),
+            _page_member("m-2", "Total 1,234", BlockKind.TABLE),
+        ),
+        page_index=7,
+        page_title="Group performance",
+        section="Financial review",
+        max_chars=500,
+    )
+    assert block is not None
+    assert block.truncated is False
+    rendered = block.prompt_text()
+    assert rendered.splitlines() == [
+        "[page_context page_index=7] title=Group performance section=Financial review",
+        "(page context: understanding only; it carries no citable path)",
+        "- (text) Operating profit rose.",
+        "- (table) Total 1,234",
+    ]
+    # Nothing here may be named by a claim, so no member block path is printed.
+    for prefix in _CITABLE_PREFIXES:
+        assert prefix not in rendered
+    assert block.chars == len(rendered)
+
+
+def test_page_context_head_omits_a_missing_title_or_section() -> None:
+    block = build_page_context_block(
+        (_page_member("m-1", "A neighbour."),), page_index=0, max_chars=500
+    )
+    assert block is not None
+    assert block.prompt_text().splitlines()[0] == "[page_context page_index=0]"
+    titled = build_page_context_block(
+        (_page_member("m-1", "A neighbour."),),
+        page_index=0,
+        section="Notes",
+        max_chars=500,
+    )
+    assert titled is not None
+    assert titled.prompt_text().splitlines()[0] == "[page_context page_index=0] section=Notes"
+
+
+def test_page_context_keeps_the_order_the_caller_gave() -> None:
+    members = (
+        _page_member("m-3", "Third."),
+        _page_member("m-1", "First."),
+        _page_member("m-2", "Second."),
+    )
+    block = build_page_context_block(members, page_index=4, max_chars=500)
+    assert block is not None
+    assert [member.member_id for member in block.members] == ["m-3", "m-1", "m-2"]
+    assert block.prompt_text().splitlines()[2:] == [
+        "- (text) Third.",
+        "- (text) First.",
+        "- (text) Second.",
+    ]
+
+
+def test_page_context_folds_whitespace_and_drops_repeats_and_the_page_heading() -> None:
+    block = build_page_context_block(
+        (
+            _page_member("m-1", "  Group   performance "),
+            _page_member("m-2", "Financial\nreview"),
+            _page_member("m-3", "Operating profit\n  rose  by 12%."),
+            _page_member("m-4", "Operating profit rose by 12%."),
+            _page_member("m-5", "   \n\t "),
+            _page_member("m-6", "Costs fell."),
+        ),
+        page_index=7,
+        page_title="Group performance",
+        section="Financial review",
+        max_chars=500,
+    )
+    assert block is not None
+    assert [member.member_id for member in block.members] == ["m-3", "m-6"]
+    assert block.members[0].text == "Operating profit rose by 12%."
+    assert "\n- (text) Operating profit rose by 12%.\n" in block.prompt_text()
+
+
+def test_page_context_drops_members_from_the_end_at_the_budget() -> None:
+    members = (
+        _page_member("m-1", "First neighbour."),
+        _page_member("m-2", "Second neighbour."),
+        _page_member("m-3", "Third neighbour."),
+    )
+    whole = build_page_context_block(members, page_index=3, max_chars=1000)
+    assert whole is not None and whole.truncated is False and len(whole.members) == 3
+    wanted = PageContextBlock(3, None, None, members[:1], True)
+    block = build_page_context_block(members, page_index=3, max_chars=wanted.chars)
+    assert block is not None
+    assert [member.member_id for member in block.members] == ["m-1"]
+    assert block.truncated is True
+    assert block.prompt_text().splitlines()[-1] == "[truncated]"
+    assert block.chars <= wanted.chars
+    # A page whose first neighbour does not fit still says it was cut, rather than vanishing.
+    starved = build_page_context_block(members, page_index=3, max_chars=1)
+    assert starved is not None
+    assert starved.members == () and starved.truncated is True
+
+
+def test_page_context_needs_members_and_a_positive_budget() -> None:
+    assert build_page_context_block((), page_index=1, max_chars=100) is None
+    blank = (_page_member("m-1", "  \n "),)
+    assert build_page_context_block(blank, page_index=1, max_chars=100) is None
+    with pytest.raises(ValueError, match="budget"):
+        build_page_context_block((_page_member("m-1", "A neighbour."),), page_index=1, max_chars=0)
+
+
+def test_budget_gives_up_page_context_from_the_last_page_first() -> None:
+    hit_a = build_context_block(_list_context())
+    hit_b = build_context_block(_text_context())
+    page_1 = build_page_context_block(
+        (_page_member("m-1", "The rest of page one."),), page_index=1, max_chars=1000
+    )
+    page_2 = build_page_context_block(
+        (_page_member("m-2", "The rest of page two."),), page_index=2, max_chars=1000
+    )
+    assert page_1 is not None and page_2 is not None
+    blocks = (hit_a, page_1, hit_b, page_2)
+    sizes = [len(block.prompt_text()) for block in blocks]
+    assert budget_blocks(blocks, max_chars=sum(sizes)) == blocks
+    # One char short: the last page's context is surrendered first.
+    assert budget_blocks(blocks, max_chars=sum(sizes) - 1) == (hit_a, page_1, hit_b)
+    # Room for the hits alone: the remaining page goes too, and both hits survive.
+    assert budget_blocks(blocks, max_chars=sizes[0] + sizes[2]) == (hit_a, hit_b)

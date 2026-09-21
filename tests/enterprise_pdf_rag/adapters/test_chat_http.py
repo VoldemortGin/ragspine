@@ -302,6 +302,53 @@ def test_answer_carries_verified_citations_and_provenance(
     _run(app, scenario)
 
 
+def test_the_envelope_reports_the_page_context_that_reached_the_prompt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "ingestion"
+    # Twelve pages fill the prompt seats, so the table sharing the last page with its
+    # narrative line is left over — exactly what the page window is for.
+    document = publish_generic_document(
+        tmp_path,
+        monkeypatch,
+        filename="meridian.pdf",
+        label="Meridian revenue",
+        page_count=12,
+        embedder=_OFFLINE,
+        output_dir=root,
+        table_page=True,
+    )
+    app, prompts = _app(root, tmp_path / "llm", max_live_calls=2)
+    model = model_id(document.source_sha256)
+
+    async def scenario(client: AsyncClient) -> None:
+        response = await client.post(_URL, json=_body(model))
+        assert response.status_code == 200, response.text
+        envelope = response.json()["enterprise_pdf_rag"]
+        assert envelope["status"] == "answered"
+        (window,) = envelope["page_windows"]
+        assert set(window) == {"page_index", "member_count", "chars", "truncated"}
+        assert (window["page_index"], window["member_count"], window["truncated"]) == (
+            11,
+            1,
+            False,
+        )
+        assert prompts[0].count("[page_context page_index=11]") == 1
+        # The leftover member is context only: it is neither a prompt member nor citable.
+        assert len(envelope["member_ids"]) == 10
+        (chunk,) = [part for part in prompts[0].split("\n\n") if part.startswith("[page_context")]
+        assert window["chars"] == len(chunk)
+        assert not any(path in chunk for path in ("[member ", "fragments.", "cells."))
+
+        # The request switch removes the blocks and their report alike.
+        closed = await client.post(_URL, json=_body(model, page_window=False))
+        assert closed.status_code == 200, closed.text
+        assert closed.json()["enterprise_pdf_rag"]["page_windows"] == []
+        assert "[page_context" not in prompts[-1]
+
+    _run(app, scenario)
+
+
 def test_history_is_forwarded_as_data_and_system_messages_are_dropped(
     published: Published, tmp_path: Path
 ) -> None:

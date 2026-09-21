@@ -13,7 +13,9 @@ from enterprise_pdf_rag.adapters.chart_qa_bar_promotion import create_displayed_
 from enterprise_pdf_rag.adapters.chart_qa_displayed import StoredDisplayResolver
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.processing_retrieval import (
+    CONTEXTUAL_POLICIES,
     ProcessingRetrieval,
+    member_anchor,
     member_text,
     resolve_processing_context,
 )
@@ -22,6 +24,7 @@ from enterprise_pdf_rag.answers.ports import MemberText
 from enterprise_pdf_rag.figures.chart_qa.displayed_models import DisplayedLookupContext
 from enterprise_pdf_rag.figures.chart_qa.models import ChartContext, QueryPin
 from enterprise_pdf_rag.figures.ports import EmbeddingPort
+from enterprise_pdf_rag.processing.index_text import PageIndexContext
 from enterprise_pdf_rag.processing.models import ObjectKind, ProcessingManifest
 from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit, RetrievalContext
 from tests.enterprise_pdf_rag.adapters.chart_qa_bar_fixture import published_bar_input
@@ -84,16 +87,23 @@ class StoreMountedDocument:
     def member_texts(self) -> tuple[MemberText, ...]:
         plan, _ = self._outputs.load_retrieval(self._publication)
         contexts = self._outputs.index_contexts(self._pinned)
+        contextual = plan.qualification_policy in CONTEXTUAL_POLICIES
         texts = [
             MemberText(
                 member.member_id,
                 member.kind,
                 member.page_index,
                 member_text(self._outputs.assets, plan, member, contexts.get(member.page_index)),
+                header=self._header(contexts.get(member.page_index)) if contextual else "",
+                bbox=member_anchor(self._outputs.assets, member),
             )
             for member in plan.members
         ]
         return tuple(sorted(texts, key=lambda item: item.member_id))
+
+    @staticmethod
+    def _header(context: PageIndexContext | None) -> str:
+        return "" if context is None else context.header()
 
     def search(self, query: str, *, limit: int) -> tuple[PinnedRetrievalHit, ...]:
         if self._retrieval is None:

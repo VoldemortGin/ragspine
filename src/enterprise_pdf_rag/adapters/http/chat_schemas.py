@@ -19,6 +19,7 @@ from enterprise_pdf_rag.answers.models import (
     ClaimKind,
     FusedHit,
     MemberFilters,
+    PageWindowStat,
     RejectedClaim,
     VerifiedClaim,
 )
@@ -61,6 +62,8 @@ class RagChatRequest(BoundaryModel):
     document: str | None = Field(default=None, pattern=r"^[0-9a-f]{12,64}$")
     rerank: bool = False
     filters: MemberFiltersIn | None = None
+    # Print the rest of each hit's page beside it (ADR 0017); omitted, the server default wins.
+    page_window: bool | None = None
 
 
 class ClaimCitationOut(BoundaryModel):
@@ -161,6 +164,24 @@ class MemberRankOut(BoundaryModel):
         )
 
 
+class PageWindowOut(BoundaryModel):
+    """One page context block that reached the prompt: the rest of a hit's page."""
+
+    page_index: int
+    member_count: int
+    chars: int
+    truncated: bool
+
+    @classmethod
+    def from_domain(cls, window: PageWindowStat) -> "PageWindowOut":
+        return cls(
+            page_index=window.page_index,
+            member_count=window.member_count,
+            chars=window.chars,
+            truncated=window.truncated,
+        )
+
+
 class AnswerEnvelope(BoundaryModel):
     """Verified claims, audit rejections and pinned provenance beside the OpenAI shape."""
 
@@ -182,6 +203,9 @@ class AnswerEnvelope(BoundaryModel):
     # because they left fewer candidates than prompt seats (ADR 0013).
     filters_applied: MemberFiltersOut | None = None
     filters_relaxed: bool = False
+    # The page context printed beside the hits, one entry per block (added after
+    # rag-chat-v1 shipped; ADR 0017). Empty when the page window is off.
+    page_windows: tuple[PageWindowOut, ...] = ()
 
     @classmethod
     def from_domain(cls, result: AnswerResult) -> "AnswerEnvelope":
@@ -207,6 +231,7 @@ class AnswerEnvelope(BoundaryModel):
             if result.filters_applied is None
             else MemberFiltersOut.from_domain(result.filters_applied),
             filters_relaxed=result.filters_relaxed,
+            page_windows=tuple(PageWindowOut.from_domain(window) for window in result.page_windows),
         )
 
 

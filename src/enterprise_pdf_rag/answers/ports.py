@@ -27,6 +27,19 @@ class MemberText:
     page_type: str | None = None
     periods: tuple[str, ...] = ()  # canonical forms only (``1H2026``)
     regions: tuple[str, ...] = ()  # verbatim page values
+    # The ADR 0013 contextual header prefixed to ``text``; ``body`` is what follows it.
+    header: str = ""
+    # The member's page rectangle, for reading order within a page; absent on snapshots
+    # whose stored evidence carries no anchor for this kind.
+    bbox: tuple[float, float, float, float] | None = None
+
+    @property
+    def body(self) -> str:
+        """The index text without its contextual header (ADR 0013)."""
+        prefix = self.header + "\n"
+        if self.header and self.text.startswith(prefix):
+            return self.text[len(prefix) :]
+        return self.text
 
 
 @runtime_checkable

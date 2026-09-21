@@ -221,6 +221,7 @@ def create_chat_router(mounted: MountedCatalog, service: AnswerService | None) -
                 rerank=body.rerank,
                 history=history,
                 filters=None if body.filters is None else body.filters.to_domain(),
+                page_window=body.page_window,
             )
         except ValueError as error:
             raise HTTPException(422, str(error)) from None
