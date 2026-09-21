@@ -364,7 +364,10 @@ of the defects that run exposed are closed: (1) the diagram-recall gap — ADR 0
 chart seat is generalised in `adapters/answer_service.select_context` to one seat per citable
 visual kind (chart with an explicit value / diagram with a labelled node / formula with a linear
 form) found within `2 * top_k`, so a proved diagram no longer depends on a node-label word in the
-question; (2) the prose number gate counted a list's `1. 2. 3.` enumerators as figures and
+question — [ADR 0012](0012-chart-index-text-and-retrieval-seats.md)'s Amendment 1 has since widened
+that window to *either* the next `top_k` fused positions *or* a hit one channel ranked inside
+`2 * top_k` on its own ranking, because RRF buries an object only one channel can score and such an
+object is exactly what the seat is for; (2) the prose number gate counted a list's `1. 2. 3.` enumerators as figures and
 abstained a correct numbered answer — line- and sentence-start enumeration markers are now
 excluded in `answers/verify.prose_grounded`, numbers inside an item stay gated; (3) the strict
 response-schema contract that BUG-A broke now has an offline guard over all nine

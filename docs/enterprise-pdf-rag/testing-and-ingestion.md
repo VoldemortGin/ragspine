@@ -345,7 +345,7 @@ curl --fail-with-body http://127.0.0.1:8766/v1/chat/completions \
 }
 ```
 
-`claims[].kind` ∈ `quote` / `cell` / `chart_value`；图表值的 `text` 是来源显示串（如 `72%`）、`value` 是十进制字符串、`unit` 是单位，正文引用写作 `[n] p.N points.<point_id>.value = 72% (svg #<element>, …)`。`citations[].kind` 是证据块类型（`text`/`list`/`group`/`table`/`chart`），`page_index` 为 0-based（正文 `p.N` 为 1-based），`field_path` 是 `fragments.<span_id>` / `cells.<cell_id>` / `points.<point_id>.value`，`evidence_ids` 是来源 span 或 SVG 元素 id，`chart_citation` 只有图表值有。`rejected[]` 列出被逐条剔除的 claim（`claim_id`/`member_id`/`field_path`/`text`/`reason`/`detail`），供审计。`member_ranks[]` 是可选字段（[ADR 0012](adr/0012-chart-index-text-and-retrieval-seats.md)），每个进入 prompt 的成员一条、按 `member_ids` 顺序给出该成员在两个通道与融合后的名次：`fused_score`（RRF 分数）、`vector_rank` / `lexical_rank`（只被一个通道命中时另一个为 `null`）、`vector_score`（余弦）、`bm25_score`；用于排查召回问题，不影响回答。`llm_live_calls` 是本次真实模型调用数（0 或 1），`cache_hit` 表示指纹命中缓存回放。`filters_applied`（自动抽取或显式传入的期间 / 地区过滤，未过滤为 `null`）与 `filters_relaxed`（收窄后候选不足 `top_k` 而回退全量检索）以及引用里的 `page_title` 是 ADR 0013 新增的可选字段。
+`claims[].kind` ∈ `quote` / `cell` / `chart_value`；图表值的 `text` 是来源显示串（如 `72%`）、`value` 是十进制字符串、`unit` 是单位，正文引用写作 `[n] p.N points.<point_id>.value = 72% (svg #<element>, …)`。`text` 允许带上单位（`$m` 图在图上只印裸数字 `294`、单位在 caption 里，模型会写成 `294$m`）：校验时先用确定性正则把 `text` 拆成「数值 + 单位」，数值逐字比 source display、单位逐字比该 point 的 `unit.text`，**不做任何数值归一化**；单位不符是独立的拒答理由 `unit_mismatch`（claim 不带单位时只核数值）。`citations[].kind` 是证据块类型（`text`/`list`/`group`/`table`/`chart`），`page_index` 为 0-based（正文 `p.N` 为 1-based），`field_path` 是 `fragments.<span_id>` / `cells.<cell_id>` / `points.<point_id>.value`，`evidence_ids` 是来源 span 或 SVG 元素 id，`chart_citation` 只有图表值有。`rejected[]` 列出被逐条剔除的 claim（`claim_id`/`member_id`/`field_path`/`text`/`reason`/`detail`），供审计。`member_ranks[]` 是可选字段（[ADR 0012](adr/0012-chart-index-text-and-retrieval-seats.md)），每个进入 prompt 的成员一条、按 `member_ids` 顺序给出该成员在两个通道与融合后的名次：`fused_score`（RRF 分数）、`vector_rank` / `lexical_rank`（只被一个通道命中时另一个为 `null`）、`vector_score`（余弦）、`bm25_score`；用于排查召回问题，不影响回答。`llm_live_calls` 是本次真实模型调用数（0 或 1），`cache_hit` 表示指纹命中缓存回放。`filters_applied`（自动抽取或显式传入的期间 / 地区过滤，未过滤为 `null`）与 `filters_relaxed`（收窄后候选不足 `top_k` 而回退全量检索）以及引用里的 `page_title` 是 ADR 0013 新增的可选字段。
 
 拒答也是 200：信封 `status` 为 `abstained`，`content` 为 `无法基于已验证证据回答 (<abstain_reason>): <abstain_detail>`，`claims` 为空。判定顺序：无检索命中或预算内无证据块 → `no_relevant_member`；模型自报 abstain → `model_declined`；模型输出不合 schema/截断 → `model_output_invalid`；逐条校验失败的 claim 进入 `rejected`；零验证 claim → 取第一条 rejected 的原因（否则 `no_verified_claim`）；散文里的数字既不属于已验证 claim 的 text / value、也不逐字出现在用户问题里、也不在已验证 claim 所引用证据原文（span quote / cell 原文 / 图表 period、category 标签与 source_display）中 → 整体 `claim_not_in_evidence`（0.14.0 起；此前任何不在 claim 内的数字都拒答）。图表类 refusal（`value_unavailable`、`period_mismatch` 等）与 ChartQA 同名。
 
@@ -395,13 +395,17 @@ bool | None`（`None` 取 settings，`True` / `False` 只覆盖这一次请求�
 
 ### 通道选择与查询翻译（[ADR 0018](adr/0018-query-classification-and-translation.md)）
 
-检索不再无条件融合。每个问题由 `answers/query_mode.classify_query` 确定性地选通道（不调模型）：token 数 ≤ 5，或含数字且内容词 ≤ 1 的问题走 **BM25 单通道**；词面通道完全打不出分的问题走 **向量单通道**；其余保持 **RRF 融合**。依据是 `data/validation/coverage-2026-09-21/`：125 条已索引事实、两种问法、reranker 之前，BM25 单通道 recall@10 74.4%、RRF 融合 70.4%、向量单通道 48.0%，且越往名次前面差距越大（r@3 54.4% vs 46.4%）。阈值由 `facts.jsonl` 离线扫参选出，取达到上限的最窄一组（改写 250 条探针查询里的 119 条，其余行为逐字不变）。
+检索不再无条件融合。每个问题由 `answers/query_mode.classify_query` 确定性地选通道（不调模型）：token 数 ≤ `MAX_BM25_ONLY_TOKENS`(5) **且**内容词 ≤ `MAX_BM25_ONLY_SHORT_CONTENT_WORDS`(2)，或含数字且内容词 ≤ `MAX_BM25_ONLY_CONTENT_WORDS`(1) 的问题走 **BM25 单通道**；词面通道完全打不出分的问题走 **向量单通道**；其余保持 **RRF 融合**。依据是 `data/validation/coverage-2026-09-21/`：125 条已索引事实、两种问法、reranker 之前，BM25 单通道 recall@10 74.4%、RRF 融合 70.4%、向量单通道 48.0%，且越往名次前面差距越大（r@3 54.4% vs 46.4%）。阈值由 `facts.jsonl` 离线扫参选出。
 
 信封新增两个**可选**字段（`rag-chat-v1` 契约名不变，只增不删）：`fusion_mode`（`bm25_only` / `rrf` / `vector_only`，实际跑的通道）与 `query_translation`（`{english, source_language, cache_hit}` 或 `null`）。
 
-非本索引语言的问题（中文问英文 deck）先翻译再检索：触发条件是**内容词**（去掉虚词与数字后）在词面通道零命中 —— 只看整句零命中会失效，因为 `2026 上半年 分销渠道 占比` 里的 `2026` 本身就命中。翻译是一次有预算、可缓存的 `complete_text_json` 调用（task 盐 `query-translation-v1`，strict schema `{english_query, source_language}`，规则禁止回答、禁止添加信息、数字 / 期间 / 专有名词逐字保留）。**译文只进两个检索通道**：prompt、period / region 前置过滤、散文数字门用的都还是原问题，claim 仍逐字比对文档原文。翻译不可用（没预算、传输失败、输出不可用、`translate_query=False`）不报错，退回**向量单通道**。一次被翻译的问答因此是**两次** live 调用，`llm_live_calls` 如实计数；重复提问两次都命中缓存。
+非本索引语言的问题（中文问英文 deck）先翻译再检索：触发条件是**内容词**（去掉虚词与数字后）在词面通道零命中 —— 只看整句零命中会失效，因为 `2026 上半年 分销渠道 占比` 里的 `2026` 本身就命中。翻译是一次有预算、可缓存的 `complete_text_json` 调用（task 盐 `query-translation-v1`，strict schema `{english_query, source_language}`，规则禁止回答、禁止添加信息、数字 / 期间 / 专有名词逐字保留）。**译文只喂词法通道**（BM25 与 `classify_query`）与 period / region 前置过滤；**向量通道与 rerank 判官仍读原问题**，prompt 与散文数字门用的也还是原问题，claim 仍逐字比对文档原文（见下面的修订 2 / 修订 3）。翻译不可用（没预算、传输失败、输出不可用、`translate_query=False`）不报错，退回**向量单通道**。一次被翻译的问答因此是**两次** live 调用，`llm_live_calls` 如实计数；重复提问两次都命中缓存。
 
 **修订 1（ADR 0018 Amendment 1）**：period / region 前置过滤现在也从译文推导，与原问题推出的取**并集**（原值在前、新值追加、去重），随后重算 `applied` / `allowed` / `relaxed`；调用方显式传的 `filters` 永不被加宽，prompt、散文数字门与 claim 校验仍只看原问题。同一改动里 region 匹配也从「逐字相等」改成「整词包含」：`Thailand` 也命中 `AIA Thailand`、`Hong Kong` 也命中 `Hong Kong Special Administrative Region`，但**排除式**取值（`ex-Thailand`、`Asia ex-Japan`）永不命中。
+
+**修订 2（ADR 0018 Amendment 2）**：短问句那条分支原先只数 token，现在同时要花一份**实词预算**（token ≤ 5 **且**内容词 ≤ 2）；含数字那条分支的 `MAX_BM25_ONLY_CONTENT_WORDS`(1) 未动。token 数只是「短标签 + 期间」这种形状的代理，而且是有漏的代理：`Agency share of VONB 1H26` 是 5 token 但 3 个实词，是短语不是标签，被判成 BM25 单通道后它要的那张图从融合第 7 名掉到 BM25 第 12 名。代价要如实记：探针上 recall@10 从 **74.4%（93/125）降到 73.6%（92/125）**，recall@20 从 78.4% **升到 79.2%**，MRR 0.476 → 0.453，改写数从 250 条里的 119 条（48%）变成 100 条（40%）。所以原先那句「取达到上限的最窄一组」**不再成立**——新规则没有达到 74.4% 这个上限，这是一个明知的取舍：**拿探针上 1 条事实换 3 条真实金标用例**。理由是探针语料 100% 是「短标签 + 期间」（1–2 个实词），根本不含这种短语形状，**因而没有能力度量它**；完整扫参表见 ADR 0018 Amendment 2。
+
+**修订 3（ADR 0018 Amendment 3）**：译文不再同时替换两个通道，只喂**词法通道**（BM25 与 `classify_query`）与前置过滤；**向量通道与 rerank 判官保留原问题**。ADR 0018 原 Decision 5 自己写着两通道都吃译文且「deliberate but *unmeasured*」，现在测了：同一道中文问句，原句把目标对象排在向量第 12 名、其英文译文排在第 32 名——差别不在语言而在**措辞**（译文写 `agents'`，索引里印的是 `Agency`）。向量通道把问题当语言读，换成别人的措辞只是拿走了提问者自己的用词。前置过滤仍按修订 1 取「原句 ∪ 译文」的并集，不变。
 
 两个连带后果值得知道：
 
@@ -445,6 +449,8 @@ bool | None`（`None` 取 settings，`True` / `False` 只覆盖这一次请求�
 **它冻结什么**：25 条用例，分三类 —— `positive`（15 条：文本逐字引用、环图显式值、路径图节点、英文 / 中文 / 关键词 / 仅标题四种问法、rerank、显式 period 过滤、不可满足 region 的放宽、缓存命中）、`abstain`（7 条：2027 预测、跨期相减、图上没画的先后顺序、选页范围外的第 25 页内容、文档没写的越南人力，外加两条 known gap）、`adversarial`（3 条：散文混入派生数字、图表值被改写、引文被改一个数字）。
 
 **它不冻结什么**：`claim_id`、`member_id`、`processing_id`、`snapshot_id`、artifact id 和散文措辞在每次运行都会变，任何期望都不引用它们。只冻结内容寻址的锚点 —— `page_index` + `field_path` + `quote`，以及 `value` / `unit` / `filters_applied` / `filters_relaxed` / `cache_hit` 这些信封事实。图表 claim 恒带 5 条 citation（value / series / category / unit / period），用例只断言 `.value` 那条，其余容忍。
+
+**一条期望也可以写成一组备选**：`required_claims` 的元素与 `filters_expected` 都支持 `{"any_of": [...]}` —— 至少两条、不许嵌套、不许在 `any_of` 旁边多写别的键；任一命中即满足，全不中则把每个备选各自的失败原因都列出来。单一写法逐字不变，`schema_version` 仍是 `nl-answers-gold-v1`（向后兼容的加法），用例总数也没变。它存在是因为有些东西**本来就不是单值的**：同一事实在两页上都成立（p.3 的引文与 p.7 的 chart 点位都印着 record Operating ROE 17.5%），钉死一条就会把答对的答案判成失败；而**被翻译的问句，它的 `filters_applied` 本就随模型措辞变化**——前置过滤取「原句 ∪ 译文」的并集（上面的修订 1），译文又来自一次真实模型调用，两轮冷跑因此合法地得到 `{periods: [1H2026]}` 与 `{periods: [1H2026, Y2026]}` 两种结果，答案与引用两轮都正确。这种用例枚举实测到的集合，而不是冻结其中一轮。
 
 **`grounded_only`**：钉死的 1-20 页里本来就没有唯一答案的问题（例如“2024 年 VONB 增长”），只冻结“必须落在某条已验证 claim 上、引用字段齐全、且 period 前置过滤推导为 `Y2024`”，不冻结它落在哪条事实上。
 

@@ -141,13 +141,48 @@ gate, not a filter — and there is no sensitivity dimension in this package.
   ["Mars"]}` is relaxed (`filters_relaxed = true`) and yields the unfiltered answer.
   `What was the VONB growth in 2024?` filters to `Y2024` pages (5–8, 20) and answers `+11%`
   from p.6.
-- **Known gaps.** (a) Region equality is exact: `Thailand 1H26 VONB` filters to the pages
+- **Known gaps.** (a) ~~Region equality is exact: `Thailand 1H26 VONB` filters to the pages
   tagged `Thailand` (4, 5) and not to p.13, which prints `AIA Thailand`, so the model
-  declines; containment would also admit `ex-Thailand`. (b) The vocabulary is verbatim and
-  English on this deck: `泰国 1H26 VONB` derives no region filter (cross-language gap) and the
-  model declines. (c) A disclaimer page contributes legal-text regions (`United States`,
+  declines; containment would also admit `ex-Thailand`.~~ **Closed by
+  [ADR 0018](0018-query-classification-and-translation.md) Amendment 1**: matching is whole-word
+  containment — every word of the filter value must appear as a whole word in the page's value,
+  so `Thailand` also matches `AIA Thailand` and `Hong Kong` also matches `Hong Kong Special
+  Administrative Region` — and the worry above is answered rather than accepted: a value that
+  *excludes* a place (`ex-Thailand`, `Asia ex-Japan`) never matches it, because that is the
+  opposite claim, not a narrower one. (b) ~~The vocabulary is verbatim and English on this deck:
+  `泰国 1H26 VONB` derives no region filter (cross-language gap) and the model declines.~~
+  **Closed as a mechanism by the same Amendment**, which runs `derive_filters` over the
+  translation too and unions the result with what the question itself derived — but not for this
+  sentence's own example: `泰国 1H26 VONB` is never translated at all, because ADR 0018's
+  content-word probe finds `VONB` scoreable on its own and therefore reads the question as one the
+  lexical channel can score. Its `regions` is still empty; what changed is that it now reaches
+  p.13 regardless. (c) A disclaimer page contributes legal-text regions (`United States`,
   `the Philippines`, …) to the vocabulary. (d) Routing needs a distinctive title word; this
   cover prints no company name, so it routes by year only.
+- **A new gap, and a worse one: region metadata is page-level, so it cannot tell two objects on
+  one page apart (2026-09-21).** p.13 of the AIA deck (`ASEAN: 32% of VONB; Strengthening Growth
+  Momentum in 2Q`, section `GROWTH ENGINES`) prints **three `VONB ($m)` bar charts side by side** —
+  AIA Thailand **514** (member `a05e27202ea4…`), AIA Singapore **294** (`36f5b652e8e0…`), AIA
+  Malaysia **232** (`3e0a86925a4e…`), with each column's bullet text naming its own partner
+  (Bangkok Bank / Citibank · IFA & Broker / Public Bank). The three cross-check against the page's
+  own headline: 514 + 294 + 232 = 1040 ≈ 32% of group VONB $3.2b. But **every member on that page
+  carries the same `regions` tuple**, `('ASEAN', 'AIA Thailand', 'AIA Singapore', 'AIA Malaysia')`,
+  so the three charts are indistinguishable to any filter. Whole-word matching now admits
+  `Thailand` → `AIA Thailand`, the pre-filter therefore passes *all* of them through, and the model
+  is left to guess the column-to-country binding from text that merely co-occurs on the page.
+  This is strictly worse than the gap it replaces. The old behaviour was a safe refusal; the new
+  one is a **wrong number carried by real provenance** — `294` and `$m` are verbatim observations
+  on that page and the bounding box is genuine. Across four real cold runs the two Thailand
+  questions were answered eight times and **not once correctly**: `$294m` (Singapore) five times,
+  `$232m` (Malaysia) three times, `$514m` (Thailand) **zero** — the binding is effectively drawn at
+  random. The gold cases `k01-region-thailand-en` / `k02-region-thailand-zh` therefore keep
+  `expected: abstained` with `known_gap: true`, and must not be frozen as `answered` while this
+  holds. The chart IR already admits the weaker half of this in its own confidence note (`the
+  category-to-value association is unproven`), but nothing in the model expresses *which column
+  belongs to which country*. The fix, not implemented here, is a **member-level region binding
+  inside the column or card**: the three charts' bounding boxes and the three country headings'
+  bounding boxes are fully separable on the x axis, so the binding is derivable rather than
+  guessed.
 - Snapshots published before 2026-09-21 keep their policy and text until re-indexed;
   `metadata` → `index` → `publish` is the whole migration.
 - Offline coverage: `tests/enterprise_pdf_rag/processing/test_periods.py`,

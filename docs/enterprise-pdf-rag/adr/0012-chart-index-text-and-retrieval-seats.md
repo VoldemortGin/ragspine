@@ -97,7 +97,9 @@ may not change.
    would see, with a chart's citable `points.<id>.value` lines and a text member's spans. The
    judge can no longer be fooled by a two-token title, nor by a chart description that names a
    chart it cannot cite. The cost is real and measured: rerank must resolve every fused candidate
-   (up to `2 × channel_limit` = 100), and on the AIA release one resolve costs ≈0.8s — `manifest()`
+   (up to `2 × channel_limit` = 100 — since Amendment 1 that is also the size of the fused ordering
+   Decision 4's selector is handed, though the selector *resolves* only the head and the few
+   candidates of a still-missing visual kind), and on the AIA release one resolve costs ≈0.8s — `manifest()`
    re-reads and re-validates ~5000 asset digests, and `load_retrieval` parses the 189 × 2560-dim
    index twice — which took the reranked case to **52s**, against ≈13–14s without. Rerank
    therefore stays **off by default** and opt-in per request, as in ADR 0011.
@@ -106,7 +108,9 @@ may not change.
    `adapters/answer_service.select_context(document, ranked, top_k)` retrieves `2 * top_k`,
    resolves the first `top_k`, and — only when none of those is a chart block with an explicit
    value — scans `ranked[top_k : 2*top_k]` for the first chart that has one and gives it the last
-   seat. The window is scanned cheaply: `member_texts()` supplies each candidate's kind, and only
+   seat. *(Amended by Amendment 1 below: the caller retrieves `2 * channel_limit`, and the window
+   also admits a hit either channel ranked inside `2 * top_k` on its own ranking.)*
+   The window is scanned cheaply: `member_texts()` supplies each candidate's kind, and only
    `CHART` candidates are resolved. A `PENDING` or label-only chart never takes the seat, nothing
    outside the window is promoted, and when a citable chart is already in the head nothing extra
    is read. `AnswerResult.fused` reports the members that actually entered hydration, promotion
@@ -119,6 +123,59 @@ may not change.
    order, default `()`) make all of the above readable from a response instead of from a byte-dump
    of the model cache. The contract name `rag-chat-v1` is unchanged;
    `docs/enterprise-pdf-rag/schemas/rag-chat-v1.json` was regenerated and `check_schema.py` passes.
+
+## Amendment 1 (2026-09-21): the guaranteed seat is decided by a hit's own channel ranks
+
+Decision 4's promotion window — the fused positions `ranked[top_k : 2*top_k]` — is **superseded**,
+and so is the `2 * top_k` the caller retrieves. `select_context` now promotes a candidate that
+sits in that fused window **or** that one of the channels ranked inside `2 * top_k` on its own
+ranking (`FusedHit.vector_rank` / `lexical_rank`, read by the helper `_within_a_channel`), and
+`AnswerService` calls `search(top_k = 2 * request.channel_limit)` instead of `2 * request.top_k` —
+100 rather than 20 on Decision 2's defaults. Both channels together rank at most
+`2 * channel_limit` members, so that is the *exact* upper bound on the fused set: the selector is
+handed the whole fused ordering rather than a prefix of it, which is the only way a channel rank
+outside the fused window can be seen at all.
+
+The reason is not an observation but the arithmetic of the fusion itself, and it is provable. RRF
+scores a hit by summing `1/(k + rank)` over the channels that ranked it. With `rrf_k = 60` and
+`channel_limit = 50`, a hit only one channel scored is worth at most `1/(60 + 1) = 0.01639` — its
+value when it is that channel's very first result — while a hit both channels scored is worth at
+least `2/(60 + 50) = 0.01818`, its value when it is last on both. Since `0.01818 > 0.01639`, **the
+best possible single-channel hit is still ordered below the worst possible two-channel hit,
+whatever its rank in the channel that found it.** That is precisely the object a guaranteed seat
+exists for, so deciding the window by fused rank asks the seat to rescue an object using the very
+ordering that is built to bury it.
+
+The AIA release shows the bound doing exactly that. For a translated Chinese question the corpus's
+only diagram (member `a9b9c1a4d6ae…`, p.6) is **vector rank 12** and has **no lexical rank at all**
+— it falls past the `channel_limit = 50` cut, so the envelope reports `lexical_rank: None` and the
+lexical channel contributes nothing to the fusion (a diagnostic probe run with a larger limit puts
+it around position 59). Its score is therefore `1/(60 + 12) = 0.01389`, below every two-channel hit
+by the bound above, and it fell outside the old fused window. Four real cold runs pin the fix: in
+the run before it the diagram took no seat and the answer abstained `not_in_context` with zero
+claims; in the three runs after it the diagram is seated every time and the answer cites
+`nodes.*.label`. (The envelope only reports ranks for members that were actually seated, so
+`lexical_rank: None` is observable in those three runs, not in the first.)
+
+The cleanest causal evidence is the pair either side of the change, because their input was
+byte-identical: runs 1 and 2 drew the same translation word for word (`What are the three stages of
+technology investment by agents?`, `cache_hit: false` both times), and their **first nine seats are
+the same members with the same `fused_score`**. Only the tenth differs — run 1 seats
+`1364d4b9f1ed` (vector 4, lexical 39, fused 0.02573), run 2 seats the diagram (vector 12, no
+lexical rank, fused 0.01389). Same question, same fused ordering, one rule changed, and the answer
+goes from zero claims and `not_in_context` to three `nodes.*.label` claims. Seating a
+single-channel hit is not a one-off either: in run 3 the tenth seat is `8bae5867c514` (vector 5, no
+lexical rank, fused `1/65 = 0.01538`), so two single-channel hits sit in that prompt at once.
+
+Nothing else about the seat changes, and the rest is worth restating because it is what keeps the
+selection deterministic: it fires only when a visual kind has no citable block in the head at all,
+at most one seat per kind, only the last non-visual seat is ever given up, candidates are examined
+in **fused** order so the fused window is always offered first, a pending or label-only object
+never qualifies, and a hit in neither window is never promoted. The regression this repairs was
+introduced by query translation ([ADR 0018](0018-query-classification-and-translation.md)), which
+put a model-written string in front of the lexical channel; the seat itself is this ADR's,
+generalised to every citable visual kind by
+[ADR 0015](0015-diagram-and-formula-retrievable.md)'s follow-up.
 
 ## Rejected alternatives
 

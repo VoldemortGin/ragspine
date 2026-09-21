@@ -85,15 +85,23 @@ calls a provider; and `TableIR` / `TableCell.verification` are pinned `PENDING` 
    Amended by [ADR 0018](0018-query-classification-and-translation.md): one *synthesis* call
    per request, plus at most one earlier translation call (task salt `query-translation-v1`)
    for a question written outside the index's language — bounded and cached the same way, and
-   skipped whenever it is unavailable. Its output reaches the two retrieval channels only.
+   skipped whenever it is unavailable. Amendments 1 and 3 of that ADR fix where its output may
+   go: the **lexical** channel — BM25 and the mode classifier — and the period / region
+   pre-filters, whose derivation is unioned with the question's own. The vector channel and the
+   rerank judge keep the question as asked; measured on one Chinese question, the asker's own
+   wording ranked the target 12th by vector where its translation ranked it 32nd, a difference
+   of phrasing rather than of language (the translation wrote `agents'` where the index prints
+   `Agency`). The prompt, the prose number gate and claim verification never see a translation.
    `answers/verify.py` then re-reads every claim from stored evidence: a quote must be a verbatim
    (whitespace-folded, case-folded) substring of its span; a cell must equal the stored
-   `PRESENT` cell text; a chart value must equal the qualified `Decimal` or its exact source
-   display, requalified through `check_context` / `check_fields` for donuts and
-   `chart_context` + `check_displayed_evidence` for displayed bars, and is cited back to SVG
-   elements. Nothing derives, rounds or combines a value. `decide` applies, in order: model
-   abstain → `MODEL_DECLINED`; failed claims are dropped one by one into `rejected`; zero
-   verified claims → abstain with the first rejection's reason, else `NO_VERIFIED_CLAIM`; any
+   `PRESENT` cell text; a chart value is read as a number plus the unit printed around it — the
+   number must be that point's exact source display, or failing that the qualified `Decimal`, and
+   a unit the claim carries must be the point's own `unit.text` verbatim (see "A chart claim's
+   unit is read before its number" below) — requalified through `check_context` / `check_fields`
+   for donuts and `chart_context` + `check_displayed_evidence` for displayed bars, and cited back
+   to SVG elements. Nothing derives, rounds, normalises or combines a value. `decide` applies, in
+   order: model abstain → `MODEL_DECLINED`; failed claims are dropped one by one into `rejected`;
+   zero verified claims → abstain with the first rejection's reason, else `NO_VERIFIED_CLAIM`; any
    number in the prose that is not a verified claim's number → the whole answer abstains with
    `CLAIM_NOT_IN_EVIDENCE`; otherwise `ANSWERED`. `AnswerResult` carries the document sha256,
    processing id, snapshot id, member ids, fused hits, request fingerprint, live call count and
@@ -222,6 +230,45 @@ calls a provider; and `TableIR` / `TableCell.verification` are pinned `PENDING` 
   cite — the span quote, the table cell text, or a chart claim's period / category labels and
   source display (`ClaimCitation.quote`). Any other number still abstains the whole answer, and
   zero verified claims are handled exactly as before; `decide` keeps its order.
+- **A chart claim's unit is read before its number — fixed 2026-09-21.** `prompt.SYSTEM_RULES`
+  asks a chart claim for "the displayed value with its unit", a rule written for a figure that
+  prints its own `%`. A `$m` figure prints the unit in its caption (`VONB ($m)`) and the bare
+  number on the bar, so the exact source display of a p.13 point is `294`: the model obeyed the
+  prompt, wrote `294$m`, and the verifier compared that against `294` and rejected it. The prompt
+  and the verifier contradicted each other, and a real gold case abstained on it every run.
+  `SYSTEM_RULES` is deliberately *not* changed — editing it invalidates every cached completion
+  and forces the whole real-model gold set to be re-run — so the verifier is the side that moved.
+  `answers/verify.py` gains `_CLAIMED_NUMBER_RE` (the number inside a claimed display: `294$m`,
+  `294 $m`, `$294m`, `$294 m`, `8.2%`, `1,168 $m`, `-294 $m`, and the accounting bracket `(294)`,
+  which is how a figure prints a sign and so stays with the number), `_split_unit` (whatever sits
+  on either side of that number, joined in reading order, is the claimed unit; a text holding no
+  number comes back whole with no unit and is compared exactly as before) and `_display_mismatch`,
+  which `_value_claim` now calls. Only the unit moves: `294.0` still does not equal `294` and
+  `1,168` keeps its separator, so a split can never turn one figure into another, and a claim
+  carrying no unit is judged on its number alone — everything that verified before still verifies.
+  The fix also closes a real hole. Before it, `294%` against a `$m` point was *accepted*: the
+  literal comparison failed, the numeric fallback ran, `_decimal("294%")` stripped the sign and
+  read `Decimal("294")`, and a claim contradicting the figure's own unit verified. A unit the
+  point does not print is now a rejection in its own right, `AbstainReason.UNIT_MISMATCH`, saying
+  either "claimed unit X is not the point's unit Y" or "claimed unit X but the point prints no
+  unit". That member was declared with the enum and never raised by anything — the chart-QA
+  services refuse on their own `RefusalReason` / `DisplayedRefusalReason`, which merely spell the
+  same name — so the claim re-read is its first caller. Since `decide` abstains with the first
+  rejection's reason when nothing verifies, `unit_mismatch` becomes a reachable `abstain_reason`
+  on `rag-chat-v1` for the first time; the enum itself is unchanged. Offline
+  coverage: the new `tests/enterprise_pdf_rag/answers/test_verify_claim_units.py` (29) beside
+  `answers/test_verify.py` (30).
+- **What that fix exposed, and whose fault it is not.** Citing p.13's `$m` bars for the first time
+  turned a safe refusal into a *wrong sourced number*. That page prints three `VONB ($m)` charts
+  side by side — AIA Thailand 514, AIA Singapore 294, AIA Malaysia 232 — while region metadata is
+  page-level ([ADR 0013](0013-page-metadata-and-prefilters.md)), so every member on it carries
+  every one of those country values and no pre-filter can tell the columns apart. A Thailand
+  question consequently answers with Singapore's or Malaysia's figure, cited verbatim, with a real
+  bbox behind it. That is not an error of this fix: the old unit rejection was an accidental
+  barrier standing in front of the wrong answer, not a check against it. The repair is a
+  member-level, in-column region binding, which does not exist yet; until it does the `k01` /
+  `k02` gold cases stay frozen as `abstained` known gaps rather than record today's behaviour. The
+  retrieval half of the same run is in [ADR 0018](0018-query-classification-and-translation.md).
 - `AnswerEnvelope` does not carry `request_fingerprint`, so a failed live call cannot be located
   under `model-cache/requests/<fingerprint>.json` from the response alone.
 - The four `contains` call sites in `adapters/visual_semantics.py` have no dedicated regression

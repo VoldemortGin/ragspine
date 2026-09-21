@@ -1,6 +1,6 @@
 ---
 covers: src/enterprise_pdf_rag/
-verified-against: 63e3814
+verified-against: 10bc03c
 ---
 
 # enterprise_pdf_rag — agent contract
@@ -135,15 +135,22 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   accepts both, and `chart_publication.resolve_chart_member` re-derives a member under the
   scope its own receipt declares.
 - **Verified claims only** — every model claim is re-read from stored evidence field by field
-  (verbatim quote, exact cell text, chart value equal to the qualified `Decimal` or its exact
-  source display, cited back to SVG elements);
-  failed claims are dropped, and any number in the prose outside a verified claim abstains the
+  (verbatim quote, exact cell text, a chart value whose number equals the qualified `Decimal`
+  or its exact source display and whose unit, when it states one, is the point's own, cited
+  back to SVG elements); failed claims are dropped, and any number in the prose outside a
+  verified claim abstains the
   whole answer (ADR 0011). One synthesis call per answer, plus at most one earlier
   translation call for a question written outside the index's language (bounded, cached,
   skipped when unavailable — ADR 0018); `llm_live_calls` counts both. Nothing is derived or
-  retried, and a translation only ever reaches retrieval — the two channels and the period /
-  region pre-filters, which union it with what the original question derived; the prompt and
-  the prose gate keep the original question, and claims stay verbatim.
+  retried, and a translation only ever reaches retrieval — the **lexical** channel (BM25 and
+  the `classify_query` routing it feeds) and the period / region pre-filters, which union it
+  with what the original question derived. The vector channel and the rerank judge keep the
+  question as asked: both read it as language, so a restatement only trades the asker's
+  wording for someone else's — measured on this corpus the original ranked the object it
+  needed at seat 12 and its own translation ranked the same object at seat 32, a difference
+  of wording rather than language (the translation wrote `agents'`, the index prints
+  `Agency`) — ADR 0018 Amendment 3. The prompt and the prose gate keep the original
+  question, and claims stay verbatim.
 - **A verified table grid means ink** (ADR 0014) — `TableIR` / `TableCell` are `VERIFIED` only
   with `GridEvidence` / `CellBorderEvidence`: every row and column boundary sits on a real
   ruling, every cell edge is continuously ruled, every merge is proved by the absence of a rule
@@ -165,12 +172,42 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   the single function behind the literal-transcription check, a cited table header (ADR 0014) and
   every diagram / formula claim, so the verify side is never laxer than the qualification side.
   Only cell *content* uses the case-folded `_norm`.
+- **A chart claim's unit is read before its number** — a claimed chart value is split
+  deterministically into the number as written and whatever unit was printed around it
+  (`294$m`, `294 $m`, `$294m`, `8.2%`, `1,168 $m`, the accounting `(294)`). The number is then
+  compared verbatim against that point's source display, the unit verbatim against that
+  point's own `unit.text`, and **nothing is normalised numerically**: `294.0` is still not
+  `294` and `1,168` keeps its separator. A claim stating no unit is judged on its number
+  alone, exactly as before. A unit the point does not print is a rejection in its own right
+  rather than a number that happened not to match, and so is a unit claimed against a point
+  that prints none. The reason both carry, `AbstainReason.UNIT_MISMATCH`, was declared with
+  the chain and until now nothing raised it; the claim re-read is its first caller, which is
+  what makes `unit_mismatch` reachable as a `rag-chat-v1` `abstain_reason` at all, the first
+  rejection's reason being the one the envelope reports. Both directions were wrong before:
+  `prompt.SYSTEM_RULES` asks for the displayed value
+  *with its unit* while a `$m` figure prints a bare `294` under a `VONB ($m)` caption, so a
+  correct `294$m` was refused; and `294%` was *admitted*, because the failed display
+  comparison fell through to a numeric check that read it as 294 and let a claim
+  contradicting the figure's own unit pass.
 - **Retrieval channels are chosen per question, and the choice is reported** (ADR 0018) —
   a short label-and-period question is answered from BM25 alone (measurably better than RRF
-  fusion on this corpus: recall@10 74.4% vs 70.4%), a narrative question keeps fusion, and a
-  question the lexical channel cannot score takes the vector channel alone. `fusion_mode` and
-  `query_translation` in `AnswerEnvelope` say which ran. A query embedder is a dependency of
-  the requests that use it, exactly like the opt-in reranker: a BM25-only question is answered
+  fusion on this corpus: the channels themselves recall 74.4% within ten seats against 70.4%
+  for fusion and 48.0% for the vector channel), a narrative question keeps fusion, and a
+  question the lexical channel cannot score takes the vector channel alone. **Short spends two
+  budgets at once** — at most `MAX_BM25_ONLY_TOKENS` (5) tokens *and* at most
+  `MAX_BM25_ONLY_SHORT_CONTENT_WORDS` (2) content words — because a token count alone reads
+  `Agency share of VONB 1H26` (five tokens, three content words) as a label and answers a
+  phrase from BM25, which drops the chart it needs from seat 7 under fusion to seat 12
+  (ADR 0018 Amendment 2). The separate figure clause still spends the tighter
+  `MAX_BM25_ONLY_CONTENT_WORDS` (1), where the token count is already over. On the 125-fact
+  probe the content-word budget costs one fact and buys one — recall@10 73.6% (92/125) against
+  74.4% (93/125), recall@20 79.2% against 78.4%, r@3 52.8%, r@5 56.8%, MRR 0.453 against
+  0.476, 100 questions routed to BM25 and 150 to fusion against 118 / 132 — an honest trade of
+  one probe fact for three real gold cases, because every probe query is a short label plus a
+  period (one or two content words) and the probe therefore cannot measure the question shape
+  this budget exists for. `fusion_mode` and `query_translation` in `AnswerEnvelope` say which
+  ran. A query embedder is a dependency of the requests that use it, exactly like the opt-in
+  reranker: a BM25-only question is answered
   without one, a question needing the vector channel is still 503 with no substitute.
 - **Same-SVG two branches, snapshot binding, no-summary-fallback** — hard invariants of the
   figure chain (ADR 0002). What gets embedded is the **index text** of

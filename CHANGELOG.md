@@ -31,6 +31,47 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ### Changed
 
+- **A short question must be a short *label* to take BM25 alone**
+  (`enterprise_pdf_rag`, [ADR 0018 amendment 2](docs/enterprise-pdf-rag/adr/0018-query-classification-and-translation.md)).
+  `classify_query` sent any question of at most `MAX_BM25_ONLY_TOKENS` (5) tokens to the lexical
+  channel alone. A token count is only a proxy for the shape that rule was measured on — every
+  one of the 125 probe queries was a short label plus a period, one or two content words — and
+  it is a leaky proxy: `Agency share of VONB 1H26` is five tokens but **three** content words, a
+  phrase rather than a label, and BM25 alone drops the chart it needs from fusion's seat 7 to
+  seat 12. The short clause now spends two budgets at once — at most five tokens **and** at most
+  `MAX_BM25_ONLY_SHORT_CONTENT_WORDS` (2) content words — which is what every probe query
+  actually was; the separate figure clause (a number plus at most `MAX_BM25_ONLY_CONTENT_WORDS`
+  (1) content word) is untouched. The budget was swept over the same probe and its cost is
+  stated rather than hidden: **recall@10 74.4% (93/125) -> 73.6% (92/125)**, recall@20 78.4% ->
+  79.2%, MRR 0.476 -> 0.453, and 100 queries routed to BM25 against 150 to fusion where it was
+  118 / 132. The single fact lost is `p09-a424f3446bd4` (`Strong Underlying Growth Drivers 1H26`
+  — five tokens, four content words, exactly the shape this change reroutes, which BM25 simply
+  happened to rank first). A budget of 4 holds 74.4% but leaves `Agency share of VONB 1H26` on
+  BM25 and so fixes nothing: this is one probe fact traded for three real gold cases, on a probe
+  whose corpus contains no question of that shape and therefore cannot measure it.
+
+- **A translation is what the lexical channel scores, and only that**
+  (`enterprise_pdf_rag`, [ADR 0018 amendment 3](docs/enterprise-pdf-rag/adr/0018-query-classification-and-translation.md)).
+  A restated question replaced the query on **both** retrieval channels, which ADR 0018 recorded
+  as deliberate but unmeasured. It is measured now, and it was wrong for the vector channel:
+  against the pinned AIA release on Qwen3-Embedding-4B the Chinese question ranks the diagram it
+  needs at seat **12**, and its own English restatement ranks it at seat **32**. The gap is not
+  language but wording — the restatement writes `agents'` where the index prints `Agency` — and
+  a multilingual embedding model reads the asker's own phrasing at least as well as someone
+  else's paraphrase of it, while a token-matching channel cannot score that phrasing at all.
+  `HybridSearch.search` gained `lexical_query: str | None`, which defaults to `None` and then
+  scores one string on both channels byte for byte as before; `_QueryPlan` carries it. BM25 and
+  `classify_query` now read the restatement, the vector channel and the rerank judge read the
+  question as asked, and the period / region pre-filters still union what the question derives
+  with what its translation derives (amendment 1), unchanged. One boundary is worth stating
+  plainly: the restatement is a real model call, so a translated question's *retrieval input* is
+  itself model output. Across the three of four real cold runs that shared one build, 20 of the
+  22 gold cases returned byte-identical `member_ids`, and the two exceptions are exactly the two
+  Chinese questions that trigger a translation (`p06-donut-zh`, `p11-diagram-zh`). Retrieval
+  itself has no randomness; whatever non-determinism a translated question shows, it inherits
+  from that one call — which is also why `p06`'s frozen `filters_applied` has to enumerate both
+  period sets it really derives.
+
 - **A chart point is retrievable when every one of its strings is printed in the figure**
   (`enterprise_pdf_rag`, [ADR 0016](docs/enterprise-pdf-rag/adr/0016-verbatim-chart-points.md)).
   `figure-source-labels-only-v1` could only compare a label against **one whole** source span,
@@ -60,6 +101,54 @@ All notable changes to RAGSpine are documented here. This project follows Semant
   snapshot re-projects from its own stored branches with no model and no network.
 
 ### Fixed
+
+- **A chart claim's unit is read before its number, and a unit the figure never printed is a
+  refusal of its own** (`enterprise_pdf_rag`,
+  [ADR 0016](docs/enterprise-pdf-rag/adr/0016-verbatim-chart-points.md)).
+  `SYSTEM_RULES` asks a chart claim for "the displayed value with its unit", which was written
+  for a figure that prints its own `%`. A `$m` figure prints the bare `294` under a `VONB ($m)`
+  caption, so the verbatim source display is `294` while the model dutifully writes `294$m` —
+  the prompt and the verifier contradicting each other, and every `$m` chart value on the pinned
+  AIA release thrown out as `CLAIM_NOT_IN_EVIDENCE`. `_split_unit` now splits a claimed display
+  into its number and whatever was printed around it (`294$m`, `294 $m`, `$294m`, `$294 m`,
+  `8.2%`, `1,168 $m`, `-294 $m`, and the accounting `(294)`, whose brackets are how a figure
+  prints a sign and so stay with the number); the number is compared verbatim against the source
+  display and the unit verbatim against that point's own `unit.text`. **Nothing is normalised** —
+  `294.0` still does not equal `294`, `1,168` keeps its separator — and a claim carrying no unit
+  is checked exactly as before, so everything that used to pass still passes. It also closes a
+  real hole in the other direction: `294%` against a `$m` point used to be **accepted**, because
+  the verbatim comparison failed and the numeric fallback read `Decimal("294%")` as 294, so a
+  claim contradicting the figure's own unit verified. A unit the point does not print — or any
+  unit at all where the point prints none — is now a rejection in its own right, said as itself
+  through the existing `AbstainReason.UNIT_MISMATCH`. That member was declared with the answer
+  chain and never raised by anything; the typed ChartQA services refuse on their own
+  `RefusalReason` / `DisplayedRefusalReason`, which only spell the same name. The enum is
+  unchanged and nothing leaves the contract; what is new is that the claim re-read is its first
+  caller, so `unit_mismatch` becomes reachable for the first time as a `rag-chat-v1`
+  `abstain_reason`, `decide` reporting the first rejection's reason.
+  `SYSTEM_RULES` is deliberately unchanged: rewording it would invalidate every
+  cached completion and force the whole real-model gold set to be re-run.
+
+- **A visual object's guaranteed seat is decided by its own channel ranks, not only by where
+  fusion put it** (`enterprise_pdf_rag`,
+  [ADR 0012](docs/enterprise-pdf-rag/adr/0012-chart-index-text-and-retrieval-seats.md),
+  [ADR 0015](docs/enterprise-pdf-rag/adr/0015-diagram-and-formula-retrievable.md)).
+  `select_context` promoted a missing visual kind only out of `ranked[top_k:2 * top_k]`, the next
+  k *fused* positions. Reciprocal rank fusion, though, sorts a hit only one channel scored below
+  every hit both channels contributed to — which is precisely the object the guaranteed seat
+  exists for. The pinned release's only Diagram is one such object: the Chinese question ranks it
+  at vector seat 12, while its English restatement shares no content word with that member
+  (`agents` is not `agency`, and neither `technology` nor `investment` appears in it), leaving it
+  at lexical seat 59 — past the channel limit of 50, so it contributes nothing to the fusion at
+  all. With one channel's 1/(60+12) against seat 20's 0.01998 it fused at 30, outside the window,
+  and the answer could read the diagram in its page context but had no citable block for it, so
+  it correctly declined. The window is now the next k fused positions **or** any hit either
+  channel ranked inside `2 * top_k` on its own ranking (`_within_a_channel`), and the call site
+  asks for `2 * channel_limit` hits — the exact upper bound on the fused set — so
+  `select_context` is handed the whole fused order instead of a prefix of it. The rule itself is
+  unchanged: it fires only for a kind with no citable block in the head, seats at most one member
+  per kind, gives up the last non-visual seat backward, and takes the first qualifying candidate
+  in fused order. This supersedes the plain `2 * top_k` fused window recorded under 0.15.0.
 
 - **A chart point whose id carries a decimal can be cited again** (`enterprise_pdf_rag`).
   A point id is derived from what the figure prints, so a value inside the label puts a
@@ -105,6 +194,26 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ### Added
 
+- **A gold requirement may name alternative anchors, and so may a filter expectation**
+  (`enterprise_pdf_rag`, ADR 0011 follow-up). A frozen case asserted exactly one anchor per
+  requirement, which silently asserted more than the evidence does: the pinned release states the
+  record Operating ROE twice — the sentence on p.3 and the chart point on p.7 — and which one a
+  run cites is not stable, so a correct answer failed. An element of `required_claims` and a
+  `filters_expected` may now be written as `{"any_of": [...]}`: at least two alternatives, never
+  nested, and never beside another key. Any single alternative satisfies the requirement, and
+  when none does the report lists why each one failed rather than only the last.
+  `adapters/nl_gold.py` discriminates the two written forms by shape
+  (`Discriminator(_choice_form)` with `Tag`), so a malformed case reports against the form it was
+  actually written in, and the single form parses and judges byte for byte as before —
+  `schema_version` stays `nl-answers-gold-v1`. Three cases are re-pinned against it:
+  `p01-roe-quote-en` and `p15-cache-repeat-en` accept either statement of the ROE, and
+  `p06-donut-zh` enumerates the two period sets that were really observed — `{1H2026}` and
+  `{1H2026, Y2026}` — because its applied pre-filters union what the question derives with what
+  its translation derives (ADR 0018 amendment 1), and the translation is a real model call, so
+  two cold runs derived different sets while giving the same answer from the same citations.
+  Freezing either set alone would have asserted something untrue. The gold's `pinned` release is
+  unchanged.
+
 - **The wait for one model call is configurable** (`enterprise_pdf_rag`).
   `JsonCompletionClient` allows up to 180 seconds but `create_configured_app` never passed
   one, so every deployment was pinned to the 45-second default. The page context window
@@ -126,11 +235,14 @@ All notable changes to RAGSpine are documented here. This project follows Semant
   within ten seats against fusion's 70.4%, and leads by more at every tighter cut (r@3 54.4% vs
   46.4%, MRR 0.482 vs 0.381), because RRF weights both rankings equally and the weaker one
   dilutes the stronger. `answers/query_mode.py` now classifies each question with no model and no
-  I/O: at most five tokens, or a figure plus at most one content word, takes BM25 alone; a
-  question the lexical channel cannot score takes the vector channel alone; everything else keeps
-  fusion. Both thresholds were swept offline against the probe's per-fact channel ranks and are
-  the narrowest pair that reaches the sweep's ceiling, so 48% of the probe's queries are rerouted
-  and the rest behave byte-for-byte as before. `HybridSearch.search` gained a `mode` argument and
+  I/O: at most five tokens **and** at most two content words, or a figure plus at most one
+  content word, takes BM25 alone; a question the lexical channel cannot score takes the vector
+  channel alone; everything else keeps fusion. Every threshold was swept offline against the
+  probe's per-fact channel ranks, and the content-word budget (amendment 2) deliberately gives
+  up the sweep's 74.4% ceiling for 73.6% — 92 facts of 125 — so that a short *phrase* like
+  `Agency share of VONB 1H26` is no longer routed as though it were a label. 40% of the probe's
+  queries (100 of 250) are rerouted and the rest behave byte-for-byte as before.
+  `HybridSearch.search` gained a `mode` argument and
   returns a `SearchOutcome`; a single-channel mode is expressed as a fusion with one empty
   ranking, so scores stay comparable, and `bm25_only` skips the vector channel entirely — one
   embedding call fewer per request. `adapters/query_translation.py` restates a question written
@@ -139,9 +251,12 @@ All notable changes to RAGSpine are documented here. This project follows Semant
   answering and require figures and proper names to survive verbatim), triggered when the
   question's *content words* — function words and figures removed — score nothing lexically, so a
   Chinese question naming `1H26` is no longer mistaken for a scoreable one. The translation
-  reaches the two retrieval channels only: the prompt, the period / region pre-filters and the
-  prose-number gate keep the original question, `SYSTEM_RULES` now asks for an answer in the
-  question's language with claim text still copied verbatim from the evidence, and a translation
+  reaches the **lexical** channel only — BM25 and the channel classifier score it, while the
+  vector channel and the rerank judge read the question as asked (amendment 3) — and the period /
+  region pre-filters union what the question derives with what the translation derives
+  (amendment 1). The prompt and the prose-number gate keep the original question, `SYSTEM_RULES`
+  now asks for an answer in the question's language with claim text still copied verbatim from
+  the evidence, and a translation
   that cannot be had is not an error — the question falls back to the vector channel alone.
   `AnswerRequest` gained `fusion_mode` and `translate_query`; `AnswerResult` and the
   `rag-chat-v1` `AnswerEnvelope` gained `fusion_mode` and `query_translation` as optional
@@ -170,7 +285,9 @@ All notable changes to RAGSpine are documented here. This project follows Semant
   folder's `manifest.json` (`aia-gold-registry-v1`). It freezes only what is stable across runs —
   `page_index`, `field_path`, `quote`, the claim's `value` / `unit` and the envelope's
   `filters_applied` / `filters_relaxed` / `cache_hit` — and never a `claim_id`, a `member_id`, a
-  snapshot id or the prose wording. `adapters/nl_gold.py` holds the strict schema (it self-checks
+  snapshot id or the prose wording. Where even that is not single-valued, a requirement or a
+  `filters_expected` may name a set of alternatives (`any_of`) instead of one of them.
+  `adapters/nl_gold.py` holds the strict schema (it self-checks
   on load: unique ids, a positive case must freeze or explicitly declare its claim, a known gap
   must say what the gap is) and `judge()`, the single pass/fail rule both runners use.
   `tests/enterprise_pdf_rag/answers/test_nl_gold.py` replays every case offline against the real

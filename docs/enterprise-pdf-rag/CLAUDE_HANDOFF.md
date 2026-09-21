@@ -1,6 +1,6 @@
 # Claude 交接：通用文档 RAG 与公开样本验收
 
-更新时间：2026-09-21（四条分支合入 `main` 并上线；真实金标 13/22，三条 ADR 0018 回归待拍板）
+更新时间：2026-09-21（四条分支合入 `main` 并上线；此后五处改动把真实金标修回 **19/22**（run 3，唯一 FAIL 是模型抖动），`k01`/`k02` 的缺口被查实为「带真实 provenance 的错数字」，严重度上调）
 
 > 阅读顺序：先看下方“恢复开发记录”；后续旧暂停快照保留作证据，不能作为实时发布或服务状态。
 
@@ -23,7 +23,7 @@
 
 `ProcessingStore.load` / `load_retrieval` 里嵌套计时，所以列内会相互包含；`resolve` 与 `manifest` 的耗时几乎
 全部来自这两项。挂载耗时不变（scan + mount 合计约 22s，只发生一次）。10 条金标问题前后**逐条状态完全一致**
-（`p07` / `p11` 两条在前后都是 abstained，是已知的 ADR 0018 回归，与本轮无关）。
+（`p07` / `p11` 两条在前后都是 abstained，是已知的 ADR 0018 回归，与本轮无关；两条**已在 `fix/gold-regressions` 上修复**，见上方「真实金标回归收尾」）。
 
 **改法（四处，不动任何不变量）**
 
@@ -54,6 +54,204 @@
 
 **遗留**：线上 8768 仍跑 `main`，**本轮没有重启任何服务**；要生效需人工重启该进程。
 
+## 真实金标回归收尾：五处改动与四轮冷跑（2026-09-21，分支 `fix/gold-regressions`，未合入 `main`）
+
+> 上一节「本轮集成」把真实金标从 17 pass 打成 **13 pass / 7 FAIL / 2 known-gap-moved**。本节是把那 7 条逐条
+> 追到底的结果：用户拍板修四项，实测又追加了第五项。证据在本机
+> `data/validation/generic-chat-2026-09-21/gold-fix/`（`nl-gold-cold` / `-2` / `-3` / `-4` 四轮冷跑，各含
+> `report.md` / `report.json` / 每例 `<case>.json`；另有扫参脚本 `sweep_baseline.py` 与 `sweep_output.txt`）。
+> `data/*` 为 git 忽略，同此前各轮。
+
+**本轮五处改动**
+
+1. **查询分类补实词预算**（`answers/query_mode.py`）。`classify_query` 的「token ≤ 5 → `bm25_only`」分支原先
+   只数 token。新增常量 `MAX_BM25_ONLY_SHORT_CONTENT_WORDS = 2`，该分支改成「token ≤ 5 **且**实词 ≤ 2」；
+   带数字的那条分支（`MAX_BM25_ONLY_CONTENT_WORDS = 1`）一字未动。起因就是 `Agency share of VONB 1H26`
+   ——5 token 但 **3 个实词**，是自然短语不是标签，被误判 `bm25_only` 之后目标甜甜圈图从 rrf 第 7 名掉到
+   BM25 第 12 名。
+2. **译文只喂词法通道**（`adapters/hybrid_search.py` + `adapters/answer_service.py`）。`HybridSearch.search`
+   新增可选参数 `lexical_query: str | None`（`None` 即两通道都吃 `query`，与此前逐字一致）：**BM25 与
+   `classify_query` 吃译文，向量通道与 rerank 判官吃原句**。前置过滤器仍取「原句 ∪ 译文」的并集，
+   ADR 0018 Amendment 1 不变。依据是真实 embedder 探针：同一道中文问句，向量通道吃**原句**时把目标 diagram
+   排在第 12 名，吃**译文**时排到第 32 名——差别不在语言而在措辞（译文写 `agents'` / `agents`，索引里印
+   的是 `Agency`）。改完之后四轮信封里该 Diagram 的 `vector_rank` **恒为 12**。ADR 0018 Decision 5 原本让译文同时替换两个通道，并自认 "deliberate but *unmeasured*"；
+   现在测了，该 Decision 已在 ADR 里标为被取代。
+3. **chart claim 先读单位再读数值**（`answers/verify.py`）。`SYSTEM_RULES` 规则 1 要求 `chart_value` 的
+   `text` 「带上单位」，而 `$m` 图的逐字 source display 是裸的 `294`（单位只印在 caption `VONB ($m)` 里），
+   模型照做写 `294$m` 反被校验器拒掉——**prompt 与校验器自相矛盾**。现在先用确定性正则把 claim 拆成
+   「数值 + 单位」（`294$m` / `294 $m` / `$294m` / `8.2%` / `1,168 $m` / 会计负号 `(294)`），数值逐字比
+   source display、单位逐字比该 point 的 `unit.text`，**不做任何数值归一化**（`294.0` 仍不等于 `294`，
+   `1,168` 保留分隔符）。顺带堵上一个真实漏洞：改前 `294%` 会被**误放行**——display 逐字比较失败后走数值
+   回退，`294%` 被读成 294，于是一条与图表单位矛盾的 claim 能通过验证；现在单位不符是独立的拒答理由
+   `UNIT_MISMATCH`，point 不印单位而 claim 带了单位同样拒。**`SYSTEM_RULES` 故意没改**——改它会让整个
+   补全缓存失效、真实金标要整体重跑。
+4. **金标 schema 支持 `any_of` 备选**（`adapters/nl_gold.py` + 金标 JSON）。`required_claims` 的元素与
+   `filters_expected` 现在都可写成 `{"any_of": [...]}`：至少两条、不许嵌套、不许在 `any_of` 旁边多写别的键；
+   任一命中即满足，全不中则把每个备选各自的原因都列出来。单一写法逐字不变，`schema_version` 仍是
+   `nl-answers-gold-v1`（向后兼容的加法），`pinned` 一字未动。据此重钉三处：`p01` / `p15` 接受 p.3 那条
+   quote **或** p.7 的 `points.point-1h26-roe-17.5.value`（两条证据都成立）；`p06` 的 `filters_expected`
+   枚举实测到的 `{periods:[1H2026]}` 与 `{periods:[1H2026,Y2026]}` 两种。
+5. **视觉对象保底席位改按通道名次判定**（`adapters/answer_service.py::select_context`）。提升窗口谓词从
+   「融合序落在 `ranked[top_k:2*top_k]`」放宽为「落在该窗口 **或** `FusedHit.vector_rank` / `lexical_rank`
+   任一 ≤ `2*top_k`」；调用点把 `search(top_k=2*request.top_k)` 改成 `2*request.channel_limit`——两路通道
+   合起来至多排出这么多 member，是融合集合大小的精确上界，这样 `select_context` 拿到的是整份融合序。
+   起因：修完第 2 项后 `p11-diagram-zh` **仍然** FAIL。真实译文
+   `What are the three stages of technology investment by agents?` 与该 member 的**实词交集为 0**
+   （`agents` ≠ `agency`，`technology` / `investment` 在它文本里一个都没有）。**三种名次分属不同条件，
+   别混着读**：向量吃译文时第 32 名（修复第 2 项**之前**）、吃原句时第 12 名（**之后**，信封实测）；词法侧
+   则越过了 `channel_limit = 50` 的截断——诊断探针把它测在约第 59 位，而**真实信封里它的 `lexical_rank`
+   干脆是 `None`**，即在 RRF 里拿不到任何词法贡献，融合分只剩单通道的 1/(60+12) = **0.01389**，掉出窗口。真实 prompt 缓存证实：`page_context` 里**印着**那行 diagram 文本，
+   但 `SYSTEM_RULES` 第 6 条规定 page_context 不可引用——**模型看得见答案却无路可引，只能 `not_in_context`；
+   模型行为是对的，问题纯在席位**。理由：RRF 在构造上就惩罚「只有一路通道看得见」的对象，而保底席位
+   （ADR 0012，经 ADR 0015 推广）本就是为这类对象存在的。语义不变：只在某视觉 kind 在 head 里完全没有
+   可引块时触发、每 kind 至多补一个、只顶掉最后一个非视觉席位、按融合序取第一个合格者（确定性）。
+   历史证据：`p11` 在翻译特性（`093e976`）之前的四次真实运行里**全部 answered**，靠保底席位从第 11/12 名
+   被提升入座——所以这是**翻译特性引入的回归**，不是固有缺口，也**不是** `fix/mount-latency` 造成的。
+
+**四轮真实冷跑**（pinned release `22127d0fad13` / snapshot `42939d6a4e87`，25 例金标中 22 例在线跑，3 例 offline-only）
+
+| 轮次 | 代码状态 | pass / FAIL / known-gap-moved | 失败例 |
+| --- | --- | ---: | --- |
+| 合并前 `main` `3214ce5` | 上一节集成之后 | **13 / 7 / 2** | 合并前是 17 pass |
+| run 1 | 第 1–4 项之后、席位修复（第 5 项）之前 | **19 / 1 / 2** | `p11-diagram-zh`：Diagram **没进席位**、0 claims、abstain `not_in_context`（**真 bug**） |
+| run 2 | 第 5 项之后、`p06` 金标改 `any_of` 之前 | **18 / 2 / 2** | `p05`（模型把 claim-2 的 member id 打短成 57 位十六进制 → `model_output_invalid: unknown member`）、`p06`（译文措辞不同 → 并集期间不同） |
+| **run 3** | 最终代码 | **19 / 1 / 2** | `p13`：`abstained / model_declined`，detail `ambiguous`，0 claims |
+| **run 4** | 最终代码（与 run 3 同一份） | **19 / 1 / 2** | `p11`：这次**答出来了**，只是三个节点只写了两个（`2 claims, expected at least 3`，缺 `nodes.node-intelligence.label`） |
+
+最终数字 run 3 与 run 4 一致，都是 **19 / 1 / 2**。run 3 逐例：`p01`–`p12` 全 pass，`p13` FAIL，
+`p14` / `p15` pass，`a01`–`a05` 五条拒答例全 pass，`k01` / `k02` known-gap-moved。
+
+**席位修复被四轮数据钉死**（Diagram `a9b9c1a4d6ae…` 是全库唯一的 Diagram）：
+
+| 轮次 | Diagram 入席 | `p11` claims |
+| --- | --- | --- |
+| run 1（修复前） | 否 | 0，abstain `not_in_context` |
+| run 2 / run 3 | 是 | 3（`node-foundation` / `node-growth` / `node-intelligence` 三个 `nodes.*.label`） |
+| run 4 | 是 | 2（只漏 `nodes.node-intelligence.label`，模型少写一条，不是席位问题） |
+
+**run 1 与 run 2 构成一次完美对照实验。** 两轮译文逐字相同
+（`What are the three stages of technology investment by agents?`——冷跑清了缓存，四轮
+`query_translation.cache_hit` **全是 `false`**，所以这是两次独立调用**碰巧抽到了逐字相同的译文**，不是缓存
+回放），因此检索输入完全相同；信封里**前 9 个
+入座 member 及其 `fused_score` 逐条相同**（`a00e8fefd645` 0.03279 / `cf096c5aeb90` 0.02921 /
+`df19e3120212` 0.02837 / `8bae5867c514` 0.02788 / `76be7fbab1f5` 0.02688 / `107d42f42b66` 0.02669 /
+`2f50964777ac` 0.02666 / `dfd8f0d6399f` 0.02629 / `19658c9322f2` 0.02617）。**唯一的差别是第 10 个席位**：
+
+| | 第 10 席 | `vector_rank` | `lexical_rank` | `fused_score` |
+| --- | --- | ---: | ---: | ---: |
+| run 1（修复前） | `1364d4b9f1ed`（普通块，两路都看得见） | 4 | 39 | 0.02573 |
+| run 2（修复后） | `a9b9c1a4d6ae`（**Diagram**） | 12 | `None` | 0.01389 |
+
+同样的问题、同样的译文、同样的融合序，**只有席位规则变了**，Diagram 就从落选变入座，答案也从 0 claims 的
+`not_in_context` 变成 3 条 `nodes.*.label`。这是本轮最干净的一条因果证据。
+
+**RRF 的惩罚不用观测，可以证明。** 在 `rrf_k = 60`、`channel_limit = 50`（`AnswerRequest` 的默认值）下：
+
+- 单通道 hit 的分数**上界**是 `1/(60 + 1) ≈ 0.01639`——它在那一路上排第 1 时取到；
+- 双通道 hit 的分数**下界**是 `2/(60 + 50) ≈ 0.01818`——它在两路上都排到截断末位（第 50）时取到。
+
+`0.01818 > 0.01639`，所以**最好的单通道 hit 也排在最差的双通道 hit 之后，与它在那一路上的名次无关**。这就是
+「RRF 在构造上惩罚只有一路看得见的对象」的精确含义，也正是保底席位必须按**通道名次**而非融合名次判定的理由。
+
+观测与之吻合：该 Diagram 在修复后的三轮里 `fused_score` **都恰好是 0.01389**，即 `1/(60 + 12)`，单通道贡献的
+精确值；而 **run 1 的十个席位全部是两路命中，最低者 0.02573**，高于 Diagram 的 0.01389。（不要把这条观测推成
+全局命题：run 3 就同时坐了**两个**单通道 hit——Diagram 在第 9 位 0.01389，`8bae5867c514` 在第 10 位
+`v=5 / l=None / 0.01538`。构造性的那条界才是普适的。）
+
+**译文逐轮不同，正是「翻译把非确定性带进检索」的直接实据。** 四轮译文实测：run 1 / run 2
+`What are the three stages of technology investment by agents?`；run 3
+`What are the three stages of investment in agent technology?`；run 4
+`What are the three stages of agents' investment in technology?`。三种措辞**都不含 `Agency`**，与索引里印的
+`Agency` 实词交集为 0，所以每一轮词法通道都看不见这个 Diagram（修复后三轮 `lexical_rank` **全为 `None`**）。
+这同时说明席位修复不是靠运气：**在译文措辞随机变化的情况下它稳定生效**。
+
+**`k01` / `k02`：缺口不是变小了，是变危险了**（本轮最重要的发现）
+
+修完前三项之后，`Thailand 1H26 VONB` / `泰国 1H26 VONB` 从「安全地拒答」变成了 `status=answered` 并给出
+**错误数字**。**正确答案是 $514m。**
+
+核实过 pinned release 与原始 PDF 第 13 页：该页（`ASEAN: 32% of VONB; Strengthening Growth Momentum in 2Q`，
+section `GROWTH ENGINES`）**并排印着三张 `VONB ($m)` 柱图**——AIA Thailand **514**（member
+`a05e27202ea4…`）、AIA Singapore **294**（`36f5b652e8e0…`）、AIA Malaysia **232**（`3e0a86925a4e…`），
+三栏的要点文字也各自对应 Bangkok Bank / Citibank·IFA&Broker / Public Bank。交叉验算
+514 + 294 + 232 = 1040 ≈ 32% × Group VONB $3.2b，自洽。
+
+**四轮冷跑共 8 次作答，没有一次答对**：$294m（新加坡）**5 次**、$232m（马来西亚）**3 次**、
+$514m（泰国）**0 次**——逐次为 run 1 `k01`=294 / `k02`=294，run 2 / 3 / 4 均为 `k01`=232 / `k02`=294。
+这不是某一个固定的错绑定，是模型在三栏之间**随机猜**。
+
+机制：**region 元数据是页级的**——p.13 上每个 member 的 `regions` 都是
+`('ASEAN','AIA Thailand','AIA Singapore','AIA Malaysia')`，三张图完全无法区分；`4760821` 的整词匹配让
+`Thailand` 匹配上 `AIA Thailand`，过滤器于是放行全部候选，模型只能靠同页共现的文本块猜绑定，猜错了。
+chart IR 自己的 confidence note 早就写着 `the category-to-value association is unproven`，但没有任何东西
+表达「哪一栏属于哪个国家」。
+
+**判定**：这比原来的缺口**更严重**——原先是安全拒答，现在是**带着真实 provenance 的错误数字**（`294` 与
+`$m` 都是页面上的逐字观测、bbox 真实）。所以 `k01` / `k02` 的 `expected` 保持 `abstained` +
+`known_gap: true`，**绝不冻结成 answered**，并作为一条**新的、更高严重度的已知缺口**记录。建议修法是
+**member 级的列 / 卡片内 region 绑定**（未实现）：三张图的 bbox 与三个国家标题的 bbox 在 x 轴上完全可分，
+所以这个绑定是可推导的。
+（提醒：金标 JSON 里 `k01` 的 `known_gap_detail` 目前只写了 `$294m` 这一种错法，实测还会答 `$232m`；
+那是数据文件，本轮未改，留给下次代码提交一并修。）
+
+**检索是确定性的，波动全在答案模型**（逐例比对了 run 2 / 3 / 4——同一份最终代码——的 `member_ids`）
+
+- **22 例里有 20 例三轮 `member_ids` 逐条完全相同，连顺序都一样。** 对**未触发翻译**的问题，前置过滤 +
+  两路通道 + 融合 + 席位是**完全确定性**的。
+- **例外恰好是那两道会触发翻译的中文问题：`p06-donut-zh` 与 `p11-diagram-zh`**，三轮的 member 集合互不
+  相同。原因是结构性的：译文来自一次真实模型调用，而第 2 项改动之后译文**正是词法通道打分的那个字符串**
+  （再加 Amendment 1 的前置过滤并集），所以**一道被翻译的问题，它的检索输入本身就是模型输出**——检索机制
+  没有随机性，非确定性是从翻译调用继承来的。**这正是 `p06` 必须用 `any_of` 枚举两种 `filters_applied` 的
+  根本原因**：钉死任何一种都是在说假话。
+- 佐证：`k02-region-thailand-zh` 虽是中文但**不被翻译**（按 ADR 0018 Decision 4 的实词探针，`VONB` 自己就
+  能词法打分），于是它三轮 `member_ids` 逐条相同。
+
+据此，席位修复之后的三次单例失败都能干净地归因到答案模型（run 2 的 `p06` 除外——它归因到翻译调用本身，
+见上一条）：
+
+- run 2 的 `p05-donut-title-only-en`：模型把 claim-2 的 member id 打短了（57 位十六进制而非 64），被
+  `model_output_invalid: unknown member` 正确拒绝、进而整条答案 abstain。**与本轮任何改动无关**；run 1 与
+  此前所有集成轮次该例都 pass。
+- run 3 的 `p13-explicit-period-filter-en`：`abstained / model_declined`，detail `ambiguous`，0 claims。
+  `p13` 就在上面那 20 例里——三轮 10 个 `member_ids` 与 `filters_applied`
+  （`{"periods":["1H26"],"regions":[]}`）逐条一致，run 1 / run 2 / run 4 都答出 72% 并正确引用
+  `p.18 points.point-agency.value`。**波动 100% 来自答案模型。**
+- run 4 的 `p11-diagram-zh`：Diagram 已入席、答案成立，只是三个节点只写了两个。
+
+所以：**真实金标是模型不确定的**——四轮各有一例失败，且失败原因互不相同（`p11` 席位 / `p05`+`p06` /
+`p13` / `p11` 少写一条）。一轮的单点结果不能当作确定性结论，判断是否回归要看**跨轮的一致性**。
+
+**扫参新数字：拿探针上 1 条事实，换真实金标上 3 个用例**
+
+ADR 0018 的 125-fact 离线探针上，采用实词预算 K=2 之后：r@3 52.8% / r@5 56.8% / **r@10 73.6%（92/125）** /
+**r@20 79.2%** / MRR 0.453，routed bm25 : rrf = 100 : 150。此前的纯 token 判据（等价于 K=4）是
+r@10 **74.4%（93/125）** / r@20 78.4% / MRR 0.476 / routed 118 : 132。即 **@10 少 1 条事实、@20 多 1 条**。
+丢的那条是 `p09-a424f3446bd4`（`Strong Underlying Growth Drivers 1H26`，5 token / 4 实词，BM25 恰好第 1 名
+→ 融合第 11）——它本身就属于「5 token 自然短语」那一类，只是碰巧 BM25 命中了。**K=4 能守住 74.4%，但对
+本次无效**：`Agency share of VONB 1H26` 只有 3 个实词，必须 K ≤ 2 才会落回 rrf。
+
+要诚实看待这个交换：探针语料 **100% 是「短标签 + 期间」**（1–2 个实词），根本没有这种问句形状，因此
+**没有能力度量它**——探针上的 0.8 个百分点是它能看见的量，真实金标上的 3 个用例是它看不见的量。完整扫参表
+（K = 0…4）见 ADR 0018 Amendment 2。
+
+**上一节「遗留（四条待拍板）」的最终状态**
+
+| 原条目 | 状态 |
+| --- | --- |
+| 1. `≤5 token` 分支只看 token 数 | **已落地**，就是上面第 1 项（`MAX_BM25_ONLY_SHORT_CONTENT_WORDS = 2`）。原文要求「确认 recall@10 74.4% 的天花板没丢」——**重跑了，天花板丢了 1 条事实（73.6%）**，是有意识的取舍。原文「靠 `select_context` 扩座位救不了」对 `p07`/`p13`/`p14` 成立（同页另一张图占掉了 chart 席位），但对 `p11` 恰恰相反，见第 5 项。 |
+| 2. 译文同时替换了两个通道 | **已落地**，就是上面第 2 项（`lexical_query`）。原文记的「译文第 24 名」经真实 embedder 复测为**第 32 名**。原文预期「`p06` 的 `Y2026` 问题只剩一个决定」——实际保留了并集行为，改成金标用 `any_of` 枚举实测到的两种集合。 |
+| 3. `SYSTEM_RULES` 规则 1 与 chart 校验器自相矛盾 | **已落地，但改的不是原文说的那一侧**：`SYSTEM_RULES` 保持逐字不变（避免整个补全缓存失效），改的是校验器（上面第 3 项），并顺带堵上了 `294%` 被误放行的漏洞。落地后暴露出 `k01`/`k02` 的真相比原以为的更糟，见上。 |
+| 4. 金标有两处在说假话，需重新冻结 | **已落地，但结论与原计划不同**：`p01`/`p15` 与 `p06` 用 `any_of` 重钉（上面第 4 项）；`k01`/`k02` 则**永久保持 `abstained`**——原文说「等第 3 条落地后再重新冻结才是诚实的做法」，第 3 条落地了，而诚实的做法恰恰是**不**把它们冻结成 `answered`：它们现在给的是错数字，不是对答案。 |
+
+**本节新增的待拍板项**
+
+1. **`k01` / `k02` 的 member 级 region 绑定**（见上）——未实现，是本轮之后仍然敞着的那条 region 缺口。
+2. **补全调用没有固定采样参数。** `adapters/json_completion.py` 构造请求体时**没有设 `temperature` /
+   `top_p` / `seed`**（`grep -rn "temperature\|top_p" src/enterprise_pdf_rag/` 零命中），走的是 provider
+   默认采样。结合上面「检索是确定性的」那组实测：每轮约 1 例的波动**全部**来自答案模型，不是检索、也不是
+   本轮改动。可以考虑固定采样参数，但那会**让整个补全缓存失效、真实金标要整体重跑**，属用户拍板范围，
+   **本轮未做，也没有改任何代码**。
+
 ## 本轮集成：四条分支合入 `main`（2026-09-21）
 
 > 证据在本机 `data/validation/generic-chat-2026-09-21/integration/`（`data/*` 为 git 忽略，同此前各轮）：
@@ -81,16 +279,18 @@ QA 四门比值 1.0000、0 编造，demo `ALL CHECKS PASSED`。**没有出现已
 | 用例 | 性质 |
 | --- | --- |
 | `p01` / `p15` | **已答对**，只是引用了 `p.7 points.point-1h26-roe-17.5.value` 而非金标冻结的 p.3 引文。两条证据都成立，金标把 `required_claims` 钉得过死。 |
-| `p06` | 译文 `2026 first half…` 多推出一个 `Y2026` 期间。这是用户拍板的并集行为的直接后果，金标 `filters_expected` 已过期。 |
-| `p07` / `p13` / `p14` | **ADR 0018 真实回归**：`classify_query` 只看 token 数，`Agency share of VONB 1H26`（5 token / 3 实词）被判 `bm25_only`，甜甜圈从 rrf 第 7 名掉到 BM25 第 12 名（`p13` 更是掉出 top-20）。 |
-| `p11` | **ADR 0018 真实回归**：中文原句在多语 embedder 上向量第 12 名（能进座位），换成译文后掉到第 24 名、全通道出局。翻译反而伤了向量通道。 |
-| `k01` / `k02` | **缺口已移位**：地区整词匹配让泰国 VONB 真的被检索到了，但模型按 `SYSTEM_RULES` 规则 1「带上单位」写成 `294$m` / `232 $m`，而 chart 的 source display 是 `294` / `232`（单位是另一个字段）——prompt 与校验器自相矛盾。 |
+| `p06` | 译文 `2026 first half…` 多推出一个 `Y2026` 期间。这是用户拍板的并集行为的直接后果，金标 `filters_expected` 钉死了并集之前的那一种。**已解决**：并集行为保留，`filters_expected` 改用 `any_of` 枚举两次冷跑实测到的两种集合（上一节第 4 项）。 |
+| `p07` / `p13` / `p14` | **ADR 0018 真实回归**：`classify_query` 只看 token 数，`Agency share of VONB 1H26`（5 token / 3 实词）被判 `bm25_only`，甜甜圈从 rrf 第 7 名掉到 BM25 第 12 名（`p13` 更是掉出 top-20）。**已解决**：该分支补了实词预算，见上一节第 1 项。 |
+| `p11` | **ADR 0018 真实回归**：中文原句在多语 embedder 上向量第 12 名（能进座位），换成译文后掉出去、全通道出局。翻译反而伤了向量通道。（这里记的「第 24 名」后经真实 embedder 复测：向量吃译文时第 **32** 名、吃原句时第 **12** 名，而词法侧越过 `channel_limit = 50`、信封里 `lexical_rank` 为 `None`；**已解决**，见上一节第 2、5 项。） |
+| `k01` / `k02` | **缺口已移位**：地区整词匹配让泰国 VONB 真的被检索到了，但模型按 `SYSTEM_RULES` 规则 1「带上单位」写成 `294$m` / `232 $m`，而 chart 的 source display 是 `294` / `232`（单位是另一个字段）——prompt 与校验器自相矛盾。**后续**：这条矛盾已从**校验器侧**解掉（不是这里提议的改 `SYSTEM_RULES`），但修完它们并没有答对——p.13 并排印着三国的 `VONB ($m)` 图，正确答案是 **$514m**，八次作答全是 294 或 232。缺口换成了更严重的 region 页级绑定，见上一节。 |
 
 三条新问题：`Product Mix Participating` **答对 53%**（引 `p.18 points.point-participating.value`）；
-`泰国 1H26 VONB` **检索成功但卡在上面那条单位矛盾**；`Summarise the Growth Engines section for Hong Kong`
+`泰国 1H26 VONB` **检索成功但卡在上面那条单位矛盾**（**已过期**：单位矛盾已修，现在卡在 region 页级绑定，会答出同页另一个国家的数字，见上一节）；`Summarise the Growth Engines section for Hong Kong`
 把超时放到 120s 后**不再 503**（53.3s 正常返回），但模型正文写了两个没接地的百分比，被散文门如实拒答。
 
 **遗留（四条待拍板，都不是我能单方面决定的行为变更）**
+
+> 四条**均已落地**，但第 3、4 条的结论与这里的原计划不同。逐条状态见上一节末尾的表；以下保留原文作为当时的判断记录。
 
 1. **`p07` / `p13` / `p14`：`answers/query_mode.py:136` 的 `≤5 token` 分支只看 token 数。** ADR 0018 的
    125-fact 探针语料都是「短标签 + 期间」（1–2 个实词），而 `Agency share of VONB 1H26` 是 3 个实词的自然
@@ -207,10 +407,10 @@ QA 四门比值 1.0000、0 编造，demo `ALL CHECKS PASSED`。**没有出现已
 
 **做了什么**（最小改动，TDD）
 
-1. **通道选择**（新 `answers/query_mode.py`，纯 stdlib、零模型、零 I/O）。`classify_query(question, *, lexical_hits)`：token ≤ 5，或含数字且内容词 ≤ 1 → `bm25_only`；词面通道零命中 → `vector_only`；其余 → `rrf`。只测「含数字」不测「含期间」—— `processing/periods.py` 认得的每种期间写法都带数字，测试钉住了这条。`answers/` 不许 import SDK，所以 `tokenize_query` 复述了词面通道的分词器，并有一条测试逐字段比对两者输出（token 预算若数的不是 BM25 真正打分的 token 就没有意义）。
-2. **阈值来自离线扫参**。用 `facts.jsonl` 里每条事实、每种问法、三个通道的名次，把 (N, M) 在 0…12 × 0…12 全跑一遍。这个规则族的上限**就是纯 BM25**（125 条里 93 条命中 @10），没有任何 (N, M) 能超过它；在并列到顶的若干组里取**改写查询数最少**的一组 (5, 1)（250 条探针查询改写 119 条，48%）。理由写在 ADR：探针问的全是「短标签 + 期间」，更大的 N 等于把没有证据的部分外推到叙事型问题上，而向量通道正是为后者存在的。
-3. **单通道 = 与空排名做一次融合**（`adapters/hybrid_search.py`）。`search(..., mode="auto")` 返回 `SearchOutcome(mode, hits)`；`bm25_only` 完全不调 `document.search`，**每个请求少一次 embedding 调用**；分值口径不变，因为所有 mode 都走同一个 `fuse()`（单边排名得分仍是 `1/(k+rank)`），未用通道的 rank/score 为 `None`。ADR 0012 的视觉对象保底席位逻辑一行没动。
-4. **查询翻译**（新 `adapters/query_translation.py`）。触发条件不是「整句词面零命中」而是「**内容词**（去虚词、去数字后）零命中」—— 这是关键：`2026 上半年 分销渠道 占比` 里的 `2026` 本身就命中，按整句判定这个功能对它要针对的用例**永远不会触发**。一次有预算、可缓存的 `complete_text_json`（task 盐 `query-translation-v1`，strict `{english_query, source_language}`，规则禁止回答 / 禁止添加信息 / 数字与专有名词逐字保留）。**译文只进两个检索通道**；prompt、period / region 前置过滤、散文数字门用的都还是原问题，claim 仍逐字比对文档英文原文。`SYSTEM_RULES` 加第 6 条：用提问语言作答，但 claim 的 `text` 永远是证据原文逐字照抄。
+1. **通道选择**（新 `answers/query_mode.py`，纯 stdlib、零模型、零 I/O）。`classify_query(question, *, lexical_hits)`：token ≤ 5，或含数字且内容词 ≤ 1 → `bm25_only`（**短查询那一支已被取代**：现在还要求内容词 ≤ 2，见上方「真实金标回归收尾」第 1 项与 ADR 0018 Amendment 2）；词面通道零命中 → `vector_only`；其余 → `rrf`。只测「含数字」不测「含期间」—— `processing/periods.py` 认得的每种期间写法都带数字，测试钉住了这条。`answers/` 不许 import SDK，所以 `tokenize_query` 复述了词面通道的分词器，并有一条测试逐字段比对两者输出（token 预算若数的不是 BM25 真正打分的 token 就没有意义）。
+2. **阈值来自离线扫参**。用 `facts.jsonl` 里每条事实、每种问法、三个通道的名次，把 (N, M) 在 0…12 × 0…12 全跑一遍。这个规则族的上限**就是纯 BM25**（125 条里 93 条命中 @10），没有任何 (N, M) 能超过它；在并列到顶的若干组里取**改写查询数最少**的一组 (5, 1)（250 条探针查询改写 119 条，48%）。**现行规则是 100 条 / 250，40%。****后续取代**：纯 token 判据对「5 token 的自然短语」失效，短查询那一支补了实词预算 K=2，代价是探针 r@10 74.4% → 73.6%（r@20 78.4% → 79.2%），见 ADR 0018 Amendment 2。理由写在 ADR：探针问的全是「短标签 + 期间」，更大的 N 等于把没有证据的部分外推到叙事型问题上，而向量通道正是为后者存在的。
+3. **单通道 = 与空排名做一次融合**（`adapters/hybrid_search.py`）。`search(..., mode="auto")` 返回 `SearchOutcome(mode, hits)`；`bm25_only` 完全不调 `document.search`，**每个请求少一次 embedding 调用**；分值口径不变，因为所有 mode 都走同一个 `fuse()`（单边排名得分仍是 `1/(k+rank)`），未用通道的 rank/score 为 `None`。ADR 0012 的视觉对象保底席位逻辑一行没动（**后续已改**：提升窗口改按通道名次判定，见上方「真实金标回归收尾」第 5 项与 ADR 0018 Amendment 3）。
+4. **查询翻译**（新 `adapters/query_translation.py`）。触发条件不是「整句词面零命中」而是「**内容词**（去虚词、去数字后）零命中」—— 这是关键：`2026 上半年 分销渠道 占比` 里的 `2026` 本身就命中，按整句判定这个功能对它要针对的用例**永远不会触发**。一次有预算、可缓存的 `complete_text_json`（task 盐 `query-translation-v1`，strict `{english_query, source_language}`，规则禁止回答 / 禁止添加信息 / 数字与专有名词逐字保留）。~~**译文只进两个检索通道**~~（**已取代**：译文现在只进**词法**通道与通道分类器，向量通道与 rerank 判官吃原句；period / region 前置过滤按 Amendment 1 取「原句 ∪ 译文」的并集。见 ADR 0018 Amendment 3）；prompt、散文数字门用的都还是原问题，claim 仍逐字比对文档英文原文。`SYSTEM_RULES` 加第 6 条：用提问语言作答，但 claim 的 `text` 永远是证据原文逐字照抄。
 5. **翻译不可用不报错**，退回向量单通道；`translate_query=False` 同理。检索计划只取决于问题本身、不取决于剩余预算，所以同一个问题永远命中同一批缓存条目（**曾经**加过「给合成调用留最后一次预算」的保护，因为它让同一问题第二次改走别的计划、打不中答案缓存，已撤回）。一次被翻译的问答 = **两次** live 调用，`llm_live_calls` 如实计数；重复提问两次都命中缓存。
 6. **信封**：`AnswerRequest` 增 `fusion_mode` / `translate_query`，`AnswerResult` 与 `AnswerEnvelope` 增 `fusion_mode` / `query_translation`（均为可选、有默认），`rag-chat-v1.json` 已重生成（**只增 92 行、零删除**，语义 diff 确认只多了这两个字段与一个 `$defs`）。`fusion_mode` 未暴露到 `RagChatRequest`——与 ADR 0012 的 `top_k`/`channel_limit` 同一立场。
 
@@ -219,7 +419,7 @@ QA 四门比值 1.0000、0 编造，demo `ALL CHECKS PASSED`。**没有出现已
 - 线上 release 已经漂了，而且**运行中途被别的进程重启过一次**（`processing` 在跑之前是 `4f6ce62fe0b7`、跑完变成 `22127d0fad13`，member 数 190 → 210，正好等于选中页数，与 `feat/page-window` 的每页页级 member 吻合）。前 20 条全部 `cache_hit=true` / `llm_live_calls=0`，而完成缓存的指纹是对整个 request payload（含 prompt 与检索到的证据）做的摘要 —— 所以这 20 条的 prompt 与历史录制逐字节相同，检索结果与钉定版一致，基线可信。
 - 唯一偏离的 `k02-region-thailand-zh` 是**跨 snapshot 比较**（重启后的第三个 snapshot），且是唯一 `llm_live_calls=1`（缓存未命中 = prompt 变了 = 证据变了）的一条，因此归因为 release 漂移而非行为变化。它仍然正确拒答、`claims` 为空、没有编造，只是拒答理由从 `model_declined` 变成了 `claim_not_in_evidence`（模型给的 `1168 $m` 与页面显示的 `1,168` 不符，被守卫拦下）。抗编造不变量未被破坏。
 
-**离线估算（前 / 后）**：125 条已索引事实、两种问法取并集、reranker 之前 —— recall@10 **70.4% → 74.4%**，recall@3 **46.4% → 55.2%**，recall@5 **51.2% → 58.4%**，MRR **0.381 → 0.476**；recall@20 持平 78.4%。@10 只差 5 条事实（薄），但越往前名次差距越大，而 prompt 席位就在最前面。
+**离线估算（前 / 后）**：125 条已索引事实、两种问法取并集、reranker 之前 —— recall@10 **70.4% → 74.4%**，recall@3 **46.4% → 55.2%**，recall@5 **51.2% → 58.4%**，MRR **0.381 → 0.476**；recall@20 持平 78.4%。（补实词预算后这组数字变成 r@10 **73.6%** / r@3 52.8% / r@5 56.8% / MRR 0.453 / r@20 **79.2%**，见 ADR 0018 Amendment 2。）@10 只差 5 条事实（薄），但越往前名次差距越大，而 prompt 席位就在最前面。（补实词预算后这个差距是 **4 条**：RRF 88/125 → 现行规则 92/125。）
 
 **离线验证**：`pytest tests/enterprise_pdf_rag -q` → **1106 passed**、25 skipped、1 failed。25 skipped 是整组金标离线回放：本机 `current-processing` 已变成 `4f6ce62fe0b7`，金标钉的是 `231c904c843e`，整组按设计 skip 并提示重新冻结 —— **因此中文三条用例（p06 / p11 / k02）本轮无法离线验证**。1 failed 是 `test_document_catalog_aia_smoke`（`Unsupported chart qualification scope`），**在 `main` 上同样红**，与本轮无关（已 `git stash` 复核）。
 
@@ -227,10 +427,10 @@ QA 四门比值 1.0000、0 编造，demo `ALL CHECKS PASSED`。**没有出现已
 
 1. **重新冻结金标并复测**：`current-processing` 已漂移，离线回放整组 skip。重新冻结后再跑两个 runner，中文路径才算验过。
 2. **离线金标 runner 固定 `fusion_mode="rrf"`**：它的向量通道是声明式的（直接返回用例脚本化 claim 引用的成员），BM25 单通道会拿掉它赖以成立的保证。通道选择改由 `test_query_mode.py` / `test_hybrid_search.py` 守，真实召回由真实 runner 负责。
-3. **`k02-region-thailand-zh` 仍是 known gap，但原因变小了**：检索已翻译，region 前置过滤仍从中文原问题推导、仍匹配不上文档自己的英文 vocabulary。是否也用译文推导过滤，是一个会把「拒答」变成「作答」的行为改动，需要证据再定（ADR 已列为被拒方案 + follow-up）。
+3. ~~**`k02-region-thailand-zh` 仍是 known gap，但原因变小了**~~（**已证伪**：原因不但没变小，缺口还变危险了——现在它会给出带真实 provenance 的**错数字**，见上方「真实金标回归收尾」。原文如下）：检索已翻译，region 前置过滤仍从中文原问题推导、仍匹配不上文档自己的英文 vocabulary。是否也用译文推导过滤，是一个会把「拒答」变成「作答」的行为改动，需要证据再定（ADR 已列为被拒方案 + follow-up）。
 4. **query embedder 变成「用到它的请求」的依赖**：没配 embedder 时 BM25 单通道问题照常 200（答案与配置齐全时逐字相同），需要向量通道的问题仍 503。与 opt-in reranker 同一规则，但这是 ADR 0011「missing group → 503 on its routes」措辞的一次实质收窄，已写进 ADR 0018 决定 7 与 ADR 0011 的修订指针。
 5. **预算**：非英文问答一次两调用，进程级 `APP_ANSWER_MAX_LIVE_CALLS`（200）能买的问答数相应减少。
-6. **中文效果未量化**：探针集全英文，无法离线评估翻译收益；上线后由用户复测。
+6. **中文效果未量化**：探针集全英文，无法离线评估翻译收益；上线后由用户复测。**已复测**：真实 embedder 探针把 `p11` 的通道名次逐个测了出来（原句向量第 12、译文第 32、译文词法第 59），结论是翻译伤了向量通道，见上方「真实金标回归收尾」第 2、5 项。
 
 ## 自然语言问答的冻结金标集与两个 runner（2026-09-20，分支 `feat/nl-gold-set`，未合并 `main`）
 
@@ -252,7 +452,9 @@ QA 四门比值 1.0000、0 编造，demo `ALL CHECKS PASSED`。**没有出现已
 
 **两条 known gap（行为没错，但不是想要的答案）**
 
-- `k01-region-thailand-en`（`Thailand 1H26 VONB`）：页面把泰国的值印在已验证 region 值 `AIA Thailand` 之下，`Thailand` 前置过滤留下的是别的候选，于是拒答。
+> **2026-09-21 更新**：「行为没错」这句已不成立。检索侧修通之后两条都会**作答**，而且答的是同页另一个国家的数字（正确答案 $514m，六次作答给的是 294 或 232）。缺口严重度上调，判定见上方「真实金标回归收尾」。以下保留当时的描述。
+
+- `k01-region-thailand-en`（`Thailand 1H26 VONB`）：页面把泰国的值印在已验证 region 值 `AIA Thailand` 之下，`Thailand` 前置过滤留下的是别的候选，于是拒答。（**已过期**：`4760821` 的整词匹配之后 `Thailand` 能匹配上 `AIA Thailand`，检索**确实到达** p.13；现在的问题是页级 region 元数据分不开同页三张国家图，见上方「真实金标回归收尾」。）
 - `k02-region-thailand-zh`（`泰国 1H26 VONB`）：中文地区名匹配不上文档自己的英文 vocabulary，**根本没推导出 region 过滤**，与英文那条是两个不同的缺陷。
 
 **离线验证**：`pytest tests/enterprise_pdf_rag -q` 由 1015 → **1063 passed**（新增 23 条 schema/judge 单测 + 25 条离线回放）；离线回放整组约 79s。mypy / ruff / 四个 check / `check_doc_drift` 见下方提交说明。
@@ -265,7 +467,7 @@ QA 四门比值 1.0000、0 编造，demo `ALL CHECKS PASSED`。**没有出现已
 
 **做了什么**（最小改动，TDD）：
 
-1. **视觉对象保底席位**（`adapters/answer_service.py::select_context`）：把 ADR 0012 的"已验证图表保底席位"推广为"每类可引用视觉对象各至多一席"——CHART 有显式值、DIAGRAM 有 ≥1 个带 label 的 node、FORMULA 有 `linear`；只看 fused 前 `2*top_k` 且不在 `top_k` 内的候选，从末位向前让座、**不让已持有可引用视觉对象的席位**，pending / 无 label 的不补、窗口外不补，只 resolve 仍缺类别的候选（`member_texts` 供 kind）。`processing/index_text.py` 的 Diagram 投影核对过：`reading_order` 含全部 node label，无需改。
+1. **视觉对象保底席位**（`adapters/answer_service.py::select_context`）：把 ADR 0012 的"已验证图表保底席位"推广为"每类可引用视觉对象各至多一席"——CHART 有显式值、DIAGRAM 有 ≥1 个带 label 的 node、FORMULA 有 `linear`；只看 fused 前 `2*top_k` 且不在 `top_k` 内的候选（**已放宽**：现在还收「任一通道自己的名次 ≤ `2*top_k`」的候选，见上方「真实金标回归收尾」第 5 项），从末位向前让座、**不让已持有可引用视觉对象的席位**，pending / 无 label 的不补、窗口外不补，只 resolve 仍缺类别的候选（`member_texts` 供 kind）。`processing/index_text.py` 的 Diagram 投影核对过：`reading_order` 含全部 node label，无需改。
 2. **散文数字门放行行首 / 句首枚举标记**（`answers/verify.py::prose_grounded`，`_ENUMERATOR_RE`）：`1.` / `2)` / `3、` / `(4)` / `第 5` / `Step 6` 在行首或句首（ASCII 句末标点后需空白，避免把 `17.5.` 的 `5.` 当序号；CJK 全角标点后不需要）视为序号剔除；正文里的金额 / 百分比 / 年份规则不变。
 3. **strict 响应 schema 离线守卫**（`tests/enterprise_pdf_rag/adapters/test_strict_response_schemas.py`）：参数化遍历 8 个 `complete_json` / `complete_text_json` 调用点的 9 个 `response_model`（`ModelAnswer`、`PageMetadataDTO`、`PageLayoutDTO`、`Image/Diagram/FormulaObservationsDTO`、`VisualDescriptionDTO`、`ChartObservationsDTO`、`FigureDescriptionDTO`），对 `_response_schema` 实际发出的 schema 断言：所有 properties 都在 `required`、`additionalProperties: false`、无 `prefixItems/oneOf/allOf/...` 等不支持关键字、`$ref` 只指 `#/$defs/`；另有 BUG-A 形状回归（pydantic 原始 schema 漏 `row/col/header`，发出的 schema 列全且可空）与"守卫对松散模型确实报错"的反例。9 个模型现状全部满足，无需改模型。
 
@@ -376,9 +578,9 @@ bash scripts/ci.sh                                              # 唯一完整�
 
 **做了什么**（[ADR 0013](adr/0013-page-metadata-and-prefilters.md)）：新 processing 阶段 `page_metadata`（每页一次文本模型调用，`title / section / page_type / language / periods / regions` 每个值逐字来自该页 span 或连续 ≤3 个 span 的拼接，否则剔除并记诊断；期间确定性规范化）；文档级 `display_title / report_period / years / regions` 零模型折叠、加载时重算校验；索引文本 policy **v4** = `display_title | page_title | section` 一行上下文头 + ADR 0012 投影（描述与引用原文不变，旧快照按 policy 门控）；`AnswerRequest.filters`（只有**期间**与**地区**两维；省略即从问题自动抽取，地区只在本文档自己的词表里逐字匹配；候选 < `top_k` 去过滤重试并标 `filters_relaxed`）；封面 / 目录页默认不进候选；多文档按封面标题独有词 + 年份路由；`/v1/models` 名称用封面标题；引用带 `page_title`。CLI：`ingest --stage metadata|semantics`、新 `metadata` 子命令。契约 `document-catalog-v1` / `rag-chat-v1` / `aia-processing-v1` 只新增可选字段。
 
-**真实验证（AIA 前 20 页，证据 `data/validation/generic-chat-2026-09-21/page-metadata/`）**：`metadata` 对 `da1065fc…` 跑 20 页 = 20 次真实调用（预算 25；后两次 v1.1 / v1.2 重跑均从 model-cache 回放，0 次调用），20/20 `succeeded`；`display_title = "INTERIM RESULTS PRESENTATION"`（封面两行 span 拼接），`report_period = 1H2026`，`years = 2022–2026`，34 个地区词；`qualify` 189 / 52 / 9；`index` 41 s → processing `00d5c714…`、snapshot `99f47f48…`（2560 维，policy v4）；`publish` 把 `current-processing` 从 `da1065fc…` 切到 `00d5c714…`（`current-manifest` 仍 `e702bf1c…`，shasum 前后见 `pointers-*.sha256`）；8768 / 3200 用报告里的 stop / start 命令重启，16 s 就绪，`/v1/models` 显示 `INTERIM RESULTS PRESENTATION (df902346791b)`。HTTP 复测 11 例全部 200：ISSUE-2 三问与 ROE 控制组照旧答对（p.18 donut 现为融合第 1 名）；新增 `1H26 Distribution Mix`（不带 VONB）与中文 `2026 上半年 分销渠道 占比` 都从 p.18 答出 72% / 28%；显式 `filters {"periods":["1H26"]}` 应用未放宽，`{"regions":["Mars"]}` 放宽（`filters_relaxed: true`，回放无过滤答案）；`What was the VONB growth in 2024?` 收窄到 Y2024 页答 `+11%`（p.6）。**未过**：`Thailand 1H26 VONB`（地区等值只命中标 `Thailand` 的 p.4 / p.5，p.13 标的是 `AIA Thailand`，模型 `not_in_context` 拒答）；中文 `泰国 1H26 VONB`（词表是英文，抽不到地区过滤，拒答）——跨语言与地区等值是已知缺口。
+**真实验证（AIA 前 20 页，证据 `data/validation/generic-chat-2026-09-21/page-metadata/`）**：`metadata` 对 `da1065fc…` 跑 20 页 = 20 次真实调用（预算 25；后两次 v1.1 / v1.2 重跑均从 model-cache 回放，0 次调用），20/20 `succeeded`；`display_title = "INTERIM RESULTS PRESENTATION"`（封面两行 span 拼接），`report_period = 1H2026`，`years = 2022–2026`，34 个地区词；`qualify` 189 / 52 / 9；`index` 41 s → processing `00d5c714…`、snapshot `99f47f48…`（2560 维，policy v4）；`publish` 把 `current-processing` 从 `da1065fc…` 切到 `00d5c714…`（`current-manifest` 仍 `e702bf1c…`，shasum 前后见 `pointers-*.sha256`）；8768 / 3200 用报告里的 stop / start 命令重启，16 s 就绪，`/v1/models` 显示 `INTERIM RESULTS PRESENTATION (df902346791b)`。HTTP 复测 11 例全部 200：ISSUE-2 三问与 ROE 控制组照旧答对（p.18 donut 现为融合第 1 名）；新增 `1H26 Distribution Mix`（不带 VONB）与中文 `2026 上半年 分销渠道 占比` 都从 p.18 答出 72% / 28%；显式 `filters {"periods":["1H26"]}` 应用未放宽，`{"regions":["Mars"]}` 放宽（`filters_relaxed: true`，回放无过滤答案）；`What was the VONB growth in 2024?` 收窄到 Y2024 页答 `+11%`（p.6）。**未过**：`Thailand 1H26 VONB`（地区等值只命中标 `Thailand` 的 p.4 / p.5，p.13 标的是 `AIA Thailand`，模型 `not_in_context` 拒答）；中文 `泰国 1H26 VONB`（词表是英文，抽不到地区过滤，拒答）——跨语言与地区等值是已知缺口。（**已解决**：`4760821` 的整词匹配让 `Thailand` 命中 `AIA Thailand`，两条现在都能检索到 p.13。但随之暴露出更严重的一条——页级 region 元数据分不开同页三张国家图，两条都会答出别国的数字，见上方「真实金标回归收尾」。）
 
-**遗留**：地区匹配的同义 / 包含（`AIA Thailand` vs `Thailand`）、中文地区词、免责声明页污染地区词表、封面无公司名时路由只能靠年份、`chart_qa_bar_promotion` 追加成员时 plan policy 回落到 bar-v2（该路径的 BM25 会丢上下文头）、mypy 在本机对 `src/ragspine/common/observability/adapters/otel.py:49` 报 `opentelemetry` 无 `trace`（main 同样，环境问题，与本分支无关）。
+**遗留**：~~地区匹配的同义 / 包含（`AIA Thailand` vs `Thailand`）~~（**已解决**，`4760821` 整词匹配 + ADR 0018 Amendment 1；但 member 级的列内 region 绑定仍缺，见上方「真实金标回归收尾」）、中文地区词、免责声明页污染地区词表、封面无公司名时路由只能靠年份、`chart_qa_bar_promotion` 追加成员时 plan policy 回落到 bar-v2（该路径的 BM25 会丢上下文头）、mypy 在本机对 `src/ragspine/common/observability/adapters/otel.py:49` 报 `opentelemetry` 无 `trace`（main 同样，环境问题，与本分支无关）。
 
 ## 会话收尾状态（2026-09-20，下一 session 从这里接手）
 
