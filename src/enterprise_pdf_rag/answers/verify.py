@@ -93,6 +93,10 @@ _ENUMERATOR_RE = re.compile(
     r"(?=\s|[:：]|$)",  # noqa: RUF001 — the fullwidth colon after ``第 1`` / ``Step 1`` is the CJK form
     re.MULTILINE,
 )
+# The number inside a claimed display, so whatever unit was printed around it can be split off:
+# ``294$m`` / ``294 $m`` / ``$294m`` / ``$294 m`` / ``8.2%`` / ``1,168 $m`` / ``-294 $m``. An
+# accounting negative keeps its brackets — they are how a figure prints the sign, not a unit.
+_CLAIMED_NUMBER_RE = re.compile(r"\(\s*[-+]?\d[\d,]*(?:\.\d+)?\s*\)|[-+]?\d[\d,]*(?:\.\d+)?")
 # A point id is derived from what the figure prints, so a value in the label puts a decimal
 # point inside it (``point-1h26-roe-17.5``). Anchored by ``fullmatch`` on the ``.value``
 # suffix, so the id may hold dots but the path still has to end in the value field.
@@ -122,6 +126,55 @@ def _decimal(token: str) -> Decimal | None:
         return Decimal(token.replace(",", "").replace("%", "").strip())
     except InvalidOperation:
         return None
+
+
+def _split_unit(text: str) -> tuple[str, str]:
+    """``"$294m"`` -> ``("294", "$m")``: the number as written, and the unit printed around it.
+
+    Only the unit moves. The number keeps every character it was written with — ``294.0``
+    stays ``294.0`` and ``1,168`` keeps its separator — so splitting can never turn one
+    figure into another. Whatever sits on either side of the number is the claimed unit,
+    joined in reading order; a text with no number at all is returned whole, with no unit,
+    and the caller compares it as it always did.
+    """
+    folded = _exact(text)
+    match = _CLAIMED_NUMBER_RE.search(folded)
+    if match is None:
+        return folded, ""
+    unit = f"{folded[: match.start()].strip()}{folded[match.end() :].strip()}"
+    return _exact(match.group()), _exact(unit)
+
+
+def _display_mismatch(
+    text: str, display: str, unit: str, value: Decimal
+) -> tuple[AbstainReason, str] | None:
+    """Why ``text`` does not state this point's number, or ``None`` when it does.
+
+    ``prompt.SYSTEM_RULES`` asks a chart claim for "the displayed value with its unit", which
+    was written for a figure that prints its own ``%``. A ``$m`` figure prints ``294`` under a
+    ``VONB ($m)`` caption, so the model writes ``294$m`` while the source display is the bare
+    number. The unit is therefore split off the claim and has to be the point's own unit
+    verbatim; what is left must still be the display. Nothing is relaxed to "the number
+    matches": a unit the point does not print is a rejection of its own, said as one.
+    """
+    if _norm(text) == _norm(display):
+        return None
+    number, claimed_unit = _split_unit(text)
+    printed_unit = _exact(unit)
+    if claimed_unit and claimed_unit != printed_unit:
+        return AbstainReason.UNIT_MISMATCH, (
+            f"claimed unit {claimed_unit!r} is not the point's unit {printed_unit!r}"
+            if printed_unit
+            else f"claimed unit {claimed_unit!r} but the point prints no unit"
+        )
+    claimed = _decimal(number) if _NUMBER_RE.fullmatch(number) else None
+    if _norm(number) == _norm(_split_unit(display)[0]) or (
+        claimed is not None and claimed == value
+    ):
+        return None
+    return AbstainReason.CLAIM_NOT_IN_EVIDENCE, (
+        f"claimed {text!r} differs from the source display {display!r}"
+    )
 
 
 def _numbers(text: str) -> tuple[tuple[str, Decimal], ...]:
@@ -404,13 +457,9 @@ def _value_claim(
     if not supported(value):
         return _reject(claim, AbstainReason.UNSUPPORTED_PRECISION, "value precision unsupported")
     display = printed(context, point)
-    claimed = _decimal(claim.text) if _NUMBER_RE.fullmatch(claim.text.strip()) else None
-    if _norm(claim.text) != _norm(display) and claimed != value:
-        return _reject(
-            claim,
-            AbstainReason.CLAIM_NOT_IN_EVIDENCE,
-            f"claimed {claim.text!r} differs from the source display {display!r}",
-        )
+    mismatch = _display_mismatch(claim.text, display, point.unit.text, value)
+    if mismatch is not None:
+        return _reject(claim, *mismatch)
     prefix = f"points.{point.point_id}"
     fields: list[tuple[str, Evidence, str]] = [
         (f"{prefix}.value", point.value.evidence, display),
