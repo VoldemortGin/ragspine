@@ -4,6 +4,44 @@
 
 > 阅读顺序：先看下方“恢复开发记录”；后续旧暂停快照保留作证据，不能作为实时发布或服务状态。
 
+## 问答审计库：一问一行，含送进模型的最终 prompt（2026-09-21，分支 `feat/answer-audit-db`，未合入 `main`）
+
+> 从 `main` `20dae5b` 拉出，独立 worktree，**没有重启任何服务，线上 8768 / 3200 全程没被碰过**。
+
+`model-cache/contexts/<fingerprint>.json` 存的是**一次模型调用**的 wire body，回溯一次问答时它答不了这些问题：
+过滤器把候选收到了什么、两个通道各自把哪个成员排在第几、哪些成员真的坐进了 prompt、校验完丢掉了哪几条 claim。
+新增 `adapters/answer_audit.py`：一个本地 SQLite 日志，**一问一行，写两次**。
+
+- **第一次写在模型调用之前**：prompt 组装完（`build_prompt` 的返回值）就插入一行，于是行里已经有 `prompt_system`
+  / `prompt_user` 的**逐字原文**、融合排名逐条的两通道名次与分数、预过滤与是否放宽、页窗口、进入 prompt 的成员。
+- **第二次是同一 id 的更新**：模型原始输出 `model_output_raw`、`request_fingerprint`、`llm_live_calls`、`cache_hit`、
+  `status` / `abstain_reason` / `abstain_detail`、通过与被拒的 claim、`answer_text`、`elapsed_ms`。
+- **抛错路径也收尾**：`DependencyUnavailable`（预算用尽、传输失败）先回填 `error` 再抛，行不会烂在"开着"的状态。
+- **写库失败只记 warning**，回答一个字不变；开不出行就不去收它。
+
+`AnswerService` 侧的插入刻意做到最小：一个前置 `_begin_audit(...)` + 三个出口各一句 `_close_audit(...)`，
+`audit` 是可选构造参数（`None` 即不写，离线门与脚本 runner 默认不写）。`core/settings.py` 新增
+`answer_audit_enabled`（`APP_ANSWER_AUDIT_ENABLED`，默认 true）与 `answer_audit_path`（`APP_ANSWER_AUDIT_PATH`，
+默认 `<ingestion_root>/answers-audit.sqlite`），由 document-catalog 组合根注入。只读回捞是
+`enterprise-pdf-rag audit --db … [--last N] [--fingerprint X] [--question-like …] [--show ID]`，不起服务、不调模型。
+
+**真实验证**（2026-09-21，进程内 ASGI，全新空 `APP_INGESTION_DIR=data/ingestion-audit`，`APP_LEGACY_DOCUMENT_ROOTS`
+指向同一份 AIA 发布 `22127d0fad13` / `42939d6a4e87` / `df902346791b`，真实 Qwen3 embedder + reranker 隧道与真实
+`gpt-5.6-luna`）：
+
+| id | 问题 | 结果 | live | ms |
+| --- | --- | --- | --- | --- |
+| 1 | `What was the Group's ROE in 1H26?` | answered，`17.5%`，引用 p.8 `points.point-1h26-roe-17.5.value` | 1 | 5071 |
+| 2 | `1H26 的 Distribution Mix 里,代理渠道(Agency)占比是多少?` | answered，`72%`，引用 p.18 `points.point-agency.value` | 1 | 4612 |
+| 3 | `2027 年的 VONB 预测值是多少?` | abstained，`model_declined` / `not_in_context` | 1 | 5515 |
+
+三条都核对过：库里的 `prompt_system` / `prompt_user` 与各自 `contexts/<fingerprint>.json` 的 `payload.messages`
+两条 content **逐字节相同**。字段表、CLI 用法与隐私边界写在
+[测试与通用 PDF 入库](testing-and-ingestion.md) 的"问答审计库"一节。
+
+**隐私**：这个库逐字存证据原文与答案正文，和 `contexts/` 同级别，是本机回溯产物——不外传、不随快照分发。
+`ragspine` 主包 `common/observability` 那条"只记码、不记正文"管的是那边的 trace，不是这个本地库。
+
 ## 三处确定性修复：采样、成员别名、列级地区绑定（2026-09-22，分支 `fix/determinism-alias-column`，未合入 `main`）
 
 > 从 `main` `693ee86` 拉出。pinned release `22127d0fad13` / snapshot `42939d6a4e87`，document `df902346791b`。

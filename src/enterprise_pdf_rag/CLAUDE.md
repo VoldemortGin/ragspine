@@ -1,6 +1,6 @@
 ---
 covers: src/enterprise_pdf_rag/
-verified-against: 370a9e3
+verified-against: a91ca6e
 ---
 
 # enterprise_pdf_rag — agent contract
@@ -71,13 +71,15 @@ adapters/     every SDK and I/O: pdfspine, http/ (FastAPI app factory; documents
               rerank borrowed from ragspine; the channels a query uses are chosen, not
               fixed — ADR 0018), query_translation.py (restate a question written outside
               the index's language), answer_service.py (one synthesis call per answer),
+              answer_audit.py (the local sqlite answer journal: one row per question, opened
+              with the prompt as sent and closed with the verified result),
               diagram_geometry.py + diagram_qualification.py + diagram_publication.py and
               pdfspine_formula.py + formula_qualification.py (the ADR 0015 proofs, receipts
               and replays), visual_requalification.py (re-prove a saved snapshot's visual
               objects from its stored branches), chart QA v1/v2, nl_gold.py (the frozen
               natural-language gold set's schema and the judge both its runners share)
 resources/    packaged prompts / static data
-cli.py        enterprise-pdf-rag ingest|metadata|qualify|index|publish|serve|chart-qa|demo|extract|llm-smoke
+cli.py        enterprise-pdf-rag ingest|metadata|qualify|index|publish|serve|audit|chart-qa|demo|extract|llm-smoke
               + AIA-sample-only ingest-aia|process-aia-layout|process-aia-semantics|index-aia-processing
 ```
 
@@ -111,6 +113,12 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   section" prompt long enough to need more), sampling seed `APP_ANSWER_SEED` (0; `temperature`
   is always `0.0`, a `seed` is sent only when one is configured — the sampling is inside the
   request body, so changing it misses every cached completion).
+- **Answer journal:** every answer writes one row to `<ingestion_root>/answers-audit.sqlite` — the
+  final `prompt_system` / `prompt_user` verbatim (opened *before* the call), the fused ranking with
+  each channel's seat, then the raw model output, the verified / rejected claims and the status.
+  `APP_ANSWER_AUDIT_ENABLED=false` writes nothing; `APP_ANSWER_AUDIT_PATH` moves the file. Read it
+  back with `enterprise-pdf-rag audit --db <path> [--last N] [--fingerprint X] [--question-like …]
+  [--show ID]` (no service, no model). It quotes the evidence verbatim: local file, never shared.
 - **Deploy:** `deploy/enterprise-pdf-rag/open-webui/` — `backend.Dockerfile` is not re-verified
   since the merge (local `../corespine` uv source; see ADR 0021 follow-ups).
 - **Benchmarks / gold:** `data/benchmarks/enterprise-pdf-rag/aia-2026-interim/` (its `manifest.json`

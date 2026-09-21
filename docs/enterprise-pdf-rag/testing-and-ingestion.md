@@ -430,6 +430,81 @@ bool | None`（`None` 取 settings，`True` / `False` 只覆盖这一次请求�
 
 `contexts/<fingerprint>.json` 另存**发给模型的最终完整请求体**，用于回溯：信封是 `request_fingerprint` / `created_at`（UTC）/ `endpoint_path` / `contract`（指纹盐）/ `task`（任务名，如 `page-metadata-v1`）+ `payload`，`payload` 即原样的 JSON 请求体（`model`、全部 `messages` 含 system 规则与证据块 / 页上下文 / 问题、`response_format` 的 schema、`max_completion_tokens` 等）；带图片的调用把 `image_url` 换成 `{"omitted": true, "sha256", "bytes"}`，其余字段一字不改。真实调用前写入，命中缓存回放时缺失则补写，同指纹**先写者胜**（不覆盖），写入失败只在该次记录的 `diagnostics.context_warning` 留码、绝不影响调用；记录里另有 `diagnostics.context_path` 指回它（相对 `model-cache/`）。**隐私**：这些文件逐字包含证据原文（报告内容），属本机排障产物，不要外传、不要随快照分发。
 
+### 问答审计库（`answers-audit.sqlite`）
+
+`model-cache/contexts/` 记的是**一次模型调用**的请求体；审计库记的是**一次问答的来龙去脉**，一问一行，可按时间、按指纹、按问题文本回捞。写它的是 `adapters/answer_audit.py`，库文件默认 `<ingestion_root>/answers-audit.sqlite`（WAL，读它不挡服务写）：
+
+```sh
+export APP_ANSWER_AUDIT_ENABLED=true                          # 默认 true；false 则一个字都不写，也不建文件
+export APP_ANSWER_AUDIT_PATH=/abs/path/answers-audit.sqlite   # 可省略；默认 <ingestion_root>/answers-audit.sqlite
+```
+
+一行写两次：**prompt 组装完、模型调用之前**先插入（此时检索已全部定局，将要发出的 prompt 原文也已成形），模型返回并逐字段校验完成后用同一 id 更新。抛错路径（`DependencyUnavailable`，如预算用尽 / 传输失败）同样回填 `error` 再抛。写库失败只留一条 warning，绝不改变回答——它观察这条链，不参与这条链。`AnswerService(audit=…)` 是可选参数，不传即不写，所以离线门与各脚本 runner 默认什么都不写。
+
+表 `answers` 的列：
+
+| 列 | 内容 |
+| --- | --- |
+| `id` / `started_at` / `finished_at` / `elapsed_ms` | 自增 id 与 UTC ISO 时间戳（毫秒精度） |
+| `question` / `translated_question` | 用户原问题；走过查询翻译（[ADR 0018](adr/0018-query-classification-and-translation.md)）时后者是那次翻译的英文，否则 NULL |
+| `document_sha256` / `processing_id` / `snapshot_id` | 钉死的文档与发布三元组 |
+| `filters_applied` / `filters_relaxed` / `fusion_mode` | 期间/地区预过滤（JSON）、是否因候选少于席位被放宽、实际跑的通道 |
+| `member_ids` / `fused` / `page_windows` | 进入 prompt 的成员（JSON）；融合排名里每条的 `member_id` + 两个通道各自的名次与分数（JSON）；每个页上下文块的页号 / 成员数 / 字符数 / 是否截断（JSON） |
+| `prompt_system` / `prompt_user` / `prompt_chars` | **送进模型的最终完整文本，逐字**；与 `contexts/<fingerprint>.json` 里 `payload.messages` 那两条 content 逐字节相同 |
+| `model_output_raw` | 模型返回的 JSON 原文（未解析）；抛错路径为 NULL |
+| `request_fingerprint` / `llm_live_calls` / `cache_hit` | 补全缓存指纹、本次真实调用数、是否缓存回放 |
+| `status` / `abstain_reason` / `abstain_detail` / `answer_text` | 最终结果；`answer_text` 只在 `answered` 时有值 |
+| `claims_verified` / `claims_rejected` | 通过校验的 claim 及其全部引用（成员、页号、页标题、字段路径、证据 id、逐字引文、行/列/表头）（JSON）；被丢弃的 claim 及原因（JSON） |
+| `error` | 抛错路径的错误码；正常路径为 NULL |
+
+索引：`request_fingerprint`、`started_at`、`document_sha256`。
+
+只读回捞走 CLI，不启动服务、不调用模型、不碰任何 provider：
+
+```sh
+enterprise-pdf-rag audit --db <path> --last 3            # 省略 --db 即按上面两个环境变量解析
+enterprise-pdf-rag audit --db <path> --question-like ROE
+enterprise-pdf-rag audit --db <path> --fingerprint 5580be
+enterprise-pdf-rag audit --db <path> --show 1            # 一次问答的全部字段 + 完整 prompt + 模型原始输出
+```
+
+2026-09-21 在真实模型上取的三行（进程内 ASGI，全新空 `APP_INGESTION_DIR`，线上 8768 / 3200 未被触碰）：
+
+```text
+   id  started_at (UTC)          ms  status     reason                  live  cache  fingerprint    chars  question
+    1  2026-09-21T16:07:50     5071  answered   -                          1  no     144ec8f7769a   13430  What was the Group's ROE in 1H26?
+    2  2026-09-21T16:07:57     4612  answered   -                          1  no     8e41efcf53c6    8497  1H26 的 Distribution Mix 里,代理渠道(Agency)占比是多少?
+    3  2026-09-21T16:08:03     5515  abstained  model_declined             1  no     5580be02eb1b    9167  2027 年的 VONB 预测值是多少?
+```
+
+`--show 1` 的开头（prompt 正文在此截短）：
+
+```text
+id                   1
+elapsed_ms           5071
+status               answered
+request_fingerprint  144ec8f7769ac04d0fbc1e80b76ac61c4444bfdfc23d51624cd54e2dd3ff4a4e
+filters_applied      {"periods": ["1H2026"], "regions": ["Group"]}
+filters_relaxed      yes
+fusion_mode          rrf
+claims_verified      [{"claim_id": "c1", "kind": "chart_value", "text": "17.5%", "value": "17.5", "unit": "%",
+                       "citations": [{"page_index": 7, "page_title": "Step-Up in OPAT Growth; Operating ROE Up
+                       200 bps to 17.5%", "field_path": "points.point-1h26-roe-17.5.value", ...}]}]
+answer_text          The Group's ROE in 1H26 was 17.5%.
+
+--- prompt_system (3054 chars) ---
+You answer questions strictly from the context blocks supplied by the user message. …
+
+--- prompt_user (13430 chars) ---
+Question:
+What was the Group's ROE in 1H26?
+…
+```
+
+三行都核对过 `prompt_system` / `prompt_user` 与各自 `contexts/<fingerprint>.json` 的 `payload.messages` 逐字节相同。
+
+**隐私**：与 `contexts/` 同一级别——`prompt_user` 逐字含证据原文与页上下文，`answer_text` 含答案正文。这是本机回溯产物，不外传、不随快照分发。`ragspine` 主包 `common/observability` 那条"只记码、不记正文"的约束管的是那边的 trace，不是这个本地库。
+
 ### 挂载期校验与每请求漂移检查
 
 完整校验只在挂载时做一次：`mount_document` 逐个核对该发布引用的全部内容寻址资产摘要，并用 `validate_processing_source` 把每一页、每个成员的证据重证一遍（AIA 发布约 5000 个资产 / 2.7 GB，scan + mount 合计约 22s）。之后每个请求只重读**钉死清单对象**那一个文件——它是内容寻址的，文件名就是它的摘要，任何改写都改掉摘要：先比 size + mtime_ns 跳过重算，文件动过就重算摘要，摘要对不上就落回挂载期那条完整校验并拒绝。同一挂载内，一个 publication 的 plan / index 按 `(plan.sha256, index.sha256)` 只解析校验一次，一个 `member_id` 的证据只完整证一次（表格重开 PDF 重证网格、图表重建 SVG 分支都在首次做完）。效果是缓存命中的一次问答从 8.8s 降到 0.7s（10 条金标均值 9.00s → 0.81s），逐条状态不变；分项前后对照见 [交接文档](CLAUDE_HANDOFF.md) 顶部一节。
@@ -438,7 +513,7 @@ bool | None`（`None` 取 settings，`True` / `False` 只覆盖这一次请求�
 
 ### 离线可测 vs 需真实模型
 
-离线（默认门，零网络）：`tests/enterprise_pdf_rag/adapters/test_document_catalog.py`、`test_documents_http.py`、`test_hybrid_search.py`、`test_chat_http.py`、`test_page_metadata_extraction.py`、`test_chat_metadata_http.py`（页级元数据阶段、v4 索引头、过滤与路由；脚本化的文本模型回复来自 prompt 自己的 span），`tests/enterprise_pdf_rag/answers/`（store 桥 `store_mounted_document.py` + 脚本化 LLM `fake_llm.py`，`test_query_filters.py` / `test_member_filter.py`），`processing/test_periods.py`、`processing/test_page_metadata.py`，`processing/test_context_builder.py`、`processing/test_table_transcription.py`，以及 e2e / draft publication / pdf ingestion 里新增的程序化表格页用例。它们用程序化 PDF、`OfflineDescriptionEmbedder` 和脚本化模型输出，证明契约、状态码、恰好一次模型调用、逐字段校验与拒答策略。
+离线（默认门，零网络）：`tests/enterprise_pdf_rag/adapters/test_document_catalog.py`、`test_documents_http.py`、`test_hybrid_search.py`、`test_chat_http.py`、`test_page_metadata_extraction.py`、`test_chat_metadata_http.py`（页级元数据阶段、v4 索引头、过滤与路由；脚本化的文本模型回复来自 prompt 自己的 span）、`test_answer_audit.py`（问答审计库：建表 / 前置写入 / 完成更新 / 抛错路径回填 / 写库坏掉不改变回答 / 开关关闭不建文件），`tests/enterprise_pdf_rag/answers/`（store 桥 `store_mounted_document.py` + 脚本化 LLM `fake_llm.py`，`test_query_filters.py` / `test_member_filter.py`），`processing/test_periods.py`、`processing/test_page_metadata.py`，`processing/test_context_builder.py`、`processing/test_table_transcription.py`，以及 e2e / draft publication / pdf ingestion 里新增的程序化表格页用例。它们用程序化 PDF、`OfflineDescriptionEmbedder` 和脚本化模型输出，证明契约、状态码、恰好一次模型调用、逐字段校验与拒答策略。
 
 需真实模型：真实本地 embedder 的 `index` 与在线 search（隧道）、真实答案模型的合成与校验、`APP_LEGACY_DOCUMENT_ROOTS` 挂载真实 AIA 发布后的检索 / 引用 / 拒答验收。2026-09-20 已做一轮（18 用例，无证据外数字进入 answered 回答；散文门年份 ISSUE-3 已于 0.14.0 解决），结论只以 [交接文档](CLAUDE_HANDOFF.md) 为准，本文不作宣称；它是一轮验收，不是冻结金标集 —— 冻结金标集见下节“NL 金标集与评测”。图表召回 ISSUE-2 已由 [ADR 0012](adr/0012-chart-index-text-and-retrieval-seats.md) 解决（索引投影 policy v3 + 查询默认 10/50 + reranker 读证据块 + 图表保底席位），真实重建与复测见交接文档。
 

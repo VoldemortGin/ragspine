@@ -4,6 +4,32 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ## [Unreleased]
 
+### Added
+
+- **Every answer is journalled locally, prompt and all** (`enterprise_pdf_rag`).
+  `model-cache/contexts/<fingerprint>.json` kept the body one model call carried, but nothing
+  kept the shape of a whole answer: which pre-filters narrowed the candidates, what seat each
+  channel gave the members that reached the prompt, what the model returned, which claims the
+  verifier then dropped. `adapters/answer_audit.py` adds a local SQLite journal — one row per
+  question, written twice. `AnswerService` opens the row once the prompt is assembled and
+  **before** the transport is touched, so it already holds `prompt_system` and `prompt_user`
+  verbatim (byte-identical to `payload.messages` in the request envelope, checked against three
+  real answers), the fused ranking with each channel's rank and score, `filters_applied` /
+  `filters_relaxed` / `fusion_mode`, the page windows and the seated `member_ids`; it closes the
+  same row with `model_output_raw`, `request_fingerprint`, `llm_live_calls`, `cache_hit`,
+  `status` / `abstain_reason` / `abstain_detail`, the verified and rejected claims, `answer_text`
+  and `elapsed_ms`. The raised path (`DependencyUnavailable`) closes it too, with its error code.
+  A journal write never changes an answer: every failure is a warning, and a row that could not
+  be opened is never closed. WAL, indexed by `request_fingerprint`, `started_at` and
+  `document_sha256`. `Settings.answer_audit_enabled` (`APP_ANSWER_AUDIT_ENABLED`, default on) and
+  `answer_audit_path` (`APP_ANSWER_AUDIT_PATH`, default `<ingestion_root>/answers-audit.sqlite`)
+  drive the document-catalog composition root, and `AnswerService(audit=…)` stays optional so the
+  offline gate and the script runners write nothing. `enterprise-pdf-rag audit --db … [--last N]
+  [--fingerprint X] [--question-like …] [--show ID]` reads it back without starting a service or
+  calling a model. Unlike `ragspine`'s privacy-aware traces this file keeps the evidence text —
+  that is the point of it — so it stays a local file under the ingestion root, never served or
+  shipped.
+
 ### Performance
 
 - **A mounted release is verified once, then watched for drift** (`enterprise_pdf_rag`).
