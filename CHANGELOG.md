@@ -36,6 +36,16 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ### Fixed
 
+- **A chart point whose id carries a decimal can be cited again** (`enterprise_pdf_rag`).
+  A point id is derived from what the figure prints, so a value inside the label puts a
+  decimal point in the id: the pinned AIA release prints
+  `points.point-1h26-roe-17.5.value` in the prompt as a citable path. The verifier's path
+  parser stopped the id at the first dot, so that claim was thrown out as
+  `MODEL_OUTPUT_INVALID` before the point was ever looked up, and a faithful answer
+  abstained (live `p01-roe-quote-en` / `p15-cache-repeat-en`, deterministically). Whatever
+  a context block prints as citable must be readable back; the id may now hold dots, while
+  `fullmatch` still anchors the path to its `.value` suffix.
+
 - **A region filter matches the page's own qualification of the place, and never its
   exclusion** (`enterprise_pdf_rag`, [ADR 0018 amendment 1](docs/enterprise-pdf-rag/adr/0018-query-classification-and-translation.md)).
   Region pre-filters compared the filter value and the page's verified region value for

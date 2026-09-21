@@ -93,7 +93,10 @@ _ENUMERATOR_RE = re.compile(
     r"(?=\s|[:：]|$)",  # noqa: RUF001 — the fullwidth colon after ``第 1`` / ``Step 1`` is the CJK form
     re.MULTILINE,
 )
-_POINT_VALUE_RE = re.compile(r"points\.(?P<point>[^.]+)\.value")
+# A point id is derived from what the figure prints, so a value in the label puts a decimal
+# point inside it (``point-1h26-roe-17.5``). Anchored by ``fullmatch`` on the ``.value``
+# suffix, so the id may hold dots but the path still has to end in the value field.
+_POINT_VALUE_RE = re.compile(r"points\.(?P<point>.+)\.value")
 _NODE_LABEL_RE = re.compile(r"nodes\.(?P<node>[A-Za-z0-9_-]+)\.label")
 _EDGE_RE = re.compile(r"edges\.(?P<index>\d+)")
 _TOKEN_PATH_RE = re.compile(r"tokens\.(?P<index>\d+)")

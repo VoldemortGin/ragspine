@@ -202,3 +202,26 @@ def test_the_same_member_relabelled_as_a_donut_takes_the_stricter_path() -> None
 
     (rejected,) = verification.rejected
     assert rejected.reason is AbstainReason.UNQUALIFIED_MEMBER
+
+
+def test_a_point_id_carrying_a_decimal_is_read_as_the_prompt_printed_it() -> None:
+    """Whatever the block prints as a citable path the verifier must be able to read back.
+
+    A chart's point ids are derived from what the figure prints, so a value in the label
+    puts a decimal point inside the id: the pinned AIA release prints
+    ``points.point-1h26-roe-17.5.value`` in the prompt. The path parser stopped the id at
+    the first dot, so that printed path could never be cited — the claim was thrown out as
+    `MODEL_OUTPUT_INVALID` before the point was even looked up (live `p01-roe-quote-en` /
+    `p15-cache-repeat-en`, 2026-09-21).
+    """
+    context = _context()
+
+    verification = _verify(context, _claim("points.point-1h26-roe-17.5.value", "17.5%"))
+
+    (rejected,) = verification.rejected
+    # The id is parsed; this chart simply has no such point, which is a different verdict.
+    assert rejected.reason is AbstainReason.UNKNOWN_POINT
+    assert rejected.detail != "chart claims cite points.<id>.value"
+    # A path that is not a point value at all is still refused.
+    (malformed,) = _verify(context, _claim("points.Agency.label", "72%")).rejected
+    assert malformed.reason is AbstainReason.MODEL_OUTPUT_INVALID
