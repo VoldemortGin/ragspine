@@ -1,8 +1,67 @@
 # Claude 交接：通用文档 RAG 与公开样本验收
 
-更新时间：2026-09-21（本轮把图表点位逐字放行 / 页级父子窗口 / 通道选择与查询翻译三刀合入 `main`）
+更新时间：2026-09-21（四条分支合入 `main` 并上线；真实金标 13/22，三条 ADR 0018 回归待拍板）
 
 > 阅读顺序：先看下方“恢复开发记录”；后续旧暂停快照保留作证据，不能作为实时发布或服务状态。
+
+## 本轮集成：四条分支合入 `main`（2026-09-21）
+
+> 证据在本机 `data/validation/generic-chat-2026-09-21/integration/`（`data/*` 为 git 忽略，同此前各轮）：
+> `nl-gold-1` / `nl-gold-2`（逐位相同，证明回归是确定性的，不是模型抖动）/ `nl-gold-3`（修掉点位 id 解析后）、
+> `q1-*` / `q2-*` / `q3-*` 三条新问题、`diag/`。
+
+合并顺序与提交：`ffcda6c` 图表点位逐字放行 → `27fe267` 页级父子窗口 → `ff4fadd` 通道选择与查询翻译 →
+`20342a3` 模型缓存留存请求。ADR 编号在合并时定为 **0016 图表点位 / 0017 页窗口 / 0018 通道与翻译**
+（后两条各自在分支上都叫 0016）。`rag-chat-v1.json` 没有手工合并，按 `check_schema.py` 的生成方式重生成，
+只增 92 行、零删除。**不需要重建索引或重新发布**：页窗口的 `bbox` / `header` 都是挂载期从既有证据读出来的，
+`current-processing` 仍是图表修复那一版 `22127d0f…`，金标 `pinned` 本来就指着它（snapshot `42939d6a…`，210 members）。
+
+集成期间另做四件事：`d9bd712` 问题数字按“写法”而非“字面”接地（修掉 `p02`）；`4760821` 地区整词匹配 +
+译文也推预过滤器（用户拍板，ADR 0018 Amendment 1）；`8328db5` `APP_ANSWER_TIMEOUT_SECONDS`；
+`ac2a9bf` 点位 id 带小数点也能回读（修掉 `p01`/`p15` 的 `MODEL_OUTPUT_INVALID`）。
+
+**离线门全绿**：`pytest tests/ -q` **5180 passed / 41 skipped**，`mypy --strict` 508 文件零错误，
+`ruff check` + `format --check` 全过，`check_doc_drift` 23 tracked / 0 stale，四个结构门全过，
+QA 四门比值 1.0000、0 编造，demo `ALL CHECKS PASSED`。**没有出现已知的 `Abort trap: 6`。**
+
+**真实金标（22 例，`gpt-5.6-luna` + Qwen3-Embedding-4B / Qwen3-Reranker-4B）：合并前 17 pass / 3 FAIL
+→ 合并后 13 pass / 7 FAIL / 2 known-gap-moved。** 修好 3 条（`p02` `a01` `a02`），新坏 7 条。
+逐条定性（用不调答案模型的纯检索探针测得，见下节“遗留”）：
+
+| 用例 | 性质 |
+| --- | --- |
+| `p01` / `p15` | **已答对**，只是引用了 `p.7 points.point-1h26-roe-17.5.value` 而非金标冻结的 p.3 引文。两条证据都成立，金标把 `required_claims` 钉得过死。 |
+| `p06` | 译文 `2026 first half…` 多推出一个 `Y2026` 期间。这是用户拍板的并集行为的直接后果，金标 `filters_expected` 已过期。 |
+| `p07` / `p13` / `p14` | **ADR 0018 真实回归**：`classify_query` 只看 token 数，`Agency share of VONB 1H26`（5 token / 3 实词）被判 `bm25_only`，甜甜圈从 rrf 第 7 名掉到 BM25 第 12 名（`p13` 更是掉出 top-20）。 |
+| `p11` | **ADR 0018 真实回归**：中文原句在多语 embedder 上向量第 12 名（能进座位），换成译文后掉到第 24 名、全通道出局。翻译反而伤了向量通道。 |
+| `k01` / `k02` | **缺口已移位**：地区整词匹配让泰国 VONB 真的被检索到了，但模型按 `SYSTEM_RULES` 规则 1「带上单位」写成 `294$m` / `232 $m`，而 chart 的 source display 是 `294` / `232`（单位是另一个字段）——prompt 与校验器自相矛盾。 |
+
+三条新问题：`Product Mix Participating` **答对 53%**（引 `p.18 points.point-participating.value`）；
+`泰国 1H26 VONB` **检索成功但卡在上面那条单位矛盾**；`Summarise the Growth Engines section for Hong Kong`
+把超时放到 120s 后**不再 503**（53.3s 正常返回），但模型正文写了两个没接地的百分比，被散文门如实拒答。
+
+**遗留（四条待拍板，都不是我能单方面决定的行为变更）**
+
+1. **`p07` / `p13` / `p14`：`answers/query_mode.py:136` 的 `≤5 token` 分支只看 token 数。** ADR 0018 的
+   125-fact 探针语料都是「短标签 + 期间」（1–2 个实词），而 `Agency share of VONB 1H26` 是 3 个实词的自然
+   短语，token 数在这里是个失效的代理指标。最窄改法是给该分支补一个实词预算（`content_words <= 2`）：实测
+   只有 `p05`（已 pass）和 `k01` 仍走 `bm25_only`，三条回归回到 rrf。改完必须重跑 ADR 0018 的 125-fact
+   sweep，确认 recall@10 74.4% 的天花板没丢。靠 `select_context` 扩座位救不了——chart 那个保底座位已经
+   被同页另一张图占掉了。
+2. **`p11`：译文同时替换了两个通道。** 数字很清楚：中文原句向量第 12 名、译文第 24 名、金标英文说法第 11 名——
+   差别不在语言而在措辞（译文写 `agents'`，索引里是 `Agency`）。最窄改法是让 `HybridSearch.search` 收一个
+   可选的 `lexical_query`：向量通道继续吃原句，词法通道与 `derive_filters` 吃译文。这同时会让 `p06` 的
+   `Y2026` 问题只剩「要不要用译文推期间」这一个决定。
+3. **`k01` / `k02`：`SYSTEM_RULES` 规则 1 与 chart 校验器自相矛盾。** 规则 1 说 `chart_value` 的 `text` 是
+   「the displayed value with its unit, for example `15%`」——这句话是照百分比图写的；`$m` 图的 block 打印的是
+   `unit=$m value=294`，模型照做写 `294$m`，校验器拿 source display `294` 一比就拒。证据是缓存里存下来的那次
+   真实请求（`model-cache/contexts/`，ADR 0018 那刀的副产品第一次派上用场）。最窄改法是把规则 1 改成「照
+   block 里 `value=` 后面的原样写，绝不补一个单独字段里的单位」+ 一条测试。**改 `SYSTEM_RULES` 会让整个补全
+   缓存失效、金标要整体重跑**，所以我没顺手做。
+4. **金标本身有两处已经在说假话，需要你决定怎么重新冻结。** `p01`/`p15` 的 `required_claims` 钉死了 p.3 那条
+   引文，但 p.7 的 chart 点位是同样成立的证据；`p06` 的 `filters_expected` 是并集行为之前的。`k01`/`k02` 我
+   **没有**按原计划改成 `answered`——真实复测证明它们答不出来，把金标改成 `answered` 等于写一个假的期望。
+   等第 3 条落地后再重新冻结才是诚实的做法。
 
 ## 图表点位逐字放行（2026-09-21，分支 `fix/chart-source-labels`，ADR 0016，**已合入 `main`**：合并提交 `ffcda6c`）
 
