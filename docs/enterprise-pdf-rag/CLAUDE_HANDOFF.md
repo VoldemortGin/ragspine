@@ -1,8 +1,39 @@
 # Claude 交接：通用文档 RAG 与公开样本验收
 
-更新时间：2026-09-22（分支 `fix/determinism-alias-column` 三处确定性修复：补全采样钉死、成员短别名、列级地区绑定；真实金标 **22/22、零已知缺口**，但实测证明这个 provider 不遵守贪心解码——引擎确定、模型不确定；**未合入 `main`**，线上服务未重启）
+更新时间：2026-09-21（分支 `feat/document-tree`，从 `main` `ed037c4` 拉出：文档自己的目录折成一棵零模型的树，当**第三条检索通道**参与 RRF 融合，模型只写每个分支的导航摘要且它永不作证；真实实测跑了两轮——当**对等通道**共用 `k = 60` 时金标从 **21/22 掉到 17/22**，给它自己的 `tree_rrf_k = 600` 之后 **OFF 22/22、ON 22/22、零判定移动**；据此**默认关闭**（`ROUTE_BY_DEFAULT = False`，调用方用 `AnswerRequest.tree_route=True` 点名）；**未合入 `main`**，线上服务未重启）
 
 > 阅读顺序：先看下方“恢复开发记录”；后续旧暂停快照保留作证据，不能作为实时发布或服务状态。
+
+## 文档树：文档自己的目录当第三条检索通道（2026-09-21，分支 `feat/document-tree`，[ADR 0019](adr/0019-document-tree-channel.md)，**未合入 `main`**）
+
+> 从 `main` `ed037c4` 拉出，独立 worktree（`ragspine-tree`），**没有重启任何服务，线上 8768 / 3200 全程没被碰过**。
+
+**问题**：现有两条通道都只给**片段**打分——BM25 打成员索引文本、向量通道打它的 embedding，[ADR 0018](adr/0018-query-classification-and-translation.md) 量过该信哪条。两条都不知道一份文档是**有结构的**。问一份长报告里某个具名章节的事，它要跟这份文档里任何一处措辞相近的片段逐个成员地抢名次，而「这份 deck 分几部分」——人拿到文件第一眼看的东西——根本没进检索。
+
+**改法**：取 PageIndex（VectifyAI，<https://github.com/VectifyAI/PageIndex>）的思路——不嵌整份长文，而是一次性建出目录树，让模型在树上挑该读哪几节，再去读那几页。**唯一不照抄的是「谁来写结构」**：PageIndex 让模型生成层级，本仓的规矩是结构必须被**证明**而不是被断言（表格网格绑真实划线、图表点位绑源涂、页元数据绑印出它的 span），所以这里的结构由 ADR 0013 的逐字页元数据**零模型**折出来，每个节点的 `title` 逐字来自某个 span 并带着 `MetadataEvidence`，「子节点按序铺满父节点、根节点铺满全文」是 `__post_init__` 的类型不变量——铺不满的树构造不出来。模型只写一样东西：每个**非叶节点**的 routing 摘要（`document-tree-summary-v1`，一节点一次有预算可缓存的纯文本调用，只读该节点自己各页的文字）。**摘要只导航、不作证**：不进索引、不进任何回答 prompt 的证据块、不可被引用。问答侧一次 `document-tree-route-v1` 调用把问题路由成**一个页集合**（至多 6 节点 / 6 页），这些页进**同一个 `fuse()`** 当第三条排名——不是前置过滤（过滤只能删，一次坏路由就把答案藏掉；做排名的坏路由只赔名次不赔召回），而且**用它自己的 RRF 常数**：`fuse(..., k=60.0, tree_k=600.0)`，`HybridSearch.__init__` 强制 `tree_rrf_k + 1 > rrf_k + channel_limit`（`1/601 = 0.00166` 对 `1/110 = 0.00909`）。换来的性质只有窄窄一条：**只有树够到的成员排在任何打分通道够到的成员之后**——路由能把没人打过分的成员托上来，不能把它顶到打过分的成员前面；这一项是相加的，两个都打过分的成员之间仍会互相挪位。`_within_a_channel` 同时学会读 `tree_rank`，在这个常数下它是这条通道唯一还能把「两条通道都打不出分」的成员送进 prompt 的路（这种成员融合分只有 `1/611 = 0.00164`，靠 ADR 0012 的保证视觉席位进去）。`is_label_query` 把 ADR 0018 的短标签规则收成一个谓词，是**默认翻开那天**才生效的那条规则。按 ADR 0018 Decision 3 先例，`RagChatRequest` **不加开关**；信封新增可选的 `tree_route`（`{node_ids, pages, cache_hit, rationale}`）与每条 `member_ranks` 上的 `tree_rank`。
+
+**树是纯增量的**：树体走内容寻址资产库，状态记录落 `<processing_store>/document-tree/<processing_id>.json`（原子覆盖，**故意可改写**，好让后来一次有预算的跑把 `deferred` 的树升级成带摘要的）。**不写进 `ProcessingManifest`**——`document_metadata` 每次加载重算并按漂移拒绝，新 draft 又会清空 `retrieval`，放进去就等于逼所有已发布 release 为一张不改变任何索引文本的图重跑 `index`。所以**不重建索引、snapshot id 不动、policy 串不动**，昨天发布的 release 跑一条 `tree` 就有；没跑的部署与本 ADR 之前逐字相同。
+
+**tree 阶段实测**（钉定 AIA 发布 `22127d0fad13` / source `df902346791b`，20 页；证据在本机 `data/validation/generic-chat-2026-09-22/document-tree/`，`data/*` git 忽略，同此前各轮）：`origin` 为 `agenda`，**22 个节点、20 个叶子、2 个分支**，冷跑 **2 次 live 调用、12.5 秒**；`--max-live-calls 0` 回放 **0 次调用、1.1 秒**，摘要完好——结构那一半本来就不欠模型任何东西。一级形状就是这份 deck 自己的 agenda 页：`n0001 p1-15 OVERVIEW AND BUSINESS HIGHLIGHTS` 与 `n0017 p16-20 FINANCIAL PERFORMANCE`。**要如实记一句**：这份 20 页 deck 只折出 2 个分支，是这套设计能有的最浅结构，**本样本对切法的检验力不足**；真正该拿来试的是有多级目录的上百页年报，而那个还没跑过。
+
+**离线验证**（仓库根）：`pytest tests/enterprise_pdf_rag -q` **1431 passed**（含钉死 `tree_rrf_k + 1 > rrf_k + channel_limit` 与它换来的顺序的用例，以及从两侧钉住默认关闭的两条：`test_a_mounted_tree_routes_nothing_and_changes_nothing_until_a_request_asks_for_it` 证明挂了树而请求不点名时答案逐字段不变，`test_with_routing_on_by_default_a_narrative_question_routes_and_a_label_query_does_not` 把 `ROUTE_BY_DEFAULT` monkeypatch 成 `True`，好让默认休眠期间 ADR 0019 的形状规则仍在测试之下）；strict mypy **521** 个源文件零错；ruff `check` 与 `format --check` 干净，**790** 个文件；conformance / architecture / schema / drift **四项结构检查全绿**。新用例落在 `processing/test_document_tree.py`（折叠、两条切法、类型不变量、`render_tree` 整行截断）、`adapters/test_document_tree_extraction.py`（阶段的 `deferred` / `failed` 分流与缓存回放）、`adapters/test_tree_retrieval.py`（解析顺序、上限、每一条退化成 `None` 的路径）、`adapters/test_hybrid_search.py`（第三条排名、`__init__` 拒绝违反的那条不等式，以及「空第三序列与两通道调用逐字节等价」）、`answers/test_query_mode.py`（`is_label_query`）、`answers/test_answer_service.py`（门、通道名次提升、信封）与 `adapters/test_chat_http.py`（`tree_route` / `tree_rank` 上线）。
+
+**真实实测（2026-09-21，全程在进程内，没起任何端口、线上 8768 / 3200 全程没被碰过）**：钉定发布 `22127d0fad13` / snapshot `42939d6a4e87` / 210 个成员，答案模型 `gpt-5.6-luna`，embedding/rerank 走本机隧道；证据在 `data/validation/generic-chat-2026-09-22/document-tree/`。
+
+| 轮次 | `tree_rrf_k` | 金标 OFF | 金标 ON | 五道结构性问题 OFF / ON | 带 `tree_rank` 的 prompt 席位 |
+| --- | ---: | ---: | ---: | --- | ---: |
+| 第一次（当对等通道跑） | 60 | **21/22** | **17/22** | 5/5 作答 / **4/5**，无一变好 | 117 / 220 |
+| 修正常数后重测 | 600 | **22/22** | **22/22** | 5/5 / 5/5，引用页逐页相同 | 78 / 220（只有 4 个是树独力够到的）|
+
+第一次那轮**六个判定移动**（`p01`、`p06`、`p07`、`p14`、`p15` pass→FAIL，`p13` FAIL→pass 且 `p13` 是已知抖动），最该记住的是 `p07` / `p14`：问「Agency share of VONB 1H26」，开了树的那轮答 **68.3%（ex-Thailand）**，引用 p6 上两段**确实印着这两个字串**的逐字 span，而不是 p18 那张甜甜圈写的 **72%**。每条 claim 都验证通过。**来源完好，答案是错的**——这正是本包存在的意义所要防住的那种失败。原因是算术不是判断：共用 `k = 60` 时树的第 1 名拿 `1/61 = 0.01639`，压过只有 BM25 能打到第 2 名的成员（`1/62 = 0.01613`），也压过真实前十名的整个分差（`p06` 那题是 0.0044）。页集合不是相关性排名：router 说的是「到哪一节去看」，节内的页序就是阅读顺序。
+
+修正后重测**没有一个判定移动、每个用例引用的页两臂完全相同**，五道结构性问题两臂都作答、引用同样的页；代价是金标 ON 比 OFF 多 **39 对 22** 次 live 调用、**215.1 秒对 147.2 秒**，逐题是 **+3.8 ~ +23.0 秒**。**所以默认关掉**：通道被证明是安全的、也接得齐全，但在这份 20 页、两条打分通道本来就够得到每一页的 deck 上它什么也没买到，不该每题花一次调用；调用方用 `AnswerRequest.tree_route=True` 点名即可（`RagChatRequest` 不加开关，所以 **HTTP 这条路今天不会路由**）。
+
+另需知道：路由结果是模型输出，所以被路由的问题和 ADR 0018 里被翻译的问题一样，**检索输入不再逐次确定**（引擎本身无随机性，不确定性全部来自那次调用），单跑一次不能当成该问题的检索行为；router 至今**不可复现**（同一问题两次冷调用，`p13` 一次 `[5]` 一次 `[5, 17]`，`rationale` 每次措辞都不同），只是在 `tree_rrf_k = 600` 之下它再也挪不动打过分的席位，所以不再移动判定。
+
+**下一个人该做的事**：这份样本**证明不了收益**——PageIndex 的前提是比 20 页长得多的文档。把这棵树跑到一份**几百页、带真正多级目录**的文档上重测（问「某个具名章节讲了什么」那类问题的召回，以及树真有深度时 `tree_rrf_k = 600` 还是不是合适的权重），拿到数字之后再决定要不要把 `ROUTE_BY_DEFAULT` 翻成 `True`。另外 ADR 0012 的保证视觉席位是绕过融合的第二道门（`tree_rank <= 2 * top_k` 就能进提升窗口，与融合分无关），本轮 4 个树独力席位全是这么进来的，没造成损失；这道门现在有直接断言它的测试 `test_a_tree_only_visual_below_every_scored_member_still_wins_its_guaranteed_seat`（29 个有分成员、`top_k` 10，外加一个只带 `tree_rank=1`、融合名次第 29、分数全场最低的甜甜圈，断言它照样拿到最后一席）。
+
+命令、信封字段与离线/真实口径写在 [测试与通用 PDF 入库](testing-and-ingestion.md) 的“文档树检索通道”一节。
 
 ## 问答审计库：一问一行，含送进模型的最终 prompt（2026-09-21，分支 `feat/answer-audit-db`，未合入 `main`）
 

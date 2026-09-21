@@ -412,6 +412,61 @@ bool | None`（`None` 取 settings，`True` / `False` 只覆盖这一次请求�
 - **query embedder 变成「用到它的请求」的依赖**，和 opt-in reranker 同一条规则。没有配置 embedder 时，走 BM25 单通道的问题照常 200 作答（答案与配置齐全时逐字相同，不是降级替代品），需要向量通道的问题仍然 503、绝不替代；看 `fusion_mode` 就知道跑了哪些通道。
 - **离线金标 runner 固定 `fusion_mode="rrf"`**。它的向量通道是声明式的，BM25 单通道会拿掉它赖以成立的保证；通道选择改由 `answers/test_query_mode.py`、`adapters/test_hybrid_search.py` 守住，真实召回仍由真实 runner 负责。
 
+### 文档树检索通道（[ADR 0019](adr/0019-document-tree-channel.md)）
+
+第三条通道不打分片段，它先看目录。`processing/document_tree.py` 把 [ADR 0013](adr/0013-page-metadata-and-prefilters.md) 的**逐字页级元数据**确定性地折成一棵目录树：有 `agenda` 页就按目录行切一级（行长 3–80 字符、去重、去页眉，短于 5 字符只按相等匹配，匹配数 < 2 就判定它不是目录页），没有就按 divider 页（标题加至多 8 个 span，`CHART` / `TABLE` 页永不算）与 running `section` 变化切；一级之下同标题的连续页合成二级节点，跨多页的二级节点再每页一个叶子。**整个结构零模型**，每个节点的 `title` 逐字来自某个 span 并带着它的 `MetadataEvidence`；`TreeNode.__post_init__` / `DocumentTree.__post_init__` 直接把「子节点按序铺满父节点的页、根节点铺满全文不重叠、id 唯一」做成类型不变量，铺不满的树根本构造不出来。灵感取自 PageIndex（VectifyAI，<https://github.com/VectifyAI/PageIndex>），差别是**结构不是模型写的**。
+
+```sh
+enterprise-pdf-rag tree --source-store <src> --processing-store <proc> --processing-id <id> --max-live-calls N [--timeout 180]
+```
+
+模型只写一样东西：每个**非叶节点**的 routing 摘要（任务盐 `document-tree-summary-v1`，一节点一次有预算、可缓存的纯文本调用，prompt 只给该节点自己的标题、页码范围、子标题与**本节点各页的文字**，绝不给图片或图表资产）。叶子不写摘要——叶子就是一页，两条片段通道本来就读得到，页窗口也会整页打出来。`--max-live-calls 0` 是**回放**：结构照常折出来，摘要命中阶段缓存就原样带上，零 live 调用。下面这条是本机对钉定 AIA 发布实跑过的（`data/` 是 git 忽略的本机产物）：
+
+```sh
+enterprise-pdf-rag tree \
+  --source-store data/output/aia-2026-interim \
+  --processing-store data/output/aia-2026-interim/pages-001-020 \
+  --processing-id 22127d0fad13ccd919c23aa25f4867e24cb742a4fcdd4bb33d4267c327006ad8 \
+  --max-live-calls 0
+```
+
+命令输出一个 `DocumentTreeSummary` JSON：`source_sha256` / `processing_id` / `state`（`succeeded` / `deferred` / `failed` / `unavailable`）/ `diagnostic` / `origin`（`agenda` 或 `sections`）/ `node_count` / `leaf_count` / `summary_calls`（尝试写摘要的非叶节点数，回放时报它代表的调用数）/ `live_call_count` / `page_count`，外加 `rendered`——**人读到的就是 router 读到的那张图**。对上面那份 20 页发布：`origin` 为 `agenda`，22 个节点、20 个叶子、2 个分支，冷跑 2 次 live 调用 12.5 秒，`--max-live-calls 0` 回放 0 次调用 1.1 秒、摘要完好。`rendered` 的一级形状就是这份 deck 自己的 agenda 页：
+
+```text
+n0001 p1-15 OVERVIEW AND BUSINESS HIGHLIGHTS
+  summary: These pages present AIA’s 1H 2026 overview, ...
+  topics: 1H 2026 results; Asia growth strategy; ...
+  n0002 p1 INTERIM RESULTS PRESENTATION
+  ...
+n0017 p16-20 FINANCIAL PERFORMANCE
+  summary: Pages 16–20 present key financial performance metrics, ...
+```
+
+**预算耗尽不算失败**：`call_budget_exhausted` / `cache_miss` 这两个「还没轮到」的码让那个节点摘要留空、整阶段记 `deferred`，其他码才是 `failed`；三种情况下**树都照常存盘**，诊断里明说 `the tree structure is complete and was saved.`。只有 `succeeded` 才进阶段缓存（指纹 `stage_fingerprint("document_tree", producer, (processing_id,))`），同一 producer 重跑零 live 调用整棵回放。
+
+**这棵树是纯增量的，不触发任何重建**：树体走内容寻址资产库，状态记录落在 `<processing_store>/document-tree/<processing_id>.json`（`DocumentTreeRecord`，`schema_version` 固定 `document-tree-v1`，原子 `os.replace` 覆盖——与阶段缓存指针不同，它**故意可改写**，好让后来一次有预算的跑把 `deferred` 的树升级成带摘要的树）。树**不写进 `ProcessingManifest`**：`document_metadata` 每次加载都重算并按漂移拒绝，而新 manifest draft 会清空 `retrieval`，放进去就等于逼所有已发布 release 为一张不改变任何索引文本的图重跑 `index`。所以**不需要重新 `qualify` / `index` / `publish`，snapshot id 不动、policy 串不动、索引不重建**；昨天发布的 release 今天跑一条 `tree` 就有了，没跑的部署与 ADR 0019 之前逐字相同。`CatalogEntry.tree_available` 报某个挂载文档有没有树。
+
+**这条通道默认不开，要显式点名才走**：`adapters/answer_service.py` 的 `ROUTE_BY_DEFAULT = False`。门 `_route` 按顺序判：这个文档没有树 → 不路由；否则 `AnswerRequest.tree_route` 显式设了就照办；两者都没说 → `ROUTE_BY_DEFAULT and not is_label_query(question)`，也就是**不路由**。要用它，在进程内构造请求时写 `AnswerRequest(..., tree_route=True)`；按 ADR 0018 Decision 3 的先例 `RagChatRequest` **不加开关**，所以 **HTTP 这条路今天不会路由**，信封里的 `tree_route` 恒为 `null`。默认关掉的理由是实测（见本节末）：在这份 20 页 deck 上开与不开金标都是 **22/22**、每个用例引用的页逐页相同，却每题多一次 live 调用、多 **+3.8 ~ +23.0 秒**——不改变任何答案的功能不该每题花一次调用。`ROUTE_BY_DEFAULT` 那条合取里的 `answers/query_mode.is_label_query`（「短标签 + 期间」形状）特意留着没折掉：它是**默认翻开那天**生效的规则——BM25 本来就能逐字命中印出来的标签，不值一次 live 调用。被路由的问题送给 router 的是 [ADR 0018](adr/0018-query-classification-and-translation.md) 的**英文译文**（有译文时），因为目录本身写在索引的语言里。router（任务盐 `document-tree-route-v1`）的全部产出是一个**页集合**：最多 `MAX_ROUTE_NODES`(6) 个节点、`MAX_ROUTE_PAGES`(6) 个页，先取模型自己给的页号（`render_tree` 印的是 1-based，这里换算回 0-based，树没覆盖的页直接丢），再取它点名的节点的页，按该顺序去重、截断、升序。没预算、传输失败、JSON 不可用、问题超过 2000 字符、回复里没有一个树覆盖的页——**一律退化成「没有这条通道」，不报错**，和 ADR 0018 的翻译调用同一条规矩。
+
+拿到的页进的是**同一个 `fuse()`**，不是前置过滤：`fuse(vector, lexical, tree=(), *, k=60.0, tree_k=600.0)` 第三个序列默认为空，所有旧调用逐字节不变；`HybridSearch._tree_rank` 把路由到的页按 router 给的页序、页内按 `answers.page_window.reading_key`（[ADR 0017](adr/0017-page-context-window.md) 的阅读序）排成一条排名，分数是合成的严格递减值，因为**页集合不是相似度**——`FusedHit.tree_rank` 只有名次、没有分数。选前置过滤会「只能删」，一次坏路由就把答案藏掉；做排名的坏路由只赔名次、不赔召回。
+
+**两条打分通道共用 `k`，树这条用自己的 `tree_k`**，因为它的名次是「某一节里的阅读顺序」，不是它量过的相关性。它换来的性质只有一条，而且只能这么窄地说：**只有树够到的成员，排在任何一条打分通道够到的成员之后**。路由成员最高拿 `1/(tree_k + 1)`，被某条打分通道排进 `channel_limit` 的成员最低拿 `1/(k + channel_limit)`，前者必须严格小于后者——也就是 `tree_k + 1 > k + channel_limit`，`HybridSearch.__init__` 不满足就拒绝构造，所以这条顺序是对象的前置条件，不是三个常数碰巧凑出来的。服务跑的常数（`tree_rrf_k` 600 / `rrf_k` 60 / `channel_limit` 50）下是 `1/601 = 0.00166` 对 `1/110 = 0.00909`。一句话：**路由能把没人打过分的成员托上来，不能把它顶到打过分的成员前面**；这一项是相加的，两个都打过分的成员之间仍可能互相挪位，保证只覆盖没打过分的页。这不是事后补的谨慎——第一次实测就是按对等通道（共用 `k = 60`）跑的，金标从 **21/22 掉到 17/22**，见本节末。
+
+`_within_a_channel` 同时学会了读 `tree_rank`，而且在这个常数下它是这条通道**唯一**还能把「BM25 与向量都打不出分」的成员送进 prompt 的路：这种成员融合分只有 `1/611 = 0.00164`，按构造排在所有打过分的成员之后，靠 ADR 0012 的保证视觉席位（`tree_rank <= 2 * top_k` 才进提升窗口，且只补 top-k 里缺的可引用视觉类型）才进得去。
+
+信封新增两个**可选**字段（`rag-chat-v1` 只增不删）：`tree_route`（`{node_ids, pages, cache_hit, rationale}`，没路由时为 `null`；`pages` 是 0-based 页号，与引用里印的一致）与每条 `member_ranks` 上的 `tree_rank`（没路由或该成员不在路由页里时为 `null`，且**永远没有对应的 score**）。按 ADR 0018 Decision 3 的先例，**`RagChatRequest` 不加任何开关**——走哪些通道是引擎的决定，事后可读，不是调用方的旋钮。被路由的问答因此多一次 live 调用（再叠上翻译就是三次），`llm_live_calls` 如实计数；重复提问全部回放缓存。
+
+**离线可测 vs 需要真实模型**：结构折叠、两条切法、类型不变量、`render_tree` 的整行截断（`processing/test_document_tree.py`）、阶段的 `deferred` / `failed` 分流与缓存回放（`adapters/test_document_tree_extraction.py`）、router 的解析顺序 / 上限 / 每一条退化路径（`adapters/test_tree_retrieval.py`）、第三条排名与「空第三序列等价于两通道调用」（`adapters/test_hybrid_search.py`）、`is_label_query`（`answers/test_query_mode.py`）、门与名次提升与信封（`answers/test_answer_service.py`、`adapters/test_chat_http.py`）**全部离线可测，零模型零网络**。需要真实模型的只有两件事：ingestion 侧每个非叶节点的摘要质量，和「路由到底有没有让答案变好」——后者只能由真实金标跑分说话。**注意**：路由结果是模型输出，所以被路由的问题和 ADR 0018 里被翻译的问题一样，**检索输入不再逐次确定**——引擎本身没有随机性，不确定性全部来自那次调用；单跑一次不能当成该问题的检索行为。router 至今**不可复现**：同一个问题冷缓存两次冷调用能给出不同的 `node_ids`（`p13` 一次 `[5]`、一次 `[5, 17]`），`rationale` 每次措辞都不同。
+
+**真实实测（2026-09-21，全程在进程内，没有起任何端口、没碰线上服务）**，钉定发布 `22127d0fad13` / snapshot `42939d6a4e87` / 210 个成员，证据在本机 `data/validation/generic-chat-2026-09-22/document-tree/`（`data/` 是 git 忽略的本机产物）：
+
+| 轮次 | `tree_rrf_k` | 金标 tree OFF | 金标 tree ON | 五道结构性问题 OFF / ON |
+| --- | ---: | ---: | ---: | --- |
+| 第一次（对等通道） | 60 | **21/22** | **17/22** | 5/5 作答 / **4/5**，无一变好 |
+| 修正后重测 | 600 | **22/22** | **22/22** | 5/5 / 5/5，引用页逐页相同 |
+
+第一次那轮最该记住的是 `p07` / `p14`：问「Agency share of VONB 1H26」，开了树的那轮答 **68.3%（ex-Thailand）**，引用 p6 上两段**确实印着这两个字串**的逐字 span，而不是 p18 那张甜甜圈写的 **72%**。每条 claim 都验证通过。**来源完好，答案是错的**——这正是本包存在的意义所要防住的那种失败。修正后重测：**没有一个判定移动**，prompt 席位里带 `tree_rank` 的从 **117/220** 降到 **78/220**，其中只有 **4/220** 是任何打分通道都没够到的；代价是金标 ON 比 OFF 多 **39 对 22** 次 live 调用、**215.1 秒对 147.2 秒**。完整前后对照见 [ADR 0019](adr/0019-document-tree-channel.md) 的 `## Validation`。**这份样本证明不了收益**：20 页、两条打分通道本来就够得到每一页，PageIndex 的前提是比它长得多的文档，默认值该不该翻要等到几百页、带多级目录的文档上重测之后再说。
+
 ### 状态码
 
 | 状态 | 触发 |

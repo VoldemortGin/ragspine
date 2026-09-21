@@ -6,6 +6,62 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ### Added
 
+- **A document's own outline answers as a third retrieval channel, and it never testifies**
+  (`enterprise_pdf_rag`, [ADR 0019](docs/enterprise-pdf-rag/adr/0019-document-tree-channel.md)).
+  BM25 and the vector channel both score fragments, so a question aimed at a named section of a
+  long report competed, member by member, with every similarly worded fragment printed anywhere
+  else in it: the document's own structure was not an input to retrieval at all. Taking the idea
+  from PageIndex (VectifyAI), `processing/document_tree.py` folds a document's table of contents
+  into a tree once, at ingestion, and one bounded call per question then picks the sections it
+  belongs to. The difference is who writes the structure — here nobody does. The fold is
+  deterministic over ADR 0013's verbatim page metadata (a contents page cuts the first level when
+  it names at least **2** later pages; dividers and running-header changes cut it otherwise), every
+  node's title is a page's own words carrying the `MetadataEvidence` that proved them, and
+  "children tile their parent in order" is enforced in `__post_init__` — a tree that loses or
+  doubles a page cannot be constructed. The one thing a model writes is a **routing note** per
+  non-leaf node (`document-tree-summary-v1`, one text-only call over that node's own page text),
+  and it routes rather than testifies: never indexed, never in an answer prompt's evidence blocks,
+  never citable. Per question, one cached `document-tree-route-v1` call returns a page set and
+  nothing else — at most **6** nodes and **6** pages, resolved deterministically — whose members
+  join the same `fuse()` as a third ranking rather than a pre-filter, because a filter can only
+  remove and one bad route would hide the answer.
+
+  **That third ranking is weighed at its own RRF constant, and the first measurement is why.**
+  Fused as a *peer* of the scoring channels at `k = 60`, the tree made retrieval worse: the frozen
+  real-model gold set fell from **21/22 to 17/22**, five cases went pass → FAIL, none of the five
+  structural questions written for this feature improved and one stopped answering, and routed
+  members held **117 of 220** prompt seats. Asked "Agency share of VONB 1H26" the routed run
+  answered **68.3% (ex-Thailand)**, citing two spans that really do print that, instead of the
+  **72%** the donut on p18 states — every claim verified, provenance intact, answer wrong. The
+  mechanism was arithmetic: a tree rank-1 term of `1/61 = 0.01639` outweighs a member only BM25
+  could score at rank 2 (`1/62 = 0.01613`) and outweighs the whole spread of a real top ten
+  (0.0044). A page set is not a relevance ranking — the router says where to look, and page order
+  inside a section is reading order — so `fuse(..., tree_k=600.0)` now scores it separately, under
+  an inequality `HybridSearch.__init__` refuses to run without: `tree_k + 1 > k + channel_limit`,
+  which at the service's constants reads `1/601 = 0.00166` against `1/110 = 0.00909`. **A routed
+  page may lift a member no channel reached; it may not put one above a member a channel scored.**
+  Re-measured the same day on the same release: gold **22/22 with the tree off and 22/22 with it
+  on, not one verdict moved and every case citing the same pages**, all five structural questions
+  answered in both arms citing the same pages, routed seats down to **78 of 220** of which only
+  **4** were reached by the tree alone.
+
+  So the channel ships **opt-in**: `ROUTE_BY_DEFAULT = False`, and a caller asks with
+  `AnswerRequest.tree_route=True`. It is provably safe and completely wired, and on a twenty-page
+  deck whose two scoring channels already reach every page it changes no answer while costing one
+  extra live call and **+3.8 s to +23.0 s** a question — a feature that changes nothing should not
+  spend a call per question. PageIndex's premise is documents far longer than this one, and the
+  number to beat should be re-measured on a document of hundreds of pages before the default flips.
+  `_within_a_channel` still learned `tree_rank`, and after the constant it is the only way the
+  channel can seat a member the others missed: such a member scores `1/611 = 0.00164` and sorts
+  below every scored seat by construction, so ADR 0012's guaranteed visual seat is what carries it
+  into the prompt. `RagChatRequest` gains no knob — the envelope reports `tree_route` and each
+  seat's `tree_rank`. The tree is additive: a content-addressed body plus a rewritable record at
+  `<processing_root>/document-tree/<processing_id>.json`, never the manifest, so **no index is
+  rebuilt and no snapshot id moves** and a release published yesterday gains one by running
+  `enterprise-pdf-rag tree`. Measured on the pinned AIA release (**20** pages): `origin = agenda`,
+  **22** nodes, **20** leaves, **2** branches, **2** live calls in **12.5 s** cold, and **0** calls
+  in **1.1 s** on replay.
+
 - **Every answer is journalled locally, prompt and all** (`enterprise_pdf_rag`).
   `model-cache/contexts/<fingerprint>.json` kept the body one model call carried, but nothing
   kept the shape of a whole answer: which pre-filters narrowed the candidates, what seat each

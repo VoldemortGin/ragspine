@@ -1,6 +1,6 @@
 ---
 covers: src/enterprise_pdf_rag/
-verified-against: a91ca6e
+verified-against: 96ff87d
 ---
 
 # enterprise_pdf_rag — agent contract
@@ -25,7 +25,8 @@ the same `pyproject.toml` — import name unchanged, not under `ragspine.*`
    [ADR 0015](../../docs/enterprise-pdf-rag/adr/0015-diagram-and-formula-retrievable.md),
    [ADR 0016](../../docs/enterprise-pdf-rag/adr/0016-verbatim-chart-points.md),
    [ADR 0017](../../docs/enterprise-pdf-rag/adr/0017-page-context-window.md),
-   [ADR 0018](../../docs/enterprise-pdf-rag/adr/0018-query-classification-and-translation.md)
+   [ADR 0018](../../docs/enterprise-pdf-rag/adr/0018-query-classification-and-translation.md),
+   [ADR 0019](../../docs/enterprise-pdf-rag/adr/0019-document-tree-channel.md)
    and [PRD v0.2](../../docs/enterprise-pdf-rag/PRD-v0.2.md) define scope; the full list is
    [`docs/enterprise-pdf-rag/adr/`](../../docs/enterprise-pdf-rag/adr/).
 4. [`testing-and-ingestion.md`](../../docs/enterprise-pdf-rag/testing-and-ingestion.md) — what is
@@ -56,7 +57,9 @@ processing/   pure page-processing / qualification logic; context_builder.py (ev
               index_text.py (contextual header + chart / diagram / formula projection both
               retrieval channels score), page_metadata.py /
               periods.py / document_metadata.py (verbatim page metadata, deterministic period
-              forms, zero-model document fold — ADR 0013)
+              forms, zero-model document fold — ADR 0013), document_tree.py (the zero-model
+              table-of-contents fold: verbatim titles carrying their evidence, two cut rules,
+              leaves tiling the document as a type invariant — ADR 0019)
 answers/      pure answer chain — ports.py (MountedDocument, MemberText), models.py
               (MemberFilters, TranslatedQuery), prompt.py (strict model output schema),
               verify.py (claim re-read), page_window.py (one page context block per hit
@@ -70,7 +73,10 @@ adapters/     every SDK and I/O: pdfspine, http/ (FastAPI app factory; documents
               document_catalog.py (scan / mount), hybrid_search.py (BM25 + RRF + opt-in
               rerank borrowed from ragspine; the channels a query uses are chosen, not
               fixed — ADR 0018), query_translation.py (restate a question written outside
-              the index's language), answer_service.py (one synthesis call per answer),
+              the index's language), document_tree_extraction.py (the document_tree
+              ingestion stage: one routing note per branch, the structure saved even when the
+              budget defers them) + tree_retrieval.py (one bounded call routing a question to
+              a handful of pages — ADR 0019), answer_service.py (one synthesis call per answer),
               answer_audit.py (the local sqlite answer journal: one row per question, opened
               with the prompt as sent and closed with the verified result),
               diagram_geometry.py + diagram_qualification.py + diagram_publication.py and
@@ -238,6 +244,24 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   printed — that widens what the prose may repeat, never what it may cite, so such a figure
   carries no citation. When the prompt budget overruns, page context is given up first (whole
   blocks, last page backward); a hit's own evidence is never surrendered.
+- **A tree node's summary routes, it never testifies** (ADR 0019) — a document's outline is
+  folded deterministically from verbatim page metadata, but each branch's routing note is
+  written by a model (`document-tree-summary-v1`), so it never leaves the routing call: it is
+  never indexed, never reaches an answer prompt's evidence blocks, and can never be cited. It
+  carries no member id and no field path, so a claim naming one is an `unknown member` dropped
+  as `MODEL_OUTPUT_INVALID`, exactly as page context is. The router's whole output is a page
+  set (at most `MAX_ROUTE_NODES` / `MAX_ROUTE_PAGES`, 6 each), and those pages join the fusion
+  as a **third ranking, never a pre-filter** — a filter can only remove, so one bad route would
+  hide the answer, while a bad ranking costs rank and not recall. That ranking **routes, it never
+  displaces**: it is fused at its own `tree_rrf_k`, which `HybridSearch.__init__` refuses to run
+  without `tree_rrf_k + 1 > rrf_k + channel_limit`, so a member **only** the tree reached sorts
+  below every member a scoring channel reached. A routed page may lift a member no channel could
+  score; it may not put one above a member a channel did. (The term is additive, so two scored
+  members can still move relative to each other — the guarantee is about unscored pages only.)
+  Measured as a peer ranking at a shared `k` it did the opposite, and cost the frozen gold set
+  21/22 → 17/22. Routing itself is **opt-in** (`ROUTE_BY_DEFAULT = False`) until it is measured
+  on a document long enough to need it. No route is never an error: no budget, no transport, no
+  usable reply and the channel is simply absent.
 - **Metadata is verbatim, automatic and never a hard gate** (ADR 0013) — every page-metadata
   value quotes its page spans (dropped otherwise, with a diagnostic); the model runs only at
   build time, nobody annotates; document metadata is a deterministic fold that is recomputed
