@@ -44,6 +44,49 @@ def reload(mutated: dict[str, Any]) -> None:
     load_gold(json.dumps(mutated).encode())
 
 
+def single_anchor_case(mutated: dict[str, Any]) -> dict[str, Any]:
+    """The first positive case whose first requirement names one anchor, not alternatives."""
+    return next(
+        case
+        for case in mutated["cases"]
+        if case["case_class"] == "positive"
+        and case["expected"].get("required_claims")
+        and "any_of" not in case["expected"]["required_claims"][0]
+    )
+
+
+def single_filter_case(mutated: dict[str, Any]) -> dict[str, Any]:
+    """The first case whose `filters_expected` names one filter set, not alternatives."""
+    return next(
+        case
+        for case in mutated["cases"]
+        if isinstance(case["expected"].get("filters_expected"), dict)
+        and "any_of" not in case["expected"]["filters_expected"]
+    )
+
+
+# The two anchors that answer "what was the record Operating ROE": the sentence on p.3 and
+# the chart point on p.7. Either is legitimate, so a requirement may name both.
+ROE_QUOTE_ANCHOR: dict[str, Any] = {
+    "kind": "quote",
+    "page_index": 3,
+    "field_path": "fragments.span-v1-ff",
+    "quote": "record Operating ROE of 17.5%",
+}
+ROE_POINT_ANCHOR: dict[str, Any] = {
+    "kind": "chart_value",
+    "page_index": 7,
+    "field_path": "points.point-1h26-roe-17.5.value",
+    "text": "17.5%",
+}
+
+
+# The two pre-filter sets one Chinese question really derived on two cold runs: the union
+# includes what the model's own translation derived, so its wording moves the result.
+DONUT_FILTERS_1H: dict[str, Any] = {"periods": ["1H2026"], "regions": []}
+DONUT_FILTERS_UNION: dict[str, Any] = {"periods": ["1H2026", "Y2026"], "regions": []}
+
+
 def test_the_frozen_gold_set_loads_and_covers_every_case_class() -> None:
     gold = load_gold(GOLD_PATH.read_bytes())
 
@@ -141,10 +184,127 @@ def test_a_known_gap_must_say_what_the_gap_is() -> None:
 
 def test_a_required_claim_names_exactly_one_path_form() -> None:
     mutated = payload()
-    positive = next(case for case in mutated["cases"] if case["case_class"] == "positive")
+    positive = single_anchor_case(mutated)
     positive["expected"]["required_claims"][0]["field_path_prefix"] = "fragments."
 
     with pytest.raises(ValidationError, match="field_path"):
+        reload(mutated)
+
+
+def test_a_requirement_may_name_alternative_anchors() -> None:
+    gold = load_gold(GOLD_PATH.read_bytes())
+
+    # p01 accepts either evidence for the record Operating ROE: the p.3 sentence the
+    # recorded run quoted, or the p.7 chart point a later run cited instead.
+    (requirement,) = gold.case("p01-roe-quote-en").expected.required_claims
+    assert [(item.kind, item.page_index) for item in requirement.alternatives] == [
+        ("quote", 3),
+        ("chart_value", 7),
+    ]
+    # A single anchor judges through the same interface: it is its own only alternative.
+    single = next(
+        item
+        for case in gold.cases
+        for item in case.expected.required_claims
+        if len(item.alternatives) == 1
+    )
+    assert single.alternatives == (single,)
+
+
+def test_a_requirement_with_fewer_than_two_alternatives_is_refused() -> None:
+    for alternatives in ([], [ROE_QUOTE_ANCHOR]):
+        mutated = payload()
+        single_anchor_case(mutated)["expected"]["required_claims"][0] = {"any_of": alternatives}
+
+        with pytest.raises(ValidationError, match="at least two"):
+            reload(mutated)
+
+
+def test_nested_alternatives_are_refused() -> None:
+    mutated = payload()
+    single_anchor_case(mutated)["expected"]["required_claims"][0] = {
+        "any_of": [ROE_QUOTE_ANCHOR, {"any_of": [ROE_QUOTE_ANCHOR, ROE_POINT_ANCHOR]}]
+    }
+
+    with pytest.raises(ValidationError, match="never nested"):
+        reload(mutated)
+
+
+def test_an_unknown_key_beside_the_alternatives_is_refused() -> None:
+    mutated = payload()
+    single_anchor_case(mutated)["expected"]["required_claims"][0] = {
+        "any_of": [ROE_QUOTE_ANCHOR, ROE_POINT_ANCHOR],
+        "either_of": [],
+    }
+
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        reload(mutated)
+
+
+def test_an_unknown_key_inside_an_alternative_is_refused() -> None:
+    mutated = payload()
+    single_anchor_case(mutated)["expected"]["required_claims"][0] = {
+        "any_of": [{**ROE_QUOTE_ANCHOR, "invented": "x"}, ROE_POINT_ANCHOR]
+    }
+
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        reload(mutated)
+
+
+def test_a_filter_expectation_may_name_alternative_filters() -> None:
+    gold = load_gold(GOLD_PATH.read_bytes())
+
+    # p06 is translated before retrieval and the pre-filters union what the translation
+    # derives, so its periods follow the model's wording: two cold runs derived `1H2026`
+    # alone and `1H2026` with `Y2026`, and both are true.
+    expectation = gold.case("p06-donut-zh").expected.filters_expected
+    assert expectation is not None
+    assert [item.periods for item in expectation.alternatives] == [
+        ("1H2026",),
+        ("1H2026", "Y2026"),
+    ]
+    # A single filter set judges through the same interface: it is its own only alternative.
+    single = gold.case("p01-roe-quote-en").expected.filters_expected
+    assert single is not None and single.alternatives == (single,)
+
+
+def test_a_filter_expectation_with_fewer_than_two_alternatives_is_refused() -> None:
+    for alternatives in ([], [DONUT_FILTERS_1H]):
+        mutated = payload()
+        single_filter_case(mutated)["expected"]["filters_expected"] = {"any_of": alternatives}
+
+        with pytest.raises(ValidationError, match="at least two"):
+            reload(mutated)
+
+
+def test_nested_filter_alternatives_are_refused() -> None:
+    mutated = payload()
+    single_filter_case(mutated)["expected"]["filters_expected"] = {
+        "any_of": [DONUT_FILTERS_1H, {"any_of": [DONUT_FILTERS_1H, DONUT_FILTERS_UNION]}]
+    }
+
+    with pytest.raises(ValidationError, match="never nested"):
+        reload(mutated)
+
+
+def test_an_unknown_key_beside_the_filter_alternatives_is_refused() -> None:
+    mutated = payload()
+    single_filter_case(mutated)["expected"]["filters_expected"] = {
+        "any_of": [DONUT_FILTERS_1H, DONUT_FILTERS_UNION],
+        "either_of": [],
+    }
+
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        reload(mutated)
+
+
+def test_an_unknown_key_inside_a_filter_alternative_is_refused() -> None:
+    mutated = payload()
+    single_filter_case(mutated)["expected"]["filters_expected"] = {
+        "any_of": [{**DONUT_FILTERS_1H, "invented": "x"}, DONUT_FILTERS_UNION]
+    }
+
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         reload(mutated)
 
 
@@ -260,6 +420,81 @@ def test_a_claim_on_another_page_does_not_satisfy_the_requirement() -> None:
     assert failure.startswith("missing required claim")
 
 
+def test_any_one_alternative_satisfies_a_requirement() -> None:
+    case = _case(
+        {
+            "required_claims": [
+                {
+                    "any_of": [
+                        ROE_QUOTE_ANCHOR,
+                        {
+                            "kind": "chart_value",
+                            "page_index": 17,
+                            "field_path": "points.point-agency.value",
+                            "quote": "72%",
+                            "text": "72%",
+                            "value": "72",
+                            "unit": "%",
+                        },
+                    ]
+                }
+            ]
+        }
+    )
+
+    # Only the second alternative is cited, and that is enough.
+    assert judge(case, _observed(), "Agency contributed 72% of VONB.") == ()
+
+
+def test_a_requirement_no_alternative_matches_fails_and_names_them_all() -> None:
+    case = _case(
+        {
+            "required_claims": [
+                {
+                    "any_of": [
+                        ROE_QUOTE_ANCHOR,
+                        {
+                            "kind": "chart_value",
+                            "page_index": 17,
+                            "field_path": "points.point-partnerships.value",
+                            "text": "28%",
+                        },
+                    ]
+                }
+            ]
+        }
+    )
+
+    (failure,) = judge(case, _observed(), "72%.")
+    assert "no alternative" in failure
+    assert "fragments.span-v1-ff" in failure
+    assert "points.point-partnerships.value" in failure
+
+
+def test_an_alternative_that_matches_but_misreads_the_value_still_fails() -> None:
+    case = _case(
+        {
+            "required_claims": [
+                {
+                    "any_of": [
+                        ROE_QUOTE_ANCHOR,
+                        {
+                            "kind": "chart_value",
+                            "page_index": 17,
+                            "field_path": "points.point-agency.value",
+                            "value": "75",
+                        },
+                    ]
+                }
+            ]
+        }
+    )
+
+    (failure,) = judge(case, _observed(), "72%.")
+    assert "no alternative" in failure
+    assert "value is '72', expected '75'" in failure
+
+
 def test_a_matching_citation_that_lacks_a_required_field_fails_the_case() -> None:
     observed = _observed()
     citations = (observed.claims[0].citations[0].model_copy(update={"member_id": None}),)
@@ -312,6 +547,24 @@ def test_an_absent_filter_expectation_is_written_as_an_empty_object() -> None:
 
     assert judge(case, _observed({"filters_applied": None}), "") == ()
     assert judge(case, _observed({"filters_applied": {"periods": ["Y2024"], "regions": []}}), "")
+
+
+def test_any_one_alternative_filter_set_satisfies_the_expectation() -> None:
+    case = _case({"filters_expected": {"any_of": [DONUT_FILTERS_1H, DONUT_FILTERS_UNION]}})
+
+    for applied in (DONUT_FILTERS_1H, DONUT_FILTERS_UNION):
+        assert judge(case, _observed({"filters_applied": applied}), "72%.") == ()
+
+
+def test_filters_matching_no_alternative_fail_and_name_every_one() -> None:
+    case = _case({"filters_expected": {"any_of": [DONUT_FILTERS_1H, DONUT_FILTERS_UNION]}})
+
+    applied = {"periods": ["Y2026"], "regions": []}
+    (failure,) = judge(case, _observed({"filters_applied": applied}), "72%.")
+    assert "no alternative" in failure
+    assert "filters_applied is {'periods': ('Y2026',), 'regions': ()}" in failure
+    assert "{'periods': ('1H2026',), 'regions': ()}" in failure
+    assert "{'periods': ('1H2026', 'Y2026'), 'regions': ()}" in failure
 
 
 def test_a_grounded_only_case_only_demands_a_fully_cited_claim() -> None:

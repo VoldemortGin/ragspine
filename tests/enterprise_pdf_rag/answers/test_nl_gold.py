@@ -59,7 +59,12 @@ GOLD = load_gold(GOLD_PATH.read_bytes())
 # (ADR 0018). The scripted translations below stand in for the model's, for the same reason.
 _FUSION_MODE: FusionMode = "rrf"
 _TRANSLATIONS = {
-    "2026 上半年 分销渠道 占比": "Distribution mix 1H26",
+    # Verbatim one of the two wordings the model really returned for this question (the
+    # other was "Distribution channel proportion in 1H26"; the gold accepts both unions).
+    # This one is scripted because it is the wording that exercises the union: its `2026`
+    # derives `Y2026` beside the `1H2026` the question itself derives, while the other
+    # derives `1H2026` again and the union adds nothing.
+    "2026 上半年 分销渠道 占比": "Distribution channel proportion in the first half of 2026",
     "代理人科技投入的三个阶段分别是什么？": "What are the three phases of agency technology?",  # noqa: RUF001 — a real Chinese question ends in the fullwidth mark
     "泰国 1H26 VONB": "Thailand 1H26 VONB",
 }
@@ -285,9 +290,10 @@ def test_gold_case_replays_against_the_pinned_release(
 def test_every_gold_anchor_is_printed_by_the_pinned_evidence(release: PinnedRelease) -> None:
     """The frozen `page_index` + `field_path` pairs still exist, expectations aside."""
     for case in GOLD.cases:
-        for required in case.expected.required_claims:
-            if required.field_path is None:
-                continue
-            member_id = release.member_of(required.page_index, required.field_path)
-            printed = release.block(member_id).prompt_text()
-            assert required.field_path + ":" in printed
+        for requirement in case.expected.required_claims:
+            for required in requirement.alternatives:
+                if required.field_path is None:
+                    continue
+                member_id = release.member_of(required.page_index, required.field_path)
+                printed = release.block(member_id).prompt_text()
+                assert required.field_path + ":" in printed

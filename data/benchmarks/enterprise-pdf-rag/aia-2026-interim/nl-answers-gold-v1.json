@@ -5,7 +5,9 @@
     "Every expectation is taken from a recorded real-model response under data/validation/ (see each case's `evidence`) or, where none exists, from the pinned evidence itself; nothing is written from memory.",
     "Only content-addressed anchors are frozen: field_path, quote, page_index. claim_id, member_id, processing_id, snapshot_id and the prose wording vary between runs and are never asserted.",
     "A chart claim always carries five citations (value, series, category, unit, period); a case asserts the .value path and tolerates the rest.",
-    "known_gap cases record behaviour that is sound but not what we want; the runners report them separately and never fail on them."
+    "known_gap cases record behaviour that is sound but not what we want; the runners report them separately and never fail on them.",
+    "A requirement may name alternatives (`any_of`): two pages can state the same fact - the p.3 sentence and the p.7 chart point both print the record Operating ROE - and which one a run cites is not stable, so the case accepts either instead of freezing one.",
+    "A filters_expected may likewise name alternatives (`any_of`): the applied pre-filters union what the question derives with what its translation derives, so for a translated question they are a function of the model's wording and two cold runs can differ legitimately. Such a case enumerates the sets that were really observed."
   ],
   "pinned": {
     "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
@@ -50,11 +52,24 @@
         "min_claims": 1,
         "required_claims": [
           {
-            "kind": "quote",
-            "page_index": 3,
-            "field_path": "fragments.span-v1-ff929d64a63e99cce87e6374a338dedc8e26868ec73b3e7666478428ecbe613f",
-            "quote": "record Operating ROE of 17.5%",
-            "text": "record Operating ROE of 17.5%"
+            "any_of": [
+              {
+                "kind": "quote",
+                "page_index": 3,
+                "field_path": "fragments.span-v1-ff929d64a63e99cce87e6374a338dedc8e26868ec73b3e7666478428ecbe613f",
+                "quote": "record Operating ROE of 17.5%",
+                "text": "record Operating ROE of 17.5%"
+              },
+              {
+                "kind": "chart_value",
+                "page_index": 7,
+                "field_path": "points.point-1h26-roe-17.5.value",
+                "quote": "17.5%",
+                "text": "17.5%",
+                "value": "17.5",
+                "unit": "%"
+              }
+            ]
           }
         ],
         "required_citation_fields": [
@@ -367,10 +382,21 @@
           "page_title"
         ],
         "filters_expected": {
-          "periods": [
-            "1H2026"
-          ],
-          "regions": []
+          "any_of": [
+            {
+              "periods": [
+                "1H2026"
+              ],
+              "regions": []
+            },
+            {
+              "periods": [
+                "1H2026",
+                "Y2026"
+              ],
+              "regions": []
+            }
+          ]
         }
       },
       "model_output": {
@@ -392,8 +418,8 @@
           }
         ]
       },
-      "rationale": "The same chart asked in Chinese against an English document: the period is still derived and the answer still cites the English evidence verbatim.",
-      "evidence": "data/validation/generic-chat-2026-09-21/page-metadata/m2-zh-distribution.json"
+      "rationale": "The same chart asked in Chinese against an English document: the period is still derived and the answer still cites the English evidence verbatim. Its applied periods union what the model's own translation derives, so two cold runs differed legitimately - `1H2026` alone and `1H2026` with `Y2026`, same answer and same citations both times - and the expectation enumerates both observed sets instead of freezing one run's wording.",
+      "evidence": "data/validation/generic-chat-2026-09-21/page-metadata/m2-zh-distribution.json; the two cold runs that disagree on the derived periods are gold-fix/nl-gold-cold/p06-donut-zh.json and gold-fix/nl-gold-cold-2/p06-donut-zh.json under the same validation root"
     },
     {
       "case_id": "p07-donut-keywords-en",
@@ -905,11 +931,24 @@
         "min_claims": 1,
         "required_claims": [
           {
-            "kind": "quote",
-            "page_index": 3,
-            "field_path": "fragments.span-v1-ff929d64a63e99cce87e6374a338dedc8e26868ec73b3e7666478428ecbe613f",
-            "quote": "record Operating ROE of 17.5%",
-            "text": "record Operating ROE of 17.5%"
+            "any_of": [
+              {
+                "kind": "quote",
+                "page_index": 3,
+                "field_path": "fragments.span-v1-ff929d64a63e99cce87e6374a338dedc8e26868ec73b3e7666478428ecbe613f",
+                "quote": "record Operating ROE of 17.5%",
+                "text": "record Operating ROE of 17.5%"
+              },
+              {
+                "kind": "chart_value",
+                "page_index": 7,
+                "field_path": "points.point-1h26-roe-17.5.value",
+                "quote": "17.5%",
+                "text": "17.5%",
+                "value": "17.5",
+                "unit": "%"
+              }
+            ]
           }
         ],
         "required_citation_fields": [
@@ -1044,14 +1083,14 @@
         },
         "filters_relaxed": false,
         "known_gap": true,
-        "known_gap_detail": "The pages print Thailand VONB under the verified region value `AIA Thailand`, so the `Thailand` pre-filter keeps the wrong candidates and the question declines. The recorded behaviour is sound (nothing is fabricated) but not the answer we want."
+        "known_gap_detail": "Retrieval now reaches the page, and that made this gap worse rather than smaller. Whole-word region matching (ADR 0018 Amendment 1) lets `Thailand` match the verified value `AIA Thailand`, and reading a claim's unit (`294$m` against display `294` + unit `$m`) removed the accidental second guard that used to stop the answer. p.13 prints three `VONB ($m)` charts side by side - AIA Thailand 514, AIA Singapore 294, AIA Malaysia 232 - and region metadata is page-level, so every member on that page carries all four region values and no filter can separate the columns. Across four 2026-09-21 cold re-tests the two Thailand cases answered eight times: `$294m` (Singapore) five times and `$232m` (Malaysia) three times, and Thailand's own `$514m` not once - the model binds a column at random and cites it with real, verbatim provenance. That is a wrong number presented as a sourced one, which is strictly worse than the refusal this case used to record, so the expectation stays `abstained`: it must not be frozen as `answered` until a member-level region binding exists. The three charts are separable on the x axis against the three country headings, so the binding is derivable; the chart IR already admits the weakness in its own confidence note, `the category-to-value association is unproven`."
       },
       "model_output": {
         "abstain": true,
         "abstain_reason": "not_in_context"
       },
-      "rationale": "Freezes the region-vocabulary gap so a later fix is visible as a change, without failing the run today.",
-      "evidence": "data/validation/generic-chat-2026-09-21/page-metadata/r1-region-thailand.json"
+      "rationale": "Keeps the region-binding gap visible. The 2026-09-21 re-test moved it from a safe refusal to a wrong sourced number, so freezing today's behaviour would freeze an error; the case reports as a moved known gap until the binding exists.",
+      "evidence": "data/validation/generic-chat-2026-09-21/gold-fix/nl-gold-cold-2"
     },
     {
       "case_id": "k02-region-thailand-zh",
@@ -1072,14 +1111,14 @@
         },
         "filters_relaxed": false,
         "known_gap": true,
-        "known_gap_detail": "The Chinese region name never matches the document's own English vocabulary, so no region filter is derived at all - a second, distinct gap from the English case."
+        "known_gap_detail": "The Chinese counterpart, and it no longer fails for the reason it was frozen for. `VONB` scores lexically on its own, so the content-word probe (ADR 0018 Decision 4) finds the question scoreable and no translation is made; `regions` is still empty, as recorded. But the question now retrieves p.13 and answers with whichever of the three columns the model happens to bind - `$294m` (Singapore) or `$232m` (Malaysia), never Thailand's own `$514m` - under Thailand's name, exactly as in `k01`. Same root cause (page-level region metadata cannot separate three side-by-side country charts), same decision: the expectation stays `abstained` rather than freeze a wrong number as correct."
       },
       "model_output": {
         "abstain": true,
         "abstain_reason": "not_in_context"
       },
-      "rationale": "The Chinese counterpart of the Thailand gap: the filter silently disappears rather than matching, and that difference must stay visible.",
-      "evidence": "data/validation/generic-chat-2026-09-21/page-metadata/r2-zh-region-thailand.json"
+      "rationale": "The Chinese counterpart of the same region-binding gap. It is kept separate because its filter disappears instead of matching, and that difference must stay visible even though both now answer with the wrong column.",
+      "evidence": "data/validation/generic-chat-2026-09-21/gold-fix/nl-gold-cold-2"
     },
     {
       "case_id": "x01-derived-number-in-prose",

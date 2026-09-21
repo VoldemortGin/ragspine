@@ -17,9 +17,10 @@ What a case may freeze is limited by what is actually stable across runs. ``fiel
 wording are not, and no expectation names them.
 """
 
-from typing import Literal
+from collections.abc import Callable
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Discriminator, Tag, model_validator
 
 from enterprise_pdf_rag.answers.models import AbstainReason, AnswerStatus
 
@@ -54,11 +55,81 @@ class _ObservedModel(BaseModel):
     model_config = ConfigDict(frozen=True, extra="ignore")
 
 
+def _no_nested_choice(kind: str) -> Callable[[object], object]:
+    """Refuse a nested choice before the generic "unexpected key" error can bury it.
+
+    A validator on the *item* only; the enclosing model keeps its plain schema, because a
+    before-validator on a strict model hands its fields a Python value and a JSON array
+    would then no longer parse as a tuple.
+    """
+
+    def refuse(value: object) -> object:
+        if isinstance(value, dict) and "any_of" in value:
+            raise ValueError(f"`any_of` names single {kind}, never nested `any_of`")
+        return value
+
+    return refuse
+
+
+def _choice_form(value: object) -> str:
+    """Which written form an expectation uses: one value, or a choice between values."""
+    if isinstance(value, dict):
+        return "any_of" if "any_of" in value else "single"
+    return "any_of" if hasattr(value, "any_of") else "single"
+
+
+def _decoded_array(value: object) -> object:
+    """A JSON array, whether this model is parsed from JSON or from an already-decoded one.
+
+    Inside an `any_of` the item validator above has decoded the object already, so a strict
+    tuple field would be handed a Python list and refuse it. The element types stay strict.
+    """
+    return tuple(value) if isinstance(value, list) else value
+
+
+GoldStrings = Annotated[tuple[str, ...], BeforeValidator(_decoded_array)]
+
+
 class GoldFilters(_GoldModel):
     """Metadata pre-filters, as a request sends them or as the envelope reports them."""
 
-    periods: tuple[str, ...] = ()
-    regions: tuple[str, ...] = ()
+    periods: GoldStrings = ()
+    regions: GoldStrings = ()
+
+    @property
+    def alternatives(self) -> tuple["GoldFilters", ...]:
+        """This expectation's filter sets: one, so that both written forms judge alike."""
+        return (self,)
+
+
+class GoldFilterAlternatives(_GoldModel):
+    """Filter sets an expectation accepts instead of one another; any single one satisfies it.
+
+    The applied pre-filters are the union of what the question derives and what its
+    translation derives (ADR 0018 Amendment 1), so for a translated question they are a
+    function of the model's wording: two cold runs of the same question derived `1H2026`
+    alone and `1H2026` with `Y2026`. Such an expectation names every set the behaviour
+    really produces rather than freezing the one a single run happened to show.
+    """
+
+    any_of: tuple[Annotated[GoldFilters, BeforeValidator(_no_nested_choice("filter sets"))], ...]
+
+    @model_validator(mode="after")
+    def _several(self) -> "GoldFilterAlternatives":
+        if len(self.any_of) < 2:
+            raise ValueError("`any_of` names at least two alternative filter sets")
+        return self
+
+    @property
+    def alternatives(self) -> tuple[GoldFilters, ...]:
+        return self.any_of
+
+
+# One filter expectation, written either way; discriminated exactly as a requirement is.
+GoldFiltersSpec = Annotated[
+    Annotated[GoldFilters, Tag("single")] | Annotated[GoldFilterAlternatives, Tag("any_of")],
+    Discriminator(_choice_form),
+]
 
 
 class GoldQuestion(_GoldModel):
@@ -119,6 +190,42 @@ class RequiredClaim(_GoldModel):
         assert self.field_path_prefix is not None
         return field_path.startswith(self.field_path_prefix)
 
+    @property
+    def alternatives(self) -> tuple["RequiredClaim", ...]:
+        """This requirement's anchors: one, so that both written forms judge alike."""
+        return (self,)
+
+
+class RequiredClaimAlternatives(_GoldModel):
+    """Anchors a requirement accepts instead of one another; any single one satisfies it.
+
+    Two pinned pages can state the same fact — the sentence on p.3 and the chart point on
+    p.7 both print the record Operating ROE — and which one a run cites is not stable.
+    Such a requirement names every anchor that is true rather than freezing one of them.
+    """
+
+    any_of: tuple[
+        Annotated[RequiredClaim, BeforeValidator(_no_nested_choice("required claims"))], ...
+    ]
+
+    @model_validator(mode="after")
+    def _several(self) -> "RequiredClaimAlternatives":
+        if len(self.any_of) < 2:
+            raise ValueError("`any_of` names at least two alternative required claims")
+        return self
+
+    @property
+    def alternatives(self) -> tuple[RequiredClaim, ...]:
+        return self.any_of
+
+
+# One requirement, written either way; the discriminator keeps a bad shape's error on the
+# form it was actually written in, instead of reporting both forms' failures at once.
+RequiredClaimSpec = Annotated[
+    Annotated[RequiredClaim, Tag("single")] | Annotated[RequiredClaimAlternatives, Tag("any_of")],
+    Discriminator(_choice_form),
+]
+
 
 class GoldExpectation(_GoldModel):
     """Everything a case asserts about one answer. Omitted fields are not checked."""
@@ -128,7 +235,7 @@ class GoldExpectation(_GoldModel):
     # A substring of `abstain_detail`; the detail carries the model's own reason word.
     abstain_detail_contains: str | None = None
     min_claims: int = 0
-    required_claims: tuple[RequiredClaim, ...] = ()
+    required_claims: tuple[RequiredClaimSpec, ...] = ()
     required_citation_fields: tuple[str, ...] = ()
     # The pinned pages state no unambiguous answer, so *which* verified fact the model
     # grounds on is not frozen - only that it grounded on one, and how it was filtered.
@@ -138,8 +245,9 @@ class GoldExpectation(_GoldModel):
     # An abstention has no prose to police, so the check applies to answered results only.
     forbidden_numbers: tuple[str, ...] = ()
     # Given, the applied pre-filters must equal it exactly; an empty object asserts that
-    # no filter was applied.
-    filters_expected: GoldFilters | None = None
+    # no filter was applied. A translated question's filters depend on the model's wording,
+    # so such a case names every set it really derives (`any_of`) instead of one of them.
+    filters_expected: GoldFiltersSpec | None = None
     filters_relaxed: bool | None = None
     cache_hit: bool | None = None
     # The recorded behaviour is not the behaviour we want. The runner reports such a case
@@ -394,6 +502,45 @@ def _claim_failures(
     return tuple(failures)
 
 
+def _requirement_failures(
+    requirement: RequiredClaim | RequiredClaimAlternatives,
+    observed: ObservedAnswer,
+    fields: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Why one requirement is unmet; a list of alternatives is met by any single one of them."""
+    reports = tuple(
+        _claim_failures(alternative, observed, fields) for alternative in requirement.alternatives
+    )
+    if any(not report for report in reports):
+        return ()
+    if len(reports) == 1:
+        return reports[0]
+    listed = " | ".join("; ".join(report) for report in reports)
+    return (f"no alternative required claim is satisfied: {listed}",)
+
+
+def _filter_failures(
+    expected: GoldFilters | GoldFilterAlternatives, observed: ObservedAnswer
+) -> tuple[str, ...]:
+    """Why the applied pre-filters are unaccepted; a list of sets is met by any single one."""
+    applied = observed.filters_applied or ObservedFilters()
+    alternatives = expected.alternatives
+    if any(
+        (applied.periods, applied.regions) == (wanted.periods, wanted.regions)
+        for wanted in alternatives
+    ):
+        return ()
+    if len(alternatives) == 1:
+        return (
+            f"filters_applied is {applied.model_dump()}, expected {alternatives[0].model_dump()}",
+        )
+    listed = " | ".join(str(wanted.model_dump()) for wanted in alternatives)
+    return (
+        f"no alternative filter expectation is satisfied: "
+        f"filters_applied is {applied.model_dump()}, expected one of {listed}",
+    )
+
+
 def judge(
     case: NlGoldCase,
     observed: ObservedAnswer,
@@ -424,8 +571,10 @@ def judge(
             failures.append(f"abstain_detail {detail!r} lacks {expected.abstain_detail_contains!r}")
     if len(observed.claims) < expected.min_claims:
         failures.append(f"{len(observed.claims)} claims, expected at least {expected.min_claims}")
-    for required in expected.required_claims:
-        failures.extend(_claim_failures(required, observed, expected.required_citation_fields))
+    for requirement in expected.required_claims:
+        failures.extend(
+            _requirement_failures(requirement, observed, expected.required_citation_fields)
+        )
     if expected.grounded_only:
         # No claim is frozen, but whatever the answer grounded on must still be fully cited.
         for claim in observed.claims:
@@ -442,12 +591,7 @@ def judge(
             if number in prose:
                 failures.append(f"answer prose contains the forbidden number {number!r}")
     if expected.filters_expected is not None:
-        applied = observed.filters_applied or ObservedFilters()
-        wanted = expected.filters_expected
-        if (applied.periods, applied.regions) != (wanted.periods, wanted.regions):
-            failures.append(
-                f"filters_applied is {applied.model_dump()}, expected {wanted.model_dump()}"
-            )
+        failures.extend(_filter_failures(expected.filters_expected, observed))
     if (
         expected.filters_relaxed is not None
         and observed.filters_relaxed != expected.filters_relaxed
