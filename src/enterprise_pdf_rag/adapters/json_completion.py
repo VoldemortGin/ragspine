@@ -171,6 +171,19 @@ def _redacted(value: object) -> object:
     return result
 
 
+# Greedy decoding. Two identical questions must produce one answer, and a cached answer must
+# stay the answer the release was measured with; a provider default of 0.7 makes neither true.
+# Sent on every completion, so it is part of the request fingerprint and old cache entries miss.
+DETERMINISTIC_TEMPERATURE = 0.0
+
+
+def _sampling(seed: int | None) -> dict[str, object]:
+    """The sampling half of a request body: greedy always, a seed when one is configured."""
+    if seed is None:
+        return {"temperature": DETERMINISTIC_TEMPERATURE}
+    return {"temperature": DETERMINISTIC_TEMPERATURE, "seed": seed}
+
+
 def _context_document(
     fingerprint: str, *, contract: str, task: str, request: dict[str, object]
 ) -> bytes:
@@ -224,6 +237,7 @@ class JsonCompletionClient:
         timeout: float = 45.0,
         sender: SmokeSender | None = None,
         retry_failed: bool = False,
+        seed: int | None = None,
     ) -> None:
         if max_live_calls < 0 or not 0 < timeout <= 180:
             raise ValueError("Invalid bounded model-call configuration")
@@ -232,6 +246,7 @@ class JsonCompletionClient:
         self._initial_budget = max_live_calls
         self._remaining = max_live_calls
         self._timeout = timeout
+        self._seed = seed
         self._sender = _send_once if sender is None else sender
         self._retry_failed = retry_failed
         self._lock = Lock()
@@ -303,6 +318,7 @@ class JsonCompletionClient:
             },
             "max_completion_tokens": max_output_tokens,
             "stream": False,
+            **_sampling(self._seed),
         }
         payload = json.dumps(request, sort_keys=True, separators=(",", ":")).encode()
         fingerprint = _digest(
@@ -370,6 +386,7 @@ class JsonCompletionClient:
             },
             "max_completion_tokens": max_output_tokens,
             "stream": False,
+            **_sampling(self._seed),
         }
         payload = json.dumps(request, sort_keys=True, separators=(",", ":")).encode()
         fingerprint = _digest(

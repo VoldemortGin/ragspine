@@ -106,6 +106,7 @@ def create_configured_app() -> FastAPI:
                 cache_dir=settings.ingestion_root / "model-cache",
                 max_live_calls=settings.answer_max_live_calls,
                 timeout=settings.answer_timeout_seconds,
+                seed=settings.answer_seed,
             )
         except ProviderConfigurationError:
             llm = None

@@ -606,3 +606,72 @@ def test_a_context_that_cannot_be_written_never_fails_the_call(tmp_path: Path) -
     assert result.diagnostics is not None
     assert result.diagnostics.context_path is None
     assert result.diagnostics.context_warning == "context_write_failed"
+
+
+def test_every_completion_asks_for_greedy_decoding_and_the_configured_seed(
+    tmp_path: Path,
+) -> None:
+    sent: list[bytes] = []
+
+    def sender(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
+        sent.append(payload)
+        return _response()
+
+    client = JsonCompletionClient(
+        _config(), cache_dir=tmp_path, max_live_calls=2, sender=sender, seed=7
+    )
+    text = client.complete_text_json(
+        task="answer-v1", prompt="Read the evidence block.", response_model=_Answer
+    )
+    vision = client.complete_json(
+        task="chart-v1", prompt="Read the figure.", image_png=PNG, response_model=_Answer
+    )
+
+    for payload in sent:
+        body = json.loads(payload)
+        assert body["temperature"] == 0.0
+        assert body["seed"] == 7
+    # The envelope is the wire body, so the sampling a cached answer was produced under is
+    # readable from `contexts/` without re-running anything.
+    for result in (text, vision):
+        context = json.loads(
+            (tmp_path / "contexts" / f"{result.request_fingerprint}.json").read_text("utf-8")
+        )
+        assert context["payload"]["temperature"] == 0.0
+        assert context["payload"]["seed"] == 7
+
+
+def test_an_unset_seed_sends_no_seed_field_but_still_pins_the_temperature(
+    tmp_path: Path,
+) -> None:
+    sent: list[bytes] = []
+
+    def sender(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
+        sent.append(payload)
+        return _response()
+
+    JsonCompletionClient(
+        _config(), cache_dir=tmp_path, max_live_calls=1, sender=sender, seed=None
+    ).complete_text_json(task="answer-v1", prompt="Read it.", response_model=_Answer)
+
+    body = json.loads(sent[0])
+    assert body["temperature"] == 0.0
+    assert "seed" not in body
+
+
+def test_the_sampling_parameters_are_part_of_the_request_fingerprint(tmp_path: Path) -> None:
+    def sender(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
+        return _response()
+
+    def fingerprint_for(seed: int | None, cache: Path) -> str:
+        return (
+            JsonCompletionClient(
+                _config(), cache_dir=cache, max_live_calls=1, sender=sender, seed=seed
+            )
+            .complete_text_json(task="answer-v1", prompt="Read it.", response_model=_Answer)
+            .request_fingerprint
+        )
+
+    assert fingerprint_for(0, tmp_path / "a") != fingerprint_for(1, tmp_path / "b")
+    assert fingerprint_for(None, tmp_path / "c") != fingerprint_for(0, tmp_path / "d")
+    assert fingerprint_for(0, tmp_path / "e") == fingerprint_for(0, tmp_path / "f")
