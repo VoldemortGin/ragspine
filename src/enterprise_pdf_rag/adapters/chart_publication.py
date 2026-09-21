@@ -10,6 +10,8 @@ from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.donut_qualification import DonutQualification
 from enterprise_pdf_rag.adapters.figure_label_qualification import (
     FIGURE_LABEL_SCOPE,
+    FIGURE_LABEL_SCOPES,
+    FIGURE_POINT_SCOPE,
     qualify_source_labels,
 )
 from enterprise_pdf_rag.adapters.figure_reasoning import (
@@ -26,6 +28,7 @@ from enterprise_pdf_rag.adapters.source_paint import (
 from enterprise_pdf_rag.documents.models import AssetRef
 from enterprise_pdf_rag.figures.models import (
     ChartIR,
+    FigureError,
     FigureQualification,
     SvgArtifact,
     TextDescription,
@@ -87,7 +90,7 @@ def resolve_chart_member(
     """No model/network calls: reconstruct source, then repeat the scoped proof."""
     receipt = parse_chart_receipt(assets.get(member.qualification))
     semantic_scope = receipt.qualification.semantic_scope
-    if semantic_scope not in {"explicit-distribution-shares", FIGURE_LABEL_SCOPE}:
+    if semantic_scope not in {"explicit-distribution-shares", *FIGURE_LABEL_SCOPES}:
         raise ValueError("Unsupported chart qualification scope")
     if (isinstance(receipt, NumericLabelPublicationReceipt)) != (
         semantic_scope == "explicit-distribution-shares"
@@ -128,8 +131,15 @@ def resolve_chart_member(
     prepared, raw_chart, raw_description = _load_chart_inputs(
         sources, assets, scope, member, receipt
     )
-    if semantic_scope == FIGURE_LABEL_SCOPE:
-        labels = qualify_source_labels(prepared.svg, raw_chart, raw_description)
+    chart = TypeAdapter(ChartIR).validate_json(assets.get(member.ir), strict=True)
+    description = TypeAdapter(TextDescription).validate_json(
+        assets.get(member.description), strict=True
+    )
+    expected: tuple[ChartIR, TextDescription | None, FigureQualification]
+    if semantic_scope in FIGURE_LABEL_SCOPES:
+        labels = qualify_source_labels(
+            prepared.svg, raw_chart, raw_description, scope=semantic_scope
+        )
         expected = (labels.chart, labels.description, labels.receipt)
     else:
         if not isinstance(receipt, NumericLabelPublicationReceipt):
@@ -144,12 +154,11 @@ def resolve_chart_member(
         numeric = DonutQualification(prepared, source_paint=proof).qualify_pair(
             prepared.svg, raw_chart, raw_description
         )
-        labels = qualify_source_labels(prepared.svg, raw_chart, raw_description)
-        expected = (numeric.chart, labels.description, numeric.receipt)
-    chart = TypeAdapter(ChartIR).validate_json(assets.get(member.ir), strict=True)
-    description = TypeAdapter(TextDescription).validate_json(
-        assets.get(member.description), strict=True
-    )
+        expected = (
+            numeric.chart,
+            _published_label_description(prepared.svg, raw_chart, raw_description, description),
+            numeric.receipt,
+        )
     if (chart, description, receipt.qualification) != expected:
         raise ValueError(
             "Chart projection or receipt differs from independent source qualification"
@@ -157,6 +166,32 @@ def resolve_chart_member(
     if semantic_scope == "explicit-distribution-shares":
         validate_pair(prepared.svg, chart, description)
     return ValidatedChartMember(chart, description, expected[2], prepared.svg)
+
+
+def _published_label_description(
+    svg: SvgArtifact,
+    raw_chart: ChartIR,
+    raw_description: TextDescription,
+    indexed: TextDescription,
+) -> TextDescription | None:
+    """Re-derive the label description a numeric member kept indexing.
+
+    A numeric receipt pins the description *asset*, never the label policy that projected
+    it, so the policy is recovered by re-deriving each declared one from source and keeping
+    the one that reproduces the indexed description byte for byte. Nothing in the receipt is
+    trusted: a description no policy reproduces returns the first projection, and the single
+    comparison in ``resolve_chart_member`` then rejects the member.
+    """
+    fallback: TextDescription | None = None
+    for scope in (FIGURE_LABEL_SCOPE, FIGURE_POINT_SCOPE):
+        try:
+            candidate = qualify_source_labels(svg, raw_chart, raw_description, scope=scope)
+        except FigureError:
+            continue
+        if candidate.description == indexed:
+            return candidate.description
+        fallback = fallback if fallback is not None else candidate.description
+    return fallback
 
 
 def _load_chart_inputs(
@@ -229,7 +264,7 @@ def promote_numeric_label_member(
     receipt = parse_chart_receipt(assets.get(member.qualification))
     if (
         not isinstance(receipt, ChartPublicationReceipt)
-        or old.qualification.semantic_scope != FIGURE_LABEL_SCOPE
+        or old.qualification.semantic_scope not in FIGURE_LABEL_SCOPES
     ):
         raise ValueError("Promotion requires a verified source-labels-only member")
     prepared, raw_chart, raw_description = _load_chart_inputs(
@@ -240,7 +275,9 @@ def promote_numeric_label_member(
     numeric = DonutQualification(prepared, source_paint=proof).qualify_pair(
         prepared.svg, raw_chart, raw_description
     )
-    labels = qualify_source_labels(prepared.svg, raw_chart, raw_description)
+    labels = qualify_source_labels(
+        prepared.svg, raw_chart, raw_description, scope=old.qualification.semantic_scope
+    )
     if labels.description != old.description:
         raise ValueError("Numeric promotion cannot rewrite the indexed description")
     proof_ref = assets.put(

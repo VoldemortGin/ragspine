@@ -29,7 +29,12 @@ def _numbers(text: str) -> tuple[Decimal, ...]:
     return tuple(Decimal(match.group().replace(",", "")) for match in _NUMBER.finditer(text))
 
 
-def _explicit_number(text: str) -> Decimal | None:
+def explicit_number(text: str) -> Decimal | None:
+    """The number a label prints outright, or ``None``: no inference, no partial reads.
+
+    A trailing ``%`` and an accounting negative ``(130)`` are printed forms of the number
+    itself; anything the whole (comma-grouped) pattern does not match is not a number here.
+    """
     label = text.strip().removesuffix("%").strip()
     negative = label.startswith("(") and label.endswith(")")
     if negative:
@@ -148,7 +153,7 @@ def validate_pair(svg: SvgArtifact, chart: ChartIR, description: TextDescription
             _validate_text(svg, field)
         elements = evidence_elements(svg, point.value.evidence)
         if point.value.kind is ValueKind.EXPLICIT and point.value.value not in tuple(
-            _explicit_number(element.text) for element in elements
+            explicit_number(element.text) for element in elements
         ):
             raise FigureError(
                 FailureCode.CONTENT_MISMATCH,

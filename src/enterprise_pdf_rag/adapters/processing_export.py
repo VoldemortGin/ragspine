@@ -18,6 +18,7 @@ from enterprise_pdf_rag.adapters.chart_publication import parse_chart_receipt
 from enterprise_pdf_rag.adapters.chart_qa_evaluation import read_evaluation
 from enterprise_pdf_rag.adapters.chart_qa_v2_evaluation import read_bar_evaluation
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
+from enterprise_pdf_rag.adapters.figure_label_qualification import FIGURE_LABEL_SCOPES
 from enterprise_pdf_rag.adapters.http.processing_schemas import ProcessingEnvelope
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.processing.models import (
@@ -210,7 +211,7 @@ def _coverage(outputs: ProcessingStore, manifest: ProcessingManifest) -> tuple[s
                     receipt = parse_chart_receipt(payload)
                     key = (
                         "labels_only_qualified"
-                        if receipt.qualification.semantic_scope == "figure-source-labels-only-v1"
+                        if receipt.qualification.semantic_scope in FIGURE_LABEL_SCOPES
                         else "numeric_qualified"
                     )
             row[key] = int(row[key]) + 1

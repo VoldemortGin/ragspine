@@ -771,4 +771,10 @@ class SemanticObjectAdapter:
                 ),
             )
         )
-        return sum(claim.value is not None for claim in projected_description.claims)
+        # One qualified number shows up once per projection: the donut policy carries it as a
+        # numeric description claim, the verbatim-points policy as an explicit chart point.
+        # Take the richer view rather than adding them, which would count the same fact twice.
+        return max(
+            sum(claim.value is not None for claim in projected_description.claims),
+            sum(point.value.value is not None for point in projected_chart.points),
+        )
