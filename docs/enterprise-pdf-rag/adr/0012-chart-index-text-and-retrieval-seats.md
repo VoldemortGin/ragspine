@@ -184,5 +184,8 @@ may not change.
   generic e2e pins the v3 policy string, and `test_chart_publication.py` /
   `test_chart_qa_bar_draft.py` assert the projected embedding text. Whole package: **802 passed**;
   mypy 452 files clean; ruff, the four structural checks and `check_doc_drift.py` pass.
-- **There is still no frozen gold set** for natural-language answers (ADR 0011 follow-up). Five
-  re-measured cases on one document show the mechanism is fixed; they are not a quality claim.
+- **The frozen gold set now exists** (ADR 0011 follow-up, 2026-09-20):
+  `benchmarks/enterprise-pdf-rag/aia-2026-interim/nl-answers-gold-v1.json`. Six of its cases are
+  the chart-recall regression this ADR fixed (plain, rephrased, title-only, Chinese, keywords-only
+  and with rerank), so a relapse fails the run instead of being re-measured by hand. It still
+  covers one document; that is not a quality claim about arbitrary PDFs.

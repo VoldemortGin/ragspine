@@ -2,6 +2,32 @@
 
 All notable changes to RAGSpine are documented here. This project follows Semantic Versioning.
 
+## [Unreleased]
+
+### Added
+
+- **A frozen gold set for natural-language answers, with two runners that share one judge**
+  (`enterprise_pdf_rag`, ADR 0011 follow-up). Until now the only frozen sets were the two typed
+  ChartQA golds; the whole answer chain was re-measured by hand every round.
+  `benchmarks/enterprise-pdf-rag/aia-2026-interim/nl-answers-gold-v1.json` freezes 25 cases
+  against one pinned release (15 positive, 7 abstaining, 3 adversarial) and is registered in that
+  folder's `manifest.json` (`aia-gold-registry-v1`). It freezes only what is stable across runs —
+  `page_index`, `field_path`, `quote`, the claim's `value` / `unit` and the envelope's
+  `filters_applied` / `filters_relaxed` / `cache_hit` — and never a `claim_id`, a `member_id`, a
+  snapshot id or the prose wording. `adapters/nl_gold.py` holds the strict schema (it self-checks
+  on load: unique ids, a positive case must freeze or explicitly declare its claim, a known gap
+  must say what the gap is) and `judge()`, the single pass/fail rule both runners use.
+  `tests/enterprise_pdf_rag/answers/test_nl_gold.py` replays every case offline against the real
+  pinned evidence through the production mount, with a declared vector channel and scripted model
+  output, so the gold's anchors, seat selection, field-level verification, the prose numeric gate
+  and the abstention policy are guarded by the default gate; it skips as a group when the release
+  is absent or no longer the pinned one. `scripts/enterprise_pdf_rag/nl_gold_eval.py` runs the
+  same cases against a live `document-catalog` service and writes a Markdown table, a JSON report
+  and every raw response, exiting 1 on any failure that is not a declared known gap. Cases cover
+  verbatim text quotes, chart values, diagram nodes, English / Chinese / keyword / title-only
+  phrasings, opt-in rerank, derived and explicit pre-filters, a relaxed impossible filter, the
+  completion cache, five abstentions and three probes that script an illegal model output.
+
 ## [0.15.0] - 2026-09-21
 
 ### Added

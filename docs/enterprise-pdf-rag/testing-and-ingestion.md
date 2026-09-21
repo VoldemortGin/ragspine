@@ -368,10 +368,42 @@ curl --fail-with-body http://127.0.0.1:8766/v1/chat/completions \
 
 离线（默认门，零网络）：`tests/enterprise_pdf_rag/adapters/test_document_catalog.py`、`test_documents_http.py`、`test_hybrid_search.py`、`test_chat_http.py`、`test_page_metadata_extraction.py`、`test_chat_metadata_http.py`（页级元数据阶段、v4 索引头、过滤与路由；脚本化的文本模型回复来自 prompt 自己的 span），`tests/enterprise_pdf_rag/answers/`（store 桥 `store_mounted_document.py` + 脚本化 LLM `fake_llm.py`，`test_query_filters.py` / `test_member_filter.py`），`processing/test_periods.py`、`processing/test_page_metadata.py`，`processing/test_context_builder.py`、`processing/test_table_transcription.py`，以及 e2e / draft publication / pdf ingestion 里新增的程序化表格页用例。它们用程序化 PDF、`OfflineDescriptionEmbedder` 和脚本化模型输出，证明契约、状态码、恰好一次模型调用、逐字段校验与拒答策略。
 
-需真实模型：真实本地 embedder 的 `index` 与在线 search（隧道）、真实答案模型的合成与校验、`APP_LEGACY_DOCUMENT_ROOTS` 挂载真实 AIA 发布后的检索 / 引用 / 拒答验收。2026-09-20 已做一轮（18 用例，无证据外数字进入 answered 回答；散文门年份 ISSUE-3 已于 0.14.0 解决），结论只以 [交接文档](CLAUDE_HANDOFF.md) 为准，本文不作宣称；它是一轮验收，不是冻结金标集。图表召回 ISSUE-2 已由 [ADR 0012](adr/0012-chart-index-text-and-retrieval-seats.md) 解决（索引投影 policy v3 + 查询默认 10/50 + reranker 读证据块 + 图表保底席位），真实重建与复测见交接文档。
+需真实模型：真实本地 embedder 的 `index` 与在线 search（隧道）、真实答案模型的合成与校验、`APP_LEGACY_DOCUMENT_ROOTS` 挂载真实 AIA 发布后的检索 / 引用 / 拒答验收。2026-09-20 已做一轮（18 用例，无证据外数字进入 answered 回答；散文门年份 ISSUE-3 已于 0.14.0 解决），结论只以 [交接文档](CLAUDE_HANDOFF.md) 为准，本文不作宣称；它是一轮验收，不是冻结金标集 —— 冻结金标集见下节“NL 金标集与评测”。图表召回 ISSUE-2 已由 [ADR 0012](adr/0012-chart-index-text-and-retrieval-seats.md) 解决（索引投影 policy v3 + 查询默认 10/50 + reranker 读证据块 + 图表保底席位），真实重建与复测见交接文档。
+
+## NL 金标集与评测（`nl-answers-gold-v1`）
+
+自然语言问答的**冻结金标集**在 `benchmarks/enterprise-pdf-rag/aia-2026-interim/nl-answers-gold-v1.json`（同目录 `manifest.json` 的 `gold_sets` 里登记，两边一致性由测试守住）。它与既有两份 ChartQA 金标并列，但问的是整条回答链，不是 typed ChartQA 接口。
+
+**它冻结什么**：25 条用例，分三类 —— `positive`（15 条：文本逐字引用、环图显式值、路径图节点、英文 / 中文 / 关键词 / 仅标题四种问法、rerank、显式 period 过滤、不可满足 region 的放宽、缓存命中）、`abstain`（7 条：2027 预测、跨期相减、图上没画的先后顺序、选页范围外的第 25 页内容、文档没写的越南人力，外加两条 known gap）、`adversarial`（3 条：散文混入派生数字、图表值被改写、引文被改一个数字）。
+
+**它不冻结什么**：`claim_id`、`member_id`、`processing_id`、`snapshot_id`、artifact id 和散文措辞在每次运行都会变，任何期望都不引用它们。只冻结内容寻址的锚点 —— `page_index` + `field_path` + `quote`，以及 `value` / `unit` / `filters_applied` / `filters_relaxed` / `cache_hit` 这些信封事实。图表 claim 恒带 5 条 citation（value / series / category / unit / period），用例只断言 `.value` 那条，其余容忍。
+
+**`grounded_only`**：钉死的 1-20 页里本来就没有唯一答案的问题（例如“2024 年 VONB 增长”），只冻结“必须落在某条已验证 claim 上、引用字段齐全、且 period 前置过滤推导为 `Y2024`”，不冻结它落在哪条事实上。
+
+**`known_gap`**：记录“行为本身没错（没有编造），但不是我们想要的答案”。两个 runner 都单独报告它们，**永远不判失败**：真实 runner 列在独立小节且不影响退出码；离线 runner 在偏离冻结行为时 `pytest.skip` 并打印 gap 说明。想让 known gap 变成硬失败，就是把 `known_gap` 去掉的那一刻。
+
+### 两个 runner
+
+| | 离线回放 | 真实模型 |
+| --- | --- | --- |
+| 入口 | `.venv/bin/python -m pytest tests/enterprise_pdf_rag/answers/test_nl_gold.py -q` | `.venv/bin/python scripts/enterprise_pdf_rag/nl_gold_eval.py` |
+| 依赖 | 只要本机有钉死的 AIA 发布（`data/output/aia-2026-interim/pages-001-020/current-processing`），无网络、无模型 | 运行中的 `document-catalog` 服务（默认 `http://127.0.0.1:8768`）+ 真实 embedder / reranker / 答案模型 |
+| 覆盖 | 22 条脚本化用例 + 3 条 adversarial（只能离线构造非法模型输出） | 22 条；3 条 `offline_only` 跳过 |
+| 判定 | 与真实 runner 共用 `adapters/nl_gold.judge`，只 `skip={"cache_hit"}` | 同一个 `judge`，全量 |
+| 缺发布时 | 整组 skip；发布被重建、与 `pinned` 不符时也 skip 并提示重新冻结 | 连不上即失败 |
+
+离线 runner **不测召回**：快照里的向量出自真实本地 embedder，离线门不许调它，所以向量通道是声明式的 —— 它直接返回该用例脚本化 claim 所引用的成员。被测的是其后的一切：席位选择与上下文预算、strict 输出 schema、逐字段 claim 校验、散文数字门、拒答策略，以及金标锚点是否还存在于钉死证据里。真实召回、延迟与缓存由真实 runner 负责。
+
+真实 runner 逐条 `POST /v1/chat/completions`，把每条原始响应写成 `<case_id>.json`，并输出 `report.md`（Markdown 表）与 `report.json`；默认落在 `data/validation/nl-gold/<日期>/`，可用 `--out` 改。只要有一条**非 known_gap** 用例失败就退出码 1。常用参数：`--base-url`、`--gold`、`--timeout`（默认 180s，rerank 用例实测约 46s）、`--case`（只跑指定用例，可重复）。
+
+### 约定
+
+- **发版前必须跑一次真实 runner**，把 `report.md` 的结论写进 [交接文档](CLAUDE_HANDOFF.md)；离线 runner 已在 `bash scripts/ci.sh` 第 5 步里，每次都跑。
+- 金标与某次结果不符时，**先核实是金标写错还是行为回归**，再决定改哪边；期望值一律以钉死证据为准，不凭记忆。
+- AIA 发布被重新 qualify / index / publish 之后，`pinned` 的三个 id 会失效：离线 runner 自动 skip 并提示，此时要对新发布重新冻结金标，而不是放宽期望。
 
 ## 通用性与完整 RAG 的完成条件
 
 产品目标面向不同文档。AIA 的公开来源、SHA、前 20 页 gold 和数值资格只是一个可复现的验收样本；它们不应该成为任意 PDF 入库的文件名、页数或业务规则前置条件。当前 API 的 `/v1/aia/*` 路径、来源审阅 model ID 和默认存储仍属于这一兼容 profile。
 
-通用入库的来源资产保存、layout/semantics、description 资格、embedding 索引、发布/服务挂载、自然语言回答是不同阶段。只有来源入库成功时，不能宣称新文档已可检索或聊天。截至 2026-09-20，这条链的每一段都有代码与离线测试：证据与资格链（含逐字转写 `VERIFIED` 的 TABLE 成员）、显式 `qualify`/`index`/`publish`、`document-catalog` 模式的按文档服务入口、hybrid 检索 → 一次模型调用 → 逐字段校验的回答链，以及文本 / 表格单元格 / 图表值的正例、拒答、引用与损坏证据用例（[ADR 0011](adr/0011-document-catalog-and-verified-answer-chain.md)）。图表召回 ISSUE-2 已由 [ADR 0012](adr/0012-chart-index-text-and-retrieval-seats.md) 解决（索引投影 policy v3 + 查询默认 10/50 + reranker 读证据块 + 图表保底席位），真实重建与复测见交接文档。尚未完成的是：真实模型上的持续验收（2026-09-20 已做一轮，结论与遗留见 [交接文档](CLAUDE_HANDOFF.md)，本文不替它下结论）、自然语言问答的冻结金标集、Open WebUI 网关对 `document-catalog` 模式的接入、`backend.Dockerfile` 复验，以及第 20 页 v2 的独立验收。在这些完成前，不能称通用聊天已验收。
+通用入库的来源资产保存、layout/semantics、description 资格、embedding 索引、发布/服务挂载、自然语言回答是不同阶段。只有来源入库成功时，不能宣称新文档已可检索或聊天。截至 2026-09-20，这条链的每一段都有代码与离线测试：证据与资格链（含逐字转写 `VERIFIED` 的 TABLE 成员）、显式 `qualify`/`index`/`publish`、`document-catalog` 模式的按文档服务入口、hybrid 检索 → 一次模型调用 → 逐字段校验的回答链，以及文本 / 表格单元格 / 图表值的正例、拒答、引用与损坏证据用例（[ADR 0011](adr/0011-document-catalog-and-verified-answer-chain.md)）。图表召回 ISSUE-2 已由 [ADR 0012](adr/0012-chart-index-text-and-retrieval-seats.md) 解决（索引投影 policy v3 + 查询默认 10/50 + reranker 读证据块 + 图表保底席位），真实重建与复测见交接文档。尚未完成的是：真实模型上的持续验收（自然语言问答的冻结金标集与两个 runner 已建，见上节“NL 金标集与评测”；每次发版仍需人工跑一次真实 runner 并把结论写进 [交接文档](CLAUDE_HANDOFF.md)）、Open WebUI 网关对 `document-catalog` 模式的接入、`backend.Dockerfile` 复验，以及第 20 页 v2 的独立验收。在这些完成前，不能称通用聊天已验收。

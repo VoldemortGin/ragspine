@@ -168,13 +168,24 @@ calls a provider; and `TableIR` / `TableCell.verification` are pinned `PENDING` 
   ids, so Open WebUI does not front `document-catalog` mode yet.
 - `deploy/enterprise-pdf-rag/open-webui/backend.Dockerfile` remains unverified since the merge
   (ADR 0021).
-- There is no frozen gold set for natural-language answers; the chart-QA golds are the only
-  frozen sets. Building one (text, table and chart questions with positives, refusals and
-  corrupt-evidence cases) is a prerequisite for claiming generic QA quality.
+- **A frozen gold set for natural-language answers now exists** (2026-09-20):
+  `benchmarks/enterprise-pdf-rag/aia-2026-interim/nl-answers-gold-v1.json`, 25 cases pinned to
+  one published release, registered in that folder's `manifest.json`. Its schema, self-checks
+  and single pass/fail rule live in `adapters/nl_gold.py`, and two runners share that rule —
+  `tests/enterprise_pdf_rag/answers/test_nl_gold.py` (offline replay of the pinned evidence,
+  in the default gate) and `scripts/enterprise_pdf_rag/nl_gold_eval.py` (live service, run
+  before a release). Covered: verbatim text quotes, chart values, diagram nodes, English /
+  Chinese / keyword / title-only phrasings, opt-in rerank, derived and explicit pre-filters, a
+  relaxed impossible filter, the completion cache, five abstentions (a forecast, a
+  cross-period subtraction, an order no edge draws, content outside the selected pages, a
+  headcount nobody printed) and three adversarial probes that script an illegal model output.
+  Table-cell questions and corrupt-evidence cases are **not** in it yet; they remain follow-ups,
+  as does widening it beyond this one document.
 - Real acceptance — a real local-embedder `index`, a real answer model, the AIA release mounted
   through `APP_LEGACY_DOCUMENT_ROOTS` — ran once on 2026-09-20 (evidence under
   `data/validation/generic-chat-2026-09-20/`, results in the handoff): no number or fact outside
-  the verified evidence reached an answered response. It is one round, not a frozen gold set.
+  the verified evidence reached an answered response. That round is what the frozen gold set
+  above was built from; it is now repeatable by one command instead of by hand.
 - **Geometry tolerance (BUG-1, fixed the same day).** The prompt renders canonical bboxes at
   full float precision while models return the shortest decimal, so strict `<=` containment
   checks failed by ~6e-15 on real calls and never in the offline stub. `processing/geometry.py`

@@ -1,6 +1,6 @@
 ---
 covers: src/enterprise_pdf_rag/
-verified-against: 48e3547
+verified-against: 44c1896
 ---
 
 # enterprise_pdf_rag — agent contract
@@ -63,7 +63,8 @@ adapters/     every SDK and I/O: pdfspine, http/ (FastAPI app factory; documents
               diagram_geometry.py + diagram_qualification.py + diagram_publication.py and
               pdfspine_formula.py + formula_qualification.py (the ADR 0015 proofs, receipts
               and replays), visual_requalification.py (re-prove a saved snapshot's visual
-              objects from its stored branches), chart QA v1/v2
+              objects from its stored branches), chart QA v1/v2, nl_gold.py (the frozen
+              natural-language gold set's schema and the judge both its runners share)
 resources/    packaged prompts / static data
 cli.py        enterprise-pdf-rag ingest|metadata|qualify|index|publish|serve|chart-qa|demo|extract|llm-smoke
               + AIA-sample-only ingest-aia|process-aia-layout|process-aia-semantics|index-aia-processing
@@ -92,7 +93,13 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   `<ingestion_root>/model-cache`, live budget `APP_ANSWER_MAX_LIVE_CALLS` (200).
 - **Deploy:** `deploy/enterprise-pdf-rag/open-webui/` — `backend.Dockerfile` is not re-verified
   since the merge (local `../corespine` uv source; see ADR 0021 follow-ups).
-- **Benchmarks / gold:** `benchmarks/enterprise-pdf-rag/aia-2026-interim/`.
+- **Benchmarks / gold:** `benchmarks/enterprise-pdf-rag/aia-2026-interim/` (its `manifest.json`
+  registers each set). Besides the two typed ChartQA golds there is now a frozen
+  **natural-language** gold set, `nl-answers-gold-v1.json`, pinned to one published release:
+  schema + the single pass/fail rule in `adapters/nl_gold.py`, replayed offline by
+  `tests/enterprise_pdf_rag/answers/test_nl_gold.py` and run against a live service by
+  `scripts/enterprise_pdf_rag/nl_gold_eval.py` (**run that one before a release**; see
+  `testing-and-ingestion.md` for `known_gap` semantics).
 
 ## Invariants (do not break)
 

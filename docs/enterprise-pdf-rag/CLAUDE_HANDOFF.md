@@ -1,8 +1,35 @@
 # Claude 交接：通用文档 RAG 与公开样本验收
 
-更新时间：2026-09-21
+更新时间：2026-09-21（末次追加 2026-09-20 的 NL 金标集一节）
 
 > 阅读顺序：先看下方“恢复开发记录”；后续旧暂停快照保留作证据，不能作为实时发布或服务状态。
+
+## 自然语言问答的冻结金标集与两个 runner（2026-09-20，分支 `feat/nl-gold-set`，未合并 `main`）
+
+> 解掉 ADR 0011 follow-up 里那条“自然语言问答还没有冻结金标集”。证据在本机 `data/validation/nl-gold/2026-09-20/`（`data/*` 为 git 忽略，同此前各轮）。
+
+**做了什么**
+
+1. **金标集** `benchmarks/enterprise-pdf-rag/aia-2026-interim/nl-answers-gold-v1.json`，25 条，钉死当前 AIA 发布（processing `231c904c843e`，snapshot `2f35ca97171a`，190 个 member）。同目录 `manifest.json` 新增 `gold_sets` 登记（`aia-gold-registry-v1`），与金标文件的一致性由测试守住。分类：`positive` 15 / `abstain` 7（含 2 条 known gap）/ `adversarial` 3。
+2. **schema + 判定逻辑** `src/enterprise_pdf_rag/adapters/nl_gold.py`（与两份 ChartQA 金标同层，pydantic `strict/frozen/extra=forbid`，加载即自校验）。`judge()` 是两个 runner 共用的唯一判定规则，所以它们不会分叉。`answer_prose()` 拆掉 `render_message` 的引用块，并由测试对着 `render_message` 复证。**没有**进 `check_schema.py`：那是 HTTP 公开契约的漂移门，金标不是 HTTP 契约。
+3. **离线 runner** `tests/enterprise_pdf_rag/answers/test_nl_gold.py`：用生产挂载路径（`scan_catalog` + `mount_document(entry, embedder=None)`，页级元数据因此可用）只读打开钉死发布，向量通道是**声明式**的 —— 直接返回该用例脚本化 claim 引用的成员，LLM 用 `fake_llm.scripted_client` 回放金标自带的 `model_output`。不追求复现召回；守的是席位/预算、strict schema、逐字段校验、散文数字门、拒答策略，以及金标锚点是否还在证据里。缺发布或发布与 `pinned` 不符时整组 skip 并提示重新冻结。
+4. **真实 runner** `scripts/enterprise_pdf_rag/nl_gold_eval.py`：逐条打 `POST /v1/chat/completions`，写 `<case_id>.json` + `report.md` + `report.json` 到 `data/validation/nl-gold/<日期>/`；known_gap 单列且不影响退出码，非 known_gap 失败即退出码 1。
+
+**本轮真实验收（2026-09-20，8768，`gpt-5.6-luna` + Qwen3-Embedding-4B / Qwen3-Reranker-4B）**：22 条可联网用例 **20 pass / 0 fail / 2 known-gap-holds**，退出码 0。rerank 用例 ~46s，其余 6.5-8.4s。表格见 `data/validation/nl-gold/2026-09-20/report.md`。
+
+**建金标过程中查实的两件事（都是金标写法问题，不是行为回归）**
+
+1. `record Operating ROE of 17.5%` 这句在**第 4 页和第 8 页各印了一次**（member `599bae5018ae` 与 `2171c8c4aac1`）。所以纯关键词问法（`Operating ROE 1H 2026`）会命中 p.8，用例不可能确定性地钉死页码 —— 该用例已删除，保留全句问法的 `p01`。
+2. 钉死的 1-20 页里**没有“2024 年 VONB 增长”这个事实**。2026-09-21 那轮答 p.6 的 `+11%`，本轮答 p.7 的 `VONB Up 18% to $965m`，两者都已验证、都被逐字引用，但都不是问题问的那个数。因此该用例改成 `grounded_only`：只冻结“必须落在某条已验证 claim 上 + 引用字段齐全 + period 前置过滤推导出 `Y2024`”。
+
+**两条 known gap（行为没错，但不是想要的答案）**
+
+- `k01-region-thailand-en`（`Thailand 1H26 VONB`）：页面把泰国的值印在已验证 region 值 `AIA Thailand` 之下，`Thailand` 前置过滤留下的是别的候选，于是拒答。
+- `k02-region-thailand-zh`（`泰国 1H26 VONB`）：中文地区名匹配不上文档自己的英文 vocabulary，**根本没推导出 region 过滤**，与英文那条是两个不同的缺陷。
+
+**离线验证**：`pytest tests/enterprise_pdf_rag -q` 由 1015 → **1063 passed**（新增 23 条 schema/judge 单测 + 25 条离线回放）；离线回放整组约 79s。mypy / ruff / 四个 check / `check_doc_drift` 见下方提交说明。
+
+**遗留**：金标只覆盖这一份文档，且还没有表格单元格（`cell`）用例与损坏证据用例；`grounded_only` 是为“文档本身没有唯一答案”开的口子，新增用例时应优先用 `required_claims`。
 
 ## 视觉对象保底席位与散文门修正（2026-09-21，分支 `fix/visual-recall-and-gates`，未合并 `main`）
 
