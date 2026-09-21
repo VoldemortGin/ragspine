@@ -1,8 +1,44 @@
 # Claude 交接：通用文档 RAG 与公开样本验收
 
-更新时间：2026-09-21（末次追加 2026-09-20 的 NL 金标集一节）
+更新时间：2026-09-21（末次追加页级父子窗口一节）
 
 > 阅读顺序：先看下方“恢复开发记录”；后续旧暂停快照保留作证据，不能作为实时发布或服务状态。
+
+## 页级父子窗口：命中块旁边带上整页（2026-09-21，分支 `feat/page-window`，未合并 `main`）
+
+> 解决「检索一次只给一个 member 打分，命中块到达 prompt 时脱离了解释它的那一页」——信息太碎。对应 ragspine 的 small-to-big（`src/ragspine/retrieval/link/narrative_link.py`）。设计见 [ADR 0016](adr/0016-page-context-window.md)。代码提交 `2af360c`。证据在本机 `data/validation/generic-chat-2026-09-21/page-window/`（`data/*` 为 git 忽略，同此前各轮），该目录 `NOTES.md` 是本节的原始记录。
+
+**做了什么**（最小改动，TDD）
+
+1. `processing/context_builder.py` 新增 `PageContextBlock`：命中成员所在页的其它成员，各折成一行正文，渲染在 `[page_context page_index=N] title=… section=…` 之下。**故意不打印任何字段路径、也不打印 member id**，所以它不可能成为 claim 的目标；模型若硬编一个 member id，落进既有的 `unknown member` 分支被拒（为此只加了测试，没加代码）。
+2. `answers/page_window.py`（新，纯 stdlib）：每页一块、插在该页第一个命中块之后、已入座的成员不再重复、按 `reading_key` 排序（复用已证明 diagram 读节点的 `READING_ROW_QUANTUM = 4.0`）。`MemberText` 新增 `bbox` 与 `header`（AIA 快照 190/190 成员都拿到），索引头只在块头打一次。
+3. 预算：`AnswerSettings.page_window=True` / `page_window_budget_chars=6000`（单页上限，按阅读序从尾部整成员丢并标 `[truncated]`）；总预算仍 18000，`budget_blocks` **先从最后一页往前整块丢页块**，命中块的证据绝不让位给邻居的上下文。
+4. 散文数字门放宽：页上下文里印出的数字算已接地。**放宽的是散文可以复述什么，不是可以引用什么**——claim 仍必须命名 member 块。只收成员自身的 text、不收块的渲染，避免块头的 `page_index=N` 把一个数字变成「有据」。
+5. 三层开关（`AnswerSettings` / `AnswerRequest.page_window` / HTTP `page_window`）+ `AnswerResult.page_windows` 与信封 `page_windows`；契约 `rag-chat-v1.json` 纯新增 88 行。
+
+**本轮真实验收（2026-09-21，临时端口 8779，`gpt-5.6-luna` + Qwen3-Embedding-4B / Qwen3-Reranker-4B）**
+
+> 线上 8768/3200 正在做 demo，本轮**没有重启它们**，也没碰 `data/open-webui-catalog`：另起一个只有 API 的 `enterprise-pdf-rag serve --port 8779`，`APP_INGESTION_DIR` 指向 scratchpad 新空目录、legacy root 仍是 AIA pages-001-020，跑完即 kill。
+
+| 金标（22 条联网用例） | pass | fail | known gap |
+| --- | --- | --- | --- |
+| 改动前（`main` 的服务） | 19 | **1**（`p13`） | 2 |
+| 改动后（页窗口） | **20** | **0** | 2 |
+
+`p13-explicit-period-filter-en` **在改动前就已经确定性失败**（连跑两次同样失败），不是本刀引入的；本刀把它修好了。旧失败的根因：问题 "Agency share of VONB" 本身有二义——第 9 页印着 "Differentiated, Professional Agency: 87% of VONB"（AIA China 分部口径），第 17 页 donut 是 72%（集团口径），模型引用了前者。带上页上下文后模型改引 `points.point-agency.value = 72%`。清空补全缓存重跑两次仍 pass。
+
+两条依赖页上下文的问题：
+
+| 问题 | 结果 |
+| --- | --- |
+| What does the Distribution Mix chart on the EV Results page tell about Agency? | **答对**：「Agency accounted for 72% of VONB」，引用 `p.18 points.point-agency.value = 72% (svg #obs-867ffed1c4f36f65)`；`page_windows` 4 块（页 17/5/18/19，430–841 字符，均未截断） |
+| Summarise the Growth Engines section for Hong Kong | **503 provider_timeout，3/3 次**（最后一次 52.2s）。同一问题带 `"page_window": false` **37.5s 正常作答**并引用 p.11 四个 span |
+
+**遗留（需要你拍板的一条）**：第二条问题暴露了本刀的真实代价——页上下文把 prompt 和生成都变长，宽泛的「总结某一节」类问题会越过 `JsonCompletionClient` **写死的 45s** 超时（`create_configured_app` 没传 `timeout=`，而该类本身允许到 180s，也没有对应的 `APP_*` 环境变量）。这不是正确性缺陷，但会让这类问题在默认配置下 503。我**没有**顺手改超时（超出本次需求范围，且属于行为变更）。可选方向：① 给 `core/settings.py` 加 `answer_timeout_seconds`（与既有 `answer_max_live_calls` 同层）并传给 `create_configured_app`；② 对这类问题用 `page_window=false`；③ 调小 `page_window_budget_chars`。
+
+其余遗留：双栏页的 `(y, x)` 阅读序会在左右栏之间交错（页边界是版面给的事实，栏边界不是，未处理）；页上下文占用总预算，极端情况下会挤掉靠后的命中块（已由预算顺序保证先挤页块）；中文查询无词面通道与 partition 误判标题行两个老洞未动。
+
+**离线验证**：`pytest tests/enterprise_pdf_rag -q` 由 **1077 → 1097 passed**（新增 20 条，另有前置的 `test_context_builder.py` 7 / `test_ports.py` 5 / `test_document_catalog.py` 2）；`mypy` 500 文件零错误；`ruff check` / `ruff format --check` 全过；`check_conformance` / `check_architecture` / `check_schema` / `check_drift` 四个全过；`check_doc_drift` 23 tracked / 0 stale（`src/enterprise_pdf_rag/CLAUDE.md` bump 到 `2af360c`）。
 
 ## 自然语言问答的冻结金标集与两个 runner（2026-09-20，分支 `feat/nl-gold-set`，未合并 `main`）
 

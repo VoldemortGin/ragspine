@@ -28,6 +28,35 @@ All notable changes to RAGSpine are documented here. This project follows Semant
   phrasings, opt-in rerank, derived and explicit pre-filters, a relaxed impossible filter, the
   completion cache, five abstentions and three probes that script an illegal model output.
 
+- **Every hit is read beside the rest of its page, which is never citable**
+  (`enterprise_pdf_rag`, ADR 0016). Retrieval scores one member at a time, so a hit reached the
+  prompt stripped of the page that explains it: a chart with no caption, a heading with no body, a
+  bullet with no section. A page-level parent window now widens the generation context the way
+  ragspine already does for narrative chunks (`src/ragspine/retrieval/link/narrative_link.py`: the
+  window goes into a separate `prompt_text`, the citation stays pinned to the fine child).
+  `processing/context_builder.py` gains `PageContextBlock` — one page's remaining members, each
+  folded to a single line of its index-text body, in the reading order a proved diagram already
+  uses (`READING_ROW_QUANTUM`, then left to right), under a `[page_context page_index=N]` head that
+  prints the ADR 0013 page title and section once. `answers/page_window.py` (new, stdlib only)
+  places one block per page after that page's first hit and leaves out members that already have
+  their own block; `answers/ports.MemberText` gains `header` and `bbox` (the description's source
+  anchor, or a chart's qualification receipt) plus a `body` property to feed it. The block
+  deliberately prints **no field path and no member id**, so nothing in it can be the target of a
+  claim: a model that names one anyway lands in the pre-existing `MODEL_OUTPUT_INVALID` /
+  "unknown member" rejection, which no new code was written for and a test now pins. The prose
+  numeric gate is widened to match — a figure the page context printed may be repeated without
+  abstaining the whole answer — but that widens what the prose may *repeat*, never what it may
+  *cite*, and only the members' own text is admitted, never the block rendering, so a head's
+  `page_index=` cannot ground a number; the three adversarial gold cases still abstain unchanged.
+  `budget_blocks` became generic over `PromptBlock` and gives page context up first, whole blocks
+  from the last page backward, so a hit's own evidence is never surrendered to its neighbours'
+  context; within a page, `page_window_budget_chars` (6000, against a total of 18000) drops whole
+  members from the end and the block says `[truncated]`. Switchable at every level
+  (`AnswerSettings.page_window`, `AnswerRequest.page_window`, `rag-chat-v1`'s `page_window`), and
+  `AnswerResult.page_windows` / the envelope report every block that reached the prompt. No policy
+  string moves, no snapshot id changes and no index is rebuilt — a release published earlier gains
+  the capability as it stands, and the contract gains only optional fields.
+
 ## [0.15.0] - 2026-09-21
 
 ### Added

@@ -348,6 +348,48 @@ curl --fail-with-body http://127.0.0.1:8766/v1/chat/completions \
 
 `"stream": true` 时先完成检索、模型调用与校验，再把正文按 128 字符切片以 SSE 回放：首帧 `delta: {"role":"assistant"}`，倒数第二帧 `finish_reason: "stop"`，最后一帧 `choices: []` 且带完整 `enterprise_pdf_rag` 信封，然后 `data: [DONE]`；`usage` 恒为 `null`。
 
+### 页级父子窗口（ADR 0016）
+
+命中块只证明一个对象，页窗口在它旁边再印一次“这一页还写了什么”。开关有三层，从内到外：
+`AnswerSettings.page_window`（默认 `True`）与 `AnswerSettings.page_window_budget_chars`（默认
+6000，**单页**上限；总预算仍是 `prompt_budget_chars = 18000`）；`AnswerRequest.page_window:
+bool | None`（`None` 取 settings，`True` / `False` 只覆盖这一次请求）；HTTP 请求体的
+`page_window`（同样省略或 `null` 即用服务默认），例如在上面的 `/v1/chat/completions` body 里加
+`"page_window": false` 就能对照关掉页窗口重跑同一个问题。
+
+每个命中页一块，插在该页第一个命中块之后，渲染成：
+
+```text
+[page_context page_index=6] title=Group overview section=Financial highlights
+(page context: understanding only; it carries no citable path)
+- (text) <这一页另一个成员的正文>
+- (chart) <另一个成员的正文>
+[truncated]
+```
+
+块头把 ADR 0013 的页标题 / section 打一次，成员只打去掉索引头之后的正文，按阅读序（行量化到
+4.0 pt，再左到右，再按 id）排列；已经有自己证据块的成员不会重复出现，`IMAGE` 这种没有块类型的
+成员跳过，正文恰好等于页标题或 section 的成员也丢掉。**块里没有字段路径、也没有 member id**，
+这就是它不可引用的实现方式，而不是一条靠自觉遵守的规则。
+
+信封多一个可选字段 `page_windows`：每个真正进入 prompt 的页块一条，
+`{"page_index": 6, "member_count": 7, "chars": 1842, "truncated": false}`。`truncated` 为 `true`
+表示该页按阅读序从尾部整成员丢弃过（块末尾会印 `[truncated]`，不会截断某个成员的半句话）。
+`rag-chat-v1` 只新增可选字段，旧客户端读契约不变。总预算超了时**先从最后一页往前整块丢页块**，
+再走原有“放不下就跳过”的规则，所以命中块自己的证据永远不会为了邻居的上下文让路。
+
+页块不可引用这一点由这几条钉住：`tests/enterprise_pdf_rag/adapters/test_answer_service.py` 脚本化
+一条指向页上下文成员的 claim，断言它落进既有的 `MODEL_OUTPUT_INVALID` / `unknown member` 分支
+（`verify_claims` 查不到该 member，`answer_service` 的 `by_member` 只收 `ContextBlock`，为此没有
+新增任何校验代码）；`tests/enterprise_pdf_rag/answers/test_page_window.py` 钉住插入位置、阅读序、
+命中成员不重复进上下文与单页预算截断；`tests/enterprise_pdf_rag/answers/test_verify.py` 钉住散文
+数字门的放宽只收成员正文、不收块渲染（块头的 `page_index=N` 不能让一个数字变成“有据”）；
+`tests/enterprise_pdf_rag/adapters/test_chat_http.py` 钉住 HTTP `page_window` 开关与信封字段。
+散文门的放宽只影响“散文可以复述什么”，不影响“可以引用什么”——claim 仍然必须命名 member 块，
+所以从页上下文读到的数字可以被陈述但不带引用；NL 金标集的三条 adversarial 用例
+（`x01-derived-number-in-prose` / `x02-fabricated-chart-value` / `x03-unknown-span-citation`）
+仍然全部拒答。
+
 ### 状态码
 
 | 状态 | 触发 |
