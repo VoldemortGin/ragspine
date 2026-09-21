@@ -4,6 +4,56 @@
 
 > 阅读顺序：先看下方“恢复开发记录”；后续旧暂停快照保留作证据，不能作为实时发布或服务状态。
 
+## 一次问答的延迟：8.8s → 0.7s（2026-09-21，分支 `fix/mount-latency`（`63e3814` + 文档），**未合入 `main`**）
+
+**问题不在模型，在校验。** 缓存命中、`llm_live_calls=0` 的一次问答也要 8～9 秒（线上 8768 走 HTTP 时更久）。
+逐项插桩（在 `ragspine-latency` 工作树内进程实例，AIA 发布 `22127d0f…` / snapshot `42939d6a…` / 210 members，
+问题 `2026 上半年 分销渠道 占比`，第 2/3 次调用，`llm_live_calls=0`）：
+
+| 调用 | 前·次数 | 前·总耗时 | 后·次数 | 后·总耗时 |
+| --- | ---: | ---: | ---: | ---: |
+| `MountedDocument.resolve` | 10 | **6.06s** | 10 | 0.00s |
+| `MountedDocument.manifest` | 12 | **4.37s** | 12 | 0.00s |
+| `ProcessingStore.load`（清单全量校验） | 13 | 4.73s | 1 | 0.17s |
+| `ProcessingStore.load_retrieval`（索引重解析） | 25 | 4.69s | 3 | 0.00s |
+| `LocalDocumentStore.get`（内容寻址读+核摘要） | 71 659 | 4.30s | 3 270 | 0.20s |
+| `MountedDocument.search` | 1 | 1.60s | 1 | 0.18s |
+| **一次问答合计** | | **8.90s** | | **0.69s** |
+| 10 条金标问题均值 / 中位数 | | **9.00s / 9.19s** | | **0.81s / 0.76s** |
+
+`ProcessingStore.load` / `load_retrieval` 里嵌套计时，所以列内会相互包含；`resolve` 与 `manifest` 的耗时几乎
+全部来自这两项。挂载耗时不变（scan + mount 合计约 22s，只发生一次）。10 条金标问题前后**逐条状态完全一致**
+（`p07` / `p11` 两条在前后都是 abstained，是已知的 ADR 0018 回归，与本轮无关）。
+
+**改法（四处，不动任何不变量）**
+
+1. **挂载期校验一次。** `mount_document` 照旧完整校验整个发布（约 5000 个内容寻址资产逐个核摘要 +
+   `validate_processing_source`）。之后每次请求，`MountedDocument.manifest()` 只看那一个**钉死清单对象**
+   ——它是内容寻址的，文件名就是它的摘要，任何改写都改掉摘要。先比 size + mtime_ns 跳过重算；文件一旦动过
+   就重算摘要；摘要对不上就落回挂载期那条完整校验路径，照旧拒绝（`digest mismatch`）。
+2. **索引解析按内容缓存。** `ProcessingStore.load_retrieval` 按 `(plan.sha256, index.sha256)` 在进程内缓存
+   已校验的解析结果——一次发布的 plan / index 都是内容寻址的，重新发布必然换 key。
+3. **证据按成员缓存。** `MountedDocument.resolve` 对同一 `member_id` 只完整证一次（表格重开 PDF 重证网格、
+   图表重建 SVG 分支都在首次做完）；清单一漂移整个挂载就报错，缓存跟着失效。
+4. **向量排序不再逐成员重算快照地址。** `ProcessingRetrieval.search` 把 `plan.snapshot_id` 提到循环外：
+   它是整份 plan 的内容地址，原来每个成员算一次 = 210 × 210 次 `asdict`，一条查询就是 0.9s。
+
+**审计开关**：`APP_VERIFY_EVERY_REQUEST=1`（`Settings.verify_every_request`）把上面三处缓存全部关掉，
+回到"每个请求重做全量校验"，供审计核对；实测就是改动前的量级。
+
+**没有动的地方**：`chart_context` / `displayed_context` 走的 `StoredChartResolver` / `StoredDisplayResolver`
+**每次都重建 native/cropped SVG、原始分支与证明**（`chart_qa.py` 里那条注释是有意的），这是每次请求里
+剩下的 0.17s，按不变量保留。页窗口与视觉席位本来就从 `LexicalIndex.members` 的已缓存文本取
+`bbox` / `header` / `body`，不触发 `resolve`——本轮确认，未改。
+
+**门**：`pytest tests/enterprise_pdf_rag -q` 1229 passed（+6 新用例），全量 `pytest tests/ -q` 见下方"门"记录，
+`mypy --strict` 508 文件零错误，ruff lint + format 全过，四个结构门全过，`check_doc_drift` 无漂移。
+新用例在 `tests/enterprise_pdf_rag/adapters/test_document_catalog.py`：热挂载第二次请求**零资产读**、
+`verify_every_request=True` 每次都重读、清单对象被改写（改长度 / 同长度翻一位）下一次请求都拒绝且缓存证据
+一起失效、同字节重写（只动时间戳）照常挂载、同一 publication 每进程只解析一次。
+
+**遗留**：线上 8768 仍跑 `main`，**本轮没有重启任何服务**；要生效需人工重启该进程。
+
 ## 本轮集成：四条分支合入 `main`（2026-09-21）
 
 > 证据在本机 `data/validation/generic-chat-2026-09-21/integration/`（`data/*` 为 git 忽略，同此前各轮）：

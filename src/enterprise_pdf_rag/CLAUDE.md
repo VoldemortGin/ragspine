@@ -1,6 +1,6 @@
 ---
 covers: src/enterprise_pdf_rag/
-verified-against: ac2a9bf
+verified-against: 63e3814
 ---
 
 # enterprise_pdf_rag — agent contract
@@ -197,8 +197,15 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   only from the document's own vocabulary (no hardcoded company), and a filter that leaves
   fewer candidates than seats is relaxed and reported, never turned into an abstention.
 - **Immutable, content-addressed snapshots** — `publish_draft` switches `current-*` pointers
-  atomically and is idempotent; corrupted evidence is refused, never repaired. A mount re-reads
-  its pinned manifest on every request and refuses drift.
+  atomically and is idempotent; corrupted evidence is refused, never repaired. A mount verifies
+  its **whole** pinned release once, when it is mounted — every asset digest, the source it was
+  cut from, every member's evidence. Every later request re-reads the one file that names all
+  of it, the pinned manifest object whose digest **is** the processing id, and refuses any
+  drift: size and mtime only skip re-hashing a file nothing touched, a file that moved is
+  re-hashed, and a mismatch falls through to the full mount-time verification, which refuses.
+  Within one mount a member's evidence is hydrated once and a retrieval plan / index parsed
+  once, both keyed by content. `APP_VERIFY_EVERY_REQUEST=1` puts the full verification back on
+  every request for an audit (an order of magnitude slower on a real document).
 - **pdfspine is the only PDF parser**; PNG wrapping is not structured extraction.
 - **Credential isolation** — only the API subprocess inherits `EMBEDDING_*`; Open WebUI inherits
   no model key. Do not send real reports to external providers without task authorization.

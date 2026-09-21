@@ -4,6 +4,31 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ## [Unreleased]
 
+### Performance
+
+- **A mounted release is verified once, then watched for drift** (`enterprise_pdf_rag`).
+  Mounting a document verified its whole pinned release — every content-addressed asset
+  digest, the source it was cut from, every member's evidence — and then verified all of it
+  again, in full, on every single request: `MountedDocument.manifest()` re-read and re-checked
+  some 5000 assets, and each `resolve()` re-parsed the whole vector index behind it. On the
+  pinned AIA release that was nearly all of an answer's latency with no model call in sight:
+  **8.90s for one cache-hit question, of which 6.06s was `resolve` and 4.37s `manifest`**.
+  The release is immutable and content-addressed, so after the mount that work proves exactly
+  one thing — that nothing drifted. A request now re-reads the one file that names the whole
+  release, the pinned manifest object whose digest *is* the processing id, and refuses any
+  rewrite of it as before; size and mtime only skip re-hashing a file nothing has touched, a
+  file that moved at all is re-hashed, and a mismatch falls through to the original full
+  verification, which refuses. Beside that, a retrieval publication's plan and index are
+  parsed once per process (keyed by their two content addresses), each member's evidence is
+  hydrated once per mount (its first read still runs the full proof), and the vector ranking
+  derives the snapshot's content address once instead of once per member — that last one was
+  210 x 210 `asdict` calls, 0.9s, per query. `APP_VERIFY_EVERY_REQUEST=1`
+  (`Settings.verify_every_request`) restores the old per-request verification for an audit.
+  Measured in-process on the AIA release: **one question 8.90s -> 0.69s**, ten frozen gold
+  questions **mean 9.00s -> 0.81s**, with every case's status unchanged. Mount time is
+  unchanged, and the chart / displayed-bar requalification seams still rebuild the native and
+  cropped SVG, the raw branches and the proof on every call.
+
 ### Changed
 
 - **A chart point is retrievable when every one of its strings is printed in the figure**

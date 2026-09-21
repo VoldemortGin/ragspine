@@ -241,7 +241,7 @@ enterprise-pdf-rag metadata --source-store <src> --processing-store <proc> --pro
 
 ## document-catalog 模式：多文档目录、按文档检索与证据链聊天
 
-`APP_EXECUTION_MODE=document-catalog` 是与 `aia-source-review` 并存的第二个显式服务模式（[ADR 0011](adr/0011-document-catalog-and-verified-answer-chain.md)）。它扫描入库根下每个 `<sha256>/{source,processing}` 目录及其 `current-*` 指针，把 `retrieval_status == ready` 的文档按 pinned processing id / retrieval snapshot id 挂载；`not_indexed` / `corrupt` 的文档只在目录里可见并带原因。挂载不调用模型；每个请求都重新读取 pinned manifest，任何漂移都 409。
+`APP_EXECUTION_MODE=document-catalog` 是与 `aia-source-review` 并存的第二个显式服务模式（[ADR 0011](adr/0011-document-catalog-and-verified-answer-chain.md)）。它扫描入库根下每个 `<sha256>/{source,processing}` 目录及其 `current-*` 指针，把 `retrieval_status == ready` 的文档按 pinned processing id / retrieval snapshot id 挂载；`not_indexed` / `corrupt` 的文档只在目录里可见并带原因。挂载不调用模型；挂载时完整校验一次，之后每个请求只重读 pinned manifest 对象本身并比对摘要，任何漂移仍是 409（见下文“挂载期校验与每请求漂移检查”）。
 
 ### 启动
 
@@ -425,6 +425,12 @@ bool | None`（`None` 取 settings，`True` / `False` 只覆盖这一次请求�
 `JsonCompletionClient` 以请求指纹（盐 `bounded-text-json-v1`）缓存到 `<ingestion_root>/model-cache/`；同一文档、同一问题、同一上下文的重复请求回放缓存（`llm_live_calls=0`、`cache_hit=true`）。客户端以 `retry_failed=False` 构造：真实调用失败也会被缓存并原样回放；要重试须删除 `<ingestion_root>/model-cache/requests/<fingerprint>.json`。这是有意为之，没有自动重试。
 
 `contexts/<fingerprint>.json` 另存**发给模型的最终完整请求体**，用于回溯：信封是 `request_fingerprint` / `created_at`（UTC）/ `endpoint_path` / `contract`（指纹盐）/ `task`（任务名，如 `page-metadata-v1`）+ `payload`，`payload` 即原样的 JSON 请求体（`model`、全部 `messages` 含 system 规则与证据块 / 页上下文 / 问题、`response_format` 的 schema、`max_completion_tokens` 等）；带图片的调用把 `image_url` 换成 `{"omitted": true, "sha256", "bytes"}`，其余字段一字不改。真实调用前写入，命中缓存回放时缺失则补写，同指纹**先写者胜**（不覆盖），写入失败只在该次记录的 `diagnostics.context_warning` 留码、绝不影响调用；记录里另有 `diagnostics.context_path` 指回它（相对 `model-cache/`）。**隐私**：这些文件逐字包含证据原文（报告内容），属本机排障产物，不要外传、不要随快照分发。
+
+### 挂载期校验与每请求漂移检查
+
+完整校验只在挂载时做一次：`mount_document` 逐个核对该发布引用的全部内容寻址资产摘要，并用 `validate_processing_source` 把每一页、每个成员的证据重证一遍（AIA 发布约 5000 个资产 / 2.7 GB，scan + mount 合计约 22s）。之后每个请求只重读**钉死清单对象**那一个文件——它是内容寻址的，文件名就是它的摘要，任何改写都改掉摘要：先比 size + mtime_ns 跳过重算，文件动过就重算摘要，摘要对不上就落回挂载期那条完整校验并拒绝。同一挂载内，一个 publication 的 plan / index 按 `(plan.sha256, index.sha256)` 只解析校验一次，一个 `member_id` 的证据只完整证一次（表格重开 PDF 重证网格、图表重建 SVG 分支都在首次做完）。效果是缓存命中的一次问答从 8.8s 降到 0.7s（10 条金标均值 9.00s → 0.81s），逐条状态不变；分项前后对照见 [交接文档](CLAUDE_HANDOFF.md) 顶部一节。
+
+`APP_VERIFY_EVERY_REQUEST=1`（`Settings.verify_every_request`）关掉上述全部复用，回到"每个请求重做挂载期全量校验"，供审计核对；真实文档上会慢一个数量级。`chart_context` / `displayed_context` 不在复用范围内：它们每次都重建 native/cropped SVG、原始分支与证明，这是有意为之。离线用例在 `tests/enterprise_pdf_rag/adapters/test_document_catalog.py`（热挂载第二次请求零资产读、审计开关每次重读、清单被改写下一次请求即拒并让已缓存证据失效、同字节重写照常挂载、同一 publication 每进程只解析一次）。
 
 ### 离线可测 vs 需真实模型
 
