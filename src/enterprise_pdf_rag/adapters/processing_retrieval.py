@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from hashlib import sha256
 from math import sqrt
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import TypeAdapter
 
 from enterprise_pdf_rag.adapters.bar_publication import parse_displayed_bar_receipt
 from enterprise_pdf_rag.adapters.chart_member_validation import (
@@ -135,6 +135,12 @@ def member_anchor(assets: LocalDocumentStore, member: RetrievalMember) -> Bounds
     Every kind but ``CHART`` stores it on its description's source anchor; a chart's
     description is bound to its SVG instead, so its rectangle comes from the figure
     qualification receipt. ``None`` when the stored evidence carries neither.
+
+    This is a best-effort read for reading order alone, so it never raises: a receipt this
+    release cannot parse — an unsupported chart scope, a shape from a newer publisher —
+    costs that member its place in the page order and nothing else. Geometry must not be
+    able to fail a mount that the evidence itself supports. ``ValidationError`` is a
+    ``ValueError`` in pydantic v2, so both arrive here.
     """
     try:
         if member.kind is not ObjectKind.CHART:
@@ -144,7 +150,7 @@ def member_anchor(assets: LocalDocumentStore, member: RetrievalMember) -> Bounds
         if uses_displayed_bar_policy(receipt):
             return parse_displayed_bar_receipt(receipt).qualification.source.bbox
         return parse_chart_receipt(receipt).qualification.source.bbox
-    except ValidationError:
+    except (ValueError, KeyError, OSError):
         return None
 
 
