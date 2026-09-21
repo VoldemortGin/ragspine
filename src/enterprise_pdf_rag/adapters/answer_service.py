@@ -28,7 +28,13 @@ from enterprise_pdf_rag.answers.models import (
 )
 from enterprise_pdf_rag.answers.page_window import with_page_context
 from enterprise_pdf_rag.answers.ports import MemberText, MountedDocument
-from enterprise_pdf_rag.answers.prompt import SYSTEM_RULES, ModelAnswer, build_prompt
+from enterprise_pdf_rag.answers.prompt import (
+    SYSTEM_RULES,
+    ModelAnswer,
+    build_prompt,
+    member_aliases,
+    resolve_member_aliases,
+)
 from enterprise_pdf_rag.answers.query_filters import derive_filters
 from enterprise_pdf_rag.answers.query_mode import FusionMode, QueryMode, content_probe
 from enterprise_pdf_rag.answers.verify import decide, verify_claims
@@ -314,10 +320,12 @@ class AnswerService:
                 query_translation=translation,
             )
         member_ids = tuple(block.member_id for block in member_blocks)
+        # Minted after the budget pass, from the blocks that really reach the prompt.
+        aliases = member_aliases(blocks)
         try:
             completion = self._llm.complete_text_json(
                 task=_TASK,
-                prompt=build_prompt(request.question, blocks, request.history),
+                prompt=build_prompt(request.question, blocks, request.history, aliases),
                 response_model=ModelAnswer,
                 system=SYSTEM_RULES,
                 max_output_tokens=self._settings.max_output_tokens,
@@ -346,7 +354,9 @@ class AnswerService:
                 return document.displayed_context(hits[member_id])
             return document.chart_context(hits[member_id])
 
-        model = completion.parsed
+        # Aliases exist only inside the prompt; everything downstream — the verifier, the
+        # citations, the HTTP contract — keeps naming members by their real id.
+        model = resolve_member_aliases(completion.parsed, aliases)
         verification = verify_claims(model, by_member, chart_evidence=chart_evidence)
         status, reason, detail = decide(
             model,

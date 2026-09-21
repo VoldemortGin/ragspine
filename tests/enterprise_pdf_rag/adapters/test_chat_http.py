@@ -104,7 +104,7 @@ def published(tmp_path_factory: pytest.TempPathFactory) -> Published:
 
 def _page_two(prompt: str) -> tuple[str, str, str]:
     """(member_id, span_id, text) of the page-2 fragment offered in the prompt."""
-    block = next(block for block in prompt.split("[member ")[1:] if "page 2" in block)
+    block = next(block for block in prompt.split("| member ")[1:] if "page 2" in block)
     found = _FRAGMENT.search(block)
     assert found is not None
     span_id, text = found.groups()
@@ -341,7 +341,7 @@ def test_the_envelope_reports_the_page_context_that_reached_the_prompt(
         assert len(envelope["member_ids"]) == 10
         (chunk,) = [part for part in prompts[0].split("\n\n") if part.startswith("[page_context")]
         assert window["chars"] == len(chunk)
-        assert not any(path in chunk for path in ("[member ", "fragments.", "cells."))
+        assert not any(path in chunk for path in ("| member ", "fragments.", "cells."))
 
         # The request switch removes the blocks and their report alike.
         closed = await client.post(_URL, json=_body(model, page_window=False))

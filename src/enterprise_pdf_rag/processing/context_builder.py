@@ -153,10 +153,17 @@ class ContextBlock:
     formula_tokens: tuple[FormulaTokenEvidence, ...] = ()
     grid_verification: Verification = Verification.PENDING
 
-    def prompt_text(self) -> str:
-        """Deterministic rendering; every citable path appears verbatim as a line prefix."""
+    def prompt_text(self, alias: str | None = None) -> str:
+        """Deterministic rendering; every citable path appears verbatim as a line prefix.
+
+        ``alias`` is a short per-request name for this block (``m1``, ``m2``, …). It is
+        printed ahead of the member id so a claim can name the block without transcribing
+        64 hex characters; the real id stays printed beside it and stays citable. Omitted,
+        the rendering is byte-for-byte what it has always been.
+        """
+        head = "member " + self.member_id if alias is None else f"{alias} | member {self.member_id}"
         lines = [
-            f"[member {self.member_id}] kind={self.kind.value} page_index={self.page_index} "
+            f"[{head}] kind={self.kind.value} page_index={self.page_index} "
             f"scope={self.scope} verification={self.verification.value}"
         ]
         if self.kind is BlockKind.CHART:

@@ -66,7 +66,8 @@ from tests.enterprise_pdf_rag.answers.store_mounted_document import (
     bar_document,
 )
 
-_MEMBER_LINE = re.compile(r"^\[member ([0-9a-f]{64})\] kind=(\w+)", re.MULTILINE)
+_MEMBER_LINE = re.compile(r"^\[(?:m\d+ \| )?member ([0-9a-f]{64})\] kind=(\w+)", re.MULTILINE)
+_ALIAS_LINE = re.compile(r"^\[(m\d+) \| member (\S+)\] kind=", re.MULTILINE)
 _QUESTION = "What was the expense ratio in 1H21?"
 
 
@@ -288,7 +289,7 @@ def test_prose_may_repeat_numbers_from_the_cited_evidence_text(
     fragment = re.compile(r"^fragments\.(\S+): (.*page 2.*)$", re.MULTILINE)
 
     def script(prompt: str) -> ModelAnswer:
-        blocks = prompt.split("[member ")[1:]
+        blocks = prompt.split("| member ")[1:]
         block = next(block for block in blocks if "page 2" in block)
         found = fragment.search(block)
         assert found is not None
@@ -427,7 +428,7 @@ def test_text_quotes_are_verified_verbatim_against_the_published_span(
     fragment = re.compile(r"^fragments\.(\S+): (.*page 2.*)$", re.MULTILINE)
 
     def quote(prompt: str) -> ModelAnswer:
-        blocks = prompt.split("[member ")[1:]
+        blocks = prompt.split("| member ")[1:]
         block = next(block for block in blocks if "page 2" in block)
         member_id = block[:64]
         found = fragment.search(block)
@@ -457,7 +458,7 @@ def test_text_quotes_are_verified_verbatim_against_the_published_span(
     assert len(prompts) == 1
 
     def fabricate(prompt: str) -> ModelAnswer:
-        blocks = prompt.split("[member ")[1:]
+        blocks = prompt.split("| member ")[1:]
         block = next(block for block in blocks if "page 2" in block)
         found = fragment.search(block)
         assert found is not None
@@ -983,7 +984,7 @@ def test_a_tight_prompt_budget_gives_up_the_page_context_before_a_hit(tmp_path: 
     script = _page_script("Profit rose.", _quote("hit-a", "Operating profit rose."))
     whole, prompts = _service(tmp_path / "whole", document, script)
     assert whole.answer(AnswerRequest(_PAGE_QUESTION, top_k=2)).page_windows != ()
-    hits_only = sum(len(chunk) for chunk in _chunks(prompts[0], "[member "))
+    hits_only = sum(len(chunk) for chunk in _chunks(prompts[0], "[m"))  # "[m1 | member …"
 
     service, tight = _service(
         tmp_path / "tight",
@@ -1052,9 +1053,65 @@ def test_a_claim_naming_a_page_context_member_is_rejected_as_an_unknown_member(
     script = _page_script("Costs fell 4.2%.", _quote("near", "Costs fell 4.2% over the period."))
     service, prompts = _service(tmp_path, document, script)
     result = service.answer(AnswerRequest(_PAGE_QUESTION, top_k=2))
-    assert "[member near]" not in prompts[0]  # printed as page context only
+    assert "member near]" not in prompts[0]  # printed as page context only
     (rejected,) = result.rejected
     assert (rejected.claim_id, rejected.member_id) == ("c1", "near")
+    assert rejected.reason is AbstainReason.MODEL_OUTPUT_INVALID
+    assert rejected.detail == "unknown member"
+    assert (result.status, result.abstain_reason, result.claims) == (
+        AnswerStatus.ABSTAINED,
+        AbstainReason.MODEL_OUTPUT_INVALID,
+        (),
+    )
+
+
+def test_the_prompt_numbers_the_member_blocks_m1_upward_in_printed_order(tmp_path: Path) -> None:
+    document = _page_document()
+    script = _page_script("Profit rose.", _quote("hit-a", "Operating profit rose."))
+    service, prompts = _service(tmp_path, document, script)
+    result = service.answer(AnswerRequest(_PAGE_QUESTION, top_k=2))
+    assert result.status is AnswerStatus.ANSWERED, result
+    # Only the citable blocks are numbered, so the page context on the same page gets none.
+    assert _ALIAS_LINE.findall(prompts[0]) == [("m1", "hit-a"), ("m2", "hit-b")]
+    assert "[page_context page_index=4]" in prompts[0]
+
+
+def test_a_claim_naming_a_block_by_its_alias_answers_exactly_as_the_full_member_id_does(
+    tmp_path: Path, bar: tuple[StoreMountedDocument, str]
+) -> None:
+    document, chart_member = bar
+
+    def by_alias(prompt: str) -> ModelAnswer:
+        aliases = {member: alias for alias, member in _ALIAS_LINE.findall(prompt)}
+        return answered(
+            "The expense ratio in 1H21 was 15%.",
+            chart_claim(aliases[chart_member], "p-1H21", "15%"),
+        )
+
+    aliased, _ = _service(tmp_path / "alias", document, by_alias)
+    full, _ = _service(tmp_path / "full", document, _one_chart_claim("15%"))
+
+    result = aliased.answer(AnswerRequest(_QUESTION))
+
+    assert result.status is AnswerStatus.ANSWERED and result.rejected == ()
+    assert result == full.answer(AnswerRequest(_QUESTION))
+    # The alias lives in the prompt alone: the report and the citation name the real member.
+    assert chart_member in result.member_ids
+    assert {citation.member_id for claim in result.claims for citation in claim.citations} == {
+        chart_member
+    }
+
+
+def test_a_claim_naming_an_alias_no_block_carries_is_rejected_as_an_unknown_member(
+    tmp_path: Path, bar: tuple[StoreMountedDocument, str]
+) -> None:
+    document, _ = bar
+    script = _page_script("It was 15%.", chart_claim("m99", "p-1H21", "15%"))
+    service, prompts = _service(tmp_path, document, script)
+    result = service.answer(AnswerRequest(_QUESTION))
+    assert "m99" not in prompts[0]  # fewer blocks than that were ever offered
+    (rejected,) = result.rejected
+    assert (rejected.claim_id, rejected.member_id) == ("c1", "m99")
     assert rejected.reason is AbstainReason.MODEL_OUTPUT_INVALID
     assert rejected.detail == "unknown member"
     assert (result.status, result.abstain_reason, result.claims) == (

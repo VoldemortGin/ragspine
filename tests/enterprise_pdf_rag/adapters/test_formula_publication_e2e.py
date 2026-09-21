@@ -39,7 +39,7 @@ from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
 from tests.enterprise_pdf_rag.answers.fake_llm import answered, scripted_client
 from tests.enterprise_pdf_rag.answers.store_mounted_document import StoreMountedDocument
 
-_MEMBER_LINE = re.compile(r"^\[member ([0-9a-f]{64})\] kind=(\w+)", re.MULTILINE)
+_MEMBER_LINE = re.compile(r"^\[(?:m\d+ \| )?member ([0-9a-f]{64})\] kind=(\w+)", re.MULTILINE)
 LINEAR = "ROE = \\frac{Net\\ profit}{Equity}"
 READABLE = "ROE 等于 Net profit 除以 Equity"
 INDEX_TEXT = f"{READABLE} {LINEAR} formula ROE = Net profit Equity"

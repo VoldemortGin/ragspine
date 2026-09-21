@@ -49,7 +49,7 @@ def published(tmp_path_factory: pytest.TempPathFactory) -> Published:
 
 def _quote_page(page: str) -> Script:
     def script(prompt: str) -> ModelAnswer:
-        block = next(block for block in prompt.split("[member ")[1:] if page in block)
+        block = next(block for block in prompt.split("| member ")[1:] if page in block)
         found = _FRAGMENT.search(block) if page == "page 2" else None
         if found is None:
             return declined()
