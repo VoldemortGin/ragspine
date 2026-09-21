@@ -372,7 +372,7 @@ curl --fail-with-body http://127.0.0.1:8766/v1/chat/completions \
 
 ## NL 金标集与评测（`nl-answers-gold-v1`）
 
-自然语言问答的**冻结金标集**在 `benchmarks/enterprise-pdf-rag/aia-2026-interim/nl-answers-gold-v1.json`（同目录 `manifest.json` 的 `gold_sets` 里登记，两边一致性由测试守住）。它与既有两份 ChartQA 金标并列，但问的是整条回答链，不是 typed ChartQA 接口。
+自然语言问答的**冻结金标集**在 `data/benchmarks/enterprise-pdf-rag/aia-2026-interim/nl-answers-gold-v1.json`（同目录 `manifest.json` 的 `gold_sets` 里登记，两边一致性由测试守住）。它与既有两份 ChartQA 金标并列，但问的是整条回答链，不是 typed ChartQA 接口。
 
 **它冻结什么**：25 条用例，分三类 —— `positive`（15 条：文本逐字引用、环图显式值、路径图节点、英文 / 中文 / 关键词 / 仅标题四种问法、rerank、显式 period 过滤、不可满足 region 的放宽、缓存命中）、`abstain`（7 条：2027 预测、跨期相减、图上没画的先后顺序、选页范围外的第 25 页内容、文档没写的越南人力，外加两条 known gap）、`adversarial`（3 条：散文混入派生数字、图表值被改写、引文被改一个数字）。
 

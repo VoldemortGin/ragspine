@@ -169,7 +169,7 @@ calls a provider; and `TableIR` / `TableCell.verification` are pinned `PENDING` 
 - `deploy/enterprise-pdf-rag/open-webui/backend.Dockerfile` remains unverified since the merge
   (ADR 0021).
 - **A frozen gold set for natural-language answers now exists** (2026-09-20):
-  `benchmarks/enterprise-pdf-rag/aia-2026-interim/nl-answers-gold-v1.json`, 25 cases pinned to
+  `data/benchmarks/enterprise-pdf-rag/aia-2026-interim/nl-answers-gold-v1.json`, 25 cases pinned to
   one published release, registered in that folder's `manifest.json`. Its schema, self-checks
   and single pass/fail rule live in `adapters/nl_gold.py`, and two runners share that rule —
   `tests/enterprise_pdf_rag/answers/test_nl_gold.py` (offline replay of the pinned evidence,

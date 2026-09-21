@@ -9,7 +9,7 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 - **A frozen gold set for natural-language answers, with two runners that share one judge**
   (`enterprise_pdf_rag`, ADR 0011 follow-up). Until now the only frozen sets were the two typed
   ChartQA golds; the whole answer chain was re-measured by hand every round.
-  `benchmarks/enterprise-pdf-rag/aia-2026-interim/nl-answers-gold-v1.json` freezes 25 cases
+  `data/benchmarks/enterprise-pdf-rag/aia-2026-interim/nl-answers-gold-v1.json` freezes 25 cases
   against one pinned release (15 positive, 7 abstaining, 3 adversarial) and is registered in that
   folder's `manifest.json` (`aia-gold-registry-v1`). It freezes only what is stable across runs —
   `page_index`, `field_path`, `quote`, the claim's `value` / `unit` and the envelope's

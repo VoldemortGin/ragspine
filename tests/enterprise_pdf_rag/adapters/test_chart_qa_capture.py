@@ -14,7 +14,7 @@ from enterprise_pdf_rag.adapters.chart_qa_evaluation import load_gold
 from tests.enterprise_pdf_rag.adapters.test_chart_qa_evaluation import _perfect_observations
 
 ROOT = Path(__file__).parents[3]
-GOLD_PATH = ROOT / "benchmarks/enterprise-pdf-rag/aia-2026-interim/chart-qa-gold-v1.json"
+GOLD_PATH = ROOT / "data/benchmarks/enterprise-pdf-rag/aia-2026-interim/chart-qa-gold-v1.json"
 
 
 def _targets() -> bytes:

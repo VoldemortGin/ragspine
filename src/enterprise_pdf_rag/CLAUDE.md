@@ -93,7 +93,7 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   `<ingestion_root>/model-cache`, live budget `APP_ANSWER_MAX_LIVE_CALLS` (200).
 - **Deploy:** `deploy/enterprise-pdf-rag/open-webui/` — `backend.Dockerfile` is not re-verified
   since the merge (local `../corespine` uv source; see ADR 0021 follow-ups).
-- **Benchmarks / gold:** `benchmarks/enterprise-pdf-rag/aia-2026-interim/` (its `manifest.json`
+- **Benchmarks / gold:** `data/benchmarks/enterprise-pdf-rag/aia-2026-interim/` (its `manifest.json`
   registers each set). Besides the two typed ChartQA golds there is now a frozen
   **natural-language** gold set, `nl-answers-gold-v1.json`, pinned to one published release:
   schema + the single pass/fail rule in `adapters/nl_gold.py`, replayed offline by

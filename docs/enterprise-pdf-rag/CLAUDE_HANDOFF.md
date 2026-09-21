@@ -10,7 +10,7 @@
 
 **做了什么**
 
-1. **金标集** `benchmarks/enterprise-pdf-rag/aia-2026-interim/nl-answers-gold-v1.json`，25 条，钉死当前 AIA 发布（processing `231c904c843e`，snapshot `2f35ca97171a`，190 个 member）。同目录 `manifest.json` 新增 `gold_sets` 登记（`aia-gold-registry-v1`），与金标文件的一致性由测试守住。分类：`positive` 15 / `abstain` 7（含 2 条 known gap）/ `adversarial` 3。
+1. **金标集** `data/benchmarks/enterprise-pdf-rag/aia-2026-interim/nl-answers-gold-v1.json`，25 条，钉死当前 AIA 发布（processing `231c904c843e`，snapshot `2f35ca97171a`，190 个 member）。同目录 `manifest.json` 新增 `gold_sets` 登记（`aia-gold-registry-v1`），与金标文件的一致性由测试守住。分类：`positive` 15 / `abstain` 7（含 2 条 known gap）/ `adversarial` 3。
 2. **schema + 判定逻辑** `src/enterprise_pdf_rag/adapters/nl_gold.py`（与两份 ChartQA 金标同层，pydantic `strict/frozen/extra=forbid`，加载即自校验）。`judge()` 是两个 runner 共用的唯一判定规则，所以它们不会分叉。`answer_prose()` 拆掉 `render_message` 的引用块，并由测试对着 `render_message` 复证。**没有**进 `check_schema.py`：那是 HTTP 公开契约的漂移门，金标不是 HTTP 契约。
 3. **离线 runner** `tests/enterprise_pdf_rag/answers/test_nl_gold.py`：用生产挂载路径（`scan_catalog` + `mount_document(entry, embedder=None)`，页级元数据因此可用）只读打开钉死发布，向量通道是**声明式**的 —— 直接返回该用例脚本化 claim 引用的成员，LLM 用 `fake_llm.scripted_client` 回放金标自带的 `model_output`。不追求复现召回；守的是席位/预算、strict schema、逐字段校验、散文数字门、拒答策略，以及金标锚点是否还在证据里。缺发布或发布与 `pinned` 不符时整组 skip 并提示重新冻结。
 4. **真实 runner** `scripts/enterprise_pdf_rag/nl_gold_eval.py`：逐条打 `POST /v1/chat/completions`，写 `<case_id>.json` + `report.md` + `report.json` 到 `data/validation/nl-gold/<日期>/`；known_gap 单列且不影响退出码，非 known_gap 失败即退出码 1。
@@ -315,7 +315,7 @@ b3 的 52s 是已知代价、不是回归：reranker 现在读证据块，因此
 | `tests/` | `tests/enterprise_pdf_rag/`（自带 `conftest.py` 的 no_network 守卫） |
 | `scripts/*.py`、`scripts/start.sh` | `scripts/enterprise_pdf_rag/` |
 | `configs/settings.yaml` | `config/enterprise-pdf-rag/settings.yaml` |
-| `benchmarks/aia-2026-interim/` | `benchmarks/enterprise-pdf-rag/aia-2026-interim/` |
+| `benchmarks/aia-2026-interim/` | `data/benchmarks/enterprise-pdf-rag/aia-2026-interim/` |
 | `deployment/open-webui/` | `deploy/enterprise-pdf-rag/open-webui/` |
 | `docs/`（ADR、PRD、schemas、samples、本文件） | `docs/enterprise-pdf-rag/` |
 | `CLAUDE.md`、`AGENTS.md` | `src/enterprise_pdf_rag/CLAUDE.md`、`src/enterprise_pdf_rag/AGENTS.md`（rag-spine“每个模块一份 CLAUDE.md”约定） |
@@ -419,7 +419,7 @@ sed -n '1,240p' docs/adr/0009-source-qualified-expense-ratio-bar-lookup.md
 - v1 donut 行为保持不变。
 - ADR：`docs/enterprise-pdf-rag/adr/0009-source-qualified-expense-ratio-bar-lookup.md`
 - 阶段说明：`docs/enterprise-pdf-rag/chart-qa-bar-stage.md`
-- Gold：`benchmarks/enterprise-pdf-rag/aia-2026-interim/chart-qa-bar-gold-v1.json`
+- Gold：`data/benchmarks/enterprise-pdf-rag/aia-2026-interim/chart-qa-bar-gold-v1.json`
 - 已实现新 source profile、stroke/bar proof、8-lineage、存储 resolver、immutable draft/append/independent targets、v2 capture/evaluator。
 - 两组交叉只读 review 均无阻塞问题。
 

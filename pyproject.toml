@@ -374,7 +374,7 @@ ban-relative-imports = "all"
 [tool.ruff.lint.per-file-ignores]
 # ---- ragspine 子树：只保留其原有 E/F/I/W/UP/B，enterprise_pdf_rag 独有的严格规则不套过来 ----
 "src/ragspine/**" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20"]
-# ragspine 的 tests/ scripts/ benchmarks/ examples/ 此前从不在 ruff 门内：除严格集外，再豁免其既有的
+# ragspine 的 tests/ scripts/ data/benchmarks/ examples/ 此前从不在 ruff 门内：除严格集外，再豁免其既有的
 # E402（conftest/脚本先 setup_root 再 import 的既定写法）、B017、B018、B023、B905、F841。
 # 注意：ruff 的 per-file-ignores 用 globset，`*` 会跨越 `/`（`tests/*.py` 等于 `tests/**/*.py`），
 # 直接写 `tests/*.py` / `scripts/*.py` 会把 tests/enterprise_pdf_rag 与 scripts/enterprise_pdf_rag 一并放宽，
@@ -382,7 +382,9 @@ ban-relative-imports = "all"
 "tests/{__init__,conftest,test_facade,test_facade_graph_auto,test_package_api,test_workspace_config}.py" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20", "E402", "B017", "B018", "B023", "B905", "F841"]
 "tests/{agent,budget,cli,common,compat,conformance,diagnostics,dify,e2e,eval,extraction,graph,ingestion,n8n,pipeline,retrieval,service,storage,workflows}/**" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20", "E402", "B017", "B018", "B023", "B905", "F841"]
 "scripts/{ask,build_docs,check_doc_drift,check_docstring_refs,classify_pdfs,eval_retrieval_ab,export_workflow_catalog,generate_workflow_catalog,ingest,ingest_narrative,make_fixtures_excel,make_fixtures_pdf,make_fixtures_pptx,make_synthetic_deck,run_demo,run_dify_workflow,run_qa_eval,run_server,run_worker,topology}.py" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20", "E402", "B017", "B018", "B023", "B905", "F841"]
-"benchmarks/**" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20", "E402", "B017", "B018", "B023", "B905", "F841"]
+# data/benchmarks/：上方 `extend-exclude = ["data"]` 已把它挡在全仓扫描之外，这条只在显式
+# `ruff check data/benchmarks/` 时生效，保留是为了显式跑时仍是同一档豁免。
+"data/benchmarks/**" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20", "E402", "B017", "B018", "B023", "B905", "F841"]
 "examples/**" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20", "E402", "B017", "B018", "B023", "B905", "F841"]
 # ---- enterprise_pdf_rag 的 scripts/ 是命令行工具层：stdout 就是输出契约，放行 print ----
 "scripts/enterprise_pdf_rag/*.py" = ["T20"]

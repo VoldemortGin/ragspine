@@ -29,7 +29,7 @@ from tests.enterprise_pdf_rag.figures.test_chart_qa import (
 )
 
 ROOT = Path(__file__).parents[3]
-GOLD_PATH = ROOT / "benchmarks/enterprise-pdf-rag/aia-2026-interim/chart-qa-gold-v1.json"
+GOLD_PATH = ROOT / "data/benchmarks/enterprise-pdf-rag/aia-2026-interim/chart-qa-gold-v1.json"
 PROCESSING_ID = "1" * 64
 SNAPSHOT_ID = "2" * 64
 MEMBER_ID = "3" * 64

@@ -24,7 +24,7 @@ from tests.enterprise_pdf_rag.adapters.chart_qa_v2_fixtures import (
 
 GOLD_PATH = (
     Path(__file__).parents[3]
-    / "benchmarks/enterprise-pdf-rag/aia-2026-interim/chart-qa-bar-gold-v1.json"
+    / "data/benchmarks/enterprise-pdf-rag/aia-2026-interim/chart-qa-bar-gold-v1.json"
 )
 
 

@@ -40,7 +40,7 @@ a `ragspine` subpackage.
 - **Layout** — `src/enterprise_pdf_rag/` (import name unchanged),
   `tests/enterprise_pdf_rag/` (own `conftest.py` carrying the offline
   `no_network` guard), `scripts/enterprise_pdf_rag/`,
-  `config/enterprise-pdf-rag/`, `benchmarks/enterprise-pdf-rag/`,
+  `config/enterprise-pdf-rag/`, `data/benchmarks/enterprise-pdf-rag/`,
   `deploy/enterprise-pdf-rag/`, `docs/enterprise-pdf-rag/` (its README,
   handoff, PRD, ADR 0001–0010, schemas). The package contract is
   `src/enterprise_pdf_rag/CLAUDE.md` + `AGENTS.md`, following the

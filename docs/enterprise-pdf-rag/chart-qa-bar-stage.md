@@ -45,7 +45,7 @@ It must accompany an answer as context, but it does not prove that two displayed
 
 ## Versioned gold plan
 
-Create `benchmarks/enterprise-pdf-rag/aia-2026-interim/chart-qa-bar-gold-v1.json` after the v2 DTO is frozen. Do not edit `chart-qa-gold-v1.json` or reuse its report identity.
+Create `data/benchmarks/enterprise-pdf-rag/aia-2026-interim/chart-qa-bar-gold-v1.json` after the v2 DTO is frozen. Do not edit `chart-qa-gold-v1.json` or reuse its report identity.
 
 Positive cases:
 
@@ -75,7 +75,7 @@ The evaluator must report answer precision and positive coverage, business refus
 
 After the production v2 DTO is frozen, the independent evaluation owner should add only new versioned files:
 
-- `benchmarks/enterprise-pdf-rag/aia-2026-interim/chart-qa-bar-gold-v1.json`;
+- `data/benchmarks/enterprise-pdf-rag/aia-2026-interim/chart-qa-bar-gold-v1.json`;
 - `src/enterprise_pdf_rag/adapters/chart_qa_v2_capture.py`;
 - `src/enterprise_pdf_rag/adapters/chart_qa_v2_evaluation.py`;
 - `tests/enterprise_pdf_rag/adapters/test_chart_qa_v2_capture.py`;

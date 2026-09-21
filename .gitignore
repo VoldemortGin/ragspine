@@ -17,6 +17,8 @@ dist/
 # `!data/golden/` would have no effect.
 data/*
 !data/golden/
+# data/benchmarks/ 同理：性能基线脚本与冻结金标集（chart-qa / nl-answers）是版本化的数据资产。
+!data/benchmarks/
 !data/.gitkeep
 
 # Claude Code: share project settings, ignore local/personal overrides

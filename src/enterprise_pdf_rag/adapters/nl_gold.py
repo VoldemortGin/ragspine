@@ -1,7 +1,7 @@
 """The frozen natural-language answer gold set: its schema, its self-checks and its judge.
 
 The gold file itself lives beside the chart-QA golds under
-``benchmarks/enterprise-pdf-rag/<corpus>/nl-answers-gold-v1.json`` and is pinned to one
+``data/benchmarks/enterprise-pdf-rag/<corpus>/nl-answers-gold-v1.json`` and is pinned to one
 published release (``pinned``). This module only parses a payload and judges an observed
 answer; it performs no I/O and knows nothing about HTTP or a store, so both runners share
 exactly one pass/fail rule and cannot drift apart:

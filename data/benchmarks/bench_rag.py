@@ -12,9 +12,9 @@
 
 从【包根】直接跑（不进子目录）：
 
-    .venv/bin/python benchmarks/bench_rag.py            # 全部
-    .venv/bin/python benchmarks/bench_rag.py embed vector  # 只跑指定项
-    .venv/bin/python benchmarks/bench_rag.py --json      # 机读输出（基线归档用）
+    .venv/bin/python data/benchmarks/bench_rag.py            # 全部
+    .venv/bin/python data/benchmarks/bench_rag.py embed vector  # 只跑指定项
+    .venv/bin/python data/benchmarks/bench_rag.py --json      # 机读输出（基线归档用）
 
 每项报告 median / mean（多次重复取中位数为基线，抗抖动）。所有语料为合成确定性数据，
 非真实公司数据；与 data/golden 无关，绝不写盘。

@@ -45,7 +45,7 @@ uv sync --locked --extra pdf
 uv run --locked enterprise-pdf-rag ingest-aia
 ```
 
-输入固定为 `data/samples/aia-group-2026-interim-results-presentation.pdf`，SHA-256 必须为 `df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e`。PDF 不随公共仓库分发；下载位置与来源见 [样本说明](samples/aia-report.md)，[71 页盘点](samples/aia-2026-interim-inventory.md) 和 [基准 manifest](../../benchmarks/enterprise-pdf-rag/aia-2026-interim/manifest.json)。不匹配的文件在解析前拒绝；缺页或失败有明确诊断，不静默遗漏。
+输入固定为 `data/samples/aia-group-2026-interim-results-presentation.pdf`，SHA-256 必须为 `df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e`。PDF 不随公共仓库分发；下载位置与来源见 [样本说明](samples/aia-report.md)，[71 页盘点](samples/aia-2026-interim-inventory.md) 和 [基准 manifest](../../data/benchmarks/enterprise-pdf-rag/aia-2026-interim/manifest.json)。不匹配的文件在解析前拒绝；缺页或失败有明确诊断，不静默遗漏。
 
 全部输出在 `data/output/aia-2026-interim/`，不使用项目根的 `output/`：
 

@@ -31,7 +31,7 @@ from enterprise_pdf_rag.answers.models import (
 from enterprise_pdf_rag.processing.context_builder import BlockKind
 
 ROOT = Path(__file__).resolve().parents[3]
-BENCHMARKS = ROOT / "benchmarks" / "enterprise-pdf-rag" / "aia-2026-interim"
+BENCHMARKS = ROOT / "data" / "benchmarks" / "enterprise-pdf-rag" / "aia-2026-interim"
 GOLD_PATH = BENCHMARKS / "nl-answers-gold-v1.json"
 
 

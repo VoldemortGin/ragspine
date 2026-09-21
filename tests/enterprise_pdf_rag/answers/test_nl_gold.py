@@ -43,7 +43,12 @@ from tests.enterprise_pdf_rag.answers.fake_llm import scripted_client
 
 ROOT = Path(__file__).resolve().parents[3]
 GOLD_PATH = (
-    ROOT / "benchmarks" / "enterprise-pdf-rag" / "aia-2026-interim" / "nl-answers-gold-v1.json"
+    ROOT
+    / "data"
+    / "benchmarks"
+    / "enterprise-pdf-rag"
+    / "aia-2026-interim"
+    / "nl-answers-gold-v1.json"
 )
 GOLD = load_gold(GOLD_PATH.read_bytes())
 # A case without scripted model output (the cache repeat) can only run against a service.

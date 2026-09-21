@@ -37,7 +37,12 @@ from enterprise_pdf_rag.adapters.nl_gold import (
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_GOLD = (
-    ROOT / "benchmarks" / "enterprise-pdf-rag" / "aia-2026-interim" / "nl-answers-gold-v1.json"
+    ROOT
+    / "data"
+    / "benchmarks"
+    / "enterprise-pdf-rag"
+    / "aia-2026-interim"
+    / "nl-answers-gold-v1.json"
 )
 DEFAULT_BASE_URL = "http://127.0.0.1:8768"
 ENVELOPE_KEY = "enterprise_pdf_rag"

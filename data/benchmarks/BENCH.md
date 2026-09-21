@@ -8,9 +8,9 @@ no API key, no real model**. Pure standard library (`time.perf_counter` + `stati
 ## Run (always from the package root)
 
 ```bash
-.venv/bin/python benchmarks/bench_rag.py            # all paths, human-readable
-.venv/bin/python benchmarks/bench_rag.py embed vector   # only selected paths
-.venv/bin/python benchmarks/bench_rag.py --json     # machine-readable (for archiving)
+.venv/bin/python data/benchmarks/bench_rag.py            # all paths, human-readable
+.venv/bin/python data/benchmarks/bench_rag.py embed vector   # only selected paths
+.venv/bin/python data/benchmarks/bench_rag.py --json     # machine-readable (for archiving)
 ```
 
 Selectable names: `embed`, `vector`, `chunk`, `retrieve`, `answer`.
