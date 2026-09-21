@@ -69,7 +69,10 @@ SYSTEM_RULES: Final[str] = (
     "5. Return only JSON matching the supplied schema. Model confidence is not verification.\n"
     "6. A block headed `page_context` is the rest of that page, supplied so you can read a hit "
     "in context. It prints no citable path and no member id, so it can never be a claim's "
-    "target: claims name `[member \u2026]` blocks alone. Never invent a member id for it."
+    "target: claims name `[member \u2026]` blocks alone. Never invent a member id for it.\n"
+    "7. Write `answer` in the language of the user's question. A claim's `text` is always "
+    "the evidence's own wording, copied from the block verbatim and never translated, "
+    "whatever language you answer in."
 )
 
 

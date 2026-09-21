@@ -21,8 +21,10 @@ from enterprise_pdf_rag.answers.models import (
     MemberFilters,
     PageWindowStat,
     RejectedClaim,
+    TranslatedQuery,
     VerifiedClaim,
 )
+from enterprise_pdf_rag.answers.query_mode import QueryMode
 from enterprise_pdf_rag.figures.chart_qa.models import FieldCitation
 from enterprise_pdf_rag.processing.context_builder import BlockKind
 
@@ -182,6 +184,27 @@ class PageWindowOut(BoundaryModel):
         )
 
 
+class QueryTranslationOut(BoundaryModel):
+    """The English restatement the two retrieval channels scored (ADR 0018).
+
+    Present only when the question was not in the index's language. The answer itself is
+    written in the question's language and every claim quotes the evidence verbatim, so
+    nothing here was translated on the way out.
+    """
+
+    english: str
+    source_language: str
+    cache_hit: bool
+
+    @classmethod
+    def from_domain(cls, translation: TranslatedQuery) -> "QueryTranslationOut":
+        return cls(
+            english=translation.english,
+            source_language=translation.source_language,
+            cache_hit=translation.cache_hit,
+        )
+
+
 class AnswerEnvelope(BoundaryModel):
     """Verified claims, audit rejections and pinned provenance beside the OpenAI shape."""
 
@@ -206,6 +229,10 @@ class AnswerEnvelope(BoundaryModel):
     # The page context printed beside the hits, one entry per block (added after
     # rag-chat-v1 shipped; ADR 0017). Empty when the page window is off.
     page_windows: tuple[PageWindowOut, ...] = ()
+    # Which retrieval channels produced ``member_ranks``, and the query translation that fed
+    # them when the question was not in the index's language (ADR 0018).
+    fusion_mode: QueryMode = "rrf"
+    query_translation: QueryTranslationOut | None = None
 
     @classmethod
     def from_domain(cls, result: AnswerResult) -> "AnswerEnvelope":
@@ -232,6 +259,10 @@ class AnswerEnvelope(BoundaryModel):
             else MemberFiltersOut.from_domain(result.filters_applied),
             filters_relaxed=result.filters_relaxed,
             page_windows=tuple(PageWindowOut.from_domain(window) for window in result.page_windows),
+            fusion_mode=result.fusion_mode,
+            query_translation=None
+            if result.query_translation is None
+            else QueryTranslationOut.from_domain(result.query_translation),
         )
 
 

@@ -5,6 +5,11 @@ borrowed from ``ragspine``; the corpus is each member's embedded index text
 (``member_texts``), so both channels score exactly the same text. Rerank is
 opt-in: with no judge injected, no model is consulted; when it runs, the judge
 reads each candidate's resolved evidence block, not the index text.
+
+Which channels a query actually uses is a decision, not a constant: ``answers/query_mode``
+routes a short label-and-period query to BM25 alone, where the measured recall is higher
+(ADR 0018). A single-channel mode is expressed as a fusion with one empty ranking, so every
+mode shares one scoring path.
 """
 
 from collections.abc import MutableMapping, Sequence
@@ -15,6 +20,7 @@ from typing import Protocol, runtime_checkable
 from enterprise_pdf_rag.adapters.local_models import RerankResult
 from enterprise_pdf_rag.answers.models import FusedHit as FusedHit
 from enterprise_pdf_rag.answers.ports import MemberText, MountedDocument
+from enterprise_pdf_rag.answers.query_mode import FusionMode, QueryMode, classify_query
 from enterprise_pdf_rag.processing.context_builder import build_context_block
 from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit
 from ragspine.retrieval.lexical.retrieval import bm25_scores, rrf_fuse, tokenize
@@ -128,6 +134,14 @@ def fuse(
 
 
 @dataclass(frozen=True, slots=True)
+class SearchOutcome:
+    """One ranking plus the channel decision that produced it."""
+
+    mode: QueryMode
+    hits: tuple[FusedHit, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class _Chunk:
     text: str
     sensitivity: str = "INTERNAL"
@@ -169,30 +183,55 @@ class HybridSearch:
     def index(self) -> LexicalIndex:
         return self._index
 
-    def search(
-        self, query: str, *, top_k: int, allowed: frozenset[str] | None = None
-    ) -> tuple[FusedHit, ...]:
-        """Fuse both channels; ``allowed`` narrows each channel to those members first.
+    def lexical_hits(self, query: str, *, allowed: frozenset[str] | None = None) -> int:
+        """How many members BM25 can score for this query; zero means the query shares no
+        vocabulary with the index, which is what a foreign-language question looks like."""
+        return len(lexical_rank(self._index, query, limit=self._channel_limit, allowed=allowed))
 
-        With a narrowing the vector channel is read over the whole corpus and cut to
-        the channel limit after filtering, so the filter never starves it.
+    def _vector_rank(
+        self, query: str, allowed: frozenset[str] | None
+    ) -> tuple[PinnedRetrievalHit, ...]:
+        if allowed is None:
+            return self._document.search(query, limit=self._channel_limit)
+        return tuple(
+            hit
+            for hit in self._document.search(
+                query, limit=max(self._channel_limit, len(self._index.member_ids))
+            )
+            if hit.member_id in allowed
+        )[: self._channel_limit]
+
+    def search(
+        self,
+        query: str,
+        *,
+        top_k: int,
+        allowed: frozenset[str] | None = None,
+        mode: FusionMode = "auto",
+    ) -> SearchOutcome:
+        """Rank over the channels ``mode`` selects; ``auto`` classifies the query (ADR 0018).
+
+        ``allowed`` narrows each channel to those members first. With a narrowing the
+        vector channel is read over the whole corpus and cut to the channel limit after
+        filtering, so the filter never starves it. ``bm25_only`` skips the vector channel
+        altogether, which is one embedding call the request never makes.
         """
         if top_k < 1:
             raise ValueError("top_k must be at least one")
-        if allowed is None:
-            vector = self._document.search(query, limit=self._channel_limit)
-        else:
-            vector = tuple(
-                hit
-                for hit in self._document.search(
-                    query, limit=max(self._channel_limit, len(self._index.member_ids))
-                )
-                if hit.member_id in allowed
-            )[: self._channel_limit]
-        lexical = lexical_rank(self._index, query, limit=self._channel_limit, allowed=allowed)
-        fused = fuse(vector, lexical, k=self._rrf_k)
+        lexical: tuple[PinnedRetrievalHit, ...] = (
+            ()
+            if mode == "vector_only"
+            else lexical_rank(self._index, query, limit=self._channel_limit, allowed=allowed)
+        )
+        resolved: QueryMode = (
+            classify_query(query, lexical_hits=len(lexical)) if mode == "auto" else mode
+        )
+        vector = () if resolved == "bm25_only" else self._vector_rank(query, allowed)
+        # Fusing one ranking with an empty one *is* that ranking, scored the same way, so a
+        # single-channel mode needs no second ranking path.
+        fused = fuse(vector, () if resolved == "vector_only" else lexical, k=self._rrf_k)
         if self._reranker is None or not fused:
-            return fused[:top_k]
+            return SearchOutcome(resolved, fused[:top_k])
         # The judge sees what the answer model would see: a chart candidate's citable
         # ``points.<id>.value`` lines, a text candidate's spans. Bounded by the fused
         # set (at most twice the channel limit); every candidate is a verified resolve.
@@ -204,7 +243,7 @@ class HybridSearch:
             for hit in fused
         ]
         reranked = listwise_rerank(query, candidates, self._reranker, top_n=top_k)
-        return tuple(candidate.hit for candidate in reranked)
+        return SearchOutcome(resolved, tuple(candidate.hit for candidate in reranked))
 
 
 @runtime_checkable

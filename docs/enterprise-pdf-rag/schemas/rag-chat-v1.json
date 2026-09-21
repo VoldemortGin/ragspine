@@ -288,6 +288,16 @@
             "title": "Filters Relaxed",
             "type": "boolean"
           },
+          "fusion_mode": {
+            "default": "rrf",
+            "enum": [
+              "bm25_only",
+              "rrf",
+              "vector_only"
+            ],
+            "title": "Fusion Mode",
+            "type": "string"
+          },
           "llm_live_calls": {
             "title": "Llm Live Calls",
             "type": "integer"
@@ -318,6 +328,17 @@
           "processing_id": {
             "title": "Processing Id",
             "type": "string"
+          },
+          "query_translation": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/QueryTranslationOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "rejected": {
             "items": {
@@ -788,6 +809,31 @@
         "title": "PageWindowOut",
         "type": "object"
       },
+      "QueryTranslationOut": {
+        "additionalProperties": false,
+        "description": "The English restatement the two retrieval channels scored (ADR 0018).\n\nPresent only when the question was not in the index's language. The answer itself is\nwritten in the question's language and every claim quotes the evidence verbatim, so\nnothing here was translated on the way out.",
+        "properties": {
+          "cache_hit": {
+            "title": "Cache Hit",
+            "type": "boolean"
+          },
+          "english": {
+            "title": "English",
+            "type": "string"
+          },
+          "source_language": {
+            "title": "Source Language",
+            "type": "string"
+          }
+        },
+        "required": [
+          "english",
+          "source_language",
+          "cache_hit"
+        ],
+        "title": "QueryTranslationOut",
+        "type": "object"
+      },
       "RejectedClaimOut": {
         "additionalProperties": false,
         "properties": {
@@ -1135,6 +1181,16 @@
             "title": "Filters Relaxed",
             "type": "boolean"
           },
+          "fusion_mode": {
+            "default": "rrf",
+            "enum": [
+              "bm25_only",
+              "rrf",
+              "vector_only"
+            ],
+            "title": "Fusion Mode",
+            "type": "string"
+          },
           "llm_live_calls": {
             "title": "Llm Live Calls",
             "type": "integer"
@@ -1165,6 +1221,17 @@
           "processing_id": {
             "title": "Processing Id",
             "type": "string"
+          },
+          "query_translation": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/QueryTranslationOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "rejected": {
             "items": {
@@ -1651,6 +1718,31 @@
           "truncated"
         ],
         "title": "PageWindowOut",
+        "type": "object"
+      },
+      "QueryTranslationOut": {
+        "additionalProperties": false,
+        "description": "The English restatement the two retrieval channels scored (ADR 0018).\n\nPresent only when the question was not in the index's language. The answer itself is\nwritten in the question's language and every claim quotes the evidence verbatim, so\nnothing here was translated on the way out.",
+        "properties": {
+          "cache_hit": {
+            "title": "Cache Hit",
+            "type": "boolean"
+          },
+          "english": {
+            "title": "English",
+            "type": "string"
+          },
+          "source_language": {
+            "title": "Source Language",
+            "type": "string"
+          }
+        },
+        "required": [
+          "english",
+          "source_language",
+          "cache_hit"
+        ],
+        "title": "QueryTranslationOut",
         "type": "object"
       },
       "RejectedClaimOut": {

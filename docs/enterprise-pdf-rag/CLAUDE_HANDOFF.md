@@ -1,6 +1,6 @@
 # Claude 交接：通用文档 RAG 与公开样本验收
 
-更新时间：2026-09-21（本轮把图表点位逐字放行 / 页级父子窗口两刀合入 `main`）
+更新时间：2026-09-21（本轮把图表点位逐字放行 / 页级父子窗口 / 通道选择与查询翻译三刀合入 `main`）
 
 > 阅读顺序：先看下方“恢复开发记录”；后续旧暂停快照保留作证据，不能作为实时发布或服务状态。
 
@@ -91,6 +91,37 @@
 其余遗留：双栏页的 `(y, x)` 阅读序会在左右栏之间交错（页边界是版面给的事实，栏边界不是，未处理）；页上下文占用总预算，极端情况下会挤掉靠后的命中块（已由预算顺序保证先挤页块）；中文查询无词面通道与 partition 误判标题行两个老洞未动。
 
 **离线验证**：`pytest tests/enterprise_pdf_rag -q` 由 **1077 → 1097 passed**（新增 20 条，另有前置的 `test_context_builder.py` 7 / `test_ports.py` 5 / `test_document_catalog.py` 2）；`mypy` 500 文件零错误；`ruff check` / `ruff format --check` 全过；`check_conformance` / `check_architecture` / `check_schema` / `check_drift` 四个全过；`check_doc_drift` 23 tracked / 0 stale（`src/enterprise_pdf_rag/CLAUDE.md` bump 到 `2af360c`）。
+
+## 通道选择与查询翻译（2026-09-21，分支 `feat/bm25-only-short-queries`，[ADR 0018](adr/0018-query-classification-and-translation.md)）
+
+> 依据是本机 `data/validation/coverage-2026-09-21/`（覆盖率与三通道召回度量，`data/*` 为 git 忽略，同此前各轮）。解掉「RRF 无条件融合」这个从未被测过的假设，并把 ADR 0013 已知缺陷 (b)（中文问英文 deck）在**检索侧**补上。
+
+**做了什么**（最小改动，TDD）
+
+1. **通道选择**（新 `answers/query_mode.py`，纯 stdlib、零模型、零 I/O）。`classify_query(question, *, lexical_hits)`：token ≤ 5，或含数字且内容词 ≤ 1 → `bm25_only`；词面通道零命中 → `vector_only`；其余 → `rrf`。只测「含数字」不测「含期间」—— `processing/periods.py` 认得的每种期间写法都带数字，测试钉住了这条。`answers/` 不许 import SDK，所以 `tokenize_query` 复述了词面通道的分词器，并有一条测试逐字段比对两者输出（token 预算若数的不是 BM25 真正打分的 token 就没有意义）。
+2. **阈值来自离线扫参**。用 `facts.jsonl` 里每条事实、每种问法、三个通道的名次，把 (N, M) 在 0…12 × 0…12 全跑一遍。这个规则族的上限**就是纯 BM25**（125 条里 93 条命中 @10），没有任何 (N, M) 能超过它；在并列到顶的若干组里取**改写查询数最少**的一组 (5, 1)（250 条探针查询改写 119 条，48%）。理由写在 ADR：探针问的全是「短标签 + 期间」，更大的 N 等于把没有证据的部分外推到叙事型问题上，而向量通道正是为后者存在的。
+3. **单通道 = 与空排名做一次融合**（`adapters/hybrid_search.py`）。`search(..., mode="auto")` 返回 `SearchOutcome(mode, hits)`；`bm25_only` 完全不调 `document.search`，**每个请求少一次 embedding 调用**；分值口径不变，因为所有 mode 都走同一个 `fuse()`（单边排名得分仍是 `1/(k+rank)`），未用通道的 rank/score 为 `None`。ADR 0012 的视觉对象保底席位逻辑一行没动。
+4. **查询翻译**（新 `adapters/query_translation.py`）。触发条件不是「整句词面零命中」而是「**内容词**（去虚词、去数字后）零命中」—— 这是关键：`2026 上半年 分销渠道 占比` 里的 `2026` 本身就命中，按整句判定这个功能对它要针对的用例**永远不会触发**。一次有预算、可缓存的 `complete_text_json`（task 盐 `query-translation-v1`，strict `{english_query, source_language}`，规则禁止回答 / 禁止添加信息 / 数字与专有名词逐字保留）。**译文只进两个检索通道**；prompt、period / region 前置过滤、散文数字门用的都还是原问题，claim 仍逐字比对文档英文原文。`SYSTEM_RULES` 加第 6 条：用提问语言作答，但 claim 的 `text` 永远是证据原文逐字照抄。
+5. **翻译不可用不报错**，退回向量单通道；`translate_query=False` 同理。检索计划只取决于问题本身、不取决于剩余预算，所以同一个问题永远命中同一批缓存条目（**曾经**加过「给合成调用留最后一次预算」的保护，因为它让同一问题第二次改走别的计划、打不中答案缓存，已撤回）。一次被翻译的问答 = **两次** live 调用，`llm_live_calls` 如实计数；重复提问两次都命中缓存。
+6. **信封**：`AnswerRequest` 增 `fusion_mode` / `translate_query`，`AnswerResult` 与 `AnswerEnvelope` 增 `fusion_mode` / `query_translation`（均为可选、有默认），`rag-chat-v1.json` 已重生成（**只增 92 行、零删除**，语义 diff 确认只多了这两个字段与一个 `$defs`）。`fusion_mode` 未暴露到 `RagChatRequest`——与 ADR 0012 的 `top_k`/`channel_limit` 同一立场。
+
+**本轮真实基线（只读，2026-09-21，8768，旧代码）**：跑 `nl_gold_eval.py` 只是为了留一份 **BEFORE** 基线 —— 线上跑的是别的 checkout 的旧代码，本轮新行为**没有**上线复测。结果 **20 pass / 0 fail / 2 known gap**（`k01` holds、`k02` moved）。两个注意事项：
+
+- 线上 release 已经漂了，而且**运行中途被别的进程重启过一次**（`processing` 在跑之前是 `4f6ce62fe0b7`、跑完变成 `22127d0fad13`，member 数 190 → 210，正好等于选中页数，与 `feat/page-window` 的每页页级 member 吻合）。前 20 条全部 `cache_hit=true` / `llm_live_calls=0`，而完成缓存的指纹是对整个 request payload（含 prompt 与检索到的证据）做的摘要 —— 所以这 20 条的 prompt 与历史录制逐字节相同，检索结果与钉定版一致，基线可信。
+- 唯一偏离的 `k02-region-thailand-zh` 是**跨 snapshot 比较**（重启后的第三个 snapshot），且是唯一 `llm_live_calls=1`（缓存未命中 = prompt 变了 = 证据变了）的一条，因此归因为 release 漂移而非行为变化。它仍然正确拒答、`claims` 为空、没有编造，只是拒答理由从 `model_declined` 变成了 `claim_not_in_evidence`（模型给的 `1168 $m` 与页面显示的 `1,168` 不符，被守卫拦下）。抗编造不变量未被破坏。
+
+**离线估算（前 / 后）**：125 条已索引事实、两种问法取并集、reranker 之前 —— recall@10 **70.4% → 74.4%**，recall@3 **46.4% → 55.2%**，recall@5 **51.2% → 58.4%**，MRR **0.381 → 0.476**；recall@20 持平 78.4%。@10 只差 5 条事实（薄），但越往前名次差距越大，而 prompt 席位就在最前面。
+
+**离线验证**：`pytest tests/enterprise_pdf_rag -q` → **1106 passed**、25 skipped、1 failed。25 skipped 是整组金标离线回放：本机 `current-processing` 已变成 `4f6ce62fe0b7`，金标钉的是 `231c904c843e`，整组按设计 skip 并提示重新冻结 —— **因此中文三条用例（p06 / p11 / k02）本轮无法离线验证**。1 failed 是 `test_document_catalog_aia_smoke`（`Unsupported chart qualification scope`），**在 `main` 上同样红**，与本轮无关（已 `git stash` 复核）。
+
+**遗留**
+
+1. **重新冻结金标并复测**：`current-processing` 已漂移，离线回放整组 skip。重新冻结后再跑两个 runner，中文路径才算验过。
+2. **离线金标 runner 固定 `fusion_mode="rrf"`**：它的向量通道是声明式的（直接返回用例脚本化 claim 引用的成员），BM25 单通道会拿掉它赖以成立的保证。通道选择改由 `test_query_mode.py` / `test_hybrid_search.py` 守，真实召回由真实 runner 负责。
+3. **`k02-region-thailand-zh` 仍是 known gap，但原因变小了**：检索已翻译，region 前置过滤仍从中文原问题推导、仍匹配不上文档自己的英文 vocabulary。是否也用译文推导过滤，是一个会把「拒答」变成「作答」的行为改动，需要证据再定（ADR 已列为被拒方案 + follow-up）。
+4. **query embedder 变成「用到它的请求」的依赖**：没配 embedder 时 BM25 单通道问题照常 200（答案与配置齐全时逐字相同），需要向量通道的问题仍 503。与 opt-in reranker 同一规则，但这是 ADR 0011「missing group → 503 on its routes」措辞的一次实质收窄，已写进 ADR 0018 决定 7 与 ADR 0011 的修订指针。
+5. **预算**：非英文问答一次两调用，进程级 `APP_ANSWER_MAX_LIVE_CALLS`（200）能买的问答数相应减少。
+6. **中文效果未量化**：探针集全英文，无法离线评估翻译收益；上线后由用户复测。
 
 ## 自然语言问答的冻结金标集与两个 runner（2026-09-20，分支 `feat/nl-gold-set`，未合并 `main`）
 
@@ -441,8 +472,9 @@ b3 的 52s 是已知代价、不是回归：reranker 现在读证据块，因此
 1. （已完成 2026-09-19）为通用 `ingest_pdf` 的 draft 建立明确的资格、description-only 索引和发布入口，按返回的 store/manifest ID 工作，避免再写死 AIA 文件名、页数或来源 SHA。入口 `src/enterprise_pdf_rag/adapters/draft_publication.py` 与 CLI `qualify|index|publish`；证据见离线 E2E `tests/enterprise_pdf_rag/adapters/test_generic_publication_e2e.py`、单元 `tests/enterprise_pdf_rag/adapters/test_draft_publication.py` 及上方恢复记录的真实 `qualify`/`publish` 冒烟（eligible=189、幂等回到 `a7384f0c`）。真实 embedder `index` 需隧道，属未覆盖。
 2. （已完成 2026-09-20，代码未 commit）文档目录/选择与通用服务挂载：`adapters/document_catalog.py`（`scan_catalog`/`mount_document`/`mount_catalog`）、`adapters/http/documents.py` + `catalog_schemas.py`（契约 `document-catalog-v1`）、`app.py` 的 `document-catalog` 分支与 `APP_LEGACY_DOCUMENT_ROOTS`；决定见 [ADR 0011](adr/0011-document-catalog-and-verified-answer-chain.md)，证据 `tests/enterprise_pdf_rag/adapters/test_document_catalog.py`（15）、`test_documents_http.py`（14）、`test_document_catalog_aia_smoke.py`。真实 AIA 发布经 legacy root 在线挂载与真实 embedder search 的结论见顶部“真实模型验收”。
 3. （已完成 2026-09-20，代码未 commit）证据链上的自然语言回答：`adapters/hybrid_search.py`（精确复用 `ragspine.retrieval.lexical.retrieval.{tokenize,bm25_scores,rrf_fuse}` 与 `ragspine.retrieval.rerank.listwise_rerank`，而非 `HybridRetriever`/agent 整体接入——理由见 ADR 0011 被拒方案）、`processing/context_builder.py`、`answers/`（models/prompt/verify）、`adapters/answer_service.py`（恰好一次 LLM + 逐字段校验 + 散文数值门）、`adapters/http/chat.py` + `chat_schemas.py`（契约 `rag-chat-v1`）、TABLE 成员逐字转写放行（`processing/table_transcription.py`，policy `-v2`）。离线已独立验收文本引用、表格单元格、图表值（donut/bar）的正例、拒答与损坏证据：`tests/enterprise_pdf_rag/answers/`（`test_verify.py` 12、`test_answer_service.py` 10）、`test_chat_http.py`（14）、`test_hybrid_search.py`（10）、`test_context_builder.py`（8）、`test_table_transcription.py`（3）。真实模型上的合成与校验结论见顶部“真实模型验收”；在此之前不称通用 RAG 聊天已验收。
-4. 第 20 页 v2 属于独立的待完成验收：仍未新增描述 embedding、未运行新 runtime 38-case 真 API 验收、未激活。若继续该切片，沿 ADR 0009 的独立评测和 atomic activation 门推进，不把两个样本事实当成通用图表能力。
-5. 准备提交/推送时再次核对用户授权与实际工作树，运行既有完整门；GitHub Linux CI 和 Databricks 部署只有实际执行后才能标记完成。
+4. （2026-09-21）重新冻结 NL 金标集到当前发布（`current-processing` 已漂移到 `4f6ce62fe0b7`，金标钉的是 `231c904c843e`），再跑离线与真实两个 runner —— ADR 0018 的中文路径要等这一步才算验过。顺带决定 region 前置过滤是否也用译文推导（会把 `k02` 从拒答变成作答）。
+5. 第 20 页 v2 属于独立的待完成验收：仍未新增描述 embedding、未运行新 runtime 38-case 真 API 验收、未激活。若继续该切片，沿 ADR 0009 的独立评测和 atomic activation 门推进，不把两个样本事实当成通用图表能力。
+6. 准备提交/推送时再次核对用户授权与实际工作树，运行既有完整门；GitHub Linux CI 和 Databricks 部署只有实际执行后才能标记完成。
 
 ## 历史暂停快照
 

@@ -36,6 +36,37 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ### Added
 
+- **Retrieval picks its channels per question, and restates a foreign-language question in the
+  index's language first**
+  (`enterprise_pdf_rag`, [ADR 0018](docs/enterprise-pdf-rag/adr/0018-query-classification-and-translation.md)).
+  Hybrid retrieval used to fuse the
+  vector and BM25 rankings with RRF unconditionally; nobody had measured whether that helps. The
+  2026-09-21 coverage probe (`data/validation/coverage-2026-09-21/`: 125 indexed facts from the
+  AIA release, each asked two ways, pre-rerank) says it does not — BM25 alone recalls 74.4%
+  within ten seats against fusion's 70.4%, and leads by more at every tighter cut (r@3 54.4% vs
+  46.4%, MRR 0.482 vs 0.381), because RRF weights both rankings equally and the weaker one
+  dilutes the stronger. `answers/query_mode.py` now classifies each question with no model and no
+  I/O: at most five tokens, or a figure plus at most one content word, takes BM25 alone; a
+  question the lexical channel cannot score takes the vector channel alone; everything else keeps
+  fusion. Both thresholds were swept offline against the probe's per-fact channel ranks and are
+  the narrowest pair that reaches the sweep's ceiling, so 48% of the probe's queries are rerouted
+  and the rest behave byte-for-byte as before. `HybridSearch.search` gained a `mode` argument and
+  returns a `SearchOutcome`; a single-channel mode is expressed as a fusion with one empty
+  ranking, so scores stay comparable, and `bm25_only` skips the vector channel entirely — one
+  embedding call fewer per request. `adapters/query_translation.py` restates a question written
+  outside the index's language through one bounded, cached `complete_text_json` call (task salt
+  `query-translation-v1`, strict `{english_query, source_language}` schema, rules that forbid
+  answering and require figures and proper names to survive verbatim), triggered when the
+  question's *content words* — function words and figures removed — score nothing lexically, so a
+  Chinese question naming `1H26` is no longer mistaken for a scoreable one. The translation
+  reaches the two retrieval channels only: the prompt, the period / region pre-filters and the
+  prose-number gate keep the original question, `SYSTEM_RULES` now asks for an answer in the
+  question's language with claim text still copied verbatim from the evidence, and a translation
+  that cannot be had is not an error — the question falls back to the vector channel alone.
+  `AnswerRequest` gained `fusion_mode` and `translate_query`; `AnswerResult` and the
+  `rag-chat-v1` `AnswerEnvelope` gained `fusion_mode` and `query_translation` as optional
+  fields, and the checked-in schema was regenerated with nothing removed.
+
 - **A frozen gold set for natural-language answers, with two runners that share one judge**
   (`enterprise_pdf_rag`, ADR 0011 follow-up). Until now the only frozen sets were the two typed
   ChartQA golds; the whole answer chain was re-measured by hand every round.

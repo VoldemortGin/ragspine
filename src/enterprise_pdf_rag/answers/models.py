@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
 
+from enterprise_pdf_rag.answers.query_mode import FusionMode, QueryMode
 from enterprise_pdf_rag.figures.chart_qa.displayed_models import DisplayedRefusalReason
 from enterprise_pdf_rag.figures.chart_qa.models import FieldCitation, RefusalReason
 from enterprise_pdf_rag.processing.context_builder import BlockKind
@@ -68,6 +69,23 @@ class FusedHit:
 
 
 @dataclass(frozen=True, slots=True)
+class TranslatedQuery:
+    """One question restated in the index's language by ``adapters/query_translation``.
+
+    ``english`` is what both retrieval channels then score; the original question is what
+    the prompt, the pre-filters and the prose gate keep using (ADR 0018).
+    """
+
+    english: str
+    source_language: str
+    cache_hit: bool
+
+    def __post_init__(self) -> None:
+        if not self.english.strip() or not self.source_language.strip():
+            raise ValueError("A translation needs a nonempty query and source language")
+
+
+@dataclass(frozen=True, slots=True)
 class MemberFilters:
     """Equality pre-filters on verified page metadata: periods (any form) and regions.
 
@@ -112,6 +130,11 @@ class AnswerRequest:
     # Print the rest of each hit's page beside it (ADR 0017); ``None`` takes the service
     # default, ``True`` / ``False`` overrides it for this request alone.
     page_window: bool | None = None
+    # ``auto`` lets ``answers/query_mode`` pick the channels; the rest pin one (ADR 0018).
+    fusion_mode: FusionMode = "auto"
+    # Whether a question the lexical channel cannot score may be translated into the index's
+    # language first. Off, such a question falls straight through to the vector channel.
+    translate_query: bool = True
 
     def __post_init__(self) -> None:
         if not self.question.strip():
@@ -179,3 +202,7 @@ class AnswerResult:
     filters_applied: MemberFilters | None = None
     filters_relaxed: bool = False
     page_windows: tuple[PageWindowStat, ...] = ()
+    # The channels this answer was actually retrieved over, and the translation that fed
+    # them when the question was not in the index's language (ADR 0018).
+    fusion_mode: QueryMode = "rrf"
+    query_translation: TranslatedQuery | None = None
