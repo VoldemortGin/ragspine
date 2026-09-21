@@ -1,5 +1,7 @@
 """Hand-built pdfspine observations; the glyph metrics are the authored ASCII fixture font's."""
 
+import pdfspine
+
 from enterprise_pdf_rag.documents.models import Bounds
 from enterprise_pdf_rag.figures.models import SourceAnchor
 from enterprise_pdf_rag.processing.formula_models import (
@@ -14,6 +16,7 @@ from enterprise_pdf_rag.processing.formula_rules import IDENTITY
 
 PAGE_HEIGHT = 160.0
 SOURCE_SHA256 = "0123456789abcdef" * 4
+PDFSPINE_TAG = f"pdfspine/{pdfspine.__version__}"
 # Probed from tests/enterprise_pdf_rag/fixtures/authored-donut-ascii.ttf through pdfspine:
 # every glyph advances 0.6 * size and its box spans 0.8 * size above the baseline to
 # 0.2 * size below it, so synthetic geometry matches what the real fixture PDF reports.
@@ -73,7 +76,7 @@ def observation(
 ) -> FormulaSourceObservation:
     return FormulaSourceObservation(
         "formula-source-observation-v1",
-        "pdfspine/0.11.0",
+        PDFSPINE_TAG,
         SOURCE_SHA256,
         0,
         page_height,
