@@ -68,10 +68,11 @@ from ragspine.retrieval.rerank.listwise_rerank import ListwiseJudge
 _TASK = "rag-answer-v1"
 _MODEL_OUTPUT_FAILURES = frozenset({"invalid_model_json", "truncated_response"})
 # Whether a question with a mounted tree is routed when the request says nothing (ADR 0019).
-# Measured off: a member only the tree reached now sorts below every scored one, and on the sample
-# it changed no citation, so routing by default would spend one live call per question for
-# nothing. A caller asks for it with ``AnswerRequest.tree_route``.
-ROUTE_BY_DEFAULT: Final = False
+# On since ADR 0019 Amendment 1: at ``tree_rrf_k`` 600 a member only the tree reached sorts below
+# every scored one, and on the 20-page sample both arms scored 22/22 citing the same pages, so the
+# channel cannot cost an answer and is left on for the documents it was built for — one live call
+# per question. A caller pins it either way with ``AnswerRequest.tree_route``.
+ROUTE_BY_DEFAULT: Final = True
 
 
 class UnknownDocument(LookupError):
@@ -280,13 +281,14 @@ class AnswerService:
         """The pages this document's outline tree routes the question to; ``None`` when unrouted.
 
         The channel exists only where a tree was built for the document, so a service mounted
-        without one behaves exactly as it did before ADR 0019. Given a tree, a request must
-        ask for it: ``ROUTE_BY_DEFAULT`` is **False** because on the 20-page sample this was
-        measured against, routing changed not one citation while costing a live call and
-        seconds of latency (ADR 0019 Validation). The rule is written out rather than folded
-        away, because the day the default flips it is the rule that applies: a short label
-        query is still not routed, since BM25 already matches a printed label wherever it
-        appears and a map of the document would buy nothing for that call.
+        without one behaves exactly as it did before ADR 0019. Given a tree, a question is
+        routed unless the request says otherwise: ``ROUTE_BY_DEFAULT`` is **True** since ADR
+        0019 Amendment 1, because at ``tree_rrf_k`` 600 a routed page cannot displace a scored
+        member and the 20-page sample scored 22/22 in both arms citing exactly the same pages
+        — the cost is one live call, not an answer. A caller pins it either way with
+        ``AnswerRequest.tree_route``. A short label query is still never routed: BM25 already
+        matches a printed label wherever it appears and a map of the document would buy
+        nothing for that call.
 
         The question routed is the English restatement when there is one: the outline is
         written in the index's language, which is the only wording a router can match it on.

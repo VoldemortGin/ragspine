@@ -9,7 +9,6 @@ from typing import Never
 
 import pytest
 
-from enterprise_pdf_rag.adapters import answer_service
 from enterprise_pdf_rag.adapters.answer_service import (
     AmbiguousDocument,
     AnswerService,
@@ -1633,13 +1632,14 @@ def _router(calls: list[str], node_ids: tuple[str, ...] = ("n3",)) -> Router:
 def test_a_narrative_question_is_routed_and_the_routed_pages_reach_the_prompt(
     tmp_path: Path,
 ) -> None:
-    """Asked for by the request: ``ROUTE_BY_DEFAULT`` is off, so nothing else turns it on.
+    """Pinned on by the request, so this case holds whatever the default is.
 
     Measured against the pinned release on 2026-09-21, after the ``tree_rrf_k = 600`` fix
     that stopped a routed page displacing a scored member: the frozen gold set scored 22/22
     with the channel off and 22/22 with it on, not one case moving, and five structural
     questions were answered in both arms citing exactly the same pages — for one extra live
-    call and 4-22 s per question. Provably safe, worth nothing here, one flag away.
+    call and 4-22 s per question. Safe at any weight the inequality allows; on since ADR
+    0019 Amendment 1.
     """
     document = _tree_document()
     routes: list[str] = []
@@ -1682,8 +1682,8 @@ def test_a_narrative_question_is_routed_and_the_routed_pages_reach_the_prompt(
 
 
 def test_a_short_label_question_never_spends_a_routing_call(tmp_path: Path) -> None:
-    """Unasked, nothing routes at all now ``ROUTE_BY_DEFAULT`` is off — and the shape rule
-    that would spare this question even if the default flipped is pinned separately below."""
+    """Unasked, the ADR 0018 shape rule spares this question even though the default is on:
+    BM25 matches a printed label wherever it appears, so a map of the document buys nothing."""
     document = _tree_document()
     routes: list[str] = []
     service, prompts = _service(
@@ -1758,7 +1758,7 @@ def test_an_unusable_route_leaves_the_answer_exactly_as_it_was(tmp_path: Path) -
         trees={_TREE_SHA: _document_tree()},
         max_live_calls=2,
     )
-    # Asked for explicitly: with the default off (see the routed test above) nothing is tried.
+    # Asked for explicitly, so the degrade path is reached whatever the default is.
     result = service.answer(AnswerRequest(_TREE_QUESTION, top_k=3, tree_route=True))
 
     # The channel is absent, not an error: the other two channels answered alone.
@@ -1815,15 +1815,14 @@ def test_a_tree_routed_abstention_keeps_its_route(tmp_path: Path) -> None:
     assert result.llm_live_calls == 2
 
 
-def test_a_mounted_tree_routes_nothing_and_changes_nothing_until_a_request_asks_for_it(
+def test_tree_route_false_answers_field_for_field_as_if_no_tree_existed(
     tmp_path: Path,
 ) -> None:
-    """``ROUTE_BY_DEFAULT`` is off: an unasked narrative question answers as if no tree existed.
+    """The off switch is exact: a mounted tree a request declines costs nothing at all.
 
-    The default is off because it was measured off (2026-09-21, pinned release, after the
-    ``tree_rrf_k = 600`` fix): 22/22 on the frozen gold set in both arms with no case moving,
-    the same pages cited for five structural questions, against one extra live call and
-    4-22 s of latency per question. This is the pin on that decision.
+    Now that ADR 0019 Amendment 1 routes by default, this is the escape hatch, and it is
+    pinned to be total: the declined answer is field for field — prompt included — the one a
+    service with no tree mounted gives, and not one live call is spent on the channel.
     """
     routes: list[str] = []
     mounted, prompts = _service(
@@ -1836,7 +1835,7 @@ def test_a_mounted_tree_routes_nothing_and_changes_nothing_until_a_request_asks_
     )
     plain, plain_prompts = _service(tmp_path / "plain", _tree_document(), lambda prompt: declined())
 
-    result = mounted.answer(AnswerRequest(_TREE_QUESTION, top_k=3))
+    result = mounted.answer(AnswerRequest(_TREE_QUESTION, top_k=3, tree_route=False))
     before = plain.answer(AnswerRequest(_TREE_QUESTION, top_k=3))
 
     # Not one call spent on the channel, and not one rank carried out of it.
@@ -1849,16 +1848,15 @@ def test_a_mounted_tree_routes_nothing_and_changes_nothing_until_a_request_asks_
     assert prompts == plain_prompts
 
 
-def test_with_routing_on_by_default_a_narrative_question_routes_and_a_label_query_does_not(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_by_default_a_narrative_question_routes_and_a_label_query_does_not(
+    tmp_path: Path,
 ) -> None:
-    """ADR 0019's shape rule, kept under test while ``ROUTE_BY_DEFAULT`` holds it dormant.
+    """The shipped default (ADR 0019 Amendment 1) and the ADR 0018 shape rule that survives it.
 
-    Nothing reads the rule today; the day the default flips it is the rule that applies, so
-    it is pinned here rather than rediscovered then: a question with a shape BM25 cannot
-    already answer is routed, and a short printed label is not.
+    Nothing is monkeypatched: this is what an unasked question does against a mounted tree.
+    A question with a shape BM25 cannot already answer is routed; a short printed label is
+    not, because BM25 matches it wherever it appears.
     """
-    monkeypatch.setattr(answer_service, "ROUTE_BY_DEFAULT", True)
     trees = {_TREE_SHA: _document_tree()}
     narrative_routes: list[str] = []
     narrative_service, _ = _service(

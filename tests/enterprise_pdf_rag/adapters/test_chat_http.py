@@ -12,7 +12,6 @@ from fastapi import FastAPI
 from httpx2 import AsyncClient
 from pydantic import TypeAdapter
 
-from enterprise_pdf_rag.adapters import answer_service
 from enterprise_pdf_rag.adapters.answer_service import AnswerService
 from enterprise_pdf_rag.adapters.document_catalog import (
     CatalogEntry,
@@ -610,18 +609,15 @@ def _mount_document_tree(processing_store: Path, processing_id: str, tree: Docum
 
 
 def test_the_envelope_reports_the_tree_route_and_each_member_rank_in_it(
-    published: Published, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    published: Published, tmp_path: Path
 ) -> None:
     """ADR 0019's third channel is an engine decision: no request knob, but a full trace.
 
     ``RagChatRequest`` deliberately carries no tree knob (the ADR 0018 Decision 3
-    precedent), so the only honest way to route an HTTP question is to have the engine this
-    app builds route by default — which the shipped default does not, measured: on the
-    pinned release the channel moved no gold case and changed no citation, for one extra
-    live call per question (ADR 0019 Validation). Flipped on here, the envelope is the trace
-    it would carry in a deployment that turned it on.
+    precedent), so what routes an HTTP question is the engine default — on since ADR 0019
+    Amendment 1, and nothing is monkeypatched here. A mounted tree therefore routes over the
+    wire, and the envelope carries the whole trace of it.
     """
-    monkeypatch.setattr(answer_service, "ROUTE_BY_DEFAULT", True)
     root, meridian, _ = published
     copy = tmp_path / "ingestion"
     shutil.copytree(root, copy)

@@ -259,9 +259,13 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   score; it may not put one above a member a channel did. (The term is additive, so two scored
   members can still move relative to each other — the guarantee is about unscored pages only.)
   Measured as a peer ranking at a shared `k` it did the opposite, and cost the frozen gold set
-  21/22 → 17/22. Routing itself is **opt-in** (`ROUTE_BY_DEFAULT = False`) until it is measured
-  on a document long enough to need it. No route is never an error: no budget, no transport, no
-  usable reply and the channel is simply absent.
+  21/22 → 17/22. At its own constant routing is **on by default** (`ROUTE_BY_DEFAULT = True`,
+  ADR 0019 Amendment 1): both gold arms scored 22/22 citing the same pages, so the channel
+  cannot cost an answer, and it costs one live call. A request declines it with
+  `tree_route=False` (then the answer is field for field the one a treeless service gives), a
+  short label query is never routed, and a document with no tree has no third channel at all.
+  No route is never an error: no budget, no transport, no usable reply and the channel is
+  simply absent.
 - **Metadata is verbatim, automatic and never a hard gate** (ADR 0013) — every page-metadata
   value quotes its page spans (dropped otherwise, with a diagnostic); the model runs only at
   build time, nobody annotates; document metadata is a deterministic fold that is recomputed

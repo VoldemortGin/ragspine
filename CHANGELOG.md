@@ -2,6 +2,35 @@
 
 All notable changes to RAGSpine are documented here. This project follows Semantic Versioning.
 
+## [Unreleased]
+
+### Changed
+
+- **The document-tree channel routes by default**
+  (`enterprise_pdf_rag`, [ADR 0019](docs/enterprise-pdf-rag/adr/0019-document-tree-channel.md)
+  Amendment 1). `ROUTE_BY_DEFAULT` is now `True`: a question against a mounted tree is routed
+  unless the request declines it, where 0.16.0 shipped it opt-in. **Not one measurement was
+  re-run and no other behavior changed** — `tree_rrf_k` stays 600, the inequality
+  `tree_rrf_k + 1 > rrf_k + channel_limit` is still a precondition of `HybridSearch.__init__`,
+  and a routing note is still never citable. What changed is which question the same evidence
+  answers. 0.16.0 asked whether the channel *earns* its live call and found it did not on a
+  twenty-page deck; this asks whether leaving it on can *cost* an answer, and the same arms say
+  no from both sides: 22/22 with the channel off and 22/22 with it on, not one verdict moved and
+  every case citing exactly the same pages, five structural questions answered 5/5 in both arms,
+  and a member only the tree reached scoring `1 / 601` against `1 / 110` for the weakest member
+  any scoring channel reached — it cannot outrank one. The price is unchanged and unhidden: one
+  extra live call per routed question, +3.8 s to +23.0 s. Three things bound it — a document with
+  no tree still has no third channel at all (a deployment that never runs the `tree` stage answers
+  byte for byte as before), a short label query is still never routed (ADR 0018's `is_label_query`
+  clause, written for this day), and `AnswerRequest.tree_route=False` still returns the answer of a
+  treeless service field for field, prompt included. `RagChatRequest` gains no knob, as ever, so
+  over HTTP this is simply what the engine now does: a wire question against a mounted tree is
+  routed, and the envelope's `tree_route` / `tree_rank` report it. The follow-up stands — this
+  sample cannot show the *benefit*, and whether routing raises recall on section-aimed questions,
+  and whether 600 is the right weight once a tree has real depth, must still be measured on a
+  document of hundreds of pages with a multi-level contents page. That measurement now decides
+  whether to keep the default rather than whether to reach it.
+
 ## [0.16.0] - 2026-09-22
 
 ### Added

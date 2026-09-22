@@ -13,7 +13,10 @@ a tree without being re-qualified, re-indexed or re-published — and a deployme
 one answers byte for byte as it did before this ADR. A deployment that *does* build one answers
 byte for byte too, until a caller asks to route: on the sample this was measured against the
 channel changed no verdict and no citation, so it ships **opt-in** (`ROUTE_BY_DEFAULT = False`).
-Decision 11 says how to ask for it and Validation says why it is off.
+Decision 11 says how to ask for it and Validation says why it is off. **Amended by Amendment 1
+(2026-09-22): the default is now `True`** — the "off" in Decision 11, in the closing clause of
+Decision 12 and in Validation's *The decision that follows* reads as the record of what shipped on
+2026-09-21, not as the current default.
 
 ## Context
 
@@ -235,18 +238,21 @@ weighted as if it could.
     lacks, at most one seat per missing kind and never over a seat already holding one.
 
 11. **Routing is off by default; a caller asks for it, and the short-label rule is what applies
-    when it is on** (`answers/query_mode.py`, `adapters/answer_service.py`). `ROUTE_BY_DEFAULT:
+    when it is on** (`answers/query_mode.py`, `adapters/answer_service.py`). ~~`ROUTE_BY_DEFAULT:
     Final = False`. With a tree mounted and `AnswerRequest.tree_route` left `None`, the question is
     **not** routed, and the Validation below is the whole of the reason: on this sample the channel
     is provably safe and changes not one verdict and not one cited page, so routing by default
     would spend a live call and seconds of latency per question to buy nothing measurable. A caller
-    asks for it with `AnswerRequest.tree_route=True`. `_route` decides in order: no tree for this
-    document, no route; otherwise `AnswerRequest.tree_route` when it is set; otherwise
-    `ROUTE_BY_DEFAULT and not is_label_query(question)`.
+    asks for it with `AnswerRequest.tree_route=True`.~~ **Superseded by Amendment 1** for the
+    value alone: `ROUTE_BY_DEFAULT: Final = True`, and a caller turns it *off* per request with
+    `AnswerRequest.tree_route=False`. `_route` decides in order: no tree for this document, no
+    route; otherwise `AnswerRequest.tree_route` when it is set; otherwise `ROUTE_BY_DEFAULT and
+    not is_label_query(question)`.
 
     That last clause is written out rather than folded away, because it is the rule that applies
-    **the day the default flips**. `is_label_query(question)` states the ADR 0018 short-label rule
-    once — at most `MAX_BM25_ONLY_TOKENS` (**5**) tokens *and* `MAX_BM25_ONLY_SHORT_CONTENT_WORDS`
+    **the day the default flips** — which it has, so it is live now. `is_label_query(question)`
+    states the ADR 0018 short-label rule once — at most `MAX_BM25_ONLY_TOKENS` (**5**) tokens
+    *and* `MAX_BM25_ONLY_SHORT_CONTENT_WORDS`
     (**2**) content words, or a figure with at most `MAX_BM25_ONLY_CONTENT_WORDS` (**1**) — where
     `classify_query` used to spell it out inline, and both the channel decision and the routing
     decision now read that one predicate. An exact label lookup already knows what it is looking
@@ -270,11 +276,14 @@ weighted as if it could.
     never a caller's knob. `llm_live_calls` counts the routing call honestly, because the snapshot
     that measures it already spans the request. Both contracts gain optional fields only, so an
     older client reads `rag-chat-v1` and `document-catalog-v1` unchanged. Together with Decision 11
-    that has a consequence worth naming outright rather than discovering: **the HTTP path has no
+    that has a consequence worth naming outright rather than discovering: ~~**the HTTP path has no
     way to ask for a route, and with `ROUTE_BY_DEFAULT` false it does not route**, so `tree_route`
     is `null` on every wire response this release can produce. The channel is reachable in-process
     through `AnswerRequest`, which is where it was measured and where it waits for a document long
-    enough to earn the default.
+    enough to earn the default.~~ **Superseded by Amendment 1**: the HTTP path still has no way to
+    ask, and now has no need to — with the default on, a wire question against a mounted tree is
+    routed and its envelope carries the route. `tree_route` is `null` only where no tree is mounted
+    or the shape rule spared the question.
 
 ## Rejected alternatives
 
@@ -624,6 +633,9 @@ can no longer reorder the scored seats, so it no longer moves a verdict:
 
 ### The decision that follows
 
+*(Superseded by Amendment 1, which flipped the default **on** this section's evidence rather
+than against it. Everything here is the record of what was decided on 2026-09-21.)*
+
 `ROUTE_BY_DEFAULT = False`. The channel is provably safe and completely wired — the inequality is a
 precondition of `HybridSearch`, the fold is deterministic, the notes cannot be cited, no route is
 never an error — and on a twenty-page deck whose two scoring channels already reach every page it
@@ -636,3 +648,51 @@ longer than this one, where no single retrieval pass covers every page and a map
 find the right section. **This sample cannot show the benefit.** The number to beat should be
 re-measured on a document of hundreds of pages with a real multi-level contents page before the
 default flips.
+
+## Amendment 1 (2026-09-22): routing is on by default
+
+`ROUTE_BY_DEFAULT: Final = True`. Decision 11's value is superseded, and with it the closing
+clause of Decision 12 and the verdict of *The decision that follows*. **Not one measurement
+changes** — no number above is restated, no arm is re-run, and nothing else in this ADR moves:
+`tree_rrf_k` stays **600**, the inequality `tree_rrf_k + 1 > rrf_k + channel_limit` is still a
+precondition of `HybridSearch.__init__`, the routing note is still never citable, and the fold is
+still zero-model.
+
+What changed is the question being answered. *The decision that follows* asked "does this sample
+show the channel earning its live call?" and answered no. This amendment asks the question the
+sample can answer: "**can leaving it on cost an answer?**" — and the same measurement says no, from
+both sides. On the pinned 20-page release the frozen gold set scored **22/22 with the channel off
+and 22/22 with it on**, not one verdict moved and every case cited exactly the same pages; the five
+structural questions were answered **5/5 in both arms**, citing the same pages; and the weighting
+makes the strong case structural rather than empirical — a member only the tree reached scores
+`1 / 601` and cannot outrank a member any scoring channel reached at `1 / (60 + 50)`. A default
+that cannot change an answer, on a sample built to catch exactly that, is a default that should be
+on for the documents the channel was built for: the long report where a single retrieval pass does
+not cover every page is the case this sample cannot represent, and it is also the case a caller
+cannot reach through HTTP, because `RagChatRequest` still carries no knob (Decision 12).
+
+The price is unchanged and is stated plainly: **one extra live call per routed question**, measured
+at **+3.8 s to +23.0 s** (gold set: 39 calls / 215.1 s on, against 22 / 147.2 s off). Three things
+bound it. A document with no tree has no third channel at all, so a deployment that never runs the
+`tree` stage answers byte for byte as before. A short label query is never routed — Decision 11's
+`is_label_query` clause, written for this day and now live. And any caller may decline per request
+with `AnswerRequest.tree_route=False`, which `test_tree_route_false_answers_field_for_field_as_if_no_tree_existed`
+pins to be field for field — prompt included — the answer of a service with no tree mounted.
+
+The follow-up in Consequences stands exactly as written: this sample still **cannot show the
+benefit**, and whether routing raises recall on section-aimed questions, and whether 600 is the
+right weight once a tree has genuine depth, must still be measured on a document of hundreds of
+pages with a real multi-level contents page. That measurement now decides whether to keep the
+default, not whether to reach it.
+
+### Offline
+
+`pytest tests/enterprise_pdf_rag -q` reports **1431 passed**, unchanged in count: the two cases that
+pinned the default from both sides were re-pointed rather than removed.
+`test_a_mounted_tree_routes_nothing_and_changes_nothing_until_a_request_asks_for_it` became
+`test_tree_route_false_answers_field_for_field_as_if_no_tree_existed` — the same field-for-field
+assertion, now on the explicit off switch — and
+`test_with_routing_on_by_default_a_narrative_question_routes_and_a_label_query_does_not` dropped its
+`monkeypatch` to become `test_by_default_a_narrative_question_routes_and_a_label_query_does_not`,
+so the shipped default is what it reads. `adapters/test_chat_http.py` likewise dropped its
+monkeypatch: the envelope's `tree_route` / `tree_rank` trace is now what the wire really produces.
