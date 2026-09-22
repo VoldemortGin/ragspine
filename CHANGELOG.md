@@ -4,6 +4,8 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-09-22
+
 ### Changed
 
 - **The document-tree channel routes by default**
@@ -30,6 +32,14 @@ All notable changes to RAGSpine are documented here. This project follows Semant
   and whether 600 is the right weight once a tree has real depth, must still be measured on a
   document of hundreds of pages with a multi-level contents page. That measurement now decides
   whether to keep the default rather than whether to reach it.
+
+### Tests
+
+- **The `pdfspine` producer tag in test fixtures is derived from the installed version**
+  (`enterprise_pdf_rag`). `test_source_paint.py` and `formula_observation_fixtures.py` used to
+  hardcode the literal `"pdfspine/0.11.0"` as the expected producer tag; both now compute
+  `PDFSPINE_TAG = f"pdfspine/{pdfspine.__version__}"` and assert against that, so the suite stops
+  drifting out of sync whenever the pinned `pdfspine` dependency is upgraded.
 
 ## [0.16.0] - 2026-09-22
 
@@ -790,7 +800,8 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 - The package-root API now exposes the `RAGSpine` facade alongside the four original primitives.
 - Installed users can complete ingestion, querying, and local visualization without repository scripts.
 
-[Unreleased]: https://github.com/VoldemortGin/ragspine/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/VoldemortGin/ragspine/compare/v0.16.1...HEAD
+[0.16.1]: https://github.com/VoldemortGin/ragspine/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/VoldemortGin/ragspine/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/VoldemortGin/ragspine/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/VoldemortGin/ragspine/compare/v0.13.0...v0.14.0
