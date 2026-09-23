@@ -20,9 +20,12 @@ from typing import Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from enterprise_pdf_rag.adapters.json_completion import JsonCompletionClient, JsonCompletionError
 from enterprise_pdf_rag.answers.models import TreeRoute
 from enterprise_pdf_rag.processing.document_tree import DocumentTree, render_tree
+from ragspine.common.evidence.providers.json_completion import (
+    JsonCompletionClient,
+    JsonCompletionError,
+)
 
 TREE_ROUTE_TASK: Final = "document-tree-route-v1"
 # A route is a shortlist, not a reading order: more sections than this is the whole document

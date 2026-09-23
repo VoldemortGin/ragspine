@@ -8,7 +8,7 @@ from beartype.roar import BeartypeCallHintParamViolation
 
 from enterprise_pdf_rag.adapters.http.app import create_configured_app
 from enterprise_pdf_rag.adapters.pdfspine_figure import PdfspineFigureParser
-from enterprise_pdf_rag.core.settings import get_settings
+from ragspine.common.evidence.settings import get_settings
 
 
 def test_central_import_hook_checks_internal_calls() -> None:

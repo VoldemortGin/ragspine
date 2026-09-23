@@ -20,18 +20,21 @@ from enterprise_pdf_rag.adapters.http.schemas import (
     SearchResponse,
 )
 from enterprise_pdf_rag.adapters.hybrid_search import LocalRerankJudge
-from enterprise_pdf_rag.adapters.json_completion import JsonCompletionClient
-from enterprise_pdf_rag.adapters.local_models import LocalEmbeddingAdapter, LocalRerankAdapter
 from enterprise_pdf_rag.adapters.processing_runtime import PROCESSING_OUTPUT
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.adapters.providers import (
+from enterprise_pdf_rag.adapters.runtime import create_runtime
+from enterprise_pdf_rag.figures.models import ExecutionMode, FailureCode, FigureError
+from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
+from ragspine.common.evidence.providers.local_models import (
+    LocalEmbeddingAdapter,
+    LocalRerankAdapter,
+)
+from ragspine.common.evidence.providers.providers import (
     ProviderConfigurationError,
     load_llm_config,
     load_local_model_config,
 )
-from enterprise_pdf_rag.adapters.runtime import create_runtime
-from enterprise_pdf_rag.core.settings import get_settings
-from enterprise_pdf_rag.figures.models import ExecutionMode, FailureCode, FigureError
+from ragspine.common.evidence.settings import get_settings
 
 
 def create_app(*, mode: ExecutionMode) -> FastAPI:

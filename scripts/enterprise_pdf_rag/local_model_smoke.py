@@ -3,11 +3,11 @@
 import json
 import sys
 
-from enterprise_pdf_rag.adapters.local_models import (
+from ragspine.common.evidence.providers.local_models import (
     LocalEmbeddingAdapter,
     LocalRerankAdapter,
 )
-from enterprise_pdf_rag.adapters.providers import load_local_model_config
+from ragspine.common.evidence.providers.providers import load_local_model_config
 
 
 def main() -> int:

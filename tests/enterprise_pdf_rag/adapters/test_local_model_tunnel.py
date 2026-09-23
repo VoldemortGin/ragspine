@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from enterprise_pdf_rag.adapters.local_model_tunnel import (
+from ragspine.common.evidence.providers.local_model_tunnel import (
     TunnelConfigurationError,
     TunnelStateError,
     load_tunnel_config,

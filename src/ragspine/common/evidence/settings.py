@@ -191,15 +191,14 @@ settings = get_settings()
 可能也不需要覆盖配置,用单例最省事。**运行期**的读取请改用 `get_settings()`。
 """
 
-_PKG = __name__.split(".")[0]  # 顶层包名,重命名安全
-
 DATA_DIR: Path = settings.data_dir
 LOG_DIR: Path = settings.log_dir
 
 
-def resource_path(relative: str) -> Path:
-    """包内自带资源的路径(假设文件系统安装,如 Docker/服务器部署)。
+def resource_path(package: str, relative: str) -> Path:
+    """``package`` 自带资源的路径(假设文件系统安装,如 Docker/服务器部署)。
 
+    包名必须显式给出:本模块已不在资源所属的包里(ADR 0022),不能再从 ``__name__`` 推断。
     zip 安装场景请改用 importlib.resources.as_file 上下文管理器。
     """
-    return Path(str(files(_PKG))) / relative
+    return Path(str(files(package))) / relative

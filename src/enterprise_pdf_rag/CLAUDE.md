@@ -42,7 +42,6 @@ served by the `document-catalog` mode. It is verified offline against authored P
 acceptance is recorded in the handoff, never assumed here.
 
 ```
-core/         settings leaf + shared value types (no I/O)
 documents/    pure document model — stdlib immutable values + Protocols only; text_layer.py
               (per-page text-layer diagnosis ok / outlined_text / garbled — detection only)
 figures/      pure figure/chart pipeline — same rule; same-SVG two branches, snapshot binding,
@@ -293,5 +292,6 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   can never be cited, certified or indexed; each page's `text_layer` keeps the counts and names
   `outlined_text` / `garbled` pages, which `ingest` reports as `ocr_needed_pages`. Nothing is
   OCR'd yet: those pages' words are simply absent from the index.
-- **Credential isolation** — only the API subprocess inherits `EMBEDDING_*`; Open WebUI inherits
-  no model key. Do not send real reports to external providers without task authorization.
+- **Settings, providers, credential isolation, local-model tunnel, live-LLM test policy** — moved
+  with `core/` and the provider adapters; see
+  [`src/ragspine/common/evidence/CLAUDE.md`](../ragspine/common/evidence/CLAUDE.md).

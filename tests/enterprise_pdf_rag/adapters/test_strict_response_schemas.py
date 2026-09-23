@@ -16,7 +16,6 @@ from enterprise_pdf_rag.adapters.chart_semantic_schemas import (
 )
 from enterprise_pdf_rag.adapters.document_tree_extraction import TreeSummaryDTO
 from enterprise_pdf_rag.adapters.http.layout_schemas import PageLayoutDTO
-from enterprise_pdf_rag.adapters.json_completion import _response_schema
 from enterprise_pdf_rag.adapters.page_metadata_extraction import PageMetadataDTO
 from enterprise_pdf_rag.adapters.query_translation import QueryTranslationDTO
 from enterprise_pdf_rag.adapters.tree_retrieval import TreeRouteDTO
@@ -27,6 +26,7 @@ from enterprise_pdf_rag.adapters.visual_semantic_schemas import (
     VisualDescriptionDTO,
 )
 from enterprise_pdf_rag.answers.prompt import ModelAnswer, ModelClaim
+from ragspine.common.evidence.providers.json_completion import _response_schema
 
 # One entry per ``response_model`` passed to ``complete_json`` / ``complete_text_json``:
 # answer_service (ModelAnswer), query_translation (QueryTranslationDTO),

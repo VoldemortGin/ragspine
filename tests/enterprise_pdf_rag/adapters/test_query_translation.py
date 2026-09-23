@@ -7,8 +7,6 @@ from typing import Any, Never
 import pytest
 from pydantic import SecretStr
 
-from enterprise_pdf_rag.adapters.json_completion import JsonCompletionClient
-from enterprise_pdf_rag.adapters.providers import LLMConfig
 from enterprise_pdf_rag.adapters.query_translation import (
     TRANSLATION_RULES,
     TRANSLATION_TASK,
@@ -17,6 +15,8 @@ from enterprise_pdf_rag.adapters.query_translation import (
     translate_query,
 )
 from enterprise_pdf_rag.answers.models import TranslatedQuery
+from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
+from ragspine.common.evidence.providers.providers import LLMConfig
 
 _QUESTION = "2026 上半年 分销渠道 占比"
 _ENGLISH = "Distribution mix in 1H26"

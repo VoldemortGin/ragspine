@@ -14,7 +14,6 @@ from typing import Final
 
 from enterprise_pdf_rag.adapters.answer_audit import AnswerAuditContext, AnswerAuditStore
 from enterprise_pdf_rag.adapters.hybrid_search import HybridSearch, LexicalIndex
-from enterprise_pdf_rag.adapters.json_completion import JsonCompletionClient, JsonCompletionError
 from enterprise_pdf_rag.adapters.query_translation import is_foreign_script, translate_query
 from enterprise_pdf_rag.adapters.tree_retrieval import route_tree
 from enterprise_pdf_rag.answers.member_filter import candidate_members, region_vocabulary
@@ -63,6 +62,10 @@ from enterprise_pdf_rag.processing.context_builder import (
 )
 from enterprise_pdf_rag.processing.document_tree import DocumentTree
 from enterprise_pdf_rag.processing.models import ObjectKind
+from ragspine.common.evidence.providers.json_completion import (
+    JsonCompletionClient,
+    JsonCompletionError,
+)
 from ragspine.retrieval.rerank.listwise_rerank import ListwiseJudge
 
 _TASK = "rag-answer-v1"

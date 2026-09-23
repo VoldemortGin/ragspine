@@ -7,11 +7,6 @@ from hashlib import sha256
 from html import escape
 
 from enterprise_pdf_rag.adapters.figure_reasoning import render_svg_png
-from enterprise_pdf_rag.adapters.json_completion import (
-    JsonCompletionClient,
-    JsonCompletionError,
-    JsonCompletionResult,
-)
 from enterprise_pdf_rag.adapters.pdfspine_svg import crop_native_svg
 from enterprise_pdf_rag.adapters.visual_semantic_schemas import (
     DiagramObservationsDTO,
@@ -40,6 +35,11 @@ from enterprise_pdf_rag.processing.typed_ir import (
     ImageIR,
     ObjectDescription,
     ObservedText,
+)
+from ragspine.common.evidence.providers.json_completion import (
+    JsonCompletionClient,
+    JsonCompletionError,
+    JsonCompletionResult,
 )
 
 type VisualIR = DiagramIR | ImageIR | FormulaIR

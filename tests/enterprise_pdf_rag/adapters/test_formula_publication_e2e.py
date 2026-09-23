@@ -336,7 +336,7 @@ def _ingest_rise_formula(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Ing
     pdf = rise_formula_pdf(tmp_path / "rise-formula.pdf")
     calls: list[bytes] = []
     monkeypatch.setattr(
-        "enterprise_pdf_rag.adapters.json_completion._send_once",
+        "ragspine.common.evidence.providers.json_completion._send_once",
         text_partition_sender(calls, formula_page=True),
     )
     return ingest_pdf(

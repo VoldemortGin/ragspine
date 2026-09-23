@@ -5,11 +5,11 @@ import os
 import sys
 from pathlib import Path
 
-from enterprise_pdf_rag.adapters.local_model_launcher import (
+from ragspine.common.evidence.providers.local_model_launcher import (
     build_local_model_child_environment,
     read_remote_container_api_key,
 )
-from enterprise_pdf_rag.adapters.local_model_tunnel import (
+from ragspine.common.evidence.providers.local_model_tunnel import (
     load_tunnel_config,
     tunnel_status,
 )

@@ -15,9 +15,9 @@ from enterprise_pdf_rag.adapters.draft_publication import DraftPublication
 from enterprise_pdf_rag.adapters.http import app as app_module
 from enterprise_pdf_rag.adapters.http.documents import create_documents_app
 from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
-from enterprise_pdf_rag.adapters.providers import LocalModelConfig, ProviderRequestError
-from enterprise_pdf_rag.core.settings import get_settings
 from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit, RetrievalContext
+from ragspine.common.evidence.providers.providers import LocalModelConfig, ProviderRequestError
+from ragspine.common.evidence.settings import get_settings
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
     publish_generic_document,
 )

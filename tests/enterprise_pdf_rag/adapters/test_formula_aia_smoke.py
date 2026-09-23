@@ -7,7 +7,7 @@ import sys
 import pytest
 
 from enterprise_pdf_rag.adapters.processing_runtime import PROCESSING_OUTPUT
-from enterprise_pdf_rag.core.settings import ROOT_DIR
+from ragspine.common.evidence.settings import ROOT_DIR
 
 _SCRIPT = ROOT_DIR / "scripts" / "enterprise_pdf_rag" / "formula_smoke.py"
 pytestmark = pytest.mark.skipif(

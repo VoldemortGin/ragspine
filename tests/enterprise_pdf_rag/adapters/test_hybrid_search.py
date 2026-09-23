@@ -16,13 +16,13 @@ from enterprise_pdf_rag.adapters.hybrid_search import (
     fuse,
     lexical_rank,
 )
-from enterprise_pdf_rag.adapters.local_models import RerankResult
 from enterprise_pdf_rag.answers.ports import MemberText, MountedDocument
 from enterprise_pdf_rag.answers.query_mode import FusionMode
 from enterprise_pdf_rag.figures.chart_qa.displayed_models import DisplayedLookupContext
 from enterprise_pdf_rag.figures.chart_qa.models import ChartContext
 from enterprise_pdf_rag.processing.models import ObjectKind, ProcessingManifest
 from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit, RetrievalContext
+from ragspine.common.evidence.providers.local_models import RerankResult
 from ragspine.retrieval.lexical.retrieval import bm25_scores, rrf_fuse, tokenize
 from tests.enterprise_pdf_rag.answers.fake_document import (
     DONUT_TITLE,

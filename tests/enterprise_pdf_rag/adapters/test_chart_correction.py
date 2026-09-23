@@ -10,8 +10,8 @@ from enterprise_pdf_rag.adapters.chart_semantics import (
     ModelChartExtractor,
     ModelOutputBindingError,
 )
-from enterprise_pdf_rag.adapters.json_completion import JsonCompletionClient
-from enterprise_pdf_rag.adapters.providers import load_llm_config
+from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
+from ragspine.common.evidence.providers.providers import load_llm_config
 from tests.enterprise_pdf_rag.adapters.test_chart_mapping import _dto, _point
 from tests.enterprise_pdf_rag.adapters.test_chart_semantics import _prepared
 

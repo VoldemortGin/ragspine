@@ -7,8 +7,6 @@ from typing import Any, Never
 import pytest
 from pydantic import SecretStr
 
-from enterprise_pdf_rag.adapters.json_completion import JsonCompletionClient
-from enterprise_pdf_rag.adapters.providers import LLMConfig
 from enterprise_pdf_rag.adapters.tree_retrieval import (
     MAX_ROUTE_NODES,
     MAX_ROUTE_PAGES,
@@ -25,6 +23,8 @@ from enterprise_pdf_rag.processing.document_tree import (
     TreeNode,
     render_tree,
 )
+from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
+from ragspine.common.evidence.providers.providers import LLMConfig
 
 _QUESTION = "What was VONB by market in 1H26?"
 

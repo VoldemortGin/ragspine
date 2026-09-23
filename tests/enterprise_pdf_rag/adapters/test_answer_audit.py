@@ -283,7 +283,7 @@ def test_the_document_catalog_composition_root_honours_the_audit_switch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from enterprise_pdf_rag.adapters.http import app as app_module
-    from enterprise_pdf_rag.core.settings import get_settings
+    from ragspine.common.evidence.settings import get_settings
 
     root = tmp_path / "ingestion"
     root.mkdir()
@@ -322,7 +322,7 @@ def test_the_document_catalog_composition_root_honours_the_audit_switch(
 def test_the_default_journal_sits_under_the_ingestion_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from enterprise_pdf_rag.core.settings import get_settings
+    from ragspine.common.evidence.settings import get_settings
 
     monkeypatch.setenv("APP_INGESTION_DIR", str(tmp_path / "ingestion"))
     monkeypatch.delenv("APP_ANSWER_AUDIT_PATH", raising=False)

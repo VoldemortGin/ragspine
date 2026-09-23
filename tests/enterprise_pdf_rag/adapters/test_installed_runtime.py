@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from enterprise_pdf_rag.cli import main
-from enterprise_pdf_rag.core.settings import get_settings
+from ragspine.common.evidence.settings import get_settings
 
 
 def test_region_catalog_survives_an_install_without_the_source_checkout(

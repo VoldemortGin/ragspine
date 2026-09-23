@@ -28,11 +28,11 @@ from enterprise_pdf_rag.adapters.http.processing_review import processing_status
 from enterprise_pdf_rag.adapters.http.processing_schemas import (
     ProcessingSnapshotResponse,
 )
-from enterprise_pdf_rag.adapters.json_completion import JsonCompletionClient
-from enterprise_pdf_rag.adapters.providers import ProviderRequestError
 from enterprise_pdf_rag.figures.ports import EmbeddingPort
 from enterprise_pdf_rag.processing.models import ProcessingManifest
 from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit
+from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
+from ragspine.common.evidence.providers.providers import ProviderRequestError
 from ragspine.retrieval.rerank.listwise_rerank import ListwiseJudge
 
 _EVIDENCE_CONFLICT = "Processing evidence is missing or inconsistent; no fallback"

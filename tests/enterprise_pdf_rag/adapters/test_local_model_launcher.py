@@ -2,11 +2,11 @@
 
 from pydantic import SecretStr
 
-from enterprise_pdf_rag.adapters.local_model_launcher import (
+from ragspine.common.evidence.providers.local_model_launcher import (
     build_local_model_child_environment,
     read_remote_container_api_key,
 )
-from enterprise_pdf_rag.adapters.local_model_tunnel import load_tunnel_config
+from ragspine.common.evidence.providers.local_model_tunnel import load_tunnel_config
 
 
 def test_child_environment_is_whitelisted_and_contains_no_deployment_fallback() -> None:

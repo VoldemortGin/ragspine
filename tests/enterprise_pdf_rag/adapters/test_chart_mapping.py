@@ -20,9 +20,9 @@ from enterprise_pdf_rag.adapters.chart_semantics import (
     ModelChartExtractor,
 )
 from enterprise_pdf_rag.adapters.figure_reasoning import PreparedFigure
-from enterprise_pdf_rag.adapters.json_completion import JsonCompletionClient
-from enterprise_pdf_rag.adapters.providers import load_llm_config
 from enterprise_pdf_rag.figures.models import ValueKind, Verification
+from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
+from ragspine.common.evidence.providers.providers import load_llm_config
 from tests.enterprise_pdf_rag.adapters.test_chart_semantics import _prepared
 
 

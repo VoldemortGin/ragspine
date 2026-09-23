@@ -13,15 +13,9 @@ from enterprise_pdf_rag.adapters.aia_processing import ProcessingPipeline
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.http import app as app_module
 from enterprise_pdf_rag.adapters.http.aia_review import create_aia_app
-from enterprise_pdf_rag.adapters.local_models import LocalEmbeddingAdapter
 from enterprise_pdf_rag.adapters.object_processing import ProcessingObjectAdapter
 from enterprise_pdf_rag.adapters.processing_retrieval import ProcessingRetrieval
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.adapters.providers import (
-    ProviderRequestError,
-    load_local_model_config,
-)
-from enterprise_pdf_rag.core.settings import get_settings
 from enterprise_pdf_rag.documents.models import DocumentSpec
 from enterprise_pdf_rag.figures.models import Confidence
 from enterprise_pdf_rag.processing.models import (
@@ -30,6 +24,12 @@ from enterprise_pdf_rag.processing.models import (
     PageInput,
     PagePartition,
 )
+from ragspine.common.evidence.providers.local_models import LocalEmbeddingAdapter
+from ragspine.common.evidence.providers.providers import (
+    ProviderRequestError,
+    load_local_model_config,
+)
+from ragspine.common.evidence.settings import get_settings
 
 
 @pytest.mark.parametrize(
@@ -127,7 +127,7 @@ def test_configured_app_search_uses_only_query_embedding_and_preserves_guard(
     monkeypatch.setattr(app_module, "AIA_OUTPUT", sources.root)
     monkeypatch.setattr(app_module, "PROCESSING_OUTPUT", outputs.root)
     monkeypatch.setattr(app_module, "create_aia_app", partial(create_aia_app, spec=spec))
-    monkeypatch.setattr("enterprise_pdf_rag.adapters.local_models._send_local_once", sender)
+    monkeypatch.setattr("ragspine.common.evidence.providers.local_models._send_local_once", sender)
     get_settings.cache_clear()
     try:
         application = app_module.create_configured_app()

@@ -99,7 +99,7 @@ def ingest_with_metadata(
     calls: list[bytes] = []
     metadata_calls: list[str] = []
     monkeypatch.setattr(
-        "enterprise_pdf_rag.adapters.json_completion._send_once",
+        "ragspine.common.evidence.providers.json_completion._send_once",
         combined_sender(calls, metadata_calls=metadata_calls),
     )
     summary = ingest_pdf(

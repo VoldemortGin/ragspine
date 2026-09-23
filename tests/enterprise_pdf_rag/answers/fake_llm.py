@@ -7,9 +7,9 @@ from typing import Literal
 
 from pydantic import BaseModel, SecretStr
 
-from enterprise_pdf_rag.adapters.json_completion import JsonCompletionClient
-from enterprise_pdf_rag.adapters.providers import LLMConfig
 from enterprise_pdf_rag.answers.prompt import ModelAnswer, ModelClaim
+from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
+from ragspine.common.evidence.providers.providers import LLMConfig
 
 Script = Callable[[str], ModelAnswer | str]
 # The query-translation call (ADR 0018) has its own response schema, so it is scripted

@@ -4,7 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from enterprise_pdf_rag.adapters.local_model_tunnel import (
+from ragspine.common.evidence.providers.local_model_tunnel import (
     load_tunnel_config,
     start_tunnel,
     stop_tunnel,

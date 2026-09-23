@@ -11,7 +11,7 @@
 import logging
 from logging.config import dictConfig
 
-from enterprise_pdf_rag.core.settings import get_settings
+from ragspine.common.evidence.settings import get_settings
 
 # 禁记字段:这些一律不进 log(隐私 + 体积)
 SENSITIVE_FIELDS = frozenset({"answer", "text", "content", "prompt", "embedding", "value"})

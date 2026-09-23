@@ -39,8 +39,6 @@ from enterprise_pdf_rag.adapters.http.schemas import (
     ExtractionResponse,
     HitSchema,
 )
-from enterprise_pdf_rag.adapters.json_completion import JsonCompletionClient
-from enterprise_pdf_rag.adapters.local_models import LocalEmbeddingAdapter
 from enterprise_pdf_rag.adapters.page_metadata_extraction import annotate_metadata_draft
 from enterprise_pdf_rag.adapters.pdf_ingestion import ingest_pdf
 from enterprise_pdf_rag.adapters.pdfspine_document import PdfspineDocumentAdapter
@@ -52,19 +50,21 @@ from enterprise_pdf_rag.adapters.processing_runtime import (
     process_aia_semantics,
 )
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.adapters.providers import (
-    OpenAICompatibleSmoke,
-    load_llm_config,
-    load_local_model_config,
-)
 from enterprise_pdf_rag.adapters.review import write_review
 from enterprise_pdf_rag.adapters.runtime import create_runtime
-from enterprise_pdf_rag.core.settings import get_settings
 from enterprise_pdf_rag.figures.chart_qa.displayed_service import (
     DisplayedChartQAService,
 )
 from enterprise_pdf_rag.figures.chart_qa.service import ChartQAService
 from enterprise_pdf_rag.figures.models import ExecutionMode
+from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
+from ragspine.common.evidence.providers.local_models import LocalEmbeddingAdapter
+from ragspine.common.evidence.providers.providers import (
+    OpenAICompatibleSmoke,
+    load_llm_config,
+    load_local_model_config,
+)
+from ragspine.common.evidence.settings import get_settings
 
 
 class _ServerOptions(BaseModel):

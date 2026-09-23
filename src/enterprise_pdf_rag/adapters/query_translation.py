@@ -22,8 +22,11 @@ from typing import Final
 
 from pydantic import BaseModel, ConfigDict
 
-from enterprise_pdf_rag.adapters.json_completion import JsonCompletionClient, JsonCompletionError
 from enterprise_pdf_rag.answers.models import TranslatedQuery
+from ragspine.common.evidence.providers.json_completion import (
+    JsonCompletionClient,
+    JsonCompletionError,
+)
 
 TRANSLATION_TASK: Final = "query-translation-v1"
 _MAX_OUTPUT_TOKENS: Final = 1024

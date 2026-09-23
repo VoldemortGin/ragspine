@@ -8,11 +8,11 @@ import pytest
 from pydantic import SecretStr
 
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
-from enterprise_pdf_rag.adapters.json_completion import JsonCompletionClient
 from enterprise_pdf_rag.adapters.page_partition import ModelPagePartitioner
-from enterprise_pdf_rag.adapters.providers import LLMConfig
 from enterprise_pdf_rag.documents.models import TextSidecar, TextSpan
 from enterprise_pdf_rag.processing.models import ObjectKind, PageInput
+from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
+from ragspine.common.evidence.providers.providers import LLMConfig
 
 
 def test_model_partition_maps_local_aliases_to_exact_observed_occurrences(

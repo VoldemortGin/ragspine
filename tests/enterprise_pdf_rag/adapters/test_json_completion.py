@@ -10,12 +10,12 @@ from threading import Event
 import pytest
 from pydantic import BaseModel, ConfigDict, SecretStr
 
-import enterprise_pdf_rag.adapters.providers as provider_module
-from enterprise_pdf_rag.adapters.json_completion import (
+import ragspine.common.evidence.providers.providers as provider_module
+from ragspine.common.evidence.providers.json_completion import (
     JsonCompletionClient,
     JsonCompletionError,
 )
-from enterprise_pdf_rag.adapters.providers import LLMConfig, ProviderRequestError
+from ragspine.common.evidence.providers.providers import LLMConfig, ProviderRequestError
 
 PNG = b"\x89PNG\r\n\x1a\nfixture-bytes"
 KEY = "test-secret-never-written"

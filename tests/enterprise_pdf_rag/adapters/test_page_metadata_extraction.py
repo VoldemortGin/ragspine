@@ -11,19 +11,19 @@ from pytest import CaptureFixture
 from enterprise_pdf_rag.adapters.document_catalog import mount_document, scan_catalog
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.http.processing_review import processing_status
-from enterprise_pdf_rag.adapters.json_completion import JsonCompletionClient
 from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
 from enterprise_pdf_rag.adapters.page_metadata_extraction import (
     annotate_page_metadata,
 )
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.adapters.providers import load_llm_config
 from enterprise_pdf_rag.cli import main
 from enterprise_pdf_rag.processing.document_metadata import DocumentMetadata
 from enterprise_pdf_rag.processing.index_text import PageIndexContext
 from enterprise_pdf_rag.processing.models import StageState
 from enterprise_pdf_rag.processing.page_metadata import MetadataValue, PageMetadata, PageType
 from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit
+from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
+from ragspine.common.evidence.providers.providers import load_llm_config
 from tests.enterprise_pdf_rag.adapters.page_metadata_helpers import (
     ingest_with_metadata,
     publish_with_metadata,
@@ -151,7 +151,7 @@ def test_invalid_model_output_fails_the_page_stage_only(
 ) -> None:
     ingest, _, _ = ingest_with_metadata(tmp_path, monkeypatch, stage="source", max_live_calls=0)
     monkeypatch.setattr(
-        "enterprise_pdf_rag.adapters.json_completion._send_once",
+        "ragspine.common.evidence.providers.json_completion._send_once",
         lambda url, *, api_key, payload, timeout: json.dumps(
             {
                 "choices": [

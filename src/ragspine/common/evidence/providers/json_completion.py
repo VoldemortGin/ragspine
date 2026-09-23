@@ -15,7 +15,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, ValidationError
 
-from enterprise_pdf_rag.adapters.providers import (
+from ragspine.common.evidence.providers.providers import (
     LLMConfig,
     ProviderRequestError,
     SmokeSender,

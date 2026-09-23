@@ -7,8 +7,8 @@ from typing import Protocol, runtime_checkable
 
 from pydantic import SecretStr
 
-from enterprise_pdf_rag.adapters.local_model_tunnel import LocalModelTunnelConfig
-from enterprise_pdf_rag.adapters.providers import ProviderConfigurationError
+from ragspine.common.evidence.providers.local_model_tunnel import LocalModelTunnelConfig
+from ragspine.common.evidence.providers.providers import ProviderConfigurationError
 
 _INHERITED = (
     "HOME",

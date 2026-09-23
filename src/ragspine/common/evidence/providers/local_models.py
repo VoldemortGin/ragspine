@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from enterprise_pdf_rag.adapters.providers import (
+from ragspine.common.evidence.providers.providers import (
     LocalModelConfig,
     ProviderRequestError,
 )

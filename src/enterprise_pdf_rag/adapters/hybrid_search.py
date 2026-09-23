@@ -28,13 +28,13 @@ from dataclasses import dataclass
 from hashlib import sha256
 from typing import Protocol, runtime_checkable
 
-from enterprise_pdf_rag.adapters.local_models import RerankResult
 from enterprise_pdf_rag.answers.models import FusedHit as FusedHit
 from enterprise_pdf_rag.answers.page_window import reading_key
 from enterprise_pdf_rag.answers.ports import MemberText, MountedDocument
 from enterprise_pdf_rag.answers.query_mode import FusionMode, QueryMode, classify_query
 from enterprise_pdf_rag.processing.context_builder import build_context_block
 from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit
+from ragspine.common.evidence.providers.local_models import RerankResult
 from ragspine.retrieval.lexical.retrieval import bm25_scores, rrf_fuse, tokenize
 from ragspine.retrieval.rerank.listwise_rerank import ListwiseJudge, listwise_rerank
 

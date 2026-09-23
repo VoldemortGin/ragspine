@@ -335,7 +335,7 @@ def ingest_generic_semantics(
     )
     calls: list[bytes] = []
     monkeypatch.setattr(
-        "enterprise_pdf_rag.adapters.json_completion._send_once",
+        "ragspine.common.evidence.providers.json_completion._send_once",
         text_partition_sender(
             calls,
             table_caption=table_caption,

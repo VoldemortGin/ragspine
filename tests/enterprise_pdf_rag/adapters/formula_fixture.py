@@ -6,7 +6,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
-from enterprise_pdf_rag.core.settings import ROOT_DIR
+from ragspine.common.evidence.settings import ROOT_DIR
 
 _FONT = ROOT_DIR / "tests/enterprise_pdf_rag/fixtures/authored-donut-ascii.ttf"
 PAGE = (240.0, 160.0)

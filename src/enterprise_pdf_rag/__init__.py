@@ -14,7 +14,7 @@ BeartypeStrategy.On(线性全量)在 beartype 里至今未实现(官方源码标
 
 # 叶子;有意在 hook 之前导入(本身不被检查)
 from enterprise_pdf_rag._shim import install as _install_legacy_finder
-from enterprise_pdf_rag.core.settings import settings
+from ragspine.common.evidence.settings import settings
 
 # ADR 0022 过渡期:旧导入路径经 meta path finder 指向迁入 ragspine 的同一模块对象。
 # _shim 是 import 机制本身(每次 import 都会先问它),不进 beartype 插桩。

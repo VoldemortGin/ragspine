@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from enterprise_pdf_rag.adapters.providers import (
+from ragspine.common.evidence.providers.providers import (
     OpenAICompatibleSmoke,
     ProviderConfigurationError,
     load_llm_config,

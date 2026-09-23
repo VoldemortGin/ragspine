@@ -6,12 +6,12 @@ from enterprise_pdf_rag.adapters.aia_ingestion import AIA_OUTPUT
 from enterprise_pdf_rag.adapters.aia_processing import ProcessingPipeline
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.http.schemas import BoundaryModel
-from enterprise_pdf_rag.adapters.json_completion import JsonCompletionClient
 from enterprise_pdf_rag.adapters.page_partition import ModelPagePartitioner
 from enterprise_pdf_rag.adapters.processing_export import export_processing_review
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.adapters.providers import load_llm_config
 from enterprise_pdf_rag.adapters.semantic_objects import SemanticObjectAdapter
+from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
+from ragspine.common.evidence.providers.providers import load_llm_config
 
 PROCESSING_OUTPUT = AIA_OUTPUT / "pages-001-020"
 
@@ -198,17 +198,17 @@ def index_aia_processing(
         ProcessingSearchResponse,
         RetrievalExample,
     )
-    from enterprise_pdf_rag.adapters.local_models import (
-        LocalEmbeddingAdapter,
-        LocalRerankAdapter,
-    )
     from enterprise_pdf_rag.adapters.processing_retrieval import ProcessingRetrieval
-    from enterprise_pdf_rag.adapters.providers import load_local_model_config
     from enterprise_pdf_rag.adapters.retrieval_evaluations import save_evaluation
     from enterprise_pdf_rag.adapters.source_publication import (
         validate_processing_source,
     )
     from enterprise_pdf_rag.processing.retrieval import require_financial_qualification
+    from ragspine.common.evidence.providers.local_models import (
+        LocalEmbeddingAdapter,
+        LocalRerankAdapter,
+    )
+    from ragspine.common.evidence.providers.providers import load_local_model_config
 
     if not query.strip() or not 1 <= limit <= 20:
         raise ValueError("A nonempty query and a bounded context limit are required")

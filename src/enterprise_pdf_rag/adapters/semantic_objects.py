@@ -30,10 +30,6 @@ from enterprise_pdf_rag.adapters.formula_qualification import (
     check_model_description,
     qualify_formula,
 )
-from enterprise_pdf_rag.adapters.json_completion import (
-    JsonCompletionClient,
-    JsonCompletionError,
-)
 from enterprise_pdf_rag.adapters.object_processing import ProcessingObjectAdapter
 from enterprise_pdf_rag.adapters.pdfspine_svg import crop_native_svg
 from enterprise_pdf_rag.adapters.pdfspine_tables import PdfspineTableAdapter
@@ -61,6 +57,10 @@ from enterprise_pdf_rag.processing.typed_ir import (
     FormulaIR,
     LiteralQualification,
     ObjectDescription,
+)
+from ragspine.common.evidence.providers.json_completion import (
+    JsonCompletionClient,
+    JsonCompletionError,
 )
 
 

@@ -21,6 +21,9 @@ behavior unchanged) + `sink.py` (the **`TraceSink` seam** — `make_trace_sink` 
 `InProcessPrivacyTraceSink` default, no duplicate Protocol) + `adapters/otel.py` (`OtelTraceSink`,
 behind `[otel]`, privacy-gated before any span).
 
+`evidence/` — the evidence chain's APP_* settings, lineage logging and model access
+(ADR 0022); its own contract is [`evidence/CLAUDE.md`](evidence/CLAUDE.md).
+
 ## Invariants
 
 - **Privacy-aware traces** — `observability` records codes / counts / timings

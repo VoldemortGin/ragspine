@@ -25,15 +25,12 @@ from enterprise_pdf_rag.adapters.http.chat import create_chat_router, model_id, 
 from enterprise_pdf_rag.adapters.http.chat_schemas import ClaimOut
 from enterprise_pdf_rag.adapters.http.documents import create_documents_app
 from enterprise_pdf_rag.adapters.http.processing_schemas import DocumentTreeRecord
-from enterprise_pdf_rag.adapters.json_completion import JsonCompletionClient
 from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.adapters.providers import LLMConfig, LocalModelConfig
 from enterprise_pdf_rag.adapters.tree_retrieval import TreeRouteDTO
 from enterprise_pdf_rag.answers.models import AnswerRequest
 from enterprise_pdf_rag.answers.prompt import ModelAnswer, ModelClaim
 from enterprise_pdf_rag.answers.verify import verify_claims
-from enterprise_pdf_rag.core.settings import get_settings
 from enterprise_pdf_rag.figures.ports import EmbeddingPort
 from enterprise_pdf_rag.processing.context_builder import build_context_block
 from enterprise_pdf_rag.processing.document_tree import (
@@ -42,6 +39,9 @@ from enterprise_pdf_rag.processing.document_tree import (
     TreeNode,
 )
 from enterprise_pdf_rag.processing.models import StageState
+from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
+from ragspine.common.evidence.providers.providers import LLMConfig, LocalModelConfig
+from ragspine.common.evidence.settings import get_settings
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
     publish_generic_document,
 )

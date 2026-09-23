@@ -16,18 +16,18 @@ from enterprise_pdf_rag.adapters.aia_processing import (
 )
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.http.schemas import BoundaryModel
-from enterprise_pdf_rag.adapters.json_completion import JsonCompletionClient
 from enterprise_pdf_rag.adapters.page_metadata_extraction import annotate_page_metadata
 from enterprise_pdf_rag.adapters.page_partition import ModelPagePartitioner
 from enterprise_pdf_rag.adapters.pdfspine_document import PdfspineDocumentAdapter
 from enterprise_pdf_rag.adapters.processing_export import export_processing_review
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.adapters.providers import load_llm_config
 from enterprise_pdf_rag.adapters.semantic_objects import SemanticObjectAdapter
-from enterprise_pdf_rag.core.settings import get_settings
 from enterprise_pdf_rag.documents.models import AssetRef, DocumentSnapshot, DocumentSpec
 from enterprise_pdf_rag.documents.service import ingest_document
 from enterprise_pdf_rag.processing.models import StageOutcome, StageState
+from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
+from ragspine.common.evidence.providers.providers import load_llm_config
+from ragspine.common.evidence.settings import get_settings
 
 type IngestionStage = Literal["source", "layout", "semantics", "metadata"]
 # Stages that add the page metadata stage after the page pipeline (same budget and cache).

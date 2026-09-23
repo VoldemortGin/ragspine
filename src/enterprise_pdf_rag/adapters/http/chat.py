@@ -37,7 +37,6 @@ from enterprise_pdf_rag.adapters.http.openai_schemas import (
     ModelInfo,
     ModelList,
 )
-from enterprise_pdf_rag.adapters.providers import ProviderRequestError
 from enterprise_pdf_rag.answers.models import AnswerRequest, AnswerResult, AnswerStatus, ClaimKind
 from enterprise_pdf_rag.answers.query_filters import (
     extract_years,
@@ -45,6 +44,7 @@ from enterprise_pdf_rag.answers.query_filters import (
     title_matches,
 )
 from enterprise_pdf_rag.figures.chart_qa.models import ChartQueryError, QueryFailure
+from ragspine.common.evidence.providers.providers import ProviderRequestError
 
 MODEL_PREFIX = "enterprise-pdf-rag/"
 _MODEL_REFERENCE = re.compile(r"^enterprise-pdf-rag/([0-9a-f]{12,64})$")
