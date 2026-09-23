@@ -1,6 +1,6 @@
 ---
 covers: src/enterprise_pdf_rag/
-verified-against: f55d59a
+verified-against: 3109919
 ---
 
 # enterprise_pdf_rag — agent contract
@@ -88,6 +88,10 @@ adapters/     every SDK and I/O: pdfspine, http/ (FastAPI app factory; documents
 resources/    packaged prompts / static data
 cli.py        enterprise-pdf-rag ingest|metadata|tree|qualify|index|publish|serve|audit|chart-qa|demo|extract|llm-smoke
               + AIA-sample-only ingest-aia|process-aia-layout|process-aia-semantics|index-aia-processing
+_moves.py     frozen legacy → canonical module map (ADR 0022: this package is dissolving into
+              ragspine.<domain>.evidence; PENDING = the AIA lane, which leaves the wheel)
+_shim.py      meta path finder, installed before the hook: a moved module's legacy name is the
+              same module object as its canonical one, with a DeprecationWarning
 ```
 
 Structure is enforced by `scripts/enterprise_pdf_rag/check_conformance.py` (src layout, beartype
