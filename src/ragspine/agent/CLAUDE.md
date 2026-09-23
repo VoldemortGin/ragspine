@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/agent/
-verified-against: 95f607e7bf0aea1ae6fa6b27ae89a330940f1fb7
+verified-against: 677087ce911e60a8199c4cbf122487ce69036b02
 ---
 
 # agent — agent contract
@@ -31,6 +31,12 @@ loop, LLM provider abstraction.
   Zero LLM, config-driven (external list + home name from the profile).
 - `llm_provider.py` — `LLMProvider` Protocol, `AnthropicProvider` (SDK lazy-imported),
   `MockProvider` (offline, deterministic).
+- `claude_cli_provider.py` — `ClaudeCliProvider`: eval-only provider that shells out to the local
+  `claude -p` CLI (subprocess, no SDK; binary resolved lazily at call time). Each call runs in a
+  fresh empty cwd with `--setting-sources ""` (the flag that keeps the user's global
+  CLAUDE.md / settings `language` out — `--safe-mode` does not), `--tools ""`, no MCP / skills /
+  session persistence. Tool calling is **prompt-emulated** (JSON protocol + validation + bounded
+  retries); no streaming, no sampling params. Timeout / non-zero exit / `is_error` → `ProviderError`.
 - `query_tools.py` — profile-driven `query_metric` tool schema + execution
   (`found` / `not_found` / `unrecognized_param` — never fabricates).
 - `decompose.py` — **W6a query decomposition (opt-in, default-off).** `QueryDecomposer` Protocol +

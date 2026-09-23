@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/service/
-verified-against: 95f607e7bf0aea1ae6fa6b27ae89a330940f1fb7
+verified-against: 677087ce911e60a8199c4cbf122487ce69036b02
 ---
 
 # service — agent contract
@@ -133,6 +133,9 @@ calls, so a not-found answer can only ever stream the refusal.
   returns only serializable provider *config* (no instance, no `provider_expr`) — the dify isolated
   process / RQ worker rebuild it via `build_provider`. Never add a provider instance or
   `provider_expr` to a serialized payload (Dify trust boundary, above).
+  `provider_type` is `mock` | `anthropic` | `claude-cli` (eval-only local `claude -p`; its model is
+  the separate `claude_cli_model` / `RAGSPINE_CLAUDE_CLI_MODEL`, default unset — it does **not**
+  inherit the anthropic `model` default).
 - **Ingest-path validation is defense-in-depth — re-run it in the worker.**
   `config.validate_ingest_path` (allowed-upload-root + suffix allowlist) runs at enqueue **and
   again** in `tasks/jobs.py` before landing; the worker never trusts the enqueuer. `PathNotAllowedError`
