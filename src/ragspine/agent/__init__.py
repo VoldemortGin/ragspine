@@ -5,6 +5,7 @@ SecurityGate 不可插拔、独立于意图解析器在原始问题上判定拒�
 
 Submodules:
     agent.py — orchestrator：唯一公开入口 answer_question()，三路分流并施加各项 guard。
+    claude_cli_provider.py — ClaudeCliProvider：本机 `claude -p` 子进程模拟 LLM（评测用；tool calling 靠提示词模拟）。
     decompose.py — opt-in LLM 查询分解（W6a）：真多跳子问题拆解；默认 none 时旁路、字节不变。
     intent.py — 规则式（无 LLM）意图&范围解析 + 澄清网关。
     llm_provider.py — LLMProvider 协议 + AnthropicProvider（真实）+ MockProvider（离线确定性）。

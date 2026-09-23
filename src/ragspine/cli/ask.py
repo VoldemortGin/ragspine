@@ -3,6 +3,7 @@
 用法（从项目根目录）：
     python scripts/ask.py --provider mock "香港去年REVENUE多少"
     python scripts/ask.py --provider anthropic --base-url https://gw.example.com "..."
+    python scripts/ask.py --provider claude-cli "..."   # 本机 `claude -p` 子进程（评测用）
 mock 模式离线确定性，不需要任何 API key。
 """
 
@@ -12,6 +13,7 @@ from datetime import date
 from pathlib import Path
 
 from ragspine.agent.agent import answer_question
+from ragspine.agent.claude_cli_provider import ClaudeCliProvider
 from ragspine.agent.llm_provider import (
     DEFAULT_ANTHROPIC_MODEL,
     AnthropicProvider,
@@ -29,9 +31,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("question", help="用户问题，如：香港去年REVENUE多少")
     parser.add_argument(
         "--provider",
-        choices=["mock", "anthropic"],
+        choices=["mock", "anthropic", "claude-cli"],
         default="mock",
-        help="mock=离线确定性（默认）；anthropic=真实 Claude 调用",
+        help="mock=离线确定性（默认）；anthropic=真实 Claude 调用；"
+        "claude-cli=本机 `claude -p` 子进程（评测用，需已安装并登录 Claude Code）",
     )
     parser.add_argument("--db", default=str(DEFAULT_FACT_DB), help="fact_metric sqlite 路径")
     parser.add_argument(
@@ -57,8 +60,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--model",
-        default=DEFAULT_ANTHROPIC_MODEL,
-        help=f"anthropic 模型名（默认 {DEFAULT_ANTHROPIC_MODEL}）",
+        default=None,
+        help=f"模型名：anthropic 默认 {DEFAULT_ANTHROPIC_MODEL}；claude-cli 默认不指定（CLI 自身默认）",
     )
     parser.add_argument(
         "--base-url",
@@ -87,7 +90,11 @@ def main(argv: list[str] | None = None) -> int:
 
     provider: LLMProvider
     if args.provider == "anthropic":
-        provider = AnthropicProvider(model=args.model, base_url=args.base_url)
+        provider = AnthropicProvider(
+            model=args.model or DEFAULT_ANTHROPIC_MODEL, base_url=args.base_url
+        )
+    elif args.provider == "claude-cli":
+        provider = ClaudeCliProvider(model=args.model)
     else:
         provider = MockProvider(reference_date=reference_date)
 

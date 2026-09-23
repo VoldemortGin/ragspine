@@ -17,6 +17,7 @@ from typing import Literal
 from corespine import CorespineError, RateLimitedProvider, env_key, load_from_env
 
 from ragspine.agent.agent import NarrativeRetriever
+from ragspine.agent.claude_cli_provider import ClaudeCliProvider
 from ragspine.agent.llm_provider import (
     DEFAULT_ANTHROPIC_MODEL,
     AnthropicProvider,
@@ -133,9 +134,12 @@ class ServiceConfig:
     queue_db_path: str | None = None  # ReviewQueue（SME 复核）路径——非 job 队列
     manifest_db_path: str | None = None
     redis_url: str = "redis://localhost:6379/0"
-    provider_type: str = "mock"  # "mock" | "anthropic"
+    provider_type: str = (
+        "mock"  # "mock" | "anthropic" | "claude-cli"(本机 `claude -p` 子进程，评测用)
+    )
     model: str = DEFAULT_ANTHROPIC_MODEL
     base_url: str | None = None
+    claude_cli_model: str | None = None  # claude-cli 的 --model；None=不指定（CLI 默认）
     retrieval_mode: str = "auto"  # 批次2.2④ 检索模式预设: "auto"/"hybrid"/"vector"(默认,embedding按下方配置装配,字节不变) | "economy"/"bm25"/"lexical"(零embedding成本,纯BM25关键词检索)
     embedding: str = "auto"  # "auto"(装[embed-onnx]→真语义ONNX,否则纯BM25) | "none" | "onnx" | "deterministic" | "openai"
     workflow_matcher: str = "auto"  # workflow scaffold: "auto" | "none" | "onnx"
@@ -203,6 +207,8 @@ def build_provider(config: ServiceConfig) -> LLMProvider:
         provider = MockProvider(reference_date=config.reference_date_obj())
     elif config.provider_type == "anthropic":
         provider = AnthropicProvider(model=config.model, base_url=config.base_url)
+    elif config.provider_type == "claude-cli":
+        provider = ClaudeCliProvider(model=config.claude_cli_model)
     else:
         raise ValueError(f"未知 provider_type: {config.provider_type!r}")
     # 主动 TPM 限流(可选):tokens_per_minute>0 时用 corespine RateLimitedProvider 包装,
@@ -222,6 +228,7 @@ def provider_config_dict(config: ServiceConfig) -> dict[str, object]:
         "provider_type": config.provider_type,
         "model": config.model,
         "base_url": config.base_url,
+        "claude_cli_model": config.claude_cli_model,
         "reference_date": config.reference_date,
         "tokens_per_minute": config.tokens_per_minute,
     }

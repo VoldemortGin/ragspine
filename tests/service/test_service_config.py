@@ -23,6 +23,7 @@ from ragspine.service.config import (
     make_retrieval_preset,
     open_fact_store,
     open_narrative_retriever,
+    provider_config_dict,
     validate_ingest_path,
 )
 
@@ -182,6 +183,23 @@ def test_build_provider_anthropic_type(monkeypatch):
     assert isinstance(provider, AnthropicProvider)
     assert provider.model == "claude-test"
     assert created.get("base_url") == "https://gw/v1"
+
+
+def test_build_provider_claude_cli_type():
+    # claude-cli 懒检查：装配时不探测 claude 可执行文件，离线也能验证。
+    from ragspine.agent.claude_cli_provider import ClaudeCliProvider
+
+    provider = build_provider(ServiceConfig(db_path="/tmp/x.db", provider_type="claude-cli"))
+    assert isinstance(provider, ClaudeCliProvider)
+    assert provider.model is None  # 默认不指定模型（不继承 anthropic 的默认模型名）
+
+    cfg = ServiceConfig.from_env(
+        {"RAGSPINE_PROVIDER": "claude-cli", "RAGSPINE_CLAUDE_CLI_MODEL": "sonnet"}
+    )
+    provider = build_provider(cfg)
+    assert isinstance(provider, ClaudeCliProvider)
+    assert provider.model == "sonnet"
+    assert provider_config_dict(cfg)["claude_cli_model"] == "sonnet"
 
 
 def test_build_provider_unknown_raises():

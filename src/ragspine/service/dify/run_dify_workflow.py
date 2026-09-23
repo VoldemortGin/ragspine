@@ -72,6 +72,7 @@ def main() -> int:
             provider_type=cast("str", spec.get("provider_type", "mock")),
             model=cast("str", spec.get("model", ServiceConfig.model)),
             base_url=cast("str | None", spec.get("base_url")),
+            claude_cli_model=cast("str | None", spec.get("claude_cli_model")),
             reference_date=cast("str | None", spec.get("reference_date")),
             tokens_per_minute=cast("int", spec.get("tokens_per_minute", 0)),
         )

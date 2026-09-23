@@ -111,3 +111,35 @@ def test_ask_e2e_clarification_question(seeded_db, capsys):
     assert rc == 0
     out = capsys.readouterr().out
     assert "REVENUE" in out  # 列出可选指标供收窄
+
+
+def test_ask_claude_cli_provider_selected(seeded_db, capsys, monkeypatch):
+    """--provider claude-cli 选到 ClaudeCliProvider；--model 缺省不指定模型。"""
+    from ragspine.cli import ask as ask_mod
+
+    seen = {}
+
+    class _Fake:
+        def __init__(self, model=None):
+            seen["model"] = model
+
+        def chat(self, messages, *, tools=None):
+            from ragspine.agent.llm_provider import MockProvider
+
+            return MockProvider().chat(messages, tools=tools)
+
+    monkeypatch.setattr(ask_mod, "ClaudeCliProvider", _Fake)
+    rc = ask_main(
+        [
+            "--provider",
+            "claude-cli",
+            "--db",
+            str(seeded_db),
+            "--reference-date",
+            "2026-06-12",
+            "香港FY2025的REVENUE是多少",
+        ]
+    )
+    assert rc == 0
+    assert seen["model"] is None
+    assert "1702" in capsys.readouterr().out
