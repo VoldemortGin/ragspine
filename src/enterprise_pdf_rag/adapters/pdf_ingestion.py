@@ -1,6 +1,7 @@
 """Generic PDF entry: compose existing source and selected-page stages as a draft."""
 
 import re
+from collections import Counter
 from hashlib import sha256
 from pathlib import Path
 from typing import Literal
@@ -64,6 +65,10 @@ class IngestionSummary(BoundaryModel):
     metadata_status: str
     metadata_page_states: dict[str, int]
     display_title: str | None
+    # Every source page, not only the selected ones; "unassessed" is a source cut before
+    # text-layer diagnostics existed. OCR pages are physical (1-based) and not remedied.
+    text_layer_page_states: dict[str, int]
+    ocr_needed_pages: tuple[int, ...]
     live_call_count: int
     activated: Literal[False] = False
     indexed: Literal[False] = False
@@ -94,7 +99,7 @@ def _source(
     sources: LocalDocumentStore, *, pdf: bytes, filename: str, pages: str
 ) -> tuple[DocumentSnapshot, tuple[int, ...], bool]:
     digest = sha256(pdf).hexdigest()
-    producer = f"pdfspine/{pdfspine.__version__}; native-svg/text-dict-v1"
+    producer = f"pdfspine/{pdfspine.__version__}; native-svg/text-dict-v2"
     fingerprint = stage_fingerprint("source", producer, (digest, filename))
     cache = ProcessingStore(sources.root)
     cached = cache.cached(fingerprint)
@@ -222,6 +227,17 @@ def ingest_pdf(
         else "attempted; inspect per-page metadata stages; values are verbatim page spans",
         metadata_page_states={} if metadata is None else metadata.page_states,
         display_title=None if metadata is None else metadata.display_title,
+        text_layer_page_states=dict(
+            Counter(
+                "unassessed" if page.text_layer is None else str(page.text_layer.status)
+                for page in source.manifest.pages
+            )
+        ),
+        ocr_needed_pages=tuple(
+            page.page_index + 1
+            for page in source.manifest.pages
+            if page.text_layer is not None and page.text_layer.needs_ocr
+        ),
         live_call_count=0 if client is None else client.live_call_count,
         review_path=str(review),
     )

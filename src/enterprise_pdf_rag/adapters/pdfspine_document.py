@@ -15,8 +15,10 @@ from enterprise_pdf_rag.documents.models import (
     DocumentExtraction,
     PageExtraction,
     RegionExtraction,
+    TextLayerDiagnostic,
     TextSpan,
 )
+from enterprise_pdf_rag.documents.text_layer import diagnose_text_layer, is_garbled_text
 
 _RECORDS = TypeAdapter(list[dict[str, object]], config=ConfigDict(strict=True))
 _BOUNDS = TypeAdapter(tuple[FiniteFloat, FiniteFloat, FiniteFloat, FiniteFloat])
@@ -63,7 +65,9 @@ class _Span(BaseModel):
         return value
 
 
-def _spans(text: _PageText, *, source_digest: str, page_index: int) -> tuple[TextSpan, ...]:
+def _observed_spans(
+    text: _PageText, *, source_digest: str, page_index: int
+) -> tuple[TextSpan, ...]:
     observations: list[TextSpan] = []
     for block_index, block in enumerate(text.blocks):
         if block.get("type") != 0:
@@ -96,6 +100,28 @@ def _spans(text: _PageText, *, source_digest: str, page_index: int) -> tuple[Tex
     return tuple(observations)
 
 
+def _spans(text: _PageText, *, source_digest: str, page_index: int) -> tuple[TextSpan, ...]:
+    """The sidecar: garbled spans are withheld so nothing can quote, certify or index them.
+
+    Surviving span ids are unchanged, since an id hashes its own block/line/span position.
+    """
+    return tuple(
+        span
+        for span in _observed_spans(text, source_digest=source_digest, page_index=page_index)
+        if not is_garbled_text(span.text)
+    )
+
+
+def _text_layer_warning(diagnostic: TextLayerDiagnostic) -> str:
+    return (
+        f"Text layer is {diagnostic.status}: {diagnostic.span_count} spans,"
+        f" {diagnostic.char_count} characters ({diagnostic.garbled_char_count} undecodable;"
+        f" {diagnostic.garbled_span_count} garbled spans withheld), {diagnostic.drawing_count}"
+        " vector paths. Page words may be missing from the index; this page needs OCR,"
+        " which is not implemented."
+    )
+
+
 def _extract_page(page: pdfspine.Page, *, source_digest: str, page_index: int) -> PageExtraction:
     bounds = _BOUNDS.validate_python(tuple(page.rect))
     if page.rotation != 0:
@@ -108,19 +134,26 @@ def _extract_page(page: pdfspine.Page, *, source_digest: str, page_index: int) -
         raise ValueError("Text and native SVG page coordinates disagree")
     native_svg = page.get_svg_image(text_as_path=False)
     validate_native_svg(native_svg, width=width, height=height)
+    observed = _observed_spans(text, source_digest=source_digest, page_index=page_index)
+    text_layer = diagnose_text_layer(
+        tuple(span.text for span in observed), drawing_count=len(page.get_drawings())
+    )
     warnings = list(_WARNINGS)
     if ElementTree.fromstring(native_svg).findall(f".//{{{_SVG}}}image"):
         warnings.append(
             "Native SVG contains raster image assets; this is a mixed vector/raster source."
         )
+    if text_layer.needs_ocr:
+        warnings.append(_text_layer_warning(text_layer))
     return PageExtraction(
         page_index,
         width,
         height,
         page.rotation,
         native_svg,
-        _spans(text, source_digest=source_digest, page_index=page_index),
+        tuple(span for span in observed if not is_garbled_text(span.text)),
         tuple(warnings),
+        text_layer,
     )
 
 
@@ -157,7 +190,7 @@ class PdfspineDocumentAdapter:
         finally:
             document.close()
         return DocumentExtraction(
-            pages, f"pdfspine/{pdfspine.__version__}; native-svg/text-dict-v1"
+            pages, f"pdfspine/{pdfspine.__version__}; native-svg/text-dict-v2"
         )
 
     def extract_region(self, pdf: bytes, *, page_index: int, bbox: Bounds) -> RegionExtraction:

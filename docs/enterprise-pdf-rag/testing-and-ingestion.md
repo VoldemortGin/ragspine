@@ -163,6 +163,7 @@ print(result.model_dump_json(indent=2))
 | `source_page_count` / `selected_physical_pages` | 全源页数与下游实际选页 |
 | `source_cached` / `live_call_count` | 是否复用已有来源缓存、实际新模型请求数 |
 | `failed_stage_count` / `semantic_status` / `review_path` | 查看部分失败、deferred 或 unavailable 的具体结果；CLI 返回 JSON 不代表全部阶段成功 |
+| `text_layer_page_states` / `ocr_needed_pages` | 全部来源页（不只选中页）的文本层状态计数（`ok` / `outlined_text` / `garbled`，旧来源缓存为 `unassessed`），以及需要 OCR 的 1-based 物理页；只报告，不补救，见下文“文本层质量诊断” |
 | `metadata_status` / `metadata_page_states` / `display_title` | 页级元数据阶段是否运行、各页 `succeeded/deferred/failed` 计数、封面标题（抽不到为 `null`，不猜） |
 | `activated` / `indexed` | 此命令始终为 `false`；没有索引构建、发布或服务切换 |
 | `retrieval_status` | 明确 `not_ready`；资格、索引和发布需要独立流程 |
@@ -172,6 +173,24 @@ layout/semantics 即使 `--max-live-calls 0` 也需提供 `OPENAI_BASE_URL`、`O
 坐标比较的规范化规则：layout / semantics 模型收到的是 canonical 坐标的全精度 repr，回传时常写成最短小数（`42.400000000000006` → `42.4`、`307.9999999999998` → `308`），因此所有"模型给出的区域框是否包含 canonical 图元（span / 原生表格网格 / 页面几何）"的判定统一走 `processing/geometry.py` 的 `contains(outer, inner, tolerance=1e-6)`，外框每边放宽 1e-6 pt——远高于浮点渲染噪声（< 1e-12 pt）、远低于任何真实版面偏移，所以差 0.5 pt 的越界 span 仍被拒绝；canonical 与 canonical 之间的比较（cell 中心、cell ⊂ 网格）不放宽。
 
 新入口解除 AIA 文件名/SHA/页数限制，不承诺支持所有 PDF 变体。现有 pdfspine 来源适配器会对旋转页、非默认 CropBox/MediaBox 坐标等未验证情况 fail closed；失败应按诊断处理，不能回退 OCR、其他 parser 或合成文本。来源 HTML 位于返回的 `source_store/review.html`；处理 HTML 使用 `review_path`。这些是本地独立产物，不会自动出现在当前 Open WebUI 来源模型中。
+
+### 文本层质量诊断（已知限制：只检测，不补救）
+
+来源提取对每页给出 `PageRecord.text_layer`（`documents/text_layer.py` 判定，`adapters/pdfspine_document.py::_extract_page` 计算），带 span 数、非空白字符数、乱码字符数、被剔除的乱码 span 数和矢量 path 数（`page.get_drawings()`，不含文字字形）：
+
+| 状态 | 判定 | 后果 |
+| --- | --- | --- |
+| `outlined_text` | 无任何非空白字符且 path ≥ `TEXTLESS_OUTLINED_MIN_DRAWINGS`（1）；或 path ≥ `OUTLINED_TEXT_MIN_DRAWINGS`（50）且 path ≥ `OUTLINED_TEXT_DRAWINGS_PER_CHAR`（10）× 字符数 | 文字被画成矢量轮廓、没有文本层；该页正文不在索引里 |
+| `garbled` | 乱码字符占非空白字符 ≥ `GARBLED_PAGE_MIN_RATIO`（5%） | 字体缺 ToUnicode 等；乱码 span 已被剔除 |
+| `ok` | 其余 | 行为与之前一致 |
+
+- 乱码字符 = U+FFFD、私用区（Co）、未分配（Cn）、代理（Cs）以及非空白控制字符；中日韩文字、全角标点、货币与数学符号、软连字符等格式字符都不算。
+- **单个 span 只要含一个乱码字符就不进 sidecar**（fail-closed），因此不能被逐字认证、不能进入描述或索引；其余 span 的 id 不变。计数留在 `text_layer`，页状态仍可能是 `ok`（例如整页只有一个图标字符）。
+- 非 `ok` 页追加一条 warning；`ingest` 的 JSON 以 `ocr_needed_pages` 列出这些页。
+- 零字符页只要有一条 path 就判 `outlined_text`：完全没有文字却有矢量图形的页，其图形是不是文字只有 OCR 能确认；误判的代价是多跑一次 OCR（结果为空也无害），漏判的代价是内容丢失。转曲版 AIA 样本的章节分隔页只有一行标题被转曲，仅 13–25 条 path，任何大于 1 的下限都会漏掉。零字符且零 path 的空白页仍为 `ok`。
+- 有文字的页沿用比例规则，阈值用真实样本校准：AIA 原件 71 页无乱码、全部为 `ok`，其中 path ≥ 50 的页最高 0.28 path/字符（全部页最高 0.63，出现在只有 5 条 path 的分隔页）；带真实标签的密集矢量图表保持 `ok`。转曲版（71 页可抽取字符均为 0）71 页全部为 `outlined_text`。
+- 来源 producer 升为 `native-svg/text-dict-v2`，旧来源缓存不再命中、会重新提取；旧 manifest 仍可读，`text_layer` 为 `null`（未评估，不等于 `ok`）。
+- **OCR 补救尚未实现**，留给后续 ADR；在那之前这些页的文字不会出现在检索结果里。
 
 ## draft 的资格 / 索引 / 发布命令
 

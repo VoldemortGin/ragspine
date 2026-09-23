@@ -211,6 +211,17 @@
             },
             "title": "Warnings",
             "type": "array"
+          },
+          "text_layer": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TextLayerDiagnostic"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "required": [
@@ -285,6 +296,54 @@
           "pending"
         ],
         "title": "SemanticStatus",
+        "type": "string"
+      },
+      "TextLayerDiagnostic": {
+        "description": "Page-level text-layer counts; ``span_count`` includes garbled spans the sidecar withheld.",
+        "properties": {
+          "status": {
+            "$ref": "#/$defs/TextLayerStatus"
+          },
+          "span_count": {
+            "title": "Span Count",
+            "type": "integer"
+          },
+          "char_count": {
+            "title": "Char Count",
+            "type": "integer"
+          },
+          "garbled_char_count": {
+            "title": "Garbled Char Count",
+            "type": "integer"
+          },
+          "garbled_span_count": {
+            "title": "Garbled Span Count",
+            "type": "integer"
+          },
+          "drawing_count": {
+            "title": "Drawing Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status",
+          "span_count",
+          "char_count",
+          "garbled_char_count",
+          "garbled_span_count",
+          "drawing_count"
+        ],
+        "title": "TextLayerDiagnostic",
+        "type": "object"
+      },
+      "TextLayerStatus": {
+        "description": "Whether a page's span sidecar carries the words the page paints.",
+        "enum": [
+          "ok",
+          "outlined_text",
+          "garbled"
+        ],
+        "title": "TextLayerStatus",
         "type": "string"
       }
     },

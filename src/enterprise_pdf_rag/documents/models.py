@@ -10,6 +10,14 @@ class SemanticStatus(StrEnum):
     PENDING = "pending"
 
 
+class TextLayerStatus(StrEnum):
+    """Whether a page's span sidecar carries the words the page paints."""
+
+    OK = "ok"
+    OUTLINED_TEXT = "outlined_text"
+    GARBLED = "garbled"
+
+
 @dataclass(frozen=True, slots=True)
 class TextSpan:
     span_id: str
@@ -22,6 +30,22 @@ class TextSpan:
 
 
 @dataclass(frozen=True, slots=True)
+class TextLayerDiagnostic:
+    """Page-level text-layer counts; ``span_count`` includes garbled spans the sidecar withheld."""
+
+    status: TextLayerStatus
+    span_count: int
+    char_count: int
+    garbled_char_count: int
+    garbled_span_count: int
+    drawing_count: int
+
+    @property
+    def needs_ocr(self) -> bool:
+        return self.status is not TextLayerStatus.OK
+
+
+@dataclass(frozen=True, slots=True)
 class PageExtraction:
     page_index: int
     width: float
@@ -30,6 +54,7 @@ class PageExtraction:
     native_svg: str
     text_spans: tuple[TextSpan, ...]
     warnings: tuple[str, ...] = ()
+    text_layer: TextLayerDiagnostic | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +103,8 @@ class PageRecord:
     text: AssetRef
     span_count: int
     warnings: tuple[str, ...]
+    # None: extracted before text-layer diagnostics existed (not assessed, not "ok").
+    text_layer: TextLayerDiagnostic | None = None
 
 
 @dataclass(frozen=True, slots=True)

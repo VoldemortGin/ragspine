@@ -43,7 +43,8 @@ acceptance is recorded in the handoff, never assumed here.
 
 ```
 core/         settings leaf + shared value types (no I/O)
-documents/    pure document model — stdlib immutable values + Protocols only
+documents/    pure document model — stdlib immutable values + Protocols only; text_layer.py
+              (per-page text-layer diagnosis ok / outlined_text / garbled — detection only)
 figures/      pure figure/chart pipeline — same rule; same-SVG two branches, snapshot binding,
               source_label_match.py (the ADR 0016 window rule: one to three adjacent source
               occurrences, folded and concatenated, must equal the string being kept)
@@ -283,5 +284,10 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   once, both keyed by content. `APP_VERIFY_EVERY_REQUEST=1` puts the full verification back on
   every request for an audit (an order of magnitude slower on a real document).
 - **pdfspine is the only PDF parser**; PNG wrapping is not structured extraction.
+- **A garbled span never enters the sidecar** — a span with any undecodable character (U+FFFD,
+  private use, unassigned, surrogate, non-whitespace control) is withheld at extraction, so it
+  can never be cited, certified or indexed; each page's `text_layer` keeps the counts and names
+  `outlined_text` / `garbled` pages, which `ingest` reports as `ocr_needed_pages`. Nothing is
+  OCR'd yet: those pages' words are simply absent from the index.
 - **Credential isolation** — only the API subprocess inherits `EMBEDDING_*`; Open WebUI inherits
   no model key. Do not send real reports to external providers without task authorization.

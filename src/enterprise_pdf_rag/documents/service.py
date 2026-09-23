@@ -70,6 +70,7 @@ def ingest_document(
                 ),
                 len(page.text_spans),
                 page.warnings,
+                page.text_layer,
             )
         )
     region_text = TextSidecar("text-spans-v1", spec.sha256, region.page_index, region.text_spans)
