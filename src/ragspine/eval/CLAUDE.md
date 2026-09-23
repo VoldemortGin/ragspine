@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/eval/
-verified-against: c02d1543866e44aa17e8a526e2ebf7c8ad43fdeb
+verified-against: 07f37a63378c0ac249af81020189d9d6052a8a71
 ---
 
 # eval — agent contract
@@ -53,11 +53,13 @@ baseline via `scripts/run_nl_gold_ragspine.py` / `make eval-nl-gold`, reports un
   non-temporal domain flags every digit. The period regex is an explicit verbatim literal
   (byte-pinned against `_PERIOD_TOKEN_RE`) — never derived from synonyms / grain, or the
   `(?:19\|20)` year anchor could vanish and whitelist any 4-digit number.
-- **nl-gold judging is ragspine-side, parsing is shared** — `load_nl_gold` reuses the strict
-  `enterprise_pdf_rag.adapters.nl_gold.load_gold` schema (lazy import; moves to `eval.evidence` per
-  ADR 0022), but pass/fail is rewritten here: content (normalized quote/value) and page
+- **nl-gold is ragspine-side end to end** — `load_nl_gold` is a light reader of the
+  `nl-answers-gold-v1` shape (ragspine must not import `enterprise_pdf_rag`, ADR 0022 conformance gate),
+  and pass/fail is rewritten here: content (normalized quote/value) and page
   (`@page={page_index+1}#` in a source locator) are counted **separately**, and one `any_of` anchor must
-  satisfy both. Known-gap is run but unscored; adversarial / `offline_only` cases are skipped with a
+  satisfy both. `--pages gold` (default) ingests only the gold's `pinned.selected_physical_pages`
+  (`select_di_pages` blanks the rest, page numbers kept) so out-of-range pages can't answer abstain cases.
+  Known-gap is run but unscored; adversarial / `offline_only` cases are skipped with a
   reason. Answers go only into report artifacts — never into observability traces; `RecordingRetriever` /
   `CountingProvider` observe locators and call counts only.
 
