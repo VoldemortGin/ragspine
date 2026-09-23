@@ -372,20 +372,17 @@ ban-relative-imports = "all"
 "__future__.annotations".msg = "本规范禁用 from __future__ import annotations:注解保持活对象,前向/自引用类型加引号即可。"
 
 [tool.ruff.lint.per-file-ignores]
-# ---- ragspine 子树：只保留其原有 E/F/I/W/UP/B，enterprise_pdf_rag 独有的严格规则不套过来 ----
-"src/ragspine/**" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20"]
-# ragspine 的 tests/ scripts/ data/benchmarks/ scripts/examples/ 此前从不在 ruff 门内：除严格集外，再豁免其既有的
+# 严格集只管证据链（ADR 0022）：各域 `evidence/` 子树、`src/ragspine/cli/evidence.py`，以及过渡期的
+# 旧树 src|tests|scripts/enterprise_pdf_rag 与垫片测试。用「`!` 取反 + `{}` 并集」一条写清，不再逐目录
+# 枚举 ragspine 的地盘：枚举式下文件一搬进 `src/ragspine/**` 严格规则就被悄悄关掉。
+# 注意：ruff 的 per-file-ignores 用 globset，`*` 会跨越 `/`（`tests/*.py` 等于 `tests/**/*.py`）。
+# 已用探针验证：全仓每个已跟踪 .py 的生效规则与改前逐一相同，只有 evidence 路径变严。
+# ---- 证据链之外：只保留 ragspine 原有 E/F/I/W/UP/B，enterprise_pdf_rag 独有的严格规则不套过来 ----
+"!{**/evidence/**,src/ragspine/cli/evidence.py,src/enterprise_pdf_rag/**,tests/enterprise_pdf_rag/**,tests/test_legacy_enterprise_pdf_rag.py,scripts/enterprise_pdf_rag/**}" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20"]
+# ragspine 的 tests/ scripts/ data/benchmarks/ 此前从不在 ruff 门内：src/ 之外再豁免其既有的
 # E402（conftest/脚本先 setup_root 再 import 的既定写法）、B017、B018、B023、B905、F841。
-# 注意：ruff 的 per-file-ignores 用 globset，`*` 会跨越 `/`（`tests/*.py` 等于 `tests/**/*.py`），
-# 直接写 `tests/*.py` / `scripts/*.py` 会把 tests/enterprise_pdf_rag 与 scripts/enterprise_pdf_rag 一并放宽，
-# 所以顶层文件逐个列出，enterprise_pdf_rag 子树才真正落在严格集内。
-"tests/{__init__,conftest,test_facade,test_facade_graph_auto,test_package_api,test_workspace_config}.py" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20", "E402", "B017", "B018", "B023", "B905", "F841"]
-"tests/{agent,budget,cli,common,compat,conformance,diagnostics,dify,e2e,eval,extraction,graph,ingestion,n8n,pipeline,retrieval,service,storage,workflows}/**" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20", "E402", "B017", "B018", "B023", "B905", "F841"]
-"scripts/{ask,build_docs,check_doc_drift,check_docstring_refs,classify_pdfs,eval_retrieval_ab,export_workflow_catalog,generate_workflow_catalog,ingest,ingest_narrative,make_fixtures_excel,make_fixtures_pdf,make_fixtures_pptx,make_synthetic_deck,run_demo,run_dify_workflow,run_qa_eval,run_server,run_worker,topology}.py" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20", "E402", "B017", "B018", "B023", "B905", "F841"]
-# data/benchmarks/：上方 `extend-exclude = ["data"]` 已把它挡在全仓扫描之外，这条只在显式
-# `ruff check data/benchmarks/` 时生效，保留是为了显式跑时仍是同一档豁免。
-"data/benchmarks/**" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20", "E402", "B017", "B018", "B023", "B905", "F841"]
-"scripts/examples/**" = ["ANN", "SIM", "RUF", "TID", "BLE", "PGH", "T20", "E402", "B017", "B018", "B023", "B905", "F841"]
+# （data/ 已被 extend-exclude 挡在全仓扫描之外，只在显式 `ruff check data/benchmarks/` 时落到这里。）
+"!{src/**,**/evidence/**,tests/enterprise_pdf_rag/**,tests/test_legacy_enterprise_pdf_rag.py,scripts/enterprise_pdf_rag/**}" = ["E402", "B017", "B018", "B023", "B905", "F841"]
 # ---- enterprise_pdf_rag 的 scripts/ 是命令行工具层：stdout 就是输出契约，放行 print ----
 "scripts/enterprise_pdf_rag/*.py" = ["T20"]
 
@@ -399,6 +396,7 @@ files = [
     "src/ragspine",
     "src/enterprise_pdf_rag",
     "tests/enterprise_pdf_rag",
+    "tests/test_legacy_enterprise_pdf_rag.py",
     "scripts/enterprise_pdf_rag",
 ]
 strict = true
@@ -415,6 +413,13 @@ exclude = ['^data/']
 module = "ragspine.*"
 warn_unreachable = false
 disable_error_code = ["ignore-without-code"]
+
+# 证据链迁入 ragspine 后（ADR 0022）仍保持上面两项加严。中间带 `*` 的模式优先于 `ragspine.*`，
+# 且 `ragspine.*.evidence.*` 也匹配 `ragspine.<域>.evidence` 本身——均已用探针文件实测。
+[[tool.mypy.overrides]]
+module = ["ragspine.*.evidence.*", "ragspine.cli.evidence"]
+warn_unreachable = true
+enable_error_code = ["ignore-without-code"]
 
 # Third-party packages without type stubs — ignore their missing imports rather than
 # vendoring stubs (most are lazy-imported optional extras).

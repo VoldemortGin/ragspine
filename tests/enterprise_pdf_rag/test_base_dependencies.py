@@ -16,12 +16,24 @@ from packaging.utils import canonicalize_name
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = ROOT / "src" / "enterprise_pdf_rag"
+RAGSPINE = ROOT / "src" / "ragspine"
 FIRST_PARTY = {"enterprise_pdf_rag", "ragspine"}
+
+
+def _evidence_sources() -> list[Path]:
+    # the legacy tree plus its canonical homes (ADR 0022), never the rest of ragspine,
+    # whose optional extras are imported behind guards
+    cli = RAGSPINE / "cli" / "evidence.py"
+    return [
+        *PACKAGE.rglob("*.py"),
+        *RAGSPINE.glob("*/evidence/**/*.py"),
+        *([cli] if cli.is_file() else []),
+    ]
 
 
 def _third_party_imports() -> set[str]:
     names: set[str] = set()
-    for path in PACKAGE.rglob("*.py"):
+    for path in _evidence_sources():
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"), filename=str(path))):
             if isinstance(node, ast.Import):
                 names.update(alias.name.partition(".")[0] for alias in node.names)

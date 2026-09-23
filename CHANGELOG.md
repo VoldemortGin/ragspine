@@ -4,6 +4,17 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ## [Unreleased]
 
+### Added
+
+- **Scaffolding to dissolve `enterprise_pdf_rag` into per-domain `evidence/` subtrees**
+  ([ADR 0022](docs/adr/0022-dissolve-enterprise-pdf-rag-into-domain-evidence-subtrees.md),
+  proposed). No module moves yet. `enterprise_pdf_rag._moves` freezes the legacy → canonical map
+  (139 modules, 8 legacy packages, the AIA sample lane pending); `enterprise_pdf_rag._shim` is a
+  meta path finder that, once a module moves, binds its legacy name to the same module object with
+  a `DeprecationWarning`; `scripts/enterprise_pdf_rag/rewrite_legacy_imports.py` rewrites imports
+  from the same map. The strict ruff set and mypy's `warn_unreachable` / `ignore-without-code` now
+  follow `**/evidence/**` and `ragspine.*.evidence.*`, so moved code keeps them.
+
 ## [0.16.1] - 2026-09-22
 
 ### Changed

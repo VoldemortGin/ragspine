@@ -47,6 +47,22 @@ def _import_names_of(requirement: str) -> frozenset[str]:
 
 # 本检查器只管 rag-spine 仓库里的这一个包:src/ 下与 ragspine 并列,规范不套到隔壁包上。
 PACKAGE = "enterprise_pdf_rag"
+# ADR 0022:本包按职责拆进 ragspine 各域的 evidence/ 子树,迁移分批进行,期间新旧两处都检查。
+CANONICAL = "ragspine"
+# 证据链的纯目录(旧 documents/figures/processing/answers 的新家)+ 两处配置/入口叶子:
+# 封闭 import 白名单的新作用域。其余 evidence 目录都是 I/O 层,等同旧 adapters/。
+EVIDENCE_PURE_DIRS = (
+    "extraction/evidence/document",
+    "extraction/evidence/page",
+    "extraction/evidence/metadata",
+    "extraction/evidence/objects",
+    "extraction/evidence/figures",
+    "retrieval/evidence/index",
+    "agent/evidence/answers",
+    "agent/evidence/context",
+)
+# 迁移完成后旧包只剩垫片本身
+SHIM_FILES = frozenset({"__init__.py", "_moves.py", "_shim.py"})
 
 
 def _find_package(root: Path) -> tuple[Path | None, list[str]]:
@@ -144,6 +160,35 @@ def _imported_top_modules(path: Path) -> set[str]:
     return mods
 
 
+def _evidence_files(ragspine: Path) -> list[Path]:
+    """各域 evidence/ 子树与 cli/evidence.py——迁入 ragspine 的证据链代码。"""
+    files = sorted(ragspine.glob("*/evidence/**/*.py"))
+    cli = ragspine / "cli" / "evidence.py"
+    return [*files, cli] if cli.is_file() else files
+
+
+def _is_lazy_index_init(path: Path) -> bool:
+    """evidence 的 __init__.py 只许 docstring + ragspine 共用的惰性子模块索引两行。"""
+    body = ast.parse(path.read_text(encoding="utf-8")).body
+    if (
+        body
+        and isinstance(body[0], ast.Expr)
+        and isinstance(body[0].value, ast.Constant)
+        and isinstance(body[0].value.value, str)
+    ):
+        body = body[1:]
+    if len(body) != 2:
+        return False
+    imports, assign = body
+    return (
+        isinstance(imports, ast.ImportFrom)
+        and imports.module == CANONICAL
+        and [a.name for a in imports.names] == ["_lazy_submodules"]
+        and isinstance(assign, ast.Assign)
+        and ast.unparse(assign) == "__getattr__, __dir__ = _lazy_submodules(__name__, __path__)"
+    )
+
+
 def check(root: Path) -> list[str]:
     problems: list[str] = []
 
@@ -165,15 +210,27 @@ def check(root: Path) -> list[str]:
     pkg, pkg_problems = _find_package(root)
     problems.extend(pkg_problems)
 
+    ragspine = root / "src" / CANONICAL
+    evidence = _evidence_files(ragspine)
+
     if pkg is not None:
+        # 旧包里还有未迁走的模块时,它们仍由本包 __init__ 的 hook 覆盖;全部迁走后只剩垫片,
+        # 由 ragspine 顶层的 hook 覆盖迁入的代码,本包 __init__ 不再需要 hook。
+        legacy_modules = [
+            py for py in pkg.rglob("*.py") if py.relative_to(pkg).as_posix() not in SHIM_FILES
+        ]
+        inits = [ragspine / "__init__.py"]
+        if legacy_modules:
+            inits.insert(0, pkg / "__init__.py")
+        for init in inits:
+            if not _installs_beartype_hook(init):
+                problems.append(
+                    f"{init.relative_to(root)} 未安装 beartype claw hook:"
+                    "语法树里找不到 beartype_this_package(...) 调用"
+                    "(注释掉、只在 docstring 里提到都不算)。"
+                )
         init = pkg / "__init__.py"
-        if not _installs_beartype_hook(init):
-            problems.append(
-                f"{init.relative_to(root)} 未安装 beartype claw hook:"
-                "语法树里找不到 beartype_this_package(...) 调用"
-                "(注释掉、只在 docstring 里提到都不算)。"
-            )
-        if lines := _toplevel_function_lines(init):
+        if legacy_modules and (lines := _toplevel_function_lines(init)):
             where = ", ".join(map(str, lines))
             problems.append(
                 f"{init.relative_to(root)} 在顶层定义了函数(行 {where}):"
@@ -181,10 +238,10 @@ def check(root: Path) -> list[str]:
                 "顶层 __init__.py 只放 hook 和 re-export,函数请挪进子模块。"
             )
 
+        # settings 叶子:旧 core/ 在时查旧处;迁到 ragspine/common/evidence/ 后查新处。
         core = pkg / "core"
-        if not core.is_dir():
-            problems.append("缺少 core/:settings/logging/prompts 的统一来源。")
-        else:
+        settings_new = ragspine / "common" / "evidence" / "settings.py"
+        if core.is_dir():
             core_init = core / "__init__.py"
             if not core_init.is_file():
                 problems.append("缺少 core/__init__.py。")
@@ -201,29 +258,47 @@ def check(root: Path) -> list[str]:
                     "core/settings.py import 了一方模块:它必须是 beartype 叶子"
                     "(只依赖标准库 + 第三方)。"
                 )
+        elif not settings_new.is_file():
+            problems.append(
+                "缺少 settings:既无 core/settings.py,也无 src/ragspine/common/evidence/settings.py。"
+            )
+        if settings_new.is_file() and (
+            _first_party_import_lines(settings_new, CANONICAL)
+            or _first_party_import_lines(settings_new, pkg.name)
+        ):
+            problems.append(
+                f"{settings_new.relative_to(root)} import 了一方模块:它必须是叶子"
+                "(只依赖标准库 + 第三方,不得 import ragspine.* / enterprise_pdf_rag)。"
+            )
 
         # 包内一律绝对导入(见规范 §7.1):相对导入在散文件跑法 / IDE 右键 Run 下必挂
-        for py in pkg.rglob("*.py"):
-            lines = _relative_import_lines(py)
-            if lines:
-                where = ", ".join(map(str, lines))
-                problems.append(
-                    f"{py.relative_to(root)} 有相对导入(行 {where}):"
-                    f"包内一律用绝对导入 from {pkg.name}.X import Y。"
-                )
+        for owner, files in ((pkg.name, pkg.rglob("*.py")), (CANONICAL, evidence)):
+            for py in files:
+                lines = _relative_import_lines(py)
+                if lines:
+                    where = ", ".join(map(str, lines))
+                    problems.append(
+                        f"{py.relative_to(root)} 有相对导入(行 {where}):"
+                        f"包内一律用绝对导入 from {owner}.X import Y。"
+                    )
 
         # 模型无关:adapters/ 之外的 import 面是**封闭**的白名单,不是厂商黑名单。
         # 白名单 = 标准库 + 本包自身 + pyproject [project.dependencies] 的运行时依赖。
         # 黑名单永远漏(下一个新 SDK 没人登记就畅通无阻);封闭式则默认拒绝:
         # 厂商 SDK 放 optional-dependencies,自然不在白名单里,一出现在 adapters/ 外就红。
-        allowed = set(sys.stdlib_module_names) | {pkg.name}
+        # 迁入 ragspine 后,作用域是证据链纯目录、common/evidence/ 顶层叶子与 cli/evidence.py。
+        allowed = set(sys.stdlib_module_names) | {pkg.name, CANONICAL}
         for dep in runtime_deps:
             allowed |= _import_names_of(dep)
 
         adapters = pkg / "adapters"
-        for py in pkg.rglob("*.py"):
-            if py.is_relative_to(adapters):
-                continue  # 在 adapters/ 下,允许(且应当 lazy)import 厂商 SDK
+        closed = [py for py in pkg.rglob("*.py") if not py.is_relative_to(adapters)]
+        closed += [
+            py for rel in EVIDENCE_PURE_DIRS for py in sorted((ragspine / rel).rglob("*.py"))
+        ]
+        closed += sorted((ragspine / "common" / "evidence").glob("*.py"))
+        closed += [py for py in [ragspine / "cli" / "evidence.py"] if py.is_file()]
+        for py in closed:
             leaked = sorted(_imported_top_modules(py) - allowed)
             if leaked:
                 problems.append(
@@ -233,6 +308,22 @@ def check(root: Path) -> list[str]:
                     "[project.optional-dependencies],并只在 adapters/ 下 lazy import,"
                     "核心/领域代码经 ports/ 的 Protocol 调用。"
                 )
+
+        for py in evidence:
+            if py.name == "__init__.py" and not _is_lazy_index_init(py):
+                problems.append(
+                    f"{py.relative_to(root)} 不止 docstring + 惰性子模块索引:evidence 的包"
+                    "__init__ 只许 `from ragspine import _lazy_submodules` 与 "
+                    "`__getattr__, __dir__ = _lazy_submodules(__name__, __path__)`。"
+                )
+
+    # 反向依赖:ragspine 永不 import 兼容垫片(旧路径只给外部调用方过渡用)
+    for py in sorted(ragspine.rglob("*.py")):
+        if PACKAGE in _imported_top_modules(py):
+            problems.append(
+                f"{py.relative_to(root)} import 了 {PACKAGE}:"
+                "ragspine 只用规范路径,旧路径是给外部代码的兼容垫片(ADR 0022)。"
+            )
 
     # 仓库根锚点:core/settings.py 的 ROOT_DIR 从 CWD 向上找这个标记文件,缺了就抛错
     if not (root / ".project-root").is_file():

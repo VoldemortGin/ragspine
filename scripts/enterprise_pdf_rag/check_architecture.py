@@ -5,15 +5,28 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
+# Legacy pure packages and their canonical homes (ADR 0022); both are checked while the
+# migration batches run, and a package that is not on disk contributes no files.
 PACKAGES = (
     "enterprise_pdf_rag.figures",
     "enterprise_pdf_rag.documents",
     "enterprise_pdf_rag.processing",
     "enterprise_pdf_rag.answers",
+    "ragspine.extraction.evidence.document",
+    "ragspine.extraction.evidence.page",
+    "ragspine.extraction.evidence.metadata",
+    "ragspine.extraction.evidence.objects",
+    "ragspine.extraction.evidence.figures",
+    "ragspine.retrieval.evidence.index",
+    "ragspine.agent.evidence.answers",
+    "ragspine.agent.evidence.context",
 )
 # Per-package third-party allowances beyond the standard library. ``answers`` declares
 # the model's strict output schema with pydantic; nothing else is admitted.
-EXTRA_ALLOWED = {"enterprise_pdf_rag.answers": frozenset({"pydantic"})}
+EXTRA_ALLOWED = {
+    "enterprise_pdf_rag.answers": frozenset({"pydantic"}),
+    "ragspine.agent.evidence.answers": frozenset({"pydantic"}),
+}
 FORBIDDEN_STDLIB = {
     "os",
     "pathlib",
@@ -41,6 +54,10 @@ def main() -> int:
             if isinstance(node, ast.Import):
                 names = [(alias.name, node.lineno) for alias in node.names]
             elif isinstance(node, ast.ImportFrom):
+                if node.module == "ragspine" and all(
+                    alias.name == "_lazy_submodules" for alias in node.names
+                ):
+                    continue  # the lazy package index every ragspine __init__ shares
                 names = [(node.module or "", node.lineno)]
             for name, line in names:
                 root = name.split(".")[0]
