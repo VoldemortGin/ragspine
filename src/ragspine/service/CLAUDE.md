@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/service/
-verified-against: 677087ce911e60a8199c4cbf122487ce69036b02
+verified-against: 4846bb2ded70e5f485566da9a0edf30c446fdf39
 ---
 
 # service — agent contract
@@ -15,7 +15,8 @@ Auto-loaded when working under `src/ragspine/service/`. Keep terse; deep dives g
 injection), RQ task queue (`FakeQueue` tests / `RQQueue` prod), ingestion jobs
 (worker-owned stores; `ServiceConfig.chunker` — default `"none"` byte-identical — rides the
 narrative-ingest job payload into `ingest_narrative(chunker=make_chunker(...))`, so `parent_child`
-small-to-big chunking is a config switch, ADR 0018), FAQ short-circuit cache, and the **Dify workflow service**
+small-to-big chunking is a config switch, ADR 0018; likewise `ServiceConfig.narrative_segment_chunking` /
+`RAGSPINE_NARRATIVE_SEGMENT_CHUNKING` — default `False` byte-identical — rides the payload as `segment_chunking`), FAQ short-circuit cache, and the **Dify workflow service**
 (`dify/` — L0 static gate + L1/L2 safe execution; ADR 0014): endpoints
 `/v1/dify/{analyze,compile,run,run/jobs}` reuse the app factory / DI / RQ queue.
 The high-level local facade selects retrieval through `RetrievalProfile` and the frozen
