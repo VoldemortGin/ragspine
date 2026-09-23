@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/extraction/evidence/
-verified-against: e48cec4
+verified-against: 0016c39
 ---
 
 # extraction/evidence — agent contract
