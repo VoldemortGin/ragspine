@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/
-verified-against: 95f607e7bf0aea1ae6fa6b27ae89a330940f1fb7
+verified-against: c02d1543866e44aa17e8a526e2ebf7c8ad43fdeb
 ---
 
 # retrieval — agent contract
@@ -50,8 +50,12 @@ behind `[vector]` — `adapters/sqlite_vec.py` (embedded, exact) + `adapters/pgv
 all three now scaling via **native ANN/KNN** (vec0 `MATCH` / pgvector HNSW / Qdrant HNSW) that narrows a
 candidate pool then an **exact `_cosine` re-rank** finalizes top-k (`store._pool_size` + `store._rerank`;
 the pool covers the true top-k for the conformance datasets so `sqlite_vec`/`pgvector` stay exact)
-— and `persistence_policy.py` gating what is written at rest), `rerank/` (the ⭐精排 exit:
+— and `persistence_policy.py` gating what is written at rest; `single_text_backend.py` adapts any
+single-text `embed_query` embedder (e.g. the OpenAI-compatible HTTP `LocalEmbeddingAdapter`) into a batch
+`EmbeddingBackend`, duck-typed, zero imports, not registered in `make_embedding_backend`), `rerank/` (the ⭐精排 exit:
 `listwise_rerank.py` orchestration + `ListwiseJudge` Protocol with RRF-fallback + RESTRICTED isolation;
+`scored_judge.py` adapts a scoring reranker (`/v1/rerank` `LocalRerankAdapter`: index + relevance_score) into a
+`ListwiseJudge` — score-descending, ties keep RRF order, blank candidates unscored + appended; not in `make_reranker`;
 judges — LLM listwise via `link/`, and three offline local brains all selected by `make_reranker`
 (`cross_encoder.py`): the **cross-encoder** `cross_encoder.py` (fastembed `TextCrossEncoder`,
 `[rerank]`, W2), plus two W11 retrieval-representation rerankers — **ColBERT late-interaction**

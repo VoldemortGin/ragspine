@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/eval/
-verified-against: 95f607e7bf0aea1ae6fa6b27ae89a330940f1fb7
+verified-against: c02d1543866e44aa17e8a526e2ebf7c8ad43fdeb
 ---
 
 # eval — agent contract
@@ -15,6 +15,11 @@ QA + extraction evaluation harnesses with baseline gates. Golden sets live under
 `data/golden/` (force-tracked). `groundedness.py` (W5) holds the narrative-side
 groundedness metrics (faithfulness + free-text answer-accuracy); `qa_eval.py` wires them in
 as two new ratcheted gates alongside the four命门.
+`nl_gold_ragspine.py` runs an nl-answers-gold file (e.g. the AIA sample) on the ragspine main chain
+(`answer_question`) along two routes — `A-ask` (rule intent parser, routed as-is) and `B-narrative`
+(`ForcedNarrativeIntentParser` pins the route) — and writes a report; **not a CI gate** (real-model
+baseline via `scripts/run_nl_gold_ragspine.py` / `make eval-nl-gold`, reports under
+`data/validation/ragspine-nl-gold/`, git-ignored).
 
 ## Invariants
 
@@ -48,6 +53,13 @@ as two new ratcheted gates alongside the four命门.
   non-temporal domain flags every digit. The period regex is an explicit verbatim literal
   (byte-pinned against `_PERIOD_TOKEN_RE`) — never derived from synonyms / grain, or the
   `(?:19\|20)` year anchor could vanish and whitelist any 4-digit number.
+- **nl-gold judging is ragspine-side, parsing is shared** — `load_nl_gold` reuses the strict
+  `enterprise_pdf_rag.adapters.nl_gold.load_gold` schema (lazy import; moves to `eval.evidence` per
+  ADR 0022), but pass/fail is rewritten here: content (normalized quote/value) and page
+  (`@page={page_index+1}#` in a source locator) are counted **separately**, and one `any_of` anchor must
+  satisfy both. Known-gap is run but unscored; adversarial / `offline_only` cases are skipped with a
+  reason. Answers go only into report artifacts — never into observability traces; `RecordingRetriever` /
+  `CountingProvider` observe locators and call counts only.
 
 ## Read before editing
 

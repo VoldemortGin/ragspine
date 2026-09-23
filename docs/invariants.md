@@ -4,7 +4,7 @@ covers:
   - src/ragspine/retrieval/link/
   - src/ragspine/retrieval/rerank/
   - src/ragspine/common/observability/
-verified-against: 95f607e7bf0aea1ae6fa6b27ae89a330940f1fb7
+verified-against: c02d1543866e44aa17e8a526e2ebf7c8ad43fdeb
 ---
 
 # Invariants (code-enforced)
@@ -42,7 +42,9 @@ not in any particular judge, so it covers **every** `ListwiseJudge` equally: the
 therefore inherits — and cannot bypass — the two-exit rule. **Frozen by**
 `tests/retrieval/rerank/test_cross_encoder_isolation.py` (RESTRICTED never reaches the cross-encoder;
 a reverse-proof shows the assertion has teeth — the same reranker *does* score the text when handed
-it directly, bypassing the seam).
+it directly, bypassing the seam). The HTTP `/v1/rerank` adapter (`retrieval/rerank/scored_judge.py`,
+`ScoredRerankJudge`) is one more judge on the same seam — `tests/retrieval/rerank/test_scored_judge.py`
+pins that RESTRICTED text never reaches the scoring request.
 
 **At-rest (third, persistence layer).** Persisting a chunk's embedding writes a *recoverable
 derivative* of its text next to its lineage (`doc_id`, `source_locator`) — a surface that bypasses
