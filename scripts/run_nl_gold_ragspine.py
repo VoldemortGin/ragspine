@@ -44,6 +44,13 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=None,
         help="评测专用 workspace（默认 <out-root>/workspaces/<文档名>）",
     )
+    parser.add_argument(
+        "--pages",
+        choices=("gold", "all"),
+        default="gold",
+        help="gold=只入库 gold 冻结的物理页（pinned.selected_physical_pages，其余页清空、页号不变）；"
+        "all=整份文档",
+    )
     parser.add_argument("--out-root", type=Path, default=DEFAULT_OUT_ROOT)
     parser.add_argument("--label", default="baseline")
     parser.add_argument(
@@ -91,9 +98,11 @@ def main(argv: list[str] | None = None) -> int:
     from ragspine.eval.nl_gold_ragspine import (
         CaseRun,
         CountingProvider,
+        gold_selected_pages,
         index_chunk_vectors,
         load_nl_gold,
         run_route,
+        select_di_pages,
         summarize,
         write_report,
     )
@@ -116,8 +125,19 @@ def main(argv: list[str] | None = None) -> int:
     workspace: Path = args.workspace or args.out_root / "workspaces" / document.stem
     timings: dict[str, float] = {}
 
+    source = document
+    selected_pages: tuple[int, ...] = ()
+    if args.pages == "gold":
+        selected_pages = gold_selected_pages(args.gold)
+        # 同名文件放进 workspace/source/，doc_id 与整份入库时一致。
+        source = workspace / "source" / document.name
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(
+            select_di_pages(document.read_text(encoding="utf-8"), selected_pages),
+            encoding="utf-8",
+        )
     t0 = time.perf_counter()
-    ingest = RAGSpine.local(workspace).ingest(document)
+    ingest = RAGSpine.local(workspace).ingest(source)
     timings["ingest_s"] = round(time.perf_counter() - t0, 2)
     if ingest.failed:
         print(f"入库失败：{ingest.summary}", file=sys.stderr)
@@ -222,6 +242,11 @@ def main(argv: list[str] | None = None) -> int:
         "document": str(document),
         "document_sha256": hashlib.sha256(document.read_bytes()).hexdigest(),
         "workspace": str(workspace),
+        "pages": (
+            f"gold pinned {selected_pages[0]}-{selected_pages[-1]} ({len(selected_pages)} pages)"
+            if selected_pages
+            else "all"
+        ),
         "chunks": chunk_count,
         "vectors": vectors,
         "provider": args.provider + (f"/{args.claude_model}" if args.claude_model else ""),

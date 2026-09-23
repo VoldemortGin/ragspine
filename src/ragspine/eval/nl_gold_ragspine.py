@@ -1,9 +1,9 @@
 """ragspine 主链路的 nl-gold 评测：把 nl-answers-gold 集跑在 ``answer_question`` 上。
 
 gold 文件（``nl-answers-gold-v1``，如 AIA 样本
-``data/benchmarks/enterprise-pdf-rag/aia-2026-interim/nl-answers-gold-v1.json``）的**解析**复用
-``enterprise_pdf_rag.adapters.nl_gold.load_gold``（同一份严格 schema，ADR 0022 迁往
-``ragspine.eval.evidence``）；**判定**在此重写，只看 ragspine 答案能观察到的东西：
+``data/benchmarks/enterprise-pdf-rag/aia-2026-interim/nl-answers-gold-v1.json``）由本模块自带的
+轻量读取器解析（只读评测用得到的字段；ragspine 按 ADR 0022 不 import ``enterprise_pdf_rag``）；
+**判定**在此重写，只看 ragspine 答案能观察到的东西：
 
 - positive：每条 required claim（``any_of`` 任一锚点）要求
   ① 内容：规范化后的答案含锚点的 quote / text，或含 value（数字边界 + ``%`` 单位容忍格式差异）；
@@ -103,55 +103,149 @@ class GoldCase:
     expect_abstain: bool = False
 
 
-def load_nl_gold(path: str | Path) -> tuple[GoldCase, ...]:
-    """读 nl-answers-gold-v1 文件（严格 schema，不合法即 ValueError）→ 评测视角的 case 列表。"""
-    from enterprise_pdf_rag.adapters.nl_gold import load_gold
+GOLD_SCHEMA_VERSION = "nl-answers-gold-v1"
+_CASE_CLASSES = ("positive", "abstain", "adversarial")
+_STATUSES = ("answered", "abstained")
 
-    gold = load_gold(Path(path).read_bytes())
-    cases: list[GoldCase] = []
-    for case in gold.cases:
-        expected = case.expected
-        case_class: str = case.case_class
-        if expected.known_gap:
-            case_class = "known-gap"
-        skip_reason = None
-        if case.case_class == "adversarial":
-            skip_reason = ADVERSARIAL_SKIP_REASON
-        elif case.offline_only:
-            skip_reason = OFFLINE_ONLY_SKIP_REASON
-        questions = tuple(
-            (lang, text.strip())
-            for lang, text in (("en", case.question.en), ("zh", case.question.zh))
-            if text and text.strip()
-        )
-        required = tuple(
-            tuple(
-                ClaimAnchor(
-                    kind=anchor.kind,
-                    page_index=anchor.page_index,
-                    quote=anchor.quote,
-                    text=anchor.text,
-                    value=anchor.value,
-                    unit=anchor.unit,
-                )
-                for anchor in spec.alternatives
-            )
-            for spec in expected.required_claims
-        )
-        cases.append(
-            GoldCase(
-                case_id=case.case_id,
-                case_class=case_class,
-                questions=questions,
-                required_claims=required,
-                grounded_only=expected.grounded_only,
-                forbidden_numbers=tuple(expected.forbidden_numbers),
-                known_gap_detail=expected.known_gap_detail,
-                skip_reason=skip_reason,
-                expect_abstain=expected.status.value == "abstained",
-            )
-        )
-    return tuple(cases)
+
+class GoldFormatError(ValueError):
+    """gold 文件不符合 nl-answers-gold-v1 里本评测要读的那部分结构。"""
+
+
+def _require(
+    mapping: Mapping[str, Any], key: str, kind: type | tuple[type, ...], where: str
+) -> Any:
+    value = mapping.get(key)
+    if not isinstance(value, kind):
+        raise GoldFormatError(f"{where}: `{key}` 缺失或类型不对")
+    return value
+
+
+def _optional_str(mapping: Mapping[str, Any], key: str, where: str) -> str | None:
+    value = mapping.get(key)
+    if value is not None and not isinstance(value, str):
+        raise GoldFormatError(f"{where}: `{key}` 须为字符串")
+    return value
+
+
+def _read_gold(path: str | Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise GoldFormatError(f"gold 不是合法 JSON：{exc}") from exc
+    if not isinstance(payload, dict) or payload.get("schema_version") != GOLD_SCHEMA_VERSION:
+        raise GoldFormatError(f"gold 的 schema_version 须为 {GOLD_SCHEMA_VERSION!r}")
+    return payload
+
+
+def _parse_anchor(raw: object, where: str) -> ClaimAnchor:
+    if not isinstance(raw, dict):
+        raise GoldFormatError(f"{where}: claim 须为对象")
+    page_index = _require(raw, "page_index", int, where)
+    if isinstance(page_index, bool) or page_index < 0:
+        raise GoldFormatError(f"{where}: page_index 须为 0 起的整数")
+    anchor = ClaimAnchor(
+        kind=_require(raw, "kind", str, where),
+        page_index=page_index,
+        quote=_optional_str(raw, "quote", where),
+        text=_optional_str(raw, "text", where),
+        value=_optional_str(raw, "value", where),
+        unit=_optional_str(raw, "unit", where),
+    )
+    if not (anchor.quote or anchor.text or anchor.value):
+        raise GoldFormatError(f"{where}: claim 须带 quote / text / value 之一")
+    return anchor
+
+
+def _parse_case(raw: object, index: int) -> GoldCase:
+    where = f"cases[{index}]"
+    if not isinstance(raw, dict):
+        raise GoldFormatError(f"{where}: case 须为对象")
+    case_id = _require(raw, "case_id", str, where)
+    where = f"case {case_id}"
+    case_class = _require(raw, "case_class", str, where)
+    if case_class not in _CASE_CLASSES:
+        raise GoldFormatError(f"{where}: 未知 case_class {case_class!r}")
+    question = _require(raw, "question", dict, where)
+    questions = tuple(
+        (lang, text.strip())
+        for lang in ("en", "zh")
+        if isinstance(text := question.get(lang), str) and text.strip()
+    )
+    if not questions:
+        raise GoldFormatError(f"{where}: question 须至少有非空的 en 或 zh")
+    expected = _require(raw, "expected", dict, where)
+    status = _require(expected, "status", str, where)
+    if status not in _STATUSES:
+        raise GoldFormatError(f"{where}: 未知 expected.status {status!r}")
+    required: list[tuple[ClaimAnchor, ...]] = []
+    for spec in expected.get("required_claims", []) or []:
+        options = spec.get("any_of") if isinstance(spec, dict) and "any_of" in spec else [spec]
+        if not isinstance(options, list) or not options:
+            raise GoldFormatError(f"{where}: any_of 须为非空数组")
+        required.append(tuple(_parse_anchor(option, where) for option in options))
+    forbidden = expected.get("forbidden_numbers", []) or []
+    if not isinstance(forbidden, list) or not all(isinstance(n, str) for n in forbidden):
+        raise GoldFormatError(f"{where}: forbidden_numbers 须为字符串数组")
+    known_gap = bool(expected.get("known_gap", False))
+    skip_reason = None
+    if case_class == "adversarial":
+        skip_reason = ADVERSARIAL_SKIP_REASON
+    elif raw.get("offline_only"):
+        skip_reason = OFFLINE_ONLY_SKIP_REASON
+    return GoldCase(
+        case_id=case_id,
+        case_class="known-gap" if known_gap else case_class,
+        questions=questions,
+        required_claims=tuple(required),
+        grounded_only=bool(expected.get("grounded_only", False)),
+        forbidden_numbers=tuple(forbidden),
+        known_gap_detail=_optional_str(expected, "known_gap_detail", where),
+        skip_reason=skip_reason,
+        expect_abstain=status == "abstained",
+    )
+
+
+def load_nl_gold(path: str | Path) -> tuple[GoldCase, ...]:
+    """读 nl-answers-gold-v1 文件 → 评测视角的 case 列表；结构不对即 GoldFormatError（ValueError）。
+
+    只读本评测用得到的字段（与 enterprise 侧严格 schema 同形）；ragspine 不 import
+    ``enterprise_pdf_rag``（ADR 0022 conformance 门），故不复用那边的 pydantic 解析器。
+    """
+    payload = _read_gold(path)
+    raw_cases = _require(payload, "cases", list, "gold")
+    cases = tuple(_parse_case(raw, i) for i, raw in enumerate(raw_cases))
+    ids = [case.case_id for case in cases]
+    if len(set(ids)) != len(ids):
+        raise GoldFormatError("gold 的 case_id 须唯一")
+    return cases
+
+
+def gold_selected_pages(path: str | Path) -> tuple[int, ...]:
+    """gold 冻结时选定的物理页（1 起，``pinned.selected_physical_pages``）；缺省为空。"""
+    pinned = _read_gold(path).get("pinned") or {}
+    pages = pinned.get("selected_physical_pages", []) if isinstance(pinned, dict) else []
+    if not isinstance(pages, list) or not all(
+        isinstance(p, int) and not isinstance(p, bool) and p >= 1 for p in pages
+    ):
+        raise GoldFormatError("pinned.selected_physical_pages 须为 1 起的整数数组")
+    return tuple(pages)
+
+
+_DI_PAGE_BREAK_RE = re.compile(r"<!--\s*PageBreak\s*-->")
+
+
+def select_di_pages(markdown: str, pages: Iterable[int]) -> str:
+    """只保留 DI markdown 的指定物理页（1 起）；其余页清空但保留分页符，页号不变。
+
+    gold 只覆盖文档的一部分页（如 1–20）时，用它把语料裁到同一范围，免得"范围外有答案"的页
+    让 abstain 类 case 失去意义、或让等价页抢走来源。
+    """
+    keep = set(pages)
+    parts = _DI_PAGE_BREAK_RE.split(markdown)
+    return "\n<!-- PageBreak -->\n".join(
+        part if index + 1 in keep else "\n" for index, part in enumerate(parts)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -282,12 +376,18 @@ REFUSAL_MARKERS = (
     "not possible to",
 )
 _REFUSAL_NORMALIZED = tuple(normalize_answer(marker) for marker in REFUSAL_MARKERS)
+# 英文缩写否定（don't / doesn't / didn't + 动词；规范化后撇号变空格，如 "don t state"）。
+_CONTRACTED_REFUSAL_RE = re.compile(
+    r"\b(?:don|doesn|didn) t (?:contain|provide|mention|include|specify|state|show|list|give|say)"
+)
 
 
 def is_refusal(answer: str) -> bool:
     """答案是否为拒答 / 未找到。"""
     normalized = normalize_answer(answer)
-    return any(marker in normalized for marker in _REFUSAL_NORMALIZED)
+    if any(marker in normalized for marker in _REFUSAL_NORMALIZED):
+        return True
+    return _CONTRACTED_REFUSAL_RE.search(normalized) is not None
 
 
 @dataclass(frozen=True)

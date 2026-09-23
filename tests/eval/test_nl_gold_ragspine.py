@@ -30,6 +30,8 @@ from ragspine.agent.intent import (
 from ragspine.agent.llm_provider import MockProvider
 from ragspine.common.observability.trace import TRACE_LOGGER_NAME
 from ragspine.eval.nl_gold_ragspine import (
+    gold_selected_pages,
+    select_di_pages,
     ROUTE_ASK,
     ROUTE_FORCED_NARRATIVE,
     ClaimAnchor,
@@ -363,6 +365,8 @@ def test_grounded_only_needs_an_answer_with_sources(cases: dict[str, GoldCase]) 
         "The provided excerpts do not contain a forecast for 2030.",
         "This information is not provided in the context.",
         "I can’t determine that from the excerpts.",
+        "The snippets don't state which stage comes after Foundation.",
+        "The excerpt doesn’t show the order.",
     ],
 )
 def test_refusal_phrasings_are_recognized(answer: str) -> None:
@@ -564,3 +568,31 @@ def test_end_to_end_both_routes_and_report(
     # 隐私：答案正文只进评测产物，绝不进 observability trace。
     traced = "\n".join(record.getMessage() for record in caplog.records)
     assert "72%" not in traced and "Agency share" not in traced
+
+
+# ---------------------------------------------------------------------------
+# 语料按 gold 的 pinned 页范围裁剪（页号保持物理序）
+# ---------------------------------------------------------------------------
+
+
+def test_gold_selected_pages(gold_path: Path) -> None:
+    assert gold_selected_pages(gold_path) == (1, 2, 3)
+
+
+def test_select_di_pages_blanks_other_pages_and_keeps_numbering(tmp_path: Path) -> None:
+    sliced = select_di_pages(_DECK, [1, 3])
+    assert sliced.count("<!-- PageBreak -->") == _DECK.count("<!-- PageBreak -->")
+    assert "Distribution Mix" not in sliced and "72%" not in sliced
+    assert "record ROE of 17.5%" in sliced and "Fictional Deck" in sliced
+
+    ws = tmp_path / "ws-sliced"
+    deck = tmp_path / "deck.md"
+    deck.write_text(sliced, encoding="utf-8")
+    RAGSpine.local(ws).ingest(deck)
+    retriever, chunk_store = build_narrative_retriever(ws / "knowledge.db")
+    try:
+        snippets = retriever.retrieve("record ROE", top_k=10)
+    finally:
+        chunk_store.close()
+    pages = {str(s["source_locator"]).split("@page=")[1].split("#")[0] for s in snippets}
+    assert pages == {"3"}
