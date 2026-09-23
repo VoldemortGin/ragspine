@@ -6,14 +6,14 @@ from pydantic import Field
 
 from enterprise_pdf_rag.adapters.http.chart_qa_schemas import PointSelectorInput
 from enterprise_pdf_rag.adapters.http.schemas import BoundaryModel
-from enterprise_pdf_rag.figures.chart_qa.displayed_models import (
+from ragspine.extraction.evidence.figures.chart_qa.displayed_models import (
     DescriptionNormalizationCitation,
     DisplayedAnswer,
     DisplayedInputClaim,
     DisplayedRefusalReason,
     PageContextCitation,
 )
-from enterprise_pdf_rag.figures.chart_qa.models import (
+from ragspine.extraction.evidence.figures.chart_qa.models import (
     AnswerValue,
     ChartQuestion,
     Operation,

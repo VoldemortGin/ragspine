@@ -20,24 +20,24 @@ from enterprise_pdf_rag.adapters.aia_processing import stage_fingerprint
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.http.schemas import BoundaryModel
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.processing.document_metadata import summarize_document
-from enterprise_pdf_rag.processing.models import (
-    PageInput,
-    PageProcessingRecord,
-    ProcessingManifest,
-    StageOutcome,
-    StageState,
+from ragspine.common.evidence.providers.json_completion import (
+    JsonCompletionClient,
+    JsonCompletionError,
 )
-from enterprise_pdf_rag.processing.page_metadata import (
+from ragspine.extraction.evidence.metadata.document_metadata import summarize_document
+from ragspine.extraction.evidence.metadata.page_metadata import (
     CandidateValue,
     PageMetadata,
     PageMetadataCandidate,
     PageType,
     verify_page_metadata,
 )
-from ragspine.common.evidence.providers.json_completion import (
-    JsonCompletionClient,
-    JsonCompletionError,
+from ragspine.extraction.evidence.page.models import (
+    PageInput,
+    PageProcessingRecord,
+    ProcessingManifest,
+    StageOutcome,
+    StageState,
 )
 
 PAGE_METADATA_TASK = "page-metadata-v1"

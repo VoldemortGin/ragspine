@@ -10,9 +10,9 @@ import pytest
 from enterprise_pdf_rag.adapters.aia_candidates import candidates_for
 from enterprise_pdf_rag.adapters.aia_ingestion import read_text_sidecar
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
-from enterprise_pdf_rag.documents.models import AssetRef, TextSidecar, TextSpan
-from enterprise_pdf_rag.figures.models import Verification
-from enterprise_pdf_rag.processing.models import ObjectKind, PageInput
+from ragspine.extraction.evidence.document.models import AssetRef, TextSidecar, TextSpan
+from ragspine.extraction.evidence.figures.models import Verification
+from ragspine.extraction.evidence.page.models import ObjectKind, PageInput
 
 CATALOG = Path("src/enterprise_pdf_rag/resources/aia-first-20-regions.json")
 SOURCE_SHA256 = "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e"

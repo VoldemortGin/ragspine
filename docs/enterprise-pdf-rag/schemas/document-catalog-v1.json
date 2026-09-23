@@ -630,7 +630,7 @@
         "description": "The connector and the filled arrowhead that prove one directed edge.",
         "properties": {
           "arrowhead": {
-            "$ref": "#/$defs/enterprise_pdf_rag__processing__diagram_models__PathEvidence"
+            "$ref": "#/$defs/ragspine__extraction__evidence__objects__diagrams__diagram_models__PathEvidence"
           },
           "base_mid": {
             "$ref": "#/$defs/Point"
@@ -640,7 +640,7 @@
             "type": "integer"
           },
           "line": {
-            "$ref": "#/$defs/enterprise_pdf_rag__processing__diagram_models__PathEvidence"
+            "$ref": "#/$defs/ragspine__extraction__evidence__objects__diagrams__diagram_models__PathEvidence"
           },
           "line_end_at_target": {
             "$ref": "#/$defs/Point"
@@ -992,7 +992,7 @@
             "$ref": "#/$defs/StructureKind"
           },
           "path": {
-            "$ref": "#/$defs/enterprise_pdf_rag__processing__formula_models__PathEvidence"
+            "$ref": "#/$defs/ragspine__extraction__evidence__objects__formulas__formula_models__PathEvidence"
           },
           "radical_token_index": {
             "anyOf": [
@@ -1528,7 +1528,7 @@
             "type": "string"
           },
           "shape": {
-            "$ref": "#/$defs/enterprise_pdf_rag__processing__diagram_models__PathEvidence"
+            "$ref": "#/$defs/ragspine__extraction__evidence__objects__diagrams__diagram_models__PathEvidence"
           }
         },
         "required": [
@@ -2348,7 +2348,7 @@
         "title": "Verification",
         "type": "string"
       },
-      "enterprise_pdf_rag__processing__diagram_models__PathEvidence": {
+      "ragspine__extraction__evidence__objects__diagrams__diagram_models__PathEvidence": {
         "description": "One native SVG <path>, located by its document order; points are page-top-left.",
         "properties": {
           "bounds": {
@@ -2401,7 +2401,7 @@
         "title": "PathEvidence",
         "type": "object"
       },
-      "enterprise_pdf_rag__processing__formula_models__PathEvidence": {
+      "ragspine__extraction__evidence__objects__formulas__formula_models__PathEvidence": {
         "properties": {
           "kind": {
             "enum": [

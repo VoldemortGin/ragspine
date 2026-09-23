@@ -10,10 +10,10 @@ from enterprise_pdf_rag.adapters.http.chart_qa_schemas import PointSelectorInput
 from enterprise_pdf_rag.adapters.http.chart_qa_v2_schemas import (
     DisplayedChartQueryRequest,
 )
-from enterprise_pdf_rag.figures.chart_qa.displayed_service import (
+from ragspine.extraction.evidence.figures.chart_qa.displayed_service import (
     DisplayedChartQAService,
 )
-from enterprise_pdf_rag.figures.chart_qa.service import ChartQAService
+from ragspine.extraction.evidence.figures.chart_qa.service import ChartQAService
 from tests.enterprise_pdf_rag.figures.test_chart_qa import PinnedResolver, qualified_context
 from tests.enterprise_pdf_rag.figures.test_chart_qa_displayed import (
     DisplayedResolver,

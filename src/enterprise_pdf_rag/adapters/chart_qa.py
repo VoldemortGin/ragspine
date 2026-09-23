@@ -4,7 +4,7 @@ from enterprise_pdf_rag.adapters.chart_publication import resolve_chart_member
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.source_publication import validate_processing_source
-from enterprise_pdf_rag.figures.chart_qa.models import (
+from ragspine.extraction.evidence.figures.chart_qa.models import (
     ChartContext,
     ChartQueryError,
     ChartRefusal,
@@ -12,7 +12,7 @@ from enterprise_pdf_rag.figures.chart_qa.models import (
     QueryPin,
     RefusalReason,
 )
-from enterprise_pdf_rag.processing.models import ObjectKind
+from ragspine.extraction.evidence.page.models import ObjectKind
 
 
 class StoredChartResolver:

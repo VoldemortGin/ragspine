@@ -35,10 +35,10 @@ from enterprise_pdf_rag.adapters.stroke_visibility import (
     similarity_scale,
     stroke_envelope,
 )
-from enterprise_pdf_rag.documents.models import Bounds, TextSidecar
-from enterprise_pdf_rag.figures.chart_qa.displayed_models import PageContextCitation
-from enterprise_pdf_rag.figures.models import Confidence, Verification
-from enterprise_pdf_rag.processing.models import PageInput
+from ragspine.extraction.evidence.document.models import Bounds, TextSidecar
+from ragspine.extraction.evidence.figures.chart_qa.displayed_models import PageContextCitation
+from ragspine.extraction.evidence.figures.models import Confidence, Verification
+from ragspine.extraction.evidence.page.models import PageInput
 
 
 @dataclass(frozen=True, slots=True)

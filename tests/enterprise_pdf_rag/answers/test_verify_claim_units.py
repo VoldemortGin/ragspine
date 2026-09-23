@@ -22,20 +22,20 @@ from enterprise_pdf_rag.adapters.figure_label_qualification import (
 from enterprise_pdf_rag.answers.models import AbstainReason, ClaimKind
 from enterprise_pdf_rag.answers.prompt import ModelAnswer, ModelClaim
 from enterprise_pdf_rag.answers.verify import ClaimVerification, _split_unit, verify_claims
-from enterprise_pdf_rag.figures.chart_qa.models import ChartContext, QueryPin
-from enterprise_pdf_rag.figures.models import (
-    ChartAxis,
-    ChartIR,
-    SvgArtifact,
-    TextField,
-    Verification,
-)
 from enterprise_pdf_rag.processing.context_builder import (
     BlockKind,
     ContextBlock,
     build_context_block,
 )
 from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit
+from ragspine.extraction.evidence.figures.chart_qa.models import ChartContext, QueryPin
+from ragspine.extraction.evidence.figures.models import (
+    ChartAxis,
+    ChartIR,
+    SvgArtifact,
+    TextField,
+    Verification,
+)
 from tests.enterprise_pdf_rag.adapters.test_figure_label_qualification import (
     _chart,
     _description,

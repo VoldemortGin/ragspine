@@ -21,8 +21,8 @@ from enterprise_pdf_rag.adapters.http.processing_review import create_processing
 from enterprise_pdf_rag.adapters.processing_retrieval import ProcessingRetrieval
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.cli import main
-from enterprise_pdf_rag.documents.models import AssetRef
-from enterprise_pdf_rag.figures.chart_qa.models import (
+from ragspine.extraction.evidence.document.models import AssetRef
+from ragspine.extraction.evidence.figures.chart_qa.models import (
     ChartQueryError,
     ChartQuestion,
     Operation,
@@ -32,9 +32,9 @@ from enterprise_pdf_rag.figures.chart_qa.models import (
     QueryStatus,
     RefusalReason,
 )
-from enterprise_pdf_rag.figures.chart_qa.service import ChartQAService
-from enterprise_pdf_rag.figures.models import Confidence
-from enterprise_pdf_rag.processing.models import (
+from ragspine.extraction.evidence.figures.chart_qa.service import ChartQAService
+from ragspine.extraction.evidence.figures.models import Confidence
+from ragspine.extraction.evidence.page.models import (
     CanonicalPage,
     LayoutObject,
     ObjectKind,
@@ -46,7 +46,7 @@ from enterprise_pdf_rag.processing.models import (
     StageOutcome,
     StageState,
 )
-from enterprise_pdf_rag.processing.service import canonical_page
+from ragspine.extraction.evidence.page.service import canonical_page
 from tests.enterprise_pdf_rag.adapters.test_chart_publication import member_fixture
 from tests.enterprise_pdf_rag.processing.test_persistent_retrieval import RecordingEmbedding
 

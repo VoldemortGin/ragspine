@@ -9,15 +9,15 @@ from typing import Literal
 from xml.etree import ElementTree
 
 from enterprise_pdf_rag.adapters.pdfspine_svg import crop_native_svg
-from enterprise_pdf_rag.documents.models import Bounds, TextSpan
-from enterprise_pdf_rag.figures.models import (
+from ragspine.extraction.evidence.document.models import Bounds, TextSpan
+from ragspine.extraction.evidence.figures.models import (
     EvidenceKind,
     SourceAnchor,
     SvgArtifact,
     SvgElement,
     content_id,
 )
-from enterprise_pdf_rag.processing.models import PageInput
+from ragspine.extraction.evidence.page.models import PageInput
 
 _SVG = "http://www.w3.org/2000/svg"
 

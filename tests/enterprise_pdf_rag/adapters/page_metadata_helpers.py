@@ -15,7 +15,7 @@ from enterprise_pdf_rag.adapters.draft_publication import (
 )
 from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
 from enterprise_pdf_rag.adapters.pdf_ingestion import IngestionSummary, ingest_pdf
-from enterprise_pdf_rag.figures.ports import EmbeddingPort
+from ragspine.extraction.evidence.figures.ports import EmbeddingPort
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
     PROVIDER_BASE_URL,
     text_partition_sender,

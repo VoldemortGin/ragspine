@@ -24,7 +24,11 @@ from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.http.processing_schemas import DocumentTreeRecord
 from enterprise_pdf_rag.adapters.http.schemas import BoundaryModel
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.processing.document_tree import (
+from ragspine.common.evidence.providers.json_completion import (
+    JsonCompletionClient,
+    JsonCompletionError,
+)
+from ragspine.extraction.evidence.metadata.document_tree import (
     DocumentTree,
     TreeNode,
     TreePage,
@@ -33,12 +37,8 @@ from enterprise_pdf_rag.processing.document_tree import (
     summary_targets,
     with_summaries,
 )
-from enterprise_pdf_rag.processing.models import ProcessingManifest, StageOutcome, StageState
-from enterprise_pdf_rag.processing.page_metadata import fold_whitespace
-from ragspine.common.evidence.providers.json_completion import (
-    JsonCompletionClient,
-    JsonCompletionError,
-)
+from ragspine.extraction.evidence.metadata.page_metadata import fold_whitespace
+from ragspine.extraction.evidence.page.models import ProcessingManifest, StageOutcome, StageState
 
 DOCUMENT_TREE_STAGE: Final = "document_tree"
 DOCUMENT_TREE_SUMMARY_TASK: Final = "document-tree-summary-v1"

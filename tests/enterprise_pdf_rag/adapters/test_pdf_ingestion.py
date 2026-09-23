@@ -19,8 +19,8 @@ from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.pdf_ingestion import IngestionSummary, ingest_pdf
 from enterprise_pdf_rag.adapters.pdfspine_document import PdfspineDocumentAdapter
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.processing.models import CanonicalPage, StageState
 from ragspine.common.evidence.settings import ROOT_DIR
+from ragspine.extraction.evidence.page.models import CanonicalPage, StageState
 from tests.enterprise_pdf_rag.adapters.test_source_paint import _FontInsertionPage
 
 # Ruled 3x2 grid drawn on the last page by ``authored_pdf(table_page=True)``; the

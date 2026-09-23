@@ -5,7 +5,7 @@ from decimal import Decimal
 
 import pytest
 
-from enterprise_pdf_rag.figures.models import (
+from ragspine.extraction.evidence.figures.models import (
     ChartAxis,
     ChartIR,
     ChartPoint,
@@ -30,8 +30,8 @@ from enterprise_pdf_rag.figures.models import (
     ValueKind,
     Verification,
 )
-from enterprise_pdf_rag.figures.service import FiguresService
-from enterprise_pdf_rag.figures.validation import validate_pair
+from ragspine.extraction.evidence.figures.service import FiguresService
+from ragspine.extraction.evidence.figures.validation import validate_pair
 
 
 def figure() -> SvgArtifact:

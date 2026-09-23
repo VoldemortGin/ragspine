@@ -7,8 +7,18 @@ from pathlib import Path
 import pytest
 
 from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
-from enterprise_pdf_rag.documents.models import AssetRef
-from enterprise_pdf_rag.figures.models import (
+from enterprise_pdf_rag.processing.context_builder import (
+    BlockKind,
+    ContextBlock,
+    PageContextBlock,
+    PageContextMember,
+    budget_blocks,
+    build_context_block,
+    build_page_context_block,
+)
+from enterprise_pdf_rag.processing.retrieval import RetrievalContext, RetrievalMember
+from ragspine.extraction.evidence.document.models import AssetRef
+from ragspine.extraction.evidence.figures.models import (
     ChartIR,
     ChartPoint,
     Confidence,
@@ -24,39 +34,30 @@ from enterprise_pdf_rag.figures.models import (
     ValueKind,
     Verification,
 )
-from enterprise_pdf_rag.processing.context_builder import (
-    BlockKind,
-    ContextBlock,
-    PageContextBlock,
-    PageContextMember,
-    budget_blocks,
-    build_context_block,
-    build_page_context_block,
-)
-from enterprise_pdf_rag.processing.diagram_description import describe_diagram
-from enterprise_pdf_rag.processing.diagram_models import (
+from ragspine.extraction.evidence.objects.diagrams.diagram_description import describe_diagram
+from ragspine.extraction.evidence.objects.diagrams.diagram_models import (
     DiagramQualification,
     NodeEvidence,
     PathEvidence,
 )
-from enterprise_pdf_rag.processing.formula_models import (
+from ragspine.extraction.evidence.objects.formulas.formula_models import (
     FormulaQualification,
     FormulaStructure,
     FormulaToken,
     StructureKind,
     TokenRole,
 )
-from enterprise_pdf_rag.processing.formula_models import PathEvidence as FormulaPathEvidence
-from enterprise_pdf_rag.processing.models import ObjectKind
-from enterprise_pdf_rag.processing.retrieval import RetrievalContext, RetrievalMember
-from enterprise_pdf_rag.processing.table_models import (
+from ragspine.extraction.evidence.objects.formulas.formula_models import (
+    PathEvidence as FormulaPathEvidence,
+)
+from ragspine.extraction.evidence.objects.tables.table_models import (
     CellContentState,
     SlotState,
     TableCell,
     TableIR,
     TableSlot,
 )
-from enterprise_pdf_rag.processing.typed_ir import (
+from ragspine.extraction.evidence.objects.typed_ir import (
     DiagramEdge,
     DiagramIR,
     DiagramNode,
@@ -68,6 +69,7 @@ from enterprise_pdf_rag.processing.typed_ir import (
     ObservedText,
     TextIR,
 )
+from ragspine.extraction.evidence.page.models import ObjectKind
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
     DOCUMENT_LABEL,
     publish_generic_document,

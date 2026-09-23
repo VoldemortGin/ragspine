@@ -11,7 +11,7 @@ from enterprise_pdf_rag.adapters.layout_normalization import (
     normalize_partition,
 )
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.processing.models import (
+from ragspine.extraction.evidence.page.models import (
     CanonicalPage,
     LayoutObject,
     ObjectProcessingRecord,
@@ -23,8 +23,8 @@ from enterprise_pdf_rag.processing.models import (
     StageOutcome,
     StageState,
 )
-from enterprise_pdf_rag.processing.ports import ObjectProcessor, PagePartitioner
-from enterprise_pdf_rag.processing.service import canonical_page, validate_partition
+from ragspine.extraction.evidence.page.ports import ObjectProcessor, PagePartitioner
+from ragspine.extraction.evidence.page.service import canonical_page, validate_partition
 
 
 def stage_fingerprint(stage: str, producer: str, inputs: tuple[object, ...]) -> str:

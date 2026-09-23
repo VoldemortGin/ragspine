@@ -22,15 +22,20 @@ from enterprise_pdf_rag.adapters.object_processing import ProcessingObjectAdapte
 from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.cli import main
-from enterprise_pdf_rag.documents.models import (
+from ragspine.extraction.evidence.document.models import (
     DocumentManifest,
     PageRecord,
     RegionRecord,
     TextSidecar,
     TextSpan,
 )
-from enterprise_pdf_rag.figures.models import Confidence
-from enterprise_pdf_rag.processing.models import (
+from ragspine.extraction.evidence.figures.models import Confidence
+from ragspine.extraction.evidence.objects.typed_ir import (
+    LiteralQualification,
+    ObjectDescription,
+    TextIR,
+)
+from ragspine.extraction.evidence.page.models import (
     CanonicalPage,
     LayoutObject,
     ObjectKind,
@@ -43,12 +48,7 @@ from enterprise_pdf_rag.processing.models import (
     StageOutcome,
     StageState,
 )
-from enterprise_pdf_rag.processing.service import canonical_page
-from enterprise_pdf_rag.processing.typed_ir import (
-    LiteralQualification,
-    ObjectDescription,
-    TextIR,
-)
+from ragspine.extraction.evidence.page.service import canonical_page
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
     ingest_generic_semantics,
 )

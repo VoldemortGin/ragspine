@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 
 from enterprise_pdf_rag.adapters.http.document_schemas import ManifestEnvelope
-from enterprise_pdf_rag.documents.models import (
+from ragspine.extraction.evidence.document.models import (
     AssetRef,
     DocumentManifest,
     DocumentSnapshot,

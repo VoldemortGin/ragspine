@@ -7,10 +7,10 @@ store-backed bridge. Nothing here performs I/O or calls a model.
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
-from enterprise_pdf_rag.figures.chart_qa.displayed_models import DisplayedLookupContext
-from enterprise_pdf_rag.figures.chart_qa.models import ChartContext
-from enterprise_pdf_rag.processing.models import ObjectKind, ProcessingManifest
 from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit, RetrievalContext
+from ragspine.extraction.evidence.figures.chart_qa.displayed_models import DisplayedLookupContext
+from ragspine.extraction.evidence.figures.chart_qa.models import ChartContext
+from ragspine.extraction.evidence.page.models import ObjectKind, ProcessingManifest
 
 
 @dataclass(frozen=True, slots=True)

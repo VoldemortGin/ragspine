@@ -2,13 +2,13 @@
 
 from enterprise_pdf_rag.answers.page_window import reading_key, with_page_context
 from enterprise_pdf_rag.answers.ports import MemberText
-from enterprise_pdf_rag.figures.models import Verification
 from enterprise_pdf_rag.processing.context_builder import (
     BlockKind,
     ContextBlock,
     PageContextBlock,
 )
-from enterprise_pdf_rag.processing.models import ObjectKind
+from ragspine.extraction.evidence.figures.models import Verification
+from ragspine.extraction.evidence.page.models import ObjectKind
 
 SNAPSHOT = "1" * 64
 

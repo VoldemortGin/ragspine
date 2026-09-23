@@ -9,24 +9,27 @@ from enterprise_pdf_rag.adapters.aia_ingestion import read_text_sidecar
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.pdfspine_svg import crop_native_svg
 from enterprise_pdf_rag.adapters.pdfspine_tables import fill_rectangles, ruling_segments
-from enterprise_pdf_rag.documents.models import TextSpan
-from enterprise_pdf_rag.figures.models import Confidence, Verification
-from enterprise_pdf_rag.processing.geometry import contains
-from enterprise_pdf_rag.processing.models import ObjectKind, ProcessingScope
 from enterprise_pdf_rag.processing.retrieval import RetrievalMember
-from enterprise_pdf_rag.processing.table_grid_proof import GRID_SCOPE, check_grid_evidence
-from enterprise_pdf_rag.processing.table_models import TableIR
-from enterprise_pdf_rag.processing.table_transcription import (
+from ragspine.extraction.evidence.document.models import TextSpan
+from ragspine.extraction.evidence.figures.models import Confidence, Verification
+from ragspine.extraction.evidence.objects.tables.table_grid_proof import (
+    GRID_SCOPE,
+    check_grid_evidence,
+)
+from ragspine.extraction.evidence.objects.tables.table_models import TableIR
+from ragspine.extraction.evidence.objects.tables.table_transcription import (
     check_table_transcription,
     table_span_ids,
 )
-from enterprise_pdf_rag.processing.typed_ir import (
+from ragspine.extraction.evidence.objects.typed_ir import (
     GroupIR,
     ListIR,
     LiteralQualification,
     ObjectDescription,
     TextIR,
 )
+from ragspine.extraction.evidence.page.geometry import contains
+from ragspine.extraction.evidence.page.models import ObjectKind, ProcessingScope
 
 LITERAL_SCOPE = "literal-source-transcription-v1"
 

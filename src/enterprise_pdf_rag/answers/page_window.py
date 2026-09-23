@@ -15,7 +15,7 @@ from enterprise_pdf_rag.processing.context_builder import (
     PromptBlock,
     build_page_context_block,
 )
-from enterprise_pdf_rag.processing.diagram_models import READING_ROW_QUANTUM
+from ragspine.extraction.evidence.objects.diagrams.diagram_models import READING_ROW_QUANTUM
 
 
 def reading_key(member: MemberText) -> tuple[int, int, float, str]:

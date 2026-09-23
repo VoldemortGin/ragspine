@@ -7,7 +7,7 @@ from httpx2 import ASGITransport, AsyncClient
 
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.http.aia_review import create_aia_app
-from enterprise_pdf_rag.documents.models import DocumentSpec
+from ragspine.extraction.evidence.document.models import DocumentSpec
 
 
 def test_export_and_http_page_navigation_keep_source_identity(
@@ -98,7 +98,7 @@ def test_wrong_page_region_sidecar_is_rejected_before_review(
         read_text_sidecar,
         render_source_review,
     )
-    from enterprise_pdf_rag.documents.models import DocumentSnapshot
+    from ragspine.extraction.evidence.document.models import DocumentSnapshot
 
     store, _spec = prepared_source
     snapshot = store.load_current()
@@ -196,7 +196,7 @@ def test_default_chat_shows_real_processing_status_and_links_not_old_focus_page(
     from enterprise_pdf_rag.adapters.aia_processing import ProcessingPipeline
     from enterprise_pdf_rag.adapters.processing_export import export_processing_review
     from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-    from enterprise_pdf_rag.processing.models import PageInput, PagePartition
+    from ragspine.extraction.evidence.page.models import PageInput, PagePartition
 
     store, spec = prepared_source
 

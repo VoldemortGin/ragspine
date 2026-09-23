@@ -42,24 +42,13 @@ served by the `document-catalog` mode. It is verified offline against authored P
 acceptance is recorded in the handoff, never assumed here.
 
 ```
-documents/    pure document model — stdlib immutable values + Protocols only; text_layer.py
-              (per-page text-layer diagnosis ok / outlined_text / garbled — detection only)
-figures/      pure figure/chart pipeline — same rule; same-SVG two branches, snapshot binding,
-              source_label_match.py (the ADR 0016 window rule: one to three adjacent source
-              occurrences, folded and concatenated, must equal the string being kept)
-processing/   pure page-processing / qualification logic; context_builder.py (evidence blocks
-              for the prompt, plus the uncitable page context block each hit is read
-              beside — ADR 0017), table_transcription.py (literal table transcription rule),
-              geometry.py + table_grid_proof.py (the ruled-grid proof: every boundary, cell
-              edge and merge bound to a real ruling — ADR 0014), diagram_models.py +
-              diagram_description.py and formula_models.py + formula_rules.py (the model-free
-              diagram / formula proofs and their deterministic projections — ADR 0015),
-              index_text.py (contextual header + chart / diagram / formula projection both
-              retrieval channels score), page_metadata.py /
-              periods.py / document_metadata.py (verbatim page metadata, deterministic period
-              forms, zero-model document fold — ADR 0013), document_tree.py (the zero-model
-              table-of-contents fold: verbatim titles carrying their evidence, two cut rules,
-              leaves tiling the document as a type invariant — ADR 0019)
+documents/    aia.py only (the pending AIA sample identity); the pure document model moved to
+              ragspine.extraction.evidence.document (ADR 0022)
+processing/   context_builder.py (evidence blocks for the prompt, plus the uncitable page
+              context block each hit is read beside — ADR 0017), index_text.py (contextual
+              header + chart / diagram / formula projection both retrieval channels score),
+              retrieval.py; the rest moved to ragspine.extraction.evidence.{page, metadata,
+              objects}, and figures/ to ragspine.extraction.evidence.figures (ADR 0022)
 answers/      pure answer chain — ports.py (MountedDocument, MemberText), models.py
               (MemberFilters, TranslatedQuery), prompt.py (strict model output schema),
               verify.py (claim re-read), page_window.py (one page context block per hit
@@ -95,7 +84,8 @@ _shim.py      meta path finder, installed before the hook: a moved module's lega
 
 Structure is enforced by `scripts/enterprise_pdf_rag/check_conformance.py` (src layout, beartype
 hook, absolute imports, closed import whitelist outside `adapters/`), `check_architecture.py`
-(pure `figures/` `documents/` `processing/` `answers/`; only `answers/` may import pydantic),
+(pure `processing/` `answers/` and the `ragspine.<domain>.evidence` pure homes; only
+`answers/` may import pydantic),
 `check_schema.py` (`docs/enterprise-pdf-rag/schemas/*.json` ⇄ pydantic boundary models) and
 `check_drift.py`. `ragspine` is imported only under `adapters/`.
 
@@ -144,17 +134,6 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
 - **Explicit mode, never silent mock** — `aia-source-review` / `document-catalog` /
   `offline-demo` / production is chosen explicitly; the default gate calls no model or network
   service.
-- **Source review ≠ semantic qualification** — only source-qualified facts reach ChartQA
-  (ADR 0008 / 0009); values are never derived. A chart carries exactly one of **two named
-  scopes**, and its receipt always says which: `explicit-distribution-shares` (native sector
-  geometry plus complete source-paint accounting — ADR 0008) or the default
-  `source-labels-and-verbatim-points-v1` (ADR 0016: a point survives only when its category
-  **and** its value with unit each print verbatim inside the figure, fail-closed per point,
-  never per figure; the category-to-value *association* stays the model's assertion, so the
-  two scopes are named apart, stored apart and never merged). `figure-source-labels-only-v1`
-  is frozen byte-for-byte so already-published members keep mounting and replaying; every gate
-  accepts both, and `chart_publication.resolve_chart_member` re-derives a member under the
-  scope its own receipt declares.
 - **Verified claims only** — every model claim is re-read from stored evidence field by field
   (verbatim quote, exact cell text, a chart value whose number equals the qualified `Decimal`
   or its exact source display and whose unit, when it states one, is the point's own, cited
@@ -172,27 +151,6 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   of wording rather than language (the translation wrote `agents'`, the index prints
   `Agency`) — ADR 0018 Amendment 3. The prompt and the prose gate keep the original
   question, and claims stay verbatim.
-- **A verified table grid means ink** (ADR 0014) — `TableIR` / `TableCell` are `VERIFIED` only
-  with `GridEvidence` / `CellBorderEvidence`: every row and column boundary sits on a real
-  ruling, every cell edge is continuously ruled, every merge is proved by the absence of a rule
-  inside it, and the whole proof is re-derived from the pinned source on every resolve. `row` /
-  `col` / `header` citations open only for a verified grid, and `header` only names a header
-  *proved* by a thick rule or a fill — never a font or first-row heuristic. An unruled, snapped
-  or double-ruled table stays `PENDING`, and stays retrievable and citable by cell text.
-- **A retrievable diagram or formula is proved without a model** (ADR 0015) — `DIAGRAM` and
-  `FORMULA` objects reach the index only through a pure, replayable proof that runs beside (never
-  inside) the two model branches: a node label must equal its cited span verbatim and its bbox must
-  match a real painted frame, an edge needs a connector plus a filled arrowhead whose derived tip
-  lands in the target, and every span inside the object must be cited; a formula token quotes a
-  span substring under a tiling closure rule, a script is proved from the PDF's own `Ts` or marked
-  `derived` (`proof_level="literal"`, `PENDING`), and every drawn path inside the object must be
-  explained. One failed rule withholds the whole object with a verbatim diagnostic. Their
-  `qualified_description` is a deterministic template, never a second model pass, and every resolve
-  replays the proof from the pinned source. An `IMAGE` is still not retrievable.
-- **One text criterion for names and symbols** — `verify._exact` (whitespace folded, case kept) is
-  the single function behind the literal-transcription check, a cited table header (ADR 0014) and
-  every diagram / formula claim, so the verify side is never laxer than the qualification side.
-  Only cell *content* uses the case-folded `_norm`.
 - **A chart claim's unit is read before its number** — a claimed chart value is split
   deterministically into the number as written and whatever unit was printed around it
   (`294$m`, `294 $m`, `$294m`, `8.2%`, `1,168 $m`, the accounting `(294)`). The number is then
@@ -230,8 +188,7 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   ran. A query embedder is a dependency of the requests that use it, exactly like the opt-in
   reranker: a BM25-only question is answered
   without one, a question needing the vector channel is still 503 with no substitute.
-- **Same-SVG two branches, snapshot binding, no-summary-fallback** — hard invariants of the
-  figure chain (ADR 0002). What gets embedded is the **index text** of
+- **What gets embedded is the index text** of
   `processing/index_text.py`: the page's contextual header (`display_title | page_title |
   section`, ADR 0013) above the natural-language description for text / list / group / table
   members, and for a chart a deterministic projection of its already-qualified IR (title, period,
@@ -286,12 +243,11 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   Within one mount a member's evidence is hydrated once and a retrieval plan / index parsed
   once, both keyed by content. `APP_VERIFY_EVERY_REQUEST=1` puts the full verification back on
   every request for an audit (an order of magnitude slower on a real document).
-- **pdfspine is the only PDF parser**; PNG wrapping is not structured extraction.
-- **A garbled span never enters the sidecar** — a span with any undecodable character (U+FFFD,
-  private use, unassigned, surrogate, non-whitespace control) is withheld at extraction, so it
-  can never be cited, certified or indexed; each page's `text_layer` keeps the counts and names
-  `outlined_text` / `garbled` pages, which `ingest` reports as `ocr_needed_pages`. Nothing is
-  OCR'd yet: those pages' words are simply absent from the index.
+- **Extraction: pdfspine as the only parser, garbled spans, same-SVG two branches, the two
+  qualification scopes, grid-as-ink, model-free diagram / formula proofs, the one text
+  criterion, purity** — moved with `documents/`, `figures/` and the extraction half of
+  `processing/`; see
+  [`src/ragspine/extraction/evidence/CLAUDE.md`](../ragspine/extraction/evidence/CLAUDE.md).
 - **Settings, providers, credential isolation, local-model tunnel, live-LLM test policy** — moved
   with `core/` and the provider adapters; see
   [`src/ragspine/common/evidence/CLAUDE.md`](../ragspine/common/evidence/CLAUDE.md).

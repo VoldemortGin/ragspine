@@ -14,7 +14,12 @@ from enterprise_pdf_rag.adapters.chart_semantic_schemas import (
 )
 from enterprise_pdf_rag.adapters.description_mapping import map_description
 from enterprise_pdf_rag.adapters.figure_reasoning import PreparedFigure
-from enterprise_pdf_rag.figures.models import (
+from ragspine.common.evidence.providers.json_completion import (
+    JsonCompletionClient,
+    JsonCompletionError,
+    JsonCompletionResult,
+)
+from ragspine.extraction.evidence.figures.models import (
     ChartAxis,
     ChartIR,
     ChartMark,
@@ -29,12 +34,7 @@ from enterprise_pdf_rag.figures.models import (
     ValueKind,
     Verification,
 )
-from enterprise_pdf_rag.figures.validation import evidence_elements, validate_svg
-from ragspine.common.evidence.providers.json_completion import (
-    JsonCompletionClient,
-    JsonCompletionError,
-    JsonCompletionResult,
-)
+from ragspine.extraction.evidence.figures.validation import evidence_elements, validate_svg
 
 
 @dataclass(frozen=True, slots=True)

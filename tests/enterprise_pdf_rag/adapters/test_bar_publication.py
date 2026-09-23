@@ -15,10 +15,11 @@ from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.figure_reasoning import FigureModelView, prepare_figure
 from enterprise_pdf_rag.adapters.pdfspine_document import PdfspineDocumentAdapter
 from enterprise_pdf_rag.adapters.source_paint_bar import SourcePaintBarProof
-from enterprise_pdf_rag.documents.models import DocumentSpec
-from enterprise_pdf_rag.documents.service import ingest_document
-from enterprise_pdf_rag.figures.models import ChartIR, Confidence, TextDescription
-from enterprise_pdf_rag.processing.models import (
+from enterprise_pdf_rag.processing.retrieval import RetrievalMember
+from ragspine.extraction.evidence.document.models import DocumentSpec
+from ragspine.extraction.evidence.document.service import ingest_document
+from ragspine.extraction.evidence.figures.models import ChartIR, Confidence, TextDescription
+from ragspine.extraction.evidence.page.models import (
     LayoutObject,
     ObjectKind,
     ObjectProcessingRecord,
@@ -26,7 +27,6 @@ from enterprise_pdf_rag.processing.models import (
     StageOutcome,
     StageState,
 )
-from enterprise_pdf_rag.processing.retrieval import RetrievalMember
 from tests.enterprise_pdf_rag.adapters.bar_source_fixture import BarSource, bar_source
 
 

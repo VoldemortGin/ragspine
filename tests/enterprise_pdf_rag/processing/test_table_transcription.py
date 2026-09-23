@@ -4,16 +4,16 @@ from dataclasses import replace
 
 import pytest
 
-from enterprise_pdf_rag.documents.models import TextSpan
-from enterprise_pdf_rag.figures.models import SourceAnchor, Verification
-from enterprise_pdf_rag.processing.table_models import (
+from ragspine.extraction.evidence.document.models import TextSpan
+from ragspine.extraction.evidence.figures.models import SourceAnchor, Verification
+from ragspine.extraction.evidence.objects.tables.table_models import (
     CellContentState,
     SlotState,
     TableCell,
     TableIR,
     TableSlot,
 )
-from enterprise_pdf_rag.processing.table_transcription import (
+from ragspine.extraction.evidence.objects.tables.table_transcription import (
     check_table_transcription,
     table_span_ids,
 )

@@ -31,7 +31,7 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, replace
 from decimal import Decimal
 
-from enterprise_pdf_rag.figures.models import (
+from ragspine.extraction.evidence.figures.models import (
     ChartAxis,
     ChartIR,
     ChartPoint,
@@ -52,7 +52,7 @@ from enterprise_pdf_rag.figures.models import (
     ValueKind,
     Verification,
 )
-from enterprise_pdf_rag.figures.source_label_match import (
+from ragspine.extraction.evidence.figures.source_label_match import (
     fold_whitespace,
     match_source_label,
     match_source_value,
@@ -61,7 +61,7 @@ from enterprise_pdf_rag.figures.source_label_match import (
     windows,
     without_trailing_parenthetical,
 )
-from enterprise_pdf_rag.figures.validation import validate_svg
+from ragspine.extraction.evidence.figures.validation import validate_svg
 
 FIGURE_LABEL_SCOPE = "figure-source-labels-only-v1"
 FIGURE_POINT_SCOPE = "source-labels-and-verbatim-points-v1"

@@ -22,11 +22,19 @@ from enterprise_pdf_rag.adapters.processing_retrieval import (
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.source_publication import validate_processing_source
 from enterprise_pdf_rag.answers.ports import MemberText
-from enterprise_pdf_rag.documents.models import AssetRef, Bounds
-from enterprise_pdf_rag.figures.chart_qa.displayed_models import DisplayedLookupContext
-from enterprise_pdf_rag.figures.chart_qa.models import ChartContext, QueryPin
-from enterprise_pdf_rag.figures.ports import EmbeddingPort
-from enterprise_pdf_rag.processing.column_regions import (
+from enterprise_pdf_rag.processing.retrieval import (
+    PinnedRetrievalHit,
+    RetrievalContext,
+    RetrievalMember,
+    RetrievalPlan,
+)
+from ragspine.extraction.evidence.document.models import AssetRef, Bounds
+from ragspine.extraction.evidence.figures.chart_qa.displayed_models import DisplayedLookupContext
+from ragspine.extraction.evidence.figures.chart_qa.models import ChartContext, QueryPin
+from ragspine.extraction.evidence.figures.ports import EmbeddingPort
+from ragspine.extraction.evidence.metadata.document_tree import DocumentTree
+from ragspine.extraction.evidence.metadata.page_metadata import PageMetadata
+from ragspine.extraction.evidence.page.column_regions import (
     EMPTY,
     MIN_COLUMNS,
     ColumnBinding,
@@ -34,18 +42,10 @@ from enterprise_pdf_rag.processing.column_regions import (
     PageRegionSpan,
     bind_columns,
 )
-from enterprise_pdf_rag.processing.document_tree import DocumentTree
-from enterprise_pdf_rag.processing.models import (
+from ragspine.extraction.evidence.page.models import (
     ObjectKind,
     ProcessingManifest,
     RetrievalPublication,
-)
-from enterprise_pdf_rag.processing.page_metadata import PageMetadata
-from enterprise_pdf_rag.processing.retrieval import (
-    PinnedRetrievalHit,
-    RetrievalContext,
-    RetrievalMember,
-    RetrievalPlan,
 )
 
 type CatalogOrigin = Literal["ingestion", "legacy"]

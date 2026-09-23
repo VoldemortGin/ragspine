@@ -7,12 +7,12 @@ from fastapi import FastAPI
 from httpx2 import ASGITransport, AsyncClient
 
 from enterprise_pdf_rag.adapters.http.chart_qa import create_chart_qa_router
-from enterprise_pdf_rag.figures.chart_qa.models import (
+from ragspine.extraction.evidence.figures.chart_qa.models import (
     ChartQueryError,
     QueryFailure,
     QueryPin,
 )
-from enterprise_pdf_rag.figures.chart_qa.service import ChartQAService
+from ragspine.extraction.evidence.figures.chart_qa.service import ChartQAService
 from tests.enterprise_pdf_rag.figures.test_chart_qa import PinnedResolver, qualified_context
 
 

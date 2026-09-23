@@ -9,10 +9,10 @@ from pydantic import SecretStr
 
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.page_partition import ModelPagePartitioner
-from enterprise_pdf_rag.documents.models import TextSidecar, TextSpan
-from enterprise_pdf_rag.processing.models import ObjectKind, PageInput
 from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
 from ragspine.common.evidence.providers.providers import LLMConfig
+from ragspine.extraction.evidence.document.models import TextSidecar, TextSpan
+from ragspine.extraction.evidence.page.models import ObjectKind, PageInput
 
 
 def test_model_partition_maps_local_aliases_to_exact_observed_occurrences(
@@ -96,10 +96,10 @@ def test_model_partition_maps_local_aliases_to_exact_observed_occurrences(
 
 
 def test_cross_page_and_dropped_source_occurrences_fail_before_processing() -> None:
-    from enterprise_pdf_rag.documents.models import AssetRef
-    from enterprise_pdf_rag.figures.models import Confidence
-    from enterprise_pdf_rag.processing.models import LayoutObject, PagePartition
-    from enterprise_pdf_rag.processing.service import validate_partition
+    from ragspine.extraction.evidence.document.models import AssetRef
+    from ragspine.extraction.evidence.figures.models import Confidence
+    from ragspine.extraction.evidence.page.models import LayoutObject, PagePartition
+    from ragspine.extraction.evidence.page.service import validate_partition
 
     page = PageInput(
         "a" * 64,
@@ -148,10 +148,10 @@ def test_cross_page_and_dropped_source_occurrences_fail_before_processing() -> N
 
 
 def test_page_geometry_tolerates_model_rendered_float_noise_but_not_real_overreach() -> None:
-    from enterprise_pdf_rag.documents.models import AssetRef
-    from enterprise_pdf_rag.figures.models import Confidence
-    from enterprise_pdf_rag.processing.models import LayoutObject, PagePartition
-    from enterprise_pdf_rag.processing.service import validate_partition
+    from ragspine.extraction.evidence.document.models import AssetRef
+    from ragspine.extraction.evidence.figures.models import Confidence
+    from ragspine.extraction.evidence.page.models import LayoutObject, PagePartition
+    from ragspine.extraction.evidence.page.service import validate_partition
 
     page = PageInput(
         "a" * 64,

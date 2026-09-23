@@ -14,17 +14,6 @@ from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.processing_retrieval import ProcessingRetrieval
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.source_publication import validate_processing_source
-from enterprise_pdf_rag.documents.models import AssetRef
-from enterprise_pdf_rag.figures.chart_qa.models import QueryPin
-from enterprise_pdf_rag.figures.ports import EmbeddingPort
-from enterprise_pdf_rag.processing.models import (
-    ObjectKind,
-    ObjectProcessingRecord,
-    PagePartition,
-    RetrievalPublication,
-    StageOutcome,
-    StageState,
-)
 from enterprise_pdf_rag.processing.retrieval import (
     IndexEntry,
     RetrievalEmbedding,
@@ -32,6 +21,17 @@ from enterprise_pdf_rag.processing.retrieval import (
     RetrievalMember,
     RetrievalPlan,
     retrieval_dependencies,
+)
+from ragspine.extraction.evidence.document.models import AssetRef
+from ragspine.extraction.evidence.figures.chart_qa.models import QueryPin
+from ragspine.extraction.evidence.figures.ports import EmbeddingPort
+from ragspine.extraction.evidence.page.models import (
+    ObjectKind,
+    ObjectProcessingRecord,
+    PagePartition,
+    RetrievalPublication,
+    StageOutcome,
+    StageState,
 )
 
 # v2: the appended member's vector embeds the chart index-text projection built by

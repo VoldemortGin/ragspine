@@ -37,15 +37,15 @@ from enterprise_pdf_rag.answers.models import (
 )
 from enterprise_pdf_rag.answers.ports import MemberText
 from enterprise_pdf_rag.answers.prompt import SYSTEM_RULES, ModelAnswer, ModelClaim
-from enterprise_pdf_rag.figures.models import Verification
 from enterprise_pdf_rag.processing.context_builder import BlockKind
-from enterprise_pdf_rag.processing.document_tree import (
+from ragspine.extraction.evidence.figures.models import Verification
+from ragspine.extraction.evidence.metadata.document_tree import (
     DOCUMENT_TREE_SCHEMA,
     DocumentTree,
     TreeNode,
 )
-from enterprise_pdf_rag.processing.models import ObjectKind
-from enterprise_pdf_rag.processing.typed_ir import DiagramIR, DiagramNode
+from ragspine.extraction.evidence.objects.typed_ir import DiagramIR, DiagramNode
+from ragspine.extraction.evidence.page.models import ObjectKind
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
     DOCUMENT_LABEL,
     publish_generic_document,

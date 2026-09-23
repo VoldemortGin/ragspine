@@ -17,8 +17,8 @@ from enterprise_pdf_rag.adapters.memory import (
     MemoryDescriptionIndex,
     MemoryFigureRepository,
 )
-from enterprise_pdf_rag.documents.models import AssetRef, Bounds, TextSidecar, TextSpan
-from enterprise_pdf_rag.figures.models import (
+from ragspine.extraction.evidence.document.models import AssetRef, Bounds, TextSidecar, TextSpan
+from ragspine.extraction.evidence.figures.models import (
     ChartIR,
     ChartMark,
     ChartPoint,
@@ -34,8 +34,8 @@ from enterprise_pdf_rag.figures.models import (
     ValueKind,
     Verification,
 )
-from enterprise_pdf_rag.figures.service import FiguresService
-from enterprise_pdf_rag.processing.models import PageInput
+from ragspine.extraction.evidence.figures.service import FiguresService
+from ragspine.extraction.evidence.page.models import PageInput
 
 
 def _sector(start: float, stop: float) -> str:

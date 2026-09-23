@@ -14,22 +14,22 @@ from enterprise_pdf_rag.adapters.http.processing_schemas import (
     StageEnvelope,
 )
 from enterprise_pdf_rag.adapters.source_publication import validate_processing_source
-from enterprise_pdf_rag.documents.models import AssetRef
-from enterprise_pdf_rag.processing.document_metadata import summarize_document
-from enterprise_pdf_rag.processing.document_tree import DocumentTree
 from enterprise_pdf_rag.processing.index_text import PageIndexContext
-from enterprise_pdf_rag.processing.models import (
-    ProcessingManifest,
-    RetrievalPublication,
-    StageOutcome,
-    StageState,
-)
-from enterprise_pdf_rag.processing.page_metadata import PageMetadata
 from enterprise_pdf_rag.processing.retrieval import (
     RetrievalEmbedding,
     RetrievalIndex,
     RetrievalPlan,
     retrieval_dependencies,
+)
+from ragspine.extraction.evidence.document.models import AssetRef
+from ragspine.extraction.evidence.metadata.document_metadata import summarize_document
+from ragspine.extraction.evidence.metadata.document_tree import DocumentTree
+from ragspine.extraction.evidence.metadata.page_metadata import PageMetadata
+from ragspine.extraction.evidence.page.models import (
+    ProcessingManifest,
+    RetrievalPublication,
+    StageOutcome,
+    StageState,
 )
 
 

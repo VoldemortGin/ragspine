@@ -12,9 +12,9 @@ from enterprise_pdf_rag.adapters.layout_normalization import (
     NORMALIZATION_VERSION,
     normalize_partition,
 )
-from enterprise_pdf_rag.documents.models import AssetRef, TextSidecar, TextSpan
-from enterprise_pdf_rag.figures.models import Confidence, Verification
-from enterprise_pdf_rag.processing.models import (
+from ragspine.extraction.evidence.document.models import AssetRef, TextSidecar, TextSpan
+from ragspine.extraction.evidence.figures.models import Confidence, Verification
+from ragspine.extraction.evidence.page.models import (
     LayoutObject,
     ObjectKind,
     PageInput,

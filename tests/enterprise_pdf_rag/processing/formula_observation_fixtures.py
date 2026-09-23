@@ -2,9 +2,9 @@
 
 import pdfspine
 
-from enterprise_pdf_rag.documents.models import Bounds
-from enterprise_pdf_rag.figures.models import SourceAnchor
-from enterprise_pdf_rag.processing.formula_models import (
+from ragspine.extraction.evidence.document.models import Bounds
+from ragspine.extraction.evidence.figures.models import SourceAnchor
+from ragspine.extraction.evidence.objects.formulas.formula_models import (
     FormulaSourceObservation,
     Matrix,
     ObservedChar,
@@ -12,7 +12,7 @@ from enterprise_pdf_rag.processing.formula_models import (
     ObservedRun,
     Point,
 )
-from enterprise_pdf_rag.processing.formula_rules import IDENTITY
+from ragspine.extraction.evidence.objects.formulas.formula_rules import IDENTITY
 
 PAGE_HEIGHT = 160.0
 SOURCE_SHA256 = "0123456789abcdef" * 4

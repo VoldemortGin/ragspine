@@ -14,9 +14,9 @@ from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.draft_publication import index_draft, publish_draft, qualify_draft
 from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.processing.models import ObjectKind, ProcessingScope
 from enterprise_pdf_rag.processing.retrieval import RetrievalMember
-from enterprise_pdf_rag.processing.typed_ir import DiagramIR, ObjectDescription
+from ragspine.extraction.evidence.objects.typed_ir import DiagramIR, ObjectDescription
+from ragspine.extraction.evidence.page.models import ObjectKind, ProcessingScope
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
     ingest_generic_semantics,
 )

@@ -9,7 +9,7 @@ from pydantic import TypeAdapter
 
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.documents.models import (
+from ragspine.extraction.evidence.document.models import (
     AssetRef,
     DocumentManifest,
     PageRecord,
@@ -17,7 +17,7 @@ from enterprise_pdf_rag.documents.models import (
     TextSidecar,
     TextSpan,
 )
-from enterprise_pdf_rag.processing.models import (
+from ragspine.extraction.evidence.page.models import (
     CanonicalPage,
     PageInput,
     PageProcessingRecord,
@@ -27,7 +27,7 @@ from enterprise_pdf_rag.processing.models import (
     StageOutcome,
     StageState,
 )
-from enterprise_pdf_rag.processing.service import canonical_page
+from ragspine.extraction.evidence.page.service import canonical_page
 
 
 def test_processing_snapshot_reopens_and_corruption_does_not_advance_pointer(

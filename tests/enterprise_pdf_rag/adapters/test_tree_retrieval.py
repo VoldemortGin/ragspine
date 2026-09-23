@@ -17,14 +17,14 @@ from enterprise_pdf_rag.adapters.tree_retrieval import (
     route_tree,
 )
 from enterprise_pdf_rag.answers.models import TreeRoute
-from enterprise_pdf_rag.processing.document_tree import (
+from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
+from ragspine.common.evidence.providers.providers import LLMConfig
+from ragspine.extraction.evidence.metadata.document_tree import (
     DOCUMENT_TREE_SCHEMA,
     DocumentTree,
     TreeNode,
     render_tree,
 )
-from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
-from ragspine.common.evidence.providers.providers import LLMConfig
 
 _QUESTION = "What was VONB by market in 1H26?"
 

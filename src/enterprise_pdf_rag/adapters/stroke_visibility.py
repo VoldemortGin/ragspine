@@ -11,7 +11,7 @@ from itertools import pairwise
 from math import hypot, isfinite, sqrt
 from typing import Literal
 
-from enterprise_pdf_rag.documents.models import Bounds
+from ragspine.extraction.evidence.document.models import Bounds
 
 type Point = tuple[float, float]
 type PathCommand = tuple[str, tuple[float, ...]]

@@ -4,13 +4,13 @@ import json
 
 import pytest
 
-from enterprise_pdf_rag.figures.ports import EmbeddingPort
 from ragspine.common.evidence.providers.local_models import (
     LocalEmbeddingAdapter,
     LocalRerankAdapter,
     RerankResult,
 )
 from ragspine.common.evidence.providers.providers import load_local_model_config
+from ragspine.extraction.evidence.figures.ports import EmbeddingPort
 
 
 def test_embedding_adapter_implements_document_and_query_contract() -> None:

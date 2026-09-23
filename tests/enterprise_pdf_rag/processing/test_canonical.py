@@ -4,9 +4,9 @@ from hashlib import sha256
 
 import pytest
 
-from enterprise_pdf_rag.documents.models import AssetRef, TextSidecar, TextSpan
-from enterprise_pdf_rag.processing.models import PageInput, ProcessingScope
-from enterprise_pdf_rag.processing.service import canonical_page
+from ragspine.extraction.evidence.document.models import AssetRef, TextSidecar, TextSpan
+from ragspine.extraction.evidence.page.models import PageInput, ProcessingScope
+from ragspine.extraction.evidence.page.service import canonical_page
 
 
 def test_twenty_page_scope_does_not_claim_seventy_one_processed_pages() -> None:

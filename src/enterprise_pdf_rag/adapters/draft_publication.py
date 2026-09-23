@@ -14,8 +14,8 @@ from enterprise_pdf_rag.adapters.processing_retrieval import (
 )
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.source_publication import validate_processing_source
-from enterprise_pdf_rag.figures.ports import EmbeddingPort
-from enterprise_pdf_rag.processing.models import ObjectKind
+from ragspine.extraction.evidence.figures.ports import EmbeddingPort
+from ragspine.extraction.evidence.page.models import ObjectKind
 
 
 class DraftQualification(BoundaryModel):

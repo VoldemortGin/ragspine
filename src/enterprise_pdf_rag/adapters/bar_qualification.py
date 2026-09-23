@@ -10,12 +10,12 @@ from enterprise_pdf_rag.adapters.bar_geometry import (
 from enterprise_pdf_rag.adapters.donut_qualification import _full_spans
 from enterprise_pdf_rag.adapters.figure_reasoning import PreparedFigure
 from enterprise_pdf_rag.adapters.source_paint_bar import SourcePaintBarProof
-from enterprise_pdf_rag.figures.chart_qa.displayed_models import (
+from ragspine.extraction.evidence.figures.chart_qa.displayed_models import (
     DISPLAYED_BAR_SCOPE,
     PERIOD_RULE,
     PointPeriodInterpretation,
 )
-from enterprise_pdf_rag.figures.models import (
+from ragspine.extraction.evidence.figures.models import (
     ChartIR,
     ChartPoint,
     Confidence,
@@ -31,7 +31,7 @@ from enterprise_pdf_rag.figures.models import (
     Verification,
     content_id,
 )
-from enterprise_pdf_rag.figures.validation import evidence_elements, validate_svg
+from ragspine.extraction.evidence.figures.validation import evidence_elements, validate_svg
 
 
 @dataclass(frozen=True, slots=True)

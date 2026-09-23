@@ -7,7 +7,7 @@ from enterprise_pdf_rag.adapters.chart_semantic_schemas import (
     DescriptionClaimDTO,
     FigureDescriptionDTO,
 )
-from enterprise_pdf_rag.figures.models import (
+from ragspine.extraction.evidence.figures.models import (
     Confidence,
     DescriptionClaim,
     Evidence,
@@ -16,7 +16,7 @@ from enterprise_pdf_rag.figures.models import (
     TextDescription,
     Verification,
 )
-from enterprise_pdf_rag.figures.validation import validate_svg
+from ragspine.extraction.evidence.figures.validation import validate_svg
 
 
 @dataclass(frozen=True, slots=True)

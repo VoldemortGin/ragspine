@@ -13,11 +13,11 @@ from enterprise_pdf_rag.adapters.http.chart_qa_v2_schemas import (
     DisplayedChartQueryRequest,
     DisplayedChartQueryResponse,
 )
-from enterprise_pdf_rag.figures.chart_qa.displayed_service import (
+from ragspine.extraction.evidence.figures.chart_qa.displayed_service import (
     DisplayedChartQAService,
 )
-from enterprise_pdf_rag.figures.chart_qa.models import ChartQueryError, QueryFailure
-from enterprise_pdf_rag.figures.chart_qa.service import ChartQAService
+from ragspine.extraction.evidence.figures.chart_qa.models import ChartQueryError, QueryFailure
+from ragspine.extraction.evidence.figures.chart_qa.service import ChartQAService
 
 
 def create_chart_qa_router(

@@ -8,18 +8,18 @@ from xml.etree import ElementTree
 import pytest
 
 from enterprise_pdf_rag.adapters.figure_reasoning import prepare_figure
-from enterprise_pdf_rag.documents.models import AssetRef, TextSidecar, TextSpan
-from enterprise_pdf_rag.figures.chart_qa.displayed_models import (
+from ragspine.extraction.evidence.document.models import AssetRef, TextSidecar, TextSpan
+from ragspine.extraction.evidence.figures.chart_qa.displayed_models import (
     DescriptionNormalizationCitation,
     DisplayedLookupContext,
     DisplayedRefusalReason,
     PageContextCitation,
     PointPeriodInterpretation,
 )
-from enterprise_pdf_rag.figures.chart_qa.displayed_service import (
+from ragspine.extraction.evidence.figures.chart_qa.displayed_service import (
     DisplayedChartQAService,
 )
-from enterprise_pdf_rag.figures.chart_qa.models import (
+from ragspine.extraction.evidence.figures.chart_qa.models import (
     ChartQueryError,
     ChartQuestion,
     Operation,
@@ -28,7 +28,7 @@ from enterprise_pdf_rag.figures.chart_qa.models import (
     QueryPin,
     QueryStatus,
 )
-from enterprise_pdf_rag.figures.models import (
+from ragspine.extraction.evidence.figures.models import (
     ChartIR,
     ChartPoint,
     Confidence,
@@ -45,7 +45,7 @@ from enterprise_pdf_rag.figures.models import (
     ValueKind,
     Verification,
 )
-from enterprise_pdf_rag.processing.models import PageInput
+from ragspine.extraction.evidence.page.models import PageInput
 
 
 class DisplayedResolver:

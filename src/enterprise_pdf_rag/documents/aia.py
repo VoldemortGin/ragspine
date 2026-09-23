@@ -1,6 +1,6 @@
 """Identity of the single, explicitly selected business source."""
 
-from enterprise_pdf_rag.documents.models import DocumentSpec
+from ragspine.extraction.evidence.document.models import DocumentSpec
 
 AIA_SPEC = DocumentSpec(
     "aia-group-2026-interim-results-presentation.pdf",

@@ -23,7 +23,6 @@ from enterprise_pdf_rag.adapters.hybrid_search import LocalRerankJudge
 from enterprise_pdf_rag.adapters.processing_runtime import PROCESSING_OUTPUT
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.runtime import create_runtime
-from enterprise_pdf_rag.figures.models import ExecutionMode, FailureCode, FigureError
 from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
 from ragspine.common.evidence.providers.local_models import (
     LocalEmbeddingAdapter,
@@ -35,6 +34,7 @@ from ragspine.common.evidence.providers.providers import (
     load_local_model_config,
 )
 from ragspine.common.evidence.settings import get_settings
+from ragspine.extraction.evidence.figures.models import ExecutionMode, FailureCode, FigureError
 
 
 def create_app(*, mode: ExecutionMode) -> FastAPI:

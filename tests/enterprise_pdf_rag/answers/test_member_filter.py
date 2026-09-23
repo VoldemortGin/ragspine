@@ -9,7 +9,7 @@ from enterprise_pdf_rag.answers.member_filter import (
 )
 from enterprise_pdf_rag.answers.models import MemberFilters
 from enterprise_pdf_rag.answers.ports import MemberText
-from enterprise_pdf_rag.processing.models import ObjectKind
+from ragspine.extraction.evidence.page.models import ObjectKind
 
 
 def _member(

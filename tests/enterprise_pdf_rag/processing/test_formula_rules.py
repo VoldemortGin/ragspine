@@ -2,9 +2,9 @@
 
 import pytest
 
-from enterprise_pdf_rag.documents.models import Bounds
-from enterprise_pdf_rag.figures.models import Verification
-from enterprise_pdf_rag.processing.formula_models import (
+from ragspine.extraction.evidence.document.models import Bounds
+from ragspine.extraction.evidence.figures.models import Verification
+from ragspine.extraction.evidence.objects.formulas.formula_models import (
     FormulaSourceObservation,
     FormulaToken,
     ObservedChar,
@@ -15,7 +15,7 @@ from enterprise_pdf_rag.processing.formula_models import (
     StructureKind,
     TokenRole,
 )
-from enterprise_pdf_rag.processing.formula_rules import (
+from ragspine.extraction.evidence.objects.formulas.formula_rules import (
     check_formula,
     check_tiling,
     linearize,
@@ -24,7 +24,7 @@ from enterprise_pdf_rag.processing.formula_rules import (
     script_of,
     tile_run,
 )
-from enterprise_pdf_rag.processing.typed_ir import FormulaIR
+from ragspine.extraction.evidence.objects.typed_ir import FormulaIR
 from tests.enterprise_pdf_rag.processing.formula_observation_fixtures import (
     PAGE_HEIGHT,
     anchor,

@@ -9,11 +9,11 @@ from enterprise_pdf_rag.adapters.aia_ingestion import read_text_sidecar
 from enterprise_pdf_rag.adapters.diagram_qualification import qualify_diagram
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.pdfspine_svg import crop_native_svg
-from enterprise_pdf_rag.documents.models import AssetRef
-from enterprise_pdf_rag.processing.diagram_models import DiagramQualification
-from enterprise_pdf_rag.processing.models import ObjectKind, ProcessingScope
 from enterprise_pdf_rag.processing.retrieval import RetrievalMember
-from enterprise_pdf_rag.processing.typed_ir import DiagramIR, ObjectDescription
+from ragspine.extraction.evidence.document.models import AssetRef
+from ragspine.extraction.evidence.objects.diagrams.diagram_models import DiagramQualification
+from ragspine.extraction.evidence.objects.typed_ir import DiagramIR, ObjectDescription
+from ragspine.extraction.evidence.page.models import ObjectKind, ProcessingScope
 
 
 class DiagramPublicationReceipt(BaseModel):

@@ -13,7 +13,7 @@ from enterprise_pdf_rag.adapters.donut_geometry import (
 )
 from enterprise_pdf_rag.adapters.figure_reasoning import PreparedFigure
 from enterprise_pdf_rag.adapters.source_paint import SourcePaintProof
-from enterprise_pdf_rag.figures.models import (
+from ragspine.extraction.evidence.figures.models import (
     ChartIR,
     ChartPoint,
     Evidence,
@@ -30,7 +30,7 @@ from enterprise_pdf_rag.figures.models import (
     ValueKind,
     Verification,
 )
-from enterprise_pdf_rag.figures.validation import evidence_elements, validate_svg
+from ragspine.extraction.evidence.figures.validation import evidence_elements, validate_svg
 
 
 def _fail(reason: str) -> FigureError:

@@ -9,16 +9,16 @@ from pydantic import TypeAdapter
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.semantic_objects import SemanticObjectAdapter
-from enterprise_pdf_rag.documents.models import TextSidecar, TextSpan
-from enterprise_pdf_rag.figures.models import Confidence, TextDescription
-from enterprise_pdf_rag.processing.models import (
+from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
+from ragspine.common.evidence.providers.providers import load_llm_config
+from ragspine.extraction.evidence.document.models import TextSidecar, TextSpan
+from ragspine.extraction.evidence.figures.models import Confidence, TextDescription
+from ragspine.extraction.evidence.page.models import (
     LayoutObject,
     ObjectKind,
     PageInput,
     StageState,
 )
-from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
-from ragspine.common.evidence.providers.providers import load_llm_config
 
 
 @pytest.mark.parametrize("valid_claim,valid_binding", [(True, True), (False, True), (True, False)])

@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from enterprise_pdf_rag.adapters.http.schemas import BoundaryModel
-from enterprise_pdf_rag.figures.chart_qa.models import (
+from ragspine.extraction.evidence.figures.chart_qa.models import (
     AnswerValue,
     CalculationInput,
     CalculationReceipt,
@@ -19,7 +19,7 @@ from enterprise_pdf_rag.figures.chart_qa.models import (
     QueryStatus,
     RefusalReason,
 )
-from enterprise_pdf_rag.figures.models import SourceAnchor
+from ragspine.extraction.evidence.figures.models import SourceAnchor
 
 
 class PointSelectorInput(BoundaryModel):

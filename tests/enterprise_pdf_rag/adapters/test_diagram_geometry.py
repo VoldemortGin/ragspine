@@ -11,8 +11,8 @@ from enterprise_pdf_rag.adapters.diagram_geometry import (
     tip_and_base,
     touches,
 )
-from enterprise_pdf_rag.documents.models import Bounds
-from enterprise_pdf_rag.processing.diagram_models import PathEvidence, Point
+from ragspine.extraction.evidence.document.models import Bounds
+from ragspine.extraction.evidence.objects.diagrams.diagram_models import PathEvidence, Point
 
 HEIGHT = 160.0
 OBJECT_BBOX: Bounds = (15.0, 65.0, 225.0, 105.0)

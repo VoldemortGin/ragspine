@@ -21,7 +21,7 @@ from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.figure_label_qualification import FIGURE_LABEL_SCOPES
 from enterprise_pdf_rag.adapters.http.processing_schemas import ProcessingEnvelope
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.processing.models import (
+from ragspine.extraction.evidence.page.models import (
     ObjectKind,
     ObjectProcessingRecord,
     ProcessingManifest,

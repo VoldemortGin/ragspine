@@ -7,14 +7,14 @@ from pathlib import Path
 from enterprise_pdf_rag.adapters.aia_processing import ProcessingPipeline
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.documents.models import (
+from ragspine.extraction.evidence.document.models import (
     DocumentManifest,
     PageRecord,
     RegionRecord,
     TextSidecar,
     TextSpan,
 )
-from enterprise_pdf_rag.processing.models import (
+from ragspine.extraction.evidence.page.models import (
     LayoutObject,
     ObjectProcessingRecord,
     PageInput,

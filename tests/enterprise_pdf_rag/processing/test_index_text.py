@@ -3,7 +3,15 @@
 from dataclasses import replace
 from decimal import Decimal
 
-from enterprise_pdf_rag.figures.models import (
+from enterprise_pdf_rag.processing.index_text import (
+    chart_index_text,
+    diagram_index_text,
+    formula_index_text,
+    has_citable_structure,
+    has_citable_value,
+    member_index_text,
+)
+from ragspine.extraction.evidence.figures.models import (
     ChartIR,
     ChartPoint,
     Confidence,
@@ -15,22 +23,14 @@ from enterprise_pdf_rag.figures.models import (
     ValueKind,
     Verification,
 )
-from enterprise_pdf_rag.processing.formula_models import (
+from ragspine.extraction.evidence.objects.formulas.formula_models import (
     FormulaStructure,
     FormulaToken,
     PathEvidence,
     StructureKind,
     TokenRole,
 )
-from enterprise_pdf_rag.processing.index_text import (
-    chart_index_text,
-    diagram_index_text,
-    formula_index_text,
-    has_citable_structure,
-    has_citable_value,
-    member_index_text,
-)
-from enterprise_pdf_rag.processing.typed_ir import (
+from ragspine.extraction.evidence.objects.typed_ir import (
     DiagramEdge,
     DiagramIR,
     DiagramNode,

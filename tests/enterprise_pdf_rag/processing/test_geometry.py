@@ -1,6 +1,6 @@
 """Containment between a model-rendered region and canonical source geometry."""
 
-from enterprise_pdf_rag.processing.geometry import (
+from ragspine.extraction.evidence.page.geometry import (
     COORDINATE_TOLERANCE,
     Axis,
     Segment,

@@ -22,17 +22,17 @@ from enterprise_pdf_rag.adapters.formula_qualification import (
 from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
 from enterprise_pdf_rag.adapters.pdfspine_document import PdfspineDocumentAdapter
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.documents.models import AssetRef, Bounds, TextSidecar
-from enterprise_pdf_rag.figures.models import Confidence, SourceAnchor, Verification
-from enterprise_pdf_rag.processing.formula_models import FormulaSourceObservation
-from enterprise_pdf_rag.processing.models import (
+from enterprise_pdf_rag.processing.retrieval import RetrievalMember
+from ragspine.extraction.evidence.document.models import AssetRef, Bounds, TextSidecar
+from ragspine.extraction.evidence.figures.models import Confidence, SourceAnchor, Verification
+from ragspine.extraction.evidence.objects.formulas.formula_models import FormulaSourceObservation
+from ragspine.extraction.evidence.objects.typed_ir import FormulaIR
+from ragspine.extraction.evidence.page.models import (
     LayoutObject,
     ObjectKind,
     PageInput,
     ProcessingScope,
 )
-from enterprise_pdf_rag.processing.retrieval import RetrievalMember
-from enterprise_pdf_rag.processing.typed_ir import FormulaIR
 from tests.enterprise_pdf_rag.adapters.formula_fixture import rise_formula_pdf
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
     ingest_generic_semantics,

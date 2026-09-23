@@ -12,7 +12,7 @@ from xml.etree import ElementTree
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-from enterprise_pdf_rag.figures.models import (
+from ragspine.extraction.evidence.figures.models import (
     SourceAnchor,
     SvgArtifact,
     SvgElement,

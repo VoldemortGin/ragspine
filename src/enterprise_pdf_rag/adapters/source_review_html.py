@@ -4,7 +4,7 @@ import re
 from html import escape
 
 from enterprise_pdf_rag.documents.aia import AIA_SPEC
-from enterprise_pdf_rag.documents.models import DocumentSnapshot, TextSidecar
+from ragspine.extraction.evidence.document.models import DocumentSnapshot, TextSidecar
 
 _STYLE = """
 body{font:16px system-ui;max-width:1200px;margin:32px auto;padding:20px;line-height:1.6;color:#20242a}

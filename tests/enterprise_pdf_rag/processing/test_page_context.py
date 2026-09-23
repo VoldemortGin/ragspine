@@ -5,15 +5,15 @@ from hashlib import sha256
 
 import pytest
 
-from enterprise_pdf_rag.documents.models import AssetRef, TextSidecar, TextSpan
-from enterprise_pdf_rag.figures.models import Confidence
-from enterprise_pdf_rag.processing.models import (
+from ragspine.extraction.evidence.document.models import AssetRef, TextSidecar, TextSpan
+from ragspine.extraction.evidence.figures.models import Confidence
+from ragspine.extraction.evidence.page.models import (
     LayoutObject,
     ObjectKind,
     PageInput,
     PagePartition,
 )
-from enterprise_pdf_rag.processing.service import validate_partition
+from ragspine.extraction.evidence.page.service import validate_partition
 
 
 def test_page_context_requires_real_distinct_occurrences_and_parent_graph_is_acyclic() -> None:

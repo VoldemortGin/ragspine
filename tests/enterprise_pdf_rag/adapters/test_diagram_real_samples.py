@@ -9,9 +9,9 @@ from enterprise_pdf_rag.adapters.diagram_qualification import (
     DiagramQualificationError,
     qualify_diagram,
 )
-from enterprise_pdf_rag.documents.models import TextSidecar, TextSpan
-from enterprise_pdf_rag.processing.typed_ir import DiagramIR
 from ragspine.common.evidence.settings import ROOT_DIR
+from ragspine.extraction.evidence.document.models import TextSidecar, TextSpan
+from ragspine.extraction.evidence.objects.typed_ir import DiagramIR
 
 _RUN = ROOT_DIR / (
     "data/output/aia-2026-interim/pages-001-020/runs/"

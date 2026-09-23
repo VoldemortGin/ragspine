@@ -2,8 +2,8 @@
 
 from decimal import Decimal
 
-from enterprise_pdf_rag.figures.models import EvidenceKind, SourceAnchor, SvgElement
-from enterprise_pdf_rag.figures.source_label_match import (
+from ragspine.extraction.evidence.figures.models import EvidenceKind, SourceAnchor, SvgElement
+from ragspine.extraction.evidence.figures.source_label_match import (
     MAX_LABEL_SPANS,
     fold_whitespace,
     match_source_label,

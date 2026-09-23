@@ -42,8 +42,8 @@ from enterprise_pdf_rag.adapters.http.webui_gate import (
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.source_publication import validate_processing_source
 from enterprise_pdf_rag.documents.aia import AIA_SPEC
-from enterprise_pdf_rag.documents.models import DocumentSnapshot, DocumentSpec
-from enterprise_pdf_rag.figures.ports import EmbeddingPort
+from ragspine.extraction.evidence.document.models import DocumentSnapshot, DocumentSpec
+from ragspine.extraction.evidence.figures.ports import EmbeddingPort
 
 
 def _ensure_source(snapshot: DocumentSnapshot, spec: DocumentSpec) -> None:

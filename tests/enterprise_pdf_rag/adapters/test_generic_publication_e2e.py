@@ -24,12 +24,15 @@ from enterprise_pdf_rag.answers.models import AbstainReason, AnswerStatus, Claim
 from enterprise_pdf_rag.answers.prompt import ModelAnswer, ModelClaim
 from enterprise_pdf_rag.answers.verify import decide, verify_claims
 from enterprise_pdf_rag.cli import main
-from enterprise_pdf_rag.figures.models import Verification
 from enterprise_pdf_rag.processing.context_builder import BlockKind, build_context_block
-from enterprise_pdf_rag.processing.models import ObjectKind, StageState
-from enterprise_pdf_rag.processing.table_grid_proof import GRID_SCOPE, strip_grid_evidence
-from enterprise_pdf_rag.processing.table_models import TableIR
-from enterprise_pdf_rag.processing.typed_ir import DiagramIR, LiteralQualification
+from ragspine.extraction.evidence.figures.models import Verification
+from ragspine.extraction.evidence.objects.tables.table_grid_proof import (
+    GRID_SCOPE,
+    strip_grid_evidence,
+)
+from ragspine.extraction.evidence.objects.tables.table_models import TableIR
+from ragspine.extraction.evidence.objects.typed_ir import DiagramIR, LiteralQualification
+from ragspine.extraction.evidence.page.models import ObjectKind, StageState
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
     DIAGRAM_DESCRIPTION,
     DOCUMENT_LABEL,

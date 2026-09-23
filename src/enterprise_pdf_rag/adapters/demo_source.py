@@ -9,7 +9,7 @@ from dataclasses import replace
 from xml.etree import ElementTree
 
 from enterprise_pdf_rag.adapters.pdfspine_figure import PdfspineFigureParser
-from enterprise_pdf_rag.figures.models import SvgArtifact, Verification
+from ragspine.extraction.evidence.figures.models import SvgArtifact, Verification
 
 
 def make_demo_figure() -> tuple[bytes, SvgArtifact]:

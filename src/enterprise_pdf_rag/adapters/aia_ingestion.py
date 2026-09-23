@@ -11,10 +11,10 @@ from pydantic import TypeAdapter
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.source_review_html import render_index, render_page
 from enterprise_pdf_rag.documents.aia import AIA_SPEC
-from enterprise_pdf_rag.documents.models import DocumentSnapshot, TextSidecar
-from enterprise_pdf_rag.documents.ports import SourceExtractor
-from enterprise_pdf_rag.documents.service import ingest_document
 from ragspine.common.evidence.settings import DATA_DIR
+from ragspine.extraction.evidence.document.models import DocumentSnapshot, TextSidecar
+from ragspine.extraction.evidence.document.ports import SourceExtractor
+from ragspine.extraction.evidence.document.service import ingest_document
 
 AIA_OUTPUT = DATA_DIR / "output" / "aia-2026-interim"
 AIA_INPUT = DATA_DIR / "samples" / AIA_SPEC.filename

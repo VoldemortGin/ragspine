@@ -8,7 +8,7 @@ from httpx2 import ASGITransport, AsyncClient
 
 from enterprise_pdf_rag.adapters.http.app import create_app
 from enterprise_pdf_rag.adapters.memory import MemoryFigureRepository
-from enterprise_pdf_rag.figures.models import ChartIR, ExecutionMode
+from ragspine.extraction.evidence.figures.models import ChartIR, ExecutionMode
 
 
 def test_model_and_nonstream_completion_return_real_demo_evidence() -> None:

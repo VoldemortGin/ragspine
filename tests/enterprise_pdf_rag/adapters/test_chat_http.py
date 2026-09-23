@@ -31,17 +31,17 @@ from enterprise_pdf_rag.adapters.tree_retrieval import TreeRouteDTO
 from enterprise_pdf_rag.answers.models import AnswerRequest
 from enterprise_pdf_rag.answers.prompt import ModelAnswer, ModelClaim
 from enterprise_pdf_rag.answers.verify import verify_claims
-from enterprise_pdf_rag.figures.ports import EmbeddingPort
 from enterprise_pdf_rag.processing.context_builder import build_context_block
-from enterprise_pdf_rag.processing.document_tree import (
+from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
+from ragspine.common.evidence.providers.providers import LLMConfig, LocalModelConfig
+from ragspine.common.evidence.settings import get_settings
+from ragspine.extraction.evidence.figures.ports import EmbeddingPort
+from ragspine.extraction.evidence.metadata.document_tree import (
     DOCUMENT_TREE_SCHEMA,
     DocumentTree,
     TreeNode,
 )
-from enterprise_pdf_rag.processing.models import StageState
-from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
-from ragspine.common.evidence.providers.providers import LLMConfig, LocalModelConfig
-from ragspine.common.evidence.settings import get_settings
+from ragspine.extraction.evidence.page.models import StageState
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
     publish_generic_document,
 )

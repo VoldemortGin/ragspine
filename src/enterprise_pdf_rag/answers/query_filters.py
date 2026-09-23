@@ -11,7 +11,7 @@ from collections import Counter
 from collections.abc import Collection, Iterable
 
 from enterprise_pdf_rag.answers.models import MemberFilters
-from enterprise_pdf_rag.processing.periods import find_periods, period_year
+from ragspine.extraction.evidence.metadata.periods import find_periods, period_year
 
 _CJK = re.compile(r"[㐀-鿿]{2,}")
 _LATIN = re.compile(r"[A-Za-z][A-Za-z&'.-]{2,}")

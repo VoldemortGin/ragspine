@@ -16,20 +16,20 @@ from enterprise_pdf_rag.adapters.http.aia_review import create_aia_app
 from enterprise_pdf_rag.adapters.object_processing import ProcessingObjectAdapter
 from enterprise_pdf_rag.adapters.processing_retrieval import ProcessingRetrieval
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.documents.models import DocumentSpec
-from enterprise_pdf_rag.figures.models import Confidence
-from enterprise_pdf_rag.processing.models import (
-    LayoutObject,
-    ObjectKind,
-    PageInput,
-    PagePartition,
-)
 from ragspine.common.evidence.providers.local_models import LocalEmbeddingAdapter
 from ragspine.common.evidence.providers.providers import (
     ProviderRequestError,
     load_local_model_config,
 )
 from ragspine.common.evidence.settings import get_settings
+from ragspine.extraction.evidence.document.models import DocumentSpec
+from ragspine.extraction.evidence.figures.models import Confidence
+from ragspine.extraction.evidence.page.models import (
+    LayoutObject,
+    ObjectKind,
+    PageInput,
+    PagePartition,
+)
 
 
 @pytest.mark.parametrize(

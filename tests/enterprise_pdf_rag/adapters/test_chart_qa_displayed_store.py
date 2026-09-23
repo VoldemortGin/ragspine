@@ -8,11 +8,11 @@ import pytest
 
 from enterprise_pdf_rag.adapters.chart_qa_displayed import StoredDisplayResolver
 from enterprise_pdf_rag.cli import main
-from enterprise_pdf_rag.figures.chart_qa.displayed_models import (
+from ragspine.extraction.evidence.figures.chart_qa.displayed_models import (
     DisplayedRefusal,
     DisplayedRefusalReason,
 )
-from enterprise_pdf_rag.figures.chart_qa.models import ChartQueryError, QueryFailure
+from ragspine.extraction.evidence.figures.chart_qa.models import ChartQueryError, QueryFailure
 from tests.enterprise_pdf_rag.adapters.test_chart_qa_store import published_chart
 
 

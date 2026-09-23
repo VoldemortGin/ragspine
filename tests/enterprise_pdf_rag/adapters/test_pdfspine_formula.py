@@ -8,10 +8,10 @@ import pytest
 
 from enterprise_pdf_rag.adapters.pdfspine_document import PdfspineDocumentAdapter
 from enterprise_pdf_rag.adapters.pdfspine_formula import observe_formula
-from enterprise_pdf_rag.documents.models import AssetRef, Bounds, TextSidecar
-from enterprise_pdf_rag.figures.models import Confidence
-from enterprise_pdf_rag.processing.formula_rules import IDENTITY, rise_of
-from enterprise_pdf_rag.processing.models import LayoutObject, ObjectKind, PageInput
+from ragspine.extraction.evidence.document.models import AssetRef, Bounds, TextSidecar
+from ragspine.extraction.evidence.figures.models import Confidence
+from ragspine.extraction.evidence.objects.formulas.formula_rules import IDENTITY, rise_of
+from ragspine.extraction.evidence.page.models import LayoutObject, ObjectKind, PageInput
 from tests.enterprise_pdf_rag.adapters.formula_fixture import rise_formula_pdf
 from tests.enterprise_pdf_rag.adapters.test_pdf_ingestion import (
     FORMULA_FRACTION_BBOX,

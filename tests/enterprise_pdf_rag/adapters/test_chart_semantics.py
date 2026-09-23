@@ -14,14 +14,14 @@ from enterprise_pdf_rag.adapters.chart_semantics import (
     ModelDescriptionGenerator,
 )
 from enterprise_pdf_rag.adapters.figure_reasoning import PreparedFigure, prepare_figure
-from enterprise_pdf_rag.documents.models import AssetRef, TextSidecar, TextSpan
-from enterprise_pdf_rag.figures.models import ExecutionMode, ValueKind, Verification
-from enterprise_pdf_rag.processing.models import PageInput
 from ragspine.common.evidence.providers.json_completion import (
     JsonCompletionClient,
     JsonCompletionError,
 )
 from ragspine.common.evidence.providers.providers import load_llm_config
+from ragspine.extraction.evidence.document.models import AssetRef, TextSidecar, TextSpan
+from ragspine.extraction.evidence.figures.models import ExecutionMode, ValueKind, Verification
+from ragspine.extraction.evidence.page.models import PageInput
 
 
 def _prepared(

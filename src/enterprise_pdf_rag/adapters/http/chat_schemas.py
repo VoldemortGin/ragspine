@@ -26,8 +26,8 @@ from enterprise_pdf_rag.answers.models import (
     VerifiedClaim,
 )
 from enterprise_pdf_rag.answers.query_mode import QueryMode
-from enterprise_pdf_rag.figures.chart_qa.models import FieldCitation
 from enterprise_pdf_rag.processing.context_builder import BlockKind
+from ragspine.extraction.evidence.figures.chart_qa.models import FieldCitation
 
 _FilterValue = Annotated[str, Field(min_length=1, max_length=64)]
 

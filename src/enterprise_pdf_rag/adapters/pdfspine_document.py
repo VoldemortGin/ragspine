@@ -10,7 +10,7 @@ from enterprise_pdf_rag.adapters.pdfspine_svg import (
     crop_native_svg,
     validate_native_svg,
 )
-from enterprise_pdf_rag.documents.models import (
+from ragspine.extraction.evidence.document.models import (
     Bounds,
     DocumentExtraction,
     PageExtraction,
@@ -18,7 +18,7 @@ from enterprise_pdf_rag.documents.models import (
     TextLayerDiagnostic,
     TextSpan,
 )
-from enterprise_pdf_rag.documents.text_layer import diagnose_text_layer, is_garbled_text
+from ragspine.extraction.evidence.document.text_layer import diagnose_text_layer, is_garbled_text
 
 _RECORDS = TypeAdapter(list[dict[str, object]], config=ConfigDict(strict=True))
 _BOUNDS = TypeAdapter(tuple[FiniteFloat, FiniteFloat, FiniteFloat, FiniteFloat])

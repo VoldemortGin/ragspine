@@ -8,7 +8,7 @@ from enterprise_pdf_rag.adapters.document_catalog import mount_document, scan_ca
 from enterprise_pdf_rag.adapters.processing_retrieval import PROJECTED_CHART_POLICIES
 from enterprise_pdf_rag.adapters.processing_runtime import PROCESSING_OUTPUT
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.processing.models import ObjectKind
+from ragspine.extraction.evidence.page.models import ObjectKind
 from tests.enterprise_pdf_rag.processing.test_persistent_retrieval import RecordingEmbedding
 
 # Only this test names the AIA location; the catalog itself learns it from configuration.

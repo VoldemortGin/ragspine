@@ -5,7 +5,7 @@ from xml.etree import ElementTree
 import pdfspine
 
 from enterprise_pdf_rag.adapters.pdfspine_figure import PdfspineFigureParser
-from enterprise_pdf_rag.figures.models import Verification
+from ragspine.extraction.evidence.figures.models import Verification
 
 
 def labelled_chart_pdf() -> bytes:

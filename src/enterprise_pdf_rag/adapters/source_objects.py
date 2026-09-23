@@ -1,14 +1,12 @@
 """Ground literal text projections separately from inferred financial relationships."""
 
-from enterprise_pdf_rag.figures.models import Confidence, SourceAnchor, Verification
-from enterprise_pdf_rag.processing.geometry import contains
-from enterprise_pdf_rag.processing.models import LayoutObject, ObjectKind, PageInput
-from enterprise_pdf_rag.processing.table_models import TableIR
-from enterprise_pdf_rag.processing.table_transcription import (
+from ragspine.extraction.evidence.figures.models import Confidence, SourceAnchor, Verification
+from ragspine.extraction.evidence.objects.tables.table_models import TableIR
+from ragspine.extraction.evidence.objects.tables.table_transcription import (
     check_table_transcription,
     table_span_ids,
 )
-from enterprise_pdf_rag.processing.typed_ir import (
+from ragspine.extraction.evidence.objects.typed_ir import (
     GroupIR,
     ListIR,
     ObjectDescription,
@@ -16,6 +14,8 @@ from enterprise_pdf_rag.processing.typed_ir import (
     SourceObjectResult,
     TextIR,
 )
+from ragspine.extraction.evidence.page.geometry import contains
+from ragspine.extraction.evidence.page.models import LayoutObject, ObjectKind, PageInput
 
 _LITERAL_PRODUCER = "exact-source-transcription-v1"
 _LITERAL_CONFIDENCE = Confidence(

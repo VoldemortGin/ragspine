@@ -10,14 +10,14 @@ from enterprise_pdf_rag.adapters.processing_retrieval import (
     PROJECTED_CHART_POLICIES,
     VISUAL_PROJECTION_POLICIES,
 )
-from enterprise_pdf_rag.documents.models import AssetRef
-from enterprise_pdf_rag.processing.models import ObjectKind, ProcessingScope
 from enterprise_pdf_rag.processing.retrieval import (
     PinnedRetrievalHit,
     RetrievalMember,
     RetrievalPlan,
     resolve_member,
 )
+from ragspine.extraction.evidence.document.models import AssetRef
+from ragspine.extraction.evidence.page.models import ObjectKind, ProcessingScope
 
 _V4_POLICY = "source-transcription-and-scoped-chart-qualification-v4"
 

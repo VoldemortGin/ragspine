@@ -15,8 +15,13 @@ from enterprise_pdf_rag.adapters.visual_semantic_schemas import (
     VisualDescriptionDTO,
     VisualEvidenceDTO,
 )
-from enterprise_pdf_rag.documents.models import Bounds, TextSpan
-from enterprise_pdf_rag.figures.models import (
+from ragspine.common.evidence.providers.json_completion import (
+    JsonCompletionClient,
+    JsonCompletionError,
+    JsonCompletionResult,
+)
+from ragspine.extraction.evidence.document.models import Bounds, TextSpan
+from ragspine.extraction.evidence.figures.models import (
     Confidence,
     EvidenceKind,
     SourceAnchor,
@@ -25,9 +30,7 @@ from enterprise_pdf_rag.figures.models import (
     Verification,
     content_id,
 )
-from enterprise_pdf_rag.processing.geometry import contains
-from enterprise_pdf_rag.processing.models import LayoutObject, ObjectKind, PageInput
-from enterprise_pdf_rag.processing.typed_ir import (
+from ragspine.extraction.evidence.objects.typed_ir import (
     DiagramEdge,
     DiagramIR,
     DiagramNode,
@@ -36,11 +39,8 @@ from enterprise_pdf_rag.processing.typed_ir import (
     ObjectDescription,
     ObservedText,
 )
-from ragspine.common.evidence.providers.json_completion import (
-    JsonCompletionClient,
-    JsonCompletionError,
-    JsonCompletionResult,
-)
+from ragspine.extraction.evidence.page.geometry import contains
+from ragspine.extraction.evidence.page.models import LayoutObject, ObjectKind, PageInput
 
 type VisualIR = DiagramIR | ImageIR | FormulaIR
 type VisualDTO = DiagramObservationsDTO | ImageObservationsDTO | FormulaObservationsDTO

@@ -20,27 +20,10 @@ from enterprise_pdf_rag.adapters.formula_qualification import (
 )
 from enterprise_pdf_rag.adapters.literal_qualification import validate_literal_member
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.documents.models import AssetRef, Bounds
-from enterprise_pdf_rag.figures.models import (
-    ChartIR,
-    FigureQualification,
-    TextDescription,
-)
-from enterprise_pdf_rag.figures.ports import EmbeddingPort
-from enterprise_pdf_rag.processing.diagram_models import DiagramQualification
-from enterprise_pdf_rag.processing.formula_models import FormulaQualification
 from enterprise_pdf_rag.processing.index_text import (
     PageIndexContext,
     contextual_index_text,
     member_index_text,
-)
-from enterprise_pdf_rag.processing.models import (
-    ObjectKind,
-    ObjectProcessingRecord,
-    ProcessingScope,
-    RetrievalPublication,
-    StageOutcome,
-    StageState,
 )
 from enterprise_pdf_rag.processing.retrieval import (
     IndexEntry,
@@ -53,8 +36,17 @@ from enterprise_pdf_rag.processing.retrieval import (
     resolve_member,
     retrieval_dependencies,
 )
-from enterprise_pdf_rag.processing.table_models import TableIR
-from enterprise_pdf_rag.processing.typed_ir import (
+from ragspine.extraction.evidence.document.models import AssetRef, Bounds
+from ragspine.extraction.evidence.figures.models import (
+    ChartIR,
+    FigureQualification,
+    TextDescription,
+)
+from ragspine.extraction.evidence.figures.ports import EmbeddingPort
+from ragspine.extraction.evidence.objects.diagrams.diagram_models import DiagramQualification
+from ragspine.extraction.evidence.objects.formulas.formula_models import FormulaQualification
+from ragspine.extraction.evidence.objects.tables.table_models import TableIR
+from ragspine.extraction.evidence.objects.typed_ir import (
     DiagramIR,
     FormulaIR,
     GroupIR,
@@ -62,6 +54,14 @@ from enterprise_pdf_rag.processing.typed_ir import (
     LiteralQualification,
     ObjectDescription,
     TextIR,
+)
+from ragspine.extraction.evidence.page.models import (
+    ObjectKind,
+    ObjectProcessingRecord,
+    ProcessingScope,
+    RetrievalPublication,
+    StageOutcome,
+    StageState,
 )
 
 # v2 admits Table members whose literal transcription qualified; v3 embeds the chart

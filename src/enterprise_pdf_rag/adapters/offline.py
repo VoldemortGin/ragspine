@@ -10,7 +10,7 @@ from decimal import Decimal
 from math import sqrt
 from xml.etree import ElementTree
 
-from enterprise_pdf_rag.figures.models import (
+from ragspine.extraction.evidence.figures.models import (
     ChartAxis,
     ChartIR,
     ChartPoint,

@@ -19,10 +19,10 @@ from enterprise_pdf_rag.adapters.document_tree_extraction import (
 from enterprise_pdf_rag.adapters.http.processing_schemas import DocumentTreeRecord
 from enterprise_pdf_rag.adapters.pdf_ingestion import ingest_pdf
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.processing.document_tree import DocumentTree
-from enterprise_pdf_rag.processing.models import StageState
 from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
 from ragspine.common.evidence.providers.providers import LLMConfig
+from ragspine.extraction.evidence.metadata.document_tree import DocumentTree
+from ragspine.extraction.evidence.page.models import StageState
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import PROVIDER_BASE_URL
 from tests.enterprise_pdf_rag.adapters.test_pdf_ingestion import authored_pdf
 

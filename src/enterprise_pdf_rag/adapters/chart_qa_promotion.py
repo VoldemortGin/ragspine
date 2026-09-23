@@ -7,20 +7,20 @@ from pydantic import TypeAdapter
 
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.documents.models import AssetRef
-from enterprise_pdf_rag.figures.chart_qa.models import QueryPin
-from enterprise_pdf_rag.processing.models import (
-    ObjectProcessingRecord,
-    RetrievalPublication,
-    StageOutcome,
-    StageState,
-)
 from enterprise_pdf_rag.processing.retrieval import (
     IndexEntry,
     RetrievalIndex,
     RetrievalMember,
     RetrievalPlan,
     retrieval_dependencies,
+)
+from ragspine.extraction.evidence.document.models import AssetRef
+from ragspine.extraction.evidence.figures.chart_qa.models import QueryPin
+from ragspine.extraction.evidence.page.models import (
+    ObjectProcessingRecord,
+    RetrievalPublication,
+    StageOutcome,
+    StageState,
 )
 
 PROMOTION_POLICY = "source-transcription-and-numeric-paint-qualification-v1"

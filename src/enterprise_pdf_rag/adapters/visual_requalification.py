@@ -33,9 +33,10 @@ from enterprise_pdf_rag.adapters.figure_reasoning import (
     prepare_figure,
 )
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.documents.models import AssetRef, DocumentSnapshot, TextSpan
-from enterprise_pdf_rag.figures.models import ChartIR, FigureError, TextDescription
-from enterprise_pdf_rag.processing.models import (
+from ragspine.extraction.evidence.document.models import AssetRef, DocumentSnapshot, TextSpan
+from ragspine.extraction.evidence.figures.models import ChartIR, FigureError, TextDescription
+from ragspine.extraction.evidence.objects.typed_ir import DiagramIR, ObjectDescription
+from ragspine.extraction.evidence.page.models import (
     ObjectKind,
     ObjectProcessingRecord,
     PageInput,
@@ -44,7 +45,6 @@ from enterprise_pdf_rag.processing.models import (
     StageOutcome,
     StageState,
 )
-from enterprise_pdf_rag.processing.typed_ir import DiagramIR, ObjectDescription
 
 REQUALIFICATION_PRODUCER = "visual-requalification-v1"
 # The stored branches one Diagram proof reads; all four must already have succeeded.

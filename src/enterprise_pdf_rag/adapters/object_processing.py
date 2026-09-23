@@ -8,20 +8,20 @@ from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.pdfspine_svg import crop_native_svg
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.source_objects import source_object_ir
-from enterprise_pdf_rag.documents.models import AssetRef, TextSidecar
-from enterprise_pdf_rag.figures.models import Verification
-from enterprise_pdf_rag.processing.geometry import contains
-from enterprise_pdf_rag.processing.models import (
+from ragspine.extraction.evidence.document.models import AssetRef, TextSidecar
+from ragspine.extraction.evidence.figures.models import Verification
+from ragspine.extraction.evidence.objects.typed_ir import (
+    LiteralQualification,
+    ObjectDescription,
+)
+from ragspine.extraction.evidence.page.geometry import contains
+from ragspine.extraction.evidence.page.models import (
     LayoutObject,
     ObjectKind,
     ObjectProcessingRecord,
     PageInput,
     StageOutcome,
     StageState,
-)
-from enterprise_pdf_rag.processing.typed_ir import (
-    LiteralQualification,
-    ObjectDescription,
 )
 
 

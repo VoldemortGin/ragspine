@@ -17,13 +17,17 @@ from enterprise_pdf_rag.adapters.page_metadata_extraction import (
 )
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.cli import main
-from enterprise_pdf_rag.processing.document_metadata import DocumentMetadata
 from enterprise_pdf_rag.processing.index_text import PageIndexContext
-from enterprise_pdf_rag.processing.models import StageState
-from enterprise_pdf_rag.processing.page_metadata import MetadataValue, PageMetadata, PageType
 from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit
 from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
 from ragspine.common.evidence.providers.providers import load_llm_config
+from ragspine.extraction.evidence.metadata.document_metadata import DocumentMetadata
+from ragspine.extraction.evidence.metadata.page_metadata import (
+    MetadataValue,
+    PageMetadata,
+    PageType,
+)
+from ragspine.extraction.evidence.page.models import StageState
 from tests.enterprise_pdf_rag.adapters.page_metadata_helpers import (
     ingest_with_metadata,
     publish_with_metadata,

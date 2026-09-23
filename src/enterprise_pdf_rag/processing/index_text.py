@@ -13,9 +13,12 @@ Nothing here reads a store.
 from dataclasses import dataclass
 from decimal import Decimal
 
-from enterprise_pdf_rag.figures.models import ChartIR, ChartPoint, ValueKind
-from enterprise_pdf_rag.processing.diagram_description import EDGE_ARROW, reading_order
-from enterprise_pdf_rag.processing.typed_ir import DiagramIR, FormulaIR, TypedIR
+from ragspine.extraction.evidence.figures.models import ChartIR, ChartPoint, ValueKind
+from ragspine.extraction.evidence.objects.diagrams.diagram_description import (
+    EDGE_ARROW,
+    reading_order,
+)
+from ragspine.extraction.evidence.objects.typed_ir import DiagramIR, FormulaIR, TypedIR
 
 
 @dataclass(frozen=True, slots=True)

@@ -25,7 +25,7 @@ from enterprise_pdf_rag.adapters.http.webui_gate import (
     normalize_demo_question,
 )
 from enterprise_pdf_rag.adapters.runtime import Runtime
-from enterprise_pdf_rag.figures.models import ReasoningView
+from ragspine.extraction.evidence.figures.models import ReasoningView
 
 
 def _render(view: ReasoningView) -> str:

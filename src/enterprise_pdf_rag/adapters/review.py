@@ -3,7 +3,7 @@
 from html import escape
 from pathlib import Path
 
-from enterprise_pdf_rag.figures.models import SvgArtifact
+from ragspine.extraction.evidence.figures.models import SvgArtifact
 
 
 def write_review(artifact: SvgArtifact, output: Path) -> None:

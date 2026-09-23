@@ -2,7 +2,7 @@
 
 Date: 2026-09-19. Execution: Python 3.12.11, locked uv environment, offline tests. This records observed failures and subsequent passing behaviors; it is not a model quality qualification.
 
-covers: src/enterprise_pdf_rag/adapters/pdfspine_figure.py, src/enterprise_pdf_rag/adapters/runtime.py, src/enterprise_pdf_rag/adapters/http/app.py, src/enterprise_pdf_rag/figures/service.py, tests/enterprise_pdf_rag/adapters/test_entries.py
+covers: src/enterprise_pdf_rag/adapters/pdfspine_figure.py, src/enterprise_pdf_rag/adapters/runtime.py, src/enterprise_pdf_rag/adapters/http/app.py, src/ragspine/extraction/evidence/figures/service.py, tests/enterprise_pdf_rag/adapters/test_entries.py
 
 | Behavior | Observed red | Observed green |
 | --- | --- | --- |

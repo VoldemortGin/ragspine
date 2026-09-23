@@ -36,31 +36,31 @@ from enterprise_pdf_rag.adapters.pdfspine_tables import PdfspineTableAdapter
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.source_objects import source_table_description
 from enterprise_pdf_rag.adapters.visual_semantics import VisualInference, VisualSemanticAdapter
-from enterprise_pdf_rag.documents.models import AssetRef, TextSidecar
-from enterprise_pdf_rag.figures.models import ChartIR, TextDescription, Verification
-from enterprise_pdf_rag.processing.formula_models import (
+from ragspine.common.evidence.providers.json_completion import (
+    JsonCompletionClient,
+    JsonCompletionError,
+)
+from ragspine.extraction.evidence.document.models import AssetRef, TextSidecar
+from ragspine.extraction.evidence.figures.models import ChartIR, TextDescription, Verification
+from ragspine.extraction.evidence.objects.formulas.formula_models import (
     FormulaQualification,
     FormulaSourceObservation,
 )
-from enterprise_pdf_rag.processing.models import (
+from ragspine.extraction.evidence.objects.tables.table_grid_proof import GRID_SCOPE
+from ragspine.extraction.evidence.objects.tables.table_models import TableExtractionResult, TableIR
+from ragspine.extraction.evidence.objects.typed_ir import (
+    DiagramIR,
+    FormulaIR,
+    LiteralQualification,
+    ObjectDescription,
+)
+from ragspine.extraction.evidence.page.models import (
     LayoutObject,
     ObjectKind,
     ObjectProcessingRecord,
     PageInput,
     StageOutcome,
     StageState,
-)
-from enterprise_pdf_rag.processing.table_grid_proof import GRID_SCOPE
-from enterprise_pdf_rag.processing.table_models import TableExtractionResult, TableIR
-from enterprise_pdf_rag.processing.typed_ir import (
-    DiagramIR,
-    FormulaIR,
-    LiteralQualification,
-    ObjectDescription,
-)
-from ragspine.common.evidence.providers.json_completion import (
-    JsonCompletionClient,
-    JsonCompletionError,
 )
 
 

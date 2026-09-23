@@ -7,13 +7,13 @@ from enterprise_pdf_rag.answers.prompt import (
     member_aliases,
     resolve_member_aliases,
 )
-from enterprise_pdf_rag.figures.models import Verification
 from enterprise_pdf_rag.processing.context_builder import (
     BlockKind,
     ContextBlock,
     PageContextBlock,
     PageContextMember,
 )
+from ragspine.extraction.evidence.figures.models import Verification
 
 SNAPSHOT = "1" * 64
 FIRST = "a" * 64

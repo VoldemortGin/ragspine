@@ -8,7 +8,7 @@ label positions. Arbitrary SVGs cannot be registered through the CLI or API.
 from xml.etree import ElementTree
 
 from enterprise_pdf_rag.adapters.demo_source import make_demo_figure
-from enterprise_pdf_rag.figures.models import (
+from ragspine.extraction.evidence.figures.models import (
     FieldOccurrence,
     FigureQualification,
     SvgArtifact,

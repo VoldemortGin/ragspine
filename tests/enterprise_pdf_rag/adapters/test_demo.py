@@ -3,7 +3,7 @@
 from decimal import Decimal
 
 from enterprise_pdf_rag.adapters.runtime import create_runtime
-from enterprise_pdf_rag.figures.models import ExecutionMode, Verification
+from ragspine.extraction.evidence.figures.models import ExecutionMode, Verification
 
 
 def test_offline_demo_retrieves_description_and_hydrates_its_chart() -> None:

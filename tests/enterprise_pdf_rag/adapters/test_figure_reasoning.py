@@ -6,10 +6,10 @@ import pytest
 from pydantic import TypeAdapter
 
 from enterprise_pdf_rag.adapters.figure_reasoning import prepare_figure, render_svg_png
-from enterprise_pdf_rag.documents.models import AssetRef, TextSidecar, TextSpan
-from enterprise_pdf_rag.figures.models import Verification
-from enterprise_pdf_rag.figures.validation import validate_svg
-from enterprise_pdf_rag.processing.models import PageInput
+from ragspine.extraction.evidence.document.models import AssetRef, TextSidecar, TextSpan
+from ragspine.extraction.evidence.figures.models import Verification
+from ragspine.extraction.evidence.figures.validation import validate_svg
+from ragspine.extraction.evidence.page.models import PageInput
 
 SVG = b'<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50" viewBox="0 0 100 50"><path d="M10 10H90V40H10Z" fill="#dc0046"/></svg>'
 

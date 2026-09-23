@@ -5,10 +5,10 @@ from decimal import Decimal
 from enum import StrEnum
 
 from enterprise_pdf_rag.answers.query_mode import FusionMode, QueryMode
-from enterprise_pdf_rag.figures.chart_qa.displayed_models import DisplayedRefusalReason
-from enterprise_pdf_rag.figures.chart_qa.models import FieldCitation, RefusalReason
 from enterprise_pdf_rag.processing.context_builder import BlockKind
 from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit
+from ragspine.extraction.evidence.figures.chart_qa.displayed_models import DisplayedRefusalReason
+from ragspine.extraction.evidence.figures.chart_qa.models import FieldCitation, RefusalReason
 
 
 class AnswerStatus(StrEnum):

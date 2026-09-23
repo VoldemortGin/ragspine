@@ -33,7 +33,13 @@ from enterprise_pdf_rag.adapters.source_paint import (
     SourcePaintProof,
     build_source_paint_proof,
 )
-from enterprise_pdf_rag.documents.models import (
+from enterprise_pdf_rag.processing.index_text import chart_index_text
+from enterprise_pdf_rag.processing.retrieval import (
+    RetrievalContext,
+    RetrievalMember,
+    require_financial_qualification,
+)
+from ragspine.extraction.evidence.document.models import (
     AssetRef,
     DocumentManifest,
     PageRecord,
@@ -41,7 +47,7 @@ from enterprise_pdf_rag.documents.models import (
     TextSidecar,
     TextSpan,
 )
-from enterprise_pdf_rag.figures.models import (
+from ragspine.extraction.evidence.figures.models import (
     ChartIR,
     DescriptionClaim,
     QualifiedFigurePair,
@@ -49,19 +55,13 @@ from enterprise_pdf_rag.figures.models import (
     TextDescription,
     Verification,
 )
-from enterprise_pdf_rag.processing.index_text import chart_index_text
-from enterprise_pdf_rag.processing.models import (
+from ragspine.extraction.evidence.page.models import (
     ObjectKind,
     ObjectProcessingRecord,
     PageInput,
     ProcessingScope,
     StageOutcome,
     StageState,
-)
-from enterprise_pdf_rag.processing.retrieval import (
-    RetrievalContext,
-    RetrievalMember,
-    require_financial_qualification,
 )
 from tests.enterprise_pdf_rag.adapters.test_donut_qualification import sample
 from tests.enterprise_pdf_rag.adapters.test_source_paint import authored_donut

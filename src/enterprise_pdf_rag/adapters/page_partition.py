@@ -7,13 +7,13 @@ from dataclasses import replace
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.figure_reasoning import render_svg_png
 from enterprise_pdf_rag.adapters.http.layout_schemas import PageLayoutDTO
-from enterprise_pdf_rag.figures.models import Confidence, content_id
-from enterprise_pdf_rag.processing.models import LayoutObject, PageInput, PagePartition
-from enterprise_pdf_rag.processing.service import (
+from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
+from ragspine.extraction.evidence.figures.models import Confidence, content_id
+from ragspine.extraction.evidence.page.models import LayoutObject, PageInput, PagePartition
+from ragspine.extraction.evidence.page.service import (
     preserve_omitted_occurrences,
     validate_partition,
 )
-from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
 
 
 def _render(data: bytes) -> bytes:

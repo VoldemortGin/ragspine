@@ -11,7 +11,7 @@ from hashlib import sha256
 from math import atan2, hypot, isfinite, pi
 from xml.etree import ElementTree
 
-from enterprise_pdf_rag.documents.models import Bounds, TextSpan
+from ragspine.extraction.evidence.document.models import Bounds, TextSpan
 
 type Point = tuple[float, float]
 type Matrix = tuple[float, float, float, float, float, float]

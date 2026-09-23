@@ -15,6 +15,20 @@ All notable changes to RAGSpine are documented here. This project follows Semant
   from the same map. The strict ruff set and mypy's `warn_unreachable` / `ignore-without-code` now
   follow `**/evidence/**` and `ragspine.*.evidence.*`, so moved code keeps them.
 
+### Changed
+
+- **The evidence chain's pure extraction packages moved to `ragspine.extraction.evidence`**
+  (ADR 0022). `enterprise_pdf_rag.documents` (all but the pending `aia` module),
+  `enterprise_pdf_rag.figures` (with `chart_qa`) and the extraction half of
+  `enterprise_pdf_rag.processing` now live under `document/`, `figures/`, `page/`, `metadata/`
+  and `objects/{tables,diagrams,formulas}/`; the legacy names still import, as the same module
+  objects, with a `DeprecationWarning`. **Schema `$defs` rename, payloads unchanged:** in
+  `aia-processing-v1` and `document-catalog-v1` (and the FastAPI OpenAPI components) the two
+  module-qualified keys `enterprise_pdf_rag__processing__{diagram,formula}_models__PathEvidence`
+  are now `ragspine__extraction__evidence__objects__{diagrams__diagram,formulas__formula}_models__PathEvidence`;
+  substituting the new key for the old one makes each regenerated schema equal to the old one,
+  so no wire payload changes.
+
 ## [0.16.1] - 2026-09-22
 
 ### Changed

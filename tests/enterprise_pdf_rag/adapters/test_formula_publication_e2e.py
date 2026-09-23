@@ -19,17 +19,17 @@ from enterprise_pdf_rag.adapters.processing_retrieval import ProcessingRetrieval
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.answers.models import AbstainReason, AnswerRequest, AnswerStatus, ClaimKind
 from enterprise_pdf_rag.answers.prompt import ModelAnswer, ModelClaim
-from enterprise_pdf_rag.figures.models import Verification
 from enterprise_pdf_rag.processing.context_builder import BlockKind, build_context_block
-from enterprise_pdf_rag.processing.formula_models import FormulaQualification
-from enterprise_pdf_rag.processing.models import (
+from enterprise_pdf_rag.processing.retrieval import RetrievalPlan
+from ragspine.extraction.evidence.figures.models import Verification
+from ragspine.extraction.evidence.objects.formulas.formula_models import FormulaQualification
+from ragspine.extraction.evidence.objects.typed_ir import FormulaIR
+from ragspine.extraction.evidence.page.models import (
     ObjectKind,
     ObjectProcessingRecord,
     ProcessingManifest,
     StageState,
 )
-from enterprise_pdf_rag.processing.retrieval import RetrievalPlan
-from enterprise_pdf_rag.processing.typed_ir import FormulaIR
 from tests.enterprise_pdf_rag.adapters.formula_fixture import rise_formula_pdf
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
     PROVIDER_BASE_URL,

@@ -40,8 +40,8 @@ from enterprise_pdf_rag.adapters.source_profile import (
     SourceProfileReceipt,
     read_source_profile,
 )
-from enterprise_pdf_rag.documents.models import AssetRef, Bounds, TextSidecar, TextSpan
-from enterprise_pdf_rag.processing.models import PageInput
+from ragspine.extraction.evidence.document.models import AssetRef, Bounds, TextSidecar, TextSpan
+from ragspine.extraction.evidence.page.models import PageInput
 
 type Command = tuple[str, tuple[float, ...]]
 type Glyph = tuple[str, int, int | None, Point, tuple[float, ...], Matrix]

@@ -13,7 +13,7 @@ from enterprise_pdf_rag.adapters.visual_requalification import (
     ObjectRequalification,
     requalify_visual_objects,
 )
-from enterprise_pdf_rag.processing.models import ObjectKind
+from ragspine.extraction.evidence.page.models import ObjectKind
 
 _PROCESSING = AIA_OUTPUT / "pages-001-020"
 _POINTER = _PROCESSING / "current-processing"

@@ -13,20 +13,20 @@ from enterprise_pdf_rag.adapters.figure_label_qualification import (
 from enterprise_pdf_rag.answers.models import AbstainReason, ClaimKind
 from enterprise_pdf_rag.answers.prompt import ModelAnswer, ModelClaim
 from enterprise_pdf_rag.answers.verify import _POINT_SCOPE, ClaimVerification, verify_claims
-from enterprise_pdf_rag.figures.chart_qa.models import (
+from enterprise_pdf_rag.processing.context_builder import BlockKind, ContextBlock
+from ragspine.extraction.evidence.figures.chart_qa.models import (
     ChartContext,
     ChartQueryError,
     QueryFailure,
     QueryPin,
 )
-from enterprise_pdf_rag.figures.models import (
+from ragspine.extraction.evidence.figures.models import (
     FieldOccurrence,
     NumericObservation,
     SvgArtifact,
     ValueKind,
     Verification,
 )
-from enterprise_pdf_rag.processing.context_builder import BlockKind, ContextBlock
 from tests.enterprise_pdf_rag.adapters.test_donut_qualification import sample
 
 MEMBER = "b" * 64

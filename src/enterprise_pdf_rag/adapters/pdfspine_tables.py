@@ -6,17 +6,15 @@ from math import isfinite
 
 import pdfspine
 
-from enterprise_pdf_rag.documents.models import Bounds
-from enterprise_pdf_rag.figures.models import SourceAnchor, content_id
-from enterprise_pdf_rag.processing.geometry import COORDINATE_TOLERANCE, Axis, Segment
-from enterprise_pdf_rag.processing.models import LayoutObject, ObjectKind, PageInput
-from enterprise_pdf_rag.processing.table_grid_proof import (
+from ragspine.extraction.evidence.document.models import Bounds
+from ragspine.extraction.evidence.figures.models import SourceAnchor, content_id
+from ragspine.extraction.evidence.objects.tables.table_grid_proof import (
     GRID_SCOPE,
     GridRejection,
     prove_grid,
     verified_table,
 )
-from enterprise_pdf_rag.processing.table_models import (
+from ragspine.extraction.evidence.objects.tables.table_models import (
     CellContentState,
     SlotState,
     TableCell,
@@ -24,6 +22,8 @@ from enterprise_pdf_rag.processing.table_models import (
     TableIR,
     TableSlot,
 )
+from ragspine.extraction.evidence.page.geometry import COORDINATE_TOLERANCE, Axis, Segment
+from ragspine.extraction.evidence.page.models import LayoutObject, ObjectKind, PageInput
 
 # pdfspine's own ``find_tables(line_max_thickness=3.0)`` default: what it will not treat
 # as a ruling, we do not treat as one either.

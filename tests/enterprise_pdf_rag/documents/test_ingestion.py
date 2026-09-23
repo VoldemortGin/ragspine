@@ -4,8 +4,8 @@ from hashlib import sha256
 
 import pytest
 
-from enterprise_pdf_rag.documents.models import DocumentSpec
-from enterprise_pdf_rag.documents.service import verify_source
+from ragspine.extraction.evidence.document.models import DocumentSpec
+from ragspine.extraction.evidence.document.service import verify_source
 
 
 def test_other_pdf_is_rejected_before_any_parser_or_storage_work() -> None:
@@ -20,13 +20,13 @@ def test_complete_source_assets_survive_a_store_reopen(tmp_path: object) -> None
     from pathlib import Path
 
     from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
-    from enterprise_pdf_rag.documents.models import (
+    from ragspine.extraction.evidence.document.models import (
         DocumentExtraction,
         PageExtraction,
         RegionExtraction,
         TextSpan,
     )
-    from enterprise_pdf_rag.documents.service import ingest_document
+    from ragspine.extraction.evidence.document.service import ingest_document
 
     assert isinstance(tmp_path, Path)
     source = b"selected PDF"
@@ -102,13 +102,13 @@ def test_non_finite_geometry_cannot_advance_current_manifest(
     prepared_source: tuple[object, DocumentSpec],
 ) -> None:
     from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
-    from enterprise_pdf_rag.documents.models import (
+    from ragspine.extraction.evidence.document.models import (
         Bounds,
         DocumentExtraction,
         PageExtraction,
         RegionExtraction,
     )
-    from enterprise_pdf_rag.documents.service import ingest_document
+    from ragspine.extraction.evidence.document.service import ingest_document
 
     store, spec = prepared_source
     assert isinstance(store, LocalDocumentStore)

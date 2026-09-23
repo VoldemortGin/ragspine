@@ -15,7 +15,7 @@ from enterprise_pdf_rag.adapters.donut_geometry import _inside, _intersects
 from enterprise_pdf_rag.adapters.source_paint import GlyphPaintProof
 from enterprise_pdf_rag.adapters.source_paint_bar import BarVectorPaint
 from enterprise_pdf_rag.adapters.stroke_visibility import PathCommand
-from enterprise_pdf_rag.documents.models import Bounds, TextSpan
+from ragspine.extraction.evidence.document.models import Bounds, TextSpan
 
 _PERCENT = re.compile(r"[0-9]+(?:\.[0-9]+)?%")
 _PERIOD = re.compile(r"[12]H[0-9]{2}")

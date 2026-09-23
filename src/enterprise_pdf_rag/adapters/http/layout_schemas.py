@@ -3,7 +3,7 @@
 from pydantic import Field
 
 from enterprise_pdf_rag.adapters.http.schemas import BoundaryModel
-from enterprise_pdf_rag.processing.models import ObjectKind
+from ragspine.extraction.evidence.page.models import ObjectKind
 
 
 class LayoutRegionDTO(BoundaryModel):

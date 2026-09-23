@@ -15,11 +15,11 @@ from enterprise_pdf_rag.adapters.chart_qa_v2_evaluation_models import (
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.source_publication import validate_processing_source
-from enterprise_pdf_rag.figures.chart_qa.displayed_models import (
+from ragspine.extraction.evidence.figures.chart_qa.displayed_models import (
     DescriptionNormalizationCitation,
 )
-from enterprise_pdf_rag.figures.chart_qa.models import QueryPin
-from enterprise_pdf_rag.figures.models import SvgBinding
+from ragspine.extraction.evidence.figures.chart_qa.models import QueryPin
+from ragspine.extraction.evidence.figures.models import SvgBinding
 
 
 def source_qualified_capture_target(

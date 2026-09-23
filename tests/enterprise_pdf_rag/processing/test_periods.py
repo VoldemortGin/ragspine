@@ -2,7 +2,7 @@
 
 import pytest
 
-from enterprise_pdf_rag.processing.periods import (
+from ragspine.extraction.evidence.metadata.periods import (
     find_periods,
     normalize_period,
     period_matches,

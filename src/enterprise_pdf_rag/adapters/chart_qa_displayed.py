@@ -9,19 +9,19 @@ from enterprise_pdf_rag.adapters.chart_member_validation import (
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.source_publication import validate_processing_source
-from enterprise_pdf_rag.figures.chart_qa.displayed_models import (
+from enterprise_pdf_rag.processing.retrieval import RetrievalMember
+from ragspine.extraction.evidence.figures.chart_qa.displayed_models import (
     DisplayedLookupContext,
     DisplayedRefusal,
     DisplayedRefusalReason,
     ValidatedDisplayedBar,
 )
-from enterprise_pdf_rag.figures.chart_qa.models import (
+from ragspine.extraction.evidence.figures.chart_qa.models import (
     ChartQueryError,
     QueryFailure,
     QueryPin,
 )
-from enterprise_pdf_rag.processing.models import ObjectKind, ProcessingScope
-from enterprise_pdf_rag.processing.retrieval import RetrievalMember
+from ragspine.extraction.evidence.page.models import ObjectKind, ProcessingScope
 
 
 @runtime_checkable

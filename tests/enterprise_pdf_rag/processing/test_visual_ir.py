@@ -5,7 +5,7 @@ from dataclasses import FrozenInstanceError
 import pytest
 from pydantic import TypeAdapter
 
-from enterprise_pdf_rag.processing.typed_ir import DiagramEdge
+from ragspine.extraction.evidence.objects.typed_ir import DiagramEdge
 
 
 def test_diagram_edge_source_occurrences_survive_serialization_and_are_immutable() -> None:

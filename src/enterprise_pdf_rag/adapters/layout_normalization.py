@@ -3,14 +3,14 @@
 from dataclasses import replace
 
 from enterprise_pdf_rag.adapters.aia_candidates import SOURCE_SHA256, candidates_for
-from enterprise_pdf_rag.figures.models import Confidence, Verification
-from enterprise_pdf_rag.processing.models import (
+from ragspine.extraction.evidence.figures.models import Confidence, Verification
+from ragspine.extraction.evidence.page.models import (
     LayoutObject,
     ObjectKind,
     PageInput,
     PagePartition,
 )
-from enterprise_pdf_rag.processing.service import validate_partition
+from ragspine.extraction.evidence.page.service import validate_partition
 
 NORMALIZATION_VERSION = "layout-normalization-v2"
 _P18_LOCKED_REGION = "aia-p018-distribution-mix-v1"

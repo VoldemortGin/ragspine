@@ -28,21 +28,22 @@ from enterprise_pdf_rag.adapters.source_paint_bar import (
     prove_page_context,
     verify_bar_source_paint_proof,
 )
-from enterprise_pdf_rag.documents.models import AssetRef, Bounds
-from enterprise_pdf_rag.figures.chart_qa.displayed_evidence import ACTUAL_FX_CONTEXT
-from enterprise_pdf_rag.figures.chart_qa.displayed_models import (
+from enterprise_pdf_rag.processing.retrieval import RetrievalMember
+from ragspine.extraction.evidence.document.models import AssetRef, Bounds
+from ragspine.extraction.evidence.figures.chart_qa.displayed_evidence import ACTUAL_FX_CONTEXT
+from ragspine.extraction.evidence.figures.chart_qa.displayed_models import (
     DescriptionNormalizationCitation,
     PageContextCitation,
     PointPeriodInterpretation,
     ValidatedDisplayedBar,
 )
-from enterprise_pdf_rag.figures.models import (
+from ragspine.extraction.evidence.figures.models import (
     ChartIR,
     FigureQualification,
     TextDescription,
     Verification,
 )
-from enterprise_pdf_rag.processing.models import (
+from ragspine.extraction.evidence.page.models import (
     LayoutObject,
     ObjectKind,
     ObjectProcessingRecord,
@@ -50,7 +51,6 @@ from enterprise_pdf_rag.processing.models import (
     ProcessingScope,
     StageState,
 )
-from enterprise_pdf_rag.processing.retrieval import RetrievalMember
 
 
 class BarPublicationReceipt(BaseModel):

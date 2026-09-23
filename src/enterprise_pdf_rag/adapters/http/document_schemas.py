@@ -4,7 +4,7 @@ from pydantic import Field
 
 from enterprise_pdf_rag.adapters.http.openai_schemas import ChatMessage, StreamOptions
 from enterprise_pdf_rag.adapters.http.schemas import BoundaryModel
-from enterprise_pdf_rag.documents.models import DocumentManifest, TextSidecar
+from ragspine.extraction.evidence.document.models import DocumentManifest, TextSidecar
 
 
 class ManifestEnvelope(BoundaryModel):

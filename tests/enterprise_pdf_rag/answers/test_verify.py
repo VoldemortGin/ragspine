@@ -24,19 +24,6 @@ from enterprise_pdf_rag.answers.verify import (
     prose_grounded,
     verify_claims,
 )
-from enterprise_pdf_rag.figures.chart_qa.displayed_models import (
-    DisplayedLookupContext,
-    DisplayedRefusal,
-    DisplayedRefusalReason,
-)
-from enterprise_pdf_rag.figures.chart_qa.models import (
-    ChartContext,
-    ChartQueryError,
-    ChartRefusal,
-    QueryFailure,
-    RefusalReason,
-)
-from enterprise_pdf_rag.figures.models import SourceAnchor, Verification
 from enterprise_pdf_rag.processing.context_builder import (
     BlockKind,
     CellEvidence,
@@ -45,9 +32,22 @@ from enterprise_pdf_rag.processing.context_builder import (
     SpanEvidence,
     build_context_block,
 )
-from enterprise_pdf_rag.processing.models import ObjectKind
 from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit
-from enterprise_pdf_rag.processing.table_models import CellContentState
+from ragspine.extraction.evidence.figures.chart_qa.displayed_models import (
+    DisplayedLookupContext,
+    DisplayedRefusal,
+    DisplayedRefusalReason,
+)
+from ragspine.extraction.evidence.figures.chart_qa.models import (
+    ChartContext,
+    ChartQueryError,
+    ChartRefusal,
+    QueryFailure,
+    RefusalReason,
+)
+from ragspine.extraction.evidence.figures.models import SourceAnchor, Verification
+from ragspine.extraction.evidence.objects.tables.table_models import CellContentState
+from ragspine.extraction.evidence.page.models import ObjectKind
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
     DOCUMENT_LABEL,
     publish_generic_document,

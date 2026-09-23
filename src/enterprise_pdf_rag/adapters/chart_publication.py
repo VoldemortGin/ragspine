@@ -25,8 +25,9 @@ from enterprise_pdf_rag.adapters.source_paint import (
     build_source_paint_proof,
     verify_source_paint_proof,
 )
-from enterprise_pdf_rag.documents.models import AssetRef
-from enterprise_pdf_rag.figures.models import (
+from enterprise_pdf_rag.processing.retrieval import RetrievalMember
+from ragspine.extraction.evidence.document.models import AssetRef
+from ragspine.extraction.evidence.figures.models import (
     ChartIR,
     FigureError,
     FigureQualification,
@@ -34,9 +35,8 @@ from enterprise_pdf_rag.figures.models import (
     TextDescription,
     Verification,
 )
-from enterprise_pdf_rag.figures.validation import validate_pair
-from enterprise_pdf_rag.processing.models import ObjectKind, PageInput, ProcessingScope
-from enterprise_pdf_rag.processing.retrieval import RetrievalMember
+from ragspine.extraction.evidence.figures.validation import validate_pair
+from ragspine.extraction.evidence.page.models import ObjectKind, PageInput, ProcessingScope
 
 
 class _ChartReceipt(BaseModel):

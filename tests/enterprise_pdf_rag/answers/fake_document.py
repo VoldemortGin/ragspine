@@ -11,10 +11,16 @@ from dataclasses import dataclass, replace
 from decimal import Decimal
 
 from enterprise_pdf_rag.answers.ports import MemberText, MountedDocument
-from enterprise_pdf_rag.documents.models import AssetRef
-from enterprise_pdf_rag.figures.chart_qa.displayed_models import DisplayedLookupContext
-from enterprise_pdf_rag.figures.chart_qa.models import ChartContext
-from enterprise_pdf_rag.figures.models import (
+from enterprise_pdf_rag.processing.index_text import member_index_text
+from enterprise_pdf_rag.processing.retrieval import (
+    PinnedRetrievalHit,
+    RetrievalContext,
+    RetrievalMember,
+)
+from ragspine.extraction.evidence.document.models import AssetRef
+from ragspine.extraction.evidence.figures.chart_qa.displayed_models import DisplayedLookupContext
+from ragspine.extraction.evidence.figures.chart_qa.models import ChartContext
+from ragspine.extraction.evidence.figures.models import (
     ChartIR,
     ChartPoint,
     Confidence,
@@ -30,29 +36,24 @@ from enterprise_pdf_rag.figures.models import (
     ValueKind,
     Verification,
 )
-from enterprise_pdf_rag.processing.diagram_description import describe_diagram
-from enterprise_pdf_rag.processing.diagram_models import (
+from ragspine.extraction.evidence.objects.diagrams.diagram_description import describe_diagram
+from ragspine.extraction.evidence.objects.diagrams.diagram_models import (
     DiagramQualification,
     NodeEvidence,
     PathEvidence,
 )
-from enterprise_pdf_rag.processing.formula_models import (
+from ragspine.extraction.evidence.objects.formulas.formula_models import (
     FormulaQualification,
     FormulaStructure,
     FormulaToken,
     StructureKind,
     TokenRole,
 )
-from enterprise_pdf_rag.processing.formula_models import PathEvidence as FormulaPathEvidence
-from enterprise_pdf_rag.processing.formula_rules import linearize, readable_text
-from enterprise_pdf_rag.processing.index_text import member_index_text
-from enterprise_pdf_rag.processing.models import ObjectKind, ProcessingManifest
-from enterprise_pdf_rag.processing.retrieval import (
-    PinnedRetrievalHit,
-    RetrievalContext,
-    RetrievalMember,
+from ragspine.extraction.evidence.objects.formulas.formula_models import (
+    PathEvidence as FormulaPathEvidence,
 )
-from enterprise_pdf_rag.processing.typed_ir import (
+from ragspine.extraction.evidence.objects.formulas.formula_rules import linearize, readable_text
+from ragspine.extraction.evidence.objects.typed_ir import (
     DiagramEdge,
     DiagramIR,
     DiagramNode,
@@ -62,6 +63,7 @@ from enterprise_pdf_rag.processing.typed_ir import (
     ObservedText,
     TextIR,
 )
+from ragspine.extraction.evidence.page.models import ObjectKind, ProcessingManifest
 
 SNAPSHOT = "1" * 64
 DONUT_TITLE = "Distribution Mix"

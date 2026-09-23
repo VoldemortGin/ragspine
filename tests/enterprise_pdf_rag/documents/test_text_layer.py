@@ -2,8 +2,8 @@
 
 import pytest
 
-from enterprise_pdf_rag.documents.models import TextLayerDiagnostic, TextLayerStatus
-from enterprise_pdf_rag.documents.text_layer import (
+from ragspine.extraction.evidence.document.models import TextLayerDiagnostic, TextLayerStatus
+from ragspine.extraction.evidence.document.text_layer import (
     GARBLED_PAGE_MIN_RATIO,
     OUTLINED_TEXT_DRAWINGS_PER_CHAR,
     OUTLINED_TEXT_MIN_DRAWINGS,

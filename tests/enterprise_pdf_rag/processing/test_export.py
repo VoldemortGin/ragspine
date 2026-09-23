@@ -14,15 +14,15 @@ from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.http.processing_review import create_processing_router
 from enterprise_pdf_rag.adapters.processing_export import export_processing_review
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.documents.models import (
+from ragspine.extraction.evidence.document.models import (
     DocumentManifest,
     PageRecord,
     RegionRecord,
     TextSidecar,
     TextSpan,
 )
-from enterprise_pdf_rag.figures.models import Confidence
-from enterprise_pdf_rag.processing.models import (
+from ragspine.extraction.evidence.figures.models import Confidence
+from ragspine.extraction.evidence.page.models import (
     LayoutObject,
     ObjectKind,
     PageInput,

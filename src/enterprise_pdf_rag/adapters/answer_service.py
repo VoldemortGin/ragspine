@@ -46,12 +46,6 @@ from enterprise_pdf_rag.answers.query_mode import (
     is_label_query,
 )
 from enterprise_pdf_rag.answers.verify import decide, verify_claims
-from enterprise_pdf_rag.figures.chart_qa.displayed_models import (
-    DISPLAYED_BAR_SCOPE,
-    DisplayedLookupContext,
-)
-from enterprise_pdf_rag.figures.chart_qa.models import ChartContext
-from enterprise_pdf_rag.figures.models import ValueKind
 from enterprise_pdf_rag.processing.context_builder import (
     BlockKind,
     ContextBlock,
@@ -60,12 +54,18 @@ from enterprise_pdf_rag.processing.context_builder import (
     budget_blocks,
     build_context_block,
 )
-from enterprise_pdf_rag.processing.document_tree import DocumentTree
-from enterprise_pdf_rag.processing.models import ObjectKind
 from ragspine.common.evidence.providers.json_completion import (
     JsonCompletionClient,
     JsonCompletionError,
 )
+from ragspine.extraction.evidence.figures.chart_qa.displayed_models import (
+    DISPLAYED_BAR_SCOPE,
+    DisplayedLookupContext,
+)
+from ragspine.extraction.evidence.figures.chart_qa.models import ChartContext
+from ragspine.extraction.evidence.figures.models import ValueKind
+from ragspine.extraction.evidence.metadata.document_tree import DocumentTree
+from ragspine.extraction.evidence.page.models import ObjectKind
 from ragspine.retrieval.rerank.listwise_rerank import ListwiseJudge
 
 _TASK = "rag-answer-v1"

@@ -12,15 +12,28 @@ from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.object_processing import ProcessingObjectAdapter
 from enterprise_pdf_rag.adapters.processing_retrieval import ProcessingRetrieval
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.documents.models import (
+from enterprise_pdf_rag.processing.retrieval import (
+    IndexEntry,
+    RetrievalEmbedding,
+    RetrievalIndex,
+    RetrievalPlan,
+    require_financial_qualification,
+    retrieval_dependencies,
+)
+from ragspine.extraction.evidence.document.models import (
     DocumentManifest,
     PageRecord,
     RegionRecord,
     TextSidecar,
     TextSpan,
 )
-from enterprise_pdf_rag.figures.models import Confidence
-from enterprise_pdf_rag.processing.models import (
+from ragspine.extraction.evidence.figures.models import Confidence
+from ragspine.extraction.evidence.objects.typed_ir import (
+    LiteralQualification,
+    ObjectDescription,
+    TextIR,
+)
+from ragspine.extraction.evidence.page.models import (
     CanonicalPage,
     LayoutObject,
     ObjectKind,
@@ -33,20 +46,7 @@ from enterprise_pdf_rag.processing.models import (
     StageOutcome,
     StageState,
 )
-from enterprise_pdf_rag.processing.retrieval import (
-    IndexEntry,
-    RetrievalEmbedding,
-    RetrievalIndex,
-    RetrievalPlan,
-    require_financial_qualification,
-    retrieval_dependencies,
-)
-from enterprise_pdf_rag.processing.service import canonical_page
-from enterprise_pdf_rag.processing.typed_ir import (
-    LiteralQualification,
-    ObjectDescription,
-    TextIR,
-)
+from ragspine.extraction.evidence.page.service import canonical_page
 
 
 class RecordingEmbedding:

@@ -12,14 +12,14 @@ from enterprise_pdf_rag.adapters.offline import (
     OfflineDescriptionGenerator,
 )
 from enterprise_pdf_rag.adapters.qualification import AuthoredFixtureQualifier
-from enterprise_pdf_rag.figures.models import (
+from ragspine.extraction.evidence.figures.models import (
     ExecutionMode,
     FigureBundle,
     FigureHit,
     ReasoningView,
     SvgArtifact,
 )
-from enterprise_pdf_rag.figures.service import FiguresService
+from ragspine.extraction.evidence.figures.service import FiguresService
 
 
 @dataclass(frozen=True, slots=True)

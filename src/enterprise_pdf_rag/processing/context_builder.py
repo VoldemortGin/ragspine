@@ -10,13 +10,16 @@ from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
 
-from enterprise_pdf_rag.documents.models import Bounds
-from enterprise_pdf_rag.figures.models import ChartIR, TextField, ValueKind, Verification
-from enterprise_pdf_rag.processing.diagram_description import EDGE_ARROW
-from enterprise_pdf_rag.processing.models import ObjectKind
 from enterprise_pdf_rag.processing.retrieval import RetrievalContext
-from enterprise_pdf_rag.processing.table_models import CellContentState, TableCell, TableIR
-from enterprise_pdf_rag.processing.typed_ir import (
+from ragspine.extraction.evidence.document.models import Bounds
+from ragspine.extraction.evidence.figures.models import ChartIR, TextField, ValueKind, Verification
+from ragspine.extraction.evidence.objects.diagrams.diagram_description import EDGE_ARROW
+from ragspine.extraction.evidence.objects.tables.table_models import (
+    CellContentState,
+    TableCell,
+    TableIR,
+)
+from ragspine.extraction.evidence.objects.typed_ir import (
     DiagramIR,
     FormulaIR,
     GroupIR,
@@ -24,6 +27,7 @@ from enterprise_pdf_rag.processing.typed_ir import (
     ObservedText,
     TextIR,
 )
+from ragspine.extraction.evidence.page.models import ObjectKind
 
 
 class BlockKind(StrEnum):

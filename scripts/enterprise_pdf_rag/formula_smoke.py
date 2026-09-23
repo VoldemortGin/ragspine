@@ -16,7 +16,7 @@ from enterprise_pdf_rag.adapters.aia_ingestion import read_text_sidecar
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.formula_qualification import qualify_formula
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.processing.models import ObjectKind, PageInput, PagePartition
+from ragspine.extraction.evidence.page.models import ObjectKind, PageInput, PagePartition
 
 
 def run(*, source_store: Path, processing_store: Path, processing_id: str) -> int:

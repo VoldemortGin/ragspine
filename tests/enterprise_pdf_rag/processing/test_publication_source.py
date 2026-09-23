@@ -9,14 +9,14 @@ from pydantic import TypeAdapter
 
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.documents.models import (
+from ragspine.extraction.evidence.document.models import (
     DocumentManifest,
     PageRecord,
     RegionRecord,
     TextSidecar,
     TextSpan,
 )
-from enterprise_pdf_rag.processing.models import (
+from ragspine.extraction.evidence.page.models import (
     CanonicalPage,
     PageInput,
     PageProcessingRecord,
@@ -25,7 +25,7 @@ from enterprise_pdf_rag.processing.models import (
     StageOutcome,
     StageState,
 )
-from enterprise_pdf_rag.processing.service import canonical_page
+from ragspine.extraction.evidence.page.service import canonical_page
 
 
 def test_publication_requires_existing_pinned_source_before_current_changes(

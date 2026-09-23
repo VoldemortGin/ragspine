@@ -18,15 +18,15 @@ from enterprise_pdf_rag.adapters.source_paint import (
     build_source_paint_proof,
     verify_source_paint_proof,
 )
-from enterprise_pdf_rag.documents.models import AssetRef, TextSidecar
-from enterprise_pdf_rag.figures.models import (
+from ragspine.extraction.evidence.document.models import AssetRef, TextSidecar
+from ragspine.extraction.evidence.figures.models import (
     ChartIR,
     Evidence,
     FigureError,
     TextDescription,
     Verification,
 )
-from enterprise_pdf_rag.processing.models import PageInput
+from ragspine.extraction.evidence.page.models import PageInput
 from tests.enterprise_pdf_rag.adapters.test_donut_qualification import _sector, sample
 
 PDFSPINE_TAG = f"pdfspine/{pdfspine.__version__}"

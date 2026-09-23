@@ -31,8 +31,8 @@ def test_region_catalog_survives_an_install_without_the_source_checkout(
             """
 import json
 from enterprise_pdf_rag.adapters.aia_candidates import candidates_for
-from enterprise_pdf_rag.documents.models import AssetRef, TextSidecar
-from enterprise_pdf_rag.processing.models import PageInput
+from ragspine.extraction.evidence.document.models import AssetRef, TextSidecar
+from ragspine.extraction.evidence.page.models import PageInput
 
 source = 'df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e'
 page = PageInput('a' * 64, source, 0, 960.0, 540.0,

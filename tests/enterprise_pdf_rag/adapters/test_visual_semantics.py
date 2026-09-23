@@ -8,16 +8,16 @@ from pathlib import Path
 from pydantic import SecretStr
 
 from enterprise_pdf_rag.adapters.visual_semantics import VisualSemanticAdapter
-from enterprise_pdf_rag.documents.models import AssetRef, TextSidecar, TextSpan
-from enterprise_pdf_rag.figures.models import Confidence, Verification
-from enterprise_pdf_rag.processing.models import LayoutObject, ObjectKind, PageInput
-from enterprise_pdf_rag.processing.typed_ir import DiagramIR, FormulaIR, ImageIR
 from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
 from ragspine.common.evidence.providers.providers import (
     LLMConfig,
     ProviderRequestError,
     SmokeSender,
 )
+from ragspine.extraction.evidence.document.models import AssetRef, TextSidecar, TextSpan
+from ragspine.extraction.evidence.figures.models import Confidence, Verification
+from ragspine.extraction.evidence.objects.typed_ir import DiagramIR, FormulaIR, ImageIR
+from ragspine.extraction.evidence.page.models import LayoutObject, ObjectKind, PageInput
 
 
 def _source(

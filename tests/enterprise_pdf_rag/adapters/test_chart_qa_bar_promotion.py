@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 
 from enterprise_pdf_rag.adapters.chart_qa_bar_promotion import append_displayed_member
-from enterprise_pdf_rag.documents.models import AssetRef
 from enterprise_pdf_rag.processing.retrieval import RetrievalEmbedding
+from ragspine.extraction.evidence.document.models import AssetRef
 from tests.enterprise_pdf_rag.adapters.test_chart_qa_store import published_chart
 
 

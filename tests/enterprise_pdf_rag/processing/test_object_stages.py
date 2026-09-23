@@ -7,10 +7,10 @@ from pydantic import TypeAdapter
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.object_processing import ProcessingObjectAdapter
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.documents.models import TextSidecar, TextSpan
-from enterprise_pdf_rag.figures.models import Confidence
-from enterprise_pdf_rag.processing.models import LayoutObject, ObjectKind, PageInput
-from enterprise_pdf_rag.processing.typed_ir import ObjectDescription, TextIR
+from ragspine.extraction.evidence.document.models import TextSidecar, TextSpan
+from ragspine.extraction.evidence.figures.models import Confidence
+from ragspine.extraction.evidence.objects.typed_ir import ObjectDescription, TextIR
+from ragspine.extraction.evidence.page.models import LayoutObject, ObjectKind, PageInput
 
 
 def test_source_object_persists_actual_ir_description_and_scoped_literal_receipt(
@@ -69,8 +69,8 @@ def test_source_object_persists_actual_ir_description_and_scoped_literal_receipt
 def test_container_group_retains_children_and_independent_source_region_description(
     tmp_path: Path,
 ) -> None:
-    from enterprise_pdf_rag.figures.models import Verification
-    from enterprise_pdf_rag.processing.typed_ir import GroupIR
+    from ragspine.extraction.evidence.figures.models import Verification
+    from ragspine.extraction.evidence.objects.typed_ir import GroupIR
 
     sources = LocalDocumentStore(tmp_path / "source")
     svg = sources.put(

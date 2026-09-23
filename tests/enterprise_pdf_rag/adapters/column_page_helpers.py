@@ -33,7 +33,8 @@ from enterprise_pdf_rag.adapters.object_processing import ProcessingObjectAdapte
 from enterprise_pdf_rag.adapters.page_metadata_extraction import PAGE_METADATA_STAGE
 from enterprise_pdf_rag.adapters.processing_retrieval import ProcessingRetrieval
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.documents.models import (
+from enterprise_pdf_rag.processing.index_text import PageIndexContext
+from ragspine.extraction.evidence.document.models import (
     AssetRef,
     Bounds,
     DocumentManifest,
@@ -42,7 +43,7 @@ from enterprise_pdf_rag.documents.models import (
     TextSidecar,
     TextSpan,
 )
-from enterprise_pdf_rag.figures.models import (
+from ragspine.extraction.evidence.figures.models import (
     ChartIR,
     Confidence,
     DescriptionClaim,
@@ -52,9 +53,15 @@ from enterprise_pdf_rag.figures.models import (
     TextField,
     Verification,
 )
-from enterprise_pdf_rag.processing.document_metadata import summarize_document
-from enterprise_pdf_rag.processing.index_text import PageIndexContext
-from enterprise_pdf_rag.processing.models import (
+from ragspine.extraction.evidence.metadata.document_metadata import summarize_document
+from ragspine.extraction.evidence.metadata.page_metadata import (
+    CandidateValue,
+    PageMetadata,
+    PageMetadataCandidate,
+    PageType,
+    verify_page_metadata,
+)
+from ragspine.extraction.evidence.page.models import (
     CanonicalPage,
     LayoutObject,
     ObjectKind,
@@ -67,14 +74,7 @@ from enterprise_pdf_rag.processing.models import (
     StageOutcome,
     StageState,
 )
-from enterprise_pdf_rag.processing.page_metadata import (
-    CandidateValue,
-    PageMetadata,
-    PageMetadataCandidate,
-    PageType,
-    verify_page_metadata,
-)
-from enterprise_pdf_rag.processing.service import canonical_page
+from ragspine.extraction.evidence.page.service import canonical_page
 from tests.enterprise_pdf_rag.processing.test_persistent_retrieval import RecordingEmbedding
 
 PAGE_WIDTH, PAGE_HEIGHT = 720.0, 200.0

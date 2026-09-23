@@ -23,8 +23,8 @@ from enterprise_pdf_rag.adapters.donut_geometry import (
     _transform,
     _unit_matrix,
 )
-from enterprise_pdf_rag.documents.models import Bounds
-from enterprise_pdf_rag.processing.diagram_models import (
+from ragspine.extraction.evidence.document.models import Bounds
+from ragspine.extraction.evidence.objects.diagrams.diagram_models import (
     ARROWHEAD_MAX_AREA,
     NODE_BBOX_TOLERANCE,
     SHAPE_MIN_FILL_RATIO,

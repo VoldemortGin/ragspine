@@ -31,11 +31,11 @@ from enterprise_pdf_rag.answers.member_filter import (
 )
 from enterprise_pdf_rag.answers.models import MemberFilters
 from enterprise_pdf_rag.answers.ports import MemberText
-from enterprise_pdf_rag.documents.models import AssetRef
-from enterprise_pdf_rag.figures.ports import EmbeddingPort
 from enterprise_pdf_rag.processing.index_text import chart_index_text
-from enterprise_pdf_rag.processing.models import ObjectKind, StageState
 from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit, RetrievalIndex
+from ragspine.extraction.evidence.document.models import AssetRef
+from ragspine.extraction.evidence.figures.ports import EmbeddingPort
+from ragspine.extraction.evidence.page.models import ObjectKind, StageState
 from tests.enterprise_pdf_rag.adapters.column_page_helpers import (
     ColumnPage,
     publish_column_page,

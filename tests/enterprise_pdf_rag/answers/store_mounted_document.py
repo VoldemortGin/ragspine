@@ -21,12 +21,12 @@ from enterprise_pdf_rag.adapters.processing_retrieval import (
 )
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.answers.ports import MemberText
-from enterprise_pdf_rag.figures.chart_qa.displayed_models import DisplayedLookupContext
-from enterprise_pdf_rag.figures.chart_qa.models import ChartContext, QueryPin
-from enterprise_pdf_rag.figures.ports import EmbeddingPort
 from enterprise_pdf_rag.processing.index_text import PageIndexContext
-from enterprise_pdf_rag.processing.models import ObjectKind, ProcessingManifest
 from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit, RetrievalContext
+from ragspine.extraction.evidence.figures.chart_qa.displayed_models import DisplayedLookupContext
+from ragspine.extraction.evidence.figures.chart_qa.models import ChartContext, QueryPin
+from ragspine.extraction.evidence.figures.ports import EmbeddingPort
+from ragspine.extraction.evidence.page.models import ObjectKind, ProcessingManifest
 from tests.enterprise_pdf_rag.adapters.chart_qa_bar_fixture import published_bar_input
 from tests.enterprise_pdf_rag.adapters.test_chart_qa_store import published_chart
 from tests.enterprise_pdf_rag.processing.test_persistent_retrieval import RecordingEmbedding

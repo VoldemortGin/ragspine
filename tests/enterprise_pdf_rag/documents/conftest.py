@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
-from enterprise_pdf_rag.documents.models import (
+from ragspine.extraction.evidence.document.models import (
     Bounds,
     DocumentExtraction,
     DocumentSpec,
@@ -14,7 +14,7 @@ from enterprise_pdf_rag.documents.models import (
     RegionExtraction,
     TextSpan,
 )
-from enterprise_pdf_rag.documents.service import ingest_document
+from ragspine.extraction.evidence.document.service import ingest_document
 
 
 @pytest.fixture

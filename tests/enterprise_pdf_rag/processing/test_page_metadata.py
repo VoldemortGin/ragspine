@@ -1,9 +1,9 @@
 """Page metadata keeps only verbatim page values; document metadata folds pages without a model."""
 
-from enterprise_pdf_rag.documents.models import TextSpan
-from enterprise_pdf_rag.processing.document_metadata import summarize_document
 from enterprise_pdf_rag.processing.index_text import PageIndexContext, contextual_index_text
-from enterprise_pdf_rag.processing.page_metadata import (
+from ragspine.extraction.evidence.document.models import TextSpan
+from ragspine.extraction.evidence.metadata.document_metadata import summarize_document
+from ragspine.extraction.evidence.metadata.page_metadata import (
     CandidateValue,
     MetadataEvidence,
     MetadataValue,

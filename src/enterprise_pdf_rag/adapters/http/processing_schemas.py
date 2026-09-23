@@ -5,8 +5,8 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from enterprise_pdf_rag.adapters.http.schemas import BoundaryModel
-from enterprise_pdf_rag.documents.models import AssetRef
-from enterprise_pdf_rag.processing.models import ProcessingManifest, StageOutcome, StageState
+from ragspine.extraction.evidence.document.models import AssetRef
+from ragspine.extraction.evidence.page.models import ProcessingManifest, StageOutcome, StageState
 
 
 class ProcessingEnvelope(BoundaryModel):

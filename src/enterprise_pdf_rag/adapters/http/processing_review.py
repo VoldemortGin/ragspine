@@ -25,14 +25,14 @@ from enterprise_pdf_rag.adapters.processing_retrieval import (
 )
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.source_publication import validate_processing_source
-from enterprise_pdf_rag.figures.chart_qa.displayed_service import (
-    DisplayedChartQAService,
-)
-from enterprise_pdf_rag.figures.chart_qa.service import ChartQAService
-from enterprise_pdf_rag.figures.ports import EmbeddingPort
-from enterprise_pdf_rag.processing.models import ProcessingManifest
 from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit, RetrievalContext
 from ragspine.common.evidence.providers.providers import ProviderRequestError
+from ragspine.extraction.evidence.figures.chart_qa.displayed_service import (
+    DisplayedChartQAService,
+)
+from ragspine.extraction.evidence.figures.chart_qa.service import ChartQAService
+from ragspine.extraction.evidence.figures.ports import EmbeddingPort
+from ragspine.extraction.evidence.page.models import ProcessingManifest
 
 
 class ProcessingSearchResponse(BoundaryModel):

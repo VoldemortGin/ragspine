@@ -7,7 +7,7 @@ from html.parser import HTMLParser
 import pytest
 
 from enterprise_pdf_rag.adapters.source_review_html import render_index, render_page
-from enterprise_pdf_rag.documents.models import (
+from ragspine.extraction.evidence.document.models import (
     AssetRef,
     DocumentManifest,
     DocumentSnapshot,

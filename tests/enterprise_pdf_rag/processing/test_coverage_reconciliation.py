@@ -4,15 +4,15 @@ from dataclasses import replace
 
 import pytest
 
-from enterprise_pdf_rag.documents.models import AssetRef, TextSidecar, TextSpan
-from enterprise_pdf_rag.figures.models import Confidence
-from enterprise_pdf_rag.processing.models import (
+from ragspine.extraction.evidence.document.models import AssetRef, TextSidecar, TextSpan
+from ragspine.extraction.evidence.figures.models import Confidence
+from ragspine.extraction.evidence.page.models import (
     LayoutObject,
     ObjectKind,
     PageInput,
     PagePartition,
 )
-from enterprise_pdf_rag.processing.service import (
+from ragspine.extraction.evidence.page.service import (
     preserve_omitted_occurrences,
     validate_partition,
 )

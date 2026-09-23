@@ -9,8 +9,8 @@ import pytest
 
 from enterprise_pdf_rag.adapters.donut_qualification import DonutQualification
 from enterprise_pdf_rag.adapters.figure_reasoning import prepare_figure
-from enterprise_pdf_rag.documents.models import AssetRef, TextSidecar
-from enterprise_pdf_rag.figures.chart_qa.models import (
+from ragspine.extraction.evidence.document.models import AssetRef, TextSidecar
+from ragspine.extraction.evidence.figures.chart_qa.models import (
     ChartContext,
     ChartQueryError,
     ChartQuestion,
@@ -20,14 +20,14 @@ from enterprise_pdf_rag.figures.chart_qa.models import (
     QueryStatus,
     RefusalReason,
 )
-from enterprise_pdf_rag.figures.chart_qa.service import ChartQAService
-from enterprise_pdf_rag.figures.models import (
+from ragspine.extraction.evidence.figures.chart_qa.service import ChartQAService
+from ragspine.extraction.evidence.figures.models import (
     Evidence,
     TextField,
     ValueKind,
     Verification,
 )
-from enterprise_pdf_rag.processing.models import PageInput
+from ragspine.extraction.evidence.page.models import PageInput
 from tests.enterprise_pdf_rag.adapters.test_donut_qualification import sample
 
 

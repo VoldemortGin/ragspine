@@ -14,21 +14,21 @@ from enterprise_pdf_rag.adapters.aia_ingestion import read_text_sidecar
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.pdfspine_formula import observe_formula
 from enterprise_pdf_rag.adapters.pdfspine_svg import crop_native_svg
-from enterprise_pdf_rag.figures.models import Confidence, SourceAnchor, Verification
-from enterprise_pdf_rag.processing.formula_models import (
+from enterprise_pdf_rag.processing.retrieval import RetrievalMember
+from ragspine.extraction.evidence.figures.models import Confidence, SourceAnchor, Verification
+from ragspine.extraction.evidence.objects.formulas.formula_models import (
     FormulaQualification,
     FormulaSourceObservation,
     TokenRole,
 )
-from enterprise_pdf_rag.processing.formula_rules import check_formula, role_of
-from enterprise_pdf_rag.processing.models import (
+from ragspine.extraction.evidence.objects.formulas.formula_rules import check_formula, role_of
+from ragspine.extraction.evidence.objects.typed_ir import FormulaIR, ObjectDescription
+from ragspine.extraction.evidence.page.models import (
     LayoutObject,
     ObjectKind,
     PageInput,
     ProcessingScope,
 )
-from enterprise_pdf_rag.processing.retrieval import RetrievalMember
-from enterprise_pdf_rag.processing.typed_ir import FormulaIR, ObjectDescription
 
 FORMULA_SCOPE = "formula-source-tokens-v1"
 FORMULA_PRODUCER = "exact-formula-transcription-v1"

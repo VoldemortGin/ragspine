@@ -7,13 +7,13 @@ from pydantic import BaseModel, ConfigDict
 from enterprise_pdf_rag.adapters.bar_publication import resolve_displayed_bar_member
 from enterprise_pdf_rag.adapters.chart_publication import validate_chart_member
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
-from enterprise_pdf_rag.figures.models import (
+from enterprise_pdf_rag.processing.retrieval import RetrievalMember
+from ragspine.extraction.evidence.figures.models import (
     ChartIR,
     FigureQualification,
     TextDescription,
 )
-from enterprise_pdf_rag.processing.models import ProcessingScope
-from enterprise_pdf_rag.processing.retrieval import RetrievalMember
+from ragspine.extraction.evidence.page.models import ProcessingScope
 
 BAR_RECEIPT_SCHEMA = "source-displayed-bar-qualification-v1"
 

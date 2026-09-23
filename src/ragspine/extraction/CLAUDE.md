@@ -23,6 +23,9 @@ registry), `verification/` (dual-channel cross-check → review queue), `registr
 `extract(path) → list[StyledGrid]` — + `get_extractor(mime)` / `register_extractor`
 over the existing `extract_grids` impls).
 
+`evidence/` — the evidence chain's pure PDF source observations, model-free proofs and typed IR
+(ADR 0022); its own contract is [`evidence/CLAUDE.md`](evidence/CLAUDE.md).
+
 ## Invariants
 
 - **Extractors are pluggable via `@runtime_checkable` Protocol seams (DI); heavy deps stay

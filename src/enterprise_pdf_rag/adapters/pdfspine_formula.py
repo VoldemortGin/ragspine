@@ -12,8 +12,8 @@ from math import isfinite
 import pdfspine
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-from enterprise_pdf_rag.documents.models import Bounds
-from enterprise_pdf_rag.processing.formula_models import (
+from ragspine.extraction.evidence.document.models import Bounds
+from ragspine.extraction.evidence.objects.formulas.formula_models import (
     FormulaSourceObservation,
     Matrix,
     ObservedChar,
@@ -21,8 +21,8 @@ from enterprise_pdf_rag.processing.formula_models import (
     ObservedRun,
     Point,
 )
-from enterprise_pdf_rag.processing.formula_rules import PATH_INSIDE_TOLERANCE
-from enterprise_pdf_rag.processing.models import LayoutObject, ObjectKind, PageInput
+from ragspine.extraction.evidence.objects.formulas.formula_rules import PATH_INSIDE_TOLERANCE
+from ragspine.extraction.evidence.page.models import LayoutObject, ObjectKind, PageInput
 
 _RECORDS = TypeAdapter(list[dict[str, object]])
 _DRAWINGS = TypeAdapter(list[dict[str, object]])

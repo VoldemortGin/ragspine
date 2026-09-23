@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict
 
 from enterprise_pdf_rag.adapters.chart_semantic_schemas import FigureDescriptionDTO
 from enterprise_pdf_rag.adapters.description_mapping import map_description
-from enterprise_pdf_rag.figures.models import SvgArtifact, SvgBinding, TextDescription
+from ragspine.extraction.evidence.figures.models import SvgArtifact, SvgBinding, TextDescription
 
 NORMALIZATION_VERSION = "duplicate-evidence-normalization-v1"
 

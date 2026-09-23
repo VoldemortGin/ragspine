@@ -7,15 +7,15 @@ from enterprise_pdf_rag.adapters.diagram_qualification import (
     DiagramQualificationError,
     qualify_diagram,
 )
-from enterprise_pdf_rag.documents.models import Bounds, TextSpan
-from enterprise_pdf_rag.figures.models import SourceAnchor, Verification
-from enterprise_pdf_rag.processing.diagram_description import DESCRIPTION_PRODUCER
-from enterprise_pdf_rag.processing.diagram_models import (
+from ragspine.extraction.evidence.document.models import Bounds, TextSpan
+from ragspine.extraction.evidence.figures.models import SourceAnchor, Verification
+from ragspine.extraction.evidence.objects.diagrams.diagram_description import DESCRIPTION_PRODUCER
+from ragspine.extraction.evidence.objects.diagrams.diagram_models import (
     DIAGRAM_METHOD,
     DIAGRAM_SCOPE,
     DiagramQualification,
 )
-from enterprise_pdf_rag.processing.typed_ir import DiagramEdge, DiagramIR, DiagramNode
+from ragspine.extraction.evidence.objects.typed_ir import DiagramEdge, DiagramIR, DiagramNode
 from tests.enterprise_pdf_rag.adapters.test_diagram_geometry import (
     OBJECT_BBOX,
     crop_svg,

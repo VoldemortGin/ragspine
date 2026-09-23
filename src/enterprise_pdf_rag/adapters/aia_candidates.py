@@ -11,9 +11,9 @@ from pydantic import (
     field_validator,
 )
 
-from enterprise_pdf_rag.figures.models import Confidence, Verification
-from enterprise_pdf_rag.processing.models import LayoutObject, ObjectKind, PageInput
 from ragspine.common.evidence.settings import resource_path
+from ragspine.extraction.evidence.figures.models import Confidence, Verification
+from ragspine.extraction.evidence.page.models import LayoutObject, ObjectKind, PageInput
 
 SOURCE_SHA256 = "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e"
 DEFAULT_CATALOG = resource_path("enterprise_pdf_rag", "resources/aia-first-20-regions.json")

@@ -5,16 +5,16 @@ from dataclasses import asdict, dataclass
 from hashlib import sha256
 from math import isfinite
 
-from enterprise_pdf_rag.documents.models import AssetRef
-from enterprise_pdf_rag.figures.models import FigureQualification, TextDescription
-from enterprise_pdf_rag.processing.diagram_models import DiagramQualification
-from enterprise_pdf_rag.processing.formula_models import FormulaQualification
-from enterprise_pdf_rag.processing.models import ObjectKind, ProcessingScope
-from enterprise_pdf_rag.processing.typed_ir import (
+from ragspine.extraction.evidence.document.models import AssetRef
+from ragspine.extraction.evidence.figures.models import FigureQualification, TextDescription
+from ragspine.extraction.evidence.objects.diagrams.diagram_models import DiagramQualification
+from ragspine.extraction.evidence.objects.formulas.formula_models import FormulaQualification
+from ragspine.extraction.evidence.objects.typed_ir import (
     LiteralQualification,
     ObjectDescription,
     TypedIR,
 )
+from ragspine.extraction.evidence.page.models import ObjectKind, ProcessingScope
 
 
 def _identity(value: object) -> str:

@@ -14,7 +14,7 @@ from enterprise_pdf_rag.adapters.description_mapping import map_description
 from enterprise_pdf_rag.adapters.description_normalization import (
     normalize_description_evidence,
 )
-from enterprise_pdf_rag.figures.models import SvgArtifact, TextDescription, Verification
+from ragspine.extraction.evidence.figures.models import SvgArtifact, TextDescription, Verification
 from tests.enterprise_pdf_rag.figures.test_chart_qa_displayed import displayed_context
 
 

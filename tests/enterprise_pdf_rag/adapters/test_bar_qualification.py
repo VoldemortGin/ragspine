@@ -10,7 +10,7 @@ from enterprise_pdf_rag.adapters.description_normalization import (
     normalize_description_evidence,
 )
 from enterprise_pdf_rag.adapters.source_paint_bar import build_bar_source_paint_proof
-from enterprise_pdf_rag.figures.models import Verification
+from ragspine.extraction.evidence.figures.models import Verification
 from tests.enterprise_pdf_rag.adapters.bar_source_fixture import bar_source
 
 

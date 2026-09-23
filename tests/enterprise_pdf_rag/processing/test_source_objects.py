@@ -6,10 +6,10 @@ from hashlib import sha256
 import pytest
 
 from enterprise_pdf_rag.adapters.source_objects import source_object_ir
-from enterprise_pdf_rag.documents.models import AssetRef, TextSidecar, TextSpan
-from enterprise_pdf_rag.figures.models import Confidence
-from enterprise_pdf_rag.processing.models import LayoutObject, ObjectKind, PageInput
-from enterprise_pdf_rag.processing.typed_ir import ListIR
+from ragspine.extraction.evidence.document.models import AssetRef, TextSidecar, TextSpan
+from ragspine.extraction.evidence.figures.models import Confidence
+from ragspine.extraction.evidence.objects.typed_ir import ListIR
+from ragspine.extraction.evidence.page.models import LayoutObject, ObjectKind, PageInput
 
 
 def test_text_list_and_group_ir_preserve_literal_source_without_claiming_relations() -> None:

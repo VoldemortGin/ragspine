@@ -11,7 +11,7 @@ from enterprise_pdf_rag.adapters.bar_geometry import (
     match_visible_bar_labels,
 )
 from enterprise_pdf_rag.adapters.source_paint_bar import BarVectorPaint
-from enterprise_pdf_rag.documents.models import TextSpan
+from ragspine.extraction.evidence.document.models import TextSpan
 
 
 def bars() -> tuple[NativeBarPaint, ...]:

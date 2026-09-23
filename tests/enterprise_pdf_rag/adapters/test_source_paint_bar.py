@@ -13,9 +13,9 @@ from enterprise_pdf_rag.adapters.source_paint_bar import (
     build_bar_source_paint_proof,
     prove_page_context,
 )
-from enterprise_pdf_rag.documents.models import AssetRef, TextSidecar
-from enterprise_pdf_rag.figures.chart_qa.displayed_evidence import ACTUAL_FX_CONTEXT
-from enterprise_pdf_rag.processing.models import PageInput
+from ragspine.extraction.evidence.document.models import AssetRef, TextSidecar
+from ragspine.extraction.evidence.figures.chart_qa.displayed_evidence import ACTUAL_FX_CONTEXT
+from ragspine.extraction.evidence.page.models import PageInput
 from tests.enterprise_pdf_rag.adapters.bar_source_fixture import bar_source
 from tests.enterprise_pdf_rag.adapters.test_source_paint import glyph_source
 

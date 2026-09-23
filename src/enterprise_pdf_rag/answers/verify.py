@@ -22,16 +22,17 @@ from enterprise_pdf_rag.answers.models import (
     from_refusal,
 )
 from enterprise_pdf_rag.answers.prompt import ModelAnswer, ModelClaim
-from enterprise_pdf_rag.figures.chart_qa.displayed_evidence import (
+from enterprise_pdf_rag.processing.context_builder import BlockKind, ContextBlock, HeaderRef
+from ragspine.extraction.evidence.figures.chart_qa.displayed_evidence import (
     chart_context,
     check_displayed_evidence,
 )
-from enterprise_pdf_rag.figures.chart_qa.displayed_models import (
+from ragspine.extraction.evidence.figures.chart_qa.displayed_models import (
     DISPLAYED_BAR_SCOPE,
     DisplayedLookupContext,
     DisplayedRefusal,
 )
-from enterprise_pdf_rag.figures.chart_qa.evidence import (
+from ragspine.extraction.evidence.figures.chart_qa.evidence import (
     check_context,
     check_fields,
     check_point_fields,
@@ -39,23 +40,22 @@ from enterprise_pdf_rag.figures.chart_qa.evidence import (
     source_display,
     verbatim_display,
 )
-from enterprise_pdf_rag.figures.chart_qa.models import (
+from ragspine.extraction.evidence.figures.chart_qa.models import (
     ChartContext,
     ChartQueryError,
     ChartRefusal,
     FieldCitation,
     QueryFailure,
 )
-from enterprise_pdf_rag.figures.chart_qa.service import _precision_supported
-from enterprise_pdf_rag.figures.models import (
+from ragspine.extraction.evidence.figures.chart_qa.service import _precision_supported
+from ragspine.extraction.evidence.figures.models import (
     ChartPoint,
     Evidence,
     FigureError,
     ValueKind,
     Verification,
 )
-from enterprise_pdf_rag.processing.context_builder import BlockKind, ContextBlock, HeaderRef
-from enterprise_pdf_rag.processing.table_models import CellContentState
+from ragspine.extraction.evidence.objects.tables.table_models import CellContentState
 
 type ChartEvidence = Callable[[str], ChartContext | DisplayedLookupContext]
 

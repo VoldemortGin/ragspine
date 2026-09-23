@@ -18,17 +18,17 @@ from enterprise_pdf_rag.adapters.http.processing_review import create_processing
 from enterprise_pdf_rag.adapters.processing_export import export_processing_review
 from enterprise_pdf_rag.adapters.processing_retrieval import resolve_processing_context
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.figures.chart_qa.displayed_service import (
-    DisplayedChartQAService,
-)
-from enterprise_pdf_rag.figures.chart_qa.models import (
-    ChartQuestion,
-    Operation,
-    PointSelector,
-)
 from enterprise_pdf_rag.processing.retrieval import (
     PinnedRetrievalHit,
     require_financial_qualification,
+)
+from ragspine.extraction.evidence.figures.chart_qa.displayed_service import (
+    DisplayedChartQAService,
+)
+from ragspine.extraction.evidence.figures.chart_qa.models import (
+    ChartQuestion,
+    Operation,
+    PointSelector,
 )
 from tests.enterprise_pdf_rag.adapters.chart_qa_bar_fixture import published_bar_input
 from tests.enterprise_pdf_rag.processing.test_persistent_retrieval import RecordingEmbedding

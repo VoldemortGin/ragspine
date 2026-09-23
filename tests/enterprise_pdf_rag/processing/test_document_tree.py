@@ -2,8 +2,8 @@
 
 import pytest
 
-from enterprise_pdf_rag.documents.models import TextSpan
-from enterprise_pdf_rag.processing.document_tree import (
+from ragspine.extraction.evidence.document.models import TextSpan
+from ragspine.extraction.evidence.metadata.document_tree import (
     DOCUMENT_TREE_SCHEMA,
     MAX_DIVIDER_SPANS,
     MIN_AGENDA_MATCHES,
@@ -16,7 +16,7 @@ from enterprise_pdf_rag.processing.document_tree import (
     summary_targets,
     with_summaries,
 )
-from enterprise_pdf_rag.processing.page_metadata import (
+from ragspine.extraction.evidence.metadata.page_metadata import (
     CandidateValue,
     MetadataEvidence,
     MetadataValue,

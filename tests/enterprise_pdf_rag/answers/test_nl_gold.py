@@ -36,11 +36,11 @@ from enterprise_pdf_rag.answers.models import AnswerRequest, MemberFilters
 from enterprise_pdf_rag.answers.ports import MemberText
 from enterprise_pdf_rag.answers.prompt import ModelAnswer, ModelClaim
 from enterprise_pdf_rag.answers.query_mode import FusionMode
-from enterprise_pdf_rag.figures.chart_qa.displayed_models import DisplayedLookupContext
-from enterprise_pdf_rag.figures.chart_qa.models import ChartContext
 from enterprise_pdf_rag.processing.context_builder import ContextBlock, build_context_block
-from enterprise_pdf_rag.processing.models import ProcessingManifest
 from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit, RetrievalContext
+from ragspine.extraction.evidence.figures.chart_qa.displayed_models import DisplayedLookupContext
+from ragspine.extraction.evidence.figures.chart_qa.models import ChartContext
+from ragspine.extraction.evidence.page.models import ProcessingManifest
 from tests.enterprise_pdf_rag.answers.fake_llm import scripted_client
 
 ROOT = Path(__file__).resolve().parents[3]

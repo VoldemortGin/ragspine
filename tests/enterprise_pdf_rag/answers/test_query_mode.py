@@ -12,7 +12,7 @@ from enterprise_pdf_rag.answers.query_mode import (
     is_numeric,
     tokenize_query,
 )
-from enterprise_pdf_rag.processing.periods import find_periods
+from ragspine.extraction.evidence.metadata.periods import find_periods
 from ragspine.retrieval.lexical.retrieval import tokenize
 
 

@@ -12,7 +12,7 @@ from collections.abc import Sequence
 
 from enterprise_pdf_rag.answers.models import MemberFilters
 from enterprise_pdf_rag.answers.ports import MemberText
-from enterprise_pdf_rag.processing.periods import normalize_period, period_matches
+from ragspine.extraction.evidence.metadata.periods import normalize_period, period_matches
 
 EXCLUDED_PAGE_TYPES = frozenset({"cover", "agenda"})
 # Words, split on whitespace and punctuation alike, so ``Taiwan (China)`` is two of them.

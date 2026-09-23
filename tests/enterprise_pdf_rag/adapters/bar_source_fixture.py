@@ -13,9 +13,9 @@ from enterprise_pdf_rag.adapters.chart_semantic_schemas import FigureDescription
 from enterprise_pdf_rag.adapters.description_mapping import map_description
 from enterprise_pdf_rag.adapters.figure_reasoning import PreparedFigure, prepare_figure
 from enterprise_pdf_rag.adapters.pdfspine_document import PdfspineDocumentAdapter
-from enterprise_pdf_rag.documents.models import AssetRef, TextSidecar
-from enterprise_pdf_rag.figures.chart_qa.displayed_evidence import ACTUAL_FX_CONTEXT
-from enterprise_pdf_rag.figures.models import (
+from ragspine.extraction.evidence.document.models import AssetRef, TextSidecar
+from ragspine.extraction.evidence.figures.chart_qa.displayed_evidence import ACTUAL_FX_CONTEXT
+from ragspine.extraction.evidence.figures.models import (
     ChartIR,
     ChartPoint,
     Confidence,
@@ -27,7 +27,7 @@ from enterprise_pdf_rag.figures.models import (
     ValueKind,
     Verification,
 )
-from enterprise_pdf_rag.processing.models import PageInput
+from ragspine.extraction.evidence.page.models import PageInput
 from tests.enterprise_pdf_rag.adapters.test_source_paint import _FontInsertionPage
 
 

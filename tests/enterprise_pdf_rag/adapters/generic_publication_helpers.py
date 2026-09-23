@@ -17,9 +17,9 @@ from enterprise_pdf_rag.adapters.draft_publication import (
 from enterprise_pdf_rag.adapters.pdf_ingestion import IngestionSummary, ingest_pdf
 from enterprise_pdf_rag.adapters.processing_retrieval import resolve_processing_context
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.figures.ports import EmbeddingPort
-from enterprise_pdf_rag.processing.models import ObjectKind
 from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit, RetrievalContext
+from ragspine.extraction.evidence.figures.ports import EmbeddingPort
+from ragspine.extraction.evidence.page.models import ObjectKind
 from tests.enterprise_pdf_rag.adapters.test_pdf_ingestion import (
     DEFAULT_TABLE,
     DIAGRAM_NODES,

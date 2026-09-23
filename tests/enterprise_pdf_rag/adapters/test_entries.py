@@ -11,7 +11,7 @@ from pytest import CaptureFixture
 from enterprise_pdf_rag.adapters.http.app import create_app
 from enterprise_pdf_rag.adapters.runtime import create_runtime
 from enterprise_pdf_rag.cli import main
-from enterprise_pdf_rag.figures.models import ExecutionMode
+from ragspine.extraction.evidence.figures.models import ExecutionMode
 
 
 def test_cli_demo_writes_reviewable_artifacts(tmp_path: Path, capsys: CaptureFixture[str]) -> None:

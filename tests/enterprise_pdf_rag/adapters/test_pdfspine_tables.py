@@ -14,11 +14,9 @@ from enterprise_pdf_rag.adapters.pdfspine_tables import (
     fill_rectangles,
     ruling_segments,
 )
-from enterprise_pdf_rag.documents.models import AssetRef, TextSidecar
-from enterprise_pdf_rag.figures.models import Confidence, Verification
-from enterprise_pdf_rag.processing.geometry import Axis, Segment
-from enterprise_pdf_rag.processing.models import LayoutObject, ObjectKind, PageInput
-from enterprise_pdf_rag.processing.table_models import (
+from ragspine.extraction.evidence.document.models import AssetRef, TextSidecar
+from ragspine.extraction.evidence.figures.models import Confidence, Verification
+from ragspine.extraction.evidence.objects.tables.table_models import (
     CellContentState,
     HeaderEvidenceKind,
     HeaderStrength,
@@ -26,6 +24,8 @@ from enterprise_pdf_rag.processing.table_models import (
     SlotState,
     TableIR,
 )
+from ragspine.extraction.evidence.page.geometry import Axis, Segment
+from ragspine.extraction.evidence.page.models import LayoutObject, ObjectKind, PageInput
 from tests.enterprise_pdf_rag.adapters.test_pdf_ingestion import (
     FILL_HEADER_TABLE,
     FRAME_ONLY_TABLE,

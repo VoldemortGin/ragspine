@@ -52,11 +52,6 @@ from enterprise_pdf_rag.adapters.processing_runtime import (
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.review import write_review
 from enterprise_pdf_rag.adapters.runtime import create_runtime
-from enterprise_pdf_rag.figures.chart_qa.displayed_service import (
-    DisplayedChartQAService,
-)
-from enterprise_pdf_rag.figures.chart_qa.service import ChartQAService
-from enterprise_pdf_rag.figures.models import ExecutionMode
 from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
 from ragspine.common.evidence.providers.local_models import LocalEmbeddingAdapter
 from ragspine.common.evidence.providers.providers import (
@@ -65,6 +60,11 @@ from ragspine.common.evidence.providers.providers import (
     load_local_model_config,
 )
 from ragspine.common.evidence.settings import get_settings
+from ragspine.extraction.evidence.figures.chart_qa.displayed_service import (
+    DisplayedChartQAService,
+)
+from ragspine.extraction.evidence.figures.chart_qa.service import ChartQAService
+from ragspine.extraction.evidence.figures.models import ExecutionMode
 
 
 class _ServerOptions(BaseModel):

@@ -3,7 +3,7 @@
 from dataclasses import replace
 from math import sqrt
 
-from enterprise_pdf_rag.figures.models import (
+from ragspine.extraction.evidence.figures.models import (
     ChartIR,
     DescriptionEmbedding,
     DescriptionIndexRecord,

@@ -1,13 +1,13 @@
 """The diagram description is a template around verbatim labels; it adds no meaning."""
 
-from enterprise_pdf_rag.figures.models import SourceAnchor, Verification
-from enterprise_pdf_rag.processing.diagram_description import (
+from ragspine.extraction.evidence.figures.models import SourceAnchor, Verification
+from ragspine.extraction.evidence.objects.diagrams.diagram_description import (
     DESCRIPTION_PRODUCER,
     describe_diagram,
     diagram_description_text,
     reading_order,
 )
-from enterprise_pdf_rag.processing.typed_ir import DiagramEdge, DiagramIR, DiagramNode
+from ragspine.extraction.evidence.objects.typed_ir import DiagramEdge, DiagramIR, DiagramNode
 
 ANCHOR = SourceAnchor("rev-1", "0" * 64, 0, (0.0, 0.0, 240.0, 160.0), "page-top-left-points")
 

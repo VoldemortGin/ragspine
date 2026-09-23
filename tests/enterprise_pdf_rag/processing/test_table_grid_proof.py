@@ -5,10 +5,9 @@ from dataclasses import replace
 
 import pytest
 
-from enterprise_pdf_rag.documents.models import Bounds, TextSpan
-from enterprise_pdf_rag.figures.models import SourceAnchor, Verification
-from enterprise_pdf_rag.processing.geometry import Axis, Segment
-from enterprise_pdf_rag.processing.table_grid_proof import (
+from ragspine.extraction.evidence.document.models import Bounds, TextSpan
+from ragspine.extraction.evidence.figures.models import SourceAnchor, Verification
+from ragspine.extraction.evidence.objects.tables.table_grid_proof import (
     GridProof,
     GridRejection,
     check_grid_evidence,
@@ -16,7 +15,7 @@ from enterprise_pdf_rag.processing.table_grid_proof import (
     strip_grid_evidence,
     verified_table,
 )
-from enterprise_pdf_rag.processing.table_models import (
+from ragspine.extraction.evidence.objects.tables.table_models import (
     CellContentState,
     HeaderEvidenceKind,
     HeaderStrength,
@@ -25,6 +24,7 @@ from enterprise_pdf_rag.processing.table_models import (
     TableIR,
     TableSlot,
 )
+from ragspine.extraction.evidence.page.geometry import Axis, Segment
 
 ROWS = (20.0, 70.0, 120.0)
 COLS = (20.0, 120.0, 220.0)

@@ -28,18 +28,18 @@ from enterprise_pdf_rag.adapters.pdfspine_document import (
     _PageText,
 )
 from enterprise_pdf_rag.adapters.source_objects import source_object_ir
-from enterprise_pdf_rag.documents.models import (
+from ragspine.extraction.evidence.document.models import (
     AssetRef,
     PageExtraction,
     TextLayerStatus,
     TextSidecar,
 )
-from enterprise_pdf_rag.documents.text_layer import (
+from ragspine.extraction.evidence.document.text_layer import (
     OUTLINED_TEXT_DRAWINGS_PER_CHAR,
     OUTLINED_TEXT_MIN_DRAWINGS,
 )
-from enterprise_pdf_rag.figures.models import Confidence
-from enterprise_pdf_rag.processing.models import LayoutObject, ObjectKind, PageInput
+from ragspine.extraction.evidence.figures.models import Confidence
+from ragspine.extraction.evidence.page.models import LayoutObject, ObjectKind, PageInput
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
     ingest_generic_semantics,
 )

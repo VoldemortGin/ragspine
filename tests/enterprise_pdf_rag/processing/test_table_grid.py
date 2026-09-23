@@ -2,8 +2,8 @@
 
 import pytest
 
-from enterprise_pdf_rag.figures.models import SourceAnchor, Verification
-from enterprise_pdf_rag.processing.table_models import (
+from ragspine.extraction.evidence.figures.models import SourceAnchor, Verification
+from ragspine.extraction.evidence.objects.tables.table_models import (
     CellBorderEvidence,
     CellContentState,
     GridEvidence,

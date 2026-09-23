@@ -11,9 +11,9 @@ from enterprise_pdf_rag.adapters.chart_qa_promotion import (
     replace_index_member,
 )
 from enterprise_pdf_rag.adapters.processing_export import export_processing_review
-from enterprise_pdf_rag.documents.models import AssetRef
-from enterprise_pdf_rag.figures.chart_qa.models import QueryStatus, RefusalReason
-from enterprise_pdf_rag.figures.chart_qa.service import ChartQAService
+from ragspine.extraction.evidence.document.models import AssetRef
+from ragspine.extraction.evidence.figures.chart_qa.models import QueryStatus, RefusalReason
+from ragspine.extraction.evidence.figures.chart_qa.service import ChartQAService
 from tests.enterprise_pdf_rag.adapters.test_chart_qa_store import published_chart, stored_question
 
 

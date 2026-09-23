@@ -1,6 +1,6 @@
 """Three charts side by side are three different countries, and geometry says which."""
 
-from enterprise_pdf_rag.processing.column_regions import (
+from ragspine.extraction.evidence.page.column_regions import (
     EMPTY,
     PageColumn,
     PageRegionSpan,

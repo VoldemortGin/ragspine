@@ -43,8 +43,8 @@ from enterprise_pdf_rag.answers.query_filters import (
     shared_title_tokens,
     title_matches,
 )
-from enterprise_pdf_rag.figures.chart_qa.models import ChartQueryError, QueryFailure
 from ragspine.common.evidence.providers.providers import ProviderRequestError
+from ragspine.extraction.evidence.figures.chart_qa.models import ChartQueryError, QueryFailure
 
 MODEL_PREFIX = "enterprise-pdf-rag/"
 _MODEL_REFERENCE = re.compile(r"^enterprise-pdf-rag/([0-9a-f]{12,64})$")

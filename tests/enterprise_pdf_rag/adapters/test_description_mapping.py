@@ -10,7 +10,7 @@ from enterprise_pdf_rag.adapters.chart_semantic_schemas import (
     FigureDescriptionDTO,
 )
 from enterprise_pdf_rag.adapters.description_mapping import map_description
-from enterprise_pdf_rag.figures.models import Confidence, ExecutionMode, Verification
+from ragspine.extraction.evidence.figures.models import Confidence, ExecutionMode, Verification
 from tests.enterprise_pdf_rag.adapters.test_chart_semantics import _prepared
 
 
