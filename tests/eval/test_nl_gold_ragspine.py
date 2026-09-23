@@ -30,8 +30,6 @@ from ragspine.agent.intent import (
 from ragspine.agent.llm_provider import MockProvider
 from ragspine.common.observability.trace import TRACE_LOGGER_NAME
 from ragspine.eval.nl_gold_ragspine import (
-    gold_selected_pages,
-    select_di_pages,
     ROUTE_ASK,
     ROUTE_FORCED_NARRATIVE,
     ClaimAnchor,
@@ -40,6 +38,7 @@ from ragspine.eval.nl_gold_ragspine import (
     GoldCase,
     RecordingRetriever,
     contains_normalized,
+    gold_selected_pages,
     index_chunk_vectors,
     is_refusal,
     judge_case,
@@ -48,6 +47,7 @@ from ragspine.eval.nl_gold_ragspine import (
     recall_at_k,
     route_label,
     run_route,
+    select_di_pages,
     summarize,
     write_report,
 )
