@@ -172,6 +172,7 @@ def run_narrative_ingest_job(payload: dict[str, Any]) -> dict[str, Any]:
             meta_by_doc=payload.get("meta_by_doc"),
             dry_run=payload.get("dry_run", False),
             chunker=make_chunker(payload.get("chunker")),
+            segment_chunking=bool(payload.get("segment_chunking", False)),
         )
         return narrative_report_to_dict(report)
     finally:

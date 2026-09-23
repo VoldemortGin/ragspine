@@ -36,6 +36,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="只报告将要做什么，不落库",
     )
+    parser.add_argument(
+        "--segment-chunking",
+        action="store_true",
+        help="按 segment 分别切块，chunk locator 带段定位（如 page=N）；.md 恒按段切块",
+    )
     return parser
 
 
@@ -55,6 +60,7 @@ def main(argv: list[str] | None = None) -> int:
             store,
             meta_by_doc=meta_by_doc,
             dry_run=args.dry_run,
+            segment_chunking=args.segment_chunking,
         )
     finally:
         store.close()

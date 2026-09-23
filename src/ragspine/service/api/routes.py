@@ -461,6 +461,7 @@ def submit_narrative_job(
         "dry_run": req.dry_run,
         "allowed_upload_root": config.allowed_upload_root,
         "chunker": config.chunker,
+        "segment_chunking": config.narrative_segment_chunking,
     }
     job_id = queue.enqueue(NARRATIVE_INGEST_JOB, payload, job_id=req.job_id)
     return JobSubmitResponse(job_id=job_id)

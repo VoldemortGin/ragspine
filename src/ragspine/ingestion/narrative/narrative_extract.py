@@ -13,6 +13,10 @@
       1-based）。docspine 是可选 [doc] extra，惰性 import。
     - txt（纯文本）：按空行拆成段落块，逐块归一化后成段；定位串 'para={N}'（N 只给
       产出非空文本的块编号，1-based，与 docx 同口径）。零三方依赖。
+    - md（DI markdown，Azure Document Intelligence 风格）：extraction.di_markdown 解析成
+      页 → 块，按（页, 标题路径）连续分组成段；定位串 'page={N}'（N=物理页序 DiPage.index，
+      与 PDF 同口径；PageNumber 标签不参与）。表格线性化为「行标题 | 列标题: 值」行、
+      图 caption 在前；页眉/页脚/页码注释不进正文。无 PageBreak 的普通 markdown 整份 = 第 1 页。
 
 统一返回 NarrativeDoc：segments 各段文本内部以 '\\n' 分行、to_text() 以空行
 （'\\n\\n'）连接各段，正好配合 chunking 的「非空行 = 段落」切分契约。
@@ -24,10 +28,12 @@ from pathlib import Path
 import pypdfium2 as pdfium
 from pptx import Presentation
 
+from ragspine.extraction.di_markdown.models import Figure, Table, TableGrid
+from ragspine.extraction.di_markdown.parse import parse_di_markdown
 from ragspine.extraction.extractors.pptx_styled_extractor import compute_file_hash
 
 # 本期支持的叙事来源后缀（扫描件 / 其它格式归别的线）。
-SUPPORTED_SUFFIXES = {".pptx", ".pdf", ".docx", ".docm", ".txt"}
+SUPPORTED_SUFFIXES = {".pptx", ".pdf", ".docx", ".docm", ".txt", ".md"}
 
 
 @dataclass
@@ -39,10 +45,13 @@ class NarrativeSegment:
         'slide={N},notes'      pptx 第 N 页演讲者备注。
         'page={N}'             PDF 第 N 页（1-based，真实页号，跳过页不占用）。
         'para={N}'             docx 第 N 个产出非空文本的段落（1-based，空段不占用）。
+
+    heading_path: 所属标题路径（DI markdown 填；其余抽取器留空）。
     """
 
     text: str
     source_locator: str
+    heading_path: tuple[str, ...] = ()
 
 
 @dataclass
@@ -208,6 +217,88 @@ def extract_txt_narrative(path: str | Path) -> NarrativeDoc:
     return doc
 
 
+def _dedupe(parts: list[str]) -> list[str]:
+    """去空、按首次出现去重（保序）。"""
+    out: list[str] = []
+    for part in parts:
+        if part and part not in out:
+            out.append(part)
+    return out
+
+
+def _row_values(grid: TableGrid, r: int, start: int) -> list[tuple[int, str]]:
+    """第 r 行自 start 列起的非空值 (列, 文本)；横向合并只在锚点列出现一次。"""
+    out: list[tuple[int, str]] = []
+    for c in range(start, grid.n_cols):
+        anchor = grid.anchor_at(r, c)
+        if anchor is not None and anchor.text and (anchor.col == c or c == start):
+            out.append((c, anchor.text))
+    return out
+
+
+def _linearize_table(grid: TableGrid) -> list[str]:
+    """表格 → 文本行：caption 在前；有表头时每个值一行「行标题 | 列标题: 值」
+    （多行表头按列 ' / ' 拼接去重，左上角表头格单独一行作表格语境），无表头时整行 ' | ' 连接。
+    """
+    lines = [grid.caption] if grid.caption else []
+    rows = grid.rows
+    n_header = grid.header_row_count
+    if n_header == 0 or n_header >= grid.n_rows or grid.n_cols < 2:
+        for r in range(grid.n_rows):
+            line = " | ".join(text for _, text in _row_values(grid, r, 0))
+            if line:
+                lines.append(line)
+        return lines
+    col_headers = [
+        " / ".join(_dedupe([rows[r][c] for r in range(n_header)])) for c in range(grid.n_cols)
+    ]
+    if col_headers[0]:
+        lines.append(col_headers[0])
+    for r in range(n_header, grid.n_rows):
+        row_title = rows[r][0]
+        values = []
+        for c, value in _row_values(grid, r, 1):
+            label = f"{col_headers[c]}: {value}" if col_headers[c] else value
+            values.append(f"{row_title} | {label}" if row_title else label)
+        lines.extend(values or ([row_title] if row_title else []))
+    return lines
+
+
+def extract_di_markdown_narrative(path: str | Path) -> NarrativeDoc:
+    """抽取一个 DI markdown（.md）的叙事文本：每页内按标题路径连续分组，一组一段。
+
+    locator='page={N}'（N=物理页序），段带 heading_path；标题文本作为段首行保留。
+    UTF-8 读取，容错 errors='replace'。纯 stdlib、确定性、不涉及任何公司。
+    """
+    path = Path(path)
+    doc = NarrativeDoc(doc_id=path.name, file_hash=compute_file_hash(path))
+    parsed = parse_di_markdown(path.read_text(encoding="utf-8", errors="replace"))
+
+    for page in parsed.pages:
+        groups: list[tuple[tuple[str, ...], list[str]]] = []
+        for block in page.blocks:
+            if isinstance(block, Table):
+                lines = _linearize_table(block.grid)
+            elif isinstance(block, Figure):
+                lines = [block.caption or "", block.text]
+            else:  # Heading / Paragraph
+                lines = [block.text]
+            if not groups or groups[-1][0] != block.heading_path:
+                groups.append((block.heading_path, []))
+            groups[-1][1].extend(lines)
+        for heading_path, lines in groups:
+            text = _clean_block("\n".join(lines))
+            if text:
+                doc.segments.append(
+                    NarrativeSegment(
+                        text=text,
+                        source_locator=f"page={page.index}",
+                        heading_path=heading_path,
+                    )
+                )
+    return doc
+
+
 def extract_narrative(path: str | Path) -> NarrativeDoc:
     """按后缀分发到对应抽取器；不支持的后缀 ValueError。"""
     path = Path(path)
@@ -220,4 +311,6 @@ def extract_narrative(path: str | Path) -> NarrativeDoc:
         return extract_docx_narrative(path)
     if suffix == ".txt":
         return extract_txt_narrative(path)
-    raise ValueError(f"不支持的叙事来源类型：{path.name}（仅 .pptx / .pdf / .docx / .txt）")
+    if suffix == ".md":
+        return extract_di_markdown_narrative(path)
+    raise ValueError(f"不支持的叙事来源类型：{path.name}（仅 .pptx / .pdf / .docx / .txt / .md）")

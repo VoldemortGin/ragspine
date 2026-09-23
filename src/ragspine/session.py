@@ -31,7 +31,7 @@ from ragspine.service.config import (
 from ragspine.storage.fact_store import SqliteFactStore
 
 _STRUCTURED_SUFFIXES = frozenset({".xlsx", ".xlsm", ".pptx", ".pdf", ".docx", ".docm"})
-_NARRATIVE_SUFFIXES = frozenset({".pptx", ".pdf", ".docx", ".docm", ".txt"})
+_NARRATIVE_SUFFIXES = frozenset({".pptx", ".pdf", ".docx", ".docm", ".txt", ".md"})
 _SUPPORTED_SUFFIXES = _STRUCTURED_SUFFIXES | _NARRATIVE_SUFFIXES
 
 

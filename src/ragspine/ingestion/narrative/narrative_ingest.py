@@ -3,7 +3,7 @@
 流程（仿 src/ragspine/ingestion/structured/ingestion.py 的编排与报告模式）：
     文件 hash -> 与登记台账比对（未变化即 skipped，幂等）
       -> narrative_extract 抽取（无文本 -> no_text；异常 -> failed，不中断整批）
-      -> chunk_document 切块（元数据逐块继承）
+      -> chunk_document 切块（元数据逐块继承；按段切块时逐 segment 切，locator 带段定位）
       -> chunk_store.replace_doc_chunks 批量写入（重入走既有版本化语义）
       -> 登记台账更新。dry_run=True 时报告完整但块库 / 台账零写入。
 
@@ -20,7 +20,7 @@
 
 import re
 import sqlite3
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -31,6 +31,7 @@ from ragspine.common.sensitivity import classify_sensitivity
 from ragspine.extraction.extractors.pptx_styled_extractor import compute_file_hash
 from ragspine.ingestion.narrative.narrative_extract import (
     SUPPORTED_SUFFIXES,
+    NarrativeDoc,
     extract_narrative,
 )
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
@@ -38,6 +39,7 @@ from ragspine.retrieval.chunking.chunker import Chunker
 from ragspine.retrieval.chunking.chunking import (
     DEFAULT_CHUNK_CHARS,
     DEFAULT_OVERLAP_CHARS,
+    Chunk,
     DocumentMeta,
     chunk_document,
 )
@@ -63,6 +65,10 @@ ALLOWED_META_KEYS = {
     "sensitivity",
     "valid_as_of",
 }
+
+# 总是按段切块的后缀：新格式没有旧行为需兼容（DI markdown 的页码溯源靠它），
+# 与 segment_chunking 开关无关；其余后缀仅在开关打开时按段切块。
+SEGMENT_CHUNKED_SUFFIXES = frozenset({".md"})
 
 # 文件名 period 启发式：只认显式模式，裸年份（如日期 2026-06-11）不算。
 _FY_RE = re.compile(r"(?i)FY[\s_-]?(20\d{2})[\s_-]?(H[12]|Q[1-4])?")
@@ -129,6 +135,46 @@ def period_from_filename(name: str) -> str:
     return candidates.pop() if len(candidates) == 1 else ""
 
 
+def chunk_segments(
+    doc: NarrativeDoc,
+    meta: DocumentMeta,
+    *,
+    chunker: Chunker | None = None,
+    max_chars: int = DEFAULT_CHUNK_CHARS,
+    overlap_chars: int = DEFAULT_OVERLAP_CHARS,
+) -> list[Chunk]:
+    """按 segment 分别切块，保住段级定位（页码 / slide / para）。
+
+    - 每段 locator 前缀 = '{doc_id}@{seg.source_locator}'，块 locator 形如 'deck.md@page=3#para1-4'；
+    - heading = 段标题路径以 ' > ' 连接（段无标题路径时保留切块器自己的 heading）；
+    - seq / chunk_id 在整份文档内统一重排（'{doc_id}#c{seq}'，唯一、确定）；
+    - 切块器给的 parent_id 追加 '@seg{段序}'，防止不同段的小节句柄相撞。
+    """
+    chunks: list[Chunk] = []
+    for k, seg in enumerate(doc.segments):
+        seg_meta = replace(meta, source_locator_prefix=f"{meta.doc_id}@{seg.source_locator}")
+        pieces = (
+            chunker.chunk(seg.text, seg_meta, max_chars=max_chars, overlap_chars=overlap_chars)
+            if chunker is not None
+            else chunk_document(
+                seg.text, seg_meta, max_chars=max_chars, overlap_chars=overlap_chars
+            )
+        )
+        heading = " > ".join(seg.heading_path)
+        for piece in pieces:
+            seq = len(chunks)
+            chunks.append(
+                replace(
+                    piece,
+                    seq=seq,
+                    chunk_id=f"{meta.doc_id}#c{seq}",
+                    heading=heading or piece.heading,
+                    parent_id=f"{piece.parent_id}@seg{k}" if piece.parent_id else "",
+                )
+            )
+    return chunks
+
+
 def ingest_narrative(
     inputs: str | Path | list[str | Path],
     store: ChunkStore,
@@ -138,6 +184,7 @@ def ingest_narrative(
     chunker: Chunker | None = None,
     max_chars: int = DEFAULT_CHUNK_CHARS,
     overlap_chars: int = DEFAULT_OVERLAP_CHARS,
+    segment_chunking: bool = False,
 ) -> NarrativeIngestReport:
     """批量叙事入库编排，返回逐文件汇总报告。
 
@@ -150,6 +197,9 @@ def ingest_narrative(
         dry_run:     True 时完整跑抽取与切块并产出报告，但块库 / 台账零写入。
         chunker:     可选切块策略（Chunker 缝，经 make_chunker 选型，如 make_chunker('parent_child')
                      的父子 small-to-big 预设）。默认 None＝内置 chunk_document（字节级零行为变化）。
+        segment_chunking: True 时所有文件按 segment 分别切块（chunk_segments，locator 带段定位）；
+                     默认 False＝旧后缀整篇切块（字节级零行为变化）。SEGMENT_CHUNKED_SUFFIXES（.md）
+                     不受开关影响，总是按段切块。
 
     行为见模块 docstring：hash 幂等跳过、单文件失败不中断整批、no_text 不落库。
     """
@@ -177,6 +227,7 @@ def ingest_narrative(
                     chunker,
                     max_chars,
                     overlap_chars,
+                    segment_chunking,
                 )
             )
     finally:
@@ -198,6 +249,7 @@ def _ingest_one(
     chunker: Chunker | None = None,
     max_chars: int = DEFAULT_CHUNK_CHARS,
     overlap_chars: int = DEFAULT_OVERLAP_CHARS,
+    segment_chunking: bool = False,
 ) -> FileReport:
     """单文件：hash 比对 -> 抽取 -> 切块 -> 写入；任何异常落进 failed 报告。"""
     doc_id = path.name
@@ -242,21 +294,27 @@ def _ingest_one(
     )
     # 切块：默认 None 走内置 chunk_document（字节级零行为变化）；注入了 Chunker 缝（如父子 small-to-big
     # 预设）则用之——window_text/parent_locator 等字段随块经 replace_doc_chunks 持久化。
-    chunks = (
-        chunker.chunk(
-            doc.to_text(),
-            doc_meta,
-            max_chars=max_chars,
-            overlap_chars=overlap_chars,
+    # 按段切块（开关 / .md）逐 segment 切，保住页码等段级定位。
+    if segment_chunking or path.suffix.lower() in SEGMENT_CHUNKED_SUFFIXES:
+        chunks = chunk_segments(
+            doc, doc_meta, chunker=chunker, max_chars=max_chars, overlap_chars=overlap_chars
         )
-        if chunker is not None
-        else chunk_document(
-            doc.to_text(),
-            doc_meta,
-            max_chars=max_chars,
-            overlap_chars=overlap_chars,
+    else:
+        chunks = (
+            chunker.chunk(
+                doc.to_text(),
+                doc_meta,
+                max_chars=max_chars,
+                overlap_chars=overlap_chars,
+            )
+            if chunker is not None
+            else chunk_document(
+                doc.to_text(),
+                doc_meta,
+                max_chars=max_chars,
+                overlap_chars=overlap_chars,
+            )
         )
-    )
     rep.n_chunks = len(chunks)
     rep.status = STATUS_INGESTED
     if dry_run:

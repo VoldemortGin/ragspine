@@ -67,6 +67,34 @@ def test_chunker_is_runtime_checkable(chunker):
     assert isinstance(chunker, Chunker)
 
 
+def test_segment_chunking_carries_page_provenance(chunker, tmp_path):
+    """每个注册 Chunker 走「按段切块」路径（DI markdown 抽取 → chunk_segments）：每块带非空
+    doc_id + 含段定位（page=N）的 source_locator，chunk_id 全文档唯一。"""
+    from ragspine.ingestion.narrative.narrative_extract import extract_di_markdown_narrative
+    from ragspine.ingestion.narrative.narrative_ingest import chunk_segments
+
+    md = tmp_path / "report.md"
+    pages = ["# 概览\n\n" + "\n".join(["甲" * 100, "乙" * 100]), "## 细节\n\n" + "丙" * 100]
+    md.write_text("\n<!-- PageBreak -->\n".join(pages), encoding="utf-8")
+    doc = extract_di_markdown_narrative(md)
+    chunks = chunk_segments(
+        doc, _meta_for("report.md"), chunker=chunker, max_chars=250, overlap_chars=0
+    )
+    assert chunks
+    for c in chunks:
+        assert c.doc_id == "report.md"
+        assert c.source_locator.startswith("report.md@page=")
+    assert {c.source_locator.split("#")[0] for c in chunks} == {
+        "report.md@page=1",
+        "report.md@page=2",
+    }
+    assert len({c.chunk_id for c in chunks}) == len(chunks)
+
+
+def _meta_for(doc_id: str) -> DocumentMeta:
+    return DocumentMeta(doc_id=doc_id, sensitivity="INTERNAL")
+
+
 # ===========================================================================
 # 非空泛证明：丢血缘的 stub 必须 FAIL（证明 provenance pack 非空泛）
 # ===========================================================================
