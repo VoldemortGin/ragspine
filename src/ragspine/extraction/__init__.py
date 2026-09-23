@@ -5,6 +5,7 @@ ir.py 的 styled_grid 是全项目最稳定的接口；各类抽取器以它为�
 
 Submodules:
     color/ — 颜色语义层：同色聚类、图例识别、版本化映射注册表。
+    di_markdown/ — Azure DI 风格 markdown → 页 → 块（标题路径 / 段落 / HTML 表网格 / 图）中间表示。
     evidence/ — 证据链(enterprise-pdf-rag 产品线)的 PDF 源观测值,零模型证明与 typed IR(ADR 0022)。
     extractors/ — xlsx / pptx / pdf 抽取器（样式与颜色感知，确定性优先）。
     routing/ — 逐页 PDF 分诊路由。

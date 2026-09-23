@@ -23,6 +23,13 @@ registry), `verification/` (dual-channel cross-check → review queue), `registr
 `extract(path) → list[StyledGrid]` — + `get_extractor(mime)` / `register_extractor`
 over the existing `extract_grids` impls).
 
+`di_markdown/` — pure-stdlib parser of Azure Document Intelligence-style Markdown (prebuilt-layout,
+`outputContentFormat=markdown`) into a typed page → block IR (`Heading` with heading path /
+`Paragraph` / `Table` as an expanded rectangular `TableGrid` keeping rowspan/colspan anchors /
+`Figure`). Page = `<!-- PageBreak -->` split; `number` from `PageNumber` else physical order;
+PageHeader/PageFooter/PageNumber never reach the body. Not wired into ingestion yet; contract in
+`di_markdown/parse.py`'s docstring.
+
 `evidence/` — the evidence chain's pure PDF source observations, model-free proofs and typed IR
 (ADR 0022); its own contract is [`evidence/CLAUDE.md`](evidence/CLAUDE.md).
 
