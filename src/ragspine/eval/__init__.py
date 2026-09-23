@@ -6,6 +6,7 @@ golden 集存于 data/golden/（强制纳入版本控制）；回归必须使基
 Submodules:
     extraction_eval.py — 抽取评测：分通道指标 + 回归门禁。
     groundedness.py — 叙事侧 groundedness 度量：faithfulness + free-text answer-accuracy。
+    nl_gold_ragspine.py — nl-answers-gold 集跑 ragspine 主链路：两路（ask / 强制叙事）判定 + 页级 recall@k + 报告。
     qa_eval.py — Q&A 评测闭环 harness：四命门 + groundedness 指标 + 基线门禁。
 """
 

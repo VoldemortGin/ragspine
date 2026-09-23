@@ -73,6 +73,10 @@ eval-qa: ## QA evaluation against the golden set (baseline-gated)
 eval-retrieval: ## BM25-vs-hybrid retrieval A/B harness
 	$(PYTHON) scripts/eval_retrieval_ab.py
 
+.PHONY: eval-nl-gold
+eval-nl-gold: ## nl-gold (AIA sample) on the ragspine main chain, both routes; real models: ARGS="--provider claude-cli --embedding local-http --reranker local-http"
+	$(PYTHON) scripts/run_nl_gold_ragspine.py $(ARGS)
+
 # ---- service -------------------------------------------------------------------------
 
 .PHONY: serve
