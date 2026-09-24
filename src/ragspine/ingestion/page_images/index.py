@@ -3,6 +3,8 @@
 - 有 PDF：签名（PDF sha256 + dpi + max_side + RESTRICTED 页集合）不变即跳过；变了就重渲染并整体替换，
   旧的孤儿文件删除。
 - 没有 PDF：撤下该 doc 以前的页图（关联由本次入库输入决定）；库里从没关联过时什么都不做、也不建表。
+- 页标签（页图按需附图的触发依据，ADR 0025）：关联了 PDF 的 ``.md`` 同时逐页算原始度量写进 ``page_tag`` 表
+  （签名 = markdown sha256 + 口径版本，不变即跳过）；撤下页图时一并撤下标签。trace op=narrative.page_tag_index 只记计数。
 - RESTRICTED：页里只要有一个 RESTRICTED 块（按块库当前活跃块判断），这一页就不渲染、不落盘
   （``n_withheld`` 计数）；检索期出口还会再查一次，见 ``retrieval/page_images/attach.py``。
 - trace 只记计数（op=narrative.page_image_index），不记路径和内容。
@@ -28,6 +30,11 @@ from ragspine.ingestion.page_images.render import (
 from ragspine.ingestion.page_images.source_pdf import MARKDOWN_SUFFIX, SourcePdf
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
 from ragspine.retrieval.page_images.store import PageImageStore
+from ragspine.retrieval.page_images.trigger.tag_store import (
+    PageTagStore,
+    compute_markdown_tags,
+    tag_signature,
+)
 from ragspine.retrieval.page_parent.pages import is_restricted, page_key
 
 STATUS_RENDERED = "rendered"
@@ -161,13 +168,14 @@ def sync_ingested_page_images(
     max_side: int = DEFAULT_PAGE_IMAGE_MAX_SIDE,
 ) -> PageImageReport:
     """叙事入库之后调用：本批成功入库（含幂等跳过）的每个 .md 按 ``sources`` 同步页图；没配 PDF 的撤下旧图。"""
-    docs: dict[str, SourcePdf | None] = {
-        f.doc_id: sources.get(f.doc_id)
+    files = [
+        f
         for f in report.files
         if Path(f.path).suffix.lower() == MARKDOWN_SUFFIX
         and f.status in (STATUS_INGESTED, STATUS_SKIPPED)
-    }
-    return sync_page_images(
+    ]
+    docs: dict[str, SourcePdf | None] = {f.doc_id: sources.get(f.doc_id) for f in files}
+    images = sync_page_images(
         chunk_db_path,
         docs,
         image_dir=image_dir,
@@ -175,6 +183,41 @@ def sync_ingested_page_images(
         max_side=max_side,
         dry_run=report.dry_run,
     )
+    if not report.dry_run:
+        sync_page_tags(chunk_db_path, {f.doc_id: (Path(f.path), docs[f.doc_id]) for f in files})
+    return images
+
+
+def sync_page_tags(
+    chunk_db_path: str | Path, docs: Mapping[str, tuple[Path, SourcePdf | None]]
+) -> None:
+    """关联了 PDF 的 ``.md`` 逐页算原始度量写进 ``page_tag``（签名不变即跳过）；没关联的撤下旧标签。"""
+    written = unchanged = cleared = n_pages = 0
+    store = PageTagStore(chunk_db_path)
+    try:
+        for doc_id, (md_path, source) in docs.items():
+            if source is None:
+                cleared += 1 if store.clear_doc(doc_id) else 0
+                continue
+            md_sha256 = hashlib.sha256(md_path.read_bytes()).hexdigest()
+            if store.doc_signature(doc_id) == tag_signature(md_sha256):
+                unchanged += 1
+                continue
+            n_pages += store.replace_doc(
+                doc_id, compute_markdown_tags(md_path), md_sha256=md_sha256
+            )
+            written += 1
+    finally:
+        store.close()
+    if written or unchanged or cleared:
+        emit_trace(
+            None,
+            op="narrative.page_tag_index",
+            written=written,
+            unchanged=unchanged,
+            cleared=cleared,
+            n_pages=n_pages,
+        )
 
 
 def page_image_report_to_dict(report: PageImageReport) -> dict[str, Any]:

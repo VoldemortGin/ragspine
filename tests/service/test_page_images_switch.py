@@ -65,6 +65,67 @@ def test_service_config_defaults_and_env():
     )
 
 
+def test_trigger_fields_defaults_env_and_preset():
+    from ragspine.service.config import ServiceConfig, make_retrieval_preset
+
+    cfg = ServiceConfig(db_path="x.db")
+    assert (cfg.page_images_trigger, cfg.page_images_max) == ("has_table,low_text", None)
+    assert (cfg.page_images_low_text_chars, cfg.page_images_figure_min_chars) == (300, 10)
+    env = ServiceConfig.from_env(
+        {
+            "RAGSPINE_PAGE_IMAGES": "tagged",
+            "RAGSPINE_PAGE_IMAGES_TRIGGER": "has_figure,low_text",
+            "RAGSPINE_PAGE_IMAGES_MAX": "2",
+            "RAGSPINE_PAGE_IMAGES_LOW_TEXT_CHARS": "200",
+            "RAGSPINE_PAGE_IMAGES_FIGURE_MIN_CHARS": "25",
+        }
+    )
+    assert (env.page_images, env.page_images_trigger, env.page_images_max) == (
+        "tagged",
+        "has_figure,low_text",
+        2,
+    )
+    assert (env.page_images_low_text_chars, env.page_images_figure_min_chars) == (200, 25)
+    with pytest.raises(ValueError):
+        ServiceConfig.from_env({"RAGSPINE_PAGE_IMAGES_MAX": "two"})
+    preset = make_retrieval_preset(
+        page_images="tagged",
+        page_images_trigger="any",
+        page_images_max=1,
+        page_images_low_text_chars=100,
+        page_images_figure_min_chars=0,
+    )
+    assert (preset.page_images, preset.page_images_trigger, preset.page_images_max) == (
+        "tagged",
+        "any",
+        1,
+    )
+    assert (preset.page_images_low_text_chars, preset.page_images_figure_min_chars) == (100, 0)
+    kept = preset.with_overrides(page_images="all")
+    assert (kept.page_images_max, kept.page_images_trigger) == (1, "any")
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"page_images": "maybe"},
+        {"page_images": "tagged", "page_images_trigger": "has_chart"},
+        {"page_images": "tagged", "page_images_trigger": ""},
+        {"page_images": "tagged", "page_images_max": -1},
+        {"page_images": "all", "page_images_low_text_chars": -5},
+        {"page_images": "all", "page_images_figure_min_chars": -1},
+    ],
+)
+def test_invalid_trigger_values_fail_at_assembly(tmp_path, overrides):
+    from ragspine.service.config import ServiceConfig, open_narrative_retriever
+
+    db = str(tmp_path / "k.db")
+    cfg = ServiceConfig(db_path=db, chunk_db_path=db, embedding="none", **overrides)
+    with pytest.raises(ValueError):
+        with open_narrative_retriever(cfg, MockProvider()):
+            pass
+
+
 def test_open_narrative_retriever_wraps_only_when_on(tmp_path):
     from ragspine.service.config import ServiceConfig, open_narrative_retriever
 
@@ -86,6 +147,27 @@ def test_open_narrative_retriever_wraps_only_when_on(tmp_path):
         assert (retriever.top_n, retriever.page_parent) == (2, "dedup")
         assert Path(retriever.image_dir) == tmp_path / "imgs"
         assert retriever.chunk_db_path == db
+    from ragspine.retrieval.page_images.trigger.retriever import PageImageTriggerRetriever
+
+    tagged = ServiceConfig(
+        db_path=db,
+        chunk_db_path=db,
+        embedding="none",
+        page_parent="dedup",
+        page_images="tagged",
+        page_images_top_n=4,
+        page_images_trigger="has_figure",
+        page_images_figure_min_chars=20,
+    )
+    with open_narrative_retriever(tagged, MockProvider()) as retriever:
+        assert isinstance(retriever, PageImageTriggerRetriever)
+        assert (retriever.mode, retriever.max_images, retriever.figure_min_chars) == (
+            "tagged",
+            4,
+            20,
+        )
+        assert retriever.trigger == frozenset({"has_figure"})
+        assert isinstance(retriever.base, PageImageRetriever) and retriever.base.top_n == 4
 
 
 def test_facade_ingest_links_pdf_and_ask_sends_images(tmp_path):

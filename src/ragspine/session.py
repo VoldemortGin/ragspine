@@ -267,6 +267,10 @@ class RAGSpine:
             page_parent=self.retrieval.page_parent,
             page_images=self.retrieval.page_images,
             page_images_top_n=self.retrieval.page_images_top_n,
+            page_images_trigger=self.retrieval.page_images_trigger,
+            page_images_max=self.retrieval.page_images_max,
+            page_images_low_text_chars=self.retrieval.page_images_low_text_chars,
+            page_images_figure_min_chars=self.retrieval.page_images_figure_min_chars,
             contextual_index=self.retrieval.contextual_index,
             query_translation=self.retrieval.query_translation,
         )

@@ -2,7 +2,8 @@
 
 页图是整页内容，范围比出口处理的单个块更大：只要一页里有任何 RESTRICTED 块，这一页的图就绝不能进 prompt。
 
-钉死（页级父子 dedup / page+child 两种模式，端到端 open_narrative_retriever → answer_question）：
+钉死（页级父子 dedup / page+child 两种模式 × 页图 on / tagged（ADR 0025）两种模式，
+端到端 open_narrative_retriever → answer_question）：
     - 同页有 RESTRICTED 块时，即使映射表里有这一页的图（例如敏感度在渲染之后才改），也不发图；
     - 同页公开块的文本照常进上下文（隔离的是图，不是整页）；
     - 反向证明：同一语料把那一块改成 INTERNAL，这一页的图就会发出去（测试有牙齿）。
@@ -20,14 +21,17 @@ ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpa
 from ragspine.agent.agent import answer_question
 from ragspine.agent.intent import ROUTE_NARRATIVE, RuleIntentParser
 from ragspine.agent.llm_provider import MockProvider, split_message_content
+from ragspine.extraction.di_markdown.page_tags import PageTagStats
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
 from ragspine.retrieval.chunking.chunking import Chunk
 from ragspine.retrieval.page_images.store import PageImageStore, RenderedPage
+from ragspine.retrieval.page_images.trigger.tag_store import PageTagStore
 from ragspine.service.config import ServiceConfig, open_narrative_retriever
 from ragspine.storage.fact_store import SqliteFactStore
 
 SECRET = "Falcon acquisition Singapore VONB board plan."
 MODES = ("dedup", "page+child")
+IMAGE_MODES = ("on", "tagged")
 _REF = date(2026, 9, 1)
 
 
@@ -87,19 +91,25 @@ def _setup(tmp_path, secret_sensitivity: str):
         pages=[RenderedPage(p, b"\x89PNG" + bytes([p]), 8, 4) for p in (4, 5)],
     )
     images.close()
+    # 两页都是低文字页：tagged（默认触发 has_table,low_text）下它们都有资格附图，隔离只能靠门口筛查。
+    tags = PageTagStore(db)
+    tags.replace_doc(
+        "deck.md", [PageTagStats(p, False, 0, 0, 20) for p in (4, 5)], md_sha256="0" * 64
+    )
+    tags.close()
     facts = SqliteFactStore(db)
     facts.init_schema()
     return db, facts
 
 
-def _ask(db, facts, mode: str) -> _ImageRecorder:
+def _ask(db, facts, mode: str, image_mode: str) -> _ImageRecorder:
     provider = _ImageRecorder()
     config = ServiceConfig(
         db_path=str(db),
         chunk_db_path=str(db),
         embedding="none",
         page_parent=mode,
-        page_images="on",
+        page_images=image_mode,
         page_images_top_n=5,
     )
     with open_narrative_retriever(config, provider) as retriever:
@@ -122,11 +132,12 @@ def _sent_pages(provider: _ImageRecorder) -> list[int]:
     return pages
 
 
+@pytest.mark.parametrize("image_mode", IMAGE_MODES)
 @pytest.mark.parametrize("mode", MODES)
-def test_page_with_restricted_chunk_never_sends_its_image(tmp_path, mode):
+def test_page_with_restricted_chunk_never_sends_its_image(tmp_path, mode, image_mode):
     db, facts = _setup(tmp_path, "RESTRICTED")
     try:
-        provider = _ask(db, facts, mode)
+        provider = _ask(db, facts, mode, image_mode)
     finally:
         facts.close()
     assert provider.seen, "叙事路应调用 provider"
@@ -138,11 +149,12 @@ def test_page_with_restricted_chunk_never_sends_its_image(tmp_path, mode):
     assert "Singapore VONB overview." in text  # 公开的同页文本照常可用
 
 
+@pytest.mark.parametrize("image_mode", IMAGE_MODES)
 @pytest.mark.parametrize("mode", MODES)
-def test_reverse_proof_same_page_image_is_sent_when_not_restricted(tmp_path, mode):
+def test_reverse_proof_same_page_image_is_sent_when_not_restricted(tmp_path, mode, image_mode):
     db, facts = _setup(tmp_path, "INTERNAL")
     try:
-        provider = _ask(db, facts, mode)
+        provider = _ask(db, facts, mode, image_mode)
     finally:
         facts.close()
     assert 4 in _sent_pages(provider)

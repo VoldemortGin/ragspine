@@ -26,6 +26,10 @@ from ragspine.agent.llm_provider import (
 )
 from ragspine.agent.query_transform import make_query_transform
 from ragspine.common.observability import emit_trace
+from ragspine.extraction.di_markdown.page_tags import (
+    DEFAULT_FIGURE_MIN_CHARS,
+    DEFAULT_LOW_TEXT_CHARS,
+)
 from ragspine.ingestion.page_images.render import (
     DEFAULT_PAGE_IMAGE_DPI,
     DEFAULT_PAGE_IMAGE_MAX_SIDE,
@@ -35,11 +39,12 @@ from ragspine.retrieval.corrective import make_corrective_retriever
 from ragspine.retrieval.lexical.retrieval import EmbeddingBackend
 from ragspine.retrieval.link.narrative_link import build_narrative_retriever
 from ragspine.retrieval.mode import make_retrieval_mode
-from ragspine.retrieval.page_images.attach import (
-    DEFAULT_PAGE_IMAGES_TOP_N,
-    make_page_image_retriever,
-)
+from ragspine.retrieval.page_images.attach import DEFAULT_PAGE_IMAGES_TOP_N
 from ragspine.retrieval.page_images.store import default_page_image_dir
+from ragspine.retrieval.page_images.trigger.retriever import (
+    DEFAULT_PAGE_IMAGES_TRIGGER,
+    make_triggered_page_image_retriever,
+)
 from ragspine.retrieval.postprocess import make_postprocessor
 from ragspine.retrieval.rerank.cross_encoder import make_reranker
 from ragspine.retrieval.vector.chunk_index import (
@@ -83,6 +88,10 @@ class RetrievalPreset:
     page_parent: str = "page+child"
     page_images: str = "off"
     page_images_top_n: int = DEFAULT_PAGE_IMAGES_TOP_N
+    page_images_trigger: str = DEFAULT_PAGE_IMAGES_TRIGGER
+    page_images_max: int | None = None
+    page_images_low_text_chars: int = DEFAULT_LOW_TEXT_CHARS
+    page_images_figure_min_chars: int = DEFAULT_FIGURE_MIN_CHARS
     contextual_index: str = "off"
     query_translation: str = "auto"
 
@@ -98,6 +107,10 @@ class RetrievalPreset:
         page_parent: str | None = None,
         page_images: str | None = None,
         page_images_top_n: int | None = None,
+        page_images_trigger: str | None = None,
+        page_images_max: int | None = None,
+        page_images_low_text_chars: int | None = None,
+        page_images_figure_min_chars: int | None = None,
         contextual_index: str | None = None,
         query_translation: str | None = None,
     ) -> "RetrievalPreset":
@@ -113,6 +126,18 @@ class RetrievalPreset:
             page_images=page_images or self.page_images,
             page_images_top_n=(
                 self.page_images_top_n if page_images_top_n is None else page_images_top_n
+            ),
+            page_images_trigger=page_images_trigger or self.page_images_trigger,
+            page_images_max=self.page_images_max if page_images_max is None else page_images_max,
+            page_images_low_text_chars=(
+                self.page_images_low_text_chars
+                if page_images_low_text_chars is None
+                else page_images_low_text_chars
+            ),
+            page_images_figure_min_chars=(
+                self.page_images_figure_min_chars
+                if page_images_figure_min_chars is None
+                else page_images_figure_min_chars
             ),
             contextual_index=contextual_index or self.contextual_index,
             query_translation=query_translation or self.query_translation,
@@ -156,6 +181,10 @@ def make_retrieval_preset(
     page_parent: str | None = None,
     page_images: str | None = None,
     page_images_top_n: int | None = None,
+    page_images_trigger: str | None = None,
+    page_images_max: int | None = None,
+    page_images_low_text_chars: int | None = None,
+    page_images_figure_min_chars: int | None = None,
     contextual_index: str | None = None,
     query_translation: str | None = None,
 ) -> RetrievalPreset:
@@ -171,6 +200,10 @@ def make_retrieval_preset(
         page_parent=page_parent,
         page_images=page_images,
         page_images_top_n=page_images_top_n,
+        page_images_trigger=page_images_trigger,
+        page_images_max=page_images_max,
+        page_images_low_text_chars=page_images_low_text_chars,
+        page_images_figure_min_chars=page_images_figure_min_chars,
         contextual_index=contextual_index,
         query_translation=query_translation,
     )
@@ -199,8 +232,16 @@ class ServiceConfig:
     page_parent: str = "page+child"  # 页级父子: "page+child"(默认,按页去重+整页BM25一路再RRF) | "dedup"(按页去重,代表块带整页上下文) | "off"(检索输出与引入前字节不变)
     contextual_index: str = "off"  # 标题进索引: "off"(默认,索引文本=正文,字节不变) | "heading"(BM25/向量索引文本前拼标题路径) | "full"(再加 title/entity/period);交给 LLM 的文本不变
     query_translation: str = "auto"  # 跨语言查询翻译: "auto"(默认,问题与文档语言不一致时用 provider 译成文档语言,译文作额外的 BM25 与向量查询;精排与生成仍用原问题) | "off"(检索输出与引入前字节不变)
-    page_images: str = "off"  # 图文混合上下文(opt-in): "off"(默认,prompt字节不变) | "on"(前 N 页附原 PDF 页图;需 page_parent≠off 且入库时关联了 source PDF)
-    page_images_top_n: int = DEFAULT_PAGE_IMAGES_TOP_N  # page_images=on 时附图的前 N 条(页)
+    page_images: str = "off"  # 图文混合上下文(opt-in,ADR 0025): "off"(默认,prompt字节不变) | "all"(前 N 页全附原 PDF 页图;"on" 是别名) | "tagged"(前 N 页里只附命中触发标签的页);需 page_parent≠off 且入库时关联了 source PDF
+    page_images_top_n: int = DEFAULT_PAGE_IMAGES_TOP_N  # 附图的候选窗口:前 N 条(页)
+    page_images_trigger: str = DEFAULT_PAGE_IMAGES_TRIGGER  # tagged 的触发标签(逗号分隔,或关系): has_table / has_figure / low_text,或 "any"
+    page_images_max: int | None = None  # 每次检索最多几张页图;None=等于 top_n
+    page_images_low_text_chars: int = (
+        DEFAULT_LOW_TEXT_CHARS  # low_text 阈值:去空白与 | 后不足该字符数
+    )
+    page_images_figure_min_chars: int = (
+        DEFAULT_FIGURE_MIN_CHARS  # has_figure 阈值:最大那个图的文字量(字符)≥该值才算,滤掉 logo
+    )
     page_image_dpi: int = DEFAULT_PAGE_IMAGE_DPI  # 入库渲染页图的 DPI(关联了 source PDF 时)
     page_image_max_side: int = DEFAULT_PAGE_IMAGE_MAX_SIDE  # 页图长边像素上限
     page_image_dir: str | None = None  # 页图目录;None=块库旁 page_images/
@@ -344,15 +385,20 @@ def open_narrative_retriever(
     # W6b 纠错检索（opt-in）：默认 "none" → make_corrective_retriever 返回 transformed 本身（字节
     # 不变）；"crag" 才包成有界确定性 grade→act 环。隔离继承自 base（RESTRICTED 已在出口剔除）。
     wrapped: NarrativeRetriever = make_corrective_retriever(transformed, config.corrective)
-    # 图文混合上下文（opt-in）：默认 "off" → 原样返回（字节不变）；"on" 给最外层结果的前 N 页附页图引用，
+    # 图文混合上下文（opt-in，ADR 0025）：默认 "off" → 原样返回（字节不变）；"all"/"on" 给最外层结果的前 N 页
+    # 附页图引用（不设上限时与原来的 on 逐字节一致）；"tagged" 再只留命中触发标签的页（只删不增）。
     # 含 RESTRICTED 块的页不发图。
-    wrapped = make_page_image_retriever(
+    wrapped = make_triggered_page_image_retriever(
         wrapped,
         config.page_images,
         chunk_db_path=config.chunk_db_path,
         image_dir=resolve_page_image_dir(config),
         top_n=config.page_images_top_n,
         page_parent=config.page_parent,
+        trigger=config.page_images_trigger,
+        max_images=config.page_images_max,
+        low_text_chars=config.page_images_low_text_chars,
+        figure_min_chars=config.page_images_figure_min_chars,
     )
     try:
         yield wrapped

@@ -5,7 +5,7 @@
 Submodules:
     source_pdf.py — 关联解析（显式参数 > sidecar ``<stem>.meta.json`` 的 ``source_pdf`` 字段）、页数校验、sha256。
     render.py — pdfspine 渲染 PNG；默认 144dpi、长边封顶 1568px。
-    index.py — sync_page_images：按 doc 幂等同步进映射表，RESTRICTED 页不渲染，trace 只记计数。
+    index.py — sync_page_images：按 doc 幂等同步进映射表，RESTRICTED 页不渲染，trace 只记计数；sync_page_tags 同时写页标签（ADR 0025）。
 """
 
 from ragspine import _lazy_submodules
