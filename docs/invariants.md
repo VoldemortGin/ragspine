@@ -4,7 +4,7 @@ covers:
   - src/ragspine/retrieval/link/
   - src/ragspine/retrieval/rerank/
   - src/ragspine/common/observability/
-verified-against: c02d1543866e44aa17e8a526e2ebf7c8ad43fdeb
+verified-against: 5e1277dc06104ec6967005f059f9067f54d4c417
 ---
 
 # Invariants (code-enforced)
@@ -55,6 +55,9 @@ score 0, then is stripped at the two exits). `PersistEverythingPolicy` is opt-in
 appropriate when the entire vector store is itself classified RESTRICTED-tier at rest — encrypted
 volume, access-controlled, and excluded from routine backups. The `where`-filter pushdown in
 `VectorStore` (`retrieval/vector/store.py`) is an additional optional enforcement point at the store.
+The opt-in persisted chunk index (`retrieval/vector/chunk_index.py`, service switch `persist_vectors`)
+syncs through the same policy — RESTRICTED chunks are counted as `withheld`, never embedded
+(`tests/service/test_persistent_vector_index.py`).
 
 **Frozen by** `tests/retrieval/lexical/test_persistence_ingest.py` (default policy persists zero
 RESTRICTED vectors; opt-in persists them) and the existing two-exit tests under

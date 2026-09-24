@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/eval/
-verified-against: 07f37a63378c0ac249af81020189d9d6052a8a71
+verified-against: 5e1277dc06104ec6967005f059f9067f54d4c417
 ---
 
 # eval — agent contract
@@ -19,7 +19,9 @@ as two new ratcheted gates alongside the four命门.
 (`answer_question`) along two routes — `A-ask` (rule intent parser, routed as-is) and `B-narrative`
 (`ForcedNarrativeIntentParser` pins the route) — and writes a report; **not a CI gate** (real-model
 baseline via `scripts/run_nl_gold_ragspine.py` / `make eval-nl-gold`, reports under
-`data/validation/ragspine-nl-gold/`, git-ignored).
+`data/validation/ragspine-nl-gold/`, git-ignored). With `--embedding local-http` the script ingests through the
+formal persisted-vector path (`storage.persist_vectors`, embed at ingest) and reads the index back via
+`service.config.open_vector_channel` — no eval-side vector backfill.
 
 ## Invariants
 

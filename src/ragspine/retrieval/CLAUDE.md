@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/
-verified-against: c02d1543866e44aa17e8a526e2ebf7c8ad43fdeb
+verified-against: 5e1277dc06104ec6967005f059f9067f54d4c417
 ---
 
 # retrieval — agent contract
@@ -52,10 +52,17 @@ candidate pool then an **exact `_cosine` re-rank** finalizes top-k (`store._pool
 the pool covers the true top-k for the conformance datasets so `sqlite_vec`/`pgvector` stay exact)
 — and `persistence_policy.py` gating what is written at rest; `single_text_backend.py` adapts any
 single-text `embed_query` embedder (e.g. the OpenAI-compatible HTTP `LocalEmbeddingAdapter`) into a batch
-`EmbeddingBackend`, duck-typed, zero imports, not registered in `make_embedding_backend`), `rerank/` (the ⭐精排 exit:
+`EmbeddingBackend`, duck-typed, zero imports, registered as `make_embedding_backend("local-http")` (reads
+`EMBEDDING_*`, `model_id="local-http:<model>"`); `chunk_index.py`'s `ChunkVectorIndex` is the **persisted chunk
+vector index** — a sqlite-vec file (`<chunk db stem>.vectors.db`) + a `chunk_vector_meta` (embedding model id +
+dim) and `chunk_vector_docs` (per-doc content signature) manifest; `sync` is doc-granular idempotent (unchanged
+signature → skip, changed → `delete(where={doc_id})` + re-embed, vanished doc → delete), policy-gated
+(RESTRICTED withheld by default), and a model / dim mismatch raises `VectorIndexMismatchError` (rebuild, never
+mix)), `rerank/` (the ⭐精排 exit:
 `listwise_rerank.py` orchestration + `ListwiseJudge` Protocol with RRF-fallback + RESTRICTED isolation;
 `scored_judge.py` adapts a scoring reranker (`/v1/rerank` `LocalRerankAdapter`: index + relevance_score) into a
-`ListwiseJudge` — score-descending, ties keep RRF order, blank candidates unscored + appended; not in `make_reranker`;
+`ListwiseJudge` — score-descending, ties keep RRF order, blank candidates unscored + appended; registered as
+`make_reranker("local-http")` (reads `RERANK_*`);
 judges — LLM listwise via `link/`, and three offline local brains all selected by `make_reranker`
 (`cross_encoder.py`): the **cross-encoder** `cross_encoder.py` (fastembed `TextCrossEncoder`,
 `[rerank]`, W2), plus two W11 retrieval-representation rerankers — **ColBERT late-interaction**
@@ -148,6 +155,11 @@ is the more-permissive `RAGSPINE_COLPALI_MODEL` alternative.
 
 ## Read before editing
 
+- **Persisted chunk vectors are opt-in and live outside `ChunkStore`.** `ChunkStore` stores text only;
+  `NarrativeIndex.retrieve` is store-managed (embeds the query, never the chunks), so without vectors
+  written at ingest the dense channel is an empty store. The service switch `persist_vectors`
+  (`service/config.index_narrative_vectors` at ingest, `open_vector_channel` at query) fills and reads
+  `ChunkVectorIndex`; default off keeps the old assembly byte-identical.
 - **Vector wiring is byte-identical on purpose.** `HybridRetriever` routes vector
   scoring through `VectorStore.query`, not an inline cosine loop. To keep results
   bit-stable: embed **candidates only** (prefilter strictly before any `embed_texts`),

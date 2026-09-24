@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/service/
-verified-against: 4846bb2ded70e5f485566da9a0edf30c446fdf39
+verified-against: 5e1277dc06104ec6967005f059f9067f54d4c417
 ---
 
 # service — agent contract
@@ -16,12 +16,20 @@ injection), RQ task queue (`FakeQueue` tests / `RQQueue` prod), ingestion jobs
 (worker-owned stores; `ServiceConfig.chunker` — default `"none"` byte-identical — rides the
 narrative-ingest job payload into `ingest_narrative(chunker=make_chunker(...))`, so `parent_child`
 small-to-big chunking is a config switch, ADR 0018; likewise `ServiceConfig.narrative_segment_chunking` /
-`RAGSPINE_NARRATIVE_SEGMENT_CHUNKING` — default `False` byte-identical — rides the payload as `segment_chunking`), FAQ short-circuit cache, and the **Dify workflow service**
+`RAGSPINE_NARRATIVE_SEGMENT_CHUNKING` — default `False` byte-identical — rides the payload as `segment_chunking`;
+and `ServiceConfig.persist_vectors` / `RAGSPINE_PERSIST_VECTORS` (+ `vector_db_path`, default the chunk db's
+`<stem>.vectors.db`) — default `False` byte-identical — makes ingest embed chunks into a persisted sqlite-vec
+`ChunkVectorIndex` (`index_narrative_vectors`, called by the facade and, via payload `persist_vectors` +
+server-decided `embedding`/`retrieval_mode`/`persistence_policy`, by the worker job) and makes
+`open_narrative_retriever` read it back (`open_vector_channel`); no backend / empty index degrades to BM25 with an
+`op=narrative.vector_channel` / `narrative.vector_index` count trace, a model mismatch raises), FAQ short-circuit cache, and the **Dify workflow service**
 (`dify/` — L0 static gate + L1/L2 safe execution; ADR 0014): endpoints
 `/v1/dify/{analyze,compile,run,run/jobs}` reuse the app factory / DI / RQ queue.
 The high-level local facade selects retrieval through `RetrievalProfile` and the frozen
 `RetrievalPreset`: `economy` is lexical-only, `balanced` adds deterministic in-process vectors,
-and `quality` opts into ONNX embeddings, cross-encoder reranking, and post-processing.
+and `quality` opts into ONNX embeddings, cross-encoder reranking, and post-processing. `RetrievalPreset.persist_vectors`
+(facade config `storage.persist_vectors`, default `False`) turns on the persisted chunk vectors above; `embedding` /
+`reranker` also accept `"local-http"` (OpenAI-compatible `/v1/embeddings` / `/v1/rerank`, env `EMBEDDING_*` / `RERANK_*`).
 The L2 subprocess entry ships inside the wheel (`dify/run_dify_workflow.py`, `python -m`-able;
 repo `scripts/` copy is a source-tree fallback). `dify/http_client.py` is the guarded client the
 runner injects for http-request nodes — default-off (`RAGSPINE_DIFY_HTTP_ENABLED`), stdlib-only,

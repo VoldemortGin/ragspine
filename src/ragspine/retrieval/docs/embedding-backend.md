@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/vector/embedding_backends.py
-verified-against: 95f607e7bf0aea1ae6fa6b27ae89a330940f1fb7
+verified-against: 5e1277dc06104ec6967005f059f9067f54d4c417
 ---
 
 # EmbeddingBackend seam — the default loop made semantic (W1)
@@ -20,6 +20,7 @@ implementations + the `make_embedding_backend` factory live in `vector/embedding
 | `deterministic` | `DeterministicEmbeddingBackend` | **no** (lexical hash) | none | yes |
 | `openai` | `OpenAIEmbeddingBackend` | yes | `[llm]` | no (API) |
 | `qwen3` / `sentence-transformers` / `st` | `SentenceTransformerEmbeddingBackend` | yes | `[embed]` (torch) | first-pull-then-offline |
+| `local-http` | `SingleTextEmbeddingBackend(LocalEmbeddingAdapter)` (OpenAI-compatible `/v1/embeddings`, env `EMBEDDING_BASE_URL` / `_MODEL` / `_API_KEY`, `model_id='local-http:<model>'`) | yes | none (stdlib HTTP) | loopback server |
 
 `OnnxEmbeddingBackend` is the W1 deliverable: a **lightweight, deterministic, real-semantic**
 default. Default model `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`

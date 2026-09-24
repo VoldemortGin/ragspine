@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/rerank/cross_encoder.py
-verified-against: 95f607e7bf0aea1ae6fa6b27ae89a330940f1fb7
+verified-against: 5e1277dc06104ec6967005f059f9067f54d4c417
 ---
 
 # Reranker seam — the ⭐ rerank stage's offline brain (W2)
@@ -19,6 +19,7 @@ orchestration (RESTRICTED isolation + degrade-to-RRF) is unchanged — W2 only a
 | `none` / `None` | — (returns `None`) | — (identity/RRF, or injected LLM judge) | none | yes |
 | `auto` | `CrossEncoderReranker` *if* `fastembed` importable, else `None` | yes / falls back | `[rerank]` | first-pull-then-offline |
 | `cross_encoder` / `ce` / `ms_marco` | `CrossEncoderReranker` | **yes** | `[rerank]` (`fastembed`, Apache-2.0) | first-pull-then-offline |
+| `local-http` | `ScoredRerankJudge(LocalRerankAdapter)` (`/v1/rerank`, env `RERANK_BASE_URL` / `_MODEL` / `_API_KEY`) | yes | none (stdlib HTTP) | loopback server |
 | (injected) `ProviderListwiseJudge` | LLM listwise (`link/narrative_link.py`) | yes (higher-cost) | `[llm]` / any provider | no (API) |
 
 > **W11 extension.** `make_reranker` (`rerank/cross_encoder.py`) is the **reranker-factory hub** for
