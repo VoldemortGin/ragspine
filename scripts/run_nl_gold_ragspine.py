@@ -9,7 +9,11 @@ embedding / 精排为 none，即零模型零网络。真实模型基线（先 ``
 取 EMBEDDING_* / RERANK_*，并确认 SSH 隧道在）：
 
     .venv/bin/python scripts/run_nl_gold_ragspine.py --provider claude-cli \\
-        --embedding local-http --reranker local-http --label baseline
+        --embedding local-http --reranker local-http --repeat 3 --label baseline
+
+主口径是整份文档（``--pages all``，默认）；``--pages gold`` 只入库 gold 冻结的页。``--repeat N`` 每题跑 N 次，
+报告每题通过率、主分均值±标准差和不稳定题（不做多数票）。``--rejudge <旧报告目录>`` 不入库、不调模型，
+只用当前判分器 + ``--gold`` 重判旧报告里记录的答案，看判分器 / gold 修正本身让分数变了多少。
 
 图文混合上下文：``--source-pdf <原 PDF>`` 在入库时关联并渲染页图，``--page-images on``（需
 ``--page-parent dedup|page+child``）给检索结果的前 ``--page-images-top-n`` 页附页图，claude-cli 会读图。
@@ -20,22 +24,32 @@ embedding / 精排为 none，即零模型零网络。真实模型基线（先 ``
 
 import argparse
 import hashlib
+import json
 import os
 import subprocess
 import sys
 import time
+from collections.abc import Callable, Mapping, Sequence
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
 DEFAULT_GOLD = (
-    ROOT_DIR / "data/benchmarks/enterprise-pdf-rag/aia-2026-interim/nl-answers-gold-v1.json"
+    ROOT_DIR / "data/benchmarks/enterprise-pdf-rag/aia-2026-interim/nl-answers-gold-v2.json"
 )
 DEFAULT_DOCUMENT = ROOT_DIR / "data/di-markdown/aia-group-2026-interim-results-presentation.md"
 DEFAULT_OUT_ROOT = ROOT_DIR / "data/validation/ragspine-nl-gold"
+
+
+def _positive_int(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError("须为 ≥1 的整数")
+    return value
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -51,9 +65,21 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--pages",
         choices=("gold", "all"),
-        default="gold",
-        help="gold=只入库 gold 冻结的物理页（pinned.selected_physical_pages，其余页清空、页号不变）；"
-        "all=整份文档",
+        default="all",
+        help="all=整份文档（主口径，默认）；gold=只入库 gold 冻结的物理页"
+        "（pinned.selected_physical_pages，其余页清空、页号不变）",
+    )
+    parser.add_argument(
+        "--repeat",
+        type=_positive_int,
+        default=1,
+        help="每题跑 N 次：报告每题通过率、主分均值±标准差、不稳定题（不做多数票）",
+    )
+    parser.add_argument(
+        "--rejudge",
+        type=Path,
+        default=None,
+        help="旧报告目录（含 report.json）：不重新生成，只用当前判分器 + --gold 重判其中记录的答案",
     )
     parser.add_argument("--out-root", type=Path, default=DEFAULT_OUT_ROOT)
     parser.add_argument("--label", default="baseline")
@@ -122,7 +148,9 @@ def main(argv: list[str] | None = None) -> int:
         CaseRun,
         CountingProvider,
         gold_selected_pages,
+        gold_version,
         load_nl_gold,
+        rejudge_report,
         run_route,
         select_di_pages,
         summarize,
@@ -146,6 +174,35 @@ def main(argv: list[str] | None = None) -> int:
     cases = load_nl_gold(args.gold)
     if wanted:
         cases = tuple(c for c in cases if c.case_id in wanted)
+    gold_meta = {
+        "gold": str(args.gold),
+        "gold_version": gold_version(args.gold),
+        "gold_sha256": hashlib.sha256(args.gold.read_bytes()).hexdigest(),
+    }
+
+    if args.rejudge is not None:
+        old_report = args.rejudge / "report.json"
+        old_meta = json.loads(old_report.read_text(encoding="utf-8"))["meta"]
+        rejudged = rejudge_report(old_report, cases)
+        meta = {
+            **old_meta,
+            **gold_meta,
+            "label": args.label,
+            "date": date.today().isoformat(),
+            "git_head": _git_head(),
+            "rejudged_from": str(args.rejudge),
+            "rejudged_from_judge_version": old_meta.get("judge_version", "nl-gold-judge-v1"),
+            "rejudged_from_gold": old_meta.get("gold", ""),
+        }
+        out = write_report(
+            args.out_root / f"{date.today().isoformat()}-{args.label}",
+            meta=meta,
+            cases=cases,
+            runs=rejudged,
+        )
+        _print_summary(rejudged, summarize)
+        print(f"report: {out / 'report.md'}")
+        return 0
 
     document: Path = args.document
     workspace: Path = args.workspace or args.out_root / "workspaces" / document.stem
@@ -266,18 +323,21 @@ def main(argv: list[str] | None = None) -> int:
     runs: dict[str, list[CaseRun]] = {}
     try:
         for route in routes:
-            print(f"==> route {route}", flush=True)
+            runs[route] = []
             t0 = time.perf_counter()
-            runs[route] = run_route(
-                cases,
-                route,
-                store=fact_store,
-                retriever=retriever,
-                provider=provider,
-                reference_date=reference_date,
-                languages=languages,
-                progress=progress,
-            )
+            for repeat in range(args.repeat):
+                print(f"==> route {route} run {repeat + 1}/{args.repeat}", flush=True)
+                runs[route] += run_route(
+                    cases,
+                    route,
+                    store=fact_store,
+                    retriever=retriever,
+                    provider=provider,
+                    reference_date=reference_date,
+                    languages=languages,
+                    progress=progress,
+                    repeat=repeat,
+                )
             timings[f"{route}_s"] = round(time.perf_counter() - t0, 1)
     finally:
         fact_store.close()
@@ -291,7 +351,8 @@ def main(argv: list[str] | None = None) -> int:
         "label": args.label,
         "date": date.today().isoformat(),
         "git_head": _git_head(),
-        "gold": str(args.gold),
+        **gold_meta,
+        "repeat": args.repeat,
         "document": str(document),
         "document_sha256": hashlib.sha256(document.read_bytes()).hexdigest(),
         "workspace": str(workspace),
@@ -323,15 +384,24 @@ def main(argv: list[str] | None = None) -> int:
         cases=cases,
         runs=runs,
     )
-    for route, route_runs in runs.items():
-        s = summarize(route_runs)
-        print(
-            f"{route}: main {s['main']['passed']}/{s['main']['total']} | "
-            f"content {s['claims']['content_hit_rate']:.0%} page {s['claims']['page_hit_rate']:.0%}"
-            f" | routes {s['route_distribution']} | llm {s['llm_calls']}"
-        )
+    _print_summary(runs, summarize)
     print(f"report: {out / 'report.md'}")
     return 0
+
+
+def _print_summary(
+    runs: Mapping[str, Sequence[Any]], summarize: Callable[[Sequence[Any]], dict[str, Any]]
+) -> None:
+    for route, route_runs in runs.items():
+        s = summarize(route_runs)
+        rep = s["repeat"]
+        print(
+            f"{route}: main {s['main']['passed']}/{s['main']['total']} "
+            f"(mean {rep['mean']:.1%} ± {rep['std']:.1%} over {rep['repeats']} run(s)) | "
+            f"content {s['claims']['content_hit_rate']:.0%} page {s['claims']['page_hit_rate']:.0%}"
+            f" fragment {s['claims']['fragment_hits']} | routes {s['route_distribution']}"
+            f" | unstable {[c['case_id'] for c in rep['unstable']]} | llm {s['llm_calls']}"
+        )
 
 
 if __name__ == "__main__":

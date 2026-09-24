@@ -14,6 +14,18 @@ gold 文件（``nl-answers-gold-v1``，如 AIA 样本
 - known-gap（``expected.known_gap``）：照跑、单列，不计主分。
 - adversarial / ``offline_only``：针对 enterprise 响应的变异探针，ragspine 无对应信封 → 跳过并记录原因。
 
+判分器 v2（``JUDGE_VERSION``，写进报告 meta；与 v1 报告的分数不可直接比较）：
+
+- 拒答：编排层确定性文案（行首“查不到” / “无法识别参数”、无资料文案）位置不限；LLM 措辞只看答案
+  **开头**（标题 + 首句），开头是猜测式作答（most likely / 很可能…）不算拒答，正文里的补充说明
+  （如表格里的“未披露”）也不算。
+- 数字单位：带币种的“亿 / 十亿 / billion / bn / b”金额在同一数量级内换算成百万并附在原文后
+  （``5.14 亿美元`` 附 ``514 million``）；只在小数位足够时换算（不补零、不丢精度），``%`` 不受影响。
+- 跨语言引用（放宽）：quote 逐字不中时，若其 ≥3 个关键片段（去停用词）全部落在答案的一个窄窗口内，
+  也算内容命中；这类命中在 claim 上标 ``fragment_hit`` 并在报告里单独计数。
+- 重复运行：同一路由多次运行（``CaseRun.repeat``）逐次计分，报告每题通过率、主分均值±标准差和
+  不稳定题；不做多数票。
+
 两条路由：``A-ask``＝原样走 ``answer_question``（规则意图解析，含结构化 / 澄清 / 叙事分流）；
 ``B-narrative``＝注入 :class:`ForcedNarrativeIntentParser`，其余逐字不变，只把路由钉在叙事通道。
 检索侧用 :class:`RecordingRetriever` 旁路记录排序后的 locator，算页级 recall@k，不多发检索请求。
@@ -24,12 +36,14 @@ gold 文件（``nl-answers-gold-v1``，如 AIA 样本
 
 import json
 import re
+import statistics
 import time
 import unicodedata
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import asdict, dataclass, field, fields, replace
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +70,9 @@ ROUTE_DESCRIPTIONS = {
     ROUTE_FORCED_NARRATIVE: "强制叙事（注入 ForcedNarrativeIntentParser，其余不变）",
 }
 RECALL_KS = (1, 3, 5, 10)
+# 判分器版本：判定口径一变就升版本并写进报告 meta，不同版本的分数不直接比较。
+# v1 = 初版；v2 = 拒答看开头 + 数量级金额换算 + 跨语言关键片段 + 重复运行统计。
+JUDGE_VERSION = "nl-gold-judge-v2"
 
 ADVERSARIAL_SKIP_REASON = (
     "adversarial probe: it mutates an enterprise_pdf_rag answer envelope (scripted "
@@ -100,12 +117,16 @@ class GoldCase:
 
 
 GOLD_SCHEMA_VERSION = "nl-answers-gold-v1"
+# v2 = v1 的字段形状 + 顶层必填 ``changelog``（每条改动的原值 / 新值 / 依据）。
+GOLD_SCHEMA_VERSION_V2 = "nl-answers-gold-v2"
+GOLD_SCHEMA_VERSIONS = (GOLD_SCHEMA_VERSION, GOLD_SCHEMA_VERSION_V2)
+_CHANGELOG_KEYS = ("case_id", "change", "old", "new", "evidence")
 _CASE_CLASSES = ("positive", "abstain", "adversarial")
 _STATUSES = ("answered", "abstained")
 
 
 class GoldFormatError(ValueError):
-    """gold 文件不符合 nl-answers-gold-v1 里本评测要读的那部分结构。"""
+    """gold 文件不符合 nl-answers-gold-v1 / v2 里本评测要读的那部分结构。"""
 
 
 def _require(
@@ -129,9 +150,32 @@ def _read_gold(path: str | Path) -> dict[str, Any]:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise GoldFormatError(f"gold 不是合法 JSON：{exc}") from exc
-    if not isinstance(payload, dict) or payload.get("schema_version") != GOLD_SCHEMA_VERSION:
-        raise GoldFormatError(f"gold 的 schema_version 须为 {GOLD_SCHEMA_VERSION!r}")
+    if not isinstance(payload, dict) or payload.get("schema_version") not in GOLD_SCHEMA_VERSIONS:
+        raise GoldFormatError(f"gold 的 schema_version 须为 {GOLD_SCHEMA_VERSIONS}")
     return payload
+
+
+def gold_version(path: str | Path) -> str:
+    """gold 文件的 schema_version（写进报告 meta，区分 v1 / v2 口径）。"""
+    return str(_read_gold(path)["schema_version"])
+
+
+def _check_changelog(payload: Mapping[str, Any], case_ids: set[str]) -> None:
+    """v2 必须带变更日志：非空，每条含 case_id / change / old / new / evidence，case_id 须存在。"""
+    changelog = payload.get("changelog")
+    if not isinstance(changelog, list) or not changelog:
+        raise GoldFormatError("nl-answers-gold-v2 须带非空的 changelog")
+    for i, entry in enumerate(changelog):
+        where = f"changelog[{i}]"
+        if not isinstance(entry, dict):
+            raise GoldFormatError(f"{where} 须为对象")
+        missing = [key for key in _CHANGELOG_KEYS if key not in entry]
+        if missing:
+            raise GoldFormatError(f"{where} 缺少 {missing}")
+        if not isinstance(entry["evidence"], str) or not entry["evidence"].strip():
+            raise GoldFormatError(f"{where}: evidence 须为非空字符串")
+        if entry["case_id"] not in case_ids:
+            raise GoldFormatError(f"{where}: 未知 case_id {entry['case_id']!r}")
 
 
 def _parse_anchor(raw: object, where: str) -> ClaimAnchor:
@@ -203,7 +247,7 @@ def _parse_case(raw: object, index: int) -> GoldCase:
 
 
 def load_nl_gold(path: str | Path) -> tuple[GoldCase, ...]:
-    """读 nl-answers-gold-v1 文件 → 评测视角的 case 列表；结构不对即 GoldFormatError（ValueError）。
+    """读 nl-answers-gold-v1 / v2 文件 → 评测视角的 case 列表；结构不对即 GoldFormatError（ValueError）。
 
     只读本评测用得到的字段（与 enterprise 侧严格 schema 同形）；ragspine 不 import
     ``enterprise_pdf_rag``（ADR 0022 conformance 门），故不复用那边的 pydantic 解析器。
@@ -214,6 +258,8 @@ def load_nl_gold(path: str | Path) -> tuple[GoldCase, ...]:
     ids = [case.case_id for case in cases]
     if len(set(ids)) != len(ids):
         raise GoldFormatError("gold 的 case_id 须唯一")
+    if payload["schema_version"] == GOLD_SCHEMA_VERSION_V2:
+        _check_changelog(payload, set(ids))
     return cases
 
 
@@ -269,15 +315,36 @@ _SPACED_PERCENT_RE = re.compile(r"(?<=\d)\s+%")
 _PUNCT_RE = re.compile(r"[^\w%.]+|_+")
 _NON_DECIMAL_DOT_RE = re.compile(r"(?<!\d)\.|\.(?!\d)")
 _SPACES_RE = re.compile(r"\s+")
+# 带币种的数量级金额（"5.14 亿美元"、"US$5.14 billion"、"$1.168b"）：换算成百万后附在原文后。
+# 数量级词相对“百万”的小数点位移；只收小数（整数需补零，精度不够）。
+_SCALE_SHIFT = {"十亿": 3, "亿": 2, "billion": 3, "bn": 3, "b": 3}
+_SCALED_AMOUNT_RE = re.compile(
+    r"(?P<prefix>(?:(?:us|hk|s|a|nz)?\$|usd|hkd|rmb|cny)\s*)?"
+    r"(?<![\d.])(?P<num>\d+\.\d+)\s*(?P<scale>十亿|亿|billion|bn|b)(?![a-z])"
+    r"(?P<suffix>\s*(?:美元|港元|港币|人民币|元|dollars?|usd|hkd))?"
+)
+
+
+def _append_millions(match: re.Match[str]) -> str:
+    """同一数量级内换算：小数位不少于位移才换算（不补零），结果精度与原文一致。"""
+    if not (match.group("prefix") or match.group("suffix")):
+        return match.group(0)
+    number = match.group("num")
+    shift = _SCALE_SHIFT[match.group("scale")]
+    if len(number.split(".")[1]) < shift:
+        return match.group(0)
+    millions = format(Decimal(number).scaleb(shift), "f")
+    return f"{match.group(0)} {millions} million "
 
 
 def normalize_answer(text: str) -> str:
-    """答案 / 期望文本的统一规范化：NFKC、弯直引号、大小写、千分位、百分号、标点、空白。"""
+    """答案 / 期望文本的统一规范化：NFKC、弯直引号、大小写、千分位、百分号、数量级金额、标点、空白。"""
     folded = unicodedata.normalize("NFKC", text).translate(_CHAR_FOLD).casefold()
     folded = _LOCATOR_RE.sub(" ", folded)
     folded = _THOUSANDS_RE.sub("", folded)
     folded = _PERCENT_WORD_RE.sub("%", folded)
     folded = _SPACED_PERCENT_RE.sub("%", folded)
+    folded = _SCALED_AMOUNT_RE.sub(_append_millions, folded)
     folded = _PUNCT_RE.sub(" ", folded)
     folded = _NON_DECIMAL_DOT_RE.sub(" ", folded)
     return _SPACES_RE.sub(" ", folded).strip()
@@ -305,6 +372,58 @@ def anchor_content_hit(anchor: ClaimAnchor, answer_normalized: str) -> bool:
     return any(contains_normalized(answer_normalized, n) for n in needles)
 
 
+# 跨语言引用（放宽）：quote 的关键片段 = 规范化后去停用词的词；门槛见下。
+FRAGMENT_MIN_TOKENS = 3
+FRAGMENT_WINDOW_FACTOR = 3
+_FRAGMENT_STOPWORDS = frozenset(
+    {"a", "an", "the", "of", "and", "or", "to", "in", "for", "on", "by", "with", "at", "as", "from"}
+)
+
+
+def _fragment_pattern(token: str) -> re.Pattern[str]:
+    lead = r"(?<![a-z0-9.])" if token[0].isascii() and token[0].isalnum() else ""
+    if token[-1].isdigit():
+        trail = r"(?![\d%]|\.\d)"
+    elif token[-1].isascii() and token[-1].isalpha():
+        trail = r"(?![a-z0-9])"
+    else:
+        trail = ""
+    return re.compile(lead + re.escape(token) + trail)
+
+
+def fragment_hit(answer_normalized: str, quote: str) -> bool:
+    """quote 的关键片段是否全部出现在答案的一个窄窗口内（不要求整句逐字、不要求顺序）。
+
+    门槛：关键片段 ≥ ``FRAGMENT_MIN_TOKENS`` 且至少一个是英文词；每个片段按词 / 数字边界匹配；
+    覆盖全部片段的最短窗口 ≤ ``FRAGMENT_WINDOW_FACTOR`` × 规范化 quote 长度（至少 60 字符）。
+    """
+    target = normalize_answer(quote)
+    tokens = list(dict.fromkeys(t for t in target.split() if t not in _FRAGMENT_STOPWORDS))
+    if len(tokens) < FRAGMENT_MIN_TOKENS or not any(t.isascii() and t.isalpha() for t in tokens):
+        return False
+    events: list[tuple[int, int, int]] = []
+    for index, token in enumerate(tokens):
+        spans = [(m.start(), m.end()) for m in _fragment_pattern(token).finditer(answer_normalized)]
+        if not spans:
+            return False
+        events += [(start, end, index) for start, end in spans]
+    events.sort()
+    window = max(FRAGMENT_WINDOW_FACTOR * len(target), 60)
+    latest: dict[int, tuple[int, int]] = {}
+    for start, end, index in events:
+        latest[index] = (start, end)
+        if len(latest) == len(tokens):
+            first = min(s for s, _ in latest.values())
+            if end - first <= window:
+                return True
+    return False
+
+
+def anchor_fragment_hit(anchor: ClaimAnchor, answer_normalized: str) -> bool:
+    quotes = [q for q in dict.fromkeys((anchor.quote, anchor.text)) if q]
+    return any(fragment_hit(answer_normalized, q) for q in quotes)
+
+
 def _page_re(page_index: int) -> re.Pattern[str]:
     return re.compile(rf"@page={page_index + 1}(?:#|$)")
 
@@ -314,8 +433,13 @@ def anchor_page_hit(anchor: ClaimAnchor, locators: Sequence[str]) -> bool:
     return any(pattern.search(loc) for loc in locators)
 
 
-# agent 编排层的确定性拒答 / 未找到文案（agent.py：_not_found_answer、_run_narrative 无结果、
-# _unrecognized_answer）+ LLM 在叙事合成里常见的拒答措辞。provider 降级文案与澄清反问【不】算拒答。
+# agent 编排层的确定性拒答 / 未找到文案（agent.py：_not_found_answer、_FALLBACK_NOT_FOUND、
+# _run_narrative 无结果、_unrecognized_answer）：行首出现（或无资料整句）即拒答，位置不限。
+# 组合查询里 "- 指标：查不到" 这种子项行不是整题拒答。
+_TEMPLATE_REFUSAL_RE = re.compile(
+    r"(?m)^[ \t]*(?:查不到|无法识别参数)|未检索到与该问题相关的资料|无法基于现有知识库作答"
+)
+# LLM 在叙事合成里的拒答措辞：只在答案开头（标题 + 首句）里找。provider 降级文案与澄清反问【不】算拒答。
 REFUSAL_MARKERS = (
     "查不到",
     "未检索到与该问题相关的资料",
@@ -339,6 +463,19 @@ REFUSAL_MARKERS = (
     "无法回答",
     "无法给出",
     "无法从",
+    "无法明确",
+    "无从",
+    "不能确定",
+    "未明确",
+    "没有明确",
+    "未说明",
+    "没有说明",
+    "未给出",
+    "没有给出",
+    "未列出",
+    "没有列出",
+    "未涉及",
+    "没有涉及",
     "没有相关",
     "无相关",
     "not found",
@@ -370,20 +507,76 @@ REFUSAL_MARKERS = (
     "cannot answer",
     "can't answer",
     "not possible to",
+    "insufficient information",
+    "not enough information",
 )
 _REFUSAL_NORMALIZED = tuple(normalize_answer(marker) for marker in REFUSAL_MARKERS)
-# 英文缩写否定（don't / doesn't / didn't + 动词；规范化后撇号变空格，如 "don t state"）。
-_CONTRACTED_REFUSAL_RE = re.compile(
-    r"\b(?:don|doesn|didn) t (?:contain|provide|mention|include|specify|state|show|list|give|say)"
+# 规范化后的否定句式（撇号已变空格，如 "don t state"；允许一个 -ly 副词，如 "do not explicitly state"）。
+_REFUSAL_PATTERNS = (
+    re.compile(
+        r"\b(?:do|does|did)(?: not|n t)(?: \w+ly)? (?:contain|provide|mention|include|specify"
+        r"|state|show|list|give|say|disclose|report|indicate|identify|define|establish|describe"
+        r"|cover|present|reveal|confirm)\b"
+    ),
+    re.compile(
+        r"\b(?:cannot|can t|could not|couldn t)(?: \w+ly)? (?:be )?(?:determined?|answer(?:ed)?"
+        r"|find|found|confirm(?:ed)?|identif(?:y|ied)|tell|establish(?:ed)?|infer(?:red)?)\b"
+    ),
+    re.compile(
+        r"\bnot(?: \w+ly)? (?:stated|mentioned|provided|disclosed|shown|specified|given|reported"
+        r"|included|available|found|covered|addressed|listed|indicated|identified)\b"
+    ),
+    re.compile(r"\b(?:contains?|includes?|provides?|gives?|offers?) no\b"),
+    re.compile(
+        r"\bnone of the (?:\w+ ){0,3}?(?:snippets?|excerpts?|sources?|documents?|passages?"
+        r"|fragments?|context|materials?|pages?|images?|slides?)\b"
+    ),
+    re.compile(
+        r"(?:片段|资料|材料|上下文|文档|文件|来源|检索结果|页图|图片)[中里内]?[均都并]?(?:没有|未|无)"
+    ),
 )
+# 开头是猜测式作答（给了答案、只是没把握）→ 不是拒答。
+_HEDGED_ANSWER_RE = re.compile(
+    r"\b(?:most likely|probably|presumably)\b|很可能|大概率|可能是|推断(?:为|是)|只是推断"
+)
+_SENTENCE_END_RE = re.compile(r"[。！？!?]|\.(?=\s|\*|$)")
+# 开头里括号内的附注（如“（片段未明确称其为阶段…）”）是补充说明，不代表拒答。
+_PARENTHETICAL_RE = re.compile(r"（[^（）]*）|\([^()]*\)")
+# 首句太短（如单独一行的 "**答案：**"）时继续往下取，最多看这么多行。
+_LEAD_MIN_CHARS = 12
+_LEAD_MAX_LINES = 4
+
+
+def _answer_lead(text: str) -> str:
+    """答案开头：前置的标题行 + 第一条正文的首句（首句过短则并入下一行）。"""
+    lead: list[str] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            lead.append(line.lstrip("#").strip())
+        else:
+            end = _SENTENCE_END_RE.search(line)
+            sentence = line[: end.end()] if end else line
+            lead.append(sentence)
+            if len(normalize_answer(sentence)) >= _LEAD_MIN_CHARS:
+                break
+        if len(lead) >= _LEAD_MAX_LINES:
+            break
+    return _PARENTHETICAL_RE.sub(" ", " ".join(lead))
 
 
 def is_refusal(answer: str) -> bool:
-    """答案是否为拒答 / 未找到。"""
-    normalized = normalize_answer(answer)
-    if any(marker in normalized for marker in _REFUSAL_NORMALIZED):
+    """答案是否为拒答 / 未找到：编排层固定文案（位置不限），或开头即拒答措辞（猜测式作答除外）。"""
+    if _TEMPLATE_REFUSAL_RE.search(unicodedata.normalize("NFKC", answer)):
         return True
-    return _CONTRACTED_REFUSAL_RE.search(normalized) is not None
+    lead = normalize_answer(_answer_lead(answer))
+    if not lead or _HEDGED_ANSWER_RE.search(lead):
+        return False
+    if any(marker in lead for marker in _REFUSAL_NORMALIZED):
+        return True
+    return any(pattern.search(lead) for pattern in _REFUSAL_PATTERNS)
 
 
 @dataclass(frozen=True)
@@ -392,6 +585,8 @@ class ClaimJudgement:
     content_hit: bool
     page_hit: bool
     satisfied: bool
+    # 只靠跨语言关键片段规则（放宽）才满足：逐字匹配本身不成立。
+    fragment_hit: bool = False
 
 
 @dataclass(frozen=True)
@@ -425,14 +620,20 @@ def judge_case(case: GoldCase, *, answer: str, locators: Sequence[str]) -> Judge
 
     claims: list[ClaimJudgement] = []
     for group in case.required_claims:
-        content = [anchor_content_hit(a, normalized) for a in group]
+        exact = [anchor_content_hit(a, normalized) for a in group]
+        content = [
+            hit or anchor_fragment_hit(a, normalized) for a, hit in zip(group, exact, strict=True)
+        ]
         pages = [anchor_page_hit(a, locators) for a in group]
+        satisfied_exact = any(c and p for c, p in zip(exact, pages, strict=True))
+        satisfied = any(c and p for c, p in zip(content, pages, strict=True))
         claims.append(
             ClaimJudgement(
                 anchors=tuple(a.describe() for a in group),
                 content_hit=any(content),
                 page_hit=any(pages),
-                satisfied=any(c and p for c, p in zip(content, pages, strict=True)),
+                satisfied=satisfied,
+                fragment_hit=satisfied and not satisfied_exact,
             )
         )
     passed = all(c.satisfied for c in claims)
@@ -557,6 +758,8 @@ class CaseRun:
     seconds: float
     error: str | None = None
     retrieved_pages: list[int] = field(default_factory=list)
+    # 第几次重复运行（0 起，``--repeat N``）。
+    repeat: int = 0
 
 
 _PAGE_NUM_RE = re.compile(r"@page=(\d+)(?:#|$)")
@@ -577,8 +780,9 @@ def run_route(
     reference_date: date | None = None,
     languages: Sequence[str] | None = None,
     progress: Callable[[CaseRun], None] | None = None,
+    repeat: int = 0,
 ) -> list[CaseRun]:
-    """跑一条路由：每条未跳过的 case、每种（被选中的）语言问一次并判定。"""
+    """跑一条路由：每条未跳过的 case、每种（被选中的）语言问一次并判定；``repeat`` 标记第几次重复。"""
     if route not in ROUTES:
         raise ValueError(f"未知路由 {route!r}，可选 {ROUTES}")
     parser: IntentParser | None = (
@@ -634,6 +838,7 @@ def run_route(
                 seconds=round(seconds, 3),
                 error=error,
                 retrieved_pages=[p for p in (_page_of(loc) for loc in retrieved) if p is not None],
+                repeat=repeat,
             )
             runs.append(run)
             if progress is not None:
@@ -655,8 +860,47 @@ def _score(runs: Sequence[CaseRun]) -> dict[str, object]:
     return {"passed": passed, "total": len(runs), "rate": _rate(passed, len(runs))}
 
 
+def repeat_stats(runs: Sequence[CaseRun]) -> dict[str, Any]:
+    """重复运行的稳定性：每次的主分、均值±标准差（样本标准差，1 次为 0）、每题通过率、不稳定题。
+
+    不做多数票：每次运行各自计分，不稳定题（有过也有不过）逐条列出。
+    """
+    scored = [r for r in runs if r.case_class in ("positive", "abstain")]
+    repeats = sorted({r.repeat for r in runs})
+    per_repeat = [[r for r in scored if r.repeat == i] for i in repeats]
+    passed_per_repeat = [sum(r.judgement.passed for r in group) for group in per_repeat]
+    rates = [_rate(p, len(g)) for p, g in zip(passed_per_repeat, per_repeat, strict=True)]
+    groups: dict[tuple[str, str], list[CaseRun]] = {}
+    for run in runs:
+        groups.setdefault((run.case_id, run.language), []).append(run)
+    per_case: list[dict[str, Any]] = []
+    for (case_id, language), group in groups.items():
+        passed = sum(r.judgement.passed for r in group)
+        per_case.append(
+            {
+                "case_id": case_id,
+                "language": language,
+                "case_class": group[0].case_class,
+                "passed": passed,
+                "total": len(group),
+                "rate": _rate(passed, len(group)),
+                "route_labels": dict(Counter(r.route_label for r in group).most_common()),
+            }
+        )
+    return {
+        "repeats": len(repeats),
+        "main_passed": passed_per_repeat,
+        "main_rates": rates,
+        "mean": round(statistics.fmean(rates), 4) if rates else 0.0,
+        "std": round(statistics.stdev(rates), 4) if len(rates) > 1 else 0.0,
+        "per_case": per_case,
+        "unstable": [c for c in per_case if 0 < c["passed"] < c["total"]],
+    }
+
+
 def summarize(runs: Sequence[CaseRun]) -> dict[str, Any]:
-    """一条路由的分数：主分（positive+abstain）、分类分、分语言、claim 内容/页码命中、路由分布。"""
+    """一条路由的分数：主分（positive+abstain，按全部运行次数计）、分类分、分语言、claim 内容/页码命中
+    （含跨语言片段规则单独计数）、路由分布（按次数）、重复运行稳定性。"""
     scored = [r for r in runs if r.case_class in ("positive", "abstain")]
     known_gap = [r for r in runs if r.case_class == "known-gap"]
     positive = [r for r in scored if r.case_class == "positive"]
@@ -687,8 +931,14 @@ def summarize(runs: Sequence[CaseRun]) -> dict[str, Any]:
             "cases_all_satisfied": sum(
                 all(c.satisfied for c in r.judgement.claims) for r in with_claims
             ),
+            "fragment_hits": sum(c.fragment_hit for c in claims),
+            "cases_passed_via_fragment": sum(
+                r.judgement.passed and any(c.fragment_hit for c in r.judgement.claims)
+                for r in with_claims
+            ),
         },
         "route_distribution": dict(Counter(r.route_label for r in runs).most_common()),
+        "repeat": repeat_stats(runs),
         "errors": sum(r.error is not None for r in runs),
         "llm_calls": sum(r.llm_calls for r in runs),
         "seconds": round(sum(r.seconds for r in runs), 1),
@@ -775,6 +1025,37 @@ def _run_record(run: CaseRun) -> dict[str, Any]:
     return record
 
 
+def _case_file_name(run: CaseRun, repeated: bool) -> str:
+    suffix = f"-r{run.repeat + 1}" if repeated else ""
+    return f"{run.case_id}-{run.language}{suffix}.json"
+
+
+def rejudge_report(report_path: str | Path, cases: Iterable[GoldCase]) -> dict[str, list[CaseRun]]:
+    """重判：读已有 report.json 里记录的答案与来源，用当前判分器 + 给定 gold 重新判定（不重新生成）。
+
+    case_class 取新 gold（gold 改了题型时随之改判）；新 gold 里没有的 case 丢弃；原本出错的运行仍判失败。
+    """
+    by_id = {c.case_id: c for c in cases}
+    report = json.loads(Path(report_path).read_text(encoding="utf-8"))
+    names = {f.name for f in fields(CaseRun)} - {"judgement"}
+    rejudged: dict[str, list[CaseRun]] = {}
+    for route, records in report["cases"].items():
+        runs: list[CaseRun] = []
+        for record in records:
+            case = by_id.get(record["case_id"])
+            if case is None or case.skip_reason:
+                continue
+            kwargs = {k: v for k, v in record.items() if k in names}
+            locators = [_snippet_locator(s) for s in kwargs.get("sources", [])]
+            judgement = judge_case(case, answer=kwargs["answer_plain"], locators=locators)
+            if kwargs.get("error"):
+                judgement = replace(judgement, passed=False, reason=f"error: {kwargs['error']}")
+            kwargs["case_class"] = case.case_class
+            runs.append(CaseRun(**kwargs, judgement=judgement))
+        rejudged[route] = runs
+    return rejudged
+
+
 def write_report(
     out_dir: str | Path,
     *,
@@ -785,7 +1066,9 @@ def write_report(
     """落盘 report.json / report.md / cases/<route>/<case>-<lang>.json，返回目录。"""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
+    meta = {**meta, "judge_version": JUDGE_VERSION}
     by_id = {c.case_id: c for c in cases}
+    repeated = any(r.repeat for rs in runs.values() for r in rs)
     routes: dict[str, Any] = {}
     for route, route_runs in runs.items():
         summary = summarize(route_runs)
@@ -795,7 +1078,7 @@ def write_report(
         case_dir = out / "cases" / route
         case_dir.mkdir(parents=True, exist_ok=True)
         for run in route_runs:
-            (case_dir / f"{run.case_id}-{run.language}.json").write_text(
+            (case_dir / _case_file_name(run, repeated)).write_text(
                 json.dumps(_run_record(run), ensure_ascii=False, indent=2), encoding="utf-8"
             )
     skipped = [
@@ -856,6 +1139,31 @@ def _render_markdown(
             f" ({claims['page_hit_rate']:.0%}) | {claims['cases_all_satisfied']}/"
             f"{claims['cases_with_claims']} | {s['llm_calls']} | {s['seconds']} |"
         )
+    lines += [
+        "",
+        "### Claims via the cross-lingual fragment rule (relaxed; counted separately)",
+        "",
+    ]
+    for route, s in routes.items():
+        claims = s["claims"]
+        lines.append(
+            f"- {route}: {claims['fragment_hits']}/{claims['satisfied']} satisfied claims, "
+            f"{claims['cases_passed_via_fragment']} passed runs depend on it"
+        )
+    lines += ["", "### Repeat stability (no majority vote)", ""]
+    for route, s in routes.items():
+        rep = s["repeat"]
+        per_run = ", ".join(str(p) for p in rep["main_passed"])
+        lines.append(
+            f"- {route}: {rep['repeats']} run(s), main rate {rep['mean']:.1%} ± {rep['std']:.1%}"
+            f" (passed per run: {per_run} / {s['main']['total'] // max(rep['repeats'], 1)})"
+        )
+        for case in rep["unstable"]:
+            labels = ", ".join(f"{k}={v}" for k, v in case["route_labels"].items())
+            lines.append(
+                f"  - unstable `{case['case_id']}` ({case['language']}): "
+                f"{case['passed']}/{case['total']} passed; routes {labels}"
+            )
     lines += ["", "### By language", ""]
     for route, s in routes.items():
         parts = ", ".join(
@@ -881,16 +1189,23 @@ def _render_markdown(
     lines.append("| case | class | lang | " + " | ".join(route_names) + " |")
     lines.append("|---|---|---|" + "---|" * len(route_names))
     keys = list(dict.fromkeys((r.case_id, r.language) for rs in runs.values() for r in rs))
-    index = {(r.route, r.case_id, r.language): r for rs in runs.values() for r in rs}
+    index: dict[tuple[str, str, str], list[CaseRun]] = {}
+    for rs in runs.values():
+        for r in rs:
+            index.setdefault((r.route, r.case_id, r.language), []).append(r)
     for case_id, lang in keys:
         cells = []
         for route in route_names:
-            run = index.get((route, case_id, lang))
-            cells.append(
-                "-"
-                if run is None
-                else f"{'PASS' if run.judgement.passed else 'FAIL'} ({run.route_label})"
-            )
+            group = index.get((route, case_id, lang))
+            if not group:
+                cells.append("-")
+            elif len(group) == 1:
+                run = group[0]
+                cells.append(f"{'PASS' if run.judgement.passed else 'FAIL'} ({run.route_label})")
+            else:
+                passed = sum(r.judgement.passed for r in group)
+                labels = "/".join(dict.fromkeys(r.route_label for r in group))
+                cells.append(f"{passed}/{len(group)} ({labels})")
         lines.append(
             f"| {case_id} | {cases[case_id].case_class} | {lang} | " + " | ".join(cells) + " |"
         )
@@ -919,8 +1234,9 @@ def _render_markdown(
 
 def _failure_lines(run: CaseRun, case: GoldCase) -> list[str]:
     source_pages = sorted({p for p in (_page_of(_snippet_locator(s)) for s in run.sources) if p})
+    repeat = f", run {run.repeat + 1}" if run.repeat else ""
     lines = [
-        f"- **{run.case_id}** ({run.case_class}, {run.language}, route={run.route_label}) — "
+        f"- **{run.case_id}** ({run.case_class}, {run.language}{repeat}, route={run.route_label}) — "
         f"{run.judgement.reason}",
         f"  - Q: {run.question}",
         f"  - expected: {_expected_text(case)}",
@@ -932,6 +1248,7 @@ def _failure_lines(run: CaseRun, case: GoldCase) -> list[str]:
         lines.append(
             f"  - claim {' | '.join(claim.anchors)}: content={'Y' if claim.content_hit else 'N'} "
             f"page={'Y' if claim.page_hit else 'N'}"
+            + (" (via fragment rule)" if claim.fragment_hit else "")
         )
     if run.judgement.forbidden_hits:
         lines.append(f"  - forbidden numbers in answer: {list(run.judgement.forbidden_hits)}")
