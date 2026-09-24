@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/contextual.py
-verified-against: 95f607e7bf0aea1ae6fa6b27ae89a330940f1fb7
+verified-against: c3d6a7f2621d50ecf6d29a00180a6bf13ab92c16
 ---
 
 # Contextual retrieval — deterministic context header (W4a)
@@ -55,6 +55,28 @@ The header lives in **one layer only — the text handed to the tokenizer / embe
 - `"default"` / `"deterministic"` / `"on"` / `"contextual"` → `contextual_index_text`.
 - anything else → `ValueError` listing the choices.
 - with `spec=None`, the env var `RAGSPINE_CONTEXTUAL` supplies the spec.
+
+## Service switch: `RAGSPINE_CONTEXTUAL_INDEX=off|heading|full` (default `off`)
+
+`make_contextual_index_mode` normalizes the switch (`none` → `off`, the old enable aliases → `full`);
+`make_index_text_fn` maps `off` → `None`, `heading` → `heading_index_text` (`[章节:<heading path>]` + text, the header
+built by `build_context_header(chunk, fields)` with the heading field only), `full` → `contextual_index_text`.
+Wiring: `ServiceConfig.contextual_index`, `RetrievalPreset.contextual_index` (facade), `build_narrative_retriever(
+contextual_index=)`, the narrative worker payload, the nl-gold eval's `--contextual-index`.
+
+- **Prompt text unchanged.** Snippet `text` is the chunk, `prompt_text` the page window — neither carries the header,
+  so the heading is never duplicated for the LLM.
+- **Whole-page units.** With a `fn` injected, the `page+child` whole-page BM25 unit gets `heading =
+  page_parent.pages.page_heading(page chunks)`: every heading segment of the page once, de-duplicated — not one
+  header per chunk, so BM25 term frequency is not inflated.
+- **Persisted vectors.** `ChunkVectorIndex.sync(..., contextual_index=)` embeds the index text and computes each doc's
+  signature over it (off → identical to the old signature), so a switch re-embeds exactly the docs whose index text
+  changed. The db records `contextual_index` (absent = `off`; `migrating:<mode>` while a sync runs, so an interrupted
+  sync is never used). `open_vector_channel` → `check_compatible(..., contextual_index=)` raises
+  `VectorIndexMismatchError` on any mismatch — no silent mixing.
+- **Default `off`.** On the 71-page AIA deck `heading` lifts GS recall@1 / MRR (BM25 dedup r@1 38% → 51%) and keeps
+  the real-LLM nl-gold score (A 86.4%±0, B 86.4%±0 vs 84.9%±2.6), but route B page recall@1 drops 59% → 53% and the
+  probe set's BM25 recall@5 slips 2–3 points, so it is not a strict no-regression and stays opt-in.
 
 ## The LLM adapter is a seam, not built here
 

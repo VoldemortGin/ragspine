@@ -6,7 +6,7 @@ covers:
   - src/ragspine/retrieval/vector/adapters/qdrant.py
   - src/ragspine/retrieval/vector/persistence_policy.py
   - src/ragspine/retrieval/lexical/retrieval.py
-verified-against: eaf2f3392fbb7840042a4bf68076da35fcb2f943
+verified-against: c3d6a7f2621d50ecf6d29a00180a6bf13ab92c16
 ---
 
 # VectorStore seam — the pluggable vector index, and how it wires into retrieval
@@ -24,7 +24,8 @@ verified-against: eaf2f3392fbb7840042a4bf68076da35fcb2f943
 > returns `chunk.text` when `fn is None` — so BM25 tokenization, lazy block embedding, **and**
 > at-ingest persisted embedding stay byte-identical — and the headered text when a `fn` (e.g.
 > `contextual_index_text`) is injected. The query is always embedded plain; `chunk.text`/citation is
-> never touched. See [`contextual.md`](contextual.md).
+> never touched. The `page+child` whole-page unit gets its page's de-duplicated heading segments
+> (`page_parent.pages.page_heading`) only when a `fn` is injected. See [`contextual.md`](contextual.md).
 
 ## The seam
 

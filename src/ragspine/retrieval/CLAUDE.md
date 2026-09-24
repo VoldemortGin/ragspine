@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/
-verified-against: 70032e956fbf3154d6fdf2d5dbcdb397b07a33b2
+verified-against: c3d6a7f2621d50ecf6d29a00180a6bf13ab92c16
 ---
 
 # retrieval — agent contract
@@ -61,7 +61,12 @@ whole page) — `off` attaches nothing (`reason=page_parent_off`); skip codes `n
 `missing_file`; trace `op=narrative.page_images` = counts + codes only),
 `contextual.py` (W4a — a deterministic, zero-fabrication context header built from controlled-vocab
 metadata, injected into **index/embed text only** via the opt-in `index_text_fn` seam on
-`HybridRetriever`/`NarrativeIndex`; `chunk.text`/citation untouched, default `None` = byte-identical),
+`HybridRetriever`/`NarrativeIndex`; `chunk.text`/citation untouched, default `None` = byte-identical; wired end to end
+by `RAGSPINE_CONTEXTUAL_INDEX=off|heading|full` / `ServiceConfig.contextual_index` / `RetrievalPreset.contextual_index` /
+`build_narrative_retriever(contextual_index=)`, default `off`: `heading` = `[章节:<path>]` + text, `full` = the W4a
+header; prompt text unchanged; `page+child` whole-page units carry `page_heading` once; persisted vectors embed and
+sign the index text, `ChunkVectorIndex` records `contextual_index` and the query side raises on mismatch; off frozen by
+`tests/retrieval/contextual_index/test_contextual_index_off_snapshot.py`),
 `lexical/` (Okapi BM25, CJK uni+bigram, RRF fusion — `HybridRetriever` delegates
 its vector **scoring** to the `VectorStore` seam), `vector/` (injectable embedding
 backends, default none = pure BM25; + the pluggable `VectorStore` seam — `store.py`

@@ -4,7 +4,7 @@ covers:
   - src/ragspine/retrieval/link/
   - src/ragspine/retrieval/rerank/
   - src/ragspine/common/observability/
-verified-against: 0c3be5c66766bd6fa9b36743a7bf725642838ba1
+verified-against: c3d6a7f2621d50ecf6d29a00180a6bf13ab92c16
 ---
 
 # Invariants (code-enforced)
@@ -62,6 +62,13 @@ the page window (`page_parent/window.page_window`) and the `page+child` whole-pa
 non-RESTRICTED siblings only. `text` / `source_locator` stay the hit chunk; `parent_locator` is the page locator.
 **Frozen by** `tests/conformance/test_page_parent_isolation.py` (+ reverse-proof) and the off-mode byte snapshot
 `tests/retrieval/page_parent/test_page_parent_off_snapshot.py`.
+
+**Headings in the index text (`RAGSPINE_CONTEXTUAL_INDEX=off|heading|full`, default `off`).** The heading path / W4a
+header only enters the BM25 / vector **index text**; snippets (`text`, `prompt_text`) are unchanged. The `page+child`
+whole-page unit's heading comes from `group_pages` members only, so a RESTRICTED chunk's heading never reaches a
+page unit, the judge or a prompt; RESTRICTED chunks are still never embedded. **Frozen by**
+`tests/retrieval/contextual_index/test_contextual_index.py` (restricted-heading cases) and the off-mode snapshot
+`tests/retrieval/contextual_index/test_contextual_index_off_snapshot.py`.
 
 **Page images are a new exit, screened at the door (`RAGSPINE_PAGE_IMAGES=on`, opt-in, default `off`).** A page
 image carries the whole page, wider than any chunk the two text exits judge. So (1) ingest never renders a page that

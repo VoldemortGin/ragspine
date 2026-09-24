@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/service/
-verified-against: 70032e956fbf3154d6fdf2d5dbcdb397b07a33b2
+verified-against: c3d6a7f2621d50ecf6d29a00180a6bf13ab92c16
 ---
 
 # service — agent contract
@@ -36,6 +36,11 @@ and `quality` opts into ONNX embeddings, cross-encoder reranking, and post-proce
 `RAGSpine.local(retrieval=make_retrieval_preset(page_parent=…))` — kept out of `RAGSpineConfig.retrieval`, whose
 effective dict is pinned to the preset recipe) is threaded by `open_narrative_retriever` into
 `build_narrative_retriever(page_parent=)`: query-time only, not part of the index fingerprint.
+`ServiceConfig.contextual_index` / `RAGSPINE_CONTEXTUAL_INDEX` (`off` default, byte-identical | `heading` | `full`; facade
+`RetrievalPreset.contextual_index`) threads into `build_narrative_retriever(contextual_index=)` (BM25 index text) and into
+the persisted vectors: `index_narrative_vectors` syncs with it (worker via payload `contextual_index`, sent with
+`persist_vectors`), `open_vector_channel` checks it and raises `VectorIndexMismatchError` when the vector db was built
+with another index text — re-ingest / re-sync with the new setting to rebuild. Kept `off`: see CHANGELOG Unreleased.
 `ServiceConfig.page_images` / `RAGSPINE_PAGE_IMAGES` (`off` default | `on`) + `page_images_top_n` (3) make
 `open_narrative_retriever` wrap the final retriever in `PageImageRetriever` (needs `page_parent` ≠ `off`); ingest-side
 `page_image_dpi` (144) / `page_image_max_side` (1568) / `page_image_dir` (default `<chunk db dir>/page_images`) ride the
