@@ -49,6 +49,17 @@
         "pinned_snapshot_id": "42939d6a4e8781bcb45c8e13f2b8d345c1c584a486261fa85dbcd6fe5aeb1d2c",
         "pinned_member_count": 210,
         "pinned_embedding_fingerprint": "local-http/Qwen/Qwen3-Embedding-4B"
+      },
+      {
+        "file": "nl-answers-gold-v2.json",
+        "schema_version": "nl-answers-gold-v2",
+        "scope": "Corrected successor of nl-answers-gold-v1 for the ragspine main-chain evaluation over the full 71-page document: a04 and p02 re-classed, k01/k02 and the Agency-72% claims accept every page that prints the value. Each change carries old value, new value and evidence in its `changelog`; v1 stays frozen.",
+        "runners": [
+          "scripts/run_nl_gold_ragspine.py (src/ragspine/eval/nl_gold_ragspine.py, judge nl-gold-judge-v2)"
+        ],
+        "case_count": 25,
+        "supersedes": "nl-answers-gold-v1.json",
+        "pinned_document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e"
       }
     ]
   },

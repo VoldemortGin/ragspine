@@ -122,11 +122,13 @@ def test_the_benchmark_manifest_registers_this_gold_set_without_drift() -> None:
     assert entry["pinned_snapshot_id"] == gold.pinned.snapshot_id
     assert entry["pinned_member_count"] == gold.pinned.member_count
     assert entry["pinned_embedding_fingerprint"] == gold.pinned.embedding_fingerprint
-    # The two chart-QA golds stay registered beside it.
+    # The two chart-QA golds stay registered beside it, and so does its ragspine-side
+    # successor v2 (judged by src/ragspine/eval/nl_gold_ragspine.py; v1 itself stays frozen).
     assert {item["file"] for item in registry["sets"]} == {
         "chart-qa-gold-v1.json",
         "chart-qa-bar-gold-v1.json",
         GOLD_PATH.name,
+        "nl-answers-gold-v2.json",
     }
 
 

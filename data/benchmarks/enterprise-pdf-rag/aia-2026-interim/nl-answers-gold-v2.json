@@ -1,0 +1,2005 @@
+{
+  "schema_version": "nl-answers-gold-v2",
+  "corpus": "AIA 2026 Interim Results Presentation, all 71 physical pages (main scope, --pages all); pinned.selected_physical_pages 1-20 is kept for the optional --pages gold scope",
+  "review": [
+    "Every expectation is taken from a recorded real-model response under data/validation/ (see each case's `evidence`) or, where none exists, from the pinned evidence itself; nothing is written from memory.",
+    "Only content-addressed anchors are frozen: field_path, quote, page_index. claim_id, member_id, processing_id, snapshot_id and the prose wording vary between runs and are never asserted.",
+    "A chart claim always carries five citations (value, series, category, unit, period); a case asserts the .value path and tolerates the rest.",
+    "known_gap cases record behaviour that is sound but not what we want; the runners report them separately and never fail on them.",
+    "A requirement may name alternatives (`any_of`): two pages can state the same fact - the p.3 sentence and the p.7 chart point both print the record Operating ROE - and which one a run cites is not stable, so the case accepts either instead of freezing one.",
+    "A filters_expected may likewise name alternatives (`any_of`): the applied pre-filters union what the question derives with what its translation derives, so for a translated question they are a function of the model's wording and two cold runs can differ legitimately. Such a case enumerates the sets that were really observed.",
+    "v2 (2026-09-24) is judged by ragspine's nl-gold evaluator (src/ragspine/eval/nl_gold_ragspine.py, judge nl-gold-judge-v2) over the full document. Every change is listed in `changelog` with its old value, new value and evidence from data/di-markdown/aia-group-2026-interim-results-presentation.md; nothing else differs from v1.",
+    "Scope: v2 has no per-scope status. The one case the task expected to differ by scope (a04) is answerable inside pages 1-20 as well (p15, p17), so a single expectation holds for --pages all and --pages gold."
+  ],
+  "pinned": {
+    "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+    "processing_id": "22127d0fad13ccd919c23aa25f4867e24cb742a4fcdd4bb33d4267c327006ad8",
+    "snapshot_id": "42939d6a4e8781bcb45c8e13f2b8d345c1c584a486261fa85dbcd6fe5aeb1d2c",
+    "selected_physical_pages": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "member_count": 210,
+    "embedding_fingerprint": "local-http/Qwen/Qwen3-Embedding-4B"
+  },
+  "minimum_positive_cases": 12,
+  "cases": [
+    {
+      "case_id": "p01-roe-quote-en",
+      "case_class": "positive",
+      "question": {
+        "en": "What was AIA's record Operating ROE in 1H 2026?"
+      },
+      "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+      "expected": {
+        "status": "answered",
+        "min_claims": 1,
+        "required_claims": [
+          {
+            "any_of": [
+              {
+                "kind": "quote",
+                "page_index": 3,
+                "field_path": "fragments.span-v1-ff929d64a63e99cce87e6374a338dedc8e26868ec73b3e7666478428ecbe613f",
+                "quote": "record Operating ROE of 17.5%",
+                "text": "record Operating ROE of 17.5%"
+              },
+              {
+                "kind": "chart_value",
+                "page_index": 7,
+                "field_path": "points.point-1h26-roe-17.5.value",
+                "quote": "17.5%",
+                "text": "17.5%",
+                "value": "17.5",
+                "unit": "%"
+              }
+            ]
+          }
+        ],
+        "required_citation_fields": [
+          "member_id",
+          "page_index",
+          "field_path",
+          "quote",
+          "evidence_ids",
+          "page_title"
+        ],
+        "filters_expected": {
+          "periods": [
+            "1H2026"
+          ],
+          "regions": []
+        },
+        "filters_relaxed": false
+      },
+      "model_output": {
+        "answer": "AIA's record Operating ROE in 1H 2026 was 17.5%.",
+        "claims": [
+          {
+            "claim_id": "c1",
+            "kind": "quote",
+            "page_index": 3,
+            "field_path": "fragments.span-v1-63001e753940c7b31e268bd90f5257f0092decd24e678a8513b0b17827d2211e",
+            "text": "Strong 1H 2026 Results, Confident in the Outlook"
+          },
+          {
+            "claim_id": "c2",
+            "kind": "quote",
+            "page_index": 3,
+            "field_path": "fragments.span-v1-ff929d64a63e99cce87e6374a338dedc8e26868ec73b3e7666478428ecbe613f",
+            "text": "record Operating ROE of 17.5%"
+          }
+        ]
+      },
+      "rationale": "The plainest text lookup, with the page heading cited beside the figure as the recorded run did: the extra claim must not weaken the required one.",
+      "evidence": "data/validation/generic-chat-2026-09-21/visual-recall/a-roe-control.json"
+    },
+    {
+      "case_id": "p02-year-filter-2024-en",
+      "case_class": "abstain",
+      "question": {
+        "en": "What was the VONB growth in 2024?"
+      },
+      "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+      "expected": {
+        "status": "abstained",
+        "abstain_reason": "model_declined",
+        "abstain_detail_contains": "not_in_context"
+      },
+      "rationale": "v2: no page of the 71 states VONB growth for 2024 (full year or 1H24); 1H24 appears only as chart axis labels (p5-p7, p20, p23, p33, p34, p46) without a VONB growth figure. The only honest answer is to decline.",
+      "evidence": "data/validation/generic-chat-2026-09-21/page-metadata/y1-year-2024.json"
+    },
+    {
+      "case_id": "p03-donut-agency-en",
+      "case_class": "positive",
+      "question": {
+        "en": "In the 1H26 Distribution Mix chart, what percentage of VONB came from Agency?"
+      },
+      "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+      "expected": {
+        "status": "answered",
+        "min_claims": 1,
+        "required_claims": [
+          {
+            "any_of": [
+              {
+                "kind": "chart_value",
+                "page_index": 17,
+                "field_path": "points.point-agency.value",
+                "quote": "72%",
+                "text": "72%",
+                "value": "72",
+                "unit": "%"
+              },
+              {
+                "kind": "chart_value",
+                "page_index": 5,
+                "quote": "72%",
+                "text": "72%",
+                "value": "72",
+                "unit": "%"
+              }
+            ]
+          }
+        ],
+        "required_citation_fields": [
+          "member_id",
+          "page_index",
+          "field_path",
+          "quote",
+          "evidence_ids",
+          "page_title"
+        ],
+        "forbidden_numbers": [
+          "44"
+        ],
+        "filters_expected": {
+          "periods": [
+            "1H2026"
+          ],
+          "regions": []
+        }
+      },
+      "model_output": {
+        "answer": "Agency contributed 72% of VONB.",
+        "claims": [
+          {
+            "claim_id": "c1",
+            "kind": "chart_value",
+            "page_index": 17,
+            "field_path": "points.point-agency.value",
+            "text": "72%"
+          }
+        ]
+      },
+      "rationale": "The chart-recall regression of ISSUE-2 / ADR 0012: the page-18 donut must take a prompt seat and its explicit value must be the answer.",
+      "evidence": "data/validation/generic-chat-2026-09-21/visual-recall/b-donut-p18.json"
+    },
+    {
+      "case_id": "p04-donut-both-shares-en",
+      "case_class": "positive",
+      "question": {
+        "en": "Distribution Mix 1H26: what is the Agency share of VONB, and what is the Partnerships share?"
+      },
+      "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+      "expected": {
+        "status": "answered",
+        "min_claims": 2,
+        "required_claims": [
+          {
+            "any_of": [
+              {
+                "kind": "chart_value",
+                "page_index": 17,
+                "field_path": "points.point-agency.value",
+                "quote": "72%",
+                "text": "72%",
+                "value": "72",
+                "unit": "%"
+              },
+              {
+                "kind": "chart_value",
+                "page_index": 5,
+                "quote": "72%",
+                "text": "72%",
+                "value": "72",
+                "unit": "%"
+              }
+            ]
+          },
+          {
+            "kind": "chart_value",
+            "page_index": 17,
+            "field_path": "points.point-partnerships.value",
+            "quote": "28%",
+            "text": "28%",
+            "value": "28",
+            "unit": "%"
+          }
+        ],
+        "required_citation_fields": [
+          "member_id",
+          "page_index",
+          "field_path",
+          "quote",
+          "evidence_ids",
+          "page_title"
+        ],
+        "forbidden_numbers": [
+          "44"
+        ],
+        "filters_expected": {
+          "periods": [
+            "1H2026"
+          ],
+          "regions": []
+        }
+      },
+      "model_output": {
+        "answer": "Agency share of VONB is 72%, and Partnerships share is 28%.",
+        "claims": [
+          {
+            "claim_id": "c1",
+            "kind": "chart_value",
+            "page_index": 17,
+            "field_path": "points.point-agency.value",
+            "text": "72%"
+          },
+          {
+            "claim_id": "c2",
+            "kind": "chart_value",
+            "page_index": 17,
+            "field_path": "points.point-partnerships.value",
+            "text": "28%"
+          }
+        ]
+      },
+      "rationale": "A rephrasing that asks for both slices; both explicit values must be cited and their difference must never appear.",
+      "evidence": "data/validation/generic-chat-2026-09-21/visual-recall/b2-donut-rephrased.json"
+    },
+    {
+      "case_id": "p05-donut-title-only-en",
+      "case_class": "positive",
+      "question": {
+        "en": "1H26 Distribution Mix"
+      },
+      "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+      "expected": {
+        "status": "answered",
+        "min_claims": 2,
+        "required_claims": [
+          {
+            "any_of": [
+              {
+                "kind": "chart_value",
+                "page_index": 17,
+                "field_path": "points.point-agency.value",
+                "quote": "72%",
+                "text": "72%",
+                "value": "72",
+                "unit": "%"
+              },
+              {
+                "kind": "chart_value",
+                "page_index": 5,
+                "quote": "72%",
+                "text": "72%",
+                "value": "72",
+                "unit": "%"
+              }
+            ]
+          },
+          {
+            "kind": "chart_value",
+            "page_index": 17,
+            "field_path": "points.point-partnerships.value",
+            "quote": "28%",
+            "text": "28%",
+            "value": "28",
+            "unit": "%"
+          }
+        ],
+        "required_citation_fields": [
+          "member_id",
+          "page_index",
+          "field_path",
+          "quote",
+          "evidence_ids",
+          "page_title"
+        ],
+        "filters_expected": {
+          "periods": [
+            "1H2026"
+          ],
+          "regions": []
+        }
+      },
+      "model_output": {
+        "answer": "Agency: 72%; Partnerships: 28%.",
+        "claims": [
+          {
+            "claim_id": "c1",
+            "kind": "chart_value",
+            "page_index": 17,
+            "field_path": "points.point-agency.value",
+            "text": "72%"
+          },
+          {
+            "claim_id": "c2",
+            "kind": "chart_value",
+            "page_index": 17,
+            "field_path": "points.point-partnerships.value",
+            "text": "28%"
+          }
+        ]
+      },
+      "rationale": "The chart title alone, with neither `VONB` nor `Agency` in the question — the index-text projection has to carry the recall.",
+      "evidence": "data/validation/generic-chat-2026-09-21/page-metadata/m1-title-only.json"
+    },
+    {
+      "case_id": "p06-donut-zh",
+      "case_class": "positive",
+      "question": {
+        "zh": "2026 上半年 分销渠道 占比"
+      },
+      "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+      "expected": {
+        "status": "answered",
+        "min_claims": 2,
+        "required_claims": [
+          {
+            "any_of": [
+              {
+                "kind": "chart_value",
+                "page_index": 17,
+                "field_path": "points.point-agency.value",
+                "quote": "72%",
+                "text": "72%",
+                "value": "72",
+                "unit": "%"
+              },
+              {
+                "kind": "chart_value",
+                "page_index": 5,
+                "quote": "72%",
+                "text": "72%",
+                "value": "72",
+                "unit": "%"
+              }
+            ]
+          },
+          {
+            "kind": "chart_value",
+            "page_index": 17,
+            "field_path": "points.point-partnerships.value",
+            "quote": "28%",
+            "text": "28%",
+            "value": "28",
+            "unit": "%"
+          }
+        ],
+        "required_citation_fields": [
+          "member_id",
+          "page_index",
+          "field_path",
+          "quote",
+          "evidence_ids",
+          "page_title"
+        ],
+        "filters_expected": {
+          "any_of": [
+            {
+              "periods": [
+                "1H2026"
+              ],
+              "regions": []
+            },
+            {
+              "periods": [
+                "1H2026",
+                "Y2026"
+              ],
+              "regions": []
+            }
+          ]
+        }
+      },
+      "model_output": {
+        "answer": "2026年上半年分销渠道占比：代理渠道72%，合作伙伴渠道28%。",
+        "claims": [
+          {
+            "claim_id": "c1",
+            "kind": "chart_value",
+            "page_index": 17,
+            "field_path": "points.point-agency.value",
+            "text": "72%"
+          },
+          {
+            "claim_id": "c2",
+            "kind": "chart_value",
+            "page_index": 17,
+            "field_path": "points.point-partnerships.value",
+            "text": "28%"
+          }
+        ]
+      },
+      "rationale": "The same chart asked in Chinese against an English document: the period is still derived and the answer still cites the English evidence verbatim. Its applied periods union what the model's own translation derives, so two cold runs differed legitimately - `1H2026` alone and `1H2026` with `Y2026`, same answer and same citations both times - and the expectation enumerates both observed sets instead of freezing one run's wording.",
+      "evidence": "data/validation/generic-chat-2026-09-21/page-metadata/m2-zh-distribution.json; the two cold runs that disagree on the derived periods are gold-fix/nl-gold-cold/p06-donut-zh.json and gold-fix/nl-gold-cold-2/p06-donut-zh.json under the same validation root"
+    },
+    {
+      "case_id": "p07-donut-keywords-en",
+      "case_class": "positive",
+      "question": {
+        "en": "Agency share of VONB 1H26"
+      },
+      "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+      "expected": {
+        "status": "answered",
+        "min_claims": 1,
+        "required_claims": [
+          {
+            "any_of": [
+              {
+                "kind": "chart_value",
+                "page_index": 17,
+                "field_path": "points.point-agency.value",
+                "quote": "72%",
+                "text": "72%",
+                "value": "72",
+                "unit": "%"
+              },
+              {
+                "kind": "chart_value",
+                "page_index": 5,
+                "quote": "72%",
+                "text": "72%",
+                "value": "72",
+                "unit": "%"
+              }
+            ]
+          }
+        ],
+        "required_citation_fields": [
+          "member_id",
+          "page_index",
+          "field_path",
+          "quote",
+          "evidence_ids",
+          "page_title"
+        ],
+        "filters_expected": {
+          "periods": [
+            "1H2026"
+          ],
+          "regions": []
+        }
+      },
+      "model_output": {
+        "answer": "Agency accounted for 72% of VONB in 1H26.",
+        "claims": [
+          {
+            "claim_id": "c1",
+            "kind": "chart_value",
+            "page_index": 17,
+            "field_path": "points.point-agency.value",
+            "text": "72%"
+          }
+        ]
+      },
+      "rationale": "Keywords with no chart title and no document title: routing and recall must not depend on the question naming the report.",
+      "evidence": "data/validation/generic-chat-2026-09-21/visual-recall/n-no-title.json"
+    },
+    {
+      "case_id": "p08-donut-rerank-en",
+      "case_class": "positive",
+      "question": {
+        "en": "In the 1H26 Distribution Mix chart, what percentage of VONB came from Agency?"
+      },
+      "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+      "request": {
+        "rerank": true
+      },
+      "expected": {
+        "status": "answered",
+        "min_claims": 1,
+        "required_claims": [
+          {
+            "any_of": [
+              {
+                "kind": "chart_value",
+                "page_index": 17,
+                "field_path": "points.point-agency.value",
+                "quote": "72%",
+                "text": "72%",
+                "value": "72",
+                "unit": "%"
+              },
+              {
+                "kind": "chart_value",
+                "page_index": 5,
+                "quote": "72%",
+                "text": "72%",
+                "value": "72",
+                "unit": "%"
+              }
+            ]
+          }
+        ],
+        "required_citation_fields": [
+          "member_id",
+          "page_index",
+          "field_path",
+          "quote",
+          "evidence_ids",
+          "page_title"
+        ],
+        "filters_expected": {
+          "periods": [
+            "1H2026"
+          ],
+          "regions": []
+        }
+      },
+      "model_output": {
+        "answer": "Agency contributed 72% of VONB.",
+        "claims": [
+          {
+            "claim_id": "c1",
+            "kind": "chart_value",
+            "page_index": 17,
+            "field_path": "points.point-agency.value",
+            "text": "72%"
+          }
+        ]
+      },
+      "rationale": "Opt-in rerank reads evidence blocks, not index text (ADR 0012); enabling it must not lose the chart seat.",
+      "evidence": "data/validation/generic-chat-2026-09-20/aia-after-issue2/b3-donut-rerank.json"
+    },
+    {
+      "case_id": "p09-diagram-three-stages-en",
+      "case_class": "positive",
+      "question": {
+        "en": "What are the three stages of the agency technology investment?"
+      },
+      "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+      "expected": {
+        "status": "answered",
+        "min_claims": 3,
+        "required_claims": [
+          {
+            "kind": "diagram_node",
+            "page_index": 5,
+            "field_path": "nodes.node-foundation.label",
+            "quote": "Foundation: 100% Digitalised Agency",
+            "text": "Foundation: 100% Digitalised Agency"
+          },
+          {
+            "kind": "diagram_node",
+            "page_index": 5,
+            "field_path": "nodes.node-growth.label",
+            "quote": "Growth: Data-Driven Lead Generation",
+            "text": "Growth: Data-Driven Lead Generation"
+          },
+          {
+            "kind": "diagram_node",
+            "page_index": 5,
+            "field_path": "nodes.node-intelligence.label",
+            "quote": "Intelligence: Sales & Management Copilots",
+            "text": "Intelligence: Sales & Management Copilots"
+          }
+        ],
+        "required_citation_fields": [
+          "member_id",
+          "page_index",
+          "field_path",
+          "quote",
+          "evidence_ids",
+          "page_title"
+        ],
+        "filters_expected": {
+          "periods": [],
+          "regions": []
+        }
+      },
+      "model_output": {
+        "answer": "The three stages are: Foundation: 100% Digitalised Agency; Growth: Data-Driven Lead Generation; and Intelligence: Sales & Management Copilots.",
+        "claims": [
+          {
+            "claim_id": "c1",
+            "kind": "diagram_node",
+            "page_index": 5,
+            "field_path": "nodes.node-foundation.label",
+            "text": "Foundation: 100% Digitalised Agency"
+          },
+          {
+            "claim_id": "c2",
+            "kind": "diagram_node",
+            "page_index": 5,
+            "field_path": "nodes.node-growth.label",
+            "text": "Growth: Data-Driven Lead Generation"
+          },
+          {
+            "claim_id": "c3",
+            "kind": "diagram_node",
+            "page_index": 5,
+            "field_path": "nodes.node-intelligence.label",
+            "text": "Intelligence: Sales & Management Copilots"
+          }
+        ]
+      },
+      "rationale": "The ADR 0015 diagram must reach the prompt through its guaranteed visual seat and be answered from its three proved node labels.",
+      "evidence": "data/validation/generic-chat-2026-09-21/visual-recall/d1-p6-three-stages.json"
+    },
+    {
+      "case_id": "p10-diagram-numbered-list-en",
+      "case_class": "positive",
+      "question": {
+        "en": "List the three stages of the agency technology investment as a numbered list."
+      },
+      "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+      "expected": {
+        "status": "answered",
+        "min_claims": 3,
+        "required_claims": [
+          {
+            "kind": "diagram_node",
+            "page_index": 5,
+            "field_path": "nodes.node-foundation.label",
+            "quote": "Foundation: 100% Digitalised Agency",
+            "text": "Foundation: 100% Digitalised Agency"
+          },
+          {
+            "kind": "diagram_node",
+            "page_index": 5,
+            "field_path": "nodes.node-growth.label",
+            "quote": "Growth: Data-Driven Lead Generation",
+            "text": "Growth: Data-Driven Lead Generation"
+          },
+          {
+            "kind": "diagram_node",
+            "page_index": 5,
+            "field_path": "nodes.node-intelligence.label",
+            "quote": "Intelligence: Sales & Management Copilots",
+            "text": "Intelligence: Sales & Management Copilots"
+          }
+        ],
+        "required_citation_fields": [
+          "member_id",
+          "page_index",
+          "field_path",
+          "quote",
+          "evidence_ids",
+          "page_title"
+        ],
+        "filters_expected": {
+          "periods": [],
+          "regions": []
+        }
+      },
+      "model_output": {
+        "answer": "1. Foundation: 100% Digitalised Agency\n2. Growth: Data-Driven Lead Generation\n3. Intelligence: Sales & Management Copilots",
+        "claims": [
+          {
+            "claim_id": "c1",
+            "kind": "diagram_node",
+            "page_index": 5,
+            "field_path": "nodes.node-foundation.label",
+            "text": "Foundation: 100% Digitalised Agency"
+          },
+          {
+            "claim_id": "c2",
+            "kind": "diagram_node",
+            "page_index": 5,
+            "field_path": "nodes.node-growth.label",
+            "text": "Growth: Data-Driven Lead Generation"
+          },
+          {
+            "claim_id": "c3",
+            "kind": "diagram_node",
+            "page_index": 5,
+            "field_path": "nodes.node-intelligence.label",
+            "text": "Intelligence: Sales & Management Copilots"
+          }
+        ]
+      },
+      "rationale": "A numbered answer: the prose numeric gate must read `1.` / `2.` / `3.` as list enumerators, not as ungrounded numbers.",
+      "evidence": "data/validation/generic-chat-2026-09-21/visual-recall/d1b-p6-numbered-list.json"
+    },
+    {
+      "case_id": "p11-diagram-zh",
+      "case_class": "positive",
+      "question": {
+        "zh": "代理人科技投入的三个阶段分别是什么？"
+      },
+      "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+      "expected": {
+        "status": "answered",
+        "min_claims": 3,
+        "required_claims": [
+          {
+            "kind": "diagram_node",
+            "page_index": 5,
+            "field_path": "nodes.node-foundation.label",
+            "quote": "Foundation: 100% Digitalised Agency",
+            "text": "Foundation: 100% Digitalised Agency"
+          },
+          {
+            "kind": "diagram_node",
+            "page_index": 5,
+            "field_path": "nodes.node-growth.label",
+            "quote": "Growth: Data-Driven Lead Generation",
+            "text": "Growth: Data-Driven Lead Generation"
+          },
+          {
+            "kind": "diagram_node",
+            "page_index": 5,
+            "field_path": "nodes.node-intelligence.label",
+            "quote": "Intelligence: Sales & Management Copilots",
+            "text": "Intelligence: Sales & Management Copilots"
+          }
+        ],
+        "required_citation_fields": [
+          "member_id",
+          "page_index",
+          "field_path",
+          "quote",
+          "evidence_ids",
+          "page_title"
+        ],
+        "filters_expected": {
+          "periods": [],
+          "regions": []
+        }
+      },
+      "model_output": {
+        "answer": "代理人科技投入的三个阶段分别是：Foundation: 100% Digitalised Agency；Growth: Data-Driven Lead Generation；Intelligence: Sales & Management Copilots。",
+        "claims": [
+          {
+            "claim_id": "c1",
+            "kind": "diagram_node",
+            "page_index": 5,
+            "field_path": "nodes.node-foundation.label",
+            "text": "Foundation: 100% Digitalised Agency"
+          },
+          {
+            "claim_id": "c2",
+            "kind": "diagram_node",
+            "page_index": 5,
+            "field_path": "nodes.node-growth.label",
+            "text": "Growth: Data-Driven Lead Generation"
+          },
+          {
+            "claim_id": "c3",
+            "kind": "diagram_node",
+            "page_index": 5,
+            "field_path": "nodes.node-intelligence.label",
+            "text": "Intelligence: Sales & Management Copilots"
+          }
+        ]
+      },
+      "rationale": "The Chinese form of the same diagram question; the labels stay English and verbatim, and `100%` inside a label is grounded by its own claim.",
+      "evidence": "data/validation/generic-chat-2026-09-21/visual-recall/d4-zh-p6.json"
+    },
+    {
+      "case_id": "p12-diagram-single-node-en",
+      "case_class": "positive",
+      "question": {
+        "en": "In the agency technology pathway, what does the Growth stage stand for?"
+      },
+      "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+      "expected": {
+        "status": "answered",
+        "min_claims": 1,
+        "required_claims": [
+          {
+            "kind": "diagram_node",
+            "page_index": 5,
+            "field_path": "nodes.node-growth.label",
+            "quote": "Growth: Data-Driven Lead Generation",
+            "text": "Growth: Data-Driven Lead Generation"
+          }
+        ],
+        "required_citation_fields": [
+          "member_id",
+          "page_index",
+          "field_path",
+          "quote",
+          "evidence_ids",
+          "page_title"
+        ],
+        "filters_expected": {
+          "periods": [],
+          "regions": []
+        }
+      },
+      "model_output": {
+        "answer": "The Growth stage stands for Data-Driven Lead Generation.",
+        "claims": [
+          {
+            "claim_id": "c1",
+            "kind": "diagram_node",
+            "page_index": 5,
+            "field_path": "nodes.node-growth.label",
+            "text": "Growth: Data-Driven Lead Generation"
+          }
+        ]
+      },
+      "rationale": "One node of the diagram, cited by its own path — the narrow counterpart of the three-stage question.",
+      "evidence": "data/validation/generic-chat-2026-09-21/visual-recall/d2-p6-growth-stage.json"
+    },
+    {
+      "case_id": "p13-explicit-period-filter-en",
+      "case_class": "positive",
+      "question": {
+        "en": "Agency share of VONB"
+      },
+      "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+      "request": {
+        "filters": {
+          "periods": [
+            "1H26"
+          ]
+        }
+      },
+      "expected": {
+        "status": "answered",
+        "min_claims": 1,
+        "required_claims": [
+          {
+            "any_of": [
+              {
+                "kind": "chart_value",
+                "page_index": 17,
+                "field_path": "points.point-agency.value",
+                "quote": "72%",
+                "text": "72%",
+                "value": "72",
+                "unit": "%"
+              },
+              {
+                "kind": "chart_value",
+                "page_index": 5,
+                "quote": "72%",
+                "text": "72%",
+                "value": "72",
+                "unit": "%"
+              }
+            ]
+          }
+        ],
+        "required_citation_fields": [
+          "member_id",
+          "page_index",
+          "field_path",
+          "quote",
+          "evidence_ids",
+          "page_title"
+        ],
+        "filters_expected": {
+          "periods": [
+            "1H26"
+          ],
+          "regions": []
+        },
+        "filters_relaxed": false
+      },
+      "model_output": {
+        "answer": "Agency represents 72% of VONB in 1H26.",
+        "claims": [
+          {
+            "claim_id": "c1",
+            "kind": "chart_value",
+            "page_index": 17,
+            "field_path": "points.point-agency.value",
+            "text": "72%"
+          }
+        ]
+      },
+      "rationale": "An explicit request filter wins over derivation and is reported verbatim in its printed form (`1H26`, not the canonical `1H2026`).",
+      "evidence": "data/validation/generic-chat-2026-09-21/page-metadata/f1-explicit-period.json"
+    },
+    {
+      "case_id": "p14-relaxed-region-filter-en",
+      "case_class": "positive",
+      "question": {
+        "en": "Agency share of VONB 1H26"
+      },
+      "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+      "request": {
+        "filters": {
+          "regions": [
+            "Mars"
+          ]
+        }
+      },
+      "expected": {
+        "status": "answered",
+        "min_claims": 1,
+        "required_claims": [
+          {
+            "any_of": [
+              {
+                "kind": "chart_value",
+                "page_index": 17,
+                "field_path": "points.point-agency.value",
+                "quote": "72%",
+                "text": "72%",
+                "value": "72",
+                "unit": "%"
+              },
+              {
+                "kind": "chart_value",
+                "page_index": 5,
+                "quote": "72%",
+                "text": "72%",
+                "value": "72",
+                "unit": "%"
+              }
+            ]
+          }
+        ],
+        "required_citation_fields": [
+          "member_id",
+          "page_index",
+          "field_path",
+          "quote",
+          "evidence_ids",
+          "page_title"
+        ],
+        "filters_expected": {
+          "periods": [],
+          "regions": [
+            "Mars"
+          ]
+        },
+        "filters_relaxed": true
+      },
+      "model_output": {
+        "answer": "Agency share of VONB in 1H26 was 72%.",
+        "claims": [
+          {
+            "claim_id": "c1",
+            "kind": "chart_value",
+            "page_index": 17,
+            "field_path": "points.point-agency.value",
+            "text": "72%"
+          }
+        ]
+      },
+      "rationale": "A filter nobody can satisfy must be relaxed and reported (ADR 0013), never turned into an abstention.",
+      "evidence": "data/validation/generic-chat-2026-09-21/page-metadata/f2-relaxed-region.json"
+    },
+    {
+      "case_id": "p15-cache-repeat-en",
+      "case_class": "positive",
+      "question": {
+        "en": "What was AIA's record Operating ROE in 1H 2026?"
+      },
+      "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+      "request": {
+        "repeat_of": "p01-roe-quote-en"
+      },
+      "expected": {
+        "status": "answered",
+        "min_claims": 1,
+        "required_claims": [
+          {
+            "any_of": [
+              {
+                "kind": "quote",
+                "page_index": 3,
+                "field_path": "fragments.span-v1-ff929d64a63e99cce87e6374a338dedc8e26868ec73b3e7666478428ecbe613f",
+                "quote": "record Operating ROE of 17.5%",
+                "text": "record Operating ROE of 17.5%"
+              },
+              {
+                "kind": "chart_value",
+                "page_index": 7,
+                "field_path": "points.point-1h26-roe-17.5.value",
+                "quote": "17.5%",
+                "text": "17.5%",
+                "value": "17.5",
+                "unit": "%"
+              }
+            ]
+          }
+        ],
+        "required_citation_fields": [
+          "member_id",
+          "page_index",
+          "field_path",
+          "quote",
+          "evidence_ids",
+          "page_title"
+        ],
+        "cache_hit": true
+      },
+      "rationale": "The same question twice must be served from the completion cache, with the identical verified claim. Only a live service can show this.",
+      "evidence": "data/validation/generic-chat-2026-09-20/aia/d-repeat-a-cache.json"
+    },
+    {
+      "case_id": "a01-forecast-2027-en",
+      "case_class": "abstain",
+      "question": {
+        "en": "What is AIA's forecast VONB for the full year 2027?"
+      },
+      "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+      "expected": {
+        "status": "abstained",
+        "abstain_reason": "model_declined",
+        "abstain_detail_contains": "not_in_context"
+      },
+      "model_output": {
+        "abstain": true,
+        "abstain_reason": "not_in_context"
+      },
+      "rationale": "A forecast the document never prints: the answer chain must decline rather than extrapolate from the periods it does carry.",
+      "evidence": "data/validation/generic-chat-2026-09-20/aia/c1-not-in-evidence-2027.json"
+    },
+    {
+      "case_id": "a02-needs-calculation-en",
+      "case_class": "abstain",
+      "question": {
+        "en": "In the 1H26 Distribution Mix, how many percentage points higher is the Agency share of VONB than the Partnerships share?"
+      },
+      "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+      "expected": {
+        "status": "abstained",
+        "abstain_reason": "model_declined",
+        "abstain_detail_contains": "needs_calculation",
+        "forbidden_numbers": [
+          "44"
+        ]
+      },
+      "model_output": {
+        "abstain": true,
+        "abstain_reason": "needs_calculation"
+      },
+      "rationale": "Both operands are verified, the difference is not: deriving 72 - 28 is forbidden even when the arithmetic is trivial.",
+      "evidence": "data/validation/generic-chat-2026-09-20/aia/c2-needs-calculation.json"
+    },
+    {
+      "case_id": "a03-diagram-order-not-inferred-en",
+      "case_class": "abstain",
+      "question": {
+        "en": "Which stage comes after Foundation in the agency technology pathway?"
+      },
+      "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+      "expected": {
+        "status": "abstained",
+        "abstain_reason": "model_declined",
+        "abstain_detail_contains": "ambiguous"
+      },
+      "model_output": {
+        "abstain": true,
+        "abstain_reason": "ambiguous"
+      },
+      "rationale": "The page-6 diagram proved three nodes and zero edges, so no order exists to cite; reading one off the layout would be fabrication (ADR 0015).",
+      "evidence": "data/validation/generic-chat-2026-09-21/visual-objects/d3-p6-order-not-inferred.json"
+    },
+    {
+      "case_id": "a04-beyond-selected-pages-en",
+      "case_class": "positive",
+      "question": {
+        "en": "What was the interim dividend per share declared for 1H26?"
+      },
+      "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+      "expected": {
+        "status": "answered",
+        "min_claims": 1,
+        "required_claims": [
+          {
+            "any_of": [
+              {
+                "kind": "chart_value",
+                "page_index": 24,
+                "quote": "53.90",
+                "text": "53.90",
+                "value": "53.90",
+                "unit": "HK cents"
+              },
+              {
+                "kind": "quote",
+                "page_index": 16,
+                "quote": "53.90 HK cents",
+                "text": "53.90 HK cents",
+                "value": "53.90",
+                "unit": "HK cents"
+              },
+              {
+                "kind": "chart_value",
+                "page_index": 14,
+                "quote": "53.90",
+                "text": "53.90",
+                "value": "53.90",
+                "unit": "HK cents"
+              }
+            ]
+          }
+        ]
+      },
+      "rationale": "v2: the 1H26 interim dividend is printed in the document, so the question is answerable. p.25 'Interim Dividend Per Share Up 10%' charts 53.90 HK cents (1H26) vs 49.00 (1H25); inside the v1 selected pages 1-20 it is also printed on p.17 ('Interim DPS ... 53.90 HK cents') and p.15 ('Interim dividend per share (HK cents) ... 53.90'). The case_id is kept for report continuity.",
+      "evidence": null
+    },
+    {
+      "case_id": "a05-vietnam-headcount-en",
+      "case_class": "abstain",
+      "question": {
+        "en": "How many tied agents does AIA have in Vietnam?"
+      },
+      "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+      "expected": {
+        "status": "abstained",
+        "abstain_reason": "model_declined",
+        "abstain_detail_contains": "not_in_context"
+      },
+      "model_output": {
+        "abstain": true,
+        "abstain_reason": "not_in_context"
+      },
+      "rationale": "An anti-fabrication probe: `Vietnam` is in the document's region vocabulary and agent counts are discussed, but no such number is printed.",
+      "evidence": null
+    },
+    {
+      "case_id": "k01-region-thailand-en",
+      "case_class": "positive",
+      "question": {
+        "en": "Thailand 1H26 VONB"
+      },
+      "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+      "expected": {
+        "status": "answered",
+        "min_claims": 1,
+        "required_claims": [
+          {
+            "any_of": [
+              {
+                "kind": "chart_value",
+                "page_index": 12,
+                "field_path": "points.point-1h26.value",
+                "quote": "514",
+                "text": "514",
+                "value": "514",
+                "unit": "$m"
+              },
+              {
+                "kind": "table_cell",
+                "page_index": 31,
+                "quote": "514",
+                "text": "514",
+                "value": "514",
+                "unit": "$m"
+              },
+              {
+                "kind": "chart_value",
+                "page_index": 32,
+                "quote": "514",
+                "text": "514",
+                "value": "514",
+                "unit": "$m"
+              },
+              {
+                "kind": "chart_value",
+                "page_index": 38,
+                "quote": "$514m",
+                "text": "$514m",
+                "value": "514",
+                "unit": "$m"
+              }
+            ]
+          }
+        ],
+        "required_citation_fields": [
+          "member_id",
+          "page_index",
+          "field_path",
+          "quote",
+          "evidence_ids",
+          "page_title"
+        ],
+        "forbidden_numbers": [
+          "294",
+          "232"
+        ],
+        "filters_expected": {
+          "periods": [
+            "1H2026"
+          ],
+          "regions": [
+            "Thailand"
+          ]
+        },
+        "filters_relaxed": false
+      },
+      "model_output": {
+        "answer": "Thailand's 1H26 VONB was $514m.",
+        "claims": [
+          {
+            "claim_id": "c1",
+            "kind": "chart_value",
+            "page_index": 12,
+            "field_path": "points.point-1h26.value",
+            "text": "514"
+          }
+        ]
+      },
+      "rationale": "The English half of the column-binding fix: the region pre-filter now admits only the chart the page's own layout binds to Thailand, so the answer is that column's number and not a neighbour's. p.13 prints three `VONB ($m)` charts side by side — AIA Thailand 514, AIA Singapore 294, AIA Malaysia 232 — and until 2026-09-22 page-level region metadata gave all three the same four region values, so nothing could tell the columns apart: across four cold runs the two Thailand questions answered eight times, `$294m` five times and `$232m` three times, and `$514m` not once. A member-level, in-column binding now reads the page's own layout (`processing/column_regions.py`): each chart's rectangle takes the region heading standing over it, and the binding is all-or-nothing, so a page that does not read as columns keeps the page-level values it always had. The chart's own `member_regions` then narrows the pre-filter, the region word joins its index-projection header, and the prompt block prints `regions=` so the model can tell the three charts apart at all. `forbidden_numbers` pins the neighbours out of the prose: answering 294 or 232 under Thailand's name is the exact failure this case was frozen for.",
+      "evidence": "data/validation/generic-chat-2026-09-22/fix3/nl-gold-cold-1"
+    },
+    {
+      "case_id": "k02-region-thailand-zh",
+      "case_class": "positive",
+      "question": {
+        "zh": "泰国 1H26 VONB"
+      },
+      "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+      "expected": {
+        "status": "answered",
+        "min_claims": 1,
+        "required_claims": [
+          {
+            "any_of": [
+              {
+                "kind": "chart_value",
+                "page_index": 12,
+                "field_path": "points.point-1h26.value",
+                "quote": "514",
+                "text": "514",
+                "value": "514",
+                "unit": "$m"
+              },
+              {
+                "kind": "table_cell",
+                "page_index": 31,
+                "quote": "514",
+                "text": "514",
+                "value": "514",
+                "unit": "$m"
+              },
+              {
+                "kind": "chart_value",
+                "page_index": 32,
+                "quote": "514",
+                "text": "514",
+                "value": "514",
+                "unit": "$m"
+              },
+              {
+                "kind": "chart_value",
+                "page_index": 38,
+                "quote": "$514m",
+                "text": "$514m",
+                "value": "514",
+                "unit": "$m"
+              }
+            ]
+          }
+        ],
+        "required_citation_fields": [
+          "member_id",
+          "page_index",
+          "field_path",
+          "quote",
+          "evidence_ids",
+          "page_title"
+        ],
+        "forbidden_numbers": [
+          "294",
+          "232"
+        ],
+        "filters_expected": {
+          "periods": [
+            "1H2026"
+          ],
+          "regions": []
+        },
+        "filters_relaxed": false
+      },
+      "model_output": {
+        "answer": "泰国 1H26 VONB 为 $514m。",
+        "claims": [
+          {
+            "claim_id": "c1",
+            "kind": "chart_value",
+            "page_index": 12,
+            "field_path": "points.point-1h26.value",
+            "text": "514"
+          }
+        ]
+      },
+      "rationale": "The Chinese half: `泰国` never derives a region filter (the vocabulary is English) and `VONB` scores lexically on its own, so no translation is made and all three charts reach the prompt — this case is answered only because each block now prints the region its column belongs to. p.13 prints three `VONB ($m)` charts side by side — AIA Thailand 514, AIA Singapore 294, AIA Malaysia 232 — and until 2026-09-22 page-level region metadata gave all three the same four region values, so nothing could tell the columns apart: across four cold runs the two Thailand questions answered eight times, `$294m` five times and `$232m` three times, and `$514m` not once. A member-level, in-column binding now reads the page's own layout (`processing/column_regions.py`): each chart's rectangle takes the region heading standing over it, and the binding is all-or-nothing, so a page that does not read as columns keeps the page-level values it always had. The chart's own `member_regions` then narrows the pre-filter, the region word joins its index-projection header, and the prompt block prints `regions=` so the model can tell the three charts apart at all. `forbidden_numbers` pins the neighbours out of the prose: answering 294 or 232 under Thailand's name is the exact failure this case was frozen for.",
+      "evidence": "data/validation/generic-chat-2026-09-22/fix3/nl-gold-cold-1"
+    },
+    {
+      "case_id": "x01-derived-number-in-prose",
+      "case_class": "adversarial",
+      "question": {
+        "en": "In the 1H26 Distribution Mix, how many percentage points higher is the Agency share of VONB than the Partnerships share?"
+      },
+      "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+      "offline_only": true,
+      "expected": {
+        "status": "abstained",
+        "abstain_reason": "claim_not_in_evidence",
+        "abstain_detail_contains": "numbers outside verified claims: 44"
+      },
+      "model_output": {
+        "answer": "Agency is 72% and the gap to Partnerships is 44 percentage points.",
+        "claims": [
+          {
+            "claim_id": "c1",
+            "kind": "chart_value",
+            "page_index": 17,
+            "field_path": "points.point-agency.value",
+            "text": "72%"
+          }
+        ]
+      },
+      "rationale": "The model obeys its claim schema but slips a derived number into the prose; the whole answer must abstain even though the cited claim verifies.",
+      "evidence": "data/validation/generic-chat-2026-09-20/aia/f-rerank-true.json"
+    },
+    {
+      "case_id": "x02-fabricated-chart-value",
+      "case_class": "adversarial",
+      "question": {
+        "en": "In the 1H26 Distribution Mix chart, what percentage of VONB came from Agency?"
+      },
+      "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+      "offline_only": true,
+      "expected": {
+        "status": "abstained",
+        "abstain_reason": "claim_not_in_evidence",
+        "abstain_detail_contains": "differs from the source display"
+      },
+      "model_output": {
+        "answer": "75%.",
+        "claims": [
+          {
+            "claim_id": "c1",
+            "kind": "chart_value",
+            "page_index": 17,
+            "field_path": "points.point-agency.value",
+            "text": "75%"
+          }
+        ]
+      },
+      "rationale": "A confident but wrong chart value on a real, citable path: verification re-reads the qualified display and drops the claim.",
+      "evidence": null
+    },
+    {
+      "case_id": "x03-unknown-span-citation",
+      "case_class": "adversarial",
+      "question": {
+        "en": "What was AIA's record Operating ROE in 1H 2026?"
+      },
+      "document_sha256": "df902346791b300566761bfcd42bc93bf19e7ba86273dd0cf32d2bb7e9f0870e",
+      "offline_only": true,
+      "expected": {
+        "status": "abstained",
+        "abstain_reason": "claim_not_in_evidence",
+        "abstain_detail_contains": "claim text is not a verbatim substring"
+      },
+      "model_output": {
+        "answer": "17.5%.",
+        "claims": [
+          {
+            "claim_id": "c1",
+            "kind": "quote",
+            "page_index": 3,
+            "field_path": "fragments.span-v1-ff929d64a63e99cce87e6374a338dedc8e26868ec73b3e7666478428ecbe613f",
+            "text": "record Operating ROE of 18.5%"
+          }
+        ]
+      },
+      "rationale": "A near-miss quote on a real span id: one digit changed and the claim no longer matches the printed fragment, so nothing survives to answer with.",
+      "evidence": null
+    }
+  ],
+  "supersedes": "nl-answers-gold-v1.json (kept frozen, unchanged)",
+  "abstain_review": [
+    {
+      "case_id": "a01-forecast-2027-en",
+      "kept": "abstain",
+      "evidence": "data/di-markdown/aia-group-2026-interim-results-presentation.md: no '2027' anywhere in the 71 pages; the only forward-looking target is the 2023-2026 OPAT per share CAGR (p4, p8). scratchpad judge/summary.md (Sonnet blind page judge, 2026-09-24): not answerable."
+    },
+    {
+      "case_id": "a02-needs-calculation-en",
+      "kept": "abstain (forbidden 44)",
+      "evidence": "data/di-markdown/aia-group-2026-interim-results-presentation.md: p18 prints Agency 72% / Partnerships 28% but no difference; '44' appears only as a page number (p44) and in an unrelated p62 table. scratchpad judge/summary.md (Sonnet blind page judge, 2026-09-24): not answerable."
+    },
+    {
+      "case_id": "a03-diagram-order-not-inferred-en",
+      "kept": "abstain",
+      "evidence": "data/di-markdown/aia-group-2026-interim-results-presentation.md: p6 lists 'Foundation: 100% Digitalised Agency', 'Growth: Data-Driven Lead Generation', 'Intelligence: Sales & Management Copilots' as separate labels with no arrows, step numbers or 'after/next' wording. scratchpad judge/summary.md (Sonnet blind page judge, 2026-09-24): not answerable."
+    },
+    {
+      "case_id": "a05-vietnam-headcount-en",
+      "kept": "abstain",
+      "evidence": "data/di-markdown/aia-group-2026-interim-results-presentation.md: Vietnam appears on p2, p5, p27, p28 (market lists / segment definitions) and p43 (risk discount rates); no agent headcount for Vietnam. scratchpad judge/summary.md (Sonnet blind page judge, 2026-09-24): not answerable."
+    }
+  ],
+  "changelog": [
+    {
+      "case_id": "a04-beyond-selected-pages-en",
+      "change": "abstain -> positive; required claim 53.90 HK cents any_of p25 / p17 / p15",
+      "old": {
+        "case_class": "abstain",
+        "expected": {
+          "status": "abstained",
+          "abstain_reason": "model_declined",
+          "abstain_detail_contains": "not_in_context"
+        },
+        "rationale": "The interim dividend is printed on page 25, outside the selected pages 1-20; the mount must decline instead of answering from a neighbouring page."
+      },
+      "new": {
+        "case_class": "positive",
+        "expected": {
+          "status": "answered",
+          "min_claims": 1,
+          "required_claims": [
+            {
+              "any_of": [
+                {
+                  "kind": "chart_value",
+                  "page_index": 24,
+                  "quote": "53.90",
+                  "text": "53.90",
+                  "value": "53.90",
+                  "unit": "HK cents"
+                },
+                {
+                  "kind": "quote",
+                  "page_index": 16,
+                  "quote": "53.90 HK cents",
+                  "text": "53.90 HK cents",
+                  "value": "53.90",
+                  "unit": "HK cents"
+                },
+                {
+                  "kind": "chart_value",
+                  "page_index": 14,
+                  "quote": "53.90",
+                  "text": "53.90",
+                  "value": "53.90",
+                  "unit": "HK cents"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "evidence": "data/di-markdown/aia-group-2026-interim-results-presentation.md: p25 figure 'Interim Dividend per share (HK cents) 53.90 / 49.00 +10% / 1H25 1H26'; p17 '## Interim DPS' ... '## 53.90 HK cents'; p15 figure 'Interim dividend per share (HK cents) ... 53.90'. The v1 rationale ('printed on page 25, outside the selected pages 1-20') is wrong for the gold scope too: p15 and p17 are inside 1-20. scratchpad judge/summary.md (Sonnet blind page judge, 2026-09-24): a04 judged answerable under all three retrieval configs (rank-1 page 25, confirmed on 15 and 17). So no per-scope status is needed: a04 is positive under --pages all and --pages gold alike."
+    },
+    {
+      "case_id": "k01-region-thailand-en",
+      "change": "required claim 514 ($m) accepts pages 13 / 32 / 33 / 39 (any_of)",
+      "old": [
+        {
+          "kind": "chart_value",
+          "page_index": 12,
+          "field_path": "points.point-1h26.value",
+          "quote": "514",
+          "text": "514",
+          "value": "514",
+          "unit": "$m"
+        }
+      ],
+      "new": [
+        {
+          "any_of": [
+            {
+              "kind": "chart_value",
+              "page_index": 12,
+              "field_path": "points.point-1h26.value",
+              "quote": "514",
+              "text": "514",
+              "value": "514",
+              "unit": "$m"
+            },
+            {
+              "kind": "table_cell",
+              "page_index": 31,
+              "quote": "514",
+              "text": "514",
+              "value": "514",
+              "unit": "$m"
+            },
+            {
+              "kind": "chart_value",
+              "page_index": 32,
+              "quote": "514",
+              "text": "514",
+              "value": "514",
+              "unit": "$m"
+            },
+            {
+              "kind": "chart_value",
+              "page_index": 38,
+              "quote": "$514m",
+              "text": "$514m",
+              "value": "514",
+              "unit": "$m"
+            }
+          ]
+        }
+      ],
+      "evidence": "data/di-markdown/aia-group-2026-interim-results-presentation.md: p13 figure 'AIA Thailand ... VONB ($m) 514 (6)% ... 1H25 1H26'; p32 'Thailand ($m)' table, row 'VONB | 514 | 522 | (6)% | (2)%' (1H26 column); p33 'AIA Thailand: Clear Market Leader; VONB Up 13% in 2Q26', figure 'VONB ($m) ... 514 ... VONB 1H26'; p39 'VONB Up 14% Excluding Thailand', '## Thailand ... (6)% ... $514m'. scratchpad judge/summary.md (Sonnet blind page judge, 2026-09-24): k01/k02 answered 514 from p39 / p32 while the v1 gold only accepted p13 (14 'page missed but answerable' rows). p33 was not in the task list; it is added because the same page-verified value is printed there."
+    },
+    {
+      "case_id": "k02-region-thailand-zh",
+      "change": "required claim 514 ($m) accepts pages 13 / 32 / 33 / 39 (any_of)",
+      "old": [
+        {
+          "kind": "chart_value",
+          "page_index": 12,
+          "field_path": "points.point-1h26.value",
+          "quote": "514",
+          "text": "514",
+          "value": "514",
+          "unit": "$m"
+        }
+      ],
+      "new": [
+        {
+          "any_of": [
+            {
+              "kind": "chart_value",
+              "page_index": 12,
+              "field_path": "points.point-1h26.value",
+              "quote": "514",
+              "text": "514",
+              "value": "514",
+              "unit": "$m"
+            },
+            {
+              "kind": "table_cell",
+              "page_index": 31,
+              "quote": "514",
+              "text": "514",
+              "value": "514",
+              "unit": "$m"
+            },
+            {
+              "kind": "chart_value",
+              "page_index": 32,
+              "quote": "514",
+              "text": "514",
+              "value": "514",
+              "unit": "$m"
+            },
+            {
+              "kind": "chart_value",
+              "page_index": 38,
+              "quote": "$514m",
+              "text": "$514m",
+              "value": "514",
+              "unit": "$m"
+            }
+          ]
+        }
+      ],
+      "evidence": "data/di-markdown/aia-group-2026-interim-results-presentation.md: p13 figure 'AIA Thailand ... VONB ($m) 514 (6)% ... 1H25 1H26'; p32 'Thailand ($m)' table, row 'VONB | 514 | 522 | (6)% | (2)%' (1H26 column); p33 'AIA Thailand: Clear Market Leader; VONB Up 13% in 2Q26', figure 'VONB ($m) ... 514 ... VONB 1H26'; p39 'VONB Up 14% Excluding Thailand', '## Thailand ... (6)% ... $514m'. scratchpad judge/summary.md (Sonnet blind page judge, 2026-09-24): k01/k02 answered 514 from p39 / p32 while the v1 gold only accepted p13 (14 'page missed but answerable' rows). p33 was not in the task list; it is added because the same page-verified value is printed there."
+    },
+    {
+      "case_id": "p02-year-filter-2024-en",
+      "change": "positive (grounded_only) -> abstain",
+      "old": {
+        "case_class": "positive",
+        "expected": {
+          "status": "answered",
+          "min_claims": 1,
+          "grounded_only": true,
+          "required_citation_fields": [
+            "member_id",
+            "page_index",
+            "field_path",
+            "quote",
+            "evidence_ids",
+            "page_title"
+          ],
+          "filters_expected": {
+            "periods": [
+              "Y2024"
+            ],
+            "regions": []
+          },
+          "filters_relaxed": false
+        },
+        "rationale": "A bare year must derive the `Y2024` period pre-filter (ADR 0013). Pages 1-20 state no 2024 VONB growth of their own, so which verified fact the model grounds on is not frozen - only that it grounded on one."
+      },
+      "new": {
+        "case_class": "abstain",
+        "expected": {
+          "status": "abstained",
+          "abstain_reason": "model_declined",
+          "abstain_detail_contains": "not_in_context"
+        }
+      },
+      "evidence": "data/di-markdown/aia-group-2026-interim-results-presentation.md: grep '2024|1H24|FY24' finds only axis labels (1H24 on p5-p7, p20, p23, p33, p34, p46), 'FY24' on p8 (OPAT per share growth chart) and 'End of 2024' on p47 - no VONB growth for 2024. The v1 rationale itself says 'Pages 1-20 state no 2024 VONB growth of their own', and its recorded model_output '+11%' cites page_index 5 (p6), where +11% is Agency VONB growth for 1H26, i.e. a misattributed number. Under grounded_only such a misattribution passed while a correct refusal failed."
+    },
+    {
+      "case_id": "p03-donut-agency-en",
+      "change": "Agency 72% claim also accepts p6 (any_of)",
+      "old": [
+        {
+          "kind": "chart_value",
+          "page_index": 17,
+          "field_path": "points.point-agency.value",
+          "quote": "72%",
+          "text": "72%",
+          "value": "72",
+          "unit": "%"
+        }
+      ],
+      "new": [
+        {
+          "any_of": [
+            {
+              "kind": "chart_value",
+              "page_index": 17,
+              "field_path": "points.point-agency.value",
+              "quote": "72%",
+              "text": "72%",
+              "value": "72",
+              "unit": "%"
+            },
+            {
+              "kind": "chart_value",
+              "page_index": 5,
+              "quote": "72%",
+              "text": "72%",
+              "value": "72",
+              "unit": "%"
+            }
+          ]
+        }
+      ],
+      "evidence": "data/di-markdown/aia-group-2026-interim-results-presentation.md: p6 'Taking Agency Performance to the Next Level' figure '72% VONB Partnerships / Agency 1H26' prints the same 1H26 Agency share of VONB as the p18 donut. Earlier ragspine runs (2026-09-23/24) failed p07 and p14 only because the answer cited p6 for 72%. The 28% Partnerships claim stays p18-only (p6 does not print 28%)."
+    },
+    {
+      "case_id": "p04-donut-both-shares-en",
+      "change": "Agency 72% claim also accepts p6 (any_of)",
+      "old": [
+        {
+          "kind": "chart_value",
+          "page_index": 17,
+          "field_path": "points.point-agency.value",
+          "quote": "72%",
+          "text": "72%",
+          "value": "72",
+          "unit": "%"
+        },
+        {
+          "kind": "chart_value",
+          "page_index": 17,
+          "field_path": "points.point-partnerships.value",
+          "quote": "28%",
+          "text": "28%",
+          "value": "28",
+          "unit": "%"
+        }
+      ],
+      "new": [
+        {
+          "any_of": [
+            {
+              "kind": "chart_value",
+              "page_index": 17,
+              "field_path": "points.point-agency.value",
+              "quote": "72%",
+              "text": "72%",
+              "value": "72",
+              "unit": "%"
+            },
+            {
+              "kind": "chart_value",
+              "page_index": 5,
+              "quote": "72%",
+              "text": "72%",
+              "value": "72",
+              "unit": "%"
+            }
+          ]
+        },
+        {
+          "kind": "chart_value",
+          "page_index": 17,
+          "field_path": "points.point-partnerships.value",
+          "quote": "28%",
+          "text": "28%",
+          "value": "28",
+          "unit": "%"
+        }
+      ],
+      "evidence": "data/di-markdown/aia-group-2026-interim-results-presentation.md: p6 'Taking Agency Performance to the Next Level' figure '72% VONB Partnerships / Agency 1H26' prints the same 1H26 Agency share of VONB as the p18 donut. Earlier ragspine runs (2026-09-23/24) failed p07 and p14 only because the answer cited p6 for 72%. The 28% Partnerships claim stays p18-only (p6 does not print 28%)."
+    },
+    {
+      "case_id": "p05-donut-title-only-en",
+      "change": "Agency 72% claim also accepts p6 (any_of)",
+      "old": [
+        {
+          "kind": "chart_value",
+          "page_index": 17,
+          "field_path": "points.point-agency.value",
+          "quote": "72%",
+          "text": "72%",
+          "value": "72",
+          "unit": "%"
+        },
+        {
+          "kind": "chart_value",
+          "page_index": 17,
+          "field_path": "points.point-partnerships.value",
+          "quote": "28%",
+          "text": "28%",
+          "value": "28",
+          "unit": "%"
+        }
+      ],
+      "new": [
+        {
+          "any_of": [
+            {
+              "kind": "chart_value",
+              "page_index": 17,
+              "field_path": "points.point-agency.value",
+              "quote": "72%",
+              "text": "72%",
+              "value": "72",
+              "unit": "%"
+            },
+            {
+              "kind": "chart_value",
+              "page_index": 5,
+              "quote": "72%",
+              "text": "72%",
+              "value": "72",
+              "unit": "%"
+            }
+          ]
+        },
+        {
+          "kind": "chart_value",
+          "page_index": 17,
+          "field_path": "points.point-partnerships.value",
+          "quote": "28%",
+          "text": "28%",
+          "value": "28",
+          "unit": "%"
+        }
+      ],
+      "evidence": "data/di-markdown/aia-group-2026-interim-results-presentation.md: p6 'Taking Agency Performance to the Next Level' figure '72% VONB Partnerships / Agency 1H26' prints the same 1H26 Agency share of VONB as the p18 donut. Earlier ragspine runs (2026-09-23/24) failed p07 and p14 only because the answer cited p6 for 72%. The 28% Partnerships claim stays p18-only (p6 does not print 28%)."
+    },
+    {
+      "case_id": "p06-donut-zh",
+      "change": "Agency 72% claim also accepts p6 (any_of)",
+      "old": [
+        {
+          "kind": "chart_value",
+          "page_index": 17,
+          "field_path": "points.point-agency.value",
+          "quote": "72%",
+          "text": "72%",
+          "value": "72",
+          "unit": "%"
+        },
+        {
+          "kind": "chart_value",
+          "page_index": 17,
+          "field_path": "points.point-partnerships.value",
+          "quote": "28%",
+          "text": "28%",
+          "value": "28",
+          "unit": "%"
+        }
+      ],
+      "new": [
+        {
+          "any_of": [
+            {
+              "kind": "chart_value",
+              "page_index": 17,
+              "field_path": "points.point-agency.value",
+              "quote": "72%",
+              "text": "72%",
+              "value": "72",
+              "unit": "%"
+            },
+            {
+              "kind": "chart_value",
+              "page_index": 5,
+              "quote": "72%",
+              "text": "72%",
+              "value": "72",
+              "unit": "%"
+            }
+          ]
+        },
+        {
+          "kind": "chart_value",
+          "page_index": 17,
+          "field_path": "points.point-partnerships.value",
+          "quote": "28%",
+          "text": "28%",
+          "value": "28",
+          "unit": "%"
+        }
+      ],
+      "evidence": "data/di-markdown/aia-group-2026-interim-results-presentation.md: p6 'Taking Agency Performance to the Next Level' figure '72% VONB Partnerships / Agency 1H26' prints the same 1H26 Agency share of VONB as the p18 donut. Earlier ragspine runs (2026-09-23/24) failed p07 and p14 only because the answer cited p6 for 72%. The 28% Partnerships claim stays p18-only (p6 does not print 28%)."
+    },
+    {
+      "case_id": "p07-donut-keywords-en",
+      "change": "Agency 72% claim also accepts p6 (any_of)",
+      "old": [
+        {
+          "kind": "chart_value",
+          "page_index": 17,
+          "field_path": "points.point-agency.value",
+          "quote": "72%",
+          "text": "72%",
+          "value": "72",
+          "unit": "%"
+        }
+      ],
+      "new": [
+        {
+          "any_of": [
+            {
+              "kind": "chart_value",
+              "page_index": 17,
+              "field_path": "points.point-agency.value",
+              "quote": "72%",
+              "text": "72%",
+              "value": "72",
+              "unit": "%"
+            },
+            {
+              "kind": "chart_value",
+              "page_index": 5,
+              "quote": "72%",
+              "text": "72%",
+              "value": "72",
+              "unit": "%"
+            }
+          ]
+        }
+      ],
+      "evidence": "data/di-markdown/aia-group-2026-interim-results-presentation.md: p6 'Taking Agency Performance to the Next Level' figure '72% VONB Partnerships / Agency 1H26' prints the same 1H26 Agency share of VONB as the p18 donut. Earlier ragspine runs (2026-09-23/24) failed p07 and p14 only because the answer cited p6 for 72%. The 28% Partnerships claim stays p18-only (p6 does not print 28%)."
+    },
+    {
+      "case_id": "p08-donut-rerank-en",
+      "change": "Agency 72% claim also accepts p6 (any_of)",
+      "old": [
+        {
+          "kind": "chart_value",
+          "page_index": 17,
+          "field_path": "points.point-agency.value",
+          "quote": "72%",
+          "text": "72%",
+          "value": "72",
+          "unit": "%"
+        }
+      ],
+      "new": [
+        {
+          "any_of": [
+            {
+              "kind": "chart_value",
+              "page_index": 17,
+              "field_path": "points.point-agency.value",
+              "quote": "72%",
+              "text": "72%",
+              "value": "72",
+              "unit": "%"
+            },
+            {
+              "kind": "chart_value",
+              "page_index": 5,
+              "quote": "72%",
+              "text": "72%",
+              "value": "72",
+              "unit": "%"
+            }
+          ]
+        }
+      ],
+      "evidence": "data/di-markdown/aia-group-2026-interim-results-presentation.md: p6 'Taking Agency Performance to the Next Level' figure '72% VONB Partnerships / Agency 1H26' prints the same 1H26 Agency share of VONB as the p18 donut. Earlier ragspine runs (2026-09-23/24) failed p07 and p14 only because the answer cited p6 for 72%. The 28% Partnerships claim stays p18-only (p6 does not print 28%)."
+    },
+    {
+      "case_id": "p13-explicit-period-filter-en",
+      "change": "Agency 72% claim also accepts p6 (any_of)",
+      "old": [
+        {
+          "kind": "chart_value",
+          "page_index": 17,
+          "field_path": "points.point-agency.value",
+          "quote": "72%",
+          "text": "72%",
+          "value": "72",
+          "unit": "%"
+        }
+      ],
+      "new": [
+        {
+          "any_of": [
+            {
+              "kind": "chart_value",
+              "page_index": 17,
+              "field_path": "points.point-agency.value",
+              "quote": "72%",
+              "text": "72%",
+              "value": "72",
+              "unit": "%"
+            },
+            {
+              "kind": "chart_value",
+              "page_index": 5,
+              "quote": "72%",
+              "text": "72%",
+              "value": "72",
+              "unit": "%"
+            }
+          ]
+        }
+      ],
+      "evidence": "data/di-markdown/aia-group-2026-interim-results-presentation.md: p6 'Taking Agency Performance to the Next Level' figure '72% VONB Partnerships / Agency 1H26' prints the same 1H26 Agency share of VONB as the p18 donut. Earlier ragspine runs (2026-09-23/24) failed p07 and p14 only because the answer cited p6 for 72%. The 28% Partnerships claim stays p18-only (p6 does not print 28%)."
+    },
+    {
+      "case_id": "p14-relaxed-region-filter-en",
+      "change": "Agency 72% claim also accepts p6 (any_of)",
+      "old": [
+        {
+          "kind": "chart_value",
+          "page_index": 17,
+          "field_path": "points.point-agency.value",
+          "quote": "72%",
+          "text": "72%",
+          "value": "72",
+          "unit": "%"
+        }
+      ],
+      "new": [
+        {
+          "any_of": [
+            {
+              "kind": "chart_value",
+              "page_index": 17,
+              "field_path": "points.point-agency.value",
+              "quote": "72%",
+              "text": "72%",
+              "value": "72",
+              "unit": "%"
+            },
+            {
+              "kind": "chart_value",
+              "page_index": 5,
+              "quote": "72%",
+              "text": "72%",
+              "value": "72",
+              "unit": "%"
+            }
+          ]
+        }
+      ],
+      "evidence": "data/di-markdown/aia-group-2026-interim-results-presentation.md: p6 'Taking Agency Performance to the Next Level' figure '72% VONB Partnerships / Agency 1H26' prints the same 1H26 Agency share of VONB as the p18 donut. Earlier ragspine runs (2026-09-23/24) failed p07 and p14 only because the answer cited p6 for 72%. The 28% Partnerships claim stays p18-only (p6 does not print 28%)."
+    }
+  ]
+}
