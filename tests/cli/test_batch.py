@@ -796,6 +796,19 @@ def test_page_image_flags_reach_the_retriever_assembly(tmp_path, workspace, ques
     assert "- page_images_figure_min_chars: `20`" in summary
 
 
+def test_resume_refuses_page_images_tagged_to_all(tmp_path, workspace, questions, capsys):
+    out = tmp_path / "out"
+    base = ["batch", str(questions), "--workspace", str(workspace), "--retrieval-only"]
+    assert main([*base, "--out", str(out), "--limit", "1", "--page-images", "tagged"]) == 0
+    before = (out / "results.jsonl").read_text(encoding="utf-8")
+    assert main([*base, "--out", str(out), "--resume", "--page-images", "all"]) == 2
+    err = capsys.readouterr().err
+    assert "run_settings.json" in err
+    assert (out / "results.jsonl").read_text(encoding="utf-8") == before
+    pinned = json.loads((out / "run_settings.json").read_text(encoding="utf-8"))
+    assert pinned["page_images"] == "tagged"
+
+
 def test_page_images_defaults_on_alias_and_resume(tmp_path, workspace, questions):
     out = tmp_path / "out"
     base = ["batch", str(questions), "--workspace", str(workspace), "--retrieval-only"]
@@ -862,8 +875,8 @@ class _ImageReadingMock(MockProvider):
         )
 
 
-@pytest.mark.parametrize(("image_mode", "expected_max"), [("all", 3), ("tagged", 2)])
-def test_ask_records_trace_counts(tmp_path, monkeypatch, image_mode, expected_max):
+@pytest.mark.parametrize(("image_mode", "expected_sent"), [("all", 3), ("tagged", 2)])
+def test_ask_records_trace_counts(tmp_path, monkeypatch, image_mode, expected_sent):
     ws = _image_workspace(tmp_path)
     monkeypatch.setattr("ragspine.cli.batch._make_provider", lambda name: _ImageReadingMock())
     qs = tmp_path / "q.jsonl"
@@ -887,12 +900,15 @@ def test_ask_records_trace_counts(tmp_path, monkeypatch, image_mode, expected_ma
         "page_images_dropped",
         "number_guard_rewrites",
     }
-    assert trace["requests"] >= 1
-    assert 1 <= trace["page_images_sent"] <= expected_max
-    # 每次 provider 调用报 100/7；一次请求可能调用多次（结构化工具环 + 回落叙事）
-    calls = trace["input_tokens"] // 100
-    assert calls >= 1 and trace["input_tokens"] == 100 * calls
-    assert trace["output_tokens"] == 7 * calls
+    # 一次请求、4 次 provider 调用（结构化工具环 + 回落叙事），每次报 100 / 7
+    assert trace == {
+        "requests": 1,
+        "input_tokens": 400,
+        "output_tokens": 28,
+        "page_images_sent": expected_sent,
+        "page_images_dropped": 0,
+        "number_guard_rewrites": 0,
+    }
     summary = (out / "summary.md").read_text(encoding="utf-8")
     assert "| 每题附图数（均值） |" in summary
     assert "| 延迟 p50 / p95（秒） |" in summary

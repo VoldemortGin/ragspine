@@ -3,6 +3,7 @@
 import hashlib
 import logging
 import os
+from pathlib import Path
 
 import rootutils
 
@@ -178,3 +179,28 @@ def test_stored_tags_win(tmp_path):
     finally:
         store.close()
     assert source == TAG_SOURCE_STORED and tags is not None and len(tags) == 3
+
+
+def test_lazy_tags_with_relative_source_path_depend_on_cwd(tmp_path, monkeypatch):
+    """台账按入库时收到的原样记 source_path：相对路径按当前 cwd 解析，换 cwd 就是 untagged（安全：只会少附图）。"""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    write_deck(repo, _PAGES)
+    db = repo / "knowledge.db"
+    monkeypatch.chdir(repo)
+    store = ChunkStore(db)
+    store.init_schema()
+    try:
+        ingest_narrative([Path("deck.md")], store)  # 相对路径入库
+    finally:
+        store.close()
+    clear_lazy_tag_cache()
+    tags = PageTagStore(db)
+    try:
+        assert tags.registered_source("deck.md")[0] == "deck.md"
+        assert load_doc_tags(tags, "deck.md")[1] == TAG_SOURCE_LAZY
+        clear_lazy_tag_cache()
+        monkeypatch.chdir(tmp_path)
+        assert load_doc_tags(tags, "deck.md") == (None, TAG_SOURCE_UNTAGGED)
+    finally:
+        tags.close()

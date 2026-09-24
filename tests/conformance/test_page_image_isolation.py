@@ -2,7 +2,7 @@
 
 页图是整页内容，范围比出口处理的单个块更大：只要一页里有任何 RESTRICTED 块，这一页的图就绝不能进 prompt。
 
-钉死（页级父子 dedup / page+child 两种模式 × 页图 on / tagged（ADR 0025）两种模式，
+钉死（页级父子 dedup / page+child 两种模式 × 页图 on / tagged / all+max（ADR 0025）三种装配，
 端到端 open_narrative_retriever → answer_question）：
     - 同页有 RESTRICTED 块时，即使映射表里有这一页的图（例如敏感度在渲染之后才改），也不发图；
     - 同页公开块的文本照常进上下文（隔离的是图，不是整页）；
@@ -25,13 +25,15 @@ from ragspine.extraction.di_markdown.page_tags import PageTagStats
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
 from ragspine.retrieval.chunking.chunking import Chunk
 from ragspine.retrieval.page_images.store import PageImageStore, RenderedPage
+from ragspine.retrieval.page_images.trigger.retriever import PageImageTriggerRetriever
 from ragspine.retrieval.page_images.trigger.tag_store import PageTagStore
 from ragspine.service.config import ServiceConfig, open_narrative_retriever
 from ragspine.storage.fact_store import SqliteFactStore
 
 SECRET = "Falcon acquisition Singapore VONB board plan."
 MODES = ("dedup", "page+child")
-IMAGE_MODES = ("on", "tagged")
+# (page_images, page_images_max)：on 走原始 PageImageRetriever；tagged 与 all+max 走只删不增的包装层
+IMAGE_MODES = (("on", None), ("tagged", None), ("all", 2))
 _REF = date(2026, 9, 1)
 
 
@@ -102,17 +104,20 @@ def _setup(tmp_path, secret_sensitivity: str):
     return db, facts
 
 
-def _ask(db, facts, mode: str, image_mode: str) -> _ImageRecorder:
+def _ask(db, facts, mode: str, image_mode: tuple[str, int | None]) -> _ImageRecorder:
     provider = _ImageRecorder()
     config = ServiceConfig(
         db_path=str(db),
         chunk_db_path=str(db),
         embedding="none",
         page_parent=mode,
-        page_images=image_mode,
+        page_images=image_mode[0],
+        page_images_max=image_mode[1],
         page_images_top_n=5,
     )
     with open_narrative_retriever(config, provider) as retriever:
+        # 确认走的是期望的装配路径（on = 原始出口；tagged / all+max = 外层只删不增的包装）
+        assert isinstance(retriever, PageImageTriggerRetriever) == (image_mode[0] != "on")
         answer_question(
             "Singapore VONB overview",
             facts,
