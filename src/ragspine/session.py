@@ -260,6 +260,7 @@ class RAGSpine:
             reranker=self.retrieval.reranker,
             postprocessor=self.retrieval.postprocessor,
             persist_vectors=self.retrieval.persist_vectors,
+            page_parent=self.retrieval.page_parent,
         )
 
     def ask(self, question: str) -> AgentResult:

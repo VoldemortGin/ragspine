@@ -17,12 +17,14 @@ rank-bm25 等新依赖。分词处理中英混排：ASCII 连续串按词、CJK 
 
 import math
 import re
+import sys
 from collections import Counter
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol, runtime_checkable
 
 from ragspine.common.glossary import ENTITY_SYNONYMS, METRIC_SYNONYMS
+from ragspine.common.observability import emit_trace
 from ragspine.pipeline.graph import PipelineGraph
 from ragspine.retrieval.chunking.chunk_store import ChunkStore, StoredChunk
 from ragspine.retrieval.chunking.chunker import Chunker
@@ -36,6 +38,16 @@ from ragspine.retrieval.chunking.chunking import (
 from ragspine.retrieval.contextual import IndexTextFn
 from ragspine.retrieval.filtering.automatic import FilterExtractor
 from ragspine.retrieval.filtering.metadata_filter import MetadataFilter
+from ragspine.retrieval.page_parent.pages import (
+    PAGE_PARENT_OFF,
+    PAGE_PARENT_PAGE_CHILD,
+    group_pages,
+    is_restricted,
+    make_page_parent_mode,
+    page_key,
+    page_locator,
+)
+from ragspine.retrieval.page_parent.window import DEFAULT_PAGE_WINDOW_CHARS, page_window
 from ragspine.retrieval.rerank.listwise_rerank import DEFAULT_TOP_N, ListwiseJudge, listwise_rerank
 from ragspine.retrieval.vector.persistence_policy import IsolationFirstPolicy, PersistencePolicy
 from ragspine.retrieval.vector.store import InProcessVectorStore, VectorRecord, VectorStore
@@ -462,6 +474,8 @@ class NarrativeIndex:
         index_text_fn: IndexTextFn | None = None,
         filter_extractor: FilterExtractor | None = None,
         chunker: Chunker | None = None,
+        page_parent: str | None = PAGE_PARENT_OFF,
+        page_window_chars: int = DEFAULT_PAGE_WINDOW_CHARS,
     ):
         self.store = store
         self.embedding_backend = embedding_backend
@@ -490,6 +504,10 @@ class NarrativeIndex:
             self.vector_store = vector_store
         # 持久化门控（可插拔缝）：决定哪些块的向量可写盘。默认隔离优先——绝不落盘 RESTRICTED。
         self.persistence_policy = persistence_policy or IsolationFirstPolicy()
+        # 页级父子（opt-in 默认 off）：'dedup' 融合后按页去重、代表块带整页窗口；'page+child' 另加整页 BM25
+        # 一路再 RRF。off＝检索输出逐字节不变。page_window_chars 是整页窗口的字符上限。
+        self.page_parent = make_page_parent_mode(page_parent)
+        self.page_window_chars = page_window_chars
 
     def ingest(self, text: str, meta: DocumentMeta, valid_as_of: str = "") -> int:
         """切块 + 幂等入库 + 入库即嵌入落盘（policy 门控、doc 粒度失效），返回入库块数。
@@ -572,6 +590,10 @@ class NarrativeIndex:
             manage_vectors=False,  # 块向量已在入库时落盘——检索只嵌 query、查 store，绝不重嵌块。
             index_text_fn=self.index_text_fn,  # contextual 情境头与入库口径一致（默认 None=不变）。
         )
+        if self.page_parent != PAGE_PARENT_OFF:
+            return self._retrieve_pages(
+                query, chunks, retriever, top_k, rerank, top_n, effective_filter
+            )
         results = retriever.search(query, top_k=top_k, metadata_filter=effective_filter)
         if not rerank or self.judge is None:
             return results
@@ -581,3 +603,94 @@ class NarrativeIndex:
             self.judge,
             top_n=self.rerank_top_n if top_n is None else top_n,
         )
+
+    def _retrieve_pages(
+        self,
+        query: str,
+        chunks: list[StoredChunk],
+        retriever: HybridRetriever,
+        top_k: int | None,
+        rerank: bool,
+        top_n: int | None,
+        metadata_filter: MetadataFilter | None,
+    ) -> list[RetrievalResult]:
+        """页级父子：融合排名按页去重（max-pool，首次出现即代表块）→ [page+child: 与整页 BM25 排名 RRF]
+        → 取前 top_k 个单元 → 精排（给了 judge 时，候选即各页代表块）→ 代表块换上整页窗口。
+
+        去重放在融合之后、精排之前：精排的候选池是 top_k 个不同的页（而不是挤在少数页上的 top_k 个块），
+        精排输出的 top_n 天然按页计数；精排本身（及其 RESTRICTED 出口）不改。没有页码的块与 RESTRICTED 块
+        各自单独成一个单元（不去重、不展开），RESTRICTED 照常交给 link / rerank 两个出口剔除；整页窗口和整页
+        单元只由同页的非 RESTRICTED 块拼成。
+        """
+        limit = self.top_k if top_k is None else top_k
+        fused = retriever.search(query, top_k=len(chunks), metadata_filter=metadata_filter)
+        universe = metadata_filter.apply(chunks) if metadata_filter is not None else chunks
+        pages = group_pages(universe)
+
+        def unit_id(chunk: StoredChunk | Chunk) -> str:
+            key = None if is_restricted(chunk) else page_key(chunk)
+            return chunk.chunk_id if key is None else f"{key[0]}@page={key[1]}"
+
+        representative: dict[str, RetrievalResult] = {}
+        for result in fused:
+            representative.setdefault(unit_id(result.chunk), result)
+        order = list(representative)
+        n_page_units = 0
+        if self.page_parent == PAGE_PARENT_PAGE_CHILD:
+            unit_pages = {f"{doc_id}@page={page}": (doc_id, page) for doc_id, page in pages}
+            units = [
+                replace(
+                    pages[key][0],
+                    chunk_id=uid,
+                    text=page_window(pages[key], pages[key][0], max_chars=sys.maxsize),
+                )
+                for uid, key in unit_pages.items()
+            ]
+            n_page_units = len(units)
+            page_rank = [
+                r.chunk.chunk_id
+                for r in HybridRetriever(
+                    units,
+                    query_rewriter=self.query_rewriter,
+                    top_k=len(units),
+                    index_text_fn=self.index_text_fn,
+                ).search(query)
+            ]
+            first_seen = {uid: i for i, uid in enumerate(dict.fromkeys(order + page_rank))}
+            scores = rrf_fuse([order, page_rank], DEFAULT_RRF_K)
+            order = sorted(scores, key=lambda uid: (-scores[uid], first_seen[uid]))
+            for uid in order:
+                if uid not in representative:  # 兜底：整页命中但无块得分（理论上不会发生）
+                    first = pages[unit_pages[uid]][0]
+                    representative[uid] = RetrievalResult(first, 0.0, 0.0, 0.0)
+
+        results = [representative[uid] for uid in order[:limit]]
+        if rerank and self.judge is not None:
+            results = listwise_rerank(
+                query,
+                results,
+                self.judge,
+                top_n=self.rerank_top_n if top_n is None else top_n,
+            )
+        expanded = 0
+        out: list[RetrievalResult] = []
+        for result in results:
+            key = None if is_restricted(result.chunk) else page_key(result.chunk)
+            if key is not None and key in pages:
+                window = page_window(pages[key], result.chunk, max_chars=self.page_window_chars)
+                chunk = replace(
+                    result.chunk, window_text=window, parent_locator=page_locator(result.chunk)
+                )
+                result = replace(result, chunk=chunk)
+                expanded += 1
+            out.append(result)
+        emit_trace(
+            op="narrative.page_parent",
+            page_parent=self.page_parent,
+            n_chunks=len(fused),
+            n_units=len(representative),
+            n_page_units=n_page_units,
+            n_returned=len(out),
+            n_pages_expanded=expanded,
+        )
+        return out

@@ -69,6 +69,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default="none",
         help="精排：local-http=/v1/rerank；llm=provider listwise（每问多一次 LLM 调用）",
     )
+    parser.add_argument(
+        "--page-parent",
+        choices=("off", "dedup", "page+child"),
+        default="off",
+        help="页级父子（RAGSPINE_PAGE_PARENT）：dedup=按页去重 + 整页上下文；page+child=另加整页 BM25 一路",
+    )
     parser.add_argument("--routes", default="A-ask,B-narrative")
     parser.add_argument("--languages", default="en,zh")
     parser.add_argument("--cases", default="", help="只跑这些 case_id（逗号分隔）")
@@ -206,6 +212,7 @@ def main(argv: list[str] | None = None) -> int:
         embedding_backend=embedding_backend,
         vector_store=vector_store,
         reranker=judge,
+        page_parent=args.page_parent,
     )
     fact_store = SqliteFactStore(db)
     fact_store.init_schema()
@@ -262,6 +269,7 @@ def main(argv: list[str] | None = None) -> int:
         "provider": args.provider + (f"/{args.claude_model}" if args.claude_model else ""),
         "embedding": models.get("embedding", args.embedding),
         "reranker": models.get("reranker", args.reranker),
+        "page_parent": args.page_parent,
         "reference_date": (reference_date or date.today()).isoformat(),
         "company_config": os.environ.get("RAGSPINE_COMPANY_CONFIG", "(default profile)"),
         "languages": ",".join(languages),

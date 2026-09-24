@@ -166,6 +166,7 @@ def build_narrative_retriever(
     persistence_policy: PersistencePolicy | None = None,
     reranker: ListwiseJudge | None = None,
     postprocessor: NodePostprocessor | None = None,
+    page_parent: str | None = None,
 ) -> tuple[NarrativeIndexRetriever, ChunkStore]:
     """开块库并组装默认叙事检索链（CLI/服务接线入口）。
 
@@ -184,6 +185,8 @@ def build_narrative_retriever(
     cross-encoder 是 opt-in。无论哪种 judge 都走 listwise_rerank 编排，RESTRICTED 不出域一致守住。
     postprocessor：可选后检索 postprocessor 链（W8，make_postprocessor 选型）；给了即在精排出口之后、
     prompt 组装之前对已 RESTRICTED-剥离的输出做重排/去冗余/压缩。默认 None＝不挂链、retrieve 输出字节不变。
+    page_parent：页级父子开关（'off' | 'dedup' | 'page+child'，见 ragspine.retrieval.page_parent）；
+    默认 None＝off，检索输出字节不变。
     """
     store = ChunkStore(chunk_db)
     store.init_schema()
@@ -197,5 +200,6 @@ def build_narrative_retriever(
         judge=judge,
         vector_store=vector_store,
         persistence_policy=persistence_policy,
+        page_parent=page_parent,
     )
     return NarrativeIndexRetriever(index, postprocessor=postprocessor), store

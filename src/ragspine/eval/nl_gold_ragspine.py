@@ -690,12 +690,16 @@ def summarize(runs: Sequence[CaseRun]) -> dict[str, Any]:
     }
 
 
-def _gold_rank(run: CaseRun, case: GoldCase) -> int | None:
-    """所有 required claim 都已在前 k 个 chunk 内出现（任一锚点页）的最小 k；到底都凑不齐则 None。"""
+def _gold_rank(run: CaseRun, case: GoldCase, *, distinct_pages: bool = False) -> int | None:
+    """所有 required claim 都已在前 k 个 chunk 内出现（任一锚点页）的最小 k；到底都凑不齐则 None。
+
+    distinct_pages=True 时按不同页计名次（同一页的多个块只算第一次出现）。
+    """
+    pages = list(dict.fromkeys(run.retrieved_pages)) if distinct_pages else run.retrieved_pages
     worst = 0
     for group in case.required_claims:
         wanted = {a.page_index + 1 for a in group}
-        rank = next((i + 1 for i, p in enumerate(run.retrieved_pages) if p in wanted), None)
+        rank = next((i + 1 for i, p in enumerate(pages) if p in wanted), None)
         if rank is None:
             return None
         worst = max(worst, rank)
@@ -708,26 +712,36 @@ def recall_at_k(
     *,
     ks: Sequence[int] = RECALL_KS,
 ) -> dict[str, Any]:
-    """页级 recall@k：冻结了 claim 的 positive / known-gap case，所有 claim 的 gold 页都进前 k。"""
+    """页级 recall@k：冻结了 claim 的 positive / known-gap case，所有 claim 的 gold 页都进前 k。
+
+    两种口径：``recall`` 的 k 按检索结果条数（chunk）计；``page_recall`` 的 k 按不同页计。
+    """
     by_id = {c.case_id: c for c in cases}
-    eligible: list[tuple[CaseRun, int | None]] = []
+    eligible: list[tuple[CaseRun, int | None, int | None]] = []
     for run in runs:
         case = by_id.get(run.case_id)
         if case is None or case.expect_abstain or not case.required_claims:
             continue
-        eligible.append((run, _gold_rank(run, case)))
-    recall = {
-        f"@{k}": _rate(
-            sum(1 for _, rank in eligible if rank is not None and rank <= k), len(eligible)
-        )
-        for k in ks
-    }
+        eligible.append((run, _gold_rank(run, case), _gold_rank(run, case, distinct_pages=True)))
+
+    def at_k(ranks: list[int | None]) -> dict[str, float]:
+        return {
+            f"@{k}": _rate(sum(1 for r in ranks if r is not None and r <= k), len(ranks))
+            for k in ks
+        }
+
     return {
         "cases": len(eligible),
-        "recall": recall,
+        "recall": at_k([rank for _, rank, _ in eligible]),
+        "page_recall": at_k([page_rank for _, _, page_rank in eligible]),
         "per_case": [
-            {"case_id": run.case_id, "language": run.language, "gold_rank": rank}
-            for run, rank in eligible
+            {
+                "case_id": run.case_id,
+                "language": run.language,
+                "gold_rank": rank,
+                "gold_page_rank": page_rank,
+            }
+            for run, rank, page_rank in eligible
         ],
     }
 
@@ -851,6 +865,11 @@ def _render_markdown(
     for route, s in routes.items():
         r = s["retrieval"]
         parts = ", ".join(f"{k}={v:.0%}" for k, v in r["recall"].items())
+        lines.append(f"- {route} ({r['cases']} cases): {parts}")
+    lines += ["", "### Retrieval page recall@k (gold page among top-k distinct pages)", ""]
+    for route, s in routes.items():
+        r = s["retrieval"]
+        parts = ", ".join(f"{k}={v:.0%}" for k, v in r["page_recall"].items())
         lines.append(f"- {route} ({r['cases']} cases): {parts}")
     lines += ["", "## Case matrix", ""]
     route_names = list(runs)

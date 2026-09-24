@@ -32,10 +32,12 @@ from ragspine.common.observability.trace import TRACE_LOGGER_NAME
 from ragspine.eval.nl_gold_ragspine import (
     ROUTE_ASK,
     ROUTE_FORCED_NARRATIVE,
+    CaseRun,
     ClaimAnchor,
     CountingProvider,
     ForcedNarrativeIntentParser,
     GoldCase,
+    Judgement,
     RecordingRetriever,
     contains_normalized,
     gold_selected_pages,
@@ -456,6 +458,38 @@ def test_recording_retriever_records_ranked_locators() -> None:
     assert recorder.locators() == []
 
 
+def test_recall_reports_chunk_rank_and_distinct_page_rank() -> None:
+    """同一页被多个块占位时，按块的名次 > 按不同页的名次；两种口径都报告。"""
+    case = GoldCase(
+        case_id="p",
+        case_class="positive",
+        questions=(("en", "q"),),
+        required_claims=((ClaimAnchor(kind="quote", page_index=6, quote="x"),),),
+    )
+    run = CaseRun(
+        route=ROUTE_FORCED_NARRATIVE,
+        case_id="p",
+        case_class="positive",
+        language="en",
+        question="q",
+        answer="",
+        answer_plain="",
+        agent_route="narrative",
+        route_label="narrative",
+        sources=[],
+        retrieved_locators=[],
+        judgement=Judgement(passed=False, reason="", refusal=False),
+        llm_calls=0,
+        seconds=0.0,
+        retrieved_pages=[5, 5, 5, 7],
+    )
+    recall = recall_at_k([run], [case], ks=(1, 3, 5))
+    assert recall["recall"] == {"@1": 0.0, "@3": 0.0, "@5": 1.0}
+    assert recall["page_recall"] == {"@1": 0.0, "@3": 1.0, "@5": 1.0}
+    assert recall["per_case"][0]["gold_rank"] == 4
+    assert recall["per_case"][0]["gold_page_rank"] == 2
+
+
 # ---------------------------------------------------------------------------
 # 端到端：小 DI markdown → 两路 → 汇总 / recall@k / 报告
 # ---------------------------------------------------------------------------
@@ -566,6 +600,8 @@ def test_end_to_end_both_routes_and_report(
     recall = recall_at_k(runs_b, gold, ks=(1, 3, 5, 10))
     assert set(recall["recall"]) == {"@1", "@3", "@5", "@10"}
     assert recall["recall"]["@10"] >= recall["recall"]["@1"]
+    assert set(recall["page_recall"]) == {"@1", "@3", "@5", "@10"}
+    assert all(recall["page_recall"][k] >= recall["recall"][k] for k in recall["recall"])
 
     out = write_report(
         tmp_path / "report",
