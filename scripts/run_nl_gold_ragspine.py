@@ -15,8 +15,9 @@ embedding / 精排为 none，即零模型零网络。真实模型基线（先 ``
 报告每题通过率、主分均值±标准差和不稳定题（不做多数票）。``--rejudge <旧报告目录>`` 不入库、不调模型，
 只用当前判分器 + ``--gold`` 重判旧报告里记录的答案，看判分器 / gold 修正本身让分数变了多少。
 
-图文混合上下文：``--source-pdf <原 PDF>`` 在入库时关联并渲染页图，``--page-images on``（需
-``--page-parent dedup|page+child``）给检索结果的前 ``--page-images-top-n`` 页附页图，claude-cli 会读图。
+图文混合上下文：``--source-pdf <原 PDF>`` 在入库时关联并渲染页图（同时写页标签）；``--page-images all``（``on`` 是别名，
+需 ``--page-parent dedup|page+child``）给检索结果的前 ``--page-images-top-n`` 页附页图，``tagged`` 只附其中命中
+``--page-images-trigger`` 标签的页，``--page-images-max`` 限制张数（ADR 0025），claude-cli 会读图。
 
 真实模型连不上即退出（exit 2），绝不静默降级成 mock。报告写到
 ``data/validation/ragspine-nl-gold/<YYYY-MM-DD>-<label>/``（report.md / report.json / cases/）。
@@ -50,6 +51,32 @@ def _positive_int(text: str) -> int:
     if value < 1:
         raise argparse.ArgumentTypeError("须为 ≥1 的整数")
     return value
+
+
+def _non_negative_int(text: str) -> int:
+    value = int(text)
+    if value < 0:
+        raise argparse.ArgumentTypeError("须为 ≥0 的整数")
+    return value
+
+
+def _page_images_policy(text: str) -> str:
+    from ragspine.retrieval.page_images.trigger.retriever import make_page_images_policy
+
+    try:
+        return make_page_images_policy(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
+def _page_images_trigger(text: str) -> str:
+    from ragspine.retrieval.page_images.trigger.retriever import parse_page_image_trigger
+
+    try:
+        parse_page_image_trigger(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+    return text
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -125,11 +152,36 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--page-images",
-        choices=("off", "on"),
+        type=_page_images_policy,
         default="off",
-        help="图文混合上下文（RAGSPINE_PAGE_IMAGES）：on=前 N 页附原 PDF 页图（需 --page-parent 非 off）",
+        help="图文混合上下文（RAGSPINE_PAGE_IMAGES，ADR 0025）：off | tagged | all（on 是 all 的别名）。"
+        "all=前 N 页全附原 PDF 页图；tagged=只附命中触发标签的页（需 --page-parent 非 off）",
     )
-    parser.add_argument("--page-images-top-n", type=int, default=3)
+    parser.add_argument("--page-images-top-n", type=_non_negative_int, default=3)
+    parser.add_argument(
+        "--page-images-trigger",
+        type=_page_images_trigger,
+        default="has_table,low_text",
+        help="tagged 的触发标签（逗号分隔，或关系）：has_table / has_figure / low_text，或 any",
+    )
+    parser.add_argument(
+        "--page-images-max",
+        type=_non_negative_int,
+        default=None,
+        help="每次检索最多几张页图（缺省 = --page-images-top-n）",
+    )
+    parser.add_argument(
+        "--page-images-low-text-chars",
+        type=_non_negative_int,
+        default=300,
+        help="low_text 阈值：页文字去空白后不足该字符数",
+    )
+    parser.add_argument(
+        "--page-images-figure-min-chars",
+        type=_non_negative_int,
+        default=10,
+        help="has_figure 阈值：最大那个图的文字量达到该字符数才算（滤掉 logo）",
+    )
     parser.add_argument("--routes", default="A-ask,B-narrative")
     parser.add_argument("--languages", default="en,zh")
     parser.add_argument("--cases", default="", help="只跑这些 case_id（逗号分隔）")
@@ -170,7 +222,9 @@ def main(argv: list[str] | None = None) -> int:
         write_report,
     )
     from ragspine.retrieval.link.narrative_link import build_narrative_retriever
-    from ragspine.retrieval.page_images.attach import make_page_image_retriever
+    from ragspine.retrieval.page_images.trigger.retriever import (
+        make_triggered_page_image_retriever,
+    )
     from ragspine.retrieval.rerank.cross_encoder import make_reranker
     from ragspine.retrieval.vector.chunk_index import embedding_model_id
     from ragspine.retrieval.vector.embedding_backends import make_embedding_backend
@@ -275,9 +329,9 @@ def main(argv: list[str] | None = None) -> int:
             "storage": {"persist_vectors": True},
         }
     t0 = time.perf_counter()
-    if args.page_images == "on" and args.page_parent == "off":
+    if args.page_images != "off" and args.page_parent == "off":
         print(
-            "警告：--page-images on 需要 --page-parent dedup|page+child，否则不附页图",
+            f"警告：--page-images {args.page_images} 需要 --page-parent dedup|page+child，否则不附页图",
             file=sys.stderr,
         )
     rag = RAGSpine.local(workspace, preset=preset, config=rag_config)
@@ -322,12 +376,16 @@ def main(argv: list[str] | None = None) -> int:
         query_translation=args.query_translation,
         translation_provider=translation_counter,
     )
-    retriever = make_page_image_retriever(
+    retriever = make_triggered_page_image_retriever(
         retriever,
         args.page_images,
         chunk_db_path=db,
         top_n=args.page_images_top_n,
         page_parent=args.page_parent,
+        trigger=args.page_images_trigger,
+        max_images=args.page_images_max,
+        low_text_chars=args.page_images_low_text_chars,
+        figure_min_chars=args.page_images_figure_min_chars,
     )
     fact_store = SqliteFactStore(db)
     fact_store.init_schema()
@@ -393,6 +451,10 @@ def main(argv: list[str] | None = None) -> int:
         "query_translation": args.query_translation,
         "page_images": args.page_images,
         "page_images_top_n": args.page_images_top_n,
+        "page_images_trigger": args.page_images_trigger,
+        "page_images_max": args.page_images_max,
+        "page_images_low_text_chars": args.page_images_low_text_chars,
+        "page_images_figure_min_chars": args.page_images_figure_min_chars,
         "source_pdf": str(args.source_pdf) if args.source_pdf else "",
         "page_images_indexed": page_images_indexed,
         "reference_date": (reference_date or date.today()).isoformat(),

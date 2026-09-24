@@ -487,6 +487,37 @@ def test_script_defaults_to_full_document_and_single_repeat() -> None:
         script._parse_args(["--repeat", "0"])
 
 
+def test_script_page_image_policy_args() -> None:
+    """ADR 0025：--page-images 三值（on 是 all 的别名）+ 触发条件 / 上限 / 阈值；非法值在解析时拒绝。"""
+    script = _script()
+    args = script._parse_args([])
+    assert (args.page_images, args.page_images_trigger, args.page_images_max) == (
+        "off",
+        "has_table,low_text",
+        None,
+    )
+    assert (args.page_images_low_text_chars, args.page_images_figure_min_chars) == (300, 10)
+    assert script._parse_args(["--page-images", "on"]).page_images == "all"
+    tagged = script._parse_args(
+        ["--page-images", "tagged", "--page-images-trigger", "any", "--page-images-max", "2"]
+        + ["--page-images-low-text-chars", "200", "--page-images-figure-min-chars", "0"]
+    )
+    assert (tagged.page_images, tagged.page_images_trigger, tagged.page_images_max) == (
+        "tagged",
+        "any",
+        2,
+    )
+    assert (tagged.page_images_low_text_chars, tagged.page_images_figure_min_chars) == (200, 0)
+    for bad in (
+        ["--page-images", "maybe"],
+        ["--page-images-trigger", "has_chart"],
+        ["--page-images-max", "-1"],
+        ["--page-images-low-text-chars", "-1"],
+    ):
+        with pytest.raises(SystemExit):
+            script._parse_args(bad)
+
+
 def test_v2_is_registered_in_the_benchmark_manifest() -> None:
     registry = json.loads((BENCH / "manifest.json").read_text(encoding="utf-8"))["gold_sets"]
     entry = next(item for item in registry["sets"] if item["file"] == GOLD_V2.name)
