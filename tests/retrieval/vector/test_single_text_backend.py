@@ -48,3 +48,18 @@ def test_inconsistent_dimensions_raise() -> None:
     backend = SingleTextEmbeddingBackend(FakeEmbedder(dims={"b": 2}))
     with pytest.raises(ValueError, match="维度"):
         backend.embed_texts(["a", "b"])
+
+
+def test_embed_query_prepends_query_prefix_documents_stay_raw() -> None:
+    embedder = FakeEmbedder()
+    backend = SingleTextEmbeddingBackend(embedder, query_prefix="Instruct: t\nQuery:")
+    backend.embed_texts(["doc"])
+    vector = backend.embed_query("q")
+    assert embedder.calls == ["doc", "Instruct: t\nQuery:q"]
+    assert isinstance(vector, list)
+
+
+def test_embed_query_without_prefix_sends_raw_query() -> None:
+    embedder = FakeEmbedder()
+    SingleTextEmbeddingBackend(embedder).embed_query("q")
+    assert embedder.calls == ["q"]

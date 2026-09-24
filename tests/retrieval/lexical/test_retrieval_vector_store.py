@@ -214,3 +214,29 @@ def test_k_covers_all_candidates_above_default_query_k():
     results = retriever.search("alpha", top_k=60)
     assert len(results) == 60
     assert all(r.vector_score > 0.0 for r in results)
+
+
+class _QueryAwareBackend(FakeEmbeddingBackend):
+    """带 embed_query 的后端：查询端走 embed_query（非对称模型如 Qwen3 的 Instruct 前缀在此落地）。"""
+
+    def __init__(self):
+        super().__init__()
+        self.queries: list[str] = []
+
+    def embed_query(self, text: str) -> list[float]:
+        self.queries.append(text)
+        return self.embed_texts([f"Q:{text}"])[0]
+
+
+def test_query_side_uses_embed_query_when_backend_offers_it(corpus):
+    backend = _QueryAwareBackend()
+    HybridRetriever(corpus, embedding_backend=backend).search("收入", top_k=3)
+    assert backend.queries == ["收入"]
+    assert "收入" not in backend.embedded  # 查询不再走 embed_texts
+    assert "Q:收入" in backend.embedded
+
+
+def test_backend_without_embed_query_embeds_query_via_embed_texts(corpus):
+    backend = FakeEmbeddingBackend()
+    HybridRetriever(corpus, embedding_backend=backend).search("收入", top_k=3)
+    assert backend.embedded[-1] == "收入"

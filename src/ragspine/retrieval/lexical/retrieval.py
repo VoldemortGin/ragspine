@@ -369,7 +369,14 @@ class HybridRetriever:
 
             if use_vector:
                 assert self.embedding_backend is not None and self.vector_store is not None
-                query_vec = self.embedding_backend.embed_texts([q])[0]
+                # 后端若提供 embed_query（非对称模型的查询端，如 Qwen3 Instruct 前缀）则用之；
+                # 否则 embed_texts([q])，与既有后端逐位等价。
+                embed_query = getattr(self.embedding_backend, "embed_query", None)
+                query_vec = (
+                    embed_query(q)
+                    if callable(embed_query)
+                    else self.embedding_backend.embed_texts([q])[0]
+                )
                 # k=len(candidates)（非 store 默认 50）：拿回全部候选的向量排名，含 cosine=0 者，
                 # 故 best_vector 对每个候选都有显式分（与原内联 zip(sims,candidates) 逐位等价）。
                 vector_hits = [

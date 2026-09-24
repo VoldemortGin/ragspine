@@ -60,6 +60,21 @@ EMBEDDING_MODEL_ENV = "RAGSPINE_EMBEDDING_MODEL"
 # 合法 torch 设备取值（override / env 取值校验白名单）。
 _VALID_DEVICES = ("cuda", "mps", "cpu")
 
+# local-http 查询端指令（任务描述）覆盖环境变量名；设为空串＝不加前缀。
+EMBEDDING_QUERY_INSTRUCTION_ENV = "RAGSPINE_EMBEDDING_QUERY_INSTRUCTION"
+
+# Qwen3-Embedding 官方推荐的检索任务描述与查询模板（文档端不加前缀；"Query:" 后无空格）。
+# 来源：https://huggingface.co/Qwen/Qwen3-Embedding-4B 、https://github.com/QwenLM/Qwen3-Embedding
+DEFAULT_QWEN3_QUERY_INSTRUCTION = (
+    "Given a web search query, retrieve relevant passages that answer the query"
+)
+
+
+def qwen3_query_prefix(instruction: str) -> str:
+    """任务描述 -> Qwen3 查询前缀 ``Instruct: {task}\nQuery:``；空描述返回 ``""``（不加前缀）。"""
+    return f"Instruct: {instruction}\nQuery:" if instruction else ""
+
+
 # 默认分批大小（OpenAI 单请求 input 上限远高于此，取保守值控制单请求体积）
 DEFAULT_EMBEDDING_BATCH_SIZE = 64
 
@@ -361,14 +376,23 @@ def _local_http_embedding_backend(**kwargs: Any) -> EmbeddingBackend:
     """local-http：OpenAI 兼容 ``/v1/embeddings``（如 vLLM 上的 Qwen3-Embedding），读 EMBEDDING_* 环境变量。
 
     延迟 import 适配器（零顶层依赖）；模型标识记为 ``local-http:<EMBEDDING_MODEL>``。
+    查询端按 Qwen3 官方模板加指令前缀（任务描述缺省 DEFAULT_QWEN3_QUERY_INSTRUCTION，可经 kwargs
+    ``query_instruction`` 或 RAGSPINE_EMBEDDING_QUERY_INSTRUCTION 覆盖，空串＝关闭）；文档端不加。
     """
     from ragspine.common.evidence.providers.local_models import LocalEmbeddingAdapter
     from ragspine.common.evidence.providers.providers import load_local_model_config
     from ragspine.retrieval.vector.single_text_backend import SingleTextEmbeddingBackend
 
+    instruction = kwargs.pop("query_instruction", None)
+    if instruction is None:
+        instruction = os.environ.get(
+            EMBEDDING_QUERY_INSTRUCTION_ENV, DEFAULT_QWEN3_QUERY_INSTRUCTION
+        )
     config = load_local_model_config("embedding")
     return SingleTextEmbeddingBackend(
-        LocalEmbeddingAdapter(config, **kwargs), model_id=f"local-http:{config.model}"
+        LocalEmbeddingAdapter(config, **kwargs),
+        model_id=f"local-http:{config.model}",
+        query_prefix=qwen3_query_prefix(instruction),
     )
 
 

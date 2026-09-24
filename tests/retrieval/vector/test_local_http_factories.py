@@ -53,3 +53,57 @@ def test_defaults_unchanged(monkeypatch):
     monkeypatch.delenv("RAGSPINE_RERANKER", raising=False)
     assert make_embedding_backend() is None
     assert make_reranker() is None
+
+
+_QWEN_DEFAULT_PREFIX = (
+    "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery:"
+)
+
+
+def _capturing_backend(monkeypatch: pytest.MonkeyPatch) -> tuple[object, list[str]]:
+    import json
+
+    sent: list[str] = []
+
+    def sender(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
+        sent.append(json.loads(payload)["input"])
+        return json.dumps({"data": [{"embedding": [0.1, 0.2], "index": 0}]}).encode()
+
+    return make_embedding_backend("local-http", sender=sender), sent
+
+
+def test_local_http_query_gets_qwen_instruct_documents_do_not(local_env, monkeypatch):
+    monkeypatch.delenv("RAGSPINE_EMBEDDING_QUERY_INSTRUCTION", raising=False)
+    backend, sent = _capturing_backend(monkeypatch)
+    backend.embed_texts(["chunk text"])
+    backend.embed_query("revenue 2024")
+    assert sent == ["chunk text", _QWEN_DEFAULT_PREFIX + "revenue 2024"]
+    # 文档向量口径不变 -> 模型标识不变，已持久化的 .vectors.db 不失效
+    assert embedding_model_id(backend) == "local-http:Qwen/Qwen3-Embedding-4B"
+
+
+def test_local_http_query_instruction_is_configurable(local_env, monkeypatch):
+    monkeypatch.setenv("RAGSPINE_EMBEDDING_QUERY_INSTRUCTION", "Find the page")
+    backend, sent = _capturing_backend(monkeypatch)
+    backend.embed_query("q")
+    assert sent == ["Instruct: Find the page\nQuery:q"]
+
+
+def test_local_http_empty_query_instruction_disables_prefix(local_env, monkeypatch):
+    monkeypatch.setenv("RAGSPINE_EMBEDDING_QUERY_INSTRUCTION", "")
+    backend, sent = _capturing_backend(monkeypatch)
+    backend.embed_query("q")
+    assert sent == ["q"]
+
+
+def test_other_backends_have_no_query_side_path():
+    """其他后端不提供 embed_query -> 检索器查询端仍走 embed_texts([q])，行为逐字节不变。"""
+    from ragspine.retrieval.vector import embedding_backends as eb
+
+    for cls in (
+        eb.DeterministicEmbeddingBackend,
+        eb.OpenAIEmbeddingBackend,
+        eb.OnnxEmbeddingBackend,
+        eb.SentenceTransformerEmbeddingBackend,
+    ):
+        assert not hasattr(cls, "embed_query"), cls
