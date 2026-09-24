@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/service/
-verified-against: 08c27176f17abf97df5629c081ca9720d2dbfecb
+verified-against: 70032e956fbf3154d6fdf2d5dbcdb397b07a33b2
 ---
 
 # service — agent contract
@@ -30,7 +30,9 @@ The high-level local facade selects retrieval through `RetrievalProfile` and the
 and `quality` opts into ONNX embeddings, cross-encoder reranking, and post-processing. `RetrievalPreset.persist_vectors`
 (facade config `storage.persist_vectors`, default `False`) turns on the persisted chunk vectors above; `embedding` /
 `reranker` also accept `"local-http"` (OpenAI-compatible `/v1/embeddings` / `/v1/rerank`, env `EMBEDDING_*` / `RERANK_*`).
-`ServiceConfig.page_parent` / `RAGSPINE_PAGE_PARENT` (`off` default | `dedup` | `page+child`; facade
+`ServiceConfig.page_parent` / `RAGSPINE_PAGE_PARENT` (`page+child` default | `dedup` | `off` byte-identical; flipped from
+`off` on the evidence in CHANGELOG Unreleased — blind review answerable@1 69% vs `dedup` 46%, real-LLM route B recall@1
+.31 → .56; facade
 `RAGSpine.local(retrieval=make_retrieval_preset(page_parent=…))` — kept out of `RAGSpineConfig.retrieval`, whose
 effective dict is pinned to the preset recipe) is threaded by `open_narrative_retriever` into
 `build_narrative_retriever(page_parent=)`: query-time only, not part of the index fingerprint.
@@ -40,8 +42,12 @@ effective dict is pinned to the preset recipe) is threaded by `open_narrative_re
 narrative job payload; the worker re-validates `source_pdf` (payload or sidecar) before writing (`SourcePdfError` →
 `JobError(stage="validation")`) and adds a count-only `page_images` block to its report when a PDF was linked. The facade
 `RAGSpine.ingest(..., source_pdf=)` does the same into `<workspace>/page_images`; `IngestResult.page_image_report`
-is `None` when nothing was linked. Note: the HTTP narrative route / worker suffix allowlist is still `.pptx/.pdf`, so
-`.md` + `source_pdf` over HTTP (or a worker with `allowed_upload_root`) is not reachable yet.
+is `None` when nothing was linked. The HTTP narrative route / worker suffix allowlist (`_NARRATIVE_SUFFIXES` in
+`api/routes.py` + `tasks/jobs.py`) is `.pptx/.pdf/.md`, so `.md` + `source_pdf` (sidecar or worker payload) works over
+HTTP and under `allowed_upload_root`: the `.md` passes `validate_ingest_path` (resolved path inside the root + suffix) and
+the linked PDF must also resolve inside the root, else `JobError(stage="validation")` before any write. There is no
+content sniffing — a `.md` is only ever decoded as UTF-8 text (`errors="replace"`), never executed; no per-file size
+cap exists for any narrative suffix. The structured route does not take `.md` (phase 2).
 The L2 subprocess entry ships inside the wheel (`dify/run_dify_workflow.py`, `python -m`-able;
 repo `scripts/` copy is a source-tree fallback). `dify/http_client.py` is the guarded client the
 runner injects for http-request nodes — default-off (`RAGSPINE_DIFY_HTTP_ENABLED`), stdlib-only,

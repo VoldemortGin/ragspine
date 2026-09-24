@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/
-verified-against: 08c27176f17abf97df5629c081ca9720d2dbfecb
+verified-against: 70032e956fbf3154d6fdf2d5dbcdb397b07a33b2
 ---
 
 # retrieval — agent contract
@@ -35,9 +35,12 @@ additive columns, old DBs migrated in place), ingest routes through the `chunker
 `link/_to_snippet` surfaces `window_text` as a separate `prompt_text` (parent context = **generation-only**,
 child stays the hit + citation; window never becomes a hit) with `parent_locator` as a provenance
 back-reference — RESTRICTED chunks are dropped whole at the exit so the parent window never leaks),
-`page_parent/` (**page-level parent/child + per-page de-dup, opt-in** `RAGSPINE_PAGE_PARENT` / `ServiceConfig.page_parent`
-/ facade `RetrievalPreset.page_parent` / `build_narrative_retriever(page_parent=)` / `NarrativeIndex(page_parent=)`, default
-`off` byte-identical, frozen by a snapshot). `pages.py`: mode parsing, page identity `(doc_id, N)` parsed from the
+`page_parent/` (**page-level parent/child + per-page de-dup, default `page+child`** at `RAGSPINE_PAGE_PARENT` /
+`ServiceConfig.page_parent` / facade `RetrievalPreset.page_parent` / `build_narrative_retriever(page_parent=)`; the
+low-level `NarrativeIndex(page_parent=)` constructor still defaults to `off`; `off` is byte-identical to the pre-page-parent
+output, frozen by a snapshot. Why the default flipped: Sonnet blind review answerable@1 `page+child` 69% vs `dedup` 46%;
+real-LLM nl-gold full-document route B recall@1 .31 → .56, content hit 68% → 84%; page-less chunks are never grouped,
+so ACME pptx / whole-doc PDF output is unchanged). `pages.py`: mode parsing, page identity `(doc_id, N)` parsed from the
 `{doc_id}@page=N#…` locator (no page → kept as-is, never de-duplicated), `group_pages` (non-RESTRICTED only);
 `window.py`: `page_window` joins a page's chunks in `seq` order, drops the paragraph-carry overlap (only when the
 carried lines match verbatim) and truncates around the hit to `page_window_chars` (default 4000) — the hit chunk is

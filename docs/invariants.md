@@ -4,7 +4,7 @@ covers:
   - src/ragspine/retrieval/link/
   - src/ragspine/retrieval/rerank/
   - src/ragspine/common/observability/
-verified-against: 08c27176f17abf97df5629c081ca9720d2dbfecb
+verified-against: 70032e956fbf3154d6fdf2d5dbcdb397b07a33b2
 ---
 
 # Invariants (code-enforced)
@@ -35,7 +35,7 @@ parent context can never leak via a child. The expanded window is generation-con
 `source_locator` stay the hit child, so citation stays honest and the window is never a hit. **Frozen by**
 `tests/conformance/test_parent_child_isolation.py` (end-to-end + a RESTRICTED-windowed reverse-proof).
 
-**Page-level parent/child (`RAGSPINE_PAGE_PARENT=dedup|page+child`, opt-in, default `off`).** `NarrativeIndex`
+**Page-level parent/child (`RAGSPINE_PAGE_PARENT=off|dedup|page+child`, service / facade default `page+child`).** `NarrativeIndex`
 de-duplicates the fused ranking by page (`{doc_id}@page=N`) before rerank and swaps the representative's
 `window_text` for its whole page, surfaced through the same `_to_snippet` → `prompt_text` path. RESTRICTED chunks
 never join a page group (`page_parent/pages.group_pages`): they stay single units that the two exits drop as before,
