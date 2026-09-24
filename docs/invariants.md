@@ -4,7 +4,7 @@ covers:
   - src/ragspine/retrieval/link/
   - src/ragspine/retrieval/rerank/
   - src/ragspine/common/observability/
-verified-against: eaf2f3392fbb7840042a4bf68076da35fcb2f943
+verified-against: 08c27176f17abf97df5629c081ca9720d2dbfecb
 ---
 
 # Invariants (code-enforced)
@@ -43,6 +43,16 @@ the page window (`page_parent/window.page_window`) and the `page+child` whole-pa
 non-RESTRICTED siblings only. `text` / `source_locator` stay the hit chunk; `parent_locator` is the page locator.
 **Frozen by** `tests/conformance/test_page_parent_isolation.py` (+ reverse-proof) and the off-mode byte snapshot
 `tests/retrieval/page_parent/test_page_parent_off_snapshot.py`.
+
+**Page images are a new exit, screened at the door (`RAGSPINE_PAGE_IMAGES=on`, opt-in, default `off`).** A page
+image carries the whole page, wider than any chunk the two text exits judge. So (1) ingest never renders a page that
+holds any RESTRICTED chunk (`ingestion/page_images/index.py`, `n_withheld`), and (2) `retrieval/page_images/attach.py`
+re-checks the chunk store at query time and sends no image for such a page even if a mapping row exists (e.g. the
+sensitivity changed after rendering). Public text on that page still flows through the normal exits. Traces record
+counts / reason codes only (`op=narrative.page_images`, `op=narrative.page_image_index`, request-trace `page_images`),
+never paths or image bytes; each image part carries `doc_id` + physical `page` (provenance). **Frozen by**
+`tests/conformance/test_page_image_isolation.py` (+ reverse-proof) and the off-mode prompt snapshot
+`tests/retrieval/page_images/test_page_images_off_snapshot.py`.
 
 **Judge-agnostic (W2).** The rerank exit's protection lives in the `listwise_rerank` *orchestration*,
 not in any particular judge, so it covers **every** `ListwiseJudge` equally: the LLM listwise judge

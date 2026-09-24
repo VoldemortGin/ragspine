@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/service/
-verified-against: eaf2f3392fbb7840042a4bf68076da35fcb2f943
+verified-against: 08c27176f17abf97df5629c081ca9720d2dbfecb
 ---
 
 # service — agent contract
@@ -34,6 +34,14 @@ and `quality` opts into ONNX embeddings, cross-encoder reranking, and post-proce
 `RAGSpine.local(retrieval=make_retrieval_preset(page_parent=…))` — kept out of `RAGSpineConfig.retrieval`, whose
 effective dict is pinned to the preset recipe) is threaded by `open_narrative_retriever` into
 `build_narrative_retriever(page_parent=)`: query-time only, not part of the index fingerprint.
+`ServiceConfig.page_images` / `RAGSPINE_PAGE_IMAGES` (`off` default | `on`) + `page_images_top_n` (3) make
+`open_narrative_retriever` wrap the final retriever in `PageImageRetriever` (needs `page_parent` ≠ `off`); ingest-side
+`page_image_dpi` (144) / `page_image_max_side` (1568) / `page_image_dir` (default `<chunk db dir>/page_images`) ride the
+narrative job payload; the worker re-validates `source_pdf` (payload or sidecar) before writing (`SourcePdfError` →
+`JobError(stage="validation")`) and adds a count-only `page_images` block to its report when a PDF was linked. The facade
+`RAGSpine.ingest(..., source_pdf=)` does the same into `<workspace>/page_images`; `IngestResult.page_image_report`
+is `None` when nothing was linked. Note: the HTTP narrative route / worker suffix allowlist is still `.pptx/.pdf`, so
+`.md` + `source_pdf` over HTTP (or a worker with `allowed_upload_root`) is not reachable yet.
 The L2 subprocess entry ships inside the wheel (`dify/run_dify_workflow.py`, `python -m`-able;
 repo `scripts/` copy is a source-tree fallback). `dify/http_client.py` is the guarded client the
 runner injects for http-request nodes — default-off (`RAGSPINE_DIFY_HTTP_ENABLED`), stdlib-only,

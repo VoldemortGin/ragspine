@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/
-verified-against: eaf2f3392fbb7840042a4bf68076da35fcb2f943
+verified-against: 08c27176f17abf97df5629c081ca9720d2dbfecb
 ---
 
 # retrieval — agent contract
@@ -45,6 +45,17 @@ always whole. `NarrativeIndex._retrieve_pages` runs **after fusion, before reran
 occurrence = representative), `page+child` adds a whole-page BM25 ranking (multi-query, no vectors) fused by RRF,
 top-k counts pages, the judge sees one representative per page, then the representative gets `window_text` = page
 window and `parent_locator` = `{doc_id}@page=N`; trace `op=narrative.page_parent` carries counts only),
+`page_images/` (**image+text context, opt-in** `RAGSPINE_PAGE_IMAGES=off|on` + `RAGSPINE_PAGE_IMAGES_TOP_N` (default 3) /
+`ServiceConfig.page_images*` / facade `RetrievalPreset.page_images*`, default `off` ⇒ `make_page_image_retriever` returns
+the base unchanged, prompt byte-identical, frozen by `tests/retrieval/page_images/test_page_images_off_snapshot.py`).
+`store.py`: `PageImageStore` — tables `page_image_doc` (pdf sha256, dpi, max_side, sync signature) + `page_image`
+(`(doc_id, page)` → content-addressed `image_dir/<sha[:2]>/<sha>.png`, image + PDF sha256, dpi, size) in the chunk db,
+created only on first real association; `image_dir` defaults to `<chunk db dir>/page_images`; replace / clear delete
+only orphaned files; page = physical page order (= locator `page=N`). `attach.py`: `PageImageRetriever` (a
+`NarrativeRetriever` wrapper, outermost in `open_narrative_retriever`) adds `page_image = {path, doc_id, page,
+image_sha256, pdf_sha256}` to the first `top_n` snippets; requires `page_parent` ≠ `off` (one snippet per page, text =
+whole page) — `off` attaches nothing (`reason=page_parent_off`); skip codes `no_page` / `restricted` / `no_image` /
+`missing_file`; trace `op=narrative.page_images` = counts + codes only),
 `contextual.py` (W4a — a deterministic, zero-fabrication context header built from controlled-vocab
 metadata, injected into **index/embed text only** via the opt-in `index_text_fn` seam on
 `HybridRetriever`/`NarrativeIndex`; `chunk.text`/citation untouched, default `None` = byte-identical),
@@ -168,6 +179,10 @@ is the more-permissive `RAGSPINE_COLPALI_MODEL` alternative.
 - **Page-level parent/child rides the same exit.** RESTRICTED chunks never join a page group, so neither the page
   window nor the `page+child` page unit contains RESTRICTED text; a RESTRICTED hit stays its own unit and is dropped by
   the two exits. Bound by `tests/conformance/test_page_parent_isolation.py` (+ reverse-proof).
+- **A page image is a new exit, screened at the door.** An image shows the whole page, so `PageImageRetriever`
+  re-checks the chunk store at query time: any active RESTRICTED chunk on that page ⇒ no image, even when a mapping
+  row exists (ingest also never renders such pages). Bound by `tests/conformance/test_page_image_isolation.py`
+  (+ reverse-proof).
 
 ## Read before editing
 

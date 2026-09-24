@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/agent/
-verified-against: 677087ce911e60a8199c4cbf122487ce69036b02
+verified-against: 08c27176f17abf97df5629c081ca9720d2dbfecb
 ---
 
 # agent — agent contract
@@ -23,6 +23,12 @@ loop, LLM provider abstraction.
   prompt and the current user turn** — pure generation context. History **never** enters intent
   parsing (parser sees only the current `question`; it stays the last user message), produces no
   new evidence (anti-fabrication + provenance unchanged), and never touches retrieval.
+  **Image+text context (opt-in):** when narrative snippets carry a `page_image` ref (added by
+  `retrieval/page_images`, `RAGSPINE_PAGE_IMAGES=on`), `_run_narrative` appends `图：pN.png` after that
+  snippet's text and sends the user turn as parts `[text, image…]` (names `p{page}.png`, `-2`/`-3` on
+  collisions, each part carries `doc_id` + `page`). A provider without `supports_image_input` gets the plain
+  string (byte-identical to no images) and the request trace records `page_images={sent, dropped,
+  dropped_reason="provider_no_image_input"}` — counts only, never paths. No `page_image` refs ⇒ no trace key.
 - `intent.py` — rule-based (no LLM) intent + scope parse and the clarification gate.
   Exposes the `IntentParser` Protocol + default `RuleIntentParser`; `clarify_scope`
   delegates the out-of-scope decision to the `SecurityGate`.
@@ -30,13 +36,23 @@ loop, LLM provider abstraction.
   (ADR 0010): external/competitor longest-match + masking + out-of-scope refusal.
   Zero LLM, config-driven (external list + home name from the profile).
 - `llm_provider.py` — `LLMProvider` Protocol, `AnthropicProvider` (SDK lazy-imported),
-  `MockProvider` (offline, deterministic).
+  `MockProvider` (offline, deterministic). Image parts: a user message `content` may be a list of
+  `{"type":"text"}` / `{"type": IMAGE_PART_TYPE ("image"), "path", "name", "doc_id", "page"}`; only a provider
+  declaring `supports_image_input = True` (`provider_supports_images`) ever receives one;
+  `split_message_content` → `(text, image parts)`. Wrappers must forward the flag (eval `CountingProvider` does;
+  corespine `RateLimitedProvider` does not → text-only, traced).
 - `claude_cli_provider.py` — `ClaudeCliProvider`: eval-only provider that shells out to the local
   `claude -p` CLI (subprocess, no SDK; binary resolved lazily at call time). Each call runs in a
   fresh empty cwd with `--setting-sources ""` (the flag that keeps the user's global
   CLAUDE.md / settings `language` out — `--safe-mode` does not), `--tools ""`, no MCP / skills /
   session persistence. Tool calling is **prompt-emulated** (JSON protocol + validation + bounded
   retries); no streaming, no sampling params. Timeout / non-zero exit / `is_error` → `ProviderError`.
+  **Reads images** (`supports_image_input = True`): image parts are copied into the fresh cwd under their
+  validated single-segment `name` (`^[A-Za-z0-9][A-Za-z0-9._-]*\.png$`, unique), the call switches to
+  `--tools Read` + `--permission-prompts none` (reads inside cwd need no approval; anything outside needs one and
+  is auto-denied — deliberately **not** `--allowedTools Read`, which would pre-approve any path), and the prompt
+  gets a one-line hint naming the relative files. Original storage paths never reach prompt / argv. No images ⇒
+  the command line is exactly the old one.
 - `query_tools.py` — profile-driven `query_metric` tool schema + execution
   (`found` / `not_found` / `unrecognized_param` — never fabricates).
 - `decompose.py` — **W6a query decomposition (opt-in, default-off).** `QueryDecomposer` Protocol +

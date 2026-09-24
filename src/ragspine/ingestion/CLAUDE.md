@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/ingestion/
-verified-against: 4846bb2ded70e5f485566da9a0edf30c446fdf39
+verified-against: 08c27176f17abf97df5629c081ca9720d2dbfecb
 ---
 
 # ingestion — agent contract
@@ -29,6 +29,17 @@ default `chunker=None` → built-in `chunk_document` **byte-identical**; injecti
 `tests/ingestion/narrative/test_legacy_chunk_snapshot.py`) chunks each segment separately via `chunk_segments`:
 locator `{doc_id}@{segment locator}#para…` (e.g. `deck.md@page=3#para1-4`), `heading` = heading path joined
 by `" > "`, seq/chunk_id renumbered doc-wide; `.md` (`SEGMENT_CHUNKED_SUFFIXES`) always takes this path),
+`page_images/` (DI markdown ↔ original PDF, **explicit association only**: `source_pdf.py` resolves
+`RAGSpine.ingest(md, source_pdf=)` / CLI `--source-pdf` / worker payload `source_pdf` (one `.md` per explicit PDF), else
+the sidecar `<stem>.meta.json` field **`source_pdf`** (relative → sidecar dir, then cwd); validates PDF page count ==
+max `DiPage.index` and records its sha256 — missing / unreadable / outside `allowed_upload_root` / count mismatch raise
+`SourcePdfError` **before any write** (a wrong pairing would put mismatched pages next to the text, worse than no
+image). No PDF ⇒ nothing happens, text ingest unchanged. `render.py`: pdfspine PNG, scale = `min(dpi/72,
+max_side/long edge pt)`, defaults **144 dpi / 1568 px** (Claude downsizes beyond ~1568 px; a 16:9 slide renders
+1568×882, ~0.2 MB). `index.py`: `sync_page_images` is doc-idempotent (signature = PDF sha + dpi + max_side +
+RESTRICTED page set; changed PDF ⇒ re-render + replace + orphan cleanup; re-ingest without a PDF clears the doc's old
+images), **pages holding any RESTRICTED chunk are never rendered** (`n_withheld`), trace `op=narrative.page_image_index`
+counts only),
 `review/` (SME human review-queue state machine).
 
 ## Invariants

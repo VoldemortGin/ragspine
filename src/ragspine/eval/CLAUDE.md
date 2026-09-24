@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/eval/
-verified-against: eaf2f3392fbb7840042a4bf68076da35fcb2f943
+verified-against: 08c27176f17abf97df5629c081ca9720d2dbfecb
 ---
 
 # eval — agent contract
@@ -23,7 +23,9 @@ baseline via `scripts/run_nl_gold_ragspine.py` / `make eval-nl-gold`, reports un
 formal persisted-vector path (`storage.persist_vectors`, embed at ingest) and reads the index back via
 `service.config.open_vector_channel` — no eval-side vector backfill. `--page-parent off|dedup|page+child` switches the
 retriever's page-level parent/child mode; `recall_at_k` reports both `recall` (k = retrieved chunks) and
-`page_recall` (k = distinct pages).
+`page_recall` (k = distinct pages). `--source-pdf` links the original PDF at ingest (else the md's `<stem>.meta.json`
+sidecar) and `--page-images on --page-images-top-n N` adds page images to the top-N pages (image+text context);
+`CountingProvider` forwards `supports_image_input` so the wrapped provider still receives image parts.
 
 ## Invariants
 

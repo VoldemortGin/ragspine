@@ -3,7 +3,7 @@ covers:
   - src/ragspine/agent/
   - src/ragspine/retrieval/
   - src/ragspine/service/faq/
-verified-against: eaf2f3392fbb7840042a4bf68076da35fcb2f943
+verified-against: 08c27176f17abf97df5629c081ca9720d2dbfecb
 ---
 
 # Architecture — request flow & dual channel
@@ -20,5 +20,5 @@ canonical one-liner diagram in `README.md`; the control-flow detail lives here.
 ## Channels
 
 - **Structured** — function-calling over the fact store → `found` / `not_found` / `unrecognized`.
-- **Narrative** — hybrid retrieve → [opt-in per-page de-dup, `RAGSPINE_PAGE_PARENT`] → listwise rerank → synthesize with citations (whole-page context when page-parent is on).
+- **Narrative** — hybrid retrieve → [opt-in per-page de-dup, `RAGSPINE_PAGE_PARENT`] → listwise rerank → [opt-in page images for the top-N pages, `RAGSPINE_PAGE_IMAGES`; needs a source PDF linked at ingest] → synthesize with citations (whole-page context when page-parent is on; text + page-image parts when the provider reads images).
 - **Composite** — run both, compare, merge.
