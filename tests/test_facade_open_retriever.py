@@ -93,7 +93,9 @@ def test_open_retriever_and_ask_share_one_service_config(
     monkeypatch.setattr("ragspine.session.open_narrative_retriever", fake_open)
     provider = MockProvider()
     with RAGSpine.local(tmp_path / "ws", provider=provider, preset=preset, config=config) as rag:
-        rag.retrieval = rag.retrieval.with_overrides(contextual_index="heading")
+        rag.retrieval = rag.retrieval.with_overrides(
+            contextual_index="heading", query_translation="off"
+        )
         with rag.open_retriever() as retriever:
             assert retriever is None
         rag.ask("Agency share of VONB")
@@ -105,3 +107,4 @@ def test_open_retriever_and_ask_share_one_service_config(
     for field, value in expected.items():
         assert getattr(retriever_config, field) == value
     assert retriever_config.contextual_index == "heading"
+    assert retriever_config.query_translation == "off"

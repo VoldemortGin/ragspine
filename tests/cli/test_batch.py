@@ -346,9 +346,10 @@ def test_claude_cli_provider_and_concurrency_note(tmp_path, workspace, questions
         ["--profile", "balanced"],
         ["--provider", "claude-cli"],
         ["--contextual-index", "heading"],
+        ["--query-translation", "off"],
         [],
     ],
-    ids=["top_k", "profile", "provider", "contextual_index", "mode"],
+    ids=["top_k", "profile", "provider", "contextual_index", "query_translation", "mode"],
 )
 def test_resume_refuses_changed_run_settings(tmp_path, workspace, questions, capsys, changed):
     out = tmp_path / "out"
@@ -674,3 +675,34 @@ def test_summary_notes_page_only_dedup_without_doc(tmp_path, workspace, question
     )
     summary = (out / "summary.md").read_text(encoding="utf-8")
     assert "题目没给 doc 时，page_rank 只按页码去重" in summary
+
+
+@pytest.mark.parametrize(
+    ("flag", "expected"), [([], "auto"), (["--query-translation", "off"], "off")]
+)
+def test_query_translation_reaches_the_retriever_assembly(
+    tmp_path, workspace, questions, monkeypatch, flag, expected
+):
+    seen: list[ServiceConfig] = []
+
+    @contextmanager
+    def fake_open(config: ServiceConfig, provider: LLMProvider) -> Iterator[_FixedRetriever]:
+        seen.append(config)
+        yield _FixedRetriever()
+
+    monkeypatch.setattr("ragspine.session.open_narrative_retriever", fake_open)
+    out = tmp_path / "out"
+    base = ["batch", str(questions), "--workspace", str(workspace), "--out", str(out)]
+    assert main([*base, "--retrieval-only", *flag]) == 0
+    assert seen and {c.query_translation for c in seen} == {expected}
+    pinned = json.loads((out / "run_settings.json").read_text(encoding="utf-8"))
+    assert pinned["query_translation"] == expected
+    summary = (out / "summary.md").read_text(encoding="utf-8")
+    assert f"- query_translation: `{expected}`" in summary
+
+
+def test_query_translation_explicit_auto_equals_default_on_resume(tmp_path, workspace, questions):
+    out = tmp_path / "out"
+    base = ["batch", str(questions), "--workspace", str(workspace), "--retrieval-only"]
+    assert main([*base, "--out", str(out), "--limit", "1"]) == 0
+    assert main([*base, "--out", str(out), "--resume", "--query-translation", "auto"]) == 0

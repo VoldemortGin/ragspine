@@ -141,6 +141,9 @@ def _open_rag(args: argparse.Namespace, provider: LLMProvider) -> RAGSpine:
         # 标题进索引不在 RAGSpineConfig / preset 里（各 profile 均为 off）：与 run_nl_gold_ragspine 同一做法，
         # 只覆盖检索预设这一项；BM25 与向量索引文本都跟随它，economy 下同样生效（只影响 BM25）。
         rag.retrieval = rag.retrieval.with_overrides(contextual_index=args.contextual_index)
+    if args.query_translation is not None:
+        # 跨语言查询翻译同样只在检索预设里（各 profile 默认 auto）：只覆盖这一项。
+        rag.retrieval = rag.retrieval.with_overrides(query_translation=args.query_translation)
     return rag
 
 
@@ -208,10 +211,13 @@ def _out_dir(args: argparse.Namespace) -> Path:
     return out
 
 
-def run_settings(args: argparse.Namespace, *, contextual_index: str) -> dict[str, object]:
+def run_settings(
+    args: argparse.Namespace, *, contextual_index: str, query_translation: str
+) -> dict[str, object]:
     """决定结果口径的运行配置（--limit / --concurrency 不在内：续跑时可以改）。
 
-    ``contextual_index`` 记实际生效值（未传 --contextual-index 时取预设的 off），显式 off 与缺省视为一致。
+    ``contextual_index`` / ``query_translation`` 记实际生效值（未传参数时取预设值：off / auto），
+    显式传入与预设相同的值视为一致。
     """
     return {
         "questions": str(Path(args.questions).resolve()),
@@ -224,6 +230,7 @@ def run_settings(args: argparse.Namespace, *, contextual_index: str) -> dict[str
         "reranker": args.reranker,
         "persist_vectors": bool(args.persist_vectors),
         "contextual_index": contextual_index,
+        "query_translation": query_translation,
     }
 
 
@@ -448,7 +455,11 @@ def _run(args: argparse.Namespace) -> int:
     out = _out_dir(args)
     _pin_settings(
         out,
-        run_settings(args, contextual_index=rag.retrieval.contextual_index),
+        run_settings(
+            args,
+            contextual_index=rag.retrieval.contextual_index,
+            query_translation=rag.retrieval.query_translation,
+        ),
         resume=args.resume,
     )
     results_path = out / RESULTS_FILE
@@ -502,6 +513,7 @@ def _run(args: argparse.Namespace) -> int:
         "vector_channel": vector_channel,
         "page_parent": rag.retrieval.page_parent,
         "contextual_index": rag.retrieval.contextual_index,
+        "query_translation": rag.retrieval.query_translation,
         "provider": args.provider,
         "top_k": str(args.top_k) if args.retrieval_only else "(ask 固定 50)",
         "concurrency": str(args.concurrency),

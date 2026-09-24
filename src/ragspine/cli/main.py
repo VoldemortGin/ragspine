@@ -1104,6 +1104,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="标题进索引：heading=索引文本前拼标题路径，full=再加 title/entity/period"
         "（缺省取预设，各 profile 均为 off）",
     )
+    p_batch.add_argument(
+        "--query-translation",
+        choices=["off", "auto"],
+        default=None,
+        help="跨语言查询翻译：auto=问题与文档语言不一致时用 provider 译成文档语言再多查一路；"
+        "off=不翻译（缺省取预设，各 profile 均为 auto；mock provider 原样返回问题，等于没翻译）",
+    )
     p_batch.add_argument("--retrieval-only", action="store_true", help="只跑检索，不调生成 LLM")
     p_batch.add_argument(
         "--top-k", type=int, default=10, help="retrieval-only 取前 k 条（默认 10）"
