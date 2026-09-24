@@ -340,8 +340,14 @@ def test_claude_cli_provider_and_concurrency_note(tmp_path, workspace, questions
 
 @pytest.mark.parametrize(
     "changed",
-    [["--top-k", "5"], ["--profile", "balanced"], ["--provider", "claude-cli"], []],
-    ids=["top_k", "profile", "provider", "mode"],
+    [
+        ["--top-k", "5"],
+        ["--profile", "balanced"],
+        ["--provider", "claude-cli"],
+        ["--contextual-index", "heading"],
+        [],
+    ],
+    ids=["top_k", "profile", "provider", "contextual_index", "mode"],
 )
 def test_resume_refuses_changed_run_settings(tmp_path, workspace, questions, capsys, changed):
     out = tmp_path / "out"
@@ -552,3 +558,50 @@ def test_v2_gold_question_set_runs(tmp_path, workspace):
     [record] = _records(out)
     assert record["id"] == "mix:en" and record["page_groups"] == [[2]]
     assert record["basis"] == "page" and record["rank"] == 1 and record["page_rank"] == 1
+
+
+@pytest.mark.parametrize(
+    ("flag", "expected"), [([], "off"), (["--contextual-index", "heading"], "heading")]
+)
+def test_contextual_index_reaches_the_retriever_assembly(
+    tmp_path, workspace, questions, monkeypatch, flag, expected
+):
+    seen: list[ServiceConfig] = []
+
+    @contextmanager
+    def fake_open(config: ServiceConfig, provider: LLMProvider) -> Iterator[_FixedRetriever]:
+        seen.append(config)
+        yield _FixedRetriever()
+
+    monkeypatch.setattr("ragspine.session.open_narrative_retriever", fake_open)
+    out = tmp_path / "out"
+    base = ["batch", str(questions), "--workspace", str(workspace), "--out", str(out)]
+    assert main([*base, "--retrieval-only", *flag]) == 0
+    assert seen and {c.contextual_index for c in seen} == {expected}
+    pinned = json.loads((out / "run_settings.json").read_text(encoding="utf-8"))
+    assert pinned["contextual_index"] == expected
+
+
+@pytest.mark.parametrize("mode", ["heading", "full"])
+def test_contextual_index_under_economy_runs_and_is_shown(tmp_path, workspace, questions, mode):
+    """economy 预设下也生效（只影响 BM25 索引文本）；summary 显示实际生效值。"""
+    out = tmp_path / "out"
+    rc = main(
+        ["batch", str(questions), "--workspace", str(workspace), "--retrieval-only"]
+        + ["--contextual-index", mode, "--out", str(out)]
+    )
+    assert rc == 0
+    summary = (out / "summary.md").read_text(encoding="utf-8")
+    assert f"- contextual_index: `{mode}`" in summary
+    assert "- retrieval_mode: `economy`" in summary
+    records = {r["id"]: r for r in _records(out)}
+    assert records["mix"]["page_rank"] == 1
+
+
+def test_summary_shows_contextual_index_default_off(tmp_path, workspace, questions):
+    out = tmp_path / "out"
+    base = ["batch", str(questions), "--workspace", str(workspace), "--retrieval-only"]
+    assert main([*base, "--out", str(out), "--limit", "1"]) == 0
+    assert "- contextual_index: `off`" in (out / "summary.md").read_text(encoding="utf-8")
+    # 显式 off 与缺省是同一实际值：续跑不算配置变化。
+    assert main([*base, "--out", str(out), "--resume", "--contextual-index", "off"]) == 0

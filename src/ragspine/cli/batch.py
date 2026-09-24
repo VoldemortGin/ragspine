@@ -127,7 +127,7 @@ def _retrieval_overrides(args: argparse.Namespace) -> dict[str, object] | None:
 
 def _open_rag(args: argparse.Namespace, provider: LLMProvider) -> RAGSpine:
     try:
-        return RAGSpine.local(
+        rag = RAGSpine.local(
             args.workspace,
             provider=provider,
             preset=args.profile,
@@ -137,6 +137,11 @@ def _open_rag(args: argparse.Namespace, provider: LLMProvider) -> RAGSpine:
         raise BatchError(
             f"检索配置非法：{exc}\n（embedding≠none 需要 `--profile balanced` 或 `--profile quality`）"
         ) from exc
+    if args.contextual_index is not None:
+        # 标题进索引不在 RAGSpineConfig / preset 里（各 profile 均为 off）：与 run_nl_gold_ragspine 同一做法，
+        # 只覆盖检索预设这一项；BM25 与向量索引文本都跟随它，economy 下同样生效（只影响 BM25）。
+        rag.retrieval = rag.retrieval.with_overrides(contextual_index=args.contextual_index)
+    return rag
 
 
 class _VectorChannelCapture(logging.Handler):
@@ -203,8 +208,11 @@ def _out_dir(args: argparse.Namespace) -> Path:
     return out
 
 
-def run_settings(args: argparse.Namespace) -> dict[str, object]:
-    """决定结果口径的运行配置（--limit / --concurrency 不在内：续跑时可以改）。"""
+def run_settings(args: argparse.Namespace, *, contextual_index: str) -> dict[str, object]:
+    """决定结果口径的运行配置（--limit / --concurrency 不在内：续跑时可以改）。
+
+    ``contextual_index`` 记实际生效值（未传 --contextual-index 时取预设的 off），显式 off 与缺省视为一致。
+    """
     return {
         "questions": str(Path(args.questions).resolve()),
         "workspace": str(Path(args.workspace).resolve()),
@@ -215,6 +223,7 @@ def run_settings(args: argparse.Namespace) -> dict[str, object]:
         "embedding": args.embedding,
         "reranker": args.reranker,
         "persist_vectors": bool(args.persist_vectors),
+        "contextual_index": contextual_index,
     }
 
 
@@ -433,7 +442,11 @@ def _run(args: argparse.Namespace) -> int:
     rag = _open_rag(args, provider)
     vector_channel = _precheck(rag)
     out = _out_dir(args)
-    _pin_settings(out, run_settings(args), resume=args.resume)
+    _pin_settings(
+        out,
+        run_settings(args, contextual_index=rag.retrieval.contextual_index),
+        resume=args.resume,
+    )
     results_path = out / RESULTS_FILE
 
     done = {
@@ -484,6 +497,7 @@ def _run(args: argparse.Namespace) -> int:
         "postprocessor": rag.retrieval.postprocessor,
         "vector_channel": vector_channel,
         "page_parent": rag.retrieval.page_parent,
+        "contextual_index": rag.retrieval.contextual_index,
         "provider": args.provider,
         "top_k": str(args.top_k) if args.retrieval_only else "(ask 固定 50)",
         "concurrency": str(args.concurrency),
