@@ -14,6 +14,14 @@ All notable changes to RAGSpine are documented here. This project follows Semant
   a `DeprecationWarning`; `scripts/enterprise_pdf_rag/rewrite_legacy_imports.py` rewrites imports
   from the same map. The strict ruff set and mypy's `warn_unreachable` / `ignore-without-code` now
   follow `**/evidence/**` and `ragspine.*.evidence.*`, so moved code keeps them.
+- **The HTTP narrative route and the narrative worker accept `.md`** (DI markdown). `_NARRATIVE_SUFFIXES`
+  in `service/api/routes.py` and `service/tasks/jobs.py` is now `.pptx/.pdf/.md`, so a markdown upload with a
+  linked source PDF (sidecar `<stem>.meta.json` `source_pdf`, or the worker payload's `source_pdf`) can run through
+  `POST /v1/ingest/narrative/jobs` and under `allowed_upload_root`. The `.md` goes through the same
+  `validate_ingest_path` (resolved path inside the root, symlinks included, + suffix); the linked PDF must also
+  resolve inside the root, else the job fails with `stage="validation"` before any write. No content sniffing: a
+  `.md` is only decoded as UTF-8 text (`errors="replace"`), never executed. Other suffixes are still rejected; the
+  structured route does not take `.md`.
 
 ### Changed
 

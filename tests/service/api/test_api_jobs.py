@@ -216,7 +216,7 @@ def test_submit_narrative_job_carries_vector_settings_only_when_switch_on(config
 def test_submit_narrative_job_rejects_bad_suffix(config, upload_root):
     queue = RecordingQueue()
     client = make_client(config, queue)
-    bad = _make_file(upload_root, "report.xlsx")  # narrative 只收 pptx/pdf
+    bad = _make_file(upload_root, "report.xlsx")  # narrative 只收 pptx/pdf/md
     resp = client.post("/v1/ingest/narrative/jobs", json={"inputs": [bad]})
     assert resp.status_code == 400
     assert queue.calls == []

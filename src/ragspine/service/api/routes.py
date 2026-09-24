@@ -92,7 +92,7 @@ DIFY_WORKFLOW_JOB = "ragspine.service.tasks.jobs.run_dify_workflow_job"
 
 # ingestion 路径允许后缀
 _STRUCTURED_SUFFIXES = (".xlsx", ".xlsm", ".pptx", ".pdf")
-_NARRATIVE_SUFFIXES = (".pptx", ".pdf")
+_NARRATIVE_SUFFIXES = (".pptx", ".pdf", ".md")  # .md：DI markdown，可经 source_pdf 关联原 PDF
 
 router = APIRouter()
 

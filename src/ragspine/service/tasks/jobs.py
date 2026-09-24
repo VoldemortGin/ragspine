@@ -49,7 +49,7 @@ NARRATIVE_INGEST_JOB = "ragspine.service.tasks.jobs.run_narrative_ingest_job"
 DIFY_WORKFLOW_JOB = "ragspine.service.tasks.jobs.run_dify_workflow_job"
 
 _STRUCTURED_SUFFIXES = (".xlsx", ".xlsm", ".pptx", ".pdf")
-_NARRATIVE_SUFFIXES = (".pptx", ".pdf")
+_NARRATIVE_SUFFIXES = (".pptx", ".pdf", ".md")  # .md：DI markdown，可经 source_pdf 关联原 PDF
 
 
 def _ensure_parent(path: str) -> None:
