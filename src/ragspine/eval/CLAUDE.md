@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/eval/
-verified-against: 0c3be5c66766bd6fa9b36743a7bf725642838ba1
+verified-against: f67fbf2e2c2bae6bfdbb65f915f0705d227d7d82
 ---
 
 # eval — agent contract
@@ -28,6 +28,11 @@ sidecar) and `--page-images on --page-images-top-n N` adds page images to the to
 `CountingProvider` forwards `supports_image_input` so the wrapped provider still receives image parts.
 `route_label` reports `fallback` when `AgentResult.fallback` is set (structured miss answered by the narrative
 fallback, ADR 0023), and `not_found` for an `ask_first` whose answer is a refusal (missing metric, fallback ungrounded).
+**Main scope is the full document**: `--pages all` is the default (`--pages gold` stays as the optional pinned-page
+scope), and the default gold is `nl-answers-gold-v2.json`. `--repeat N` (default 1) runs every case N times;
+`CaseRun.repeat` tags the run and `repeat_stats` reports per-case pass rate, main-rate mean ± std (sample std) and
+the unstable cases — no majority vote; route distribution counts every run. `--rejudge <report dir>` re-scores the
+answers recorded in an old `report.json` with the current judge + `--gold` (no ingest, no model call).
 
 ## Invariants
 
@@ -62,14 +67,27 @@ fallback, ADR 0023), and `not_found` for an `ask_first` whose answer is a refusa
   (byte-pinned against `_PERIOD_TOKEN_RE`) — never derived from synonyms / grain, or the
   `(?:19\|20)` year anchor could vanish and whitelist any 4-digit number.
 - **nl-gold is ragspine-side end to end** — `load_nl_gold` is a light reader of the
-  `nl-answers-gold-v1` shape (ragspine must not import `enterprise_pdf_rag`, ADR 0022 conformance gate),
+  `nl-answers-gold-v1` / `-v2` shape (ragspine must not import `enterprise_pdf_rag`, ADR 0022 conformance gate),
   and pass/fail is rewritten here: content (normalized quote/value) and page
   (`@page={page_index+1}#` in a source locator) are counted **separately**, and one `any_of` anchor must
-  satisfy both. `--pages gold` (default) ingests only the gold's `pinned.selected_physical_pages`
-  (`select_di_pages` blanks the rest, page numbers kept) so out-of-range pages can't answer abstain cases.
+  satisfy both. `--pages all` (default) ingests the whole document; `--pages gold` ingests only the gold's
+  `pinned.selected_physical_pages` (`select_di_pages` blanks the rest, page numbers kept).
   Known-gap is run but unscored; adversarial / `offline_only` cases are skipped with a
   reason. Answers go only into report artifacts — never into observability traces; `RecordingRetriever` /
   `CountingProvider` observe locators and call counts only.
+- **Gold v1 is frozen; v2 carries its evidence** — `nl-answers-gold-v1.json` is never edited. `-v2` requires a
+  non-empty top-level `changelog` (each entry: `case_id`, `change`, `old`, `new`, `evidence`; the loader rejects
+  it otherwise) and is registered in the benchmark `manifest.json`. Fix a gold with a new version, not an edit.
+- **Judge changes are versioned** — `JUDGE_VERSION` (now `nl-gold-judge-v2`) is written into every report's
+  `meta` by `write_report`, next to the script's `gold_version` / `gold_sha256`; scores of different judge or gold
+  versions are not directly comparable (use `--rejudge` to compare on the same answers). Judge v2 rules:
+  refusal = orchestrator template anywhere (line-start `查不到` / `无法识别参数`, no-material text) **or** a refusal
+  phrase in the answer's lead (headings + first sentence, parentheticals dropped), unless the lead is a hedged
+  answer (`most likely` / `很可能`…); scaled currency amounts (`5.14 亿美元`, `US$1.168b`) get their exact
+  millions appended in `normalize_answer` (only when no zero-padding is needed; `%` untouched) — the
+  `normalize_answer` / `contains_normalized` signatures stay fixed (imported elsewhere); the cross-lingual
+  fragment rule (≥3 key tokens of a quote inside a 3×-quote-length window) is a **relaxation**, flagged per claim
+  (`fragment_hit`) and counted separately in the report.
 
 ## Read before editing
 
