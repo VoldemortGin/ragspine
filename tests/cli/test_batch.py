@@ -339,3 +339,37 @@ def test_resume_survives_a_half_written_line(tmp_path, workspace, questions, cap
     assert lines[1] == '{"id": "roe", "question": "rec'  # 坏行原样留着，续写从新的一行开始
     parsed = [json.loads(line) for i, line in enumerate(lines) if i != 1]
     assert [r["id"] for r in parsed] == ["mix", "roe", "content", "free"]
+
+
+def test_ask_mode_checks_index_compatibility_up_front(tmp_path, questions, capsys):
+    ws = tmp_path / "ws-pc"
+    deck = tmp_path / "deck.md"
+    deck.write_text(_DECK, encoding="utf-8")
+    parent_child = {"indexing": {"chunker": "parent_child", "max_chars": 16, "overlap_chars": 0}}
+    RAGSpine.local(ws, config=parent_child).ingest(deck)
+    out = tmp_path / "out"
+    assert main(["batch", str(questions), "--workspace", str(ws), "--out", str(out)]) == 2
+    assert "ReindexRequiredError" in capsys.readouterr().err
+    assert not (out / "results.jsonl").exists()
+
+
+def test_unavailable_provider_is_exit_2(workspace, questions, monkeypatch, capsys):
+    def broken(*args: object, **kwargs: object) -> MockProvider:
+        raise RuntimeError("claude binary not found")
+
+    monkeypatch.setattr("ragspine.agent.claude_cli_provider.ClaudeCliProvider", broken)
+    rc = main(["batch", str(questions), "--workspace", str(workspace), "--provider", "claude-cli"])
+    assert rc == 2
+    assert "claude binary not found" in capsys.readouterr().err
+
+
+def test_every_question_failing_is_a_nonzero_exit(tmp_path, workspace, questions, monkeypatch):
+    def boom(self: RAGSpine, question: str) -> object:
+        raise RuntimeError("provider down")
+
+    monkeypatch.setattr(RAGSpine, "ask", boom)
+    out = tmp_path / "out"
+    assert main(["batch", str(questions), "--workspace", str(workspace), "--out", str(out)]) == 1
+    records = _records(out)
+    assert len(records) == 4
+    assert {r["error"] for r in records} == {"RuntimeError: provider down"}

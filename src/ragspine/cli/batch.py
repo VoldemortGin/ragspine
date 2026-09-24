@@ -137,6 +137,15 @@ def _open_rag(args: argparse.Namespace, provider: LLMProvider) -> RAGSpine:
         ) from exc
 
 
+def _precheck(rag: RAGSpine) -> None:
+    """开跑前按 ask 的守卫（关闭 / 索引兼容）组装一次检索器：装配失败即报错，不让每题都记 error。"""
+    try:
+        with rag.open_retriever():
+            pass
+    except Exception as exc:  # noqa: BLE001 — 装配 / 兼容性失败都是前置条件不满足
+        raise BatchError(f"workspace 检索器装配失败：{_error_text(exc)}") from exc
+
+
 def _out_dir(args: argparse.Namespace) -> Path:
     if args.out is not None:
         out = Path(args.out)
@@ -374,7 +383,12 @@ def _run(args: argparse.Namespace) -> int:
         raise BatchError(str(exc)) from exc
     if args.limit is not None:
         questions = questions[: args.limit]
-    rag = _open_rag(args, _make_provider(args.provider))
+    try:
+        provider = _make_provider(args.provider)
+    except Exception as exc:  # noqa: BLE001 — 缺 extra / key / 二进制：前置条件不满足
+        raise BatchError(f"provider {args.provider!r} 不可用：{_error_text(exc)}") from exc
+    rag = _open_rag(args, provider)
+    _precheck(rag)
     out = _out_dir(args)
     _pin_settings(out, run_settings(args), resume=args.resume)
     results_path = out / RESULTS_FILE
@@ -387,16 +401,17 @@ def _run(args: argparse.Namespace) -> int:
     _ensure_trailing_newline(results_path)
     pending = [q for q in questions if q.id not in done]
     lock = threading.Lock()
-    completed = 0
+    completed = failed = 0
 
     with results_path.open("a", encoding="utf-8") as sink:
 
         def emit(record: Record) -> None:
-            nonlocal completed
+            nonlocal completed, failed
             with lock:
                 sink.write(json.dumps(record, ensure_ascii=False) + "\n")
                 sink.flush()
                 completed += 1
+                failed += 1 if record["error"] else 0
                 status = "error" if record["error"] else "ok"
                 print(f"  [{completed}/{len(pending)}] {record['id']} {status}", flush=True)
 
@@ -435,6 +450,9 @@ def _run(args: argparse.Namespace) -> int:
     (out / SUMMARY_FILE).write_text(summary, encoding="utf-8")
     print(f"results: {results_path}\nsummary: {out / SUMMARY_FILE}")
     print(_headline(ordered, top_k=args.top_k))
+    if pending and failed == len(pending):
+        print(f"error: 本次 {failed} 题全部出错，见 {results_path}", file=sys.stderr)
+        return 1
     return 0
 
 
