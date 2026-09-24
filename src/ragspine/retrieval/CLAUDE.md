@@ -49,8 +49,10 @@ occurrence = representative), `page+child` adds a whole-page BM25 ranking (multi
 top-k counts pages, the judge sees one representative per page, then the representative gets `window_text` = page
 window and `parent_locator` = `{doc_id}@page=N`; trace `op=narrative.page_parent` carries counts only),
 `page_images/` (**image+text context, opt-in** `RAGSPINE_PAGE_IMAGES=off|tagged|all` (`on` = `all`) + `RAGSPINE_PAGE_IMAGES_TOP_N` (default 3) /
-`ServiceConfig.page_images*` / facade `RetrievalPreset.page_images*`, default `off` ⇒ `make_page_image_retriever` returns
-the base unchanged, prompt byte-identical, frozen by `tests/retrieval/page_images/test_page_images_off_snapshot.py`).
+`ServiceConfig.page_images*` / facade `RetrievalPreset.page_images*`; the service assembles through
+`trigger.retriever.make_triggered_page_image_retriever`, which for the default `off` returns the base unchanged, prompt
+byte-identical, frozen by `tests/retrieval/page_images/test_page_images_off_snapshot.py`; `attach.make_page_image_retriever`
+stays as the lower-level off|on factory).
 `store.py`: `PageImageStore` — tables `page_image_doc` (pdf sha256, dpi, max_side, sync signature) + `page_image`
 (`(doc_id, page)` → content-addressed `image_dir/<sha[:2]>/<sha>.png`, image + PDF sha256, dpi, size) in the chunk db,
 created only on first real association; `image_dir` defaults to `<chunk db dir>/page_images`; replace / clear delete
@@ -61,7 +63,10 @@ whole page) — `off` attaches nothing (`reason=page_parent_off`); skip codes `n
 `missing_file`; trace `op=narrative.page_images` = counts + codes only). `trigger/` (ADR 0025): `tag_store.py` =
 `page_tag` table (per-page raw measures from `extraction/di_markdown/page_tags.py` + md sha256 / tags version, written by
 the ingest side, created on first write) and `load_doc_tags` (stored rows, else a **read-only** lazy parse of
-`narrative_doc.source_path` when its hash still matches, cached per `(doc_id, file_hash)`, else `untagged`);
+`narrative_doc.source_path` when its hash still matches, cached per `(doc_id, file_hash)`, else `untagged`; the
+ledger keeps the path as ingest received it, so a relative `source_path` resolves against the **current working
+directory** — query from another cwd and the doc is `untagged` (no image in `tagged` mode: safe, just fewer images;
+re-run ingest from the repo root to store tag rows and stop depending on the path));
 `retriever.py` = `make_page_images_policy` (`off|tagged|all`, `on` → `all`), `parse_page_image_trigger`
 (`has_table,has_figure,low_text` subset or `any`), `PageImageTriggerRetriever` (outermost, wraps `PageImageRetriever`:
 rank order, drop `dup` (same page / image sha), `not_tagged` / `untagged` in `tagged` mode, `over_max`; **only deletes

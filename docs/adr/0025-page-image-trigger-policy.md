@@ -106,6 +106,11 @@ together with its images. Page = physical page order, the locator's `page=N`.
 and the result cached in process (key `(doc_id, file_hash)`), never written back — the query path stays
 read-only because the service db belongs to the worker. Otherwise the doc is **untagged**: in `tagged`
 mode it gets no image (reason `untagged`), as SuperIndex does when `load_tags` returns `{}`.
+The ledger stores `source_path` exactly as ingest received it; a relative path therefore resolves against
+the query process's working directory, and querying from a different cwd makes the doc `untagged`. That
+errs toward fewer images, never toward a wrong one (the hash still has to match). Resolving against the
+workspace or repo root was not done: the ledger does not record which root a relative path was relative
+to, so any other base is a guess. Re-running ingest (which writes `page_tag` rows) removes the dependency.
 
 ### 4. Selection — the trigger only removes (invariant)
 
