@@ -9,6 +9,8 @@
 - 表格不还原，降级为段落（同一视觉行的单元格以空格连接）；文字做 HTML 转义。
 
 旁边写 ``<stem>.meta.json``，``source_pdf`` 指向转曲版 PDF，入库时即关联并渲染页图（页数须一致）。
+路径与现有 sidecar 一致：在仓库内时写相对仓库根的 POSIX 路径（入库从仓库根运行，按 cwd 解析），
+在仓库外时才写绝对路径。
 
 输入 JSON 格式（PaddleOCR 实验脚本的输出）::
 
@@ -146,6 +148,21 @@ def ocr_to_di_markdown(
     return f"\n{PAGE_BREAK}\n\n".join(pages)
 
 
+def repo_relative(path: Path, root: Path | None = None) -> str:
+    """仓库内的路径写成相对仓库根的 POSIX 路径（与现有 sidecar 一致）；仓库外写绝对路径。"""
+    resolved = path.resolve()
+    base = (root or _repo_root()).resolve()
+    try:
+        return resolved.relative_to(base).as_posix()
+    except ValueError:
+        return str(resolved)
+
+
+def _repo_root() -> Path:
+    cwd = Path.cwd().resolve()
+    return next((c for c in (cwd, *cwd.parents) if (c / ".project-root").exists()), cwd)
+
+
 def pdf_page_heights(pdf: Path) -> list[float]:
     import pdfspine
 
@@ -190,12 +207,12 @@ def main(argv: list[str] | None = None) -> int:
     sidecar.write_text(
         json.dumps(
             {
-                "source_pdf": str(pdf),
-                "output_markdown": str(args.out),
+                "source_pdf": repo_relative(pdf),
+                "output_markdown": repo_relative(args.out),
                 "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
                 "generator": "scripts/examples/ocr_to_di_markdown.py - OCR lines stand-in for Azure DI "
                 "prebuilt-layout Markdown (not real DI output)",
-                "ocr_json": str(args.ocr_json.resolve()),
+                "ocr_json": repo_relative(args.ocr_json),
                 "ocr_engine": ocr.get("engine", ""),
                 "ocr_dpi": ocr.get("dpi"),
                 "min_score": args.min_score,

@@ -73,7 +73,10 @@ def test_document_is_parseable_with_page_breaks_and_numbers():
         _script().ocr_to_di_markdown({"pages": [{"page": 4, "lines": []}]}, [225.0])
 
 
-def test_main_writes_markdown_and_sidecar_linked_to_pdf(tmp_path):
+def test_main_writes_markdown_and_sidecar_linked_to_pdf(tmp_path, monkeypatch):
+    # 仓库根 = tmp_path（有 .project-root），入库从仓库根运行：sidecar 写相对仓库根的路径
+    (tmp_path / ".project-root").touch()
+    monkeypatch.chdir(tmp_path)
     pdf = make_pdf(tmp_path / "outlined.pdf", ["A", "B"])
     ocr_json = tmp_path / "ocr.json"
     ocr_json.write_text(
@@ -92,7 +95,8 @@ def test_main_writes_markdown_and_sidecar_linked_to_pdf(tmp_path):
     out = tmp_path / "md" / "deck-ocr.md"
     assert _script().main([str(ocr_json), "--pdf", str(pdf), "--out", str(out)]) == 0
     meta = json.loads(out.with_suffix(".meta.json").read_text(encoding="utf-8"))
-    assert meta["source_pdf"] == str(pdf.resolve()) and meta["ocr_engine"] == "test-ocr"
+    assert meta["source_pdf"] == "outlined.pdf" and meta["ocr_engine"] == "test-ocr"
+    assert meta["output_markdown"] == "md/deck-ocr.md" and meta["ocr_json"] == "ocr.json"
     # 入库侧能按 sidecar 关联上 PDF（页数一致）
     sources = prepare_source_pdfs([out])
     assert sources["deck-ocr.md"].page_count == 2
@@ -104,3 +108,12 @@ def test_main_rejects_page_count_mismatch(tmp_path, capsys):
     ocr_json.write_text(json.dumps({"pages": [{"page": 1, "lines": []}, {"page": 2, "lines": []}]}))
     rc = _script().main([str(ocr_json), "--pdf", str(pdf), "--out", str(tmp_path / "o.md")])
     assert rc == 2 and "页数不一致" in capsys.readouterr().err
+
+
+def test_repo_relative_falls_back_to_absolute_outside_the_repo(tmp_path):
+    script = _script()
+    root = tmp_path / "repo"
+    (root / "data").mkdir(parents=True)
+    assert script.repo_relative(root / "data" / "x.pdf", root) == "data/x.pdf"
+    outside = tmp_path / "elsewhere.pdf"
+    assert script.repo_relative(outside, root) == str(outside.resolve())
