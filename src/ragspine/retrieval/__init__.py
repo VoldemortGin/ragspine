@@ -17,6 +17,7 @@ Submodules:
     raptor.py — opt-in RAPTOR 递归聚类+摘要树（W10）：确定性聚类 + is_synthesis 合成摘要 + 多粒度检索；默认关时返回 base 本身、字节不变。
     rerank/ — Claude listwise 精排，RRF 退化兜底。
     routing/ — 多知识库 / 多索引路由：按隔离边界选择检索目标并保序合并。
+    translation/ — 跨语言查询翻译（RAGSPINE_QUERY_TRANSLATION=off|auto，服务 / facade 默认 auto）：问题与文档语言不一致时译文作额外检索查询，精排与生成仍用原问题；off 字节不变。
     vector/ — 可注入的 embedding 后端（默认无 = 纯 BM25）。
     vision/ — opt-in 视觉文档检索（W12）：ColPali/ColQwen2 page-as-image 晚交互（GPU）；默认关、字节不变。
 """

@@ -84,6 +84,7 @@ class RetrievalPreset:
     page_images: str = "off"
     page_images_top_n: int = DEFAULT_PAGE_IMAGES_TOP_N
     contextual_index: str = "off"
+    query_translation: str = "auto"
 
     def with_overrides(
         self,
@@ -98,6 +99,7 @@ class RetrievalPreset:
         page_images: str | None = None,
         page_images_top_n: int | None = None,
         contextual_index: str | None = None,
+        query_translation: str | None = None,
     ) -> "RetrievalPreset":
         """Return a new preset with only explicitly supplied fields replaced."""
         return RetrievalPreset(
@@ -113,6 +115,7 @@ class RetrievalPreset:
                 self.page_images_top_n if page_images_top_n is None else page_images_top_n
             ),
             contextual_index=contextual_index or self.contextual_index,
+            query_translation=query_translation or self.query_translation,
         )
 
 
@@ -154,6 +157,7 @@ def make_retrieval_preset(
     page_images: str | None = None,
     page_images_top_n: int | None = None,
     contextual_index: str | None = None,
+    query_translation: str | None = None,
 ) -> RetrievalPreset:
     """Resolve a named local profile and apply explicit, typed overrides."""
     selected = profile if isinstance(profile, RetrievalProfile) else RetrievalProfile(profile)
@@ -168,6 +172,7 @@ def make_retrieval_preset(
         page_images=page_images,
         page_images_top_n=page_images_top_n,
         contextual_index=contextual_index,
+        query_translation=query_translation,
     )
 
 
@@ -193,6 +198,7 @@ class ServiceConfig:
     corrective: str = "none"  # W6b 纠错检索(opt-in): "none"(默认,返回base本身字节不变) | "crag"(有界确定性 grade→act 环)
     page_parent: str = "page+child"  # 页级父子: "page+child"(默认,按页去重+整页BM25一路再RRF) | "dedup"(按页去重,代表块带整页上下文) | "off"(检索输出与引入前字节不变)
     contextual_index: str = "off"  # 标题进索引: "off"(默认,索引文本=正文,字节不变) | "heading"(BM25/向量索引文本前拼标题路径) | "full"(再加 title/entity/period);交给 LLM 的文本不变
+    query_translation: str = "auto"  # 跨语言查询翻译: "auto"(默认,问题与文档语言不一致时用 provider 译成文档语言,译文作额外的 BM25 与向量查询;精排与生成仍用原问题) | "off"(检索输出与引入前字节不变)
     page_images: str = "off"  # 图文混合上下文(opt-in): "off"(默认,prompt字节不变) | "on"(前 N 页附原 PDF 页图;需 page_parent≠off 且入库时关联了 source PDF)
     page_images_top_n: int = DEFAULT_PAGE_IMAGES_TOP_N  # page_images=on 时附图的前 N 条(页)
     page_image_dpi: int = DEFAULT_PAGE_IMAGE_DPI  # 入库渲染页图的 DPI(关联了 source PDF 时)
@@ -329,6 +335,7 @@ def open_narrative_retriever(
         postprocessor=make_postprocessor(config.postprocessor),
         page_parent=config.page_parent,
         contextual_index=config.contextual_index,
+        query_translation=config.query_translation,
     )
     # W9 查询变换（opt-in，需注入 provider）：默认 "none" → make_query_transform 返回 retriever 本身
     # （字节不变）；"hyde"/"rag_fusion"/"step_back" 才包成对应 LLM 变换 wrapper。假想文档只作检索探针

@@ -22,6 +22,22 @@ All notable changes to RAGSpine are documented here. This project follows Semant
   resolve inside the root, else the job fails with `stage="validation"` before any write. No content sniffing: a
   `.md` is only decoded as UTF-8 text (`errors="replace"`), never executed. Other suffixes are still rejected; the
   structured route does not take `.md`.
+- **Cross-lingual query translation (`RAGSPINE_QUERY_TRANSLATION=off|auto`, default `auto`).** When the question's
+  language differs from the candidate chunks' (deterministic CJK-character vs Latin-word count; chunk `language`
+  metadata when uniform, else text statistics), `retrieval/translation/` asks the LLM provider once per question to
+  restate it in the document's language (figures, periods and abbreviations kept; `上半年` -> `1H`, `新业务价值` ->
+  `VONB`), cached per translator. The translation is an extra BM25 **and** vector query fused by RRF
+  (`HybridRetriever.search(extra_queries=, extra_vector=)`; also fed to the `page+child` whole-page BM25); rerank and
+  generation keep the original question. Same-language questions (ACME's Chinese corpus) never call the provider;
+  no provider / provider error / empty / unchanged / wrong-language output degrades to no translation, and every
+  decision is traced (`op=narrative.query_translation`, codes and counts only, never the question or translation).
+  Ported from the enterprise ADR 0018 rules (not imported, ADR 0022). Wired through `ServiceConfig`,
+  `RetrievalPreset`, `build_narrative_retriever(query_translation=, translation_provider=)` and the nl-gold eval's
+  `--query-translation`; `MockProvider` returns the query unchanged. `off` is byte-identical (frozen by
+  `tests/retrieval/query_translation/test_query_translation_off_snapshot.py`). Default `auto` because 71-page
+  retrieval (zh bucket, n=10, page+child hybrid) went r@1/5/10 40/50/50% -> 60/90/90% (MRR .42 -> .70; BM25-only
+  translation reached 30/80/90%) with no non-zh ranking change, and real-LLM nl-gold v2 (full document, repeat 3) went
+  A 86.4% -> 90.9% ±0, B 84.9% ±2.6 -> 90.9% ±0; p06-zh and p11-zh pass 3/3 on both routes.
 - **Headings in the index text, opt-in (`RAGSPINE_CONTEXTUAL_INDEX=off|heading|full`, default `off`).**
   `ServiceConfig.contextual_index`, the facade's `RetrievalPreset.contextual_index`,
   `build_narrative_retriever(contextual_index=)`, the worker payload and the nl-gold eval's

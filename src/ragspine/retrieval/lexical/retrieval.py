@@ -50,6 +50,7 @@ from ragspine.retrieval.page_parent.pages import (
 )
 from ragspine.retrieval.page_parent.window import DEFAULT_PAGE_WINDOW_CHARS, page_window
 from ragspine.retrieval.rerank.listwise_rerank import DEFAULT_TOP_N, ListwiseJudge, listwise_rerank
+from ragspine.retrieval.translation.translator import QueryTranslator, translated_queries
 from ragspine.retrieval.vector.persistence_policy import IsolationFirstPolicy, PersistencePolicy
 from ragspine.retrieval.vector.store import InProcessVectorStore, VectorRecord, VectorStore
 
@@ -297,6 +298,8 @@ class HybridRetriever:
         language: str | None = None,
         top_k: int | None = None,
         metadata_filter: MetadataFilter | None = None,
+        extra_queries: Sequence[str] = (),
+        extra_vector: bool = False,
     ) -> list[RetrievalResult]:
         """检索：先按元数据过滤候选，再对候选打分融合，返回 top_k（默认 50）。
 
@@ -306,6 +309,9 @@ class HybridRetriever:
         metadata_filter（批次 2.2 ①，opt-in）：在 5 维等值预过滤之后、任何打分/embedding 之前再叠加一层
         确定性条件过滤（=、in、范围等最小算子集），只【收窄】候选。默认 None＝不叠加（字节不变）。
         它绝不能绕过 RESTRICTED 隔离——只是把候选变少，link/rerank 双出口照常剔除 RESTRICTED。
+
+        extra_queries（跨语言查询翻译）：追加的检索查询，不经 query_rewriter；默认只进 BM25，
+        extra_vector=True 时也进向量通道。各自一路排名参与 RRF。默认空＝字节不变。
         """
         limit = self.top_k if top_k is None else top_k
 
@@ -332,6 +338,10 @@ class HybridRetriever:
         # 2) multi-query 改写（含原 query），去重保序。
         raw_queries = self.query_rewriter.rewrite(query) if self.query_rewriter else [query]
         queries = list(dict.fromkeys(raw_queries))
+        lexical_only = [q for q in dict.fromkeys(extra_queries) if q not in queries]
+        if extra_vector:
+            queries += lexical_only
+            lexical_only = []
 
         # 3) 各通道打分与排名（仅对通过预过滤的候选）。
         #    索引文本经 index_text_fn（W4a contextual，默认恒等于 c.text）——BM25 分词与块向量嵌入
@@ -370,7 +380,8 @@ class HybridRetriever:
         rankings: list[list[str]] = []
         best_bm25: dict[str, float] = {}
         best_vector: dict[str, float] = {}
-        for q in queries:
+
+        def rank_bm25(q: str) -> None:
             scores = bm25_scores(tokenize(q), docs_tokens, self.k1, self.b)
             hit = sorted(
                 ((s, c.chunk_id) for s, c in zip(scores, candidates, strict=False) if s > 0.0),
@@ -379,6 +390,9 @@ class HybridRetriever:
             rankings.append([cid for _, cid in hit])
             for s, cid in hit:
                 best_bm25[cid] = max(best_bm25.get(cid, 0.0), s)
+
+        for q in queries:
+            rank_bm25(q)
 
             if use_vector:
                 assert self.embedding_backend is not None and self.vector_store is not None
@@ -402,6 +416,8 @@ class HybridRetriever:
                 rankings.append([h.id for h in vector_hits])
                 for h in vector_hits:
                     best_vector[h.id] = max(best_vector.get(h.id, 0.0), h.score)
+        for q in lexical_only:
+            rank_bm25(q)
 
         # 4) RRF 融合 -> top_k（确定性平分破除）。
         fused = rrf_fuse(rankings, self.rrf_k)
@@ -477,6 +493,8 @@ class NarrativeIndex:
         chunker: Chunker | None = None,
         page_parent: str | None = PAGE_PARENT_OFF,
         page_window_chars: int = DEFAULT_PAGE_WINDOW_CHARS,
+        query_translator: QueryTranslator | None = None,
+        translate_vector: bool = False,
     ):
         self.store = store
         self.embedding_backend = embedding_backend
@@ -509,6 +527,10 @@ class NarrativeIndex:
         # 一路再 RRF。off＝检索输出逐字节不变。page_window_chars 是整页窗口的字符上限。
         self.page_parent = make_page_parent_mode(page_parent)
         self.page_window_chars = page_window_chars
+        # 跨语言查询翻译（opt-in 默认 None）：问题与候选块语言不一致时，译文作额外检索查询（默认只进
+        # BM25，translate_vector=True 时也进向量）；精排与生成仍用原问题。None＝检索输出逐字节不变。
+        self.query_translator = query_translator
+        self.translate_vector = translate_vector
 
     def ingest(self, text: str, meta: DocumentMeta, valid_as_of: str = "") -> int:
         """切块 + 幂等入库 + 入库即嵌入落盘（policy 门控、doc 粒度失效），返回入库块数。
@@ -591,11 +613,22 @@ class NarrativeIndex:
             manage_vectors=False,  # 块向量已在入库时落盘——检索只嵌 query、查 store，绝不重嵌块。
             index_text_fn=self.index_text_fn,  # contextual 情境头与入库口径一致（默认 None=不变）。
         )
+        extra = (
+            translated_queries(self.query_translator, query, chunks)
+            if self.query_translator is not None
+            else []
+        )
         if self.page_parent != PAGE_PARENT_OFF:
             return self._retrieve_pages(
-                query, chunks, retriever, top_k, rerank, top_n, effective_filter
+                query, chunks, retriever, top_k, rerank, top_n, effective_filter, extra
             )
-        results = retriever.search(query, top_k=top_k, metadata_filter=effective_filter)
+        results = retriever.search(
+            query,
+            top_k=top_k,
+            metadata_filter=effective_filter,
+            extra_queries=extra,
+            extra_vector=self.translate_vector,
+        )
         if not rerank or self.judge is None:
             return results
         return listwise_rerank(
@@ -614,6 +647,7 @@ class NarrativeIndex:
         rerank: bool,
         top_n: int | None,
         metadata_filter: MetadataFilter | None,
+        extra_queries: Sequence[str] = (),
     ) -> list[RetrievalResult]:
         """页级父子：融合排名按页去重（max-pool，首次出现即代表块）→ [page+child: 与整页 BM25 排名 RRF]
         → 取前 top_k 个单元 → 精排（给了 judge 时，候选即各页代表块）→ 代表块换上整页窗口。
@@ -624,7 +658,13 @@ class NarrativeIndex:
         单元只由同页的非 RESTRICTED 块拼成。
         """
         limit = self.top_k if top_k is None else top_k
-        fused = retriever.search(query, top_k=len(chunks), metadata_filter=metadata_filter)
+        fused = retriever.search(
+            query,
+            top_k=len(chunks),
+            metadata_filter=metadata_filter,
+            extra_queries=extra_queries,
+            extra_vector=self.translate_vector,
+        )
         universe = metadata_filter.apply(chunks) if metadata_filter is not None else chunks
         pages = group_pages(universe)
 
@@ -661,7 +701,7 @@ class NarrativeIndex:
                     query_rewriter=self.query_rewriter,
                     top_k=len(units),
                     index_text_fn=self.index_text_fn,
-                ).search(query)
+                ).search(query, extra_queries=extra_queries)
             ]
             first_seen = {uid: i for i, uid in enumerate(dict.fromkeys(order + page_rank))}
             scores = rrf_fuse([order, page_rank], DEFAULT_RRF_K)

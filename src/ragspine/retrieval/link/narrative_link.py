@@ -44,6 +44,11 @@ from ragspine.retrieval.rerank.listwise_rerank import (
     build_listwise_prompt,
     parse_listwise_response,
 )
+from ragspine.retrieval.translation import (
+    QUERY_TRANSLATION_AUTO,
+    LLMQueryTranslator,
+    make_query_translation_mode,
+)
 from ragspine.retrieval.vector.persistence_policy import PersistencePolicy
 from ragspine.retrieval.vector.store import VectorStore
 
@@ -174,6 +179,8 @@ def build_narrative_retriever(
     postprocessor: NodePostprocessor | None = None,
     page_parent: str | None = PAGE_PARENT_PAGE_CHILD,
     contextual_index: str | None = CONTEXTUAL_INDEX_OFF,
+    query_translation: str | None = QUERY_TRANSLATION_AUTO,
+    translation_provider: LLMProvider | None = None,
 ) -> tuple[NarrativeIndexRetriever, ChunkStore]:
     """开块库并组装默认叙事检索链（CLI/服务接线入口）。
 
@@ -196,7 +203,13 @@ def build_narrative_retriever(
     默认 'page+child'（按页去重 + 整页 BM25 一路）；'off'（或 None）＝检索输出与引入前字节不变。
     contextual_index：标题进索引开关（'off' | 'heading' | 'full'，见 ragspine.retrieval.contextual）；
     只改 BM25 / 向量的索引文本，交给 LLM 的文本不变。'off'（或 None）＝检索输出与引入前字节不变。
+    query_translation：跨语言查询翻译开关（'off' | 'auto'，见 ragspine.retrieval.translation），默认 'auto'：问题与
+    文档语言不一致即用 translation_provider（缺省用 provider）把问题译成文档语言，译文作额外的 BM25 与向量查询
+    （71 页中文桶实验：同时进向量比只进 BM25 更好），精排与生成仍用原问题；没有 provider 即降级不翻译并记 trace。'off'（或 None）＝检索输出与引入前字节不变。
     """
+    translator = None
+    if make_query_translation_mode(query_translation) == QUERY_TRANSLATION_AUTO:
+        translator = LLMQueryTranslator(translation_provider or provider)
     index_text_fn = make_index_text_fn(make_contextual_index_mode(contextual_index))
     store = ChunkStore(chunk_db)
     store.init_schema()
@@ -212,5 +225,7 @@ def build_narrative_retriever(
         persistence_policy=persistence_policy,
         page_parent=page_parent,
         index_text_fn=index_text_fn,
+        query_translator=translator,
+        translate_vector=translator is not None,
     )
     return NarrativeIndexRetriever(index, postprocessor=postprocessor), store

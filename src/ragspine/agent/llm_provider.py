@@ -30,6 +30,7 @@ from corespine import (
 )
 
 from ragspine.agent.intent import parse_intent
+from ragspine.retrieval.translation import QUERY_TRANSLATION_PROMPT_PREFIX
 
 # 默认模型名（唯一出处，改这里即全局生效）
 DEFAULT_ANTHROPIC_MODEL = "claude-opus-4-8"
@@ -325,6 +326,12 @@ class MockProvider:
             return _completion_text(self._final_answer_text(result))
 
         text = _last_user_text(messages)
+        first = messages[0] if messages else {}
+        if first.get("role") == "system" and str(first.get("content") or "").startswith(
+            QUERY_TRANSLATION_PROMPT_PREFIX
+        ):
+            # 查询翻译：离线不假装会翻译，原样返回（翻译器据此记 unchanged、不加额外查询）。
+            return _completion_text(text)
         if text.startswith(NARRATIVE_PROMPT_PREFIX):
             # 叙事合成：确定性地回显检索片段正文
             body = text[len(NARRATIVE_PROMPT_PREFIX) :].strip()

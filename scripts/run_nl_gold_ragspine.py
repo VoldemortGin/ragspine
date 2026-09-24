@@ -111,6 +111,13 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="标题进索引（RAGSPINE_CONTEXTUAL_INDEX）：heading=BM25/向量索引文本前拼标题路径；full=再加 title/entity/period",
     )
     parser.add_argument(
+        "--query-translation",
+        choices=("off", "auto"),
+        default="auto",
+        help="跨语言查询翻译（RAGSPINE_QUERY_TRANSLATION）：auto=问题与文档语言不一致时用 --provider "
+        "把问题译成文档语言，译文作额外的 BM25 与向量查询（每题只译一次，缓存）",
+    )
+    parser.add_argument(
         "--source-pdf",
         type=Path,
         default=None,
@@ -303,6 +310,7 @@ def main(argv: list[str] | None = None) -> int:
         vector_store = vector_index.store if vector_index is not None else None
 
     rerank_counter = CountingProvider(provider) if args.reranker == "llm" else None
+    translation_counter = CountingProvider(provider) if args.query_translation == "auto" else None
     retriever, chunk_store = build_narrative_retriever(
         db,
         provider=rerank_counter,
@@ -311,6 +319,8 @@ def main(argv: list[str] | None = None) -> int:
         reranker=judge,
         page_parent=args.page_parent,
         contextual_index=args.contextual_index,
+        query_translation=args.query_translation,
+        translation_provider=translation_counter,
     )
     retriever = make_page_image_retriever(
         retriever,
@@ -380,6 +390,7 @@ def main(argv: list[str] | None = None) -> int:
         "reranker": models.get("reranker", args.reranker),
         "page_parent": args.page_parent,
         "contextual_index": args.contextual_index,
+        "query_translation": args.query_translation,
         "page_images": args.page_images,
         "page_images_top_n": args.page_images_top_n,
         "source_pdf": str(args.source_pdf) if args.source_pdf else "",
@@ -389,6 +400,7 @@ def main(argv: list[str] | None = None) -> int:
         "languages": ",".join(languages),
         "llm_calls_answer": answer_calls,
         "llm_calls_rerank": rerank_counter.calls if rerank_counter else 0,
+        "llm_calls_translation": translation_counter.calls if translation_counter else 0,
         "timings": timings,
     }
     out = write_report(
