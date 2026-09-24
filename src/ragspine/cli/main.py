@@ -45,7 +45,18 @@ from ragspine.workflows.matching import TemplateMatcher
 _DIST_NAME = "rag-spine"
 
 _KNOWN_COMMANDS = frozenset(
-    {"ask", "config", "dify", "doctor", "ingest", "quickstart", "serve", "version", "workflow"}
+    {
+        "ask",
+        "batch",
+        "config",
+        "dify",
+        "doctor",
+        "ingest",
+        "quickstart",
+        "serve",
+        "version",
+        "workflow",
+    }
 )
 _WINDOWS_RESERVED_NAMES = frozenset(
     {
@@ -146,6 +157,13 @@ def _cmd_ask(args: argparse.Namespace) -> int:
 
     _print_result(result)
     return 0
+
+
+def _cmd_batch(args: argparse.Namespace) -> int:
+    """题集批量问答 / retrieval-only 评测；编排在 ragspine.cli.batch（惰性 import，不进首答路径）。"""
+    from ragspine.cli.batch import run
+
+    return run(args)
 
 
 def _cmd_ingest(args: argparse.Namespace) -> int:
@@ -1033,6 +1051,63 @@ def _build_parser() -> argparse.ArgumentParser:
         help="mock=离线确定性（默认）；anthropic=真实 Claude（需装 [llm] + key）",
     )
     p_ask.set_defaults(func=_cmd_ask)
+
+    p_batch = sub.add_parser(
+        "batch",
+        help="题集批量问答 / retrieval-only 评测（results.jsonl + summary.md）",
+        description=(
+            "逐题跑 workspace 的 ask 链路，或加 --retrieval-only 只跑检索算 recall@k / MRR。"
+            "题集：.json / .jsonl / .csv / .txt，或 nl-answers-gold-v1。"
+            "真实模型（Qwen embedding / reranker）：先 source data/local-models/local-models.env，"
+            "再加 --profile balanced --embedding local-http --reranker local-http --persist-vectors。"
+        ),
+    )
+    p_batch.add_argument("questions", help="题集文件")
+    p_batch.add_argument(
+        "--workspace", required=True, help="由 `ragspine ingest` 创建的 workspace 目录"
+    )
+    p_batch.add_argument(
+        "--profile",
+        choices=["economy", "balanced", "quality"],
+        default="economy",
+        help="workspace 检索预设（默认 economy）",
+    )
+    p_batch.add_argument(
+        "--embedding",
+        choices=["none", "deterministic", "onnx", "local-http"],
+        default=None,
+        help="覆盖预设的 embedding（local-http 读 EMBEDDING_* 环境变量；需 --profile balanced/quality）",
+    )
+    p_batch.add_argument(
+        "--reranker",
+        choices=["none", "cross_encoder", "local-http"],
+        default=None,
+        help="覆盖预设的精排（local-http 读 RERANK_* 环境变量）",
+    )
+    p_batch.add_argument(
+        "--persist-vectors",
+        action="store_true",
+        help="从入库时持久化的块向量库读向量（入库须同样开启）",
+    )
+    p_batch.add_argument("--retrieval-only", action="store_true", help="只跑检索，不调生成 LLM")
+    p_batch.add_argument(
+        "--top-k", type=int, default=10, help="retrieval-only 取前 k 条（默认 10）"
+    )
+    p_batch.add_argument(
+        "--out", default=None, help="输出目录（默认 data/output/batch/<题集名>-<时间戳>/）"
+    )
+    p_batch.add_argument(
+        "--resume", action="store_true", help="续跑 --out 里已有的结果，跳过已成功的题"
+    )
+    p_batch.add_argument("--limit", type=int, default=None, help="只跑题集前 N 题")
+    p_batch.add_argument("--concurrency", type=int, default=1, help="并发数（默认 1）")
+    p_batch.add_argument(
+        "--provider",
+        choices=["mock", "anthropic", "claude-cli"],
+        default="mock",
+        help="mock=离线确定性（默认）；anthropic 需 [llm] + key；claude-cli 自带并发上限 4",
+    )
+    p_batch.set_defaults(func=_cmd_batch)
 
     p_doctor = sub.add_parser("doctor", help="离线检查依赖、配置、密钥与路径")
     p_doctor.add_argument("--config", default=None, help="可选 TOML 配置路径")

@@ -16,6 +16,12 @@ A thin argparse wrapper over the zero-SDK offline core — **never** shells out 
   - `ask` — mirrors `scripts/ask.py`: `FactStore` from `--db`, `MockProvider` by default
     (`anthropic` only with the `[llm]` extra + key, lazy-imported), prints answer + sources.
   - `version` — `importlib.metadata.version("rag-spine")`.
+  - `batch <questions> --workspace DIR [--retrieval-only]` — batch ask / retrieval-only eval;
+    orchestration in `batch.py` (lazy-imported: resume, `--concurrency`, `results.jsonl` +
+    `summary.md` under `data/output/batch/`), pure logic in `eval/retrieval_only.py`. Retrieval-only
+    goes through `RAGSpine.open_retriever()` (same guards/assembly as `ask`, no intent filters).
+    Missing workspace / empty chunk store → stderr + exit 2 (db-guard `ENTRY_POINTS`). Real models
+    via `--embedding/--reranker local-http --persist-vectors` (no new `RAGSPINE_*` env).
   - `workflow serve <file-or-template-id> [--port N] [--open]` — starts the API + packaged
     Studio on `127.0.0.1` (fixed, no `--host`) and auto-loads the selected workflow via an
     opaque launch-session token (`/studio/?launch=<token>`; contents/paths/credentials never

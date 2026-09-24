@@ -6,6 +6,7 @@ ENTRY_POINTS 是这类入口的注册表——将来新增第三个入口时往�
 """
 
 import os
+from pathlib import Path
 
 import pytest
 import rootutils
@@ -24,7 +25,18 @@ def _cli_ask(db: object) -> int:
     return cli_main(["ask", "x", "--db", str(db)])
 
 
-ENTRY_POINTS = [("scripts/ask.py", _ask_py), ("ragspine ask", _cli_ask)]
+def _cli_batch(db: object) -> int:
+    # batch 以 workspace 为库：缺失的库路径当作 workspace 传入，必须报错且不建目录。
+    questions = Path(str(db)).parent / "questions.txt"
+    questions.write_text("x\n", encoding="utf-8")
+    return cli_main(["batch", str(questions), "--workspace", str(db), "--retrieval-only"])
+
+
+ENTRY_POINTS = [
+    ("scripts/ask.py", _ask_py),
+    ("ragspine ask", _cli_ask),
+    ("ragspine batch", _cli_batch),
+]
 
 
 @pytest.mark.parametrize("name,entry", ENTRY_POINTS, ids=[e[0] for e in ENTRY_POINTS])

@@ -6,6 +6,21 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ### Added
 
+- **`ragspine batch` — batch ask and retrieval-only evaluation over a question set.**
+  `ragspine batch <questions> --workspace DIR [--retrieval-only]` reads `.json` / `.jsonl` / `.csv` / `.txt`
+  question sets (or an `nl-answers-gold-v1` file) and writes `results.jsonl` (one line per question, appended as
+  it finishes) plus `summary.md` under `data/output/batch/<set>-<timestamp>/`; `--resume`, `--limit`,
+  `--concurrency`, `--provider mock|anthropic|claude-cli`. `--retrieval-only` runs only the workspace retriever
+  (no generation LLM) and reports `recall@k` / `page_recall@k` / MRR, judged by page groups (else by the
+  expected text in the hit chunk), with the nl-gold scoring rules (`eval/retrieval_only.py`, parity-tested
+  against `nl_gold_ragspine.recall_at_k`); it does not apply `ask`'s entity/period intent filters. Real models
+  use `--profile balanced --embedding local-http --reranker local-http --persist-vectors` (the adapters read
+  `EMBEDDING_*` / `RERANK_*`); no new `RAGSPINE_*` setting. A missing workspace or an empty chunk store is an
+  error (exit 2), never a silently created empty store. Answers and chunk text go only into these files, never
+  into observability traces.
+- **Facade: new public method `RAGSpine.open_retriever()`** — a context manager that opens the workspace's
+  narrative retriever with the same guards (closed facade, index compatibility) and the same service config and
+  provider as `ask`. `ask` itself is unchanged; the package-root `__all__` is unchanged.
 - **Scaffolding to dissolve `enterprise_pdf_rag` into per-domain `evidence/` subtrees**
   ([ADR 0022](docs/adr/0022-dissolve-enterprise-pdf-rag-into-domain-evidence-subtrees.md),
   proposed). No module moves yet. `enterprise_pdf_rag._moves` freezes the legacy → canonical map
