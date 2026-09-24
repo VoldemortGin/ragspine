@@ -1,7 +1,7 @@
 """页级父子开关接线：ServiceConfig（RAGSPINE_PAGE_PARENT）与本地 facade（RetrievalPreset.page_parent）。
 
-默认 off：open_narrative_retriever 装配的叙事索引不做按页去重。打开后 .md（按页切块）的检索结果
-每页只出现一次、代表块带整页上下文（prompt_text）与页级 locator（parent_locator）。
+默认 page+child（原为 off；依据见 CHANGELOG Unreleased）：.md（按页切块）的检索结果每页只出现一次、
+代表块带整页上下文（prompt_text）与页级 locator（parent_locator）。显式 off 时不做按页去重。
 """
 
 from pathlib import Path
@@ -34,10 +34,12 @@ def _capture_snippets(monkeypatch: pytest.MonkeyPatch) -> list[list[dict[str, ob
     return captured
 
 
-def test_service_config_defaults_off_and_reads_env():
+def test_service_config_defaults_page_child_and_reads_env():
     from ragspine.service.config import ServiceConfig
 
-    assert ServiceConfig(db_path="x.db").page_parent == "off"
+    assert ServiceConfig(db_path="x.db").page_parent == "page+child"
+    assert ServiceConfig.from_env({}).page_parent == "page+child"
+    assert ServiceConfig.from_env({"RAGSPINE_PAGE_PARENT": "off"}).page_parent == "off"
     assert ServiceConfig.from_env({"RAGSPINE_PAGE_PARENT": "dedup"}).page_parent == "dedup"
     assert (
         ServiceConfig.from_env({"RAGSPINE_PAGE_PARENT": "page+child"}).page_parent == "page+child"
@@ -55,14 +57,34 @@ def test_open_narrative_retriever_threads_the_switch(tmp_path, mode):
         assert retriever.index.page_parent == mode
 
 
-def test_facade_defaults_off(tmp_path):
+def test_facade_defaults_page_child(tmp_path):
     from ragspine import RAGSpine
-    from ragspine.service.config import make_retrieval_preset
+    from ragspine.service.config import RetrievalProfile, make_retrieval_preset
 
-    assert make_retrieval_preset().page_parent == "off"
+    for profile in RetrievalProfile:
+        assert make_retrieval_preset(profile).page_parent == "page+child"
     rag = RAGSpine.local(tmp_path / "ws")
-    assert rag.retrieval.page_parent == "off"
-    assert rag._service_config().page_parent == "off"
+    assert rag.retrieval.page_parent == "page+child"
+    assert rag._service_config().page_parent == "page+child"
+    explicit_off = RAGSpine.local(
+        tmp_path / "ws", retrieval=make_retrieval_preset(page_parent="off")
+    )
+    assert explicit_off._service_config().page_parent == "off"
+
+
+def test_build_narrative_retriever_defaults_page_child(tmp_path):
+    from ragspine.retrieval.link.narrative_link import build_narrative_retriever
+
+    retriever, store = build_narrative_retriever(tmp_path / "k.db")
+    try:
+        assert retriever.index.page_parent == "page+child"
+    finally:
+        store.close()
+    retriever, store = build_narrative_retriever(tmp_path / "k.db", page_parent="off")
+    try:
+        assert retriever.index.page_parent == "off"
+    finally:
+        store.close()
 
 
 def test_facade_switch_dedups_pages(tmp_path: Path, monkeypatch):
@@ -72,13 +94,13 @@ def test_facade_switch_dedups_pages(tmp_path: Path, monkeypatch):
     doc.write_text(_MD, encoding="utf-8")
     captured = _capture_snippets(monkeypatch)
 
-    off = RAGSpine.local(tmp_path / "ws")
+    from ragspine.service.config import make_retrieval_preset
+
+    off = RAGSpine.local(tmp_path / "ws", retrieval=make_retrieval_preset(page_parent="off"))
     off.ingest(doc)
     off.ask("agency channel new business value")
     off_pages = [str(s["source_locator"]).split("#")[0] for s in captured[-1]]
     assert len(off_pages) > len(set(off_pages)), "off 下同一页会被多个块命中"
-
-    from ragspine.service.config import make_retrieval_preset
 
     rag = RAGSpine.local(tmp_path / "ws", retrieval=make_retrieval_preset(page_parent="dedup"))
     assert rag._service_config().page_parent == "dedup"

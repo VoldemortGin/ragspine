@@ -1,4 +1,6 @@
-"""page_parent —— 页级父子 + 按页去重（opt-in，``RAGSPINE_PAGE_PARENT=off|dedup|page+child``，默认 off）。
+"""page_parent —— 页级父子 + 按页去重（``RAGSPINE_PAGE_PARENT=off|dedup|page+child``）。
+
+服务 / facade / ``build_narrative_retriever`` 默认 ``page+child``；底层 ``NarrativeIndex`` 构造默认仍是 off（字节不变）。
 
 检索粒度仍是小块（child），交给 LLM 的上下文是整页（parent）：同一页被多个小块命中时只返回一次，
 代表块 = 该页排名最好的块，其 ``window_text`` 换成整页文本（复用 ADR 0018 的 small-to-big 展开路径，

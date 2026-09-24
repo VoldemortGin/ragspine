@@ -12,7 +12,7 @@ Submodules:
     link/ — 适配层：把检索接入 agent 编排（NarrativeRetriever 协议）。
     mode.py — 检索模式预设（hybrid / economy），把产品选择映射为确定性参数。
     page_images/ — opt-in 图文混合上下文（RAGSPINE_PAGE_IMAGES=on）：页图映射表 + 前 N 页附页图引用，含 RESTRICTED 块的页不发图；默认 off、字节不变。
-    page_parent/ — opt-in 页级父子 + 按页去重（RAGSPINE_PAGE_PARENT=dedup|page+child）：同页只返回一次、代表块带整页上下文；默认 off、字节不变。
+    page_parent/ — 页级父子 + 按页去重（RAGSPINE_PAGE_PARENT=off|dedup|page+child）：同页只返回一次、代表块带整页上下文；服务 / facade 默认 page+child，off 字节不变。
     postprocess.py — opt-in 后检索 postprocessor 链（W8）：MMR 去冗余 + lost-in-the-middle 重排 + 上下文压缩；默认 none 时不挂链、字节不变。
     raptor.py — opt-in RAPTOR 递归聚类+摘要树（W10）：确定性聚类 + is_synthesis 合成摘要 + 多粒度检索；默认关时返回 base 本身、字节不变。
     rerank/ — Claude listwise 精排，RRF 退化兜底。

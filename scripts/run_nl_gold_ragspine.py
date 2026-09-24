@@ -75,7 +75,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--page-parent",
         choices=("off", "dedup", "page+child"),
-        default="off",
+        default="page+child",
         help="页级父子（RAGSPINE_PAGE_PARENT）：dedup=按页去重 + 整页上下文；page+child=另加整页 BM25 一路",
     )
     parser.add_argument(

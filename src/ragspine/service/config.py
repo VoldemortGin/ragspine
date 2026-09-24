@@ -80,7 +80,7 @@ class RetrievalPreset:
     reranker: RerankerSpec
     postprocessor: PostprocessorSpec
     persist_vectors: bool = False
-    page_parent: str = "off"
+    page_parent: str = "page+child"
     page_images: str = "off"
     page_images_top_n: int = DEFAULT_PAGE_IMAGES_TOP_N
 
@@ -186,7 +186,7 @@ class ServiceConfig:
     reranker: str = "none"  # "none"(不重排,默认行为不变) | "local-http"(/v1/rerank,读 RERANK_*) | "cross_encoder"(本地[rerank]) | "colbert"(晚交互MaxSim,[colbert]) | "splade"(学习稀疏,[splade]) | "auto"(装[rerank]即用,否则不重排)
     query_decompose: str = "none"  # W6a 查询分解(opt-in): "none"(不分解,默认字节不变) | "llm"(注入provider的LLM多跳分解)
     corrective: str = "none"  # W6b 纠错检索(opt-in): "none"(默认,返回base本身字节不变) | "crag"(有界确定性 grade→act 环)
-    page_parent: str = "off"  # 页级父子(opt-in): "off"(默认,检索输出字节不变) | "dedup"(按页去重,代表块带整页上下文) | "page+child"(另加整页BM25一路再RRF)
+    page_parent: str = "page+child"  # 页级父子: "page+child"(默认,按页去重+整页BM25一路再RRF) | "dedup"(按页去重,代表块带整页上下文) | "off"(检索输出与引入前字节不变)
     page_images: str = "off"  # 图文混合上下文(opt-in): "off"(默认,prompt字节不变) | "on"(前 N 页附原 PDF 页图;需 page_parent≠off 且入库时关联了 source PDF)
     page_images_top_n: int = DEFAULT_PAGE_IMAGES_TOP_N  # page_images=on 时附图的前 N 条(页)
     page_image_dpi: int = DEFAULT_PAGE_IMAGE_DPI  # 入库渲染页图的 DPI(关联了 source PDF 时)

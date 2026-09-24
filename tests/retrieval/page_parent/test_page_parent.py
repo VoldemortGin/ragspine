@@ -258,9 +258,14 @@ def test_build_narrative_retriever_threads_the_switch(tmp_path):
         assert retriever.index.page_parent == "page+child"
     finally:
         store.close()
-    retriever, store = build_narrative_retriever(tmp_path / "c.db")
+    retriever, store = build_narrative_retriever(tmp_path / "c.db", page_parent="off")
     try:
         assert retriever.index.page_parent == "off"
+    finally:
+        store.close()
+    retriever, store = build_narrative_retriever(tmp_path / "c.db")
+    try:
+        assert retriever.index.page_parent == "page+child"  # 默认已改为 page+child
     finally:
         store.close()
 

@@ -17,6 +17,18 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ### Changed
 
+- **Page-level parent/child now defaults to `page+child`** (was `off`). `RAGSPINE_PAGE_PARENT` /
+  `ServiceConfig.page_parent`, the facade's `RetrievalPreset.page_parent` (every profile),
+  `build_narrative_retriever(page_parent=)` and the nl-gold eval's `--page-parent` now default to
+  `page+child`: the fused ranking is de-duplicated per page, the representative chunk carries its whole
+  page as generation context, and a whole-page BM25 ranking is RRF-fused in. Evidence: the retrieval
+  ablation; a Sonnet blind review (answerable@1: `page+child` 69% vs `dedup` 46%); and the real-LLM
+  nl-gold run on the full document (route B recall@1 .31 → .56, content hit 68% → 84%). Chunks whose
+  locator has no `@page=N` (e.g. pptx `slide=`, whole-document PDF chunks) are never grouped, so their
+  output is unchanged — the bundled ACME QA eval retrieves byte-identically and its ratchet scores do not
+  move. `RAGSPINE_PAGE_PARENT=off` (or `page_parent="off"`) restores the old output byte for byte (frozen
+  by the off-mode snapshot); the low-level `NarrativeIndex(page_parent=)` constructor default stays `off`.
+  `RAGSPINE_PAGE_IMAGES` stays `off`.
 - **The evidence chain's pure extraction packages moved to `ragspine.extraction.evidence`**
   (ADR 0022). `enterprise_pdf_rag.documents` (all but the pending `aia` module),
   `enterprise_pdf_rag.figures` (with `chart_qa`) and the extraction half of
