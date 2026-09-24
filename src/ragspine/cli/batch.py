@@ -206,11 +206,13 @@ def _ask_record(question: BatchQuestion, rag: RAGSpine) -> Record:
     started = time.perf_counter()
     error: str | None = None
     answer = route = ""
+    fallback: str | None = None
     sources: list[dict[str, object]] = []
     try:
         result = rag.ask(question.question)
         answer = result.answer_plain or result.answer
         route = result.route
+        fallback = result.fallback
         sources = list(result.sources)
     except Exception as exc:  # noqa: BLE001 — 单题失败记为未命中，整批继续
         error = _error_text(exc)
@@ -219,6 +221,7 @@ def _ask_record(question: BatchQuestion, rag: RAGSpine) -> Record:
     record.update(
         answer=answer,
         route="error" if error else route,
+        fallback=fallback,
         sources=[
             {
                 "doc": str(source.get("doc") or ""),
@@ -463,7 +466,10 @@ def render_summary(
     else:
         page = [r for r in records if r.get("page_hit") is not None]
         content = [r for r in records if r.get("content_hit") is not None]
-        routes = Counter(str(r.get("route")) for r in records)
+        routes = Counter(
+            f"{r.get('route')}→fallback" if r.get("fallback") else str(r.get("route"))
+            for r in records
+        )
         lines += [
             "| 指标 | 值 |",
             "|---|---|",
@@ -497,7 +503,10 @@ def _question_lines(record: Mapping[str, Any]) -> list[str]:
             if record.get("content_hit") is not None
             else "",
         ]
-        header += f" — route={record.get('route')} " + " ".join(f for f in flags if f)
+        route = record.get("route")
+        if record.get("fallback"):
+            route = f"{route}→fallback({record['fallback']})"
+        header += f" — route={route} " + " ".join(f for f in flags if f)
         lines = [header.rstrip(), "", f"问：{record['question']}"]
         if record.get("error"):
             lines.append(f"错误：{record['error']}")

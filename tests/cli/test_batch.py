@@ -212,6 +212,7 @@ def test_end_to_end_mock_records_answer_route_sources(tmp_path, workspace, quest
     mix = records["mix"]
     assert mix["mode"] == "ask" and mix["answer"] and mix["route"]
     assert mix["sources"] and mix["page_hit"] is True
+    assert "fallback" in mix  # ADR 0023：结构化回落叙事时记原因代码，否则为 None
     assert records["free"]["page_hit"] is None and records["free"]["content_hit"] is None
     summary = (out / "summary.md").read_text(encoding="utf-8")
     assert "page_hit" in summary

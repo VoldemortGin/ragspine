@@ -33,6 +33,13 @@ scope), and the default gold is `nl-answers-gold-v2.json`. `--repeat N` (default
 `CaseRun.repeat` tags the run and `repeat_stats` reports per-case pass rate, main-rate mean ± std (sample std) and
 the unstable cases — no majority vote; route distribution counts every run. `--rejudge <report dir>` re-scores the
 answers recorded in an old `report.json` with the current judge + `--gold` (no ingest, no model call).
+`retrieval_only.py` is the generic retrieval-only scorer behind `ragspine batch --retrieval-only`: question sets
+(.json/.jsonl/.csv/.txt, qa_golden_set-style `expected` objects, nl-answers-gold v1/v2 (`GOLD_SCHEMA_VERSIONS`) → one question per case × language
+with `recall_at_k`'s eligibility), page-group judging (optional `doc` filter) with an expected-text fallback on the hit
+chunk, and `recall@k` / `page_recall@k` / MRR. It only imports nl_gold's public `load_nl_gold` / `normalize_answer` /
+`contains_normalized` / `RECALL_KS`; its `gold_rank` mirrors `_gold_rank` and is pinned by parity tests against
+`recall_at_k` (expected values computed by calling nl_gold, never hard-coded) — re-check them whenever nl_gold's
+scoring changes. It retrieves without `ask`'s entity/period filters; hit text goes only into batch artifacts, never traces.
 
 ## Invariants
 
