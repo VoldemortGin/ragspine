@@ -21,7 +21,8 @@ A thin argparse wrapper over the zero-SDK offline core — **never** shells out 
     `summary.md` under `data/output/batch/`), pure logic in `eval/retrieval_only.py`. Retrieval-only
     goes through `RAGSpine.open_retriever()` (same guards/assembly as `ask`, no intent filters).
     Missing workspace / empty chunk store → stderr + exit 2 (db-guard `ENTRY_POINTS`). Real models
-    via `--embedding/--reranker local-http --persist-vectors` (no new `RAGSPINE_*` env).
+    via `--embedding/--reranker local-http --persist-vectors`, `--contextual-index off|heading|full`
+    overrides only the preset's `contextual_index` (no new `RAGSPINE_*` env).
     `run_settings.json` pins the run's scoring settings; `--resume` with different settings → exit 2.
     A precheck opens the retriever once (ask's guards) and reports the actual vector channel in the summary.
   - `workflow serve <file-or-template-id> [--port N] [--open]` — starts the API + packaged
