@@ -280,19 +280,35 @@ def _ask_record(question: BatchQuestion, rag: RAGSpine) -> Record:
 # ---------------------------------------------------------------------------
 
 
-def read_records(path: Path) -> dict[str, Record]:
-    """读 results.jsonl（同 id 取最后一条；写到一半的坏行跳过，续跑时会重做）。"""
+def read_records(path: Path, *, warn: bool = False) -> dict[str, Record]:
+    """读 results.jsonl（同 id 取最后一条）；损坏的行跳过（续跑时该题会重做），``warn`` 时告警到 stderr。"""
     records: dict[str, Record] = {}
     if not path.is_file():
         return records
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
         try:
             record = json.loads(line)
         except json.JSONDecodeError:
-            continue
+            record = None
         if isinstance(record, dict) and "id" in record:
             records[str(record["id"])] = record
+        elif warn:
+            print(f"warning: 跳过 {path} 第 {number} 行（损坏或不完整）", file=sys.stderr)
     return records
+
+
+def _ensure_trailing_newline(path: Path) -> None:
+    """上次中断可能留下没有换行的半行：追加前补一个换行，免得续写的第一条和它粘在一起。"""
+    if not path.is_file() or path.stat().st_size == 0:
+        return
+    with path.open("rb") as handle:
+        handle.seek(-1, 2)
+        last = handle.read(1)
+    if last != b"\n":
+        with path.open("ab") as handle:
+            handle.write(b"\n")
 
 
 def _run_retrieval(
@@ -364,8 +380,11 @@ def _run(args: argparse.Namespace) -> int:
     results_path = out / RESULTS_FILE
 
     done = {
-        rid for rid, record in read_records(results_path).items() if record.get("error") is None
+        rid
+        for rid, record in read_records(results_path, warn=True).items()
+        if record.get("error") is None
     }
+    _ensure_trailing_newline(results_path)
     pending = [q for q in questions if q.id not in done]
     lock = threading.Lock()
     completed = 0

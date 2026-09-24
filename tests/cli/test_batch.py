@@ -324,3 +324,18 @@ def test_resume_refuses_changed_run_settings(tmp_path, workspace, questions, cap
     assert (out / "results.jsonl").read_text(encoding="utf-8") == before
     pinned = json.loads((out / "run_settings.json").read_text(encoding="utf-8"))
     assert pinned["mode"] == "retrieval-only" and pinned["top_k"] == 10
+
+
+def test_resume_survives_a_half_written_line(tmp_path, workspace, questions, capsys):
+    out = tmp_path / "out"
+    base = ["batch", str(questions), "--workspace", str(workspace), "--retrieval-only"]
+    assert main([*base, "--out", str(out), "--limit", "1"]) == 0
+    with (out / "results.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write('{"id": "roe", "question": "rec')  # 进程被杀时留下的半行，没有换行
+    capsys.readouterr()
+    assert main([*base, "--out", str(out), "--resume"]) == 0
+    assert "warning" in capsys.readouterr().err
+    lines = (out / "results.jsonl").read_text(encoding="utf-8").splitlines()
+    assert lines[1] == '{"id": "roe", "question": "rec'  # 坏行原样留着，续写从新的一行开始
+    parsed = [json.loads(line) for i, line in enumerate(lines) if i != 1]
+    assert [r["id"] for r in parsed] == ["mix", "roe", "content", "free"]
