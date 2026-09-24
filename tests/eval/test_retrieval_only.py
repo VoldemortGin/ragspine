@@ -18,6 +18,9 @@ import rootutils
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
 from ragspine.eval.nl_gold_ragspine import (
+    GOLD_SCHEMA_VERSION,
+    GOLD_SCHEMA_VERSION_V2,
+    GOLD_SCHEMA_VERSIONS,
     ROUTE_FORCED_NARRATIVE,
     CaseRun,
     ClaimAnchor,
@@ -170,7 +173,7 @@ def test_load_rejects_bad_sets(tmp_path: Path, name: str, content: str) -> None:
         load_questions(path)
 
 
-def _gold_file(tmp_path: Path) -> Path:
+def _gold_file(tmp_path: Path, version: str = GOLD_SCHEMA_VERSION) -> Path:
     def anchor(page_index: int, quote: str) -> dict[str, object]:
         return {"kind": "quote", "page_index": page_index, "quote": quote}
 
@@ -184,7 +187,7 @@ def _gold_file(tmp_path: Path) -> Path:
         }
 
     payload = {
-        "schema_version": "nl-answers-gold-v1",
+        "schema_version": version,
         "cases": [
             case(
                 "p-two",
@@ -207,13 +210,18 @@ def _gold_file(tmp_path: Path) -> Path:
             ),
         ],
     }
-    path = tmp_path / "gold.json"
+    if version == GOLD_SCHEMA_VERSION_V2:
+        payload["changelog"] = [
+            {"case_id": "gap", "change": "re-pin", "old": "p2", "new": "p1", "evidence": "page 1"}
+        ]
+    path = tmp_path / f"gold-{version}.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
     return path
 
 
-def test_load_nl_gold_one_question_per_case_language(tmp_path: Path) -> None:
-    qs = load_questions(_gold_file(tmp_path))
+@pytest.mark.parametrize("version", GOLD_SCHEMA_VERSIONS)
+def test_load_nl_gold_one_question_per_case_language(tmp_path: Path, version: str) -> None:
+    qs = load_questions(_gold_file(tmp_path, version))
     by_id = {q.id: q for q in qs}
     # 跳过的 case（adversarial / offline_only）不出题；abstain 出题但无 page group（不参与判定）。
     assert set(by_id) == {"p-two:en", "p-two:zh", "abst:en", "abst:zh", "gap:en", "gap:zh"}
@@ -446,3 +454,30 @@ def test_retrieve_hits_passes_no_filters_and_truncates() -> None:
     hits = retrieve_hits(retriever, "q", top_k=3)
     assert len(hits) == 3
     assert retriever.calls == [("q", None, 3)]
+
+
+_V2_GOLD = (
+    Path(ROOT_DIR)
+    / "data"
+    / "benchmarks"
+    / "enterprise-pdf-rag"
+    / "aia-2026-interim"
+    / "nl-answers-gold-v2.json"
+)
+
+
+@pytest.mark.skipif(not _V2_GOLD.is_file(), reason="tracked v2 gold not present")
+def test_real_v2_gold_matches_recall_at_k_eligibility() -> None:
+    """版本库里的 gold v2：可判定题数与 nl_gold recall_at_k 的 eligible 数相同（数由 nl_gold 算）。"""
+    cases = load_nl_gold(_V2_GOLD)
+    runs = []
+    for case in cases:
+        if case.skip_reason:
+            continue
+        for language, _ in case.questions:
+            run = _run([], case.case_id)
+            run.language = language
+            runs.append(run)
+    theirs = recall_at_k(runs, cases)
+    judged = [q for q in load_questions(_V2_GOLD) if q.page_groups]
+    assert len(judged) == theirs["cases"] > 0

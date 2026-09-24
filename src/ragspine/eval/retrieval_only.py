@@ -21,6 +21,7 @@ import csv
 import io
 import json
 import re
+import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,7 +32,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from ragspine.agent.agent import NarrativeRetriever
 from ragspine.eval.nl_gold_ragspine import (
-    GOLD_SCHEMA_VERSION,
+    GOLD_SCHEMA_VERSIONS,
     RECALL_KS,
     contains_normalized,
     load_nl_gold,
@@ -43,7 +44,8 @@ PageHit = tuple[str, int]
 Basis = Literal["page", "content", "none"]
 
 _RANGE_RE = re.compile(r"^(\d+)\s*-\s*(\d+)$")
-_NUMBER_RE = re.compile(r"\d+(?:\.\d+)?%?")
+# 数字片段按原文取（千分位 / 全角经 NFKC），每段再交给 nl_gold 的 contains_normalized 规范化比对。
+_NUMBER_RE = re.compile(r"\d[\d,]*(?:\.\d+)?\s*%?")
 _KNOWN_KEYS = frozenset({"id", "question", "expected", "pages", "page", "doc"})
 
 
@@ -188,7 +190,7 @@ def _records(path: Path, text: str) -> list[Mapping[str, Any]]:
 
 
 def _nl_gold_questions(path: Path) -> list[BatchQuestion]:
-    """nl-answers-gold-v1：每个 (case, 语言) 一题；筛选与 nl_gold ``recall_at_k`` 的 eligible 相同。"""
+    """nl-answers-gold v1 / v2（``GOLD_SCHEMA_VERSIONS``）：每个 (case, 语言) 一题；筛选与 nl_gold ``recall_at_k`` 的 eligible 相同。"""
     questions: list[BatchQuestion] = []
     for case in load_nl_gold(path):
         if case.skip_reason:
@@ -211,12 +213,12 @@ def _nl_gold_questions(path: Path) -> list[BatchQuestion]:
 
 
 def load_questions(path: str | Path) -> tuple[BatchQuestion, ...]:
-    """按后缀读题集（.json / .jsonl / .csv / .txt；nl-answers-gold-v1 的 .json 自动识别）。"""
+    """按后缀读题集（.json / .jsonl / .csv / .txt；nl-answers-gold v1 / v2 的 .json 自动识别）。"""
     source = Path(path)
     try:
         text = source.read_text(encoding="utf-8-sig")
         payload = json.loads(text) if source.suffix.lower() == ".json" else None
-        if isinstance(payload, Mapping) and payload.get("schema_version") == GOLD_SCHEMA_VERSION:
+        if isinstance(payload, Mapping) and payload.get("schema_version") in GOLD_SCHEMA_VERSIONS:
             questions = _nl_gold_questions(source)
         else:
             questions = [
@@ -296,9 +298,14 @@ def gold_rank(
 
 
 def content_hit(text: str, expected: str) -> bool:
-    """``expected`` 是否出现在 ``text`` 中：含数字则每个数字都须出现，否则整串须出现（规范化后）。"""
+    """``expected`` 是否出现在 ``text`` 中：整串出现即命中；否则含数字时每个数字都须出现。
+
+    规范化与匹配全部委托 nl_gold 的 ``normalize_answer`` / ``contains_normalized``（口径随它走）。
+    """
     haystack = normalize_answer(text)
-    numbers = _NUMBER_RE.findall(normalize_answer(expected))
+    if contains_normalized(haystack, expected):
+        return True
+    numbers = _NUMBER_RE.findall(unicodedata.normalize("NFKC", expected))
     if numbers:
         return all(contains_normalized(haystack, number) for number in numbers)
     return contains_normalized(haystack, expected)

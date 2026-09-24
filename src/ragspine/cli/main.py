@@ -1057,7 +1057,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="题集批量问答 / retrieval-only 评测（results.jsonl + summary.md）",
         description=(
             "逐题跑 workspace 的 ask 链路，或加 --retrieval-only 只跑检索算 recall@k / MRR。"
-            "题集：.json / .jsonl / .csv / .txt，或 nl-answers-gold-v1。"
+            "题集：.json / .jsonl / .csv / .txt，或 nl-answers-gold v1 / v2。"
             "真实模型（Qwen embedding / reranker）：先 source data/local-models/local-models.env，"
             "再加 --profile balanced --embedding local-http --reranker local-http --persist-vectors。"
         ),

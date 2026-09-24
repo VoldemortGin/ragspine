@@ -8,7 +8,7 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 - **`ragspine batch` — batch ask and retrieval-only evaluation over a question set.**
   `ragspine batch <questions> --workspace DIR [--retrieval-only]` reads `.json` / `.jsonl` / `.csv` / `.txt`
-  question sets (or an `nl-answers-gold-v1` file) and writes `results.jsonl` (one line per question, appended as
+  question sets (or an `nl-answers-gold-v1` / `-v2` file) and writes `results.jsonl` (one line per question, appended as
   it finishes) plus `summary.md` under `data/output/batch/<set>-<timestamp>/`; `--resume`, `--limit`,
   `--concurrency`, `--provider mock|anthropic|claude-cli`. `--retrieval-only` runs only the workspace retriever
   (no generation LLM) and reports `recall@k` / `page_recall@k` / MRR, judged by page groups (else by the
