@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/eval/
-verified-against: 06c00917cccb645522ba116f1f040ee7fbee3910
+verified-against: 84902f3aa2815c475544d0e69c2bf368cf894834
 ---
 
 # eval — agent contract
@@ -36,8 +36,8 @@ answers recorded in an old `report.json` with the current judge + `--gold` (no i
 `retrieval_only.py` is the generic retrieval-only scorer behind `ragspine batch --retrieval-only`: question sets
 (.json/.jsonl/.csv/.txt, qa_golden_set-style `expected` objects, nl-answers-gold v1/v2 (`GOLD_SCHEMA_VERSIONS`) → one question per case × language
 with `recall_at_k`'s eligibility), page-group judging (optional `doc` filter) with an expected-text fallback on the hit
-chunk, and `recall@k` / `page_recall@k` / MRR. It only imports nl_gold's public `load_nl_gold` / `normalize_answer` /
-`contains_normalized` / `RECALL_KS`; its `gold_rank` mirrors `_gold_rank` and is pinned by parity tests against
+chunk, and `recall@k` / `page_recall@k` / MRR. It only imports nl_gold's `load_nl_gold` / `RECALL_KS` / `GOLD_SCHEMA_VERSIONS` and
+`normalize_answer` / `contains_normalized` from their home `common/answer_text` (the same pair nl_gold uses); its `gold_rank` mirrors `_gold_rank` and is pinned by parity tests against
 `recall_at_k` (expected values computed by calling nl_gold, never hard-coded) — re-check them whenever nl_gold's
 scoring changes. It retrieves without `ask`'s entity/period filters; hit text goes only into batch artifacts, never traces.
 
