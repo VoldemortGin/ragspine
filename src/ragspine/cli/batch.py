@@ -47,6 +47,7 @@ from ragspine.session import RAGSpine
 DEFAULT_OUT_ROOT = Path("data") / "output" / "batch"
 RESULTS_FILE = "results.jsonl"
 SUMMARY_FILE = "summary.md"
+SETTINGS_FILE = "run_settings.json"
 MODE_RETRIEVAL = "retrieval-only"
 MODE_ASK = "ask"
 # claude-cli provider 自带的并发上限（agent/claude_cli_provider.py 的 DEFAULT_CLAUDE_CLI_CONCURRENCY）。
@@ -150,6 +151,41 @@ def _out_dir(args: argparse.Namespace) -> Path:
         )
     out.mkdir(parents=True, exist_ok=True)
     return out
+
+
+def run_settings(args: argparse.Namespace) -> dict[str, object]:
+    """决定结果口径的运行配置（--limit / --concurrency 不在内：续跑时可以改）。"""
+    return {
+        "questions": str(Path(args.questions).resolve()),
+        "workspace": str(Path(args.workspace).resolve()),
+        "mode": MODE_RETRIEVAL if args.retrieval_only else MODE_ASK,
+        "top_k": args.top_k if args.retrieval_only else None,
+        "profile": args.profile,
+        "provider": args.provider,
+        "embedding": args.embedding,
+        "reranker": args.reranker,
+        "persist_vectors": bool(args.persist_vectors),
+    }
+
+
+def _pin_settings(out: Path, settings: Mapping[str, object], *, resume: bool) -> None:
+    """首跑写下运行配置；续跑时与之比对，不一致即报错（免得两种口径的记录混在一个目录）。"""
+    path = out / SETTINGS_FILE
+    if resume and (out / RESULTS_FILE).exists():
+        try:
+            pinned = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise BatchError(
+                f"无法读取 {path}（{exc}），不能确认续跑配置一致；请换一个 --out 重跑"
+            ) from exc
+        changed = sorted(
+            key for key in {*pinned, *settings} if pinned.get(key) != settings.get(key)
+        )
+        if changed:
+            detail = ", ".join(f"{k}: {pinned.get(k)!r} → {settings.get(k)!r}" for k in changed)
+            raise BatchError(f"续跑配置与 {path} 不一致（{detail}）；请换一个 --out 重跑")
+        return
+    path.write_text(json.dumps(settings, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -324,6 +360,7 @@ def _run(args: argparse.Namespace) -> int:
         questions = questions[: args.limit]
     rag = _open_rag(args, _make_provider(args.provider))
     out = _out_dir(args)
+    _pin_settings(out, run_settings(args), resume=args.resume)
     results_path = out / RESULTS_FILE
 
     done = {

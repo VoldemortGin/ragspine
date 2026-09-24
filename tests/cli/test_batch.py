@@ -305,3 +305,22 @@ def test_claude_cli_provider_and_concurrency_note(tmp_path, workspace, questions
     assert rc == 0 and built
     summary = (out / "summary.md").read_text(encoding="utf-8")
     assert "claude-cli" in summary and "4" in summary and "排队" in summary
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [["--top-k", "5"], ["--profile", "balanced"], ["--provider", "claude-cli"], []],
+    ids=["top_k", "profile", "provider", "mode"],
+)
+def test_resume_refuses_changed_run_settings(tmp_path, workspace, questions, capsys, changed):
+    out = tmp_path / "out"
+    base = ["batch", str(questions), "--workspace", str(workspace), "--out", str(out)]
+    assert main([*base, "--retrieval-only", "--limit", "1"]) == 0
+    before = (out / "results.jsonl").read_text(encoding="utf-8")
+    mode = [] if not changed else ["--retrieval-only"]  # 空 = 换成端到端模式
+    assert main([*base, *mode, *changed, "--resume"]) == 2
+    err = capsys.readouterr().err
+    assert "--out" in err and "run_settings.json" in err
+    assert (out / "results.jsonl").read_text(encoding="utf-8") == before
+    pinned = json.loads((out / "run_settings.json").read_text(encoding="utf-8"))
+    assert pinned["mode"] == "retrieval-only" and pinned["top_k"] == 10
