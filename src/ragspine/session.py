@@ -1,11 +1,12 @@
 """High-level, offline-first facade for a local RAGSpine workspace."""
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from ragspine.agent.agent import AgentResult, answer_question
+from ragspine.agent.agent import AgentResult, NarrativeRetriever, answer_question
 from ragspine.agent.intent import ROUTE_NARRATIVE, RuleIntentParser
 from ragspine.agent.llm_provider import AnthropicProvider, LLMProvider, MockProvider
 from ragspine.config import EffectivePlan, RAGSpineConfig, SourceEntry, resolve_config
@@ -269,6 +270,19 @@ class RAGSpine:
             contextual_index=self.retrieval.contextual_index,
             query_translation=self.retrieval.query_translation,
         )
+
+    @contextmanager
+    def open_retriever(self) -> Iterator[NarrativeRetriever | None]:
+        """Open this workspace's narrative retriever, assembled exactly as :meth:`ask` does.
+
+        Same guards (closed facade, index compatibility) and the same service config and
+        provider, but no intent parsing: callers pass their own ``filters`` (``ask`` derives
+        entity/period filters from the question). Used by retrieval-only evaluation.
+        """
+        self._ensure_open()
+        self._index_metadata.assert_compatible(self._effective_plan)
+        with open_narrative_retriever(self._service_config(), self.provider) as retriever:
+            yield retriever
 
     def ask(self, question: str) -> AgentResult:
         """Answer from this workspace using the existing guarded agent path."""
