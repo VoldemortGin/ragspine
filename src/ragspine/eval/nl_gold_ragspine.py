@@ -468,10 +468,13 @@ class ForcedNarrativeIntentParser:
 
 def route_label(result: AgentResult) -> str:
     """把一次 answer_question 结果归为 structured / narrative / composite / clarify /
-    not_found / out_of_scope。"""
+    not_found / out_of_scope / fallback（结构化回落叙事且有依据，ADR 0023）。"""
+    if result.fallback is not None:
+        return "fallback"
     clarification = result.clarification
     if clarification is not None and clarification.mode == CLARIFY_ASK_FIRST:
-        return "clarify"
+        # 缺指标且回落叙事无依据时，答案以“查不到”开头（ADR 0023），按 not_found 计。
+        return "not_found" if is_refusal(result.answer) else "clarify"
     if clarification is not None and clarification.mode == CLARIFY_OUT_OF_SCOPE_ENTITY:
         return "out_of_scope"
     if result.route == ROUTE_STRUCTURED:

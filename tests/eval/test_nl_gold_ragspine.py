@@ -429,6 +429,19 @@ def test_route_label_mapping() -> None:
     assert route_label(_result(ROUTE_COMPOSITE, tool_results=[{"status": "not_found"}])) == (
         "composite"
     )
+    fallback = _result(
+        ROUTE_NARRATIVE,
+        sources=[{"doc": "d", "locator": "l"}],
+        tool_results=[{"status": "not_found"}],
+        fallback="structured_no_hit",
+    )
+    assert route_label(fallback) == "fallback"
+    ungrounded = AgentResult(
+        answer="查不到：资料中没有能回答该问题的依据。想查询哪个指标？",
+        route=ROUTE_STRUCTURED,
+        clarification=ask_first,
+    )
+    assert route_label(ungrounded) == "not_found"
 
 
 def test_forced_narrative_parser_keeps_slots_and_raw_question() -> None:

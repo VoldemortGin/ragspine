@@ -2,7 +2,8 @@
 
 硬约束（编排层兜底，不依赖模型自觉）：
 - not_found / unrecognized：最终回答由编排层确定性生成，明确说查不到/无法识别，
-  即使模型试图编造数字也会被拦截改写。
+  即使模型试图编造数字也会被拦截改写。路由回落（ADR 0023，默认开）：改写前先试叙事通道，
+  只有带来源且含出自片段的数字才采纳，否则照旧改写。
 - found：回答必带数据血缘（source_doc_id + source_locator），模型漏写则补上。
 
 叙事通路由另一条线并行开发：这里只定义 NarrativeRetriever 协议（duck-typed），
@@ -10,6 +11,8 @@
 """
 
 import json
+import os
+import re
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -22,9 +25,11 @@ from ragspine.agent.decompose import ROUTE_DECOMPOSED, QueryDecomposer
 from ragspine.agent.intent import (
     CLARIFY_ANSWER_WITH_ASSUMPTIONS,
     CLARIFY_ASK_FIRST,
+    CLARIFY_NONE,
     CLARIFY_OUT_OF_SCOPE_ENTITY,
     ROUTE_COMPOSITE,
     ROUTE_NARRATIVE,
+    ROUTE_STRUCTURED,
     ClarificationResult,
     IntentParser,
     ParsedIntent,
@@ -82,6 +87,44 @@ _NARRATIVE_SYSTEM_PROMPT_TEMPLATE = (
     "你是 {company} 管理层经营洞察助手，只依据给定片段作答并标注来源。"
 )
 
+# 路由回落（ADR 0023）：结构化缺指标 / 零命中时先回落叙事，叙事也无依据才维持原结果。
+NARRATIVE_FALLBACK_ENV = "RAGSPINE_NARRATIVE_FALLBACK"
+FALLBACK_MISSING_METRIC = "missing_metric"
+FALLBACK_STRUCTURED_NO_HIT = "structured_no_hit"
+# 回落 prompt 里要求模型在片段不足时只输出的哨兵；答案含它即视为无依据。
+NARRATIVE_NO_ANSWER = "NO_ANSWER"
+_FALLBACK_RULE = f"若片段不足以回答该问题，只输出 {NARRATIVE_NO_ANSWER}，不要推测。"
+# 缺指标且回落无依据：先明确“查不到”，再附原反问（指标选项仍可用）。
+_FALLBACK_NOT_FOUND = "查不到：资料中没有能回答该问题的依据，不提供任何推测数字。"
+_CITE_MARK_RE = re.compile(r"\[\d+\]")
+_NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)*")
+
+
+def _resolve_narrative_fallback(value: bool | None) -> bool:
+    """显式参数优先；None 读 RAGSPINE_NARRATIVE_FALLBACK（on|off，默认 on）。"""
+    if value is not None:
+        return value
+    spec = (os.environ.get(NARRATIVE_FALLBACK_ENV) or "on").strip().lower()
+    if spec not in ("on", "off"):
+        raise ValueError(f"{NARRATIVE_FALLBACK_ENV} 只能是 on / off，收到 {spec!r}")
+    return spec == "on"
+
+
+def _numbers(text: str) -> set[str]:
+    """文本中的数字（去千分位逗号；先剔除 [n] 片段引用标号）。"""
+    return {m.replace(",", "") for m in _NUMBER_RE.findall(_CITE_MARK_RE.sub(" ", text))}
+
+
+def _fallback_grounded(answer: str, question: str, snippets: list[dict[str, object]]) -> bool:
+    """回落答案是否有依据：非空、无 NO_ANSWER 哨兵，且至少一个数字出现在片段原文里
+    （问句自带的数字不算）。回落只发生在数字类问题上，没有出自证据的数字就不算作答。"""
+    if not answer.strip() or NARRATIVE_NO_ANSWER in answer:
+        return False
+    evidence: set[str] = set()
+    for s in snippets:
+        evidence |= _numbers(_snippet_text(s))
+    return bool((_numbers(answer) - _numbers(question)) & evidence)
+
 
 @runtime_checkable
 class NarrativeRetriever(Protocol):
@@ -104,6 +147,8 @@ class AgentResult:
     # answer 的无内联来源变体：正文与 answer 逐字节一致，但剥去「（来源：…）」/
     # 「（资料来源：…）」后缀；产品层用 .sources 自渲染引用 UI，避免重复。
     answer_plain: str = ""
+    # 路由回落原因（ADR 0023）：结构化回落叙事且有依据时为 FALLBACK_*，否则 None。
+    fallback: str | None = None
 
 
 @dataclass
@@ -466,12 +511,17 @@ def _run_narrative(
     intent: ParsedIntent,
     ctx: _TraceCtx,
     history_messages: list[dict[str, object]],
+    *,
+    fallback: bool = False,
 ) -> tuple[str, str, list[dict[str, object]]]:
     """叙事通路：检索 → 合成 → 附来源。检索未接入/无结果时坦白降级；返回
     (answer, answer_plain, sources)。answer_plain 是模型散文本身（不含编排层追加的
     「（资料来源：…）」血缘兜底后缀）；降级/无结果路本就无后缀，两者相同。
 
     provider 失败（ProviderError）→ 诚实降级文案，不崩、不编造；其他异常照常抛出。
+
+    fallback=True（结构化回落，ADR 0023）：system prompt 追加 NO_ANSWER 规则；答案无依据
+    （见 _fallback_grounded）时返回空 sources——调用方据 sources 为空维持原结构化结果。
     """
     if retriever is None:
         degraded = "叙事检索通路尚未接入，暂时无法回答归因/监管/进展类问题；数字类问题可直接提问。"
@@ -514,7 +564,8 @@ def _run_narrative(
                     "role": "system",
                     "content": _NARRATIVE_SYSTEM_PROMPT_TEMPLATE.format(
                         company=_PROFILE.home_company_name
-                    ),
+                    )
+                    + (_FALLBACK_RULE if fallback else ""),
                 },
                 *history_messages,
                 {"role": "user", "content": user_content},
@@ -526,6 +577,8 @@ def _run_narrative(
         return _DEGRADE_NARRATIVE, _DEGRADE_NARRATIVE, []
     ctx.record_provider(time.perf_counter() - started, _usage_dict(resp.usage))
     answer = resp.choices[0].message.content or ""
+    if fallback and not _fallback_grounded(answer, question, snippets):
+        return "", "", []
     answer_plain = answer  # 裸散文：不含编排层追加的血缘兜底后缀
     # 血缘兜底：来源文件名必须出现在回答里
     missing = [s for s in sources if s["doc"] and str(s["doc"]) not in answer]
@@ -555,14 +608,20 @@ def _emit_request_trace(
     clar: ClarificationResult,
     tool_results: list[dict[str, object]],
     ctx: _TraceCtx,
+    fallback: tuple[str, bool] | None = None,
 ) -> None:
     """结束前发一条结构化 trace（仅非敏感元数据，日志按 Restricted 对待）。
 
     fabrication_guard_triggered：本次是否触发防编造强制改写——
-    有工具结果但无任何 found（即落到 not_found/unrecognized 兜底改写）时为 True。
+    有工具结果但无任何 found（即落到 not_found/unrecognized 兜底改写）时为 True；
+    回落叙事且有依据（没有发生改写）时为 False。
+    fallback：尝试了路由回落时为 (原因代码, 是否有依据)，记为 narrative_fallback；未尝试不记该键。
     """
     counts = _tool_status_counts(tool_results)
-    fabrication_guard_triggered = bool(tool_results) and counts["found"] == 0
+    grounded_fallback = fallback is not None and fallback[1]
+    fabrication_guard_triggered = (
+        bool(tool_results) and counts["found"] == 0 and not grounded_fallback
+    )
     fields: dict[str, object] = {
         "request_id": request_id,
         "route": intent.route,
@@ -579,6 +638,8 @@ def _emit_request_trace(
         "chunk_ids": ctx.chunk_ids,
         "chunk_scores": ctx.chunk_scores,
     }
+    if fallback is not None:
+        fields["narrative_fallback"] = {"reason": fallback[0], "grounded": fallback[1]}
     if ctx.page_images_sent or ctx.page_images_dropped:
         # 只记计数与原因代码，不记路径 / 图片内容。
         fields["page_images"] = {
@@ -603,6 +664,7 @@ def _answer_decomposed(
     narrative_retriever: NarrativeRetriever | None,
     intent_parser: IntentParser | None,
     history: Sequence[HistoryTurn] | None,
+    narrative_fallback: bool,
 ) -> AgentResult:
     """W6a 多跳分解 fan-out：每个子问题独立走 answer_question（带全部 guard + 安全门），
     再确定性合成。
@@ -621,6 +683,7 @@ def _answer_decomposed(
             narrative_retriever=narrative_retriever,
             intent_parser=intent_parser,
             history=history,
+            narrative_fallback=narrative_fallback,
         )
         for sq in subquestions
     ]
@@ -646,6 +709,38 @@ def _answer_decomposed(
     )
 
 
+def _try_fallback(
+    question: str,
+    provider: LLMProvider,
+    retriever: NarrativeRetriever | None,
+    intent: ParsedIntent,
+    ctx: _TraceCtx,
+    history_messages: list[dict[str, object]],
+) -> tuple[str, str, list[dict[str, object]]] | None:
+    """结构化回落叙事：有依据（带来源）返回 (answer, answer_plain, sources)，否则 None。"""
+    answer, answer_plain, sources = _run_narrative(
+        question, provider, retriever, intent, ctx, history_messages, fallback=True
+    )
+    return (answer, answer_plain, sources) if sources else None
+
+
+def _fallback_result(
+    fb: tuple[str, str, list[dict[str, object]]],
+    tool_results: list[dict[str, object]],
+    reason: str,
+) -> AgentResult:
+    answer, answer_plain, sources = fb
+    return AgentResult(
+        answer=answer,
+        route=ROUTE_NARRATIVE,
+        clarification=ClarificationResult(mode=CLARIFY_NONE),
+        tool_results=tool_results,
+        sources=sources,
+        answer_plain=answer_plain,
+        fallback=reason,
+    )
+
+
 def answer_question(
     question: str,
     store: FactStore,
@@ -656,6 +751,7 @@ def answer_question(
     intent_parser: IntentParser | None = None,
     decomposer: QueryDecomposer | None = None,
     history: Sequence[HistoryTurn] | None = None,
+    narrative_fallback: bool | None = None,
 ) -> AgentResult:
     """单条问题端到端编排入口。
 
@@ -671,7 +767,12 @@ def answer_question(
         与澄清网关只看当前 question；历史只作为 LLM provider 调用的上下文 messages（插在 system
         与当前问句之间）。因此历史里的内容不产生新“证据”：结构化查无实据仍确定性改写为查不到，
         provenance 仍只指向真实检索/工具命中，安全门仍从 raw question 独立复核。
+    narrative_fallback：路由回落（ADR 0023）。None＝读 RAGSPINE_NARRATIVE_FALLBACK（on|off，
+        默认 on）。on 且注入了 narrative_retriever 时，structured 路由缺指标（原反问）或零 found
+        （原“查不到”/无法识别改写）先回落叙事；回落答案须带来源且含出自片段的数字，否则维持原结果
+        逐字节不变。竞品越权拒答仍最前置；found 路径、composite、narrative 路由不受影响。
     """
+    use_fallback = _resolve_narrative_fallback(narrative_fallback)
     # W6a：注入了分解器且真分解（>1 子问题）时走 fan-out；否则（含 decomposer=None）落到下方
     # 既有主流程——此分支不命中时主流程逐位不变，默认 loop 字节等价。
     if decomposer is not None:
@@ -686,6 +787,7 @@ def answer_question(
                 narrative_retriever=narrative_retriever,
                 intent_parser=intent_parser,
                 history=history,
+                narrative_fallback=use_fallback,
             )
 
     request_id = new_request_id()
@@ -711,14 +813,29 @@ def answer_question(
             answer_plain=clar.question or "",
         )
 
+    # 回落开启且接了叙事检索：结构化路由缺指标 / 零命中时先试叙事（ADR 0023）。
+    can_fallback = (
+        use_fallback and narrative_retriever is not None and intent.route == ROUTE_STRUCTURED
+    )
+
     # 前置单选：歧义会导致实质错误，直接反问，不调用 LLM
     if clar.mode == CLARIFY_ASK_FIRST:
-        _emit_request_trace(request_id, intent, clar, [], ctx)
+        fallback: tuple[str, bool] | None = None
+        if can_fallback:
+            fb = _try_fallback(question, provider, narrative_retriever, intent, ctx, hist_msgs)
+            fallback = (FALLBACK_MISSING_METRIC, fb is not None)
+            if fb is not None:
+                _emit_request_trace(request_id, intent, clar, [], ctx, fallback)
+                return _fallback_result(fb, [], FALLBACK_MISSING_METRIC)
+        _emit_request_trace(request_id, intent, clar, [], ctx, fallback)
+        ask = clar.question or ""
+        if fallback is not None:
+            ask = _FALLBACK_NOT_FOUND + ask
         return AgentResult(
-            answer=clar.question or "",
+            answer=ask,
             route=intent.route,
             clarification=clar,
-            answer_plain=clar.question or "",
+            answer_plain=ask,
         )
 
     # 默认先答：把假设槽位回填进问题（结构化通路按受控代码追加限定）
@@ -762,6 +879,14 @@ def answer_question(
         )
         answer, answer_plain, sources = _structured_answer(model_text, tool_results)
 
+    no_hit_fallback: tuple[str, bool] | None = None
+    if can_fallback and not any(r.get("status") == "found" for r in tool_results):
+        fb = _try_fallback(question, provider, narrative_retriever, intent, ctx, hist_msgs)
+        no_hit_fallback = (FALLBACK_STRUCTURED_NO_HIT, fb is not None)
+        if fb is not None:
+            _emit_request_trace(request_id, intent, clar, tool_results, ctx, no_hit_fallback)
+            return _fallback_result(fb, tool_results, FALLBACK_STRUCTURED_NO_HIT)
+
     if intent.route == ROUTE_COMPOSITE:
         narrative_answer, narrative_answer_plain, narrative_sources = _run_narrative(
             question, provider, narrative_retriever, intent, ctx, hist_msgs
@@ -777,7 +902,7 @@ def answer_question(
         answer = prefix + answer
         answer_plain = prefix + answer_plain
 
-    _emit_request_trace(request_id, intent, clar, tool_results, ctx)
+    _emit_request_trace(request_id, intent, clar, tool_results, ctx, no_hit_fallback)
     return AgentResult(
         answer=answer,
         route=intent.route,
