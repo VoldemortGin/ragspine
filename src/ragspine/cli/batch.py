@@ -17,6 +17,7 @@
 
 import argparse
 import json
+import logging
 import queue
 import sys
 import threading
@@ -29,6 +30,7 @@ from typing import Any
 
 from ragspine.agent.agent import NarrativeRetriever
 from ragspine.agent.llm_provider import LLMProvider, MockProvider
+from ragspine.common.observability.trace import TRACE_LOGGER_NAME
 from ragspine.config import RAGSpineConfig
 from ragspine.eval.retrieval_only import (
     BatchQuestion,
@@ -137,13 +139,52 @@ def _open_rag(args: argparse.Namespace, provider: LLMProvider) -> RAGSpine:
         ) from exc
 
 
-def _precheck(rag: RAGSpine) -> None:
-    """开跑前按 ask 的守卫（关闭 / 索引兼容）组装一次检索器：装配失败即报错，不让每题都记 error。"""
+class _VectorChannelCapture(logging.Handler):
+    """旁听装配时的 ``narrative.vector_channel`` trace（只含计数与原因码），得到实际的向量通道状态。"""
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.INFO)
+        self.fields: dict[str, object] | None = None
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if getattr(record, "op", None) == "narrative.vector_channel":
+            self.fields = {
+                key: getattr(record, key, None)
+                for key in ("vector_channel", "vector_reason", "n_vectors")
+            }
+
+
+def _vector_status(rag: RAGSpine, captured: Mapping[str, object] | None) -> str:
+    persist = f"persist_vectors={rag.retrieval.persist_vectors}"
+    if captured is not None:
+        reason = captured.get("vector_reason")
+        detail = f"{reason}, " if reason else ""
+        return f"{captured.get('vector_channel')}（{detail}n_vectors={captured.get('n_vectors')}；{persist}）"
+    if rag.retrieval.retrieval_mode == "economy" or rag.retrieval.embedding == "none":
+        return f"bm25_only（未开向量通道；{persist}）"
+    return f"hybrid（{rag.retrieval.embedding} 向量，检索时现算；{persist}）"
+
+
+def _precheck(rag: RAGSpine) -> str:
+    """开跑前按 ask 的守卫（关闭 / 索引兼容）组装一次检索器：装配失败即报错，不让每题都记 error。
+
+    返回实际的向量通道状态（持久化向量库为空 / 没有后端时会退化成纯 BM25，配置值不代表实际）。
+    """
+    logger = logging.getLogger(TRACE_LOGGER_NAME)
+    capture = _VectorChannelCapture()
+    previous_level = logger.level
+    logger.addHandler(capture)
+    if not logger.isEnabledFor(logging.INFO):
+        logger.setLevel(logging.INFO)
     try:
         with rag.open_retriever():
             pass
     except Exception as exc:  # noqa: BLE001 — 装配 / 兼容性失败都是前置条件不满足
         raise BatchError(f"workspace 检索器装配失败：{_error_text(exc)}") from exc
+    finally:
+        logger.removeHandler(capture)
+        logger.setLevel(previous_level)
+    return _vector_status(rag, capture.fields)
 
 
 def _out_dir(args: argparse.Namespace) -> Path:
@@ -390,7 +431,7 @@ def _run(args: argparse.Namespace) -> int:
     except Exception as exc:  # noqa: BLE001 — 缺 extra / key / 二进制：前置条件不满足
         raise BatchError(f"provider {args.provider!r} 不可用：{_error_text(exc)}") from exc
     rag = _open_rag(args, provider)
-    _precheck(rag)
+    vector_channel = _precheck(rag)
     out = _out_dir(args)
     _pin_settings(out, run_settings(args), resume=args.resume)
     results_path = out / RESULTS_FILE
@@ -441,7 +482,7 @@ def _run(args: argparse.Namespace) -> int:
         "embedding": rag.retrieval.embedding,
         "reranker": rag.retrieval.reranker,
         "postprocessor": rag.retrieval.postprocessor,
-        "persist_vectors": str(rag.retrieval.persist_vectors),
+        "vector_channel": vector_channel,
         "page_parent": rag.retrieval.page_parent,
         "provider": args.provider,
         "top_k": str(args.top_k) if args.retrieval_only else "(ask 固定 50)",

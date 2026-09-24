@@ -403,3 +403,58 @@ def test_ask_mode_writes_each_question_as_it_completes(tmp_path, workspace, ques
     records = _records(out)
     assert records[-1]["id"] == "mix"
     assert sorted(r["id"] for r in records) == ["content", "free", "mix", "roe"]
+
+
+def test_summary_shows_the_actual_vector_channel(tmp_path, workspace, questions):
+    """配置 persist_vectors=True 但向量库为空：summary 显示实际退化的 bm25_only，而不是配置值。"""
+    out = tmp_path / "out"
+    rc = main(
+        ["batch", str(questions), "--workspace", str(workspace), "--retrieval-only"]
+        + ["--profile", "balanced", "--embedding", "deterministic", "--persist-vectors"]
+        + ["--out", str(out)]
+    )
+    assert rc == 0
+    summary = (out / "summary.md").read_text(encoding="utf-8")
+    assert (
+        "- vector_channel: `bm25_only（empty_index, n_vectors=0；persist_vectors=True）`" in summary
+    )
+
+
+def test_summary_shows_a_filled_persisted_vector_channel(tmp_path, questions):
+    pytest.importorskip("sqlite_vec")
+    ws = tmp_path / "ws-vec"
+    deck = tmp_path / "deck.md"
+    deck.write_text(_DECK, encoding="utf-8")
+    ingest = RAGSpine.local(
+        ws, preset="balanced", config={"storage": {"persist_vectors": True}}
+    ).ingest(deck)
+    assert ingest.vector_report is not None
+    n_vectors = ingest.vector_report.total
+    out = tmp_path / "out"
+    rc = main(
+        ["batch", str(questions), "--workspace", str(ws), "--retrieval-only"]
+        + ["--profile", "balanced", "--persist-vectors", "--out", str(out)]
+    )
+    assert rc == 0
+    summary = (out / "summary.md").read_text(encoding="utf-8")
+    assert f"- vector_channel: `hybrid（n_vectors={n_vectors}；persist_vectors=True）`" in summary
+
+
+def test_summary_vector_channel_for_the_economy_default(tmp_path, workspace, questions):
+    out = tmp_path / "out"
+    assert (
+        main(
+            [
+                "batch",
+                str(questions),
+                "--workspace",
+                str(workspace),
+                "--retrieval-only",
+                "--out",
+                str(out),
+            ]
+        )
+        == 0
+    )
+    summary = (out / "summary.md").read_text(encoding="utf-8")
+    assert "- vector_channel: `bm25_only（未开向量通道；persist_vectors=False）`" in summary
