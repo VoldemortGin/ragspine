@@ -22,7 +22,8 @@ A thin argparse wrapper over the zero-SDK offline core — **never** shells out 
     goes through `RAGSpine.open_retriever()` (same guards/assembly as `ask`, no intent filters).
     Missing workspace / empty chunk store → stderr + exit 2 (db-guard `ENTRY_POINTS`). Real models
     via `--embedding/--reranker local-http --persist-vectors`, `--contextual-index off|heading|full`
-    overrides only the preset's `contextual_index` (no new `RAGSPINE_*` env).
+    overrides only the preset's `contextual_index`, `--query-translation off|auto` only its
+    `query_translation` (no new `RAGSPINE_*` env; mock + auto is flagged as not translating).
     `run_settings.json` pins the run's scoring settings; `--resume` with different settings → exit 2.
     A precheck opens the retriever once (ask's guards) and reports the actual vector channel in the summary.
   - `workflow serve <file-or-template-id> [--port N] [--open]` — starts the API + packaged
