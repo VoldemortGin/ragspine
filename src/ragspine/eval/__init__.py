@@ -8,6 +8,7 @@ Submodules:
     groundedness.py — 叙事侧 groundedness 度量：faithfulness + free-text answer-accuracy。
     nl_gold_ragspine.py — nl-answers-gold 集跑 ragspine 主链路：两路（ask / 强制叙事）判定 + 页级 recall@k + 报告。
     qa_eval.py — Q&A 评测闭环 harness：四命门 + groundedness 指标 + 基线门禁。
+    retrieval_only.py — 通用 retrieval-only 评测：题集加载 + 页/内容判定 + recall@k / MRR（ragspine batch 用）。
 """
 
 from ragspine import _lazy_submodules
