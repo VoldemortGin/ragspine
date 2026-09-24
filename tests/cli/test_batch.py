@@ -347,9 +347,28 @@ def test_claude_cli_provider_and_concurrency_note(tmp_path, workspace, questions
         ["--provider", "claude-cli"],
         ["--contextual-index", "heading"],
         ["--query-translation", "off"],
+        ["--page-images", "tagged"],
+        ["--page-images-trigger", "any"],
+        ["--page-images-max", "1"],
+        ["--page-images-top-n", "5"],
+        ["--page-images-low-text-chars", "100"],
+        ["--page-images-figure-min-chars", "0"],
         [],
     ],
-    ids=["top_k", "profile", "provider", "contextual_index", "query_translation", "mode"],
+    ids=[
+        "top_k",
+        "profile",
+        "provider",
+        "contextual_index",
+        "query_translation",
+        "page_images",
+        "page_images_trigger",
+        "page_images_max",
+        "page_images_top_n",
+        "page_images_low_text_chars",
+        "page_images_figure_min_chars",
+        "mode",
+    ],
 )
 def test_resume_refuses_changed_run_settings(tmp_path, workspace, questions, capsys, changed):
     out = tmp_path / "out"
@@ -720,3 +739,212 @@ def test_mock_provider_with_auto_translation_is_flagged_as_not_translating(
     off = tmp_path / "off"
     assert main([*base, "--out", str(off), "--query-translation", "off"]) == 0
     assert _MOCK_TRANSLATION_NOTE not in (off / "summary.md").read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# 页图按需附图（ADR 0025）：参数走 with_overrides、summary 显示实际值、续跑比对、trace 旁听只记计数
+# ---------------------------------------------------------------------------
+
+
+def test_page_image_flags_reach_the_retriever_assembly(tmp_path, workspace, questions, monkeypatch):
+    seen: list[ServiceConfig] = []
+
+    @contextmanager
+    def fake_open(config: ServiceConfig, provider: LLMProvider) -> Iterator[_FixedRetriever]:
+        seen.append(config)
+        yield _FixedRetriever()
+
+    monkeypatch.setattr("ragspine.session.open_narrative_retriever", fake_open)
+    out = tmp_path / "out"
+    flags = [
+        "--page-images",
+        "tagged",
+        "--page-images-trigger",
+        "has_figure,low_text",
+        "--page-images-max",
+        "2",
+        "--page-images-top-n",
+        "5",
+        "--page-images-low-text-chars",
+        "150",
+        "--page-images-figure-min-chars",
+        "20",
+    ]
+    base = ["batch", str(questions), "--workspace", str(workspace), "--out", str(out)]
+    assert main([*base, "--retrieval-only", *flags]) == 0
+    assert seen
+    got = {
+        (
+            c.page_images,
+            c.page_images_trigger,
+            c.page_images_max,
+            c.page_images_top_n,
+            c.page_images_low_text_chars,
+            c.page_images_figure_min_chars,
+        )
+        for c in seen
+    }
+    assert got == {("tagged", "has_figure,low_text", 2, 5, 150, 20)}
+    pinned = json.loads((out / "run_settings.json").read_text(encoding="utf-8"))
+    assert pinned["page_images"] == "tagged" and pinned["page_images_max"] == 2
+    summary = (out / "summary.md").read_text(encoding="utf-8")
+    assert "- page_images: `tagged`" in summary
+    assert "- page_images_trigger: `has_figure,low_text`" in summary
+    assert "- page_images_max: `2`" in summary
+    assert "- page_images_top_n: `5`" in summary
+    assert "- page_images_low_text_chars: `150`" in summary
+    assert "- page_images_figure_min_chars: `20`" in summary
+
+
+def test_page_images_defaults_on_alias_and_resume(tmp_path, workspace, questions):
+    out = tmp_path / "out"
+    base = ["batch", str(questions), "--workspace", str(workspace), "--retrieval-only"]
+    assert main([*base, "--out", str(out), "--limit", "1"]) == 0
+    summary = (out / "summary.md").read_text(encoding="utf-8")
+    assert "- page_images: `off`" in summary
+    assert "- page_images_max: `(= top_n)`" in summary
+    # 显式写出默认值：实际生效值相同，续跑不算配置变化
+    assert main([*base, "--out", str(out), "--resume", "--page-images", "off"]) == 0
+    on = tmp_path / "on"
+    assert main([*base, "--out", str(on), "--limit", "1", "--page-images", "on"]) == 0
+    assert (
+        json.loads((on / "run_settings.json").read_text(encoding="utf-8"))["page_images"] == "all"
+    )
+    # on 是 all 的别名：续跑时写 all 视为一致
+    assert main([*base, "--out", str(on), "--resume", "--page-images", "all"]) == 0
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [
+        ["--page-images-trigger", "has_chart"],
+        ["--page-images-max", "-1"],
+        ["--page-images-top-n", "-2"],
+        ["--page-images-low-text-chars", "-1"],
+    ],
+)
+def test_invalid_page_image_flags_are_exit_2(tmp_path, workspace, questions, capsys, flags):
+    base = ["batch", str(questions), "--workspace", str(workspace), "--out", str(tmp_path / "o")]
+    assert main([*base, "--retrieval-only", "--page-images", "tagged", *flags]) == 2
+    assert "page_images" in capsys.readouterr().err
+
+
+def _image_workspace(tmp_path: Path) -> Path:
+    from tests.ingestion.page_images.fixtures import write_deck
+
+    pages = [
+        "Welcome to the results. " * 20,
+        "<table><tr><th>Channel</th><th>VONB</th></tr><tr><td>Agency</td><td>72%</td></tr></table>",
+        "The record ROE of 17.5% was achieved.",
+    ]
+    md, pdf = write_deck(tmp_path, pages)
+    ws = tmp_path / "img-ws"
+    RAGSpine.local(ws).ingest(md, source_pdf=pdf)
+    return ws
+
+
+class _ImageReadingMock(MockProvider):
+    """读图的 MockProvider（只为让 agent 真的发图）；每次调用报一个固定 usage。"""
+
+    supports_image_input = True
+
+    def chat(self, messages, *, tools=None):  # type: ignore[no-untyped-def]
+        import dataclasses
+
+        from corespine import Usage
+
+        from ragspine.agent.llm_provider import split_message_content
+
+        text, _ = split_message_content(messages[-1]["content"])
+        resp = super().chat([*messages[:-1], {"role": "user", "content": text}], tools=tools)
+        return dataclasses.replace(
+            resp, usage=Usage(prompt_tokens=100, completion_tokens=7, total_tokens=107)
+        )
+
+
+@pytest.mark.parametrize(("image_mode", "expected_max"), [("all", 3), ("tagged", 2)])
+def test_ask_records_trace_counts(tmp_path, monkeypatch, image_mode, expected_max):
+    ws = _image_workspace(tmp_path)
+    monkeypatch.setattr("ragspine.cli.batch._make_provider", lambda name: _ImageReadingMock())
+    qs = tmp_path / "q.jsonl"
+    qs.write_text(
+        json.dumps({"id": "roe", "question": "record ROE Agency VONB results welcome"}) + "\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / image_mode
+    rc = main(
+        ["batch", str(qs), "--workspace", str(ws), "--out", str(out)]
+        + ["--page-images", image_mode, "--page-images-top-n", "3", "--query-translation", "off"]
+    )
+    assert rc == 0
+    [record] = _records(out)
+    trace = record["trace"]
+    assert set(trace) == {
+        "requests",
+        "input_tokens",
+        "output_tokens",
+        "page_images_sent",
+        "page_images_dropped",
+        "number_guard_rewrites",
+    }
+    assert trace["requests"] >= 1
+    assert 1 <= trace["page_images_sent"] <= expected_max
+    # 每次 provider 调用报 100/7；一次请求可能调用多次（结构化工具环 + 回落叙事）
+    calls = trace["input_tokens"] // 100
+    assert calls >= 1 and trace["input_tokens"] == 100 * calls
+    assert trace["output_tokens"] == 7 * calls
+    summary = (out / "summary.md").read_text(encoding="utf-8")
+    assert "| 每题附图数（均值） |" in summary
+    assert "| 延迟 p50 / p95（秒） |" in summary
+    assert "| token 输入 / 输出（总计） |" in summary
+    # 只有计数：trace 里没有文本
+    assert all(isinstance(v, int | None) for v in trace.values())
+
+
+def test_tagged_sends_fewer_images_than_all(tmp_path, monkeypatch):
+    ws = _image_workspace(tmp_path)
+    monkeypatch.setattr("ragspine.cli.batch._make_provider", lambda name: _ImageReadingMock())
+    qs = tmp_path / "q.jsonl"
+    qs.write_text(
+        json.dumps({"id": "q", "question": "record ROE Agency VONB results welcome"}) + "\n",
+        encoding="utf-8",
+    )
+    sent = {}
+    for mode in ("off", "all", "tagged"):
+        out = tmp_path / f"o-{mode}"
+        base = ["batch", str(qs), "--workspace", str(ws), "--out", str(out)]
+        assert main([*base, "--page-images", mode, "--query-translation", "off"]) == 0
+        [record] = _records(out)
+        sent[mode] = record["trace"]["page_images_sent"]
+    assert sent["off"] == 0
+    assert sent["all"] == 3
+    # 页 1 文字多、无表 → tagged（默认 has_table,low_text）不附
+    assert sent["tagged"] == 2
+
+
+def test_summary_reports_images_a_non_image_provider_dropped(tmp_path):
+    ws = _image_workspace(tmp_path)
+    qs = tmp_path / "q.jsonl"
+    qs.write_text(
+        json.dumps({"id": "q", "question": "record ROE Agency VONB results welcome"}) + "\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "out"
+    base = ["batch", str(qs), "--workspace", str(ws), "--out", str(out), "--page-images", "all"]
+    assert main([*base, "--query-translation", "off"]) == 0
+    [record] = _records(out)
+    assert (record["trace"]["page_images_sent"], record["trace"]["page_images_dropped"]) == (0, 3)
+    summary = (out / "summary.md").read_text(encoding="utf-8")
+    assert (
+        "| 每题附图数（均值） | 0.00（合计 0）；provider 不读图、未发出 3 张（每题 3.00） |"
+        in summary
+    )
+
+
+def test_token_usage_missing_is_reported(tmp_path, workspace, questions):
+    out = tmp_path / "out"
+    assert main(["batch", str(questions), "--workspace", str(workspace), "--out", str(out)]) == 0
+    records = _records(out)
+    assert all(r["trace"]["input_tokens"] is None for r in records)
+    summary = (out / "summary.md").read_text(encoding="utf-8")
+    assert "| token 输入 / 输出（总计） | 未采集到 |" in summary

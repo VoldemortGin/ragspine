@@ -1111,6 +1111,40 @@ def _build_parser() -> argparse.ArgumentParser:
         help="跨语言查询翻译：auto=问题与文档语言不一致时用 provider 译成文档语言再多查一路；"
         "off=不翻译（缺省取预设，各 profile 均为 auto；mock provider 原样返回问题，等于没翻译）",
     )
+    p_batch.add_argument(
+        "--page-images",
+        choices=["off", "tagged", "all", "on"],
+        default=None,
+        help="页图（ADR 0025）：all=前 N 页全附（on 是别名）；tagged=只附命中触发标签的页；"
+        "off=不附（缺省取预设，各 profile 均为 off）。需入库时关联 source PDF",
+    )
+    p_batch.add_argument(
+        "--page-images-trigger",
+        default=None,
+        help="tagged 的触发标签，逗号分隔、之间为或：has_table / has_figure / low_text，或 any"
+        "（缺省 has_table,low_text）",
+    )
+    p_batch.add_argument(
+        "--page-images-max",
+        type=int,
+        default=None,
+        help="每次检索最多附几张页图（缺省 = --page-images-top-n）",
+    )
+    p_batch.add_argument(
+        "--page-images-top-n", type=int, default=None, help="附图的候选窗口：前 N 页（缺省 3）"
+    )
+    p_batch.add_argument(
+        "--page-images-low-text-chars",
+        type=int,
+        default=None,
+        help="low_text 阈值：页文字去空白后不足该字符数（缺省 300）",
+    )
+    p_batch.add_argument(
+        "--page-images-figure-min-chars",
+        type=int,
+        default=None,
+        help="has_figure 阈值：最大那个图的文字量达到该字符数才算，滤掉 logo（缺省 10）",
+    )
     p_batch.add_argument("--retrieval-only", action="store_true", help="只跑检索，不调生成 LLM")
     p_batch.add_argument(
         "--top-k", type=int, default=10, help="retrieval-only 取前 k 条（默认 10）"

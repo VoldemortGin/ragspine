@@ -8,6 +8,8 @@
 - ``results.jsonl`` 每完成一题追加一行（写入加锁）；``--resume`` 跳过已成功的 id（出错的重跑），
   再用全量记录（同 id 取最后一条）重新生成 ``summary.md``。
 - 答案与命中块文本只进这两个评测产物，绝不送进 observability trace（trace 只记计数）。
+- 端到端模式每题旁听本线程的 trace（只取计数）：请求 trace 的 ``token_usage``、``page_images.sent/dropped``、
+  数字防护改写次数，记进该题的 ``trace`` 字段，summary 汇总每题附图数、token、延迟 p50/p95（ADR 0025 评测用）。
 
 检索配置由 workspace + ``--profile`` 经 ``RAGSpine.local`` 决定；``RAGSpine.local`` 不读 ``RAGSPINE_*``
 环境变量，所以真实模型（Qwen embedding / reranker）用 ``--embedding`` / ``--reranker`` /
@@ -19,12 +21,14 @@ import argparse
 import json
 import logging
 import queue
+import statistics
 import sys
 import threading
 import time
 from collections import Counter
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +48,10 @@ from ragspine.eval.retrieval_only import (
     retrieve_hits,
 )
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
+from ragspine.retrieval.page_images.trigger.retriever import (
+    make_page_images_policy,
+    parse_page_image_trigger,
+)
 from ragspine.session import RAGSpine
 
 DEFAULT_OUT_ROOT = Path("data") / "output" / "batch"
@@ -60,6 +68,13 @@ _MOCK_TRANSLATION_NOTE = (
     "query_translation=auto 但 provider 是 mock：MockProvider 对翻译请求原样返回问题，"
     "本次跨语言翻译实际没有生效；要评测真实翻译效果请换成真实 provider（anthropic / claude-cli）。"
 )
+
+# claude-cli 的 token 取自 `claude -p` JSON 的 usage；页图由模型经 Read 工具读取，是否完整计入未经核实。
+_CLAUDE_CLI_TOKEN_NOTE = (
+    "claude-cli 的 token 取自 `claude -p` 返回的 usage；页图由模型经 Read 工具读取，这部分是否完整计入未经核实，"
+    "token 对比只作参考，以每题附图数与延迟为准。"
+)
+_TOKENS_MISSING_NOTE = "本次 provider 没有报告 token 用量：只报每题附图数与延迟。"
 
 Record = dict[str, Any]
 
@@ -150,6 +165,30 @@ def _open_rag(args: argparse.Namespace, provider: LLMProvider) -> RAGSpine:
     if args.query_translation is not None:
         # 跨语言查询翻译同样只在检索预设里（各 profile 默认 auto）：只覆盖这一项。
         rag.retrieval = rag.retrieval.with_overrides(query_translation=args.query_translation)
+    # 页图按需附图（ADR 0025）同样只在检索预设里（各 profile 默认 off）；on 归一为 all，非法值前置报错。
+    try:
+        policy = make_page_images_policy(args.page_images) if args.page_images else None
+        if args.page_images_trigger is not None:
+            parse_page_image_trigger(args.page_images_trigger)
+        for flag in (
+            "page_images_max",
+            "page_images_top_n",
+            "page_images_low_text_chars",
+            "page_images_figure_min_chars",
+        ):
+            value = getattr(args, flag)
+            if value is not None and value < 0:
+                raise ValueError(f"{flag} 必须 >= 0，收到 {value}")
+    except ValueError as exc:
+        raise BatchError(f"页图参数非法：{exc}") from exc
+    rag.retrieval = rag.retrieval.with_overrides(
+        page_images=policy,
+        page_images_trigger=args.page_images_trigger,
+        page_images_max=args.page_images_max,
+        page_images_top_n=args.page_images_top_n,
+        page_images_low_text_chars=args.page_images_low_text_chars,
+        page_images_figure_min_chars=args.page_images_figure_min_chars,
+    )
     return rag
 
 
@@ -168,6 +207,79 @@ class _VectorChannelCapture(logging.Handler):
             }
 
 
+class _RequestTraceCapture(logging.Handler):
+    """按线程旁听 agent 的请求 trace（只取计数）：token 用量、发出的页图数、数字防护改写次数。
+
+    ``RAGSpine.ask`` 在调用线程里同步完成，所以按 ``LogRecord.thread`` 归到当前这道题；多跳分解时每个子问题
+    各发一条请求 trace，这里累加。
+    """
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.INFO)
+        self._lock = threading.Lock()
+        self._by_thread: dict[int, dict[str, int | None]] = {}
+
+    def start(self) -> None:
+        with self._lock:
+            self._by_thread[threading.get_ident()] = _empty_trace_counts()
+
+    def pop(self) -> dict[str, int | None]:
+        with self._lock:
+            return self._by_thread.pop(threading.get_ident(), _empty_trace_counts())
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if not hasattr(record, "tool_status_counts"):  # 只要请求 trace
+            return
+        with self._lock:
+            counts = self._by_thread.get(record.thread or 0)
+            if counts is None:
+                return
+            counts["requests"] = int(counts["requests"] or 0) + 1
+            usage = getattr(record, "token_usage", None)
+            if isinstance(usage, dict):
+                for key in ("input_tokens", "output_tokens"):
+                    counts[key] = int(counts[key] or 0) + int(usage.get(key) or 0)
+            images = getattr(record, "page_images", None)
+            if isinstance(images, dict):
+                counts["page_images_sent"] = int(counts["page_images_sent"] or 0) + int(
+                    images.get("sent") or 0
+                )
+                counts["page_images_dropped"] = int(counts["page_images_dropped"] or 0) + int(
+                    images.get("dropped") or 0
+                )
+            guard = getattr(record, "narrative_number_guard", None)
+            if isinstance(guard, dict):
+                counts["number_guard_rewrites"] = int(counts["number_guard_rewrites"] or 0) + int(
+                    guard.get("rewritten") or 0
+                )
+
+
+def _empty_trace_counts() -> dict[str, int | None]:
+    return {
+        "requests": 0,
+        "input_tokens": None,
+        "output_tokens": None,
+        "page_images_sent": 0,
+        "page_images_dropped": 0,
+        "number_guard_rewrites": 0,
+    }
+
+
+@contextmanager
+def _listening(handler: logging.Handler) -> Iterator[None]:
+    """临时把 handler 挂到 trace logger（必要时把级别放到 INFO），退出时原样恢复。"""
+    logger = logging.getLogger(TRACE_LOGGER_NAME)
+    previous_level = logger.level
+    logger.addHandler(handler)
+    if not logger.isEnabledFor(logging.INFO):
+        logger.setLevel(logging.INFO)
+    try:
+        yield
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(previous_level)
+
+
 def _vector_status(rag: RAGSpine, captured: Mapping[str, object] | None) -> str:
     persist = f"persist_vectors={rag.retrieval.persist_vectors}"
     if captured is not None:
@@ -184,20 +296,12 @@ def _precheck(rag: RAGSpine) -> str:
 
     返回实际的向量通道状态（持久化向量库为空 / 没有后端时会退化成纯 BM25，配置值不代表实际）。
     """
-    logger = logging.getLogger(TRACE_LOGGER_NAME)
     capture = _VectorChannelCapture()
-    previous_level = logger.level
-    logger.addHandler(capture)
-    if not logger.isEnabledFor(logging.INFO):
-        logger.setLevel(logging.INFO)
     try:
-        with rag.open_retriever():
+        with _listening(capture), rag.open_retriever():
             pass
     except Exception as exc:  # noqa: BLE001 — 装配 / 兼容性失败都是前置条件不满足
         raise BatchError(f"workspace 检索器装配失败：{_error_text(exc)}") from exc
-    finally:
-        logger.removeHandler(capture)
-        logger.setLevel(previous_level)
     return _vector_status(rag, capture.fields)
 
 
@@ -218,12 +322,16 @@ def _out_dir(args: argparse.Namespace) -> Path:
 
 
 def run_settings(
-    args: argparse.Namespace, *, contextual_index: str, query_translation: str
+    args: argparse.Namespace,
+    *,
+    contextual_index: str,
+    query_translation: str,
+    page_images: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """决定结果口径的运行配置（--limit / --concurrency 不在内：续跑时可以改）。
 
-    ``contextual_index`` / ``query_translation`` 记实际生效值（未传参数时取预设值：off / auto），
-    显式传入与预设相同的值视为一致。
+    ``contextual_index`` / ``query_translation`` / ``page_images*`` 记实际生效值（未传参数时取预设值），
+    显式传入与预设相同的值视为一致（``on`` 归一为 ``all``）。
     """
     return {
         "questions": str(Path(args.questions).resolve()),
@@ -237,6 +345,20 @@ def run_settings(
         "persist_vectors": bool(args.persist_vectors),
         "contextual_index": contextual_index,
         "query_translation": query_translation,
+        **(page_images or {}),
+    }
+
+
+def _page_image_settings(rag: RAGSpine) -> dict[str, object]:
+    """检索预设里实际生效的页图配置（ADR 0025）。"""
+    r = rag.retrieval
+    return {
+        "page_images": make_page_images_policy(r.page_images),
+        "page_images_top_n": r.page_images_top_n,
+        "page_images_trigger": r.page_images_trigger,
+        "page_images_max": r.page_images_max,
+        "page_images_low_text_chars": r.page_images_low_text_chars,
+        "page_images_figure_min_chars": r.page_images_figure_min_chars,
     }
 
 
@@ -314,7 +436,11 @@ def _retrieval_record(
     return record
 
 
-def _ask_record(question: BatchQuestion, rag: RAGSpine) -> Record:
+def _ask_record(
+    question: BatchQuestion, rag: RAGSpine, capture: _RequestTraceCapture | None = None
+) -> Record:
+    if capture is not None:
+        capture.start()
     started = time.perf_counter()
     error: str | None = None
     answer = route = ""
@@ -348,6 +474,8 @@ def _ask_record(question: BatchQuestion, rag: RAGSpine) -> Record:
         seconds=round(time.perf_counter() - started, 3),
         error=error,
     )
+    if capture is not None:
+        record["trace"] = capture.pop()
     return record
 
 
@@ -426,8 +554,9 @@ def _run_ask(
     emit: Callable[[Record], None],
 ) -> None:
     # 完成一题写一题（as_completed）：前面的题卡住时，后面已完成的题不会压在内存里不落盘。
-    with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
-        futures = [pool.submit(_ask_record, question, rag) for question in pending]
+    capture = _RequestTraceCapture()
+    with _listening(capture), ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
+        futures = [pool.submit(_ask_record, question, rag, capture) for question in pending]
         for future in as_completed(futures):
             emit(future.result())
 
@@ -465,6 +594,7 @@ def _run(args: argparse.Namespace) -> int:
             args,
             contextual_index=rag.retrieval.contextual_index,
             query_translation=rag.retrieval.query_translation,
+            page_images=_page_image_settings(rag),
         ),
         resume=args.resume,
     )
@@ -520,6 +650,10 @@ def _run(args: argparse.Namespace) -> int:
         "page_parent": rag.retrieval.page_parent,
         "contextual_index": rag.retrieval.contextual_index,
         "query_translation": rag.retrieval.query_translation,
+        **{
+            key: ("(= top_n)" if key == "page_images_max" and value is None else str(value))
+            for key, value in _page_image_settings(rag).items()
+        },
         "provider": args.provider,
         "top_k": str(args.top_k) if args.retrieval_only else "(ask 固定 50)",
         "concurrency": str(args.concurrency),
@@ -608,6 +742,10 @@ def render_summary(
         lines.append(f"- {_MOCK_TRANSLATION_NOTE}")
     if settings.get("provider") == "claude-cli":
         lines.append(f"- {_CLAUDE_CLI_NOTE}")
+        if mode == MODE_ASK:
+            lines.append(f"- {_CLAUDE_CLI_TOKEN_NOTE}")
+    if mode == MODE_ASK and not _token_totals(records):
+        lines.append(f"- {_TOKENS_MISSING_NOTE}")
     lines += [f"- {note}" for note in _JUDGING_NOTES]
     lines += ["", "## 指标", ""]
     if mode == MODE_RETRIEVAL:
@@ -636,11 +774,65 @@ def render_summary(
             f"| content_hit | {_rate(sum(bool(r['content_hit']) for r in content), len(content))} |",
             f"| errors | {sum(1 for r in records if r.get('error'))} |",
             f"| routes | {', '.join(f'{k}={v}' for k, v in routes.most_common())} |",
+            *_cost_rows(records),
         ]
     lines += ["", "## 逐题", ""]
     for record in records:
         lines += _question_lines(record)
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _traces(records: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    return [r["trace"] for r in records if isinstance(r.get("trace"), Mapping)]
+
+
+def _token_totals(records: Sequence[Mapping[str, Any]]) -> tuple[int, int] | None:
+    reported = [t for t in _traces(records) if t.get("input_tokens") is not None]
+    if not reported:
+        return None
+    return (
+        sum(int(t.get("input_tokens") or 0) for t in reported),
+        sum(int(t.get("output_tokens") or 0) for t in reported),
+    )
+
+
+def _percentile(values: Sequence[float], q: float) -> float:
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return ordered[0]
+    return statistics.quantiles(ordered, n=100, method="inclusive")[int(q) - 1]
+
+
+def _cost_rows(records: Sequence[Mapping[str, Any]]) -> list[str]:
+    """端到端的成本口径：每题附图数、延迟 p50/p95、token、数字防护改写（出错的题不计延迟）。"""
+    traces = _traces(records)
+    seconds = [float(r["seconds"]) for r in records if not r.get("error") and "seconds" in r]
+    rows = []
+    if traces:
+        sent = [int(t.get("page_images_sent") or 0) for t in traces]
+        dropped = sum(int(t.get("page_images_dropped") or 0) for t in traces)
+        row = f"| 每题附图数（均值） | {statistics.fmean(sent):.2f}（合计 {sum(sent)}）"
+        if dropped:
+            # provider 不读图时 agent 一张不发、计入 dropped：这是检索侧附上的图数。
+            row += f"；provider 不读图、未发出 {dropped} 张（每题 {dropped / len(traces):.2f}）"
+        rows.append(row + " |")
+    if seconds:
+        rows.append(
+            f"| 延迟 p50 / p95（秒） | {_percentile(seconds, 50):.2f} / {_percentile(seconds, 95):.2f} |"
+        )
+    if traces:
+        totals = _token_totals(records)
+        if totals is None:
+            rows.append("| token 输入 / 输出（总计） | 未采集到 |")
+        else:
+            n = sum(1 for t in traces if t.get("input_tokens") is not None)
+            rows.append(
+                f"| token 输入 / 输出（总计） | {totals[0]} / {totals[1]}"
+                f"（{n} 题有记录，每题均值 {totals[0] / n:.0f} / {totals[1] / n:.0f}） |"
+            )
+        rewrites = sum(int(t.get("number_guard_rewrites") or 0) for t in traces)
+        rows.append(f"| 数字防护改写次数 | {rewrites} |")
+    return rows
 
 
 def _question_lines(record: Mapping[str, Any]) -> list[str]:
