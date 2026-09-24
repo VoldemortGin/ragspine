@@ -462,6 +462,10 @@ def submit_narrative_job(
         "allowed_upload_root": config.allowed_upload_root,
         "chunker": config.chunker,
         "segment_chunking": config.narrative_segment_chunking,
+        # 页图渲染参数由服务端决定（只在 md 关联了 source PDF 时才用到）。
+        "page_image_dpi": config.page_image_dpi,
+        "page_image_max_side": config.page_image_max_side,
+        "page_image_dir": config.page_image_dir,
     }
     if config.persist_vectors:
         # 持久化块向量（opt-in）：embedding 配置由服务端决定，随 payload 下发给 worker。

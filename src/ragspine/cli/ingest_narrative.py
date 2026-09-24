@@ -7,14 +7,29 @@
 
 --meta 为 per-doc 元数据 JSON：{文件名: {topic/entity/geography/period/
 language/sensitivity/title/valid_as_of}}；缺省时仅从文件名启发式提取 period，
-topic/entity 绝不猜测。退出码：有 failed 文件为 1，否则 0。
+topic/entity 绝不猜测。退出码：有 failed 文件为 1，source PDF 关联校验失败为 2，否则 0。
+
+--source-pdf 给单个 DI markdown 关联原 PDF（也可用 sidecar ``<stem>.meta.json`` 的 ``source_pdf`` 字段），
+入库时把每页渲染成 PNG（``--page-image-dpi`` / ``--page-image-max-side``，默认 144 / 1568），存到
+``--page-image-dir``（默认块库旁 ``page_images/``）。
 """
 
 import argparse
 import json
+import sys
 
 from ragspine.common.core import DEFAULT_FACT_DB
-from ragspine.ingestion.narrative.narrative_ingest import STATUS_FAILED, ingest_narrative
+from ragspine.ingestion.narrative.narrative_ingest import (
+    STATUS_FAILED,
+    _resolve_inputs,
+    ingest_narrative,
+)
+from ragspine.ingestion.page_images.index import sync_ingested_page_images
+from ragspine.ingestion.page_images.render import (
+    DEFAULT_PAGE_IMAGE_DPI,
+    DEFAULT_PAGE_IMAGE_MAX_SIDE,
+)
+from ragspine.ingestion.page_images.source_pdf import SourcePdfError, prepare_source_pdfs
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
 
 
@@ -41,6 +56,16 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="按 segment 分别切块，chunk locator 带段定位（如 page=N）；.md 恒按段切块",
     )
+    parser.add_argument(
+        "--source-pdf",
+        default=None,
+        help="给单个 DI markdown 关联原 PDF（页数须一致），入库时渲染页图；缺省读 <stem>.meta.json 的 source_pdf",
+    )
+    parser.add_argument("--page-image-dpi", type=int, default=DEFAULT_PAGE_IMAGE_DPI)
+    parser.add_argument("--page-image-max-side", type=int, default=DEFAULT_PAGE_IMAGE_MAX_SIDE)
+    parser.add_argument(
+        "--page-image-dir", default=None, help="页图目录（默认块库旁 page_images/）"
+    )
     return parser
 
 
@@ -51,6 +76,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.meta:
         with open(args.meta, encoding="utf-8") as f:
             meta_by_doc = json.load(f)
+
+    try:
+        pdf_sources = prepare_source_pdfs(_resolve_inputs(args.inputs), args.source_pdf)
+    except SourcePdfError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
 
     store = ChunkStore(args.db)
     store.init_schema()
@@ -64,6 +95,14 @@ def main(argv: list[str] | None = None) -> int:
         )
     finally:
         store.close()
+    images = sync_ingested_page_images(
+        report,
+        pdf_sources,
+        args.db,
+        image_dir=args.page_image_dir,
+        dpi=args.page_image_dpi,
+        max_side=args.page_image_max_side,
+    )
 
     prefix = "[dry-run] " if report.dry_run else ""
     for fr in report.files:
@@ -84,6 +123,11 @@ def main(argv: list[str] | None = None) -> int:
         f"no_text={counts['no_text']} failed={counts['failed']} "
         f"(chunks={total_chunks}, 跳过扫描页={total_skipped_pages})"
     )
+    for doc in images.docs:
+        print(
+            f"{prefix}页图 {doc.doc_id}: {doc.status} "
+            f"(pages={doc.n_pages}, images={doc.n_images}, withheld={doc.n_withheld})"
+        )
     return 1 if counts[STATUS_FAILED] else 0
 
 

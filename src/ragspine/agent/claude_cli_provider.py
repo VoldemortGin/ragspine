@@ -11,6 +11,12 @@
   （工具名必须在 tools 内、arguments 必须是对象），不合格则带纠错提示有限次重试，仍不合格抛
   ProviderError（交给编排层诚实降级）。每轮只是一次独立的无状态 CLI 调用，多轮工具循环靠重放整段
   对话记录实现。
+- 图片：支持（``supports_image_input = True``）。user 消息 content 可为部件列表（见
+  ``llm_provider.IMAGE_PART_TYPE``）；图片部件按其 ``name`` 复制进本次调用的临时空 cwd，**只放开 Read
+  工具**（``--tools Read``），并加 ``--permission-prompts none``：cwd 内读文件无需授权，cwd 以外的任何
+  读取都要授权，而无人应答即自动拒绝（实测 ``../`` 之外的文件读取被拒）。刻意不用 ``--allowedTools Read``，
+  它会预先放行任意路径的 Read。prompt 末尾追加一句用相对文件名读图的指引，原图存储路径不进 prompt / argv。
+  没有图片时命令行与之前完全一样（``--tools ""``）。
 - 不支持：流式（不实现 StreamingProvider）、采样参数（temperature / max_tokens 由 CLI 决定）、
   原生 JSON mode（JSON 由提示词约束 + 解析保证）。
 
@@ -25,6 +31,7 @@ lazy：import 本模块不检查 claude 是否存在；首次 chat 时用 shutil
 """
 
 import json
+import re
 import shutil
 import subprocess
 import tempfile
@@ -41,6 +48,8 @@ from corespine import (
     ToolCall,
     Usage,
 )
+
+from ragspine.agent.llm_provider import split_message_content
 
 DEFAULT_CLAUDE_CLI_TIMEOUT_S = 300.0
 DEFAULT_CLAUDE_CLI_CONCURRENCY = 4
@@ -59,24 +68,36 @@ _TOOL_PROTOCOL = """\
 - 已能给出最终回答时：{{"content": "<最终回答文本>"}}
 对话记录中的 [tool_result] 段是工具返回结果；拿到所需结果后请给出最终回答，不要重复调用同一工具。"""
 
+# 图片部件的文件名：单层、不以点开头、.png 结尾（复制进 cwd 用，杜绝路径穿越）。
+_IMAGE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\.png$")
+_IMAGE_HINT = (
+    "\n\n[页图] 以下页图文件就在当前工作目录中：{names}。作答前请用 Read 工具逐一查看这些图片，"
+    "图中的信息与上面的文字片段同样可以作为依据；不要读取其他文件。"
+)
+
 _FORMAT_FIX = (
     "你上一条回复不符合工具调用协议（{error}）。请只输出一个合法 JSON 对象："
     '{{"tool_calls": [...]}} 或 {{"content": "..."}}。'
 )
 
 
-def _render_transcript(messages: list[dict[str, Any]]) -> tuple[str, str]:
-    """OpenAI messages → (system 文本, stdin 对话记录)。单条 user 消息时原样透传其内容。"""
+def _render_transcript(
+    messages: list[dict[str, Any]],
+) -> tuple[str, str, list[dict[str, Any]]]:
+    """OpenAI messages → (system 文本, stdin 对话记录, 图片部件)。单条 user 消息时原样透传其文本。"""
     system_parts: list[str] = []
     convo: list[dict[str, Any]] = []
+    images: list[dict[str, Any]] = []
     for m in messages:
+        text, image_parts = split_message_content(m.get("content"))
+        images.extend(image_parts)
         if m.get("role") == "system":
-            system_parts.append(str(m.get("content") or ""))
+            system_parts.append(text)
         else:
-            convo.append(m)
+            convo.append({**m, "content": text})
     system = "\n".join(p for p in system_parts if p)
     if len(convo) == 1 and convo[0].get("role") == "user":
-        return system, str(convo[0].get("content") or "")
+        return system, str(convo[0].get("content") or ""), images
 
     blocks: list[str] = []
     for m in convo:
@@ -93,7 +114,20 @@ def _render_transcript(messages: list[dict[str, Any]]) -> tuple[str, str]:
             blocks.append("[assistant]\n" + "\n".join(parts))
         else:
             blocks.append(f"[user]\n{content}")
-    return system, "\n\n".join(blocks)
+    return system, "\n\n".join(blocks), images
+
+
+def _image_names(images: list[dict[str, Any]]) -> list[str]:
+    """校验图片部件的文件名（单层安全文件名、不重复）；不合格抛 ValueError（程序错误，不归 ProviderError）。"""
+    names: list[str] = []
+    for part in images:
+        name = str(part.get("name") or "")
+        if not _IMAGE_NAME_RE.fullmatch(name):
+            raise ValueError(f"图片部件文件名不合法：{name!r}")
+        if name in names:
+            raise ValueError(f"图片部件文件名重复：{name!r}")
+        names.append(name)
+    return names
 
 
 def _extract_json_object(text: str) -> dict[str, Any]:
@@ -150,6 +184,8 @@ def _tool_name(tool: dict[str, Any]) -> str:
 class ClaudeCliProvider:
     """`claude -p` 子进程 provider（评测用）。能力边界见模块 docstring。"""
 
+    supports_image_input = True
+
     def __init__(
         self,
         model: str | None = None,
@@ -176,12 +212,23 @@ class ClaudeCliProvider:
             )
         return path
 
-    def _run(self, system: str, prompt: str) -> tuple[str, Usage | None, str]:
-        """跑一次 `claude -p`，返回 (结果文本, usage, 模型名)。失败归一到 ProviderError。"""
+    def _run(
+        self, system: str, prompt: str, images: list[dict[str, Any]] | None = None
+    ) -> tuple[str, Usage | None, str]:
+        """跑一次 `claude -p`，返回 (结果文本, usage, 模型名)。失败归一到 ProviderError。
+
+        images 非空时把图片复制进 cwd、只放开 Read 工具，并在 prompt 末尾附读图指引。
+        """
         exe = self._resolve_bin()
+        images = images or []
+        names = _image_names(images)
         with self._slots, tempfile.TemporaryDirectory(prefix="ragspine-claude-cli-") as tmp:
             workdir = Path(tmp) / "cwd"
             workdir.mkdir()
+            for name, part in zip(names, images, strict=True):
+                shutil.copyfile(str(part.get("path") or ""), workdir / name)
+            if names:
+                prompt = prompt + _IMAGE_HINT.format(names="、".join(names))
             system_file = Path(tmp) / "system.txt"
             system_file.write_text(system or _FALLBACK_SYSTEM, encoding="utf-8")
             cmd = [
@@ -192,13 +239,15 @@ class ClaudeCliProvider:
                 "--system-prompt-file",
                 str(system_file),
                 "--tools",
-                "",
+                "Read" if names else "",
                 "--setting-sources",
                 "",
                 "--strict-mcp-config",
                 "--disable-slash-commands",
                 "--no-session-persistence",
             ]
+            if names:
+                cmd += ["--permission-prompts", "none"]
             if self.model:
                 cmd += ["--model", self.model]
             try:
@@ -236,9 +285,9 @@ class ClaudeCliProvider:
     def chat(
         self, messages: list[dict[str, Any]], *, tools: list[dict[str, Any]] | None = None
     ) -> ChatCompletion:
-        system, prompt = _render_transcript(messages)
+        system, prompt, images = _render_transcript(messages)
         if not tools:
-            text, usage, model = self._run(system, prompt)
+            text, usage, model = self._run(system, prompt, images)
             return _completion(ResponseMessage(role="assistant", content=text), usage, model)
 
         system = system + _TOOL_PROTOCOL.format(tools=json.dumps(tools, ensure_ascii=False))
@@ -246,7 +295,7 @@ class ClaudeCliProvider:
         attempt_prompt = prompt
         last_error = ""
         for _ in range(self.format_retries + 1):
-            text, usage, model = self._run(system, attempt_prompt)
+            text, usage, model = self._run(system, attempt_prompt, images)
             try:
                 message = _parse_tool_reply(text, names)
             except ValueError as exc:

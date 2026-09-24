@@ -11,6 +11,9 @@ embedding / 精排为 none，即零模型零网络。真实模型基线（先 ``
     .venv/bin/python scripts/run_nl_gold_ragspine.py --provider claude-cli \\
         --embedding local-http --reranker local-http --label baseline
 
+图文混合上下文：``--source-pdf <原 PDF>`` 在入库时关联并渲染页图，``--page-images on``（需
+``--page-parent dedup|page+child``）给检索结果的前 ``--page-images-top-n`` 页附页图，claude-cli 会读图。
+
 真实模型连不上即退出（exit 2），绝不静默降级成 mock。报告写到
 ``data/validation/ragspine-nl-gold/<YYYY-MM-DD>-<label>/``（report.md / report.json / cases/）。
 """
@@ -75,6 +78,19 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default="off",
         help="页级父子（RAGSPINE_PAGE_PARENT）：dedup=按页去重 + 整页上下文；page+child=另加整页 BM25 一路",
     )
+    parser.add_argument(
+        "--source-pdf",
+        type=Path,
+        default=None,
+        help="文档对应的原 PDF（页数须与 markdown 一致）；入库时渲染页图。缺省读 <stem>.meta.json 的 source_pdf",
+    )
+    parser.add_argument(
+        "--page-images",
+        choices=("off", "on"),
+        default="off",
+        help="图文混合上下文（RAGSPINE_PAGE_IMAGES）：on=前 N 页附原 PDF 页图（需 --page-parent 非 off）",
+    )
+    parser.add_argument("--page-images-top-n", type=int, default=3)
     parser.add_argument("--routes", default="A-ask,B-narrative")
     parser.add_argument("--languages", default="en,zh")
     parser.add_argument("--cases", default="", help="只跑这些 case_id（逗号分隔）")
@@ -113,6 +129,7 @@ def main(argv: list[str] | None = None) -> int:
         write_report,
     )
     from ragspine.retrieval.link.narrative_link import build_narrative_retriever
+    from ragspine.retrieval.page_images.attach import make_page_image_retriever
     from ragspine.retrieval.rerank.cross_encoder import make_reranker
     from ragspine.retrieval.vector.chunk_index import embedding_model_id
     from ragspine.retrieval.vector.embedding_backends import make_embedding_backend
@@ -188,13 +205,25 @@ def main(argv: list[str] | None = None) -> int:
             "storage": {"persist_vectors": True},
         }
     t0 = time.perf_counter()
-    ingest = RAGSpine.local(workspace, preset=preset, config=rag_config).ingest(source)
+    if args.page_images == "on" and args.page_parent == "off":
+        print(
+            "警告：--page-images on 需要 --page-parent dedup|page+child，否则不附页图",
+            file=sys.stderr,
+        )
+    ingest = RAGSpine.local(workspace, preset=preset, config=rag_config).ingest(
+        source, source_pdf=args.source_pdf
+    )
     timings["ingest_s"] = round(time.perf_counter() - t0, 2)
     if ingest.failed:
         print(f"入库失败：{ingest.summary}", file=sys.stderr)
         return 1
     db = workspace / "knowledge.db"
     vectors = ingest.vector_report.total if ingest.vector_report is not None else 0
+    page_images_indexed = (
+        sum(d.n_images for d in ingest.page_image_report.docs)
+        if ingest.page_image_report is not None
+        else 0
+    )
 
     vector_index = None
     vector_store = None
@@ -212,6 +241,13 @@ def main(argv: list[str] | None = None) -> int:
         embedding_backend=embedding_backend,
         vector_store=vector_store,
         reranker=judge,
+        page_parent=args.page_parent,
+    )
+    retriever = make_page_image_retriever(
+        retriever,
+        args.page_images,
+        chunk_db_path=db,
+        top_n=args.page_images_top_n,
         page_parent=args.page_parent,
     )
     fact_store = SqliteFactStore(db)
@@ -270,6 +306,10 @@ def main(argv: list[str] | None = None) -> int:
         "embedding": models.get("embedding", args.embedding),
         "reranker": models.get("reranker", args.reranker),
         "page_parent": args.page_parent,
+        "page_images": args.page_images,
+        "page_images_top_n": args.page_images_top_n,
+        "source_pdf": str(args.source_pdf) if args.source_pdf else "",
+        "page_images_indexed": page_images_indexed,
         "reference_date": (reference_date or date.today()).isoformat(),
         "company_config": os.environ.get("RAGSPINE_COMPANY_CONFIG", "(default profile)"),
         "languages": ",".join(languages),

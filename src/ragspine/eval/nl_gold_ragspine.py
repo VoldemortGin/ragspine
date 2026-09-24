@@ -45,7 +45,7 @@ from ragspine.agent.intent import (
     ParsedIntent,
     RuleIntentParser,
 )
-from ragspine.agent.llm_provider import LLMProvider
+from ragspine.agent.llm_provider import LLMProvider, provider_supports_images
 from ragspine.storage.fact_store import FactStore
 
 ROUTE_ASK = "A-ask"
@@ -515,6 +515,8 @@ class CountingProvider:
         self._inner = inner
         self.calls = 0
         self.seconds = 0.0
+        # 透传读图能力：包装后图文混合上下文照常发给内层 provider。
+        self.supports_image_input = provider_supports_images(inner)
 
     def chat(
         self, messages: list[dict[str, Any]], *, tools: list[dict[str, Any]] | None = None

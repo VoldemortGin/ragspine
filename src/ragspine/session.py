@@ -17,6 +17,8 @@ from ragspine.ingestion.narrative.narrative_ingest import (
     NarrativeIngestReport,
     ingest_narrative,
 )
+from ragspine.ingestion.page_images.index import PageImageReport, sync_ingested_page_images
+from ragspine.ingestion.page_images.source_pdf import prepare_source_pdfs
 from ragspine.ingestion.review.review_queue import ReviewQueue
 from ragspine.ingestion.structured.ingestion import IngestReport, ingest_file
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
@@ -72,6 +74,7 @@ class IngestResult:
     structured_reports: tuple[IngestReport, ...] = ()
     narrative_report: NarrativeIngestReport | None = None
     vector_report: VectorSyncReport | None = None
+    page_image_report: PageImageReport | None = None
 
     @property
     def failed(self) -> bool:
@@ -261,6 +264,8 @@ class RAGSpine:
             postprocessor=self.retrieval.postprocessor,
             persist_vectors=self.retrieval.persist_vectors,
             page_parent=self.retrieval.page_parent,
+            page_images=self.retrieval.page_images,
+            page_images_top_n=self.retrieval.page_images_top_n,
         )
 
     def ask(self, question: str) -> AgentResult:
@@ -302,12 +307,23 @@ class RAGSpine:
         *,
         dry_run: bool = False,
         valid_as_of: str | None = None,
+        source_pdf: str | Path | None = None,
     ) -> IngestResult:
-        """Ingest a file or directory into every applicable knowledge channel."""
+        """Ingest a file or directory into every applicable knowledge channel.
+
+        ``source_pdf`` links the original PDF to a single DI markdown input (otherwise a
+        ``<stem>.meta.json`` sidecar's ``source_pdf`` field is used); its pages are rendered
+        into ``<workspace>/page_images`` for image+text context. A missing file or a page-count
+        mismatch raises ``SourcePdfError`` before anything is written.
+        """
         self._ensure_open()
         paths = self._resolve_sources(source)
         structured_paths = [path for path in paths if path.suffix.lower() in _STRUCTURED_SUFFIXES]
         narrative_paths = [path for path in paths if path.suffix.lower() in _NARRATIVE_SUFFIXES]
+        # 原 PDF 关联在任何写入之前解析 + 校验（缺失 / 越界 / 页数不一致即抛 SourcePdfError）。
+        pdf_sources = prepare_source_pdfs(
+            narrative_paths, source_pdf, allowed_root=self.allowed_upload_root
+        )
 
         # The fingerprint describes only the narrative chunk index.  Purely
         # structured ingestion is independent of that contract, while mixed
@@ -345,6 +361,7 @@ class RAGSpine:
 
         narrative_report = None
         vector_report = None
+        page_image_report = None
         if narrative_paths:
             chunk_store = ChunkStore(self.db_path)
             chunk_store.init_schema()
@@ -366,10 +383,14 @@ class RAGSpine:
                     )
             finally:
                 chunk_store.close()
+            images = sync_ingested_page_images(narrative_report, pdf_sources, self.db_path)
+            page_image_report = images if images.docs else None
             if not dry_run:
                 # 持久化块向量（opt-in，默认关＝None）：按 embedding 配置把块库同步进向量库。
                 vector_report = index_narrative_vectors(self._service_config())
-        return IngestResult(tuple(structured_reports), narrative_report, vector_report)
+        return IngestResult(
+            tuple(structured_reports), narrative_report, vector_report, page_image_report
+        )
 
     def _resolve_sources(self, source: str | Path) -> list[Path]:
         path = Path(source)

@@ -4,6 +4,7 @@
 
 Submodules:
     narrative/ — 叙事文档抽取 + 批量切块入库。
+    page_images/ — DI markdown 显式关联原 PDF：页数校验 + sha256，入库渲染页图（内容寻址，RESTRICTED 页不渲染）。
     review/ — SME 人工复核队列状态机。
     source/ — 原始文档入口缝：SourceConnector Protocol + RawDoc + 文件系统默认实现。
     structured/ — 结构化事实入库 + 幂等批量 manifest 台账。

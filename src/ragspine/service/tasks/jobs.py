@@ -16,8 +16,18 @@ from typing import Any, cast
 from ragspine.extraction.color.color_semantics import MappingRegistry
 from ragspine.ingestion.narrative.narrative_ingest import (
     NarrativeIngestReport,
+    _resolve_inputs,
     ingest_narrative,
 )
+from ragspine.ingestion.page_images.index import (
+    page_image_report_to_dict,
+    sync_ingested_page_images,
+)
+from ragspine.ingestion.page_images.render import (
+    DEFAULT_PAGE_IMAGE_DPI,
+    DEFAULT_PAGE_IMAGE_MAX_SIDE,
+)
+from ragspine.ingestion.page_images.source_pdf import SourcePdfError, prepare_source_pdfs
 from ragspine.ingestion.review.review_queue import ReviewQueue
 from ragspine.ingestion.structured.ingestion import IngestReport, ingest_file
 from ragspine.ingestion.structured.ingestion_manifest import ManifestStore
@@ -159,6 +169,14 @@ def run_narrative_ingest_job(payload: dict[str, Any]) -> dict[str, Any]:
             except PathNotAllowedError as exc:
                 raise JobError(str(exc), stage="validation", retryable=False) from exc
 
+    # 原 PDF 关联（payload source_pdf 或 sidecar）：写入前校验，缺失 / 越界 / 页数不一致即 validation 失败。
+    try:
+        pdf_sources = prepare_source_pdfs(
+            _resolve_inputs(inputs), payload.get("source_pdf"), allowed_root=allowed_upload_root
+        )
+    except SourcePdfError as exc:
+        raise JobError(str(exc), stage="validation", retryable=False) from exc
+
     chunk_db_path = payload["chunk_db_path"]
     _ensure_parent(chunk_db_path)
 
@@ -178,6 +196,17 @@ def run_narrative_ingest_job(payload: dict[str, Any]) -> dict[str, Any]:
     finally:
         store.close()
     result = narrative_report_to_dict(report)
+    images = sync_ingested_page_images(
+        report,
+        pdf_sources,
+        chunk_db_path,
+        image_dir=payload.get("page_image_dir"),
+        dpi=int(payload.get("page_image_dpi") or DEFAULT_PAGE_IMAGE_DPI),
+        max_side=int(payload.get("page_image_max_side") or DEFAULT_PAGE_IMAGE_MAX_SIDE),
+    )
+    if images.docs:
+        # 页图同步只加计数（无路径 / 内容）；没有关联 PDF 时 report 与原来一致。
+        result["page_images"] = page_image_report_to_dict(images)
     if payload.get("persist_vectors") and not report.dry_run:
         # 持久化块向量（opt-in）：worker 按服务端下发的 embedding 配置自建后端，同步块库 → 向量库；
         # report 只加计数（不含正文）。开关关闭时 report 与原来一致。

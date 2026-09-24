@@ -34,9 +34,11 @@ from ragspine.agent.intent import (
     expand_subtasks,
 )
 from ragspine.agent.llm_provider import (
+    IMAGE_PART_TYPE,
     NARRATIVE_PROMPT_PREFIX,
     LLMProvider,
     ProviderError,
+    provider_supports_images,
 )
 from ragspine.agent.query_tools import QUERY_METRIC_TOOL_OPENAI, execute_query_metric
 from ragspine.common.company_profile import load_company_profile
@@ -115,6 +117,9 @@ class _TraceCtx:
     has_usage: bool = False
     chunk_ids: list[object] = field(default_factory=list)
     chunk_scores: list[object] = field(default_factory=list)
+    # 图文混合上下文（检索结果带 page_image 时）：发出的页图数 / 因 provider 不支持图片而丢弃的页图数。
+    page_images_sent: int = 0
+    page_images_dropped: int = 0
 
     def record_provider(self, seconds: float, usage: dict[str, int | None] | None) -> None:
         self.provider_seconds += seconds
@@ -414,6 +419,46 @@ def _snippet_source(snippet: dict[str, object]) -> dict[str, object]:
     return {"doc": doc, "locator": locator}
 
 
+# 检索结果上的页图引用键（retrieval/page_images 附加；duck-typed，编排层不 import 检索实现）。
+_PAGE_IMAGE_KEY = "page_image"
+_DROPPED_NO_IMAGE_INPUT = "provider_no_image_input"
+
+
+def _page_image_parts(
+    snippets: list[dict[str, object]], provider: LLMProvider, ctx: _TraceCtx
+) -> dict[int, dict[str, object]]:
+    """{snippet 下标: 图片部件}。provider 不支持图片时一张不发、计入 ctx.page_images_dropped。
+
+    图片文件名按页码取 ``p{page}.png``，同名（不同 doc 的同一页）依次加 ``-2``、``-3``，确定性。
+    """
+    refs = [
+        (i, ref) for i, s in enumerate(snippets) if isinstance(ref := s.get(_PAGE_IMAGE_KEY), dict)
+    ]
+    if not refs:
+        return {}
+    if not provider_supports_images(provider):
+        ctx.page_images_dropped += len(refs)
+        return {}
+    parts: dict[int, dict[str, object]] = {}
+    used: set[str] = set()
+    for i, ref in refs:
+        stem = f"p{ref.get('page')}"
+        name, n = f"{stem}.png", 1
+        while name in used:
+            n += 1
+            name = f"{stem}-{n}.png"
+        used.add(name)
+        parts[i] = {
+            "type": IMAGE_PART_TYPE,
+            "path": str(ref.get("path") or ""),
+            "name": name,
+            "doc_id": ref.get("doc_id"),
+            "page": ref.get("page"),
+        }
+    ctx.page_images_sent += len(parts)
+    return parts
+
+
 def _run_narrative(
     question: str,
     provider: LLMProvider,
@@ -447,11 +492,18 @@ def _run_narrative(
     ctx.chunk_scores = [s.get("scores") for s in snippets if s.get("scores")]
 
     sources = [_snippet_source(s) for s in snippets]
+    # 图文混合（opt-in）：带页图引用的片段在文本后追加「图：pN.png」，与随消息发出的图片部件一一对应；
+    # 没有页图（默认）时 body / prompt / 消息与之前逐字节一致。
+    image_parts = _page_image_parts(snippets, provider, ctx)
     body = "\n".join(
         f"[{i + 1}] {_snippet_text(s)}（来源：{src['doc']} {src['locator']}）"
+        + (f"\n图：{image_parts[i]['name']}" if i in image_parts else "")
         for i, (s, src) in enumerate(zip(snippets, sources, strict=True))
     )
     prompt = f"{NARRATIVE_PROMPT_PREFIX}。\n问题：{question}\n检索片段：\n{body}"
+    user_content: object = (
+        [{"type": "text", "text": prompt}, *image_parts.values()] if image_parts else prompt
+    )
     # 历史仅作生成上下文插在 system 与当前问句之间；检索 query（上方）与合成 prompt 仍只用
     # 当前 question，历史绝不进检索、绝不成为新“证据”，空历史时消息序列逐字节不变。
     started = time.perf_counter()
@@ -465,7 +517,7 @@ def _run_narrative(
                     ),
                 },
                 *history_messages,
-                {"role": "user", "content": prompt},
+                {"role": "user", "content": user_content},
             ]
         )
     except ProviderError:
@@ -527,6 +579,13 @@ def _emit_request_trace(
         "chunk_ids": ctx.chunk_ids,
         "chunk_scores": ctx.chunk_scores,
     }
+    if ctx.page_images_sent or ctx.page_images_dropped:
+        # 只记计数与原因代码，不记路径 / 图片内容。
+        fields["page_images"] = {
+            "sent": ctx.page_images_sent,
+            "dropped": ctx.page_images_dropped,
+            "dropped_reason": _DROPPED_NO_IMAGE_INPUT if ctx.page_images_dropped else "",
+        }
     if ctx.has_usage:
         fields["token_usage"] = {
             "input_tokens": ctx.input_tokens,

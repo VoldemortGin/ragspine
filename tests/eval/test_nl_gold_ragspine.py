@@ -446,6 +446,14 @@ def test_counting_provider_counts_calls() -> None:
     assert provider.calls == 2 and provider.seconds >= 0.0
 
 
+def test_counting_provider_forwards_image_capability() -> None:
+    from ragspine.agent.claude_cli_provider import ClaudeCliProvider
+    from ragspine.agent.llm_provider import provider_supports_images
+
+    assert provider_supports_images(CountingProvider(ClaudeCliProvider()))
+    assert not provider_supports_images(CountingProvider(MockProvider()))
+
+
 def test_recording_retriever_records_ranked_locators() -> None:
     class Fake:
         def retrieve(self, query, *, filters=None, top_k=50):  # noqa: ANN001, ANN202

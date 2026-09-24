@@ -57,7 +57,39 @@ __all__ = [
     "StreamingProvider",
     "iter_text_chunks",
     "STREAM_CHUNK_CHARS",
+    "IMAGE_PART_TYPE",
+    "provider_supports_images",
+    "split_message_content",
 ]
+
+# 图文混合消息（opt-in）：user 消息的 content 除了字符串，还可以是部件列表——
+#   {"type": "text", "text": "..."}
+#   {"type": "image", "path": "<本地 PNG 绝对路径>", "name": "p18.png", "doc_id": "...", "page": 18}
+# name 是 prompt 文本里引用这张图用的文件名。只有声明 `supports_image_input = True` 的 provider
+# 才会收到部件列表；其余 provider（Mock / Anthropic / 包装器）照旧只收到字符串，由编排层降级并记 trace。
+IMAGE_PART_TYPE = "image"
+
+
+def provider_supports_images(provider: object) -> bool:
+    """provider 是否声明能读图片部件（显式 `supports_image_input = True`）。"""
+    return getattr(provider, "supports_image_input", False) is True
+
+
+def split_message_content(content: object) -> tuple[str, list[dict[str, Any]]]:
+    """消息 content → (文本, 图片部件列表)。字符串原样返回；部件列表的文本部件以换行拼接。"""
+    if not isinstance(content, list):
+        return str(content or ""), []
+    texts: list[str] = []
+    images: list[dict[str, Any]] = []
+    for part in content:
+        if not isinstance(part, dict):
+            continue
+        if part.get("type") == IMAGE_PART_TYPE:
+            images.append(part)
+        elif part.get("type") == "text":
+            texts.append(str(part.get("text") or ""))
+    return "\n".join(texts), images
+
 
 # 确定性定长文本 delta：SSE 逐块推送用，跨平台稳定（按 code point 切片）。
 STREAM_CHUNK_CHARS = 24

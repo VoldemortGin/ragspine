@@ -255,3 +255,149 @@ def test_live_claude_cli_smoke():
         [{"role": "user", "content": "中国内地FY2024的REVENUE是多少"}], tools=TOOLS
     )
     assert resp.choices[0].message.tool_calls
+
+
+# ---------------------------------------------------------------------------
+# 图文混合：页图复制进临时 cwd，只放开 Read 工具，其余隔离不变
+# ---------------------------------------------------------------------------
+
+
+class FakeRunWithFiles(FakeRun):
+    """额外记录 cwd 里每个文件的字节。"""
+
+    def __call__(self, cmd, **kwargs):
+        cwd = Path(kwargs["cwd"])
+        self.files = {p.name: p.read_bytes() for p in cwd.iterdir()}
+        return super().__call__(cmd, **kwargs)
+
+
+def _image_messages(tmp_path):
+    a = tmp_path / "store" / "aa" / "hash-a.png"
+    a.parent.mkdir(parents=True)
+    a.write_bytes(b"PNG-A")
+    b = tmp_path / "store" / "hash-b.png"
+    b.write_bytes(b"PNG-B")
+    return [
+        {"role": "system", "content": "SYS"},
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "问题\n[1] 片段（来源：deck.md deck.md@page=18#para1）\n图：p18.png",
+                },
+                {
+                    "type": "image",
+                    "path": str(a),
+                    "name": "p18.png",
+                    "doc_id": "deck.md",
+                    "page": 18,
+                },
+                {"type": "image", "path": str(b), "name": "p3.png", "doc_id": "deck.md", "page": 3},
+            ],
+        },
+    ]
+
+
+def test_declares_image_support():
+    from ragspine.agent.llm_provider import provider_supports_images
+
+    assert provider_supports_images(ClaudeCliProvider())
+
+
+def test_images_are_copied_into_empty_cwd_and_only_read_is_enabled(monkeypatch, fake_bin, tmp_path):
+    fake = _install(monkeypatch, FakeRunWithFiles(_payload("72%")))
+    resp = ClaudeCliProvider().chat(_image_messages(tmp_path))
+    assert resp.choices[0].message.content == "72%"
+
+    call = fake.calls[0]
+    cmd = call["cmd"]
+    assert call["cwd_listing"] == ["p18.png", "p3.png"]
+    assert fake.files == {"p18.png": b"PNG-A", "p3.png": b"PNG-B"}
+    assert cmd[cmd.index("--tools") + 1] == "Read"
+    assert cmd[cmd.index("--permission-prompts") + 1] == "none"
+    assert "--allowedTools" not in cmd and "--allowed-tools" not in cmd
+    assert "--add-dir" not in cmd
+    assert cmd[cmd.index("--setting-sources") + 1] == ""
+    for flag in ("--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence"):
+        assert flag in cmd
+    prompt = call["input"]
+    assert prompt.startswith("问题\n[1] 片段（来源：deck.md deck.md@page=18#para1）\n图：p18.png")
+    assert "Read" in prompt and "p18.png" in prompt and "p3.png" in prompt
+    # 原图的存储路径不外泄给模型
+    assert str(tmp_path) not in prompt and all(str(tmp_path) not in c for c in cmd)
+    assert call["system"] == "SYS"
+
+
+def test_text_only_parts_behave_like_a_string(monkeypatch, fake_bin):
+    fake = _install(monkeypatch, FakeRun(_payload("ok"), _payload("ok")))
+    ClaudeCliProvider().chat([{"role": "user", "content": [{"type": "text", "text": "问题"}]}])
+    ClaudeCliProvider().chat([{"role": "user", "content": "问题"}])
+    first, second = fake.calls
+
+    def _argv(cmd):  # system prompt 文件在每次调用的临时目录里，路径不同
+        i = cmd.index("--system-prompt-file")
+        return cmd[:i] + cmd[i + 2 :]
+
+    assert _argv(first["cmd"]) == _argv(second["cmd"])
+    assert first["input"] == second["input"] == "问题"
+    assert first["cmd"][first["cmd"].index("--tools") + 1] == ""
+    assert "--permission-prompts" not in first["cmd"]
+
+
+@pytest.mark.parametrize("name", ["../p1.png", "sub/p1.png", "", ".hidden.png", "p1.txt"])
+def test_unsafe_image_names_are_rejected(monkeypatch, fake_bin, tmp_path, name):
+    _install(monkeypatch, FakeRun(_payload("ok")))
+    img = tmp_path / "x.png"
+    img.write_bytes(b"x")
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "q"},
+                {"type": "image", "path": str(img), "name": name},
+            ],
+        }
+    ]
+    with pytest.raises(ValueError):
+        ClaudeCliProvider().chat(messages)
+
+
+def test_duplicate_image_names_are_rejected(monkeypatch, fake_bin, tmp_path):
+    _install(monkeypatch, FakeRun(_payload("ok")))
+    img = tmp_path / "x.png"
+    img.write_bytes(b"x")
+    part = {"type": "image", "path": str(img), "name": "p1.png"}
+    with pytest.raises(ValueError):
+        ClaudeCliProvider().chat(
+            [{"role": "user", "content": [{"type": "text", "text": "q"}, part, part]}]
+        )
+
+
+@pytest.mark.network
+@pytest.mark.skipif(
+    os.environ.get("RAGSPINE_CLAUDE_CLI_SMOKE") != "1" or shutil.which("claude") is None,
+    reason="真实 claude -p 读图 smoke：需本机已登录 claude 且 RAGSPINE_CLAUDE_CLI_SMOKE=1",
+)
+def test_live_claude_cli_reads_page_image(tmp_path):
+    from ragspine.ingestion.page_images.render import render_pdf_pages
+    from tests.ingestion.page_images.fixtures import make_pdf
+
+    pdf = make_pdf(tmp_path / "a.pdf", ["Codeword: ZEBRA-4417"])
+    png = tmp_path / "img.png"
+    png.write_bytes(render_pdf_pages(pdf, dpi=144, max_side=1568)[0].png)
+    resp = ClaudeCliProvider(timeout=180.0).chat(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "What codeword is printed in p1.png? Reply with the codeword only.",
+                    },
+                    {"type": "image", "path": str(png), "name": "p1.png"},
+                ],
+            }
+        ]
+    )
+    assert "ZEBRA-4417" in (resp.choices[0].message.content or "")

@@ -26,11 +26,20 @@ from ragspine.agent.llm_provider import (
 )
 from ragspine.agent.query_transform import make_query_transform
 from ragspine.common.observability import emit_trace
+from ragspine.ingestion.page_images.render import (
+    DEFAULT_PAGE_IMAGE_DPI,
+    DEFAULT_PAGE_IMAGE_MAX_SIDE,
+)
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
 from ragspine.retrieval.corrective import make_corrective_retriever
 from ragspine.retrieval.lexical.retrieval import EmbeddingBackend
 from ragspine.retrieval.link.narrative_link import build_narrative_retriever
 from ragspine.retrieval.mode import make_retrieval_mode
+from ragspine.retrieval.page_images.attach import (
+    DEFAULT_PAGE_IMAGES_TOP_N,
+    make_page_image_retriever,
+)
+from ragspine.retrieval.page_images.store import default_page_image_dir
 from ragspine.retrieval.postprocess import make_postprocessor
 from ragspine.retrieval.rerank.cross_encoder import make_reranker
 from ragspine.retrieval.vector.chunk_index import (
@@ -72,6 +81,8 @@ class RetrievalPreset:
     postprocessor: PostprocessorSpec
     persist_vectors: bool = False
     page_parent: str = "off"
+    page_images: str = "off"
+    page_images_top_n: int = DEFAULT_PAGE_IMAGES_TOP_N
 
     def with_overrides(
         self,
@@ -83,6 +94,8 @@ class RetrievalPreset:
         postprocessor: PostprocessorSpec | None = None,
         persist_vectors: bool | None = None,
         page_parent: str | None = None,
+        page_images: str | None = None,
+        page_images_top_n: int | None = None,
     ) -> "RetrievalPreset":
         """Return a new preset with only explicitly supplied fields replaced."""
         return RetrievalPreset(
@@ -93,6 +106,10 @@ class RetrievalPreset:
             postprocessor=postprocessor or self.postprocessor,
             persist_vectors=self.persist_vectors if persist_vectors is None else persist_vectors,
             page_parent=page_parent or self.page_parent,
+            page_images=page_images or self.page_images,
+            page_images_top_n=(
+                self.page_images_top_n if page_images_top_n is None else page_images_top_n
+            ),
         )
 
 
@@ -131,6 +148,8 @@ def make_retrieval_preset(
     postprocessor: PostprocessorSpec | None = None,
     persist_vectors: bool | None = None,
     page_parent: str | None = None,
+    page_images: str | None = None,
+    page_images_top_n: int | None = None,
 ) -> RetrievalPreset:
     """Resolve a named local profile and apply explicit, typed overrides."""
     selected = profile if isinstance(profile, RetrievalProfile) else RetrievalProfile(profile)
@@ -142,6 +161,8 @@ def make_retrieval_preset(
         postprocessor=postprocessor,
         persist_vectors=persist_vectors,
         page_parent=page_parent,
+        page_images=page_images,
+        page_images_top_n=page_images_top_n,
     )
 
 
@@ -166,6 +187,11 @@ class ServiceConfig:
     query_decompose: str = "none"  # W6a 查询分解(opt-in): "none"(不分解,默认字节不变) | "llm"(注入provider的LLM多跳分解)
     corrective: str = "none"  # W6b 纠错检索(opt-in): "none"(默认,返回base本身字节不变) | "crag"(有界确定性 grade→act 环)
     page_parent: str = "off"  # 页级父子(opt-in): "off"(默认,检索输出字节不变) | "dedup"(按页去重,代表块带整页上下文) | "page+child"(另加整页BM25一路再RRF)
+    page_images: str = "off"  # 图文混合上下文(opt-in): "off"(默认,prompt字节不变) | "on"(前 N 页附原 PDF 页图;需 page_parent≠off 且入库时关联了 source PDF)
+    page_images_top_n: int = DEFAULT_PAGE_IMAGES_TOP_N  # page_images=on 时附图的前 N 条(页)
+    page_image_dpi: int = DEFAULT_PAGE_IMAGE_DPI  # 入库渲染页图的 DPI(关联了 source PDF 时)
+    page_image_max_side: int = DEFAULT_PAGE_IMAGE_MAX_SIDE  # 页图长边像素上限
+    page_image_dir: str | None = None  # 页图目录;None=块库旁 page_images/
     postprocessor: str = "none"  # W8 后检索链(opt-in): "none"(默认,不挂链字节不变) | "mmr"/"lost_in_middle"/"compress" | 逗号成链如"mmr,lost_in_middle"
     query_transform: str = "none"  # W9 查询变换(opt-in,需注入provider): "none"(默认返回base字节不变) | "hyde" | "rag_fusion" | "step_back"
     adaptive: str = "none"  # W9 Adaptive-RAG 复杂度路由(opt-in): "none"(默认不路由字节不变) | "heuristic"(确定性分类) | "llm"
@@ -304,12 +330,29 @@ def open_narrative_retriever(
     # W6b 纠错检索（opt-in）：默认 "none" → make_corrective_retriever 返回 transformed 本身（字节
     # 不变）；"crag" 才包成有界确定性 grade→act 环。隔离继承自 base（RESTRICTED 已在出口剔除）。
     wrapped: NarrativeRetriever = make_corrective_retriever(transformed, config.corrective)
+    # 图文混合上下文（opt-in）：默认 "off" → 原样返回（字节不变）；"on" 给最外层结果的前 N 页附页图引用，
+    # 含 RESTRICTED 块的页不发图。
+    wrapped = make_page_image_retriever(
+        wrapped,
+        config.page_images,
+        chunk_db_path=config.chunk_db_path,
+        image_dir=resolve_page_image_dir(config),
+        top_n=config.page_images_top_n,
+        page_parent=config.page_parent,
+    )
     try:
         yield wrapped
     finally:
         store.close()
         if vector_index is not None:
             vector_index.close()
+
+
+def resolve_page_image_dir(config: ServiceConfig) -> Path:
+    """页图目录：显式 page_image_dir，否则块库旁 ``page_images/``。"""
+    if config.page_image_dir:
+        return Path(config.page_image_dir)
+    return default_page_image_dir(config.chunk_db_path or config.db_path)
 
 
 def resolve_vector_db_path(config: ServiceConfig) -> Path:
