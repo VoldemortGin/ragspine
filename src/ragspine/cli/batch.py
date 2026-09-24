@@ -237,6 +237,10 @@ def _pin_settings(out: Path, settings: Mapping[str, object], *, resume: bool) ->
             raise BatchError(
                 f"无法读取 {path}（{exc}），不能确认续跑配置一致；请换一个 --out 重跑"
             ) from exc
+        if not isinstance(pinned, dict):
+            raise BatchError(
+                f"{path} 不是 JSON 对象（可能被改坏），不能确认续跑配置一致；请换一个 --out 重跑"
+            )
         changed = sorted(
             key for key in {*pinned, *settings} if pinned.get(key) != settings.get(key)
         )

@@ -605,3 +605,16 @@ def test_summary_shows_contextual_index_default_off(tmp_path, workspace, questio
     assert "- contextual_index: `off`" in (out / "summary.md").read_text(encoding="utf-8")
     # 显式 off 与缺省是同一实际值：续跑不算配置变化。
     assert main([*base, "--out", str(out), "--resume", "--contextual-index", "off"]) == 0
+
+
+@pytest.mark.parametrize("content", ["[1, 2]", '"text"', "{broken"])
+def test_resume_with_a_corrupt_run_settings_is_exit_2(
+    tmp_path, workspace, questions, capsys, content
+):
+    out = tmp_path / "out"
+    base = ["batch", str(questions), "--workspace", str(workspace), "--retrieval-only"]
+    assert main([*base, "--out", str(out), "--limit", "1"]) == 0
+    (out / "run_settings.json").write_text(content, encoding="utf-8")
+    assert main([*base, "--out", str(out), "--resume"]) == 2
+    err = capsys.readouterr().err
+    assert "run_settings.json" in err and "--out" in err
