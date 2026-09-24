@@ -72,7 +72,7 @@ Docs describing code carry `covers:` + `verified-against:` frontmatter;
 
 ## Invariants (do not break)
 
-- **Anti-fabrication** — no `found` fact (or no metric) ⇒ the narrative fallback is tried and kept only if grounded (sources, no `NO_ANSWER`, a number from the snippets); otherwise the answer is the deterministic not-found (`agent/agent.py`, [ADR 0023](docs/adr/0023-structured-miss-narrative-fallback.md)).
+- **Anti-fabrication** — no `found` fact (or no metric) ⇒ the narrative fallback is tried and kept only if grounded (sources, no `NO_ANSWER`, a number from the snippets); otherwise the answer is the deterministic not-found (`agent/agent.py`, [ADR 0023](docs/adr/0023-structured-miss-narrative-fallback.md)). Every narrative answer's numbers must appear in the snippets, else it is deterministically rewritten (`agent/number_guard.py`, [ADR 0024](docs/adr/0024-narrative-number-guard.md)).
 - **Provenance** — every fact/answer carries `source_doc_id` + locator. Don't drop lineage.
 - **RESTRICTED isolation** — sensitivity-`RESTRICTED` content is filtered at **two** exits
   (`retrieval/link`, `retrieval/rerank`) before it can reach a prompt.

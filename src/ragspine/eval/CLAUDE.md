@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/eval/
-verified-against: f67fbf2e2c2bae6bfdbb65f915f0705d227d7d82
+verified-against: 6ebaaa4c3340f5dfcb69c255c94b3b6bc4724c74
 ---
 
 # eval — agent contract
@@ -85,7 +85,8 @@ answers recorded in an old `report.json` with the current judge + `--gold` (no i
   phrase in the answer's lead (headings + first sentence, parentheticals dropped), unless the lead is a hedged
   answer (`most likely` / `很可能`…); scaled currency amounts (`5.14 亿美元`, `US$1.168b`) get their exact
   millions appended in `normalize_answer` (only when no zero-padding is needed; `%` untouched) — the
-  `normalize_answer` / `contains_normalized` signatures stay fixed (imported elsewhere); the cross-lingual
+  `normalize_answer` / `contains_normalized` signatures stay fixed (imported elsewhere; they now live in
+  `common/answer_text.py`, shared with the narrative number guard of ADR 0024, and are re-exported here); the cross-lingual
   fragment rule (≥3 key tokens of a quote inside a 3×-quote-length window) is a **relaxation**, flagged per claim
   (`fragment_hit`) and counted separately in the report.
 

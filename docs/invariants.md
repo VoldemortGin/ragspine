@@ -1,10 +1,11 @@
 ---
 covers:
   - src/ragspine/agent/agent.py
+  - src/ragspine/agent/number_guard.py
   - src/ragspine/retrieval/link/
   - src/ragspine/retrieval/rerank/
   - src/ragspine/common/observability/
-verified-against: c71bb945629f82eb18b3761493d091d1af2662dc
+verified-against: 6ebaaa4c3340f5dfcb69c255c94b3b6bc4724c74
 ---
 
 # Invariants (code-enforced)
@@ -16,7 +17,7 @@ freezes it.
 ## Anti-fabrication
 
 **Guarantees** a number in an answer comes from evidence: a structured `found` fact, or (on the
-fallback path) a number that appears in the retrieved snippet text. With no such evidence the answer
+narrative channel, fallback included) a number that appears in the retrieved snippet text. With no such evidence the answer
 is the deterministic not-found / unrecognized rewrite (for a missing metric: not-found followed by
 the `ask_first` metric question, or just that question when no fallback ran), never model prose.
 
@@ -31,9 +32,21 @@ original structured result unchanged, and a missing metric answers "查不到：
 (the `ask_first` clarification object is kept). The competitor / out-of-scope refusal stays the first early return;
 `found`, composite and narrative routes never fall back. The request trace records
 `narrative_fallback={reason, grounded}` (codes only).
+**Narrative number guard (ADR 0024, `RAGSPINE_NARRATIVE_NUMBER_GUARD=on|off`, default `on`):** every
+`_run_narrative` synthesis (narrative route, composite attribution, accepted fallback) goes through
+`agent/number_guard.guard_narrative_answer`. Each answer number must appear in the snippet text under the
+nl-gold normalization (`common/answer_text.normalize_answer` / `contains_normalized`; magnitude amounts compared
+by value, `%` never matches a bare number). Exempt: question numbers, source doc / locator strings, `[n]`
+markers, page / slide refs, list numbers, and years / periods that match the question or snippets. An ungrounded
+number in the lead ⇒ `NUMBER_GUARD_NOTICE` + the original sentences that hold only grounded numbers. Elsewhere ⇒
+only those sentences are dropped, plus a trailing note. No second LLM call. Sources are still forced. When on, the
+system prompt also carries `NUMBER_GUARD_RULE` (no calculation / order / causal inference). Off ⇒ byte-identical.
+Trace: `narrative_number_guard={ungrounded, rewritten}` (counts only, only on rewrite).
 **Frozen by** `tests/agent/test_agent_orchestrator.py` (not-found / unrecognized rewrite,
 `test_found_path_discards_fabricated_extra_number`), `tests/agent/test_narrative_fallback.py`
-(fallback grounded / ungrounded / fabricated-number rejected / off ≡ old behavior), and the QA ratchet
+(fallback grounded / ungrounded / fabricated-number rejected / off ≡ old behavior),
+`tests/agent/test_narrative_number_guard.py` (computed number rewritten, raw / format-variant / question /
+citation / period numbers pass, sources kept, off ≡ snapshot), and the QA ratchet
 (`data/golden/qa_baseline.json`, fabrication count 0).
 
 ## Provenance

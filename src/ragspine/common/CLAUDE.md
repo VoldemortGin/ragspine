@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/common/
-verified-against: 9002e50aac9b249bfbb3563132cf872706ccfdcb
+verified-against: 6ebaaa4c3340f5dfcb69c255c94b3b6bc4724c74
 ---
 
 # common — agent contract
@@ -20,6 +20,11 @@ behavior unchanged) + `sink.py` (the **`TraceSink` seam** — `make_trace_sink` 
 `enforce_trace_privacy` gate; **reuses** corespine's `@runtime_checkable TraceSink` Protocol +
 `InProcessPrivacyTraceSink` default, no duplicate Protocol) + `adapters/otel.py` (`OtelTraceSink`,
 behind `[otel]`, privacy-gated before any span).
+
+`answer_text.py` — `normalize_answer` / `contains_normalized`: number-friendly text normalization
+(NFKC, thousands, `per cent`→`%`, magnitude amounts) + digit-boundary containment. One definition shared by the
+nl-gold judge (`eval/`, re-exported with unchanged signatures) and the narrative number guard (`agent/number_guard`,
+ADR 0024).
 
 `evidence/` — the evidence chain's APP_* settings, lineage logging and model access
 (ADR 0022); its own contract is [`evidence/CLAUDE.md`](evidence/CLAUDE.md).

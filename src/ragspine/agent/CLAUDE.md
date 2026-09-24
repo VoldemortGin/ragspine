@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/agent/
-verified-against: c71bb945629f82eb18b3761493d091d1af2662dc
+verified-against: 6ebaaa4c3340f5dfcb69c255c94b3b6bc4724c74
 ---
 
 # agent — agent contract
@@ -55,6 +55,10 @@ loop, LLM provider abstraction.
   is auto-denied — deliberately **not** `--allowedTools Read`, which would pre-approve any path), and the prompt
   gets a one-line hint naming the relative files. Original storage paths never reach prompt / argv. No images ⇒
   the command line is exactly the old one.
+- `number_guard.py` — **narrative number guard (ADR 0024)**: `guard_narrative_answer` /
+  `ungrounded_numbers` (deterministic, zero LLM; normalization from `common/answer_text`),
+  `NUMBER_GUARD_RULE` (prompt), `NUMBER_GUARD_NOTICE`, `resolve_number_guard` /
+  `RAGSPINE_NARRATIVE_NUMBER_GUARD`.
 - `query_tools.py` — profile-driven `query_metric` tool schema + execution
   (`found` / `not_found` / `unrecognized_param` — never fabricates).
 - `decompose.py` — **W6a query decomposition (opt-in, default-off).** `QueryDecomposer` Protocol +
@@ -92,8 +96,14 @@ loop, LLM provider abstraction.
     `test_found_path_discards_fabricated_extra_number`). Don't reintroduce
     `model_text` into the found branch.
   - *multi-subtask* — `_multi_subtask_answer` never calls the LLM at all.
-  - *narrative* — `_run_narrative` trusts model prose but **forces source citation**;
-    no found-fact rewrite here. That asymmetry is deliberate.
+  - *narrative* — `_run_narrative` **forces source citation**, and (ADR 0024,
+    `RAGSPINE_NARRATIVE_NUMBER_GUARD=on|off`, default `on`; `answer_question(narrative_number_guard=)`
+    overrides) every answer number must appear in the snippet text. Question numbers, citation / page /
+    list markers, and years or periods that match the evidence are exempt. Otherwise the answer is
+    rewritten deterministically: an ungrounded number in the lead ⇒ `NUMBER_GUARD_NOTICE` + the grounded
+    raw-value sentences; elsewhere ⇒ only those sentences are dropped, plus a note. On also appends
+    `NUMBER_GUARD_RULE` to the system prompt. Off ⇒ byte-identical. The prose is otherwise trusted; there
+    is no found-fact rewrite here. Don't swap the rewrite for a second LLM "repair" call.
   - *route fallback (ADR 0023)* — `RAGSPINE_NARRATIVE_FALLBACK=on|off` (default `on`;
     `answer_question(narrative_fallback=)` overrides). With a retriever injected, a structured-route
     missing metric (`missing_metric`) or zero `found` (`structured_no_hit`) first runs
@@ -102,7 +112,8 @@ loop, LLM provider abstraction.
     no-hit returns the original result byte-identical, and a missing metric answers "查不到：…" + the
     original ask (the `ask_first` clarification is kept). Result: `route=narrative`, `fallback=<reason>`,
     `clarification.mode=none`. Never on `found` / composite / narrative, never before the
-    competitor refusal. Don't relax the grounding check to "has sources".
+    competitor refusal. Don't relax the grounding check to "has sources". The number guard runs after
+    `_fallback_grounded` on an accepted fallback answer too.
 - **Security is deterministic and never-pluggable.** Intent extraction is a swappable
   `IntentParser` Protocol; the `SecurityGate` is not. The gate re-derives external /
   competitor scope from the raw question and decides refusal independently of whatever
