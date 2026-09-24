@@ -475,6 +475,7 @@ def submit_narrative_job(
             embedding=config.embedding,
             persistence_policy=config.persistence_policy,
             vector_db_path=config.vector_db_path,
+            contextual_index=config.contextual_index,
         )
     job_id = queue.enqueue(NARRATIVE_INGEST_JOB, payload, job_id=req.job_id)
     return JobSubmitResponse(job_id=job_id)

@@ -57,3 +57,17 @@ def group_pages[T](chunks: Iterable[T]) -> dict[tuple[str, int], list[T]]:
     for members in groups.values():
         members.sort(key=lambda c: getattr(c, "seq", 0))
     return groups
+
+
+def page_heading(chunks: Iterable[Any]) -> str:
+    """整页单元的标题：页内各块标题路径（" > " 分段）去重保序后拼一次；都没有标题 -> ''。
+
+    只给整页单元的【索引文本】用（标题进索引开关打开时），每个标题段只出现一次，
+    不按块重复、不放大 BM25 词频。调用方只传同页的非 RESTRICTED 块（group_pages 的组）。
+    """
+    segments: dict[str, None] = {}
+    for chunk in chunks:
+        for segment in str(getattr(chunk, "heading", "") or "").split(" > "):
+            if segment.strip():
+                segments.setdefault(segment.strip(), None)
+    return " > ".join(segments)

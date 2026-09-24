@@ -24,6 +24,11 @@ from typing import Any
 
 from ragspine.agent.llm_provider import LLMProvider
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
+from ragspine.retrieval.contextual import (
+    CONTEXTUAL_INDEX_OFF,
+    make_contextual_index_mode,
+    make_index_text_fn,
+)
 from ragspine.retrieval.lexical.retrieval import (
     EmbeddingBackend,
     GlossaryQueryRewriter,
@@ -168,6 +173,7 @@ def build_narrative_retriever(
     reranker: ListwiseJudge | None = None,
     postprocessor: NodePostprocessor | None = None,
     page_parent: str | None = PAGE_PARENT_PAGE_CHILD,
+    contextual_index: str | None = CONTEXTUAL_INDEX_OFF,
 ) -> tuple[NarrativeIndexRetriever, ChunkStore]:
     """开块库并组装默认叙事检索链（CLI/服务接线入口）。
 
@@ -188,7 +194,10 @@ def build_narrative_retriever(
     prompt 组装之前对已 RESTRICTED-剥离的输出做重排/去冗余/压缩。默认 None＝不挂链、retrieve 输出字节不变。
     page_parent：页级父子开关（'off' | 'dedup' | 'page+child'，见 ragspine.retrieval.page_parent）；
     默认 'page+child'（按页去重 + 整页 BM25 一路）；'off'（或 None）＝检索输出与引入前字节不变。
+    contextual_index：标题进索引开关（'off' | 'heading' | 'full'，见 ragspine.retrieval.contextual）；
+    只改 BM25 / 向量的索引文本，交给 LLM 的文本不变。'off'（或 None）＝检索输出与引入前字节不变。
     """
+    index_text_fn = make_index_text_fn(make_contextual_index_mode(contextual_index))
     store = ChunkStore(chunk_db)
     store.init_schema()
     judge: ListwiseJudge | None = reranker
@@ -202,5 +211,6 @@ def build_narrative_retriever(
         vector_store=vector_store,
         persistence_policy=persistence_policy,
         page_parent=page_parent,
+        index_text_fn=index_text_fn,
     )
     return NarrativeIndexRetriever(index, postprocessor=postprocessor), store

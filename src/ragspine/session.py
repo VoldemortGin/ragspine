@@ -266,6 +266,7 @@ class RAGSpine:
             page_parent=self.retrieval.page_parent,
             page_images=self.retrieval.page_images,
             page_images_top_n=self.retrieval.page_images_top_n,
+            contextual_index=self.retrieval.contextual_index,
         )
 
     def ask(self, question: str) -> AgentResult:

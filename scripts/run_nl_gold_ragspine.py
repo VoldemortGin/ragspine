@@ -105,6 +105,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="页级父子（RAGSPINE_PAGE_PARENT）：dedup=按页去重 + 整页上下文；page+child=另加整页 BM25 一路",
     )
     parser.add_argument(
+        "--contextual-index",
+        choices=("off", "heading", "full"),
+        default="off",
+        help="标题进索引（RAGSPINE_CONTEXTUAL_INDEX）：heading=BM25/向量索引文本前拼标题路径；full=再加 title/entity/period",
+    )
+    parser.add_argument(
         "--source-pdf",
         type=Path,
         default=None,
@@ -267,9 +273,9 @@ def main(argv: list[str] | None = None) -> int:
             "警告：--page-images on 需要 --page-parent dedup|page+child，否则不附页图",
             file=sys.stderr,
         )
-    ingest = RAGSpine.local(workspace, preset=preset, config=rag_config).ingest(
-        source, source_pdf=args.source_pdf
-    )
+    rag = RAGSpine.local(workspace, preset=preset, config=rag_config)
+    rag.retrieval = rag.retrieval.with_overrides(contextual_index=args.contextual_index)
+    ingest = rag.ingest(source, source_pdf=args.source_pdf)
     timings["ingest_s"] = round(time.perf_counter() - t0, 2)
     if ingest.failed:
         print(f"入库失败：{ingest.summary}", file=sys.stderr)
@@ -286,7 +292,12 @@ def main(argv: list[str] | None = None) -> int:
     vector_store = None
     if embedding_backend is not None:
         embedding_backend, vector_index = open_vector_channel(
-            ServiceConfig(db_path=str(db), chunk_db_path=str(db), persist_vectors=True),
+            ServiceConfig(
+                db_path=str(db),
+                chunk_db_path=str(db),
+                persist_vectors=True,
+                contextual_index=args.contextual_index,
+            ),
             embedding_backend,
         )
         vector_store = vector_index.store if vector_index is not None else None
@@ -299,6 +310,7 @@ def main(argv: list[str] | None = None) -> int:
         vector_store=vector_store,
         reranker=judge,
         page_parent=args.page_parent,
+        contextual_index=args.contextual_index,
     )
     retriever = make_page_image_retriever(
         retriever,
@@ -367,6 +379,7 @@ def main(argv: list[str] | None = None) -> int:
         "embedding": models.get("embedding", args.embedding),
         "reranker": models.get("reranker", args.reranker),
         "page_parent": args.page_parent,
+        "contextual_index": args.contextual_index,
         "page_images": args.page_images,
         "page_images_top_n": args.page_images_top_n,
         "source_pdf": str(args.source_pdf) if args.source_pdf else "",

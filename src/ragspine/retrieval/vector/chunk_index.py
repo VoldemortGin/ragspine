@@ -12,6 +12,10 @@
   向量；被挡下的块数计入 ``withheld``。
 - **模型标识**：首次写入时记下 embedding 模型标识与维度；之后 sync / 检索发现模型或维度不一致即抛
   ``VectorIndexMismatchError``（要求重建），绝不混用两个模型的向量。
+- **索引文本版本**（标题进索引开关 ``contextual_index``）：嵌入的是块的【索引文本】（off 时即正文），doc 签名
+  也按索引文本算——开关一变，索引文本变了的 doc 在下次 sync 时自动重嵌。库内另记 ``contextual_index``
+  （off 不写，旧库缺省即 off）；sync 期间标记为「迁移中」，检索期版本不一致即抛 ``VectorIndexMismatchError``，
+  绝不静默混用两种索引文本的向量。
 """
 
 import hashlib
@@ -23,7 +27,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ragspine.retrieval.chunking.chunk_store import StoredChunk
-from ragspine.retrieval.lexical.retrieval import EmbeddingBackend, _record_metadata
+from ragspine.retrieval.contextual import (
+    CONTEXTUAL_INDEX_OFF,
+    IndexTextFn,
+    make_contextual_index_mode,
+    make_index_text_fn,
+)
+from ragspine.retrieval.lexical.retrieval import EmbeddingBackend, _index_text, _record_metadata
 from ragspine.retrieval.vector.adapters.sqlite_vec import SqliteVecVectorStore
 from ragspine.retrieval.vector.persistence_policy import IsolationFirstPolicy, PersistencePolicy
 from ragspine.retrieval.vector.store import VectorRecord
@@ -33,6 +43,8 @@ DEFAULT_EMBED_BATCH = 32
 
 _META_TABLE = "chunk_vector_meta"
 _DOCS_TABLE = "chunk_vector_docs"
+_INDEX_TEXT_KEY = "contextual_index"
+_MIGRATING = "migrating:"
 
 
 class VectorIndexMismatchError(ValueError):
@@ -89,9 +101,9 @@ def embedding_model_id(backend: EmbeddingBackend) -> str:
     return name
 
 
-def _doc_signature(chunks: Sequence[StoredChunk]) -> str:
+def _doc_signature(chunks: Sequence[StoredChunk], index_text_fn: IndexTextFn | None = None) -> str:
     payload = [
-        [c.chunk_id, c.text, sorted(_record_metadata(c).items())]
+        [c.chunk_id, _index_text(c, index_text_fn), sorted(_record_metadata(c).items())]
         for c in sorted(chunks, key=lambda c: c.chunk_id)
     ]
     encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
@@ -124,11 +136,27 @@ class ChunkVectorIndex:
         value = self._meta("dim")
         return int(value) if value is not None else None
 
+    @property
+    def contextual_index(self) -> str:
+        """向量对应的索引文本版本（off / heading / full；同步中断时为 'migrating:<目标>'）。"""
+        return self._meta(_INDEX_TEXT_KEY) or CONTEXTUAL_INDEX_OFF
+
     def count(self) -> int:
         return self.store.count()
 
-    def check_compatible(self, model_id: str, dim: int | None = None) -> None:
-        """模型标识 / 维度与库内记录不一致即抛 VectorIndexMismatchError（空库不校验）。"""
+    def check_compatible(
+        self, model_id: str, dim: int | None = None, *, contextual_index: str | None = None
+    ) -> None:
+        """模型标识 / 维度（/ 给了时的索引文本版本）与库内记录不一致即抛 VectorIndexMismatchError
+        （空库不校验）。"""
+        if contextual_index is not None and self.count() > 0:
+            wanted = make_contextual_index_mode(contextual_index)
+            stored = self.contextual_index
+            if stored != wanted:
+                raise VectorIndexMismatchError(
+                    f"向量库 {self.db_path} 的索引文本版本为 contextual_index={stored!r}，当前为 "
+                    f"{wanted!r}；向量与索引文本不对应，请按当前配置重新入库同步以重建（rebuild）"
+                )
         stored_model, stored_dim = self.model_id, self.dim
         if stored_model is not None and stored_model != model_id:
             raise VectorIndexMismatchError(
@@ -149,9 +177,18 @@ class ChunkVectorIndex:
         model_id: str,
         persistence_policy: PersistencePolicy | None = None,
         batch_size: int = DEFAULT_EMBED_BATCH,
+        contextual_index: str | None = CONTEXTUAL_INDEX_OFF,
     ) -> VectorSyncReport:
-        """把活跃块同步进向量库（doc 粒度幂等），返回计数。"""
+        """把活跃块同步进向量库（doc 粒度幂等），返回计数。
+
+        contextual_index：嵌入哪种索引文本（off＝正文，逐字节同旧行为）；与库内版本不同时先标记「迁移中」，
+        签名变了的 doc 重嵌，全部完成后才写入新版本。
+        """
         self.check_compatible(model_id)
+        mode = make_contextual_index_mode(contextual_index)
+        index_text_fn = make_index_text_fn(mode)
+        if self.contextual_index != mode:
+            self._set_meta(_INDEX_TEXT_KEY, _MIGRATING + mode)
         policy = persistence_policy or IsolationFirstPolicy()
         by_doc: dict[str, list[StoredChunk]] = {}
         withheld = 0
@@ -175,7 +212,7 @@ class ChunkVectorIndex:
         unchanged = 0
         for doc_id in sorted(by_doc):
             doc_chunks = by_doc[doc_id]
-            signature = _doc_signature(doc_chunks)
+            signature = _doc_signature(doc_chunks, index_text_fn)
             if existing.get(doc_id) == signature:
                 unchanged += 1
                 continue
@@ -183,7 +220,7 @@ class ChunkVectorIndex:
                 deleted += self.store.delete(where={"doc_id": doc_id})
             for start in range(0, len(doc_chunks), batch_size):
                 batch = doc_chunks[start : start + batch_size]
-                vectors = backend.embed_texts([c.text for c in batch])
+                vectors = backend.embed_texts([_index_text(c, index_text_fn) for c in batch])
                 if vectors:
                     self._claim(model_id, len(vectors[0]))
                 embedded += self.store.upsert(
@@ -198,6 +235,8 @@ class ChunkVectorIndex:
                 (doc_id, signature, len(doc_chunks)),
             )
             self._conn.commit()
+        if self.contextual_index != mode:
+            self._set_meta(_INDEX_TEXT_KEY, mode)
 
         return VectorSyncReport(
             vector_channel="hybrid",
@@ -220,6 +259,12 @@ class ChunkVectorIndex:
             f"SELECT value FROM {_META_TABLE} WHERE key = ?", (key,)
         ).fetchone()
         return None if row is None else str(row[0])
+
+    def _set_meta(self, key: str, value: str) -> None:
+        self._conn.execute(
+            f"INSERT OR REPLACE INTO {_META_TABLE} (key, value) VALUES (?, ?)", (key, value)
+        )
+        self._conn.commit()
 
     def _claim(self, model_id: str, dim: int) -> None:
         """首次写入记下模型标识与维度；之后必须一致。"""

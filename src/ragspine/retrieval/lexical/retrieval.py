@@ -44,6 +44,7 @@ from ragspine.retrieval.page_parent.pages import (
     group_pages,
     is_restricted,
     make_page_parent_mode,
+    page_heading,
     page_key,
     page_locator,
 )
@@ -646,6 +647,12 @@ class NarrativeIndex:
                 )
                 for uid, key in unit_pages.items()
             ]
+            if self.index_text_fn is not None:
+                # 标题进索引：整页单元带一次页内标题（各块标题段去重），不沿用首块的标题。
+                units = [
+                    replace(unit, heading=page_heading(pages[key]))
+                    for unit, key in zip(units, unit_pages.values(), strict=True)
+                ]
             n_page_units = len(units)
             page_rank = [
                 r.chunk.chunk_id

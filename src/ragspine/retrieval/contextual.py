@@ -21,6 +21,13 @@ from typing import Any
 # 缺省 spec 时工厂读取的环境变量名（范式同 chunker.CHUNKER_ENV）。
 CONTEXTUAL_ENV = "RAGSPINE_CONTEXTUAL"
 
+# 标题进索引开关（RAGSPINE_CONTEXTUAL_INDEX / ServiceConfig.contextual_index）的取值：
+# off＝索引文本即 chunk.text（逐字节不变）；heading＝只拼标题路径；full＝title/entity/period/heading 全头。
+CONTEXTUAL_INDEX_OFF = "off"
+CONTEXTUAL_INDEX_HEADING = "heading"
+CONTEXTUAL_INDEX_FULL = "full"
+CONTEXTUAL_INDEX_MODES = (CONTEXTUAL_INDEX_OFF, CONTEXTUAL_INDEX_HEADING, CONTEXTUAL_INDEX_FULL)
+
 # 索引文本函数：chunk -> 喂给 BM25 分词 / 向量嵌入的文本（None 时调用方回退 chunk.text）。
 IndexTextFn = Callable[[Any], str]
 
@@ -36,7 +43,7 @@ _HEADER_FIELDS: tuple[tuple[str, str], ...] = (
 _ON_ALIASES = frozenset({"default", "deterministic", "on", "contextual"})
 
 
-def build_context_header(chunk: Any) -> str:
+def build_context_header(chunk: Any, fields: tuple[tuple[str, str], ...] = _HEADER_FIELDS) -> str:
     """从 chunk 既有受控元数据拼确定性情境头；无任何可用字段 -> 空串。
 
     形如 '[文档:2025上半年财务 · 实体:ACME_HK · 期间:2025H1]'。只收非空字段，顺序固定
@@ -44,7 +51,7 @@ def build_context_header(chunk: Any) -> str:
     绝不臆造。
     """
     parts: list[str] = []
-    for attr, label in _HEADER_FIELDS:
+    for attr, label in fields:
         value = getattr(chunk, attr, "")
         if value:
             parts.append(f"{label}:{value}")
@@ -63,21 +70,43 @@ def contextual_index_text(chunk: Any) -> str:
     return f"{header}\n{text}" if header else text
 
 
+def heading_index_text(chunk: Any) -> str:
+    """只拼标题路径的索引文本：'[章节:A > B]' + 换行 + 原文；无标题则原样返回 chunk.text。"""
+    header = build_context_header(chunk, (("heading", "章节"),))
+    text: str = chunk.text
+    return f"{header}\n{text}" if header else text
+
+
+def make_contextual_index_mode(spec: str | None) -> str:
+    """把开关取值规范成 off / heading / full（大小写 / 留白不敏感；None、'none' 视为 off，
+    旧的启用别名视为 full）；其余抛 ValueError。"""
+    normalized = (spec or CONTEXTUAL_INDEX_OFF).strip().lower()
+    if normalized == "none":
+        return CONTEXTUAL_INDEX_OFF
+    if normalized in _ON_ALIASES:
+        return CONTEXTUAL_INDEX_FULL
+    if normalized in CONTEXTUAL_INDEX_MODES:
+        return normalized
+    raise ValueError(
+        f"未知 contextual_index：{normalized!r}（可选 {' / '.join(CONTEXTUAL_INDEX_MODES)}）"
+    )
+
+
 def make_index_text_fn(spec: str | None = None) -> IndexTextFn | None:
     """索引文本策略工厂（范式同 make_chunker）：把「是否启用 contextual」降为一个 spec/env。
 
     spec 取值（大小写 / 留白不敏感；缺省读环境变量 RAGSPINE_CONTEXTUAL）：
         - None / 'none'                           -> None（调用方回退 chunk.text，逐位等价旧行为）。
-        - 'default'/'deterministic'/'on'/'contextual' -> contextual_index_text（确定性情境头）。
+        - 'off'                                   -> None（同 'none'）。
+        - 'heading'                               -> heading_index_text（只拼标题路径）。
+        - 'full' / 'default'/'deterministic'/'on'/'contextual' -> contextual_index_text（确定性情境头）。
         - 其余                                    -> ValueError 列出可选名字。
     """
     if spec is None:
         spec = os.environ.get(CONTEXTUAL_ENV)
-    normalized = (spec or "none").strip().lower()
-    if normalized == "none":
-        return None
-    if normalized in _ON_ALIASES:
+    mode = make_contextual_index_mode(spec)
+    if mode == CONTEXTUAL_INDEX_HEADING:
+        return heading_index_text
+    if mode == CONTEXTUAL_INDEX_FULL:
         return contextual_index_text
-    raise ValueError(
-        f"未知 contextual spec：{normalized!r}（可选 none / {' / '.join(sorted(_ON_ALIASES))}）"
-    )
+    return None

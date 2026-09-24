@@ -221,6 +221,7 @@ def run_narrative_ingest_job(payload: dict[str, Any]) -> dict[str, Any]:
                 ),
                 persist_vectors=True,
                 vector_db_path=payload.get("vector_db_path"),
+                contextual_index=payload.get("contextual_index", ServiceConfig.contextual_index),
             )
         )
         if vector_report is not None:

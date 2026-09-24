@@ -83,6 +83,7 @@ class RetrievalPreset:
     page_parent: str = "page+child"
     page_images: str = "off"
     page_images_top_n: int = DEFAULT_PAGE_IMAGES_TOP_N
+    contextual_index: str = "off"
 
     def with_overrides(
         self,
@@ -96,6 +97,7 @@ class RetrievalPreset:
         page_parent: str | None = None,
         page_images: str | None = None,
         page_images_top_n: int | None = None,
+        contextual_index: str | None = None,
     ) -> "RetrievalPreset":
         """Return a new preset with only explicitly supplied fields replaced."""
         return RetrievalPreset(
@@ -110,6 +112,7 @@ class RetrievalPreset:
             page_images_top_n=(
                 self.page_images_top_n if page_images_top_n is None else page_images_top_n
             ),
+            contextual_index=contextual_index or self.contextual_index,
         )
 
 
@@ -150,6 +153,7 @@ def make_retrieval_preset(
     page_parent: str | None = None,
     page_images: str | None = None,
     page_images_top_n: int | None = None,
+    contextual_index: str | None = None,
 ) -> RetrievalPreset:
     """Resolve a named local profile and apply explicit, typed overrides."""
     selected = profile if isinstance(profile, RetrievalProfile) else RetrievalProfile(profile)
@@ -163,6 +167,7 @@ def make_retrieval_preset(
         page_parent=page_parent,
         page_images=page_images,
         page_images_top_n=page_images_top_n,
+        contextual_index=contextual_index,
     )
 
 
@@ -187,6 +192,7 @@ class ServiceConfig:
     query_decompose: str = "none"  # W6a 查询分解(opt-in): "none"(不分解,默认字节不变) | "llm"(注入provider的LLM多跳分解)
     corrective: str = "none"  # W6b 纠错检索(opt-in): "none"(默认,返回base本身字节不变) | "crag"(有界确定性 grade→act 环)
     page_parent: str = "page+child"  # 页级父子: "page+child"(默认,按页去重+整页BM25一路再RRF) | "dedup"(按页去重,代表块带整页上下文) | "off"(检索输出与引入前字节不变)
+    contextual_index: str = "off"  # 标题进索引: "off"(默认,索引文本=正文,字节不变) | "heading"(BM25/向量索引文本前拼标题路径) | "full"(再加 title/entity/period);交给 LLM 的文本不变
     page_images: str = "off"  # 图文混合上下文(opt-in): "off"(默认,prompt字节不变) | "on"(前 N 页附原 PDF 页图;需 page_parent≠off 且入库时关联了 source PDF)
     page_images_top_n: int = DEFAULT_PAGE_IMAGES_TOP_N  # page_images=on 时附图的前 N 条(页)
     page_image_dpi: int = DEFAULT_PAGE_IMAGE_DPI  # 入库渲染页图的 DPI(关联了 source PDF 时)
@@ -322,6 +328,7 @@ def open_narrative_retriever(
         reranker=make_reranker(config.reranker),
         postprocessor=make_postprocessor(config.postprocessor),
         page_parent=config.page_parent,
+        contextual_index=config.contextual_index,
     )
     # W9 查询变换（opt-in，需注入 provider）：默认 "none" → make_query_transform 返回 retriever 本身
     # （字节不变）；"hyde"/"rag_fusion"/"step_back" 才包成对应 LLM 变换 wrapper。假想文档只作检索探针
@@ -367,7 +374,8 @@ def open_vector_channel(
 ) -> tuple[EmbeddingBackend | None, ChunkVectorIndex | None]:
     """检索期打开持久化向量库；返回 (后端, 索引)，降级时两者皆 None。每次都发一条计数 trace。
 
-    索引由调用方 close（open_narrative_retriever 在退出时关）；模型标识不一致抛 VectorIndexMismatchError。
+    索引由调用方 close（open_narrative_retriever 在退出时关）；模型标识或索引文本版本（contextual_index）
+    不一致抛 VectorIndexMismatchError。
     """
     path = resolve_vector_db_path(config)
     reason = ""
@@ -379,7 +387,9 @@ def open_vector_channel(
     else:
         index = ChunkVectorIndex(path)
         try:
-            index.check_compatible(embedding_model_id(embedding_backend))
+            index.check_compatible(
+                embedding_model_id(embedding_backend), contextual_index=config.contextual_index
+            )
         except Exception:
             index.close()
             raise
@@ -430,6 +440,7 @@ def index_narrative_vectors(config: ServiceConfig) -> VectorSyncReport | None:
                 backend,
                 model_id=embedding_model_id(backend),
                 persistence_policy=make_persistence_policy(config.persistence_policy),
+                contextual_index=config.contextual_index,
             )
         finally:
             index.close()

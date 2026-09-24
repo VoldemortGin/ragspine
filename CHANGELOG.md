@@ -22,6 +22,18 @@ All notable changes to RAGSpine are documented here. This project follows Semant
   resolve inside the root, else the job fails with `stage="validation"` before any write. No content sniffing: a
   `.md` is only decoded as UTF-8 text (`errors="replace"`), never executed. Other suffixes are still rejected; the
   structured route does not take `.md`.
+- **Headings in the index text, opt-in (`RAGSPINE_CONTEXTUAL_INDEX=off|heading|full`, default `off`).**
+  `ServiceConfig.contextual_index`, the facade's `RetrievalPreset.contextual_index`,
+  `build_narrative_retriever(contextual_index=)`, the worker payload and the nl-gold eval's
+  `--contextual-index` wire the existing W4a `index_text_fn` seam: `heading` prefixes `[章节:<heading path>]` to the
+  BM25 / vector index text, `full` adds title / entity / period. The prompt text (chunk text or page window) is
+  unchanged; a `page+child` whole-page unit carries its page's de-duplicated heading segments once. Persisted
+  vectors embed the index text; the doc signature is computed over it, so a sync after a switch re-embeds exactly
+  the docs whose index text changed, and the vector db records `contextual_index` (absent = `off`; `migrating:*`
+  while a sync runs). The query side raises `VectorIndexMismatchError` on a mismatch instead of mixing vectors.
+  `off` is byte-identical (retrieval + vector signature snapshot). Default stays `off`: on the 71-page AIA deck
+  `heading` lifts GS BM25 / RRF recall@1 and MRR and keeps the real-LLM nl-gold score (A 86.4%±0, B 86.4%±0 vs
+  84.9%±2.6), but route B page recall@1 drops 59% → 53% and probe BM25 recall@5 slips 2–3 points.
 
 ### Changed
 
