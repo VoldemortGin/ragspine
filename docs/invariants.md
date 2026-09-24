@@ -4,7 +4,7 @@ covers:
   - src/ragspine/retrieval/link/
   - src/ragspine/retrieval/rerank/
   - src/ragspine/common/observability/
-verified-against: c3d6a7f2621d50ecf6d29a00180a6bf13ab92c16
+verified-against: c71bb945629f82eb18b3761493d091d1af2662dc
 ---
 
 # Invariants (code-enforced)
@@ -69,6 +69,14 @@ whole-page unit's heading comes from `group_pages` members only, so a RESTRICTED
 page unit, the judge or a prompt; RESTRICTED chunks are still never embedded. **Frozen by**
 `tests/retrieval/contextual_index/test_contextual_index.py` (restricted-heading cases) and the off-mode snapshot
 `tests/retrieval/contextual_index/test_contextual_index_off_snapshot.py`.
+
+**Query translation only reaches retrieval (`RAGSPINE_QUERY_TRANSLATION=off|auto`, default `auto`).** The translated
+question is an extra BM25 / vector query inside `NarrativeIndex.retrieve`; the rerank judge, the prompt, the
+anti-fabrication rewrite and citations all keep the original question, and retrieval output is still real chunks
+filtered at the same two RESTRICTED exits. The trace (`op=narrative.query_translation`) carries language / reason codes
+and counts, never the question or the translation. **Frozen by**
+`tests/retrieval/query_translation/test_query_translation.py` (generation-prompt isolation, trace privacy) and the
+off-mode snapshot `tests/retrieval/query_translation/test_query_translation_off_snapshot.py`.
 
 **Page images are a new exit, screened at the door (`RAGSPINE_PAGE_IMAGES=on`, opt-in, default `off`).** A page
 image carries the whole page, wider than any chunk the two text exits judge. So (1) ingest never renders a page that

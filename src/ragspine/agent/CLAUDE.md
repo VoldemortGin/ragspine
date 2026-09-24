@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/agent/
-verified-against: 0c3be5c66766bd6fa9b36743a7bf725642838ba1
+verified-against: c71bb945629f82eb18b3761493d091d1af2662dc
 ---
 
 # agent — agent contract
@@ -40,7 +40,9 @@ loop, LLM provider abstraction.
   `{"type":"text"}` / `{"type": IMAGE_PART_TYPE ("image"), "path", "name", "doc_id", "page"}`; only a provider
   declaring `supports_image_input = True` (`provider_supports_images`) ever receives one;
   `split_message_content` → `(text, image parts)`. Wrappers must forward the flag (eval `CountingProvider` does;
-  corespine `RateLimitedProvider` does not → text-only, traced).
+  corespine `RateLimitedProvider` does not → text-only, traced). A query-translation request (system prompt starting
+  with `QUERY_TRANSLATION_PROMPT_PREFIX`, `retrieval/translation`) gets the query back unchanged from `MockProvider`,
+  so offline runs never add a translated query.
 - `claude_cli_provider.py` — `ClaudeCliProvider`: eval-only provider that shells out to the local
   `claude -p` CLI (subprocess, no SDK; binary resolved lazily at call time). Each call runs in a
   fresh empty cwd with `--setting-sources ""` (the flag that keeps the user's global

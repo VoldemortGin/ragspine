@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/service/
-verified-against: c3d6a7f2621d50ecf6d29a00180a6bf13ab92c16
+verified-against: c71bb945629f82eb18b3761493d091d1af2662dc
 ---
 
 # service — agent contract
@@ -41,6 +41,11 @@ effective dict is pinned to the preset recipe) is threaded by `open_narrative_re
 the persisted vectors: `index_narrative_vectors` syncs with it (worker via payload `contextual_index`, sent with
 `persist_vectors`), `open_vector_channel` checks it and raises `VectorIndexMismatchError` when the vector db was built
 with another index text — re-ingest / re-sync with the new setting to rebuild. Kept `off`: see CHANGELOG Unreleased.
+`ServiceConfig.query_translation` / `RAGSPINE_QUERY_TRANSLATION` (`auto` default | `off`, byte-identical; facade
+`RetrievalPreset.query_translation`) makes `open_narrative_retriever` pass the request's provider to
+`build_narrative_retriever(query_translation=)`: a question whose language differs from the chunks' is translated once
+(cached) into an extra BM25 + vector query; same-language questions never call the provider. Query-time only, not part
+of the index fingerprint.
 `ServiceConfig.page_images` / `RAGSPINE_PAGE_IMAGES` (`off` default | `on`) + `page_images_top_n` (3) make
 `open_narrative_retriever` wrap the final retriever in `PageImageRetriever` (needs `page_parent` ≠ `off`); ingest-side
 `page_image_dpi` (144) / `page_image_max_side` (1568) / `page_image_dir` (default `<chunk db dir>/page_images`) ride the

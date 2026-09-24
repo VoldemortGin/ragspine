@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/
-verified-against: c3d6a7f2621d50ecf6d29a00180a6bf13ab92c16
+verified-against: c71bb945629f82eb18b3761493d091d1af2662dc
 ---
 
 # retrieval — agent contract
@@ -67,6 +67,16 @@ by `RAGSPINE_CONTEXTUAL_INDEX=off|heading|full` / `ServiceConfig.contextual_inde
 header; prompt text unchanged; `page+child` whole-page units carry `page_heading` once; persisted vectors embed and
 sign the index text, `ChunkVectorIndex` records `contextual_index` and the query side raises on mismatch; off frozen by
 `tests/retrieval/contextual_index/test_contextual_index_off_snapshot.py`),
+`translation/` (cross-lingual query translation, `RAGSPINE_QUERY_TRANSLATION=off|auto` / `ServiceConfig.query_translation` /
+`RetrievalPreset.query_translation` / `build_narrative_retriever(query_translation=, translation_provider=)`, default
+`auto`; `NarrativeIndex(query_translator=None)` stays off. `language.py` = deterministic CJK-char vs Latin-word
+detection, corpus language from uniform chunk `language` metadata else text stats; `translator.py` =
+`LLMQueryTranslator` (one provider call per (question, target), cached; provider errors not cached; reason codes
+`no_provider` / `provider_error` / `empty_output` / `unchanged` / `wrong_language` / `too_long`). The translation is an
+extra query via `HybridRetriever.search(extra_queries=, extra_vector=)` — BM25 and (as wired) vector, plus the
+`page+child` whole-page BM25; rerank and generation keep the original question. Trace `op=narrative.query_translation`
+= status / reason / language codes / counts, never text. off frozen by
+`tests/retrieval/query_translation/test_query_translation_off_snapshot.py`),
 `lexical/` (Okapi BM25, CJK uni+bigram, RRF fusion — `HybridRetriever` delegates
 its vector **scoring** to the `VectorStore` seam), `vector/` (injectable embedding
 backends, default none = pure BM25; + the pluggable `VectorStore` seam — `store.py`

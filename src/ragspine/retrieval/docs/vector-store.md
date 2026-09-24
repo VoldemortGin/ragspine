@@ -6,7 +6,7 @@ covers:
   - src/ragspine/retrieval/vector/adapters/qdrant.py
   - src/ragspine/retrieval/vector/persistence_policy.py
   - src/ragspine/retrieval/lexical/retrieval.py
-verified-against: c3d6a7f2621d50ecf6d29a00180a6bf13ab92c16
+verified-against: c71bb945629f82eb18b3761493d091d1af2662dc
 ---
 
 # VectorStore seam — the pluggable vector index, and how it wires into retrieval
@@ -286,7 +286,8 @@ changed in three ways:
 - **Store-managed retrieve.** `NarrativeIndex` builds its `HybridRetriever` with
   `manage_vectors=False`: the retriever embeds only the *query* (via the backend's `embed_query`
   when it has one — e.g. the Qwen3 instruct prefix — else `embed_texts([q])`) and calls `store.query`, never
-  re-embedding chunks. So a fresh process over the same `db_path` retrieves with **zero chunk
+  re-embedding chunks. A cross-lingual translation (`extra_queries`, `RAGSPINE_QUERY_TRANSLATION`) is embedded the same
+  way when `extra_vector=True`. So a fresh process over the same `db_path` retrieves with **zero chunk
   re-embedding** — the persistence pays off. (The direct `HybridRetriever` path keeps
   `manage_vectors=True` and stays byte-identical.)
 
