@@ -562,6 +562,8 @@ _JUDGING_NOTES = [
     "recall@k 的名次：按页判定时只数带页码的命中（没页码的块不占名次，与 nl_gold 一致），按 expected 判定时数全部检索条数；"
     "page_recall@k 按不同页计名次（同一页只算第一次出现）；MRR = mean(1/rank)，未命中记 0。"
     "逐题列表的序号是检索结果的原始位置，可能与按页判定的 rank 不同。",
+    "按 expected 判定且题目没给 doc 时，page_rank 只按页码去重：多文档 workspace 里不同文档的同号页算同一页，"
+    "page_rank 可能偏低、page_recall 偏高；需要精确时请在题目里给 doc。",
     "既无页码也无 expected 的题不计入分母；出错的题记为未命中。",
 ]
 

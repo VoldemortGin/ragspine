@@ -88,6 +88,7 @@ def test_batch_help_is_a_real_subcommand(capsys):
     assert exc.value.code == 0
     out = capsys.readouterr().out
     assert "--retrieval-only" in out and "--resume" in out and "claude-cli" in out
+    assert "退出码" in out and "--contextual-index" in out
 
 
 def test_missing_workspace_errors_without_creating_it(tmp_path, questions, capsys):
@@ -618,3 +619,58 @@ def test_resume_with_a_corrupt_run_settings_is_exit_2(
     assert main([*base, "--out", str(out), "--resume"]) == 2
     err = capsys.readouterr().err
     assert "run_settings.json" in err and "--out" in err
+
+
+def test_worker_assembly_failure_after_precheck_is_exit_2(
+    tmp_path, workspace, questions, monkeypatch, capsys
+):
+    """开跑检查通过、worker 再装配失败：退出码 2（与 --help 的说明一致）。"""
+    import ragspine.session as session
+
+    real_open = session.open_narrative_retriever
+    calls: list[int] = []
+
+    @contextmanager
+    def flaky_open(config: ServiceConfig, provider: LLMProvider):
+        calls.append(1)
+        if len(calls) > 1:
+            raise RuntimeError("model service went away")
+        with real_open(config, provider) as retriever:
+            yield retriever
+
+    monkeypatch.setattr(session, "open_narrative_retriever", flaky_open)
+    out = tmp_path / "out"
+    rc = main(
+        [
+            "batch",
+            str(questions),
+            "--workspace",
+            str(workspace),
+            "--retrieval-only",
+            "--out",
+            str(out),
+        ]
+    )
+    assert rc == 2 and len(calls) == 2
+    assert "model service went away" in capsys.readouterr().err
+    assert (out / "run_settings.json").is_file()
+
+
+def test_summary_notes_page_only_dedup_without_doc(tmp_path, workspace, questions):
+    out = tmp_path / "out"
+    assert (
+        main(
+            [
+                "batch",
+                str(questions),
+                "--workspace",
+                str(workspace),
+                "--retrieval-only",
+                "--out",
+                str(out),
+            ]
+        )
+        == 0
+    )
+    summary = (out / "summary.md").read_text(encoding="utf-8")
+    assert "题目没给 doc 时，page_rank 只按页码去重" in summary
