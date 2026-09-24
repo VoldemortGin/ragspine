@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/service/
-verified-against: 5e1277dc06104ec6967005f059f9067f54d4c417
+verified-against: eaf2f3392fbb7840042a4bf68076da35fcb2f943
 ---
 
 # service — agent contract
@@ -30,6 +30,10 @@ The high-level local facade selects retrieval through `RetrievalProfile` and the
 and `quality` opts into ONNX embeddings, cross-encoder reranking, and post-processing. `RetrievalPreset.persist_vectors`
 (facade config `storage.persist_vectors`, default `False`) turns on the persisted chunk vectors above; `embedding` /
 `reranker` also accept `"local-http"` (OpenAI-compatible `/v1/embeddings` / `/v1/rerank`, env `EMBEDDING_*` / `RERANK_*`).
+`ServiceConfig.page_parent` / `RAGSPINE_PAGE_PARENT` (`off` default | `dedup` | `page+child`; facade
+`RAGSpine.local(retrieval=make_retrieval_preset(page_parent=…))` — kept out of `RAGSpineConfig.retrieval`, whose
+effective dict is pinned to the preset recipe) is threaded by `open_narrative_retriever` into
+`build_narrative_retriever(page_parent=)`: query-time only, not part of the index fingerprint.
 The L2 subprocess entry ships inside the wheel (`dify/run_dify_workflow.py`, `python -m`-able;
 repo `scripts/` copy is a source-tree fallback). `dify/http_client.py` is the guarded client the
 runner injects for http-request nodes — default-off (`RAGSPINE_DIFY_HTTP_ENABLED`), stdlib-only,

@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/
-verified-against: 292310486de84598446e78169cf955d46bfbc6cb
+verified-against: eaf2f3392fbb7840042a4bf68076da35fcb2f943
 ---
 
 # retrieval — agent contract
@@ -35,6 +35,16 @@ additive columns, old DBs migrated in place), ingest routes through the `chunker
 `link/_to_snippet` surfaces `window_text` as a separate `prompt_text` (parent context = **generation-only**,
 child stays the hit + citation; window never becomes a hit) with `parent_locator` as a provenance
 back-reference — RESTRICTED chunks are dropped whole at the exit so the parent window never leaks),
+`page_parent/` (**page-level parent/child + per-page de-dup, opt-in** `RAGSPINE_PAGE_PARENT` / `ServiceConfig.page_parent`
+/ facade `RetrievalPreset.page_parent` / `build_narrative_retriever(page_parent=)` / `NarrativeIndex(page_parent=)`, default
+`off` byte-identical, frozen by a snapshot). `pages.py`: mode parsing, page identity `(doc_id, N)` parsed from the
+`{doc_id}@page=N#…` locator (no page → kept as-is, never de-duplicated), `group_pages` (non-RESTRICTED only);
+`window.py`: `page_window` joins a page's chunks in `seq` order, drops the paragraph-carry overlap (only when the
+carried lines match verbatim) and truncates around the hit to `page_window_chars` (default 4000) — the hit chunk is
+always whole. `NarrativeIndex._retrieve_pages` runs **after fusion, before rerank**: max-pool de-dup (first
+occurrence = representative), `page+child` adds a whole-page BM25 ranking (multi-query, no vectors) fused by RRF,
+top-k counts pages, the judge sees one representative per page, then the representative gets `window_text` = page
+window and `parent_locator` = `{doc_id}@page=N`; trace `op=narrative.page_parent` carries counts only),
 `contextual.py` (W4a — a deterministic, zero-fabrication context header built from controlled-vocab
 metadata, injected into **index/embed text only** via the opt-in `index_text_fn` seam on
 `HybridRetriever`/`NarrativeIndex`; `chunk.text`/citation untouched, default `None` = byte-identical),
@@ -155,6 +165,9 @@ is the more-permissive `RAGSPINE_COLPALI_MODEL` alternative.
   It runs **after** the `link/` RESTRICTED strip, so a RESTRICTED chunk's whole snippet — parent window
   included — is dropped (整段拒绝); the window can never leak via a child. Bound by
   `tests/conformance/test_parent_child_isolation.py` (+ reverse-proof).
+- **Page-level parent/child rides the same exit.** RESTRICTED chunks never join a page group, so neither the page
+  window nor the `page+child` page unit contains RESTRICTED text; a RESTRICTED hit stays its own unit and is dropped by
+  the two exits. Bound by `tests/conformance/test_page_parent_isolation.py` (+ reverse-proof).
 
 ## Read before editing
 

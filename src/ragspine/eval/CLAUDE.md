@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/eval/
-verified-against: 5e1277dc06104ec6967005f059f9067f54d4c417
+verified-against: eaf2f3392fbb7840042a4bf68076da35fcb2f943
 ---
 
 # eval — agent contract
@@ -21,7 +21,9 @@ as two new ratcheted gates alongside the four命门.
 baseline via `scripts/run_nl_gold_ragspine.py` / `make eval-nl-gold`, reports under
 `data/validation/ragspine-nl-gold/`, git-ignored). With `--embedding local-http` the script ingests through the
 formal persisted-vector path (`storage.persist_vectors`, embed at ingest) and reads the index back via
-`service.config.open_vector_channel` — no eval-side vector backfill.
+`service.config.open_vector_channel` — no eval-side vector backfill. `--page-parent off|dedup|page+child` switches the
+retriever's page-level parent/child mode; `recall_at_k` reports both `recall` (k = retrieved chunks) and
+`page_recall` (k = distinct pages).
 
 ## Invariants
 

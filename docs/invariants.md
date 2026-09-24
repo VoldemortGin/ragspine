@@ -4,7 +4,7 @@ covers:
   - src/ragspine/retrieval/link/
   - src/ragspine/retrieval/rerank/
   - src/ragspine/common/observability/
-verified-against: 5e1277dc06104ec6967005f059f9067f54d4c417
+verified-against: eaf2f3392fbb7840042a4bf68076da35fcb2f943
 ---
 
 # Invariants (code-enforced)
@@ -34,6 +34,15 @@ chunks, so a RESTRICTED chunk's whole snippet — parent window included — is 
 parent context can never leak via a child. The expanded window is generation-context only; `text` /
 `source_locator` stay the hit child, so citation stays honest and the window is never a hit. **Frozen by**
 `tests/conformance/test_parent_child_isolation.py` (end-to-end + a RESTRICTED-windowed reverse-proof).
+
+**Page-level parent/child (`RAGSPINE_PAGE_PARENT=dedup|page+child`, opt-in, default `off`).** `NarrativeIndex`
+de-duplicates the fused ranking by page (`{doc_id}@page=N`) before rerank and swaps the representative's
+`window_text` for its whole page, surfaced through the same `_to_snippet` → `prompt_text` path. RESTRICTED chunks
+never join a page group (`page_parent/pages.group_pages`): they stay single units that the two exits drop as before,
+the page window (`page_parent/window.page_window`) and the `page+child` whole-page BM25 unit are built from
+non-RESTRICTED siblings only. `text` / `source_locator` stay the hit chunk; `parent_locator` is the page locator.
+**Frozen by** `tests/conformance/test_page_parent_isolation.py` (+ reverse-proof) and the off-mode byte snapshot
+`tests/retrieval/page_parent/test_page_parent_off_snapshot.py`.
 
 **Judge-agnostic (W2).** The rerank exit's protection lives in the `listwise_rerank` *orchestration*,
 not in any particular judge, so it covers **every** `ListwiseJudge` equally: the LLM listwise judge
