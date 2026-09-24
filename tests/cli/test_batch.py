@@ -145,7 +145,8 @@ def test_retrieval_only_end_to_end(tmp_path, workspace, questions, capsys):
     summary = (out / "summary.md").read_text(encoding="utf-8")
     assert re.search(r"\| page_recall \| 1\.0000 \|", summary)
     assert "entity/period" in summary  # (c) 与 ask 的差异写明
-    assert "✓" in summary
+    assert "1. ✓ `deck.md@page=2#para1-2` Distribution Mix Agency share of VONB was 72%." in summary
+    assert "### mix — rank=1 page_rank=1" in summary
     assert str(out) in capsys.readouterr().out
 
 
@@ -169,7 +170,12 @@ def test_limit_and_resume_skip_done_questions(tmp_path, workspace, questions, mo
     assert asked == ["Partnerships share of VONB", "Welcome to the results"]
     assert sorted(r["id"] for r in _records(out)) == ["content", "free", "mix", "roe"]
     summary = (out / "summary.md").read_text(encoding="utf-8")
-    assert "free" in summary and "mix" in summary
+    assert [line for line in summary.splitlines() if line.startswith("### ")] == [
+        "### mix — rank=1 page_rank=1",
+        "### roe — rank=1 page_rank=1",
+        "### content — rank=1 page_rank=1",
+        "### free",
+    ]
 
 
 def test_existing_results_need_resume(tmp_path, workspace, questions, capsys):
@@ -209,13 +215,35 @@ def test_end_to_end_mock_records_answer_route_sources(tmp_path, workspace, quest
     )
     assert rc == 0
     records = {r["id"]: r for r in _records(out)}
-    mix = records["mix"]
-    assert mix["mode"] == "ask" and mix["answer"] and mix["route"]
-    assert mix["sources"] and mix["page_hit"] is True
-    assert "fallback" in mix  # ADR 0023：结构化回落叙事时记原因代码，否则为 None
+    # 每条记录与直接调 RAGSpine.ask 的结果逐字段一致（batch 只编排，不改答案 / 路由 / 来源）。
+    with RAGSpine.local(workspace) as rag:
+        for spec in _QUESTIONS:
+            direct = rag.ask(str(spec["question"]))
+            record = records[str(spec["id"])]
+            assert record["mode"] == "ask" and record["error"] is None
+            assert record["answer"] == (direct.answer_plain or direct.answer)
+            assert record["route"] == direct.route
+            assert record["fallback"] == direct.fallback  # ADR 0023 回落原因码，未回落为 None
+            assert [(x["doc"], x["locator"]) for x in record["sources"]] == [
+                (str(x["doc"]), str(x["locator"])) for x in direct.sources
+            ]
+    assert records["mix"]["page_hit"] is True and records["mix"]["content_hit"] is True
+    assert records["mix"]["sources"][0] == {
+        "doc": "deck.md",
+        "locator": "deck.md@page=2#para1-2",
+        "page": 2,
+        "hit": True,
+    }
+    assert records["content"]["page_hit"] is None
     assert records["free"]["page_hit"] is None and records["free"]["content_hit"] is None
+    page = [r["page_hit"] for r in records.values() if r["page_hit"] is not None]
+    content = [r["content_hit"] for r in records.values() if r["content_hit"] is not None]
     summary = (out / "summary.md").read_text(encoding="utf-8")
-    assert "page_hit" in summary
+    assert f"| page_hit | {sum(page) / len(page):.4f} ({sum(page)}/{len(page)}) |" in summary
+    assert (
+        f"| content_hit | {sum(content) / len(content):.4f} ({sum(content)}/{len(content)}) |"
+        in summary
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -304,7 +332,10 @@ def test_claude_cli_provider_and_concurrency_note(tmp_path, workspace, questions
     )
     assert rc == 0 and built
     summary = (out / "summary.md").read_text(encoding="utf-8")
-    assert "claude-cli" in summary and "4" in summary and "排队" in summary
+    from ragspine.cli.batch import _CLAUDE_CLI_NOTE
+
+    assert f"- {_CLAUDE_CLI_NOTE}" in summary
+    assert "- provider: `claude-cli`" in summary and "- concurrency: `6`" in summary
 
 
 @pytest.mark.parametrize(
@@ -458,3 +489,66 @@ def test_summary_vector_channel_for_the_economy_default(tmp_path, workspace, que
     )
     summary = (out / "summary.md").read_text(encoding="utf-8")
     assert "- vector_channel: `bm25_only（未开向量通道；persist_vectors=False）`" in summary
+
+
+def test_resume_reruns_questions_that_errored(tmp_path, workspace, questions, monkeypatch):
+    import ragspine.cli.batch as batch
+
+    out = tmp_path / "out"
+    base = ["batch", str(questions), "--workspace", str(workspace), "--retrieval-only"]
+    real = batch.retrieve_hits
+
+    def flaky(retriever, question, *, top_k):
+        if question == "record ROE achieved":
+            raise RuntimeError("transient")
+        return real(retriever, question, top_k=top_k)
+
+    monkeypatch.setattr(batch, "retrieve_hits", flaky)
+    assert main([*base, "--out", str(out)]) == 0
+    first = {r["id"]: r for r in _records(out)}
+    assert first["roe"]["error"] == "RuntimeError: transient" and first["roe"]["rank"] is None
+
+    asked: list[str] = []
+
+    def spy(retriever, question, *, top_k):
+        asked.append(question)
+        return real(retriever, question, top_k=top_k)
+
+    monkeypatch.setattr(batch, "retrieve_hits", spy)
+    assert main([*base, "--out", str(out), "--resume"]) == 0
+    assert asked == ["record ROE achieved"]
+    final = batch.read_records(out / "results.jsonl")
+    assert final["roe"]["error"] is None and final["roe"]["page_rank"] == 1
+    summary = (out / "summary.md").read_text(encoding="utf-8")
+    assert "已判定 3 题，无法判定 1 题，出错 0 题。" in summary
+
+
+def test_v2_gold_question_set_runs(tmp_path, workspace):
+    """nl-answers-gold-v2 题集直接可跑（schema 识别走 nl_gold 的 GOLD_SCHEMA_VERSIONS）。"""
+    gold = {
+        "schema_version": "nl-answers-gold-v2",
+        "changelog": [
+            {"case_id": "mix", "change": "pin", "old": "p1", "new": "p2", "evidence": "page 2"}
+        ],
+        "cases": [
+            {
+                "case_id": "mix",
+                "case_class": "positive",
+                "question": {"en": "Agency share of VONB"},
+                "expected": {
+                    "status": "answered",
+                    "required_claims": [{"kind": "quote", "page_index": 1, "quote": "72%"}],
+                },
+            }
+        ],
+    }
+    path = tmp_path / "gold-v2.json"
+    path.write_text(json.dumps(gold), encoding="utf-8")
+    out = tmp_path / "out"
+    rc = main(
+        ["batch", str(path), "--workspace", str(workspace), "--retrieval-only", "--out", str(out)]
+    )
+    assert rc == 0
+    [record] = _records(out)
+    assert record["id"] == "mix:en" and record["page_groups"] == [[2]]
+    assert record["basis"] == "page" and record["rank"] == 1 and record["page_rank"] == 1
