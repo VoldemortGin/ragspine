@@ -1061,6 +1061,14 @@ def _build_parser() -> argparse.ArgumentParser:
             "真实模型（Qwen embedding / reranker）：先 source data/local-models/local-models.env，"
             "再加 --profile balanced --embedding local-http --reranker local-http --persist-vectors。"
         ),
+        epilog=(
+            "退出码：0 = 跑完（个别题出错会记在 results.jsonl 的 error 字段，不影响退出码）；"
+            "1 = 本次跑的题全部出错；"
+            "2 = 前置条件不满足或装配失败：workspace / 块库缺失、题集非法、检索配置非法、provider 不可用、"
+            "开跑前检查失败，以及 --retrieval-only 下开跑检查通过后 worker 再装配检索器失败"
+            "（此时已完成的题已写进 results.jsonl，可用 --resume 续跑）。"
+            "端到端模式每题自行装配，装配失败记为该题 error，按 0 / 1 计。"
+        ),
     )
     p_batch.add_argument("questions", help="题集文件")
     p_batch.add_argument(
