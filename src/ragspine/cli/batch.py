@@ -23,7 +23,7 @@ import threading
 import time
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -358,9 +358,11 @@ def _run_ask(
     concurrency: int,
     emit: Callable[[Record], None],
 ) -> None:
+    # 完成一题写一题（as_completed）：前面的题卡住时，后面已完成的题不会压在内存里不落盘。
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
-        for record in pool.map(lambda q: _ask_record(q, rag), pending):
-            emit(record)
+        futures = [pool.submit(_ask_record, question, rag) for question in pending]
+        for future in as_completed(futures):
+            emit(future.result())
 
 
 def run(args: argparse.Namespace) -> int:

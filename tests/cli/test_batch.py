@@ -373,3 +373,33 @@ def test_every_question_failing_is_a_nonzero_exit(tmp_path, workspace, questions
     records = _records(out)
     assert len(records) == 4
     assert {r["error"] for r in records} == {"RuntimeError: provider down"}
+
+
+def test_ask_mode_writes_each_question_as_it_completes(tmp_path, workspace, questions, monkeypatch):
+    """首题卡住时，其余已完成的题先落盘（as_completed，不按提交顺序压着）。"""
+    import time
+
+    out = tmp_path / "out"
+    results = out / "results.jsonl"
+    real_ask = RAGSpine.ask
+    saw_others_first: list[bool] = []
+
+    def slow_first(self: RAGSpine, question: str):
+        if question == _QUESTIONS[0]["question"]:
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                if results.is_file() and len(results.read_text(encoding="utf-8").splitlines()) == 3:
+                    break
+                time.sleep(0.02)
+            saw_others_first.append(len(results.read_text(encoding="utf-8").splitlines()) == 3)
+        return real_ask(self, question)
+
+    monkeypatch.setattr(RAGSpine, "ask", slow_first)
+    rc = main(
+        ["batch", str(questions), "--workspace", str(workspace), "--out", str(out)]
+        + ["--concurrency", "4"]
+    )
+    assert rc == 0 and saw_others_first == [True]
+    records = _records(out)
+    assert records[-1]["id"] == "mix"
+    assert sorted(r["id"] for r in records) == ["content", "free", "mix", "roe"]
