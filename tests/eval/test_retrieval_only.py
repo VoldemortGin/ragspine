@@ -501,3 +501,12 @@ def test_real_v2_gold_matches_recall_at_k_eligibility() -> None:
     theirs = recall_at_k(runs, cases)
     judged = [q for q in load_questions(_V2_GOLD) if q.page_groups]
     assert len(judged) == theirs["cases"] > 0
+
+
+def test_uses_the_same_answer_text_functions_as_nl_gold() -> None:
+    """规范化 / 匹配与 nl_gold 是同一对函数（真源 common.answer_text，nl_gold re-export）。"""
+    import ragspine.eval.nl_gold_ragspine as nl_gold
+    import ragspine.eval.retrieval_only as retrieval_only
+
+    assert retrieval_only.normalize_answer is nl_gold.normalize_answer
+    assert retrieval_only.contains_normalized is nl_gold.contains_normalized

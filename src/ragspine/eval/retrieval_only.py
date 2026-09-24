@@ -2,8 +2,8 @@
 
 只跑检索、不调生成 LLM；编排（resume / 并发 / 落盘）在 ``ragspine.cli.batch``。
 
-判定口径与 ``nl_gold_ragspine`` 对齐，只 import 它的公开函数（``load_nl_gold`` / ``normalize_answer`` /
-``contains_normalized`` / ``RECALL_KS``），不改它：
+判定口径与 ``nl_gold_ragspine`` 对齐，只 import、不改它：``load_nl_gold`` / ``RECALL_KS`` / ``GOLD_SCHEMA_VERSIONS``
+来自 nl_gold，``normalize_answer`` / ``contains_normalized`` 来自其真源 ``ragspine.common.answer_text``（nl_gold 用同一对）：
 
 - 有 page group 时按页判定：命中 = ``page ∈ group``；题目给了 ``doc`` 还要求块的 ``doc_id``（或去扩展名后）
   与之匹配（casefold）。页码经 ``retrieval.page_parent.pages.page_key`` 从 locator 解析；没页码的块不参与
@@ -31,13 +31,10 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from ragspine.agent.agent import NarrativeRetriever
-from ragspine.eval.nl_gold_ragspine import (
-    GOLD_SCHEMA_VERSIONS,
-    RECALL_KS,
-    contains_normalized,
-    load_nl_gold,
-    normalize_answer,
-)
+
+# 答案文本规范化 / 匹配的真源（nl_gold 只是隐式 re-export，mypy strict 不认），与 nl_gold 用的是同一对函数。
+from ragspine.common.answer_text import contains_normalized, normalize_answer
+from ragspine.eval.nl_gold_ragspine import GOLD_SCHEMA_VERSIONS, RECALL_KS, load_nl_gold
 from ragspine.retrieval.page_parent.pages import page_key
 
 PageHit = tuple[str, int]
