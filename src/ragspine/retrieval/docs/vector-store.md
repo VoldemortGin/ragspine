@@ -6,7 +6,7 @@ covers:
   - src/ragspine/retrieval/vector/adapters/qdrant.py
   - src/ragspine/retrieval/vector/persistence_policy.py
   - src/ragspine/retrieval/lexical/retrieval.py
-verified-against: 95f607e7bf0aea1ae6fa6b27ae89a330940f1fb7
+verified-against: 292310486de84598446e78169cf955d46bfbc6cb
 ---
 
 # VectorStore seam — the pluggable vector index, and how it wires into retrieval
@@ -283,7 +283,8 @@ changed in three ways:
   why `_record_metadata` now carries `doc_id` (it is *not* part of the retrieval `where`, so scoring
   stays byte-identical).
 - **Store-managed retrieve.** `NarrativeIndex` builds its `HybridRetriever` with
-  `manage_vectors=False`: the retriever embeds only the *query* and calls `store.query`, never
+  `manage_vectors=False`: the retriever embeds only the *query* (via the backend's `embed_query`
+  when it has one — e.g. the Qwen3 instruct prefix — else `embed_texts([q])`) and calls `store.query`, never
   re-embedding chunks. So a fresh process over the same `db_path` retrieves with **zero chunk
   re-embedding** — the persistence pays off. (The direct `HybridRetriever` path keeps
   `manage_vectors=True` and stays byte-identical.)

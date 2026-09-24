@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/
-verified-against: 5e1277dc06104ec6967005f059f9067f54d4c417
+verified-against: 292310486de84598446e78169cf955d46bfbc6cb
 ---
 
 # retrieval — agent contract
@@ -53,7 +53,10 @@ the pool covers the true top-k for the conformance datasets so `sqlite_vec`/`pgv
 — and `persistence_policy.py` gating what is written at rest; `single_text_backend.py` adapts any
 single-text `embed_query` embedder (e.g. the OpenAI-compatible HTTP `LocalEmbeddingAdapter`) into a batch
 `EmbeddingBackend`, duck-typed, zero imports, registered as `make_embedding_backend("local-http")` (reads
-`EMBEDDING_*`, `model_id="local-http:<model>"`); `chunk_index.py`'s `ChunkVectorIndex` is the **persisted chunk
+`EMBEDDING_*`, `model_id="local-http:<model>"`; query side gets the Qwen3 `Instruct: {task}\nQuery:` prefix via
+`embed_query` — `RAGSPINE_EMBEDDING_QUERY_INSTRUCTION` overrides the task, `""` disables; documents unprefixed, so
+`model_id` / persisted vectors unchanged — `HybridRetriever` embeds the query via `embed_query` when a backend has
+it, else `embed_texts([q])`, other backends byte-identical); `chunk_index.py`'s `ChunkVectorIndex` is the **persisted chunk
 vector index** — a sqlite-vec file (`<chunk db stem>.vectors.db`) + a `chunk_vector_meta` (embedding model id +
 dim) and `chunk_vector_docs` (per-doc content signature) manifest; `sync` is doc-granular idempotent (unchanged
 signature → skip, changed → `delete(where={doc_id})` + re-embed, vanished doc → delete), policy-gated

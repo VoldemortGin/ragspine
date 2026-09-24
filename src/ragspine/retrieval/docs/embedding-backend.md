@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/vector/embedding_backends.py
-verified-against: 5e1277dc06104ec6967005f059f9067f54d4c417
+verified-against: 292310486de84598446e78169cf955d46bfbc6cb
 ---
 
 # EmbeddingBackend seam — the default loop made semantic (W1)
@@ -21,6 +21,17 @@ implementations + the `make_embedding_backend` factory live in `vector/embedding
 | `openai` | `OpenAIEmbeddingBackend` | yes | `[llm]` | no (API) |
 | `qwen3` / `sentence-transformers` / `st` | `SentenceTransformerEmbeddingBackend` | yes | `[embed]` (torch) | first-pull-then-offline |
 | `local-http` | `SingleTextEmbeddingBackend(LocalEmbeddingAdapter)` (OpenAI-compatible `/v1/embeddings`, env `EMBEDDING_BASE_URL` / `_MODEL` / `_API_KEY`, `model_id='local-http:<model>'`) | yes | none (stdlib HTTP) | loopback server |
+
+**Asymmetric query side (`local-http`).** Qwen3-Embedding wants an instruction on queries only:
+`Instruct: {task}\nQuery:{query}` (no space after `Query:`), documents unprefixed
+([model card](https://huggingface.co/Qwen/Qwen3-Embedding-4B),
+[QwenLM/Qwen3-Embedding](https://github.com/QwenLM/Qwen3-Embedding)). `SingleTextEmbeddingBackend`
+takes a `query_prefix` applied only by its `embed_query`; `embed_texts` (documents) stays raw, so
+`model_id` and persisted `.vectors.db` stay valid. The `local-http` factory defaults the task to the
+official `Given a web search query, retrieve relevant passages that answer the query`
+(`RAGSPINE_EMBEDDING_QUERY_INSTRUCTION` overrides, `""` disables). `HybridRetriever` calls
+`embed_query` when a backend defines it, else `embed_texts([q])[0]` — every other backend is
+byte-identical.
 
 `OnnxEmbeddingBackend` is the W1 deliverable: a **lightweight, deterministic, real-semantic**
 default. Default model `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`
