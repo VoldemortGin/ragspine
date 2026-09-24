@@ -706,3 +706,17 @@ def test_query_translation_explicit_auto_equals_default_on_resume(tmp_path, work
     base = ["batch", str(questions), "--workspace", str(workspace), "--retrieval-only"]
     assert main([*base, "--out", str(out), "--limit", "1"]) == 0
     assert main([*base, "--out", str(out), "--resume", "--query-translation", "auto"]) == 0
+
+
+def test_mock_provider_with_auto_translation_is_flagged_as_not_translating(
+    tmp_path, workspace, questions
+):
+    from ragspine.cli.batch import _MOCK_TRANSLATION_NOTE
+
+    out = tmp_path / "out"
+    base = ["batch", str(questions), "--workspace", str(workspace), "--retrieval-only"]
+    assert main([*base, "--out", str(out)]) == 0
+    assert f"- {_MOCK_TRANSLATION_NOTE}" in (out / "summary.md").read_text(encoding="utf-8")
+    off = tmp_path / "off"
+    assert main([*base, "--out", str(off), "--query-translation", "off"]) == 0
+    assert _MOCK_TRANSLATION_NOTE not in (off / "summary.md").read_text(encoding="utf-8")

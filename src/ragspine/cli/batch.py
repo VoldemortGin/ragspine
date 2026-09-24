@@ -55,6 +55,12 @@ MODE_ASK = "ask"
 # claude-cli provider 自带的并发上限（agent/claude_cli_provider.py 的 DEFAULT_CLAUDE_CLI_CONCURRENCY）。
 _CLAUDE_CLI_NOTE = "claude-cli provider 自带并发上限（默认 4 个 `claude -p` 子进程），`--concurrency` 超过 4 时多出的请求会排队。"
 
+# MockProvider 收到翻译请求会原样返回问题：auto 在 mock 下等于没翻译。
+_MOCK_TRANSLATION_NOTE = (
+    "query_translation=auto 但 provider 是 mock：MockProvider 对翻译请求原样返回问题，"
+    "本次跨语言翻译实际没有生效；要评测真实翻译效果请换成真实 provider（anthropic / claude-cli）。"
+)
+
 Record = dict[str, Any]
 
 
@@ -598,6 +604,8 @@ def render_summary(
         lines.append(
             "- 端到端：每题调 `RAGSpine.ask`；页命中按 sources 的 locator 判定，内容命中比对答案。"
         )
+    if settings.get("provider") == "mock" and settings.get("query_translation") == "auto":
+        lines.append(f"- {_MOCK_TRANSLATION_NOTE}")
     if settings.get("provider") == "claude-cli":
         lines.append(f"- {_CLAUDE_CLI_NOTE}")
     lines += [f"- {note}" for note in _JUDGING_NOTES]
