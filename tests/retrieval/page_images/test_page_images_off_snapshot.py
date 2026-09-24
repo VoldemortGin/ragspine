@@ -12,6 +12,7 @@ import os
 from dataclasses import replace
 from datetime import date
 
+import pytest
 import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
@@ -19,6 +20,7 @@ ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpa
 from ragspine.agent.agent import answer_question
 from ragspine.agent.intent import ROUTE_NARRATIVE, RuleIntentParser
 from ragspine.agent.llm_provider import MockProvider
+from ragspine.agent.number_guard import NARRATIVE_NUMBER_GUARD_ENV
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
 from ragspine.service.config import ServiceConfig, open_narrative_retriever
 from ragspine.storage.fact_store import SqliteFactStore
@@ -82,6 +84,13 @@ def _digest(tmp_path, **config_kwargs) -> str:
         facts.close()
     payload = json.dumps(dumps, sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+@pytest.fixture(autouse=True)
+def _number_guard_off(monkeypatch):
+    # 摘要冻结于叙事数字防编造（ADR 0024，默认 on，会在 system prompt 追加推断约束）之前；
+    # 本文件只锁页图开关，故把那个正交开关钉在 off（它自己的 off 快照见 tests/agent/test_narrative_number_guard.py）。
+    monkeypatch.setenv(NARRATIVE_NUMBER_GUARD_ENV, "off")
 
 
 def test_default_config_messages_byte_identical(tmp_path):

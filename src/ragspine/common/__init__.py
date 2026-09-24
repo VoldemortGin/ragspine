@@ -4,6 +4,7 @@
 代码/计数/时序，从不记录答案、事实值或 chunk 文本。
 
 Submodules:
+    answer_text.py — 答案/证据文本的数字友好规范化 + 带数字边界的包含判断（评测判分与叙事数字防编造共用）。
     company_profile.py — 所属公司（home company）身份的配置化载入。
     core.py — 跨切面全局常量（数据根 + 各 sqlite 库默认路径）的单一出处。
     evidence/ — 证据链（enterprise-pdf-rag 产品线）的 APP_* 配置、血缘日志与模型访问（ADR 0022）。

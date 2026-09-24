@@ -45,6 +45,11 @@ from ragspine.agent.llm_provider import (
     ProviderError,
     provider_supports_images,
 )
+from ragspine.agent.number_guard import (
+    NUMBER_GUARD_RULE,
+    guard_narrative_answer,
+    resolve_number_guard,
+)
 from ragspine.agent.query_tools import QUERY_METRIC_TOOL_OPENAI, execute_query_metric
 from ragspine.common.company_profile import load_company_profile
 from ragspine.common.glossary import normalize_period, resolve_relative_period
@@ -165,6 +170,9 @@ class _TraceCtx:
     # 图文混合上下文（检索结果带 page_image 时）：发出的页图数 / 因 provider 不支持图片而丢弃的页图数。
     page_images_sent: int = 0
     page_images_dropped: int = 0
+    # 叙事数字防编造（ADR 0024）：被改写的叙事答案数 / 其中无依据数字个数（只记计数）。
+    number_guard_rewrites: int = 0
+    number_guard_ungrounded: int = 0
 
     def record_provider(self, seconds: float, usage: dict[str, int | None] | None) -> None:
         self.provider_seconds += seconds
@@ -513,6 +521,7 @@ def _run_narrative(
     history_messages: list[dict[str, object]],
     *,
     fallback: bool = False,
+    number_guard: bool = False,
 ) -> tuple[str, str, list[dict[str, object]]]:
     """叙事通路：检索 → 合成 → 附来源。检索未接入/无结果时坦白降级；返回
     (answer, answer_plain, sources)。answer_plain 是模型散文本身（不含编排层追加的
@@ -522,6 +531,9 @@ def _run_narrative(
 
     fallback=True（结构化回落，ADR 0023）：system prompt 追加 NO_ANSWER 规则；答案无依据
     （见 _fallback_grounded）时返回空 sources——调用方据 sources 为空维持原结构化结果。
+
+    number_guard=True（叙事数字防编造，ADR 0024）：system prompt 追加推断约束；答案里有片段找不到
+    的数字时确定性改写（number_guard.guard_narrative_answer），再照常强制附来源。
     """
     if retriever is None:
         degraded = "叙事检索通路尚未接入，暂时无法回答归因/监管/进展类问题；数字类问题可直接提问。"
@@ -565,7 +577,8 @@ def _run_narrative(
                     "content": _NARRATIVE_SYSTEM_PROMPT_TEMPLATE.format(
                         company=_PROFILE.home_company_name
                     )
-                    + (_FALLBACK_RULE if fallback else ""),
+                    + (_FALLBACK_RULE if fallback else "")
+                    + (NUMBER_GUARD_RULE if number_guard else ""),
                 },
                 *history_messages,
                 {"role": "user", "content": user_content},
@@ -579,6 +592,14 @@ def _run_narrative(
     answer = resp.choices[0].message.content or ""
     if fallback and not _fallback_grounded(answer, question, snippets):
         return "", "", []
+    if number_guard:
+        refs = [str(r) for src in sources for r in (src["doc"], src["locator"]) if r]
+        answer, n_ungrounded = guard_narrative_answer(
+            answer, question, [_snippet_text(s) for s in snippets], refs
+        )
+        if n_ungrounded:
+            ctx.number_guard_rewrites += 1
+            ctx.number_guard_ungrounded += n_ungrounded
     answer_plain = answer  # 裸散文：不含编排层追加的血缘兜底后缀
     # 血缘兜底：来源文件名必须出现在回答里
     missing = [s for s in sources if s["doc"] and str(s["doc"]) not in answer]
@@ -640,6 +661,12 @@ def _emit_request_trace(
     }
     if fallback is not None:
         fields["narrative_fallback"] = {"reason": fallback[0], "grounded": fallback[1]}
+    if ctx.number_guard_rewrites:
+        # 只记计数，不记被移除的数字或答案正文。
+        fields["narrative_number_guard"] = {
+            "ungrounded": ctx.number_guard_ungrounded,
+            "rewritten": ctx.number_guard_rewrites,
+        }
     if ctx.page_images_sent or ctx.page_images_dropped:
         # 只记计数与原因代码，不记路径 / 图片内容。
         fields["page_images"] = {
@@ -665,6 +692,7 @@ def _answer_decomposed(
     intent_parser: IntentParser | None,
     history: Sequence[HistoryTurn] | None,
     narrative_fallback: bool,
+    narrative_number_guard: bool,
 ) -> AgentResult:
     """W6a 多跳分解 fan-out：每个子问题独立走 answer_question（带全部 guard + 安全门），
     再确定性合成。
@@ -684,6 +712,7 @@ def _answer_decomposed(
             intent_parser=intent_parser,
             history=history,
             narrative_fallback=narrative_fallback,
+            narrative_number_guard=narrative_number_guard,
         )
         for sq in subquestions
     ]
@@ -716,10 +745,18 @@ def _try_fallback(
     intent: ParsedIntent,
     ctx: _TraceCtx,
     history_messages: list[dict[str, object]],
+    number_guard: bool,
 ) -> tuple[str, str, list[dict[str, object]]] | None:
     """结构化回落叙事：有依据（带来源）返回 (answer, answer_plain, sources)，否则 None。"""
     answer, answer_plain, sources = _run_narrative(
-        question, provider, retriever, intent, ctx, history_messages, fallback=True
+        question,
+        provider,
+        retriever,
+        intent,
+        ctx,
+        history_messages,
+        fallback=True,
+        number_guard=number_guard,
     )
     return (answer, answer_plain, sources) if sources else None
 
@@ -752,6 +789,7 @@ def answer_question(
     decomposer: QueryDecomposer | None = None,
     history: Sequence[HistoryTurn] | None = None,
     narrative_fallback: bool | None = None,
+    narrative_number_guard: bool | None = None,
 ) -> AgentResult:
     """单条问题端到端编排入口。
 
@@ -771,8 +809,12 @@ def answer_question(
         默认 on）。on 且注入了 narrative_retriever 时，structured 路由缺指标（原反问）或零 found
         （原“查不到”/无法识别改写）先回落叙事；回落答案须带来源且含出自片段的数字，否则维持原结果
         逐字节不变。竞品越权拒答仍最前置；found 路径、composite、narrative 路由不受影响。
+    narrative_number_guard：叙事数字防编造（ADR 0024）。None＝读 RAGSPINE_NARRATIVE_NUMBER_GUARD
+        （on|off，默认 on）。on 时叙事合成（narrative / composite 归因段 / 路由回落）的 system prompt
+        追加推断约束，答案里片段找不到的数字触发确定性改写；off 时逐字节不变。
     """
     use_fallback = _resolve_narrative_fallback(narrative_fallback)
+    use_number_guard = resolve_number_guard(narrative_number_guard)
     # W6a：注入了分解器且真分解（>1 子问题）时走 fan-out；否则（含 decomposer=None）落到下方
     # 既有主流程——此分支不命中时主流程逐位不变，默认 loop 字节等价。
     if decomposer is not None:
@@ -788,6 +830,7 @@ def answer_question(
                 intent_parser=intent_parser,
                 history=history,
                 narrative_fallback=use_fallback,
+                narrative_number_guard=use_number_guard,
             )
 
     request_id = new_request_id()
@@ -822,7 +865,9 @@ def answer_question(
     if clar.mode == CLARIFY_ASK_FIRST:
         fallback: tuple[str, bool] | None = None
         if can_fallback:
-            fb = _try_fallback(question, provider, narrative_retriever, intent, ctx, hist_msgs)
+            fb = _try_fallback(
+                question, provider, narrative_retriever, intent, ctx, hist_msgs, use_number_guard
+            )
             fallback = (FALLBACK_MISSING_METRIC, fb is not None)
             if fb is not None:
                 _emit_request_trace(request_id, intent, clar, [], ctx, fallback)
@@ -851,7 +896,13 @@ def answer_question(
 
     if intent.route == ROUTE_NARRATIVE:
         answer, answer_plain, sources = _run_narrative(
-            question, provider, narrative_retriever, intent, ctx, hist_msgs
+            question,
+            provider,
+            narrative_retriever,
+            intent,
+            ctx,
+            hist_msgs,
+            number_guard=use_number_guard,
         )
         _emit_request_trace(request_id, intent, clar, [], ctx)
         return AgentResult(
@@ -881,7 +932,9 @@ def answer_question(
 
     no_hit_fallback: tuple[str, bool] | None = None
     if can_fallback and not any(r.get("status") == "found" for r in tool_results):
-        fb = _try_fallback(question, provider, narrative_retriever, intent, ctx, hist_msgs)
+        fb = _try_fallback(
+            question, provider, narrative_retriever, intent, ctx, hist_msgs, use_number_guard
+        )
         no_hit_fallback = (FALLBACK_STRUCTURED_NO_HIT, fb is not None)
         if fb is not None:
             _emit_request_trace(request_id, intent, clar, tool_results, ctx, no_hit_fallback)
@@ -889,7 +942,13 @@ def answer_question(
 
     if intent.route == ROUTE_COMPOSITE:
         narrative_answer, narrative_answer_plain, narrative_sources = _run_narrative(
-            question, provider, narrative_retriever, intent, ctx, hist_msgs
+            question,
+            provider,
+            narrative_retriever,
+            intent,
+            ctx,
+            hist_msgs,
+            number_guard=use_number_guard,
         )
         answer = f"{answer}\n\n归因分析：\n{narrative_answer}"
         answer_plain = f"{answer_plain}\n\n归因分析：\n{narrative_answer_plain}"
