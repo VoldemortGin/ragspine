@@ -538,10 +538,12 @@ def _headline(records: Sequence[Mapping[str, Any]], *, top_k: int) -> str:
 _JUDGING_NOTES = [
     "有页码（page group）时按页判定：命中 = 块的页 ∈ group；题目给了 doc 时还要求 doc_id（或去扩展名后）匹配。"
     "没页码的块（如 pptx 的 slide=）不参与页级排名，与 nl_gold 一致。",
-    "没页码时回退到 expected 与命中块 text / prompt_text 比对：expected 含数字则每个数字都须出现，"
-    "否则整串须出现（规范化同 nl_gold：NFKC、千分位、%、数字边界）。比对的是命中块文本而非整页；38.00 与 38 不视为相等。",
-    "rank = 各 group 首次命中位置的最大值（所有 group 都进前 k 才算命中）；"
-    "recall@k 按检索条数（chunk）计，page_recall@k 按不同页计；MRR = mean(1/rank)，未命中记 0。",
+    "没页码时回退到 expected 与命中块 text / prompt_text 比对：整串出现即命中，否则 expected 里的每个数字都须出现"
+    "（规范化与匹配委托 nl_gold 的 normalize_answer / contains_normalized）。比对的是命中块文本而非整页；38.00 与 38 不视为相等。",
+    "rank = 各 group 首次命中位置的最大值（所有 group 都进前 k 才算命中）。"
+    "recall@k 的名次：按页判定时只数带页码的命中（没页码的块不占名次，与 nl_gold 一致），按 expected 判定时数全部检索条数；"
+    "page_recall@k 按不同页计名次（同一页只算第一次出现）；MRR = mean(1/rank)，未命中记 0。"
+    "逐题列表的序号是检索结果的原始位置，可能与按页判定的 rank 不同。",
     "既无页码也无 expected 的题不计入分母；出错的题记为未命中。",
 ]
 
