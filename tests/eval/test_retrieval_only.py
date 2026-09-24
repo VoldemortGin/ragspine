@@ -276,6 +276,26 @@ def test_content_basis_fullwidth_and_thousands() -> None:
     assert judged.hit_flags == (False, True)
 
 
+def test_content_page_rank_counts_a_page_whose_first_chunk_missed() -> None:
+    """回归：同一页先出现未命中块、后出现命中块时，不同页名次仍按该页计（不能被去重跳过）。"""
+    q = BatchQuestion(id="a", question="q", expected="72%")
+    hits = [
+        _hit(2, doc="d.md", text="Agency share"),
+        _hit(2, doc="d.md", text="Agency share was 72%"),
+        _hit(3, doc="d.md", text="72%"),
+    ]
+    judged = judge_hits(q, hits)
+    assert judged.rank == 2 and judged.page_rank == 1
+    metrics = retrieval_metrics([(judged.rank, judged.page_rank)], (1, 2))
+    assert metrics["page_recall"]["@1"] >= metrics["recall"]["@1"]
+
+
+def test_content_page_rank_counts_distinct_pages_before_the_hit() -> None:
+    q = BatchQuestion(id="a", question="q", expected="72%")
+    hits = [_hit(1), _hit(1), _hit(None), _hit(2), _hit(3, text="72%")]
+    assert judge_hits(q, hits).page_rank == 4  # 页 1、无页码块、页 2、页 3
+
+
 @pytest.mark.parametrize(
     ("text", "expected"),
     [

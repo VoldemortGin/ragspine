@@ -354,12 +354,12 @@ def judge_hits(question: BatchQuestion, hits: Sequence[Mapping[str, object]]) ->
             for hit in hits
         )
         rank = next((i + 1 for i, flag in enumerate(flags) if flag), None)
+        # 不同页名次：命中时取截至当前位置出现过的不同页数（当前页已出现过则不再 +1）；
+        # 去重键与页判定一致（给了 doc 用 (doc, page)，否则 page），没页码的块各自算一个。
         seen: set[object] = set()
         page_rank: int | None = None
         for i, (key, flag) in enumerate(zip(keys, flags, strict=True)):
-            dedup: object = key if key is not None else ("#", i)
-            if dedup in seen:
-                continue
+            dedup: object = ("#", i) if key is None else (key if question.doc else key[1])
             seen.add(dedup)
             if flag:
                 page_rank = len(seen)
