@@ -24,7 +24,12 @@ formal persisted-vector path (`storage.persist_vectors`, embed at ingest) and re
 `service.config.open_vector_channel` — no eval-side vector backfill. `--page-parent off|dedup|page+child` (default `page+child`) switches the
 retriever's page-level parent/child mode; `recall_at_k` reports both `recall` (k = retrieved chunks) and
 `page_recall` (k = distinct pages). `--source-pdf` links the original PDF at ingest (else the md's `<stem>.meta.json`
-sidecar) and `--page-images on --page-images-top-n N` adds page images to the top-N pages (image+text context);
+sidecar) and `--page-images off|tagged|all` (`on` = `all`; ADR 0025) with `--page-images-top-n N`,
+`--page-images-trigger`, `--page-images-max`, `--page-images-low-text-chars`, `--page-images-figure-min-chars` adds
+page images to the top-N pages (`tagged`: only pages whose tags hit the trigger) via
+`make_triggered_page_image_retriever` (image+text context); all of them are recorded in the report meta. The OCR text
+condition for that evaluation is built by `scripts/examples/ocr_to_di_markdown.py` (OCR lines → DI-style markdown +
+sidecar linking the outlined PDF; output kept under git-ignored `data/`);
 `CountingProvider` forwards `supports_image_input` so the wrapped provider still receives image parts.
 `route_label` reports `fallback` when `AgentResult.fallback` is set (structured miss answered by the narrative
 fallback, ADR 0023), and `not_found` for an `ask_first` whose answer is a refusal (missing metric, fallback ungrounded).

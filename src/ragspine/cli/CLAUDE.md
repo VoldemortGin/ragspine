@@ -24,6 +24,13 @@ A thin argparse wrapper over the zero-SDK offline core — **never** shells out 
     via `--embedding/--reranker local-http --persist-vectors`, `--contextual-index off|heading|full`
     overrides only the preset's `contextual_index`, `--query-translation off|auto` only its
     `query_translation` (no new `RAGSPINE_*` env; mock + auto is flagged as not translating).
+    `--page-images off|tagged|all` (`on` = `all`) + `--page-images-trigger/-max/-top-n/-low-text-chars/
+    -figure-min-chars` override only the preset's page-image fields (ADR 0025; invalid → exit 2); the summary and
+    `run_settings.json` show the effective values. Ask mode listens to its own thread's request traces
+    (`_RequestTraceCapture`, counts only) and adds a per-question `trace` (`requests`, `input_tokens`/`output_tokens`
+    or `None`, `page_images_sent`/`_dropped`, `number_guard_rewrites`); the summary adds images per question
+    (dropped ones shown when the provider cannot read images), latency p50/p95, token totals or "未采集到", and a
+    claude-cli token caveat.
     `run_settings.json` pins the run's scoring settings; `--resume` with different settings → exit 2.
     A precheck opens the retriever once (ask's guards) and reports the actual vector channel in the summary.
   - `workflow serve <file-or-template-id> [--port N] [--open]` — starts the API + packaged

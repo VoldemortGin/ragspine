@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/extraction/
-verified-against: aa79977
+verified-against: 4cb01273af900910fb698aa6f348d87c44076edb
 ---
 
 # extraction — agent contract
@@ -27,8 +27,11 @@ over the existing `extract_grids` impls).
 `outputContentFormat=markdown`) into a typed page → block IR (`Heading` with heading path /
 `Paragraph` / `Table` as an expanded rectangular `TableGrid` keeping rowspan/colspan anchors /
 `Figure`). Page = `<!-- PageBreak -->` split; `number` from `PageNumber` else physical order;
-PageHeader/PageFooter/PageNumber never reach the body. Not wired into ingestion yet; contract in
-`di_markdown/parse.py`'s docstring.
+PageHeader/PageFooter/PageNumber never reach the body. Contract in `di_markdown/parse.py`'s docstring.
+`di_markdown/page_tags.py` (ADR 0025) derives per-page raw measures from the blocks — `has_table` (Table block or a
+pipe separator row with a `|`), `n_figures` / `figure_max_chars` (largest figure's text + caption), `text_chars`
+(all block text minus whitespace and `|`) — and `page_tags(stats, low_text_chars=300, figure_min_chars=10)` turns
+them into `has_table` / `has_figure` / `low_text`. Pure, stdlib only; bump `PAGE_TAGS_VERSION` when a measure changes.
 
 `evidence/` — the evidence chain's pure PDF source observations, model-free proofs and typed IR
 (ADR 0022); its own contract is [`evidence/CLAUDE.md`](evidence/CLAUDE.md).

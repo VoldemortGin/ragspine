@@ -6,6 +6,18 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ### Added
 
+- **Page images on demand: `RAGSPINE_PAGE_IMAGES=off|tagged|all`**
+  ([ADR 0025](docs/adr/0025-page-image-trigger-policy.md)). `on` stays as an alias of `all` and is
+  byte-identical to before; the default is still `off`. `tagged` attaches an image only to the top-N pages whose
+  ingest-time tags hit `RAGSPINE_PAGE_IMAGES_TRIGGER` (default `has_table,low_text`; `has_figure`, `any`), capped
+  by `RAGSPINE_PAGE_IMAGES_MAX`; thresholds `RAGSPINE_PAGE_IMAGES_LOW_TEXT_CHARS` (300) and
+  `RAGSPINE_PAGE_IMAGES_FIGURE_MIN_CHARS` (10, drops logo-sized figures) are query-time settings calibrated on one
+  sample. Tags come from the DI markdown blocks at ingest (`page_tag` table, only for a `.md` with a linked PDF;
+  older dbs are tagged lazily and read-only). The trigger only removes image references, so RESTRICTED screening
+  is inherited. `ragspine batch` gains the matching `--page-images*` flags and per-question counts (images sent,
+  tokens, number-guard rewrites, latency p50/p95); `scripts/run_nl_gold_ragspine.py` takes the same modes;
+  `scripts/examples/ocr_to_di_markdown.py` turns OCR lines into DI-style markdown for the OCR evaluation condition.
+  The default is decided by the pre-registered evaluation in ADR 0025 (not run yet).
 - **`ragspine batch` — batch ask and retrieval-only evaluation over a question set.**
   `ragspine batch <questions> --workspace DIR [--retrieval-only]` reads `.json` / `.jsonl` / `.csv` / `.txt`
   question sets (or an `nl-answers-gold-v1` / `-v2` file) and writes `results.jsonl` (one line per question, appended as

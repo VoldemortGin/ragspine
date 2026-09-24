@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/service/
-verified-against: c71bb945629f82eb18b3761493d091d1af2662dc
+verified-against: 4cb01273af900910fb698aa6f348d87c44076edb
 ---
 
 # service — agent contract
@@ -46,8 +46,12 @@ with another index text — re-ingest / re-sync with the new setting to rebuild.
 `build_narrative_retriever(query_translation=)`: a question whose language differs from the chunks' is translated once
 (cached) into an extra BM25 + vector query; same-language questions never call the provider. Query-time only, not part
 of the index fingerprint.
-`ServiceConfig.page_images` / `RAGSPINE_PAGE_IMAGES` (`off` default | `on`) + `page_images_top_n` (3) make
-`open_narrative_retriever` wrap the final retriever in `PageImageRetriever` (needs `page_parent` ≠ `off`); ingest-side
+`ServiceConfig.page_images` / `RAGSPINE_PAGE_IMAGES` (`off` default | `tagged` | `all`, `on` = `all`; ADR 0025) +
+`page_images_top_n` (3) + `page_images_trigger` (`has_table,low_text`) / `page_images_max` (None = top_n) /
+`page_images_low_text_chars` (300) / `page_images_figure_min_chars` (10), mirrored on `RetrievalPreset` and passed by
+the facade, make `open_narrative_retriever` call `make_triggered_page_image_retriever`: `all` without a max is the
+plain `PageImageRetriever` (byte-identical to the old `on`), `tagged` or a max adds the remove-only
+`PageImageTriggerRetriever` (needs `page_parent` ≠ `off`); invalid values raise `ValueError` at assembly; ingest-side
 `page_image_dpi` (144) / `page_image_max_side` (1568) / `page_image_dir` (default `<chunk db dir>/page_images`) ride the
 narrative job payload; the worker re-validates `source_pdf` (payload or sidecar) before writing (`SourcePdfError` →
 `JobError(stage="validation")`) and adds a count-only `page_images` block to its report when a PDF was linked. The facade

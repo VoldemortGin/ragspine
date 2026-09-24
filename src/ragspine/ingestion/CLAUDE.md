@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/ingestion/
-verified-against: 08c27176f17abf97df5629c081ca9720d2dbfecb
+verified-against: 4cb01273af900910fb698aa6f348d87c44076edb
 ---
 
 # ingestion — agent contract
@@ -39,7 +39,10 @@ max_side/long edge pt)`, defaults **144 dpi / 1568 px** (Claude downsizes beyond
 1568×882, ~0.2 MB). `index.py`: `sync_page_images` is doc-idempotent (signature = PDF sha + dpi + max_side +
 RESTRICTED page set; changed PDF ⇒ re-render + replace + orphan cleanup; re-ingest without a PDF clears the doc's old
 images), **pages holding any RESTRICTED chunk are never rendered** (`n_withheld`), trace `op=narrative.page_image_index`
-counts only),
+counts only; `sync_ingested_page_images` — the one point the facade / CLI / worker ingest paths share — also runs
+`sync_page_tags` (ADR 0025): every linked `.md` (idempotently skipped ones too, so re-ingest backfills an old db) gets
+per-page raw tag measures in `page_tag` (signature = md sha256 + `PAGE_TAGS_VERSION`, unchanged ⇒ skip), a `.md`
+without a PDF loses its tags with its images, dry-run writes nothing, trace `op=narrative.page_tag_index` counts only),
 `review/` (SME human review-queue state machine).
 
 ## Invariants

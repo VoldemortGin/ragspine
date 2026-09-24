@@ -91,7 +91,7 @@ and counts, never the question or the translation. **Frozen by**
 `tests/retrieval/query_translation/test_query_translation.py` (generation-prompt isolation, trace privacy) and the
 off-mode snapshot `tests/retrieval/query_translation/test_query_translation_off_snapshot.py`.
 
-**Page images are a new exit, screened at the door (`RAGSPINE_PAGE_IMAGES=on`, opt-in, default `off`).** A page
+**Page images are a new exit, screened at the door (`RAGSPINE_PAGE_IMAGES=all|tagged`, `on` = `all`, opt-in, default `off`).** A page
 image carries the whole page, wider than any chunk the two text exits judge. So (1) ingest never renders a page that
 holds any RESTRICTED chunk (`ingestion/page_images/index.py`, `n_withheld`), and (2) `retrieval/page_images/attach.py`
 re-checks the chunk store at query time and sends no image for such a page even if a mapping row exists (e.g. the
@@ -99,7 +99,10 @@ sensitivity changed after rendering). Public text on that page still flows throu
 counts / reason codes only (`op=narrative.page_images`, `op=narrative.page_image_index`, request-trace `page_images`),
 never paths or image bytes; each image part carries `doc_id` + physical `page` (provenance). **Frozen by**
 `tests/conformance/test_page_image_isolation.py` (+ reverse-proof) and the off-mode prompt snapshot
-`tests/retrieval/page_images/test_page_images_off_snapshot.py`.
+`tests/retrieval/page_images/test_page_images_off_snapshot.py`. **The trigger only removes, never adds**
+([ADR 0025](adr/0025-page-image-trigger-policy.md)): `retrieval/page_images/trigger/retriever.py` wraps the image
+exit and can only delete `page_image` keys (tagged filter, de-dup, `max` cap) — never add a reference or touch another
+key — so the door screening above is inherited unchanged; the conformance test runs `tagged` next to `on`.
 
 **Judge-agnostic (W2).** The rerank exit's protection lives in the `listwise_rerank` *orchestration*,
 not in any particular judge, so it covers **every** `ListwiseJudge` equally: the LLM listwise judge

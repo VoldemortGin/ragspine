@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/
-verified-against: c71bb945629f82eb18b3761493d091d1af2662dc
+verified-against: 4cb01273af900910fb698aa6f348d87c44076edb
 ---
 
 # retrieval — agent contract
@@ -48,7 +48,7 @@ always whole. `NarrativeIndex._retrieve_pages` runs **after fusion, before reran
 occurrence = representative), `page+child` adds a whole-page BM25 ranking (multi-query, no vectors) fused by RRF,
 top-k counts pages, the judge sees one representative per page, then the representative gets `window_text` = page
 window and `parent_locator` = `{doc_id}@page=N`; trace `op=narrative.page_parent` carries counts only),
-`page_images/` (**image+text context, opt-in** `RAGSPINE_PAGE_IMAGES=off|on` + `RAGSPINE_PAGE_IMAGES_TOP_N` (default 3) /
+`page_images/` (**image+text context, opt-in** `RAGSPINE_PAGE_IMAGES=off|tagged|all` (`on` = `all`) + `RAGSPINE_PAGE_IMAGES_TOP_N` (default 3) /
 `ServiceConfig.page_images*` / facade `RetrievalPreset.page_images*`, default `off` ⇒ `make_page_image_retriever` returns
 the base unchanged, prompt byte-identical, frozen by `tests/retrieval/page_images/test_page_images_off_snapshot.py`).
 `store.py`: `PageImageStore` — tables `page_image_doc` (pdf sha256, dpi, max_side, sync signature) + `page_image`
@@ -58,7 +58,16 @@ only orphaned files; page = physical page order (= locator `page=N`). `attach.py
 `NarrativeRetriever` wrapper, outermost in `open_narrative_retriever`) adds `page_image = {path, doc_id, page,
 image_sha256, pdf_sha256}` to the first `top_n` snippets; requires `page_parent` ≠ `off` (one snippet per page, text =
 whole page) — `off` attaches nothing (`reason=page_parent_off`); skip codes `no_page` / `restricted` / `no_image` /
-`missing_file`; trace `op=narrative.page_images` = counts + codes only),
+`missing_file`; trace `op=narrative.page_images` = counts + codes only). `trigger/` (ADR 0025): `tag_store.py` =
+`page_tag` table (per-page raw measures from `extraction/di_markdown/page_tags.py` + md sha256 / tags version, written by
+the ingest side, created on first write) and `load_doc_tags` (stored rows, else a **read-only** lazy parse of
+`narrative_doc.source_path` when its hash still matches, cached per `(doc_id, file_hash)`, else `untagged`);
+`retriever.py` = `make_page_images_policy` (`off|tagged|all`, `on` → `all`), `parse_page_image_trigger`
+(`has_table,has_figure,low_text` subset or `any`), `PageImageTriggerRetriever` (outermost, wraps `PageImageRetriever`:
+rank order, drop `dup` (same page / image sha), `not_tagged` / `untagged` in `tagged` mode, `over_max`; **only deletes
+`page_image` keys**, so the door screening is inherited; trace `op=narrative.page_image_trigger` = counts + codes) and
+`make_triggered_page_image_retriever` (`all` without `max` returns the plain `PageImageRetriever`, byte-identical to the
+old `on`; thresholds `low_text_chars` 300 / `figure_min_chars` 10 are query-time settings),
 `contextual.py` (W4a — a deterministic, zero-fabrication context header built from controlled-vocab
 metadata, injected into **index/embed text only** via the opt-in `index_text_fn` seam on
 `HybridRetriever`/`NarrativeIndex`; `chunk.text`/citation untouched, default `None` = byte-identical; wired end to end
@@ -201,6 +210,9 @@ is the more-permissive `RAGSPINE_COLPALI_MODEL` alternative.
   re-checks the chunk store at query time: any active RESTRICTED chunk on that page ⇒ no image, even when a mapping
   row exists (ingest also never renders such pages). Bound by `tests/conformance/test_page_image_isolation.py`
   (+ reverse-proof).
+- **The page-image trigger only removes (ADR 0025).** `PageImageTriggerRetriever` may delete `page_image` keys
+  (tag filter, de-dup, max) but never adds a reference or touches another key, so it inherits the door screening;
+  the isolation conformance test runs `tagged` next to `on`.
 
 ## Read before editing
 
