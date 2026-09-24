@@ -4,7 +4,7 @@ covers:
   - src/ragspine/retrieval/link/
   - src/ragspine/retrieval/rerank/
   - src/ragspine/common/observability/
-verified-against: 70032e956fbf3154d6fdf2d5dbcdb397b07a33b2
+verified-against: 0c3be5c66766bd6fa9b36743a7bf725642838ba1
 ---
 
 # Invariants (code-enforced)
@@ -15,7 +15,26 @@ freezes it.
 
 ## Anti-fabrication
 
-<!-- TODO: where the rewrite happens (src/ragspine/agent/agent.py) and the regression test. -->
+**Guarantees** a number in an answer comes from evidence: a structured `found` fact, or (on the
+fallback path) a number that appears in the retrieved snippet text. With no such evidence the answer
+is the deterministic not-found / unrecognized rewrite (for a missing metric: not-found followed by
+the `ask_first` metric question, or just that question when no fallback ran), never model prose.
+
+**Enforced** in `agent/agent.py`. `_structured_answer` renders `found` facts from the fact value
+(model prose discarded) and rewrites no-`found` to not-found / unrecognized. **Route fallback (ADR 0023,
+`RAGSPINE_NARRATIVE_FALLBACK=on|off`, default `on`, needs an injected narrative retriever):** a
+structured-route question with a missing metric or no `found` fact first tries `_run_narrative(fallback=True)`.
+The result is accepted only when `_fallback_grounded` holds: snippets were retrieved, the answer has no
+`NO_ANSWER` sentinel, and at least one answer number (minus question numbers and `[n]` markers) appears
+in the snippet text. Sources are forced as on the narrative route. Otherwise a no-hit returns the
+original structured result unchanged, and a missing metric answers "查不到：…" plus the original ask
+(the `ask_first` clarification object is kept). The competitor / out-of-scope refusal stays the first early return;
+`found`, composite and narrative routes never fall back. The request trace records
+`narrative_fallback={reason, grounded}` (codes only).
+**Frozen by** `tests/agent/test_agent_orchestrator.py` (not-found / unrecognized rewrite,
+`test_found_path_discards_fabricated_extra_number`), `tests/agent/test_narrative_fallback.py`
+(fallback grounded / ungrounded / fabricated-number rejected / off ≡ old behavior), and the QA ratchet
+(`data/golden/qa_baseline.json`, fabrication count 0).
 
 ## Provenance
 

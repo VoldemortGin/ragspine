@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/agent/
-verified-against: 08c27176f17abf97df5629c081ca9720d2dbfecb
+verified-against: 0c3be5c66766bd6fa9b36743a7bf725642838ba1
 ---
 
 # agent — agent contract
@@ -83,7 +83,8 @@ loop, LLM provider abstraction.
   - *structured* — `_structured_answer`: the answer is **deterministically
     synthesized on every path**. found facts are rendered from the fact value
     (`实体 期间 指标（渠道）：值 单位（来源…）`, same format as `_multi_subtask_answer`);
-    no-found is rewritten to "not found" / "unrecognized". The model's prose is
+    no-found is rewritten to "not found" / "unrecognized" — **after** the route fallback
+    below has had its chance. The model's prose is
     **never** trusted for the number — a live LLM cannot smuggle an extra fabricated
     figure on the found path (audit HIGH closed; regression:
     `test_found_path_discards_fabricated_extra_number`). Don't reintroduce
@@ -91,6 +92,15 @@ loop, LLM provider abstraction.
   - *multi-subtask* — `_multi_subtask_answer` never calls the LLM at all.
   - *narrative* — `_run_narrative` trusts model prose but **forces source citation**;
     no found-fact rewrite here. That asymmetry is deliberate.
+  - *route fallback (ADR 0023)* — `RAGSPINE_NARRATIVE_FALLBACK=on|off` (default `on`;
+    `answer_question(narrative_fallback=)` overrides). With a retriever injected, a structured-route
+    missing metric (`missing_metric`) or zero `found` (`structured_no_hit`) first runs
+    `_run_narrative(fallback=True)`. Accepted only if `_fallback_grounded` holds: no `NO_ANSWER`
+    sentinel, and some answer number that isn't in the question appears in the snippet text. Else a
+    no-hit returns the original result byte-identical, and a missing metric answers "查不到：…" + the
+    original ask (the `ask_first` clarification is kept). Result: `route=narrative`, `fallback=<reason>`,
+    `clarification.mode=none`. Never on `found` / composite / narrative, never before the
+    competitor refusal. Don't relax the grounding check to "has sources".
 - **Security is deterministic and never-pluggable.** Intent extraction is a swappable
   `IntentParser` Protocol; the `SecurityGate` is not. The gate re-derives external /
   competitor scope from the raw question and decides refusal independently of whatever
@@ -118,7 +128,8 @@ loop, LLM provider abstraction.
   on the **raw question** (via `clarify_scope`), not by trusting `intent.external_entity`.
 - **Clarification asymmetry is deliberate.** In `clarify_scope`: missing *metric* → ask
   first; missing *entity/period* → answer with surfaced assumptions. Don't downgrade
-  metric-missing to "assume and answer".
+  metric-missing to "assume and answer". The orchestrator may try the narrative fallback before
+  it asks (ADR 0023), but it never guesses a metric. `clarify_scope` itself is unchanged.
 - **`ProviderError` wraps only network / API / timeout errors** (`llm_provider.py`);
   program errors (KeyError/TypeError) must propagate. Never `except Exception` into a
   degrade path — it buries real bugs. It now inherits the family base `corespine.CorespineError`

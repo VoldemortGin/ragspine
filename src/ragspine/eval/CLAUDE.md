@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/eval/
-verified-against: 08c27176f17abf97df5629c081ca9720d2dbfecb
+verified-against: 0c3be5c66766bd6fa9b36743a7bf725642838ba1
 ---
 
 # eval — agent contract
@@ -26,6 +26,8 @@ retriever's page-level parent/child mode; `recall_at_k` reports both `recall` (k
 `page_recall` (k = distinct pages). `--source-pdf` links the original PDF at ingest (else the md's `<stem>.meta.json`
 sidecar) and `--page-images on --page-images-top-n N` adds page images to the top-N pages (image+text context);
 `CountingProvider` forwards `supports_image_input` so the wrapped provider still receives image parts.
+`route_label` reports `fallback` when `AgentResult.fallback` is set (structured miss answered by the narrative
+fallback, ADR 0023), and `not_found` for an `ask_first` whose answer is a refusal (missing metric, fallback ungrounded).
 
 ## Invariants
 
