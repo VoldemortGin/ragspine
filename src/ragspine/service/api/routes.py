@@ -463,6 +463,15 @@ def submit_narrative_job(
         "chunker": config.chunker,
         "segment_chunking": config.narrative_segment_chunking,
     }
+    if config.persist_vectors:
+        # 持久化块向量（opt-in）：embedding 配置由服务端决定，随 payload 下发给 worker。
+        payload.update(
+            persist_vectors=True,
+            retrieval_mode=config.retrieval_mode,
+            embedding=config.embedding,
+            persistence_policy=config.persistence_policy,
+            vector_db_path=config.vector_db_path,
+        )
     job_id = queue.enqueue(NARRATIVE_INGEST_JOB, payload, job_id=req.job_id)
     return JobSubmitResponse(job_id=job_id)
 

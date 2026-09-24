@@ -20,8 +20,10 @@ class QueryEmbedder(Protocol):
 class SingleTextEmbeddingBackend:
     """实现 EmbeddingBackend 协议：对每条文本调一次 ``embedder.embed_query``。"""
 
-    def __init__(self, embedder: QueryEmbedder) -> None:
+    def __init__(self, embedder: QueryEmbedder, *, model_id: str | None = None) -> None:
         self._embedder = embedder
+        # 模型标识（持久化向量库据此核对，见 chunk_index.embedding_model_id）；None＝未声明。
+        self.model_id = model_id
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         """批量文本 -> 向量（顺序与输入对齐）。空输入直接返回空表，不发请求。"""

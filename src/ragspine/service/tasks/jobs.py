@@ -27,6 +27,7 @@ from ragspine.service.config import (
     PathNotAllowedError,
     ServiceConfig,
     build_provider,
+    index_narrative_vectors,
     provider_config_dict,
     validate_ingest_path,
 )
@@ -174,9 +175,32 @@ def run_narrative_ingest_job(payload: dict[str, Any]) -> dict[str, Any]:
             chunker=make_chunker(payload.get("chunker")),
             segment_chunking=bool(payload.get("segment_chunking", False)),
         )
-        return narrative_report_to_dict(report)
     finally:
         store.close()
+    result = narrative_report_to_dict(report)
+    if payload.get("persist_vectors") and not report.dry_run:
+        # 持久化块向量（opt-in）：worker 按服务端下发的 embedding 配置自建后端，同步块库 → 向量库；
+        # report 只加计数（不含正文）。开关关闭时 report 与原来一致。
+        vector_report = index_narrative_vectors(
+            ServiceConfig(
+                db_path=chunk_db_path,
+                chunk_db_path=chunk_db_path,
+                retrieval_mode=payload.get("retrieval_mode", ServiceConfig.retrieval_mode),
+                embedding=payload.get("embedding", ServiceConfig.embedding),
+                persistence_policy=payload.get(
+                    "persistence_policy", ServiceConfig.persistence_policy
+                ),
+                persist_vectors=True,
+                vector_db_path=payload.get("vector_db_path"),
+            )
+        )
+        if vector_report is not None:
+            result["vectors"] = {
+                "vector_channel": vector_report.vector_channel,
+                "vector_reason": vector_report.vector_reason,
+                **vector_report.counts(),
+            }
+    return result
 
 
 def run_dify_workflow_job(payload: dict[str, Any]) -> dict[str, Any]:

@@ -46,10 +46,6 @@ from ragspine.agent.intent import (
     RuleIntentParser,
 )
 from ragspine.agent.llm_provider import LLMProvider
-from ragspine.retrieval.chunking.chunk_store import ChunkStore
-from ragspine.retrieval.lexical.retrieval import EmbeddingBackend, _record_metadata
-from ragspine.retrieval.vector.persistence_policy import IsolationFirstPolicy, PersistencePolicy
-from ragspine.retrieval.vector.store import VectorRecord, VectorStore
 from ragspine.storage.fact_store import FactStore
 
 ROUTE_ASK = "A-ask"
@@ -529,38 +525,6 @@ class CountingProvider:
             return self._inner.chat(messages, tools=tools)
         finally:
             self.seconds += time.perf_counter() - started
-
-
-def index_chunk_vectors(
-    chunk_db: str | Path,
-    embedding_backend: EmbeddingBackend,
-    vector_store: VectorStore,
-    *,
-    persistence_policy: PersistencePolicy | None = None,
-    batch_size: int = 32,
-) -> int:
-    """把块库里的活跃块嵌入并写进 vector_store（口径同 NarrativeIndex.ingest 的入库即嵌入）。
-
-    ``RAGSpine.ingest`` 只写块、不嵌入；检索期 NarrativeIndex 只嵌 query、不重嵌块。评测要开向量
-    通道时用它补齐块向量。持久化门控默认隔离优先（RESTRICTED 块不嵌入）。返回写入条数。
-    """
-    policy = persistence_policy or IsolationFirstPolicy()
-    store = ChunkStore(chunk_db)
-    try:
-        chunks = [c for c in store.iter_chunks() if policy.persistable(c)]
-    finally:
-        store.close()
-    written = 0
-    for start in range(0, len(chunks), batch_size):
-        batch = chunks[start : start + batch_size]
-        vectors = embedding_backend.embed_texts([c.text for c in batch])
-        written += vector_store.upsert(
-            [
-                VectorRecord(id=c.chunk_id, vector=tuple(vec), metadata=_record_metadata(c))
-                for c, vec in zip(batch, vectors, strict=True)
-            ]
-        )
-    return written
 
 
 # ---------------------------------------------------------------------------

@@ -21,10 +21,12 @@ from ragspine.ingestion.review.review_queue import ReviewQueue
 from ragspine.ingestion.structured.ingestion import IngestReport, ingest_file
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
 from ragspine.retrieval.chunking.chunker import make_chunker
+from ragspine.retrieval.vector.chunk_index import VectorSyncReport
 from ragspine.service.config import (
     RetrievalPreset,
     RetrievalProfile,
     ServiceConfig,
+    index_narrative_vectors,
     make_retrieval_preset,
     open_narrative_retriever,
 )
@@ -69,6 +71,7 @@ class IngestResult:
 
     structured_reports: tuple[IngestReport, ...] = ()
     narrative_report: NarrativeIngestReport | None = None
+    vector_report: VectorSyncReport | None = None
 
     @property
     def failed(self) -> bool:
@@ -184,6 +187,7 @@ class RAGSpine:
             vector_store=resolved.retrieval.vector_store,
             reranker=resolved.retrieval.reranker,
             postprocessor=resolved.retrieval.postprocessor,
+            persist_vectors=resolved.storage.persist_vectors,
         )
         if retrieval is not None:
             resolved = resolved.model_copy(
@@ -200,7 +204,11 @@ class RAGSpine:
                 }
             )
             plan = _replace_plan_config(plan, resolved, prefix="retrieval.")
-            assembled_retrieval = retrieval
+            assembled_retrieval = (
+                retrieval.with_overrides(persist_vectors=True)
+                if resolved.storage.persist_vectors and not retrieval.persist_vectors
+                else retrieval
+            )
         if graph is not None:
             resolved = resolved.model_copy(
                 update={
@@ -242,6 +250,18 @@ class RAGSpine:
         """Close the facade; per-operation resources are already deterministic."""
         self._closed = True
 
+    def _service_config(self) -> ServiceConfig:
+        return ServiceConfig(
+            db_path=str(self.db_path),
+            chunk_db_path=str(self.db_path),
+            retrieval_mode=self.retrieval.retrieval_mode,
+            embedding=self.retrieval.embedding,
+            vector_store=self.retrieval.vector_store,
+            reranker=self.retrieval.reranker,
+            postprocessor=self.retrieval.postprocessor,
+            persist_vectors=self.retrieval.persist_vectors,
+        )
+
     def ask(self, question: str) -> AgentResult:
         """Answer from this workspace using the existing guarded agent path."""
         self._ensure_open()
@@ -263,17 +283,8 @@ class RAGSpine:
                 return graph_result
         store = SqliteFactStore(self.db_path)
         store.init_schema()
-        config = ServiceConfig(
-            db_path=str(self.db_path),
-            chunk_db_path=str(self.db_path),
-            retrieval_mode=self.retrieval.retrieval_mode,
-            embedding=self.retrieval.embedding,
-            vector_store=self.retrieval.vector_store,
-            reranker=self.retrieval.reranker,
-            postprocessor=self.retrieval.postprocessor,
-        )
         try:
-            with open_narrative_retriever(config, self.provider) as retriever:
+            with open_narrative_retriever(self._service_config(), self.provider) as retriever:
                 return answer_question(
                     question,
                     store,
@@ -332,6 +343,7 @@ class RAGSpine:
                 store.close()
 
         narrative_report = None
+        vector_report = None
         if narrative_paths:
             chunk_store = ChunkStore(self.db_path)
             chunk_store.init_schema()
@@ -353,7 +365,10 @@ class RAGSpine:
                     )
             finally:
                 chunk_store.close()
-        return IngestResult(tuple(structured_reports), narrative_report)
+            if not dry_run:
+                # 持久化块向量（opt-in，默认关＝None）：按 embedding 配置把块库同步进向量库。
+                vector_report = index_narrative_vectors(self._service_config())
+        return IngestResult(tuple(structured_reports), narrative_report, vector_report)
 
     def _resolve_sources(self, source: str | Path) -> list[Path]:
         path = Path(source)

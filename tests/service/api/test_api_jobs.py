@@ -197,6 +197,22 @@ def test_submit_narrative_job_returns_job_id(config, upload_root):
     assert payload["inputs"][0].endswith("report.pdf")
 
 
+def test_submit_narrative_job_carries_vector_settings_only_when_switch_on(config, upload_root):
+    from dataclasses import replace
+
+    queue = RecordingQueue()
+    file = _make_file(upload_root, "report.pdf")
+    make_client(config, queue).post("/v1/ingest/narrative/jobs", json={"inputs": [file]})
+    assert "persist_vectors" not in queue.calls[0][1]
+
+    on = replace(config, persist_vectors=True, embedding="local-http", vector_db_path="v.db")
+    make_client(on, queue).post("/v1/ingest/narrative/jobs", json={"inputs": [file]})
+    payload = queue.calls[1][1]
+    assert payload["persist_vectors"] is True
+    assert (payload["embedding"], payload["vector_db_path"]) == ("local-http", "v.db")
+    assert payload["persistence_policy"] == "default"
+
+
 def test_submit_narrative_job_rejects_bad_suffix(config, upload_root):
     queue = RecordingQueue()
     client = make_client(config, queue)

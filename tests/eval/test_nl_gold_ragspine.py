@@ -39,7 +39,6 @@ from ragspine.eval.nl_gold_ragspine import (
     RecordingRetriever,
     contains_normalized,
     gold_selected_pages,
-    index_chunk_vectors,
     is_refusal,
     judge_case,
     load_nl_gold,
@@ -53,7 +52,7 @@ from ragspine.eval.nl_gold_ragspine import (
 )
 from ragspine.retrieval.link.narrative_link import build_narrative_retriever
 from ragspine.retrieval.vector.embedding_backends import DeterministicEmbeddingBackend
-from ragspine.retrieval.vector.store import InProcessVectorStore
+from ragspine.service.config import ServiceConfig, open_vector_channel
 from ragspine.session import RAGSpine
 from ragspine.storage.fact_store import SqliteFactStore
 
@@ -488,11 +487,31 @@ def workspace(tmp_path: Path) -> Path:
     return ws
 
 
-def test_index_chunk_vectors_fills_the_vector_store(workspace: Path) -> None:
-    store = InProcessVectorStore()
-    count = index_chunk_vectors(workspace / "knowledge.db", DeterministicEmbeddingBackend(), store)
-    assert count > 0
-    hits = store.query(DeterministicEmbeddingBackend().embed_texts(["Agency"])[0], k=count)
+def test_persisted_ingest_fills_the_vector_channel_for_eval(tmp_path: Path) -> None:
+    """评测走正式路径：入库即嵌入落盘（storage.persist_vectors），检索期 open_vector_channel 读回。"""
+    pytest.importorskip("sqlite_vec")
+    ws = tmp_path / "ws-vec"
+    deck = tmp_path / "deck.md"
+    deck.write_text(_DECK, encoding="utf-8")
+    ingest = RAGSpine.local(
+        ws, preset="balanced", config={"storage": {"persist_vectors": True}}
+    ).ingest(deck)
+    assert ingest.vector_report is not None and ingest.vector_report.total > 0
+    count = ingest.vector_report.total
+
+    config = ServiceConfig(
+        db_path=str(ws / "knowledge.db"),
+        chunk_db_path=str(ws / "knowledge.db"),
+        persist_vectors=True,
+    )
+    backend, index = open_vector_channel(config, DeterministicEmbeddingBackend())
+    assert backend is not None and index is not None
+    try:
+        hits = index.store.query(
+            DeterministicEmbeddingBackend().embed_texts(["Agency"])[0], k=count
+        )
+    finally:
+        index.close()
     assert len(hits) == count
 
 

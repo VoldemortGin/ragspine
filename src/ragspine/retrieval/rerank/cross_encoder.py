@@ -127,6 +127,18 @@ class CrossEncoderReranker:
 # ListwiseJudge、都走 listwise_rerank（RESTRICTED 不出域一致继承）。Registry 内部对名字做大小写/留白/
 # 连字符归一，故 "cross-encoder"/"CROSS_ENCODER"/" ce "/"late-interaction" 等都解析到同一工厂。
 # 三个后端类的构造均惰性（不 import fastembed），故本表在此登记零 SDK import。
+def _local_http_reranker(**kwargs: Any) -> ListwiseJudge:
+    """local-http：Cohere 形状 ``/v1/rerank``（如 vLLM 上的 Qwen3-Reranker），读 RERANK_* 环境变量。
+
+    延迟 import 适配器（零顶层依赖），包成 ScoredRerankJudge，照常走 listwise_rerank（RESTRICTED 不出域）。
+    """
+    from ragspine.common.evidence.providers.local_models import LocalRerankAdapter
+    from ragspine.common.evidence.providers.providers import load_local_model_config
+    from ragspine.retrieval.rerank.scored_judge import ScoredRerankJudge
+
+    return ScoredRerankJudge(LocalRerankAdapter(load_local_model_config("rerank"), **kwargs))
+
+
 RERANKERS: Registry[ListwiseJudge] = Registry("reranker")
 RERANKERS.register("cross_encoder", CrossEncoderReranker)
 RERANKERS.register("ce", CrossEncoderReranker)
@@ -137,6 +149,7 @@ RERANKERS.register("late_interaction", ColbertReranker)
 RERANKERS.register("splade", SpladeReranker)
 RERANKERS.register("splade_pp", SpladeReranker)
 RERANKERS.register("learned_sparse", SpladeReranker)
+RERANKERS.register("local_http", _local_http_reranker)
 
 # 各本地重排后端的别名集合（归一后）与其模型覆盖环境变量——用于 make_reranker 缺省模型时的 env 注入。
 # 一张 (spec 集合 -> 模型 env 变量名) 表，随新增重排后端在此追加一行即可（数据驱动，避免多段 if 复制）。
@@ -173,6 +186,8 @@ def make_reranker(spec: str | None = None, **kwargs: Any) -> ListwiseJudge | Non
                                               -> SpladeReranker（W11 SPLADE 学习稀疏点积重排，延迟
                                                  import，[splade]；model_name 可经 kwargs 或
                                                  RAGSPINE_SPLADE_MODEL 覆盖）
+        - 'local-http'                        -> ScoredRerankJudge(LocalRerankAdapter)（/v1/rerank，读
+                                                 RERANK_BASE_URL / _MODEL / _API_KEY）
         - 其他                                -> ValueError（Registry 列清当前可用名）
 
     返回 ListwiseJudge 实例或 None（可直接喂给 build_narrative_retriever 的 reranker 参数）。

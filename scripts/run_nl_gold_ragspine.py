@@ -1,7 +1,8 @@
 """nl-answers-gold 集跑 ragspine 主链路（两路：真实 ask / 强制叙事），写基线报告。
 
-判定与汇总逻辑在 ``ragspine.eval.nl_gold_ragspine``；本脚本只做接线：入库文档 → （可选）补齐块向量
-→ 组装检索器（embedding / 精排可选真实 HTTP 模型）→ 逐路由逐 case 提问 → 落盘报告。
+判定与汇总逻辑在 ``ragspine.eval.nl_gold_ragspine``；本脚本只做接线：入库文档（开 embedding 时走正式的
+入库即嵌入落盘路径 ``storage.persist_vectors``）→ 组装检索器（从持久化向量库读；embedding / 精排可选真实 HTTP
+模型，经 ``make_embedding_backend`` / ``make_reranker`` 的 ``local-http``）→ 逐路由逐 case 提问 → 落盘报告。
 
 默认值指向 AIA 样本（gold + DI markdown），公司 / gold / 文档全部可由参数改；默认 provider 为 mock、
 embedding / 精排为 none，即零模型零网络。真实模型基线（先 ``source data/local-models/local-models.env``
@@ -99,7 +100,6 @@ def main(argv: list[str] | None = None) -> int:
         CaseRun,
         CountingProvider,
         gold_selected_pages,
-        index_chunk_vectors,
         load_nl_gold,
         run_route,
         select_di_pages,
@@ -107,7 +107,10 @@ def main(argv: list[str] | None = None) -> int:
         write_report,
     )
     from ragspine.retrieval.link.narrative_link import build_narrative_retriever
-    from ragspine.retrieval.vector.store import InProcessVectorStore
+    from ragspine.retrieval.rerank.cross_encoder import make_reranker
+    from ragspine.retrieval.vector.chunk_index import embedding_model_id
+    from ragspine.retrieval.vector.embedding_backends import make_embedding_backend
+    from ragspine.service.config import ServiceConfig, open_vector_channel
     from ragspine.session import RAGSpine
     from ragspine.storage.fact_store import SqliteFactStore
 
@@ -136,37 +139,21 @@ def main(argv: list[str] | None = None) -> int:
             select_di_pages(document.read_text(encoding="utf-8"), selected_pages),
             encoding="utf-8",
         )
-    t0 = time.perf_counter()
-    ingest = RAGSpine.local(workspace).ingest(source)
-    timings["ingest_s"] = round(time.perf_counter() - t0, 2)
-    if ingest.failed:
-        print(f"入库失败：{ingest.summary}", file=sys.stderr)
-        return 1
-    db = workspace / "knowledge.db"
-
     embedding_backend = None
     judge = None
     models: dict[str, str] = {}
     if args.embedding == "local-http" or args.reranker == "local-http":
-        from ragspine.common.evidence.providers.local_models import (
-            LocalEmbeddingAdapter,
-            LocalRerankAdapter,
-        )
-        from ragspine.common.evidence.providers.providers import load_local_model_config
-        from ragspine.retrieval.rerank.scored_judge import ScoredRerankJudge
-        from ragspine.retrieval.vector.single_text_backend import SingleTextEmbeddingBackend
-
         try:
             if args.embedding == "local-http":
-                config = load_local_model_config("embedding")
-                embedding_backend = SingleTextEmbeddingBackend(LocalEmbeddingAdapter(config))
+                embedding_backend = make_embedding_backend("local-http")
+                assert embedding_backend is not None
                 probe = embedding_backend.embed_texts(["ping"])[0]
-                models["embedding"] = f"local-http/{config.model} ({len(probe)}d)"
+                models["embedding"] = f"{embedding_model_id(embedding_backend)} ({len(probe)}d)"
             if args.reranker == "local-http":
-                config = load_local_model_config("rerank")
-                judge = ScoredRerankJudge(LocalRerankAdapter(config))
+                judge = make_reranker("local-http")
+                assert judge is not None
                 judge.judge("ping", ["ping", "pong"])
-                models["reranker"] = f"local-http/{config.model}"
+                models["reranker"] = f"local-http/{os.environ.get('RERANK_MODEL', '')}"
         except Exception as exc:  # noqa: BLE001 — 真实模型不可用即如实退出，绝不降级
             print(
                 f"真实模型不可用（{type(exc).__name__}: {exc}）。先 source "
@@ -184,12 +171,33 @@ def main(argv: list[str] | None = None) -> int:
 
         provider = MockProvider(reference_date=reference_date)
 
-    vector_store = InProcessVectorStore() if embedding_backend is not None else None
-    vectors = 0
-    if embedding_backend is not None and vector_store is not None:
-        t0 = time.perf_counter()
-        vectors = index_chunk_vectors(db, embedding_backend, vector_store)
-        timings["index_vectors_s"] = round(time.perf_counter() - t0, 2)
+    # 入库：开 embedding 时走正式路径——入库即按 embedding 配置嵌入、写进持久化向量库（幂等，已入库的
+    # 块只补缺失 / 变更的向量）；不开则与原来一样只写块、纯 BM25。
+    rag_config: dict[str, object] = {}
+    preset = None
+    if args.embedding != "none":
+        preset = "balanced"
+        rag_config = {
+            "retrieval": {"embedding": args.embedding},
+            "storage": {"persist_vectors": True},
+        }
+    t0 = time.perf_counter()
+    ingest = RAGSpine.local(workspace, preset=preset, config=rag_config).ingest(source)
+    timings["ingest_s"] = round(time.perf_counter() - t0, 2)
+    if ingest.failed:
+        print(f"入库失败：{ingest.summary}", file=sys.stderr)
+        return 1
+    db = workspace / "knowledge.db"
+    vectors = ingest.vector_report.total if ingest.vector_report is not None else 0
+
+    vector_index = None
+    vector_store = None
+    if embedding_backend is not None:
+        embedding_backend, vector_index = open_vector_channel(
+            ServiceConfig(db_path=str(db), chunk_db_path=str(db), persist_vectors=True),
+            embedding_backend,
+        )
+        vector_store = vector_index.store if vector_index is not None else None
 
     rerank_counter = CountingProvider(provider) if args.reranker == "llm" else None
     retriever, chunk_store = build_narrative_retriever(
@@ -231,6 +239,8 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         fact_store.close()
         chunk_store.close()
+        if vector_index is not None:
+            vector_index.close()
 
     timings["total_s"] = round(time.perf_counter() - started_all, 1)
     answer_calls = sum(r.llm_calls for rs in runs.values() for r in rs)

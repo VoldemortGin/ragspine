@@ -8,6 +8,7 @@ Submodules:
     store.py — 可插拔 VectorStore 缝 + 零依赖确定性内存默认实现（InProcessVectorStore）+ 工厂。
     single_text_backend.py — 单条 embedder（如 OpenAI 兼容 HTTP 的 LocalEmbeddingAdapter）→ 批量 EmbeddingBackend 的薄适配。
     persistence_policy.py — 持久化策略缝（向量是否可写盘）+ 隔离优先默认 + 工厂。
+    chunk_index.py — 持久化块向量索引（sqlite-vec 文件 + 模型标识 / doc 签名清单），入库幂等同步、检索期读回。
     adapters/ — 第三方 VectorStore 适配器（sqlite-vec/vec0 等），延迟 import，behind [vector] extra。
 """
 

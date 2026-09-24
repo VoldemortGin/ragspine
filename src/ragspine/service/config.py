@@ -25,22 +25,31 @@ from ragspine.agent.llm_provider import (
     MockProvider,
 )
 from ragspine.agent.query_transform import make_query_transform
+from ragspine.common.observability import emit_trace
+from ragspine.retrieval.chunking.chunk_store import ChunkStore
 from ragspine.retrieval.corrective import make_corrective_retriever
+from ragspine.retrieval.lexical.retrieval import EmbeddingBackend
 from ragspine.retrieval.link.narrative_link import build_narrative_retriever
 from ragspine.retrieval.mode import make_retrieval_mode
 from ragspine.retrieval.postprocess import make_postprocessor
 from ragspine.retrieval.rerank.cross_encoder import make_reranker
+from ragspine.retrieval.vector.chunk_index import (
+    ChunkVectorIndex,
+    VectorSyncReport,
+    default_vector_db_path,
+    embedding_model_id,
+)
 from ragspine.retrieval.vector.embedding_backends import make_embedding_backend
 from ragspine.retrieval.vector.persistence_policy import make_persistence_policy
-from ragspine.retrieval.vector.store import make_vector_store
+from ragspine.retrieval.vector.store import VectorStore, make_vector_store
 from ragspine.storage.fact_store import FactStore, SqliteFactStore
 
 _PACKAGED_STUDIO_DIR = Path(__file__).resolve().with_name("studio_dist")
 
 RetrievalModeSpec = Literal["economy", "hybrid"]
-EmbeddingSpec = Literal["none", "deterministic", "onnx"]
+EmbeddingSpec = Literal["none", "deterministic", "onnx", "local-http"]
 VectorStoreSpec = Literal["none", "in_process"]
-RerankerSpec = Literal["none", "cross_encoder"]
+RerankerSpec = Literal["none", "cross_encoder", "local-http"]
 PostprocessorSpec = Literal["none", "mmr,lost_in_middle,compress"]
 
 
@@ -61,6 +70,7 @@ class RetrievalPreset:
     vector_store: VectorStoreSpec
     reranker: RerankerSpec
     postprocessor: PostprocessorSpec
+    persist_vectors: bool = False
 
     def with_overrides(
         self,
@@ -70,6 +80,7 @@ class RetrievalPreset:
         vector_store: VectorStoreSpec | None = None,
         reranker: RerankerSpec | None = None,
         postprocessor: PostprocessorSpec | None = None,
+        persist_vectors: bool | None = None,
     ) -> "RetrievalPreset":
         """Return a new preset with only explicitly supplied fields replaced."""
         return RetrievalPreset(
@@ -78,6 +89,7 @@ class RetrievalPreset:
             vector_store=vector_store or self.vector_store,
             reranker=reranker or self.reranker,
             postprocessor=postprocessor or self.postprocessor,
+            persist_vectors=self.persist_vectors if persist_vectors is None else persist_vectors,
         )
 
 
@@ -114,6 +126,7 @@ def make_retrieval_preset(
     vector_store: VectorStoreSpec | None = None,
     reranker: RerankerSpec | None = None,
     postprocessor: PostprocessorSpec | None = None,
+    persist_vectors: bool | None = None,
 ) -> RetrievalPreset:
     """Resolve a named local profile and apply explicit, typed overrides."""
     selected = profile if isinstance(profile, RetrievalProfile) else RetrievalProfile(profile)
@@ -123,6 +136,7 @@ def make_retrieval_preset(
         vector_store=vector_store,
         reranker=reranker,
         postprocessor=postprocessor,
+        persist_vectors=persist_vectors,
     )
 
 
@@ -141,9 +155,9 @@ class ServiceConfig:
     base_url: str | None = None
     claude_cli_model: str | None = None  # claude-cli 的 --model；None=不指定（CLI 默认）
     retrieval_mode: str = "auto"  # 批次2.2④ 检索模式预设: "auto"/"hybrid"/"vector"(默认,embedding按下方配置装配,字节不变) | "economy"/"bm25"/"lexical"(零embedding成本,纯BM25关键词检索)
-    embedding: str = "auto"  # "auto"(装[embed-onnx]→真语义ONNX,否则纯BM25) | "none" | "onnx" | "deterministic" | "openai"
+    embedding: str = "auto"  # "auto"(装[embed-onnx]→真语义ONNX,否则纯BM25) | "none" | "onnx" | "deterministic" | "openai" | "local-http"(/v1/embeddings,读 EMBEDDING_*)
     workflow_matcher: str = "auto"  # workflow scaffold: "auto" | "none" | "onnx"
-    reranker: str = "none"  # "none"(不重排,默认行为不变) | "cross_encoder"(本地[rerank]) | "colbert"(晚交互MaxSim,[colbert]) | "splade"(学习稀疏,[splade]) | "auto"(装[rerank]即用,否则不重排)
+    reranker: str = "none"  # "none"(不重排,默认行为不变) | "local-http"(/v1/rerank,读 RERANK_*) | "cross_encoder"(本地[rerank]) | "colbert"(晚交互MaxSim,[colbert]) | "splade"(学习稀疏,[splade]) | "auto"(装[rerank]即用,否则不重排)
     query_decompose: str = "none"  # W6a 查询分解(opt-in): "none"(不分解,默认字节不变) | "llm"(注入provider的LLM多跳分解)
     corrective: str = "none"  # W6b 纠错检索(opt-in): "none"(默认,返回base本身字节不变) | "crag"(有界确定性 grade→act 环)
     postprocessor: str = "none"  # W8 后检索链(opt-in): "none"(默认,不挂链字节不变) | "mmr"/"lost_in_middle"/"compress" | 逗号成链如"mmr,lost_in_middle"
@@ -153,6 +167,8 @@ class ServiceConfig:
     narrative_segment_chunking: bool = False  # 叙事入库按 segment 切块(opt-in): False(默认整篇切块,字节不变) | True(locator 带段定位如 page=N)；.md 恒按段切块
     vector_store: str = "none"  # "none" | "in_process" | "sqlite_vec"（后者需 [vector]）
     persistence_policy: str = "default"  # "default"(隔离优先) | "persist_everything"
+    persist_vectors: bool = False  # 块向量持久化(opt-in): False(默认,向量库按 vector_store 装配,字节不变) | True(入库即按 embedding 嵌入写进 sqlite-vec 文件,检索读该文件;需 [vector])
+    vector_db_path: str | None = None  # persist_vectors 的向量库文件；None=块库旁 <stem>.vectors.db
     reference_date: str | None = None  # ISO "YYYY-MM-DD" or None
     faq_source: str | None = None  # FAQ JSON 文件路径；None -> 空缓存
     allowed_upload_root: str | None = None  # ingestion 路径必须落在此根内
@@ -256,7 +272,15 @@ def open_narrative_retriever(
     # 向量库，纯 BM25 关键词检索。默认 'auto' = 混合模式，embedding/向量库按配置装配（字节不变）。
     mode = make_retrieval_mode(config.retrieval_mode)
     embedding_backend = make_embedding_backend(config.embedding) if mode.uses_embedding else None
-    vector_store = make_vector_store(config.vector_store) if mode.uses_embedding else None
+    vector_index: ChunkVectorIndex | None = None
+    vector_store: VectorStore | None
+    if config.persist_vectors:
+        # 持久化块向量（opt-in）：向量库固定为入库时写好的 sqlite-vec 文件（vector_store 不参与）；
+        # 没有后端 / 库为空即明确降级为纯 BM25 并记 trace，模型不一致直接报错。
+        embedding_backend, vector_index = open_vector_channel(config, embedding_backend)
+        vector_store = vector_index.store if vector_index is not None else None
+    else:
+        vector_store = make_vector_store(config.vector_store) if mode.uses_embedding else None
     retriever, store = build_narrative_retriever(
         config.chunk_db_path,
         provider=provider,
@@ -277,6 +301,96 @@ def open_narrative_retriever(
         yield wrapped
     finally:
         store.close()
+        if vector_index is not None:
+            vector_index.close()
+
+
+def resolve_vector_db_path(config: ServiceConfig) -> Path:
+    """persist_vectors 的向量库文件：显式 vector_db_path，否则块库旁 ``<stem>.vectors.db``。"""
+    if config.vector_db_path:
+        return Path(config.vector_db_path)
+    return default_vector_db_path(config.chunk_db_path or config.db_path)
+
+
+def open_vector_channel(
+    config: ServiceConfig, embedding_backend: EmbeddingBackend | None
+) -> tuple[EmbeddingBackend | None, ChunkVectorIndex | None]:
+    """检索期打开持久化向量库；返回 (后端, 索引)，降级时两者皆 None。每次都发一条计数 trace。
+
+    索引由调用方 close（open_narrative_retriever 在退出时关）；模型标识不一致抛 VectorIndexMismatchError。
+    """
+    path = resolve_vector_db_path(config)
+    reason = ""
+    index: ChunkVectorIndex | None = None
+    if embedding_backend is None:
+        reason = "no_embedding_backend"
+    elif not path.is_file():
+        reason = "empty_index"
+    else:
+        index = ChunkVectorIndex(path)
+        try:
+            index.check_compatible(embedding_model_id(embedding_backend))
+        except Exception:
+            index.close()
+            raise
+        if index.count() == 0:
+            index.close()
+            index = None
+            reason = "empty_index"
+    n_vectors = index.count() if index is not None else 0
+    emit_trace(
+        op="narrative.vector_channel",
+        vector_channel="hybrid" if index is not None else "bm25_only",
+        vector_reason=reason,
+        n_vectors=n_vectors,
+    )
+    if index is None:
+        return None, None
+    return embedding_backend, index
+
+
+def index_narrative_vectors(config: ServiceConfig) -> VectorSyncReport | None:
+    """入库后把块库同步进持久化向量库（persist_vectors 打开时）；开关关闭返回 None。
+
+    按 config 装配 embedding 后端（economy 模式 / 无后端即降级为纯 BM25，不建向量文件）；持久化策略默认
+    隔离优先（RESTRICTED 块不嵌入）；doc 粒度幂等，模型标识不一致抛 VectorIndexMismatchError。
+    每次都发一条只含计数的 trace（op=narrative.vector_index）。
+    """
+    if not config.persist_vectors:
+        return None
+    chunk_store = ChunkStore(config.chunk_db_path or config.db_path)
+    try:
+        chunk_store.init_schema()
+        chunks = chunk_store.iter_chunks()
+    finally:
+        chunk_store.close()
+    mode = make_retrieval_mode(config.retrieval_mode)
+    backend = make_embedding_backend(config.embedding) if mode.uses_embedding else None
+    if backend is None:
+        report = VectorSyncReport(
+            vector_channel="bm25_only",
+            vector_reason="no_embedding_backend" if mode.uses_embedding else "retrieval_mode",
+            n_chunks=len(chunks),
+        )
+    else:
+        index = ChunkVectorIndex(resolve_vector_db_path(config))
+        try:
+            report = index.sync(
+                chunks,
+                backend,
+                model_id=embedding_model_id(backend),
+                persistence_policy=make_persistence_policy(config.persistence_policy),
+            )
+        finally:
+            index.close()
+    emit_trace(
+        None,
+        op="narrative.vector_index",
+        vector_channel=report.vector_channel,
+        vector_reason=report.vector_reason,
+        **report.counts(),
+    )
+    return report
 
 
 class PathNotAllowedError(CorespineError):

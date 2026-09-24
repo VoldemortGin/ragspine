@@ -357,6 +357,21 @@ class OnnxEmbeddingBackend:
 # embedding 后端缝注册表（corespine.Registry 泛化 make_*：名字->工厂 + spec 归一）。
 # 各内置后端在此登记；qwen3 / sentence-transformers / st 是同一 ST 后端的别名，
 # 三个名字都指向同一工厂（Registry 内部对名字做大小写/留白/连字符归一）；
+def _local_http_embedding_backend(**kwargs: Any) -> EmbeddingBackend:
+    """local-http：OpenAI 兼容 ``/v1/embeddings``（如 vLLM 上的 Qwen3-Embedding），读 EMBEDDING_* 环境变量。
+
+    延迟 import 适配器（零顶层依赖）；模型标识记为 ``local-http:<EMBEDDING_MODEL>``。
+    """
+    from ragspine.common.evidence.providers.local_models import LocalEmbeddingAdapter
+    from ragspine.common.evidence.providers.providers import load_local_model_config
+    from ragspine.retrieval.vector.single_text_backend import SingleTextEmbeddingBackend
+
+    config = load_local_model_config("embedding")
+    return SingleTextEmbeddingBackend(
+        LocalEmbeddingAdapter(config, **kwargs), model_id=f"local-http:{config.model}"
+    )
+
+
 # onnx / fastembed / minilm 同指 OnnxEmbeddingBackend（真语义 ONNX 默认后端）。
 EMBEDDING_BACKENDS: Registry[EmbeddingBackend] = Registry("embedding_backend")
 EMBEDDING_BACKENDS.register("deterministic", DeterministicEmbeddingBackend)
@@ -367,6 +382,7 @@ EMBEDDING_BACKENDS.register("st", SentenceTransformerEmbeddingBackend)
 EMBEDDING_BACKENDS.register("onnx", OnnxEmbeddingBackend)
 EMBEDDING_BACKENDS.register("fastembed", OnnxEmbeddingBackend)
 EMBEDDING_BACKENDS.register("minilm", OnnxEmbeddingBackend)
+EMBEDDING_BACKENDS.register("local_http", _local_http_embedding_backend)
 
 # ST 后端的别名集合（归一后；缺省读 RAGSPINE_EMBEDDING_MODEL 仅对这些 spec 生效）。
 _ST_SPECS = frozenset({"qwen3", "sentence_transformers", "st"})
@@ -393,6 +409,8 @@ def make_embedding_backend(spec: str | None = None, **kwargs: Any) -> EmbeddingB
                                                  kwargs 或 RAGSPINE_ONNX_EMBEDDING_MODEL 覆盖）
         - 'deterministic'                     -> DeterministicEmbeddingBackend（dim 等经 kwargs 透传）
         - 'openai'                            -> OpenAIEmbeddingBackend（延迟 import，缺 SDK 抛友好错）
+        - 'local-http'                        -> SingleTextEmbeddingBackend(LocalEmbeddingAdapter)（OpenAI
+                                                 兼容 /v1/embeddings，读 EMBEDDING_BASE_URL / _MODEL / _API_KEY）
         - 'qwen3' / 'sentence-transformers' / 'st'
                                               -> SentenceTransformerEmbeddingBackend
                                                  （缺省 Qwen3-Embedding-0.6B；model_name 可经

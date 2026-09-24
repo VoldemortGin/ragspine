@@ -25,9 +25,9 @@ class RetrievalConfig(_StrictModel):
     """Optional overrides layered over the selected retrieval profile."""
 
     retrieval_mode: Literal["economy", "hybrid"] | None = None
-    embedding: Literal["none", "deterministic", "onnx"] | None = None
+    embedding: Literal["none", "deterministic", "onnx", "local-http"] | None = None
     vector_store: Literal["none", "in_process"] | None = None
-    reranker: Literal["none", "cross_encoder"] | None = None
+    reranker: Literal["none", "cross_encoder", "local-http"] | None = None
     postprocessor: Literal["none", "mmr,lost_in_middle,compress"] | None = None
 
 
@@ -84,6 +84,9 @@ class StorageConfig(_StrictModel):
     mapping_db: str = "mapping.db"
     review_db: str = "review.db"
     graph_db: str = "graph.db"
+    # Opt-in persisted chunk vectors: embed at ingest into ``<knowledge_db stem>.vectors.db``
+    # and read them back at query time. Default off keeps the old retrieval assembly.
+    persist_vectors: bool = False
 
     @field_validator("knowledge_db", "mapping_db", "review_db", "graph_db")
     @classmethod
