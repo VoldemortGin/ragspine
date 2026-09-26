@@ -70,6 +70,8 @@ __all__ = [
     "CompressionPostprocessor",
     "ChainPostprocessor",
     "make_postprocessor",
+    "PostprocessingRetriever",
+    "make_postprocessing_retriever",
 ]
 
 
@@ -228,6 +230,11 @@ POSTPROCESSORS.register("litm", LostInTheMiddlePostprocessor)
 POSTPROCESSORS.register("long_context_reorder", LostInTheMiddlePostprocessor)
 POSTPROCESSORS.register("compress", CompressionPostprocessor)
 POSTPROCESSORS.register("compression", CompressionPostprocessor)
+POSTPROCESSORS.register("diversity", MMRPostprocessor)
+POSTPROCESSORS.register("reorder", LostInTheMiddlePostprocessor)
+POSTPROCESSORS.register("long_context", LostInTheMiddlePostprocessor)
+POSTPROCESSORS.register("lost_in_the_middle", LostInTheMiddlePostprocessor)
+POSTPROCESSORS.register("extractive", CompressionPostprocessor)
 
 
 def make_postprocessor(spec: str | None = None, **kwargs: object) -> NodePostprocessor | None:
@@ -250,9 +257,44 @@ def make_postprocessor(spec: str | None = None, **kwargs: object) -> NodePostpro
     normalized = (spec or "none").strip().lower()
     if normalized in ("", "none"):
         return None
+    if normalized in ("recommended", "all", "default"):
+        normalized = "mmr,compress,reorder"
     parts = [p.strip() for p in normalized.split(",") if p.strip()]
     if not parts:
         return None
     if len(parts) == 1:
         return POSTPROCESSORS.make(parts[0], **kwargs)
     return ChainPostprocessor([POSTPROCESSORS.make(p) for p in parts])
+
+
+@runtime_checkable
+class NarrativeRetriever(Protocol):
+    """已经完成 RESTRICTED 过滤的叙事检索出口。"""
+
+    def retrieve(
+        self, query: str, *, filters: dict[str, str] | None = None, top_k: int = 50
+    ) -> list[Snippet]: ...
+
+
+class PostprocessingRetriever:
+    """将现有后处理器组合到任意已隔离的检索出口。"""
+
+    def __init__(self, base: NarrativeRetriever, postprocessor: NodePostprocessor) -> None:
+        self.base = base
+        self.postprocessor = postprocessor
+
+    def retrieve(
+        self, query: str, *, filters: dict[str, str] | None = None, top_k: int = 50
+    ) -> list[Snippet]:
+        snippets = self.base.retrieve(query, filters=filters, top_k=top_k)
+        return self.postprocessor.postprocess(query, snippets)
+
+
+def make_postprocessing_retriever(
+    base: NarrativeRetriever, spec: str | None = None, **kwargs: object
+) -> NarrativeRetriever:
+    """未启用时返回原检索器；启用时复用保留原文的现代后处理链。"""
+    postprocessor = make_postprocessor(spec, **kwargs)
+    if postprocessor is None:
+        return base
+    return PostprocessingRetriever(base, postprocessor)
