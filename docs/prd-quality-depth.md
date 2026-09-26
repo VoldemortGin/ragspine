@@ -772,8 +772,8 @@ provenance. Benchmarks **Weaviate / Vespa / Jina ColBERT · Vespa SPLADE · Llam
 > PaliGemma base is **Gemma-licensed** (use restrictions; *not* ≤ Apache-2.0-permissive). Weights are runtime-pulled
 > (not a packaged dependency), so they don't hit the CI dependency-license gate — flagged honestly; **ColQwen2**
 > (Qwen2-VL base, Apache-2.0) is the more-permissive configurable alternative (`RAGSPINE_COLPALI_MODEL`). Contract:
-> `src/ragspine/retrieval/docs/visual-retrieval.md`. **Follow-ups:** a CPU/quantized ColPali path; **fusing** visual
-> hits with the OCR→text channel (RRF over both routes); a persistent multi-vector visual index at scale; honest
+> `src/ragspine/retrieval/docs/visual-retrieval.md`. **Follow-ups:** a CPU/quantized ColPali path; measuring the now-implemented W12-B text/visual
+> RRF fusion against real models; a persistent multi-vector visual index at scale; honest
 > GPU/throughput benchmarking + the ColQwen2 model choice + real-weights end-to-end (GPU box).
 
 **Gap:** the family OCR→text route (W3a) loses page layout / figures when a question depends on visual structure
@@ -793,8 +793,8 @@ Offered **alongside** the W3a family-OCR→text route (both available; visual re
 OCR→text wins on offline / deterministic / CPU). Benchmarks **LlamaIndex ColPali · Weaviate / Vespa ColPali ·
 the 2025 ColPali / ColQwen frontier**.
 
-*Follow-up:* a CPU / quantized ColPali path if one matures; **fusing** visual-retrieval hits with the OCR→text
-channel (RRF over both routes); honest GPU / throughput benchmarking; ColQwen2 vs ColPali model choice.
+*Follow-up:* a CPU / quantized ColPali path if one matures; real-model evaluation of the W12-B
+text/visual RRF fusion; honest GPU / throughput benchmarking; ColQwen2 vs ColPali model choice.
 
 ## Gap matrix (depth)
 
@@ -821,7 +821,7 @@ Legend: **kind** 🛡/⭐/🔧 · **status** ✅ have · ◐ partial · ✗ gap.
 | Query transformation | det. synonym multi-query + W6a decomposition only | HyDE + RAG-Fusion + step-back + Adaptive-RAG (opt-in LLM) — vs LlamaIndex `HyDEQueryTransform`/`QueryFusionRetriever` · LangChain `MultiQueryRetriever`/HyDE · LangGraph adaptive-rag | ⭐ | ◐ four opt-in transforms shipped; deterministic step-back/dense-on and per-transform eval ratchets pending | W9 · P2 |
 | Multi-granularity tree + chunking | flat index; W4b layout/parent-child only | RAPTOR recursive-cluster tree (det. cluster + `is_synthesis` summaries) + sentence-window + semantic chunking — vs LlamaIndex RAPTOR pack/`SentenceWindowNodeParser`/`SemanticSplitterNodeParser` · RAGFlow RAPTOR | ⭐ | ◐ tree and chunkers shipped; retrieval-time expansion/tree traversal and measured A/B pending | W10 · P2 |
 | Retrieval representation | single-vector dense + BM25 → RRF | ColBERT late-interaction (multi-vector MaxSim) + SPLADE learned-sparse, offline via fastembed — vs Weaviate/Vespa/Jina ColBERT · Vespa SPLADE · LlamaIndex `ColbertIndex`/`ColbertRerank` | ⭐ | ◐ (ColBERT MaxSim + SPLADE sparse-dot **rerankers** on the `ListwiseJudge` seam + `make_reranker`, opt-in / byte-identical / isolation-inherited + reverse-proof; multi-vector index / SPLADE sparse-retrieval-fused-with-BM25 / A/B = follow-up) | W11 · P2 |
-| Visual-document retrieval | OCR→text only (W3a) | ColPali/ColQwen2 page-as-image late interaction (GPU, opt-in) — vs LlamaIndex ColPali · Weaviate/Vespa ColPali · 2025 ColQwen | ⭐ | ◐ (ColPali page-as-image visual **MaxSim retriever** re-using W11 `colbert.maxsim` + `pypdfium2` `page→image`, on a `VisualEmbedder` seam + `make_visual_embedder`, opt-in / byte-identical / isolation-at-the-door + reverse-proof; real fastembed `LateInteractionMultimodalEmbedding` backend gpu-marked; GPU end-to-end / OCR-text RRF fusion / persistent multi-vector index = follow-up) | W12 · P2 |
+| Visual-document retrieval | OCR→text only (W3a) | ColPali/ColQwen2 page-as-image late interaction (GPU, opt-in) — vs LlamaIndex ColPali · Weaviate/Vespa ColPali · 2025 ColQwen | ⭐ | ◐ (ColPali page-as-image visual **MaxSim retriever** re-using W11 `colbert.maxsim` + `pypdfium2` `page→image`, on a `VisualEmbedder` seam + `make_visual_embedder`, opt-in / byte-identical / isolation-at-the-door + reverse-proof; real fastembed `LateInteractionMultimodalEmbedding` backend gpu-marked; OCR-text RRF fusion implemented (offline contract tested); GPU end-to-end / persistent multi-vector index = follow-up) | W12 · P2 |
 
 ## Phasing
 
@@ -857,7 +857,7 @@ Legend: **kind** 🛡/⭐/🔧 · **status** ✅ have · ◐ partial · ✗ gap.
     page-as-image visual **MaxSim retriever** (re-using W11 `colbert.maxsim` + `pypdfium2` `page→image`) on a
     `VisualEmbedder` seam + `make_visual_embedder` (`[colpali]`), opt-in / default-off / byte-identical /
     isolation-at-the-door + reverse-proof; the real fastembed vision backend is gpu-marked and the GPU
-    end-to-end / OCR-text RRF fusion / persistent multi-vector index are follow-ups (see the W12 SHIPPED note
+    end-to-end / real-model RRF evaluation / persistent multi-vector index are follow-ups (see the W12 SHIPPED note
     above). The deterministic default loop + its byte-identical eval stay unchanged.
 
 Each piece follows the ADR 0005 promotion rule: experimental adapter until it has a real, CI-tested,
@@ -1029,3 +1029,8 @@ W12-B 验收合同（此次合并必须先有测试）：
 
 验证：W8 postprocess/query-transform/chunking/RAPTOR/rerank/vision 相关测试、W12-B fusion
 测试，最后运行完整 `scripts/ci.sh`。GPU 和真实权重 E2E 仍是后续项，不因本次离线测试变成已完成。
+
+
+整合验证记录：W8 独有入口先出现 9 failed / 1 passed；旧 W12-B 在当前协议验收下
+7 failed / 13 passed，适配后 20 passed；后处理、融合、切块、重排、视觉与查询变换聚焦回归
+358 passed / 1 skipped / 3 deselected。完整门禁结果单独以执行日志为准；本记录不替代全门禁。

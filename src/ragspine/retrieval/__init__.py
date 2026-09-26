@@ -8,6 +8,7 @@ Submodules:
     contextual.py — 确定性 contextual retrieval（W4a）：受控元数据情境头进索引文本（opt-in）。
     corrective.py — opt-in 纠错检索（W6b）：有界确定性 grade→act 环；默认 none 时返回 base 本身、字节不变。
     filtering/ — 元数据过滤：显式过滤条件 + 可注入自动过滤提取器（默认关闭）。
+    fusion/ — opt-in 文本/视觉页 RRF 融合；默认返回文本检索器本身，按文档页去重并保留来源。
     lexical/ — 混合检索：Okapi BM25（CJK uni+bigram）+ 向量 + RRF 融合。
     link/ — 适配层：把检索接入 agent 编排（NarrativeRetriever 协议）。
     mode.py — 检索模式预设（hybrid / economy），把产品选择映射为确定性参数。

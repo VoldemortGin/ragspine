@@ -50,6 +50,13 @@ through `link/narrative_link.py`'s `build_narrative_retriever(postprocessor=…)
   *could* be default-on, but ship **opt-in** to preserve byte-identity (recommended-on, not on-by-default).
 - `make_postprocessor("mmr")` / `"lost_in_middle"` / `"compress"` → the single processor.
 - A comma spec (`"mmr,lost_in_middle"`) → a `ChainPostprocessor` applying each in order.
+- Historical branch aliases `diversity`, `reorder`, `long_context`, `lost_in_the_middle`, and `extractive`
+  reuse the current processors. Explicit `recommended` / `all` / `default` selects MMR → compression →
+  reorder; an omitted spec remains disabled. Compression still preserves `text` and writes `prompt_text`.
+- `make_postprocessing_retriever(base, spec)` composes the same processors with any already-isolated
+  narrative retriever. Disabled returns `base` itself; enabled forwards query/filters/top_k once before
+  processing. `PostprocessingRetriever` is the explicit constructor. These live in `postprocess.py`,
+  not a conflicting `postprocess/` package.
 - `RAGSPINE_POSTPROCESSOR` selects the spec from env; unknown specs raise `ValueError` listing the
   available names (corespine `Registry`, case/space/hyphen-insensitive).
 

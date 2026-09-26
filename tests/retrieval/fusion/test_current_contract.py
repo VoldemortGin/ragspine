@@ -3,8 +3,8 @@
 from copy import deepcopy
 
 import pytest
-from ragspine.retrieval.fusion.route_fusion import FusedRetriever
 
+from ragspine.retrieval.fusion.route_fusion import FusedRetriever
 from ragspine.retrieval.vision.colpali import ColPaliVisualRetriever, VisualPage
 
 
@@ -103,11 +103,36 @@ def test_current_colpali_retriever_integrates_without_gpu():
             return [[[1.0, 0.0]] for _ in images]
 
     retriever = ColPaliVisualRetriever(
-        [VisualPage(doc_id="d", page_no=2, image=b"synthetic", source_locator="custom")],
         Embedder(),
+        [VisualPage(doc_id="d", page_no=2, image=b"synthetic", source_locator="custom")],
     )
     out = FusedRetriever(Text([hit("a", 1), hit("b", 2)]), retriever).retrieve("q")
     assert len(out) == 2
     assert out[0]["chunk_id"] == "b"
     assert out[0]["visual_score"] == 1.0
     assert out[0]["text"] == "b"
+
+
+def test_same_number_in_other_document_does_not_merge():
+    out = FusedRetriever(Text([hit("a", 1, "a.pdf")]), Visual([visual(1, "b.pdf")])).retrieve("q")
+    assert len(out) == 2
+    assert all(len(row["retrieval_routes"]) == 1 for row in out)
+
+
+def test_explicit_page_no_wins_over_misleading_locator():
+    text_hit = hit("a", 1) | {"source_locator": "d#page2"}
+    out = FusedRetriever(Text([text_hit]), Visual([visual(2)])).retrieve("q")
+    assert len(out) == 2
+    assert all(len(row["retrieval_routes"]) == 1 for row in out)
+
+
+def test_missing_document_identity_cannot_authorize_a_visual_confirmation():
+    text_hit = hit("a", 1)
+    text_hit.pop("doc_id")
+    visual_hit = visual(1)
+    visual_hit.pop("doc_id")
+    out = FusedRetriever(Text([text_hit]), Visual([visual_hit])).retrieve(
+        "q", filters={"entity": "ACME"}
+    )
+    assert len(out) == 1
+    assert out[0]["retrieval_routes"] == ["text"]

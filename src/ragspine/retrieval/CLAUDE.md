@@ -143,6 +143,15 @@ rank relevance + lexical-Jaccard similarity), `LostInTheMiddlePostprocessor` (mo
 *after* the `link/` RESTRICTED strip, so **isolation is inherited** (subset/reorder/compress only). Compression
 writes a separate `prompt_text` key (agent prefers it) — original `text` + all reference fields untouched
 (**provenance never broken**, the W4a index_text layering)),
+`fusion/route_fusion.py` (**W12-B opt-in text/visual RRF**): `FusedRetriever` and
+`make_fused_retriever` compose current narrative and ColPali visual outputs. With no visual leg, the factory
+returns the text retriever itself and the wrapper forwards the original top_k. Active fusion scores each
+document/page once per leg (`page_no`, legacy `page`, then page/slide locator), prefers the text representative,
+preserves source fields, and accepts current `visual_maxsim` and legacy `colpali_maxsim` score metadata.
+Both legs are screened for RESTRICTED. Nonempty filters allow visual confirmation only of a clearly identified
+page already selected by the text leg; unidentified documents never authorize cross-leg confirmation.
+No default wiring or real-model/GPU requirement is added. W8's `make_postprocessing_retriever` lives in the
+existing `postprocess.py`, with its explicit recommended/all/default presets and legacy spec aliases,
 `raptor.py` (**W10 RAPTOR recursive-cluster multi-granularity tree, opt-in default-off** — the second
 global-synthesis route parallel to W7b narrative GraphRAG). `build_raptor_tree` drops RESTRICTED at the
 door, builds leaves from chunks, then recurses: **deterministic threshold clustering** (`cluster_by_similarity`
