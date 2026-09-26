@@ -2,7 +2,7 @@
 
 现状（docs/prd-quality-depth.md W12 follow-up）：W3a OCR→text 与 W12 ColPali 视觉是【并列】两条路线——
 扫描/图表密集页 OCR→text 易塌结构（表格行列丢、bbox 抖动），而视觉路线保版面但需 GPU。本模块把两条
-路线用 RRF（复用 W1 rrf_fuse）融合成一条统一排序：弱腿不拖累、强腿胜出，且【同一 (doc, page) 两腿
+路线用 RRF（复用 W1 rrf_fuse）按排名综合两路候选；【同一 (doc, page) 两腿
 都命中】时分数相加 + 合并成一条（视觉确认 boost），文本命中优先做代表（带 text，LLM 可消费）。
 
 设计（守 ADR 0001 确定性 + 反编造 + 隔离）：
