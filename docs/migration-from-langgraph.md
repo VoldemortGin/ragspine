@@ -1,133 +1,124 @@
-# Migrating to RAGSpine from LangGraph (and a note on Dify)
+# Migrating a RAG use case from LangGraph or Dify
 
-A guide for teams evaluating RAGSpine after hitting friction with LangGraph or Dify. It is
-deliberately fair: RAGSpine occupies a **narrow niche** — grounded numeric + narrative Q&A
-with refusal-on-missing-data and citations — not general agent orchestration. If you need a
-general stateful agent graph, you should keep LangGraph; this guide tells you honestly when
-*not* to switch.
+RAGSpine provides grounded numeric and narrative Q&A as a Python library. This guide
+explains how to move that part of an application, or embed it in an existing workflow.
+It is not a claim of LangGraph API compatibility or a replacement for the whole Dify platform.
 
-> This is a guide, not a code-bound contract — it carries no `covers:` frontmatter and is
-> exempt from drift tracking, like the glossary and the ADRs.
+The [LangGraph/Dify capability roadmap](prd-langgraph-dify-capabilities.md) describes the
+Spine family's planned expansion and acceptance criteria. Planned capabilities are not
+shipped guarantees: general durable workflow execution and compatible checkpoint replay
+are not completed by this migration guide, a fact database, or conversation persistence.
 
-## First, don't conflate the two
+> This guide carries no `covers:` frontmatter and is exempt from drift tracking, like the
+> glossary and ADRs. Capability statements were checked against official documentation on
+> 2026-09-26; use the linked specifications and tests for RAGSpine's exact guarantees.
 
-LangGraph and Dify are very different tools, and lumping them together is a strawman:
+## Compare the right layers
 
-- **LangGraph** is an **MIT-licensed pip library** with **no runtime and no UI** — the same
-  delivery model as RAGSpine. You `pip install` it and write Python. Its "abstraction tax" is
-  **conceptual**: to do anything you first model your flow as a graph (`StateGraph`, nodes,
-  edges, conditional edges, a typed `State` with reducers), then `compile()` and `invoke()`.
-- **Dify** is a **self-hosted platform**: a multi-container deployment (Postgres, Redis, a
-  vector store, a sandbox, a plugin daemon, API/worker/web/nginx) with a **visual workflow
-  builder** whose app definitions live in Postgres. Its tax is **operational + lock-in**:
-  you run and own a cluster, and your application is a database-backed visual DSL, not a
-  portable Python artifact.
+- **LangGraph** is an orchestration framework and runtime. Its Graph API supports state,
+  nodes, edges, and reducers; its Functional API supports ordinary Python control flow.
+  Nodes can be deterministic Python functions, model calls, or a mixture. A graph that
+  only uses local functions does not require an LLM API key or network access. Using a
+  hosted model introduces that provider's requirements, not a requirement of graph
+  execution itself. See the official [overview](https://docs.langchain.com/oss/python/langgraph/overview)
+  and [Functional API](https://docs.langchain.com/oss/python/langgraph/functional-api).
+- **Dify** is an application platform with visual workflow authoring and managed or
+  self-hosted deployment options. Applications can be exported and imported as YAML DSL.
+  Export includes orchestration and configuration, but not knowledge-base data, usage
+  logs, or third-party tool API keys. Secret environment variables require care when
+  exporting. A DSL file is portable configuration for Dify, not a standalone Python
+  program or a complete deployment backup. See [app export and import](https://github.com/langgenius/dify-docs/blob/main/en/cloud/use-dify/workspace/app-management.mdx).
+- **RAGSpine** supplies domain-specific retrieval, structured facts, provenance, and answer
+  controls. The Spine family separates general orchestration into `spineagent` and
+  application concerns into `spinestudio`; see the [family roadmap](prd-langgraph-dify-capabilities.md).
 
-RAGSpine competes with the *first* on "you don't need a graph model to do RAG," and with the
-*second* on "this is a library you import, not a platform you operate."
+The useful comparison is which guarantees each layer already implements and which ones
+an application must implement and test. Graph orchestration does not inherently cause
+fabrication, and a library interface does not by itself prove answer correctness.
 
 ## Concept mapping: LangGraph → RAGSpine
 
-| LangGraph | RAGSpine | Note |
+| LangGraph application concept | RAGSpine counterpart | Migration boundary |
 |---|---|---|
-| `StateGraph` + nodes + edges + conditional edges | *(none)* | Orchestration is **internal** to `answer_question`; there is no graph DSL to learn or assemble. |
-| `State` (`Annotated[TypedDict, reducer]`) | *(none on the path)* | No user-authored state object for a basic Q&A. |
-| `graph.compile()` / `.invoke()` / `.stream()` | `answer_question(question, store, provider)` | One call, **3 args**. No compile step. |
-| `init_chat_model("claude-…")` (live key required) | `MockProvider()` | Deterministic, **offline, no key**. `AnthropicProvider` is opt-in behind the `[llm]` extra. |
-| `@tool` + `bind_tools` | built-in `query_metric` | The grounded numeric tool ships and is profile-driven — you don't wire it. |
-| message types (`SystemMessage` / `HumanMessage` / `ToolMessage`) | plain strings in/out | `answer_question` takes a `str`, returns an `AgentResult`. |
-| checkpointer / persistence (`MemorySaver`, `PostgresSaver`) | `FactStore` (sqlite) | Persistence here is **your fact store**, not a graph execution checkpointer. |
-| provenance / citations (bolt-on, your responsibility) | `source_doc_id` + `source_locator` on every fact; `result.sources` | **Code-enforced**, not opt-in. See [ADR 0012](adr/0012-onboarding-complexity-budget.md) and the README. |
+| A node or tool that answers a RAG question | `answer_question(question, store, provider)` | Replace the RAG operation, or call it inside the existing graph. |
+| User-defined graph state and reducers | Inputs and `AgentResult` for a Q&A call | No automatic translation of arbitrary state, reducers, or routing. |
+| Local node, mock model, or hosted model | `MockProvider` or a configured provider | Both can run local deterministic logic; provider choice determines credentials and network needs. |
+| A numeric lookup tool | Profile-driven `query_metric` and fact storage | Map metrics, entities, periods, units, and provenance explicitly. |
+| Checkpointer and execution history | No equivalent in `FactStore` | A SQLite fact store persists facts, not graph checkpoints or suspended execution. |
+| Application-defined citation/refusal checks | Built-in checks on supported answer paths | Retain application-specific checks and verify the selected profile and settings. |
+| Streaming, interrupts, durable execution, replay | Separate orchestration requirements | Do not infer support from a successful synchronous Q&A call or stored chat history. |
 
-The point of the table is the empty cells: most of what you assemble by hand in LangGraph
-has **no counterpart to learn** in RAGSpine because routing, the tool loop, and the
-anti-fabrication guard run transparently inside the one call.
+## Grounding is an application contract
 
-## The difference that matters: fabricate vs. refuse
+LangGraph can route deterministically and run validation or refusal nodes before returning
+an answer. Its general orchestration primitives do not automatically impose RAGSpine's
+specific fact schema or answer policy; a LangGraph application can implement those policies
+itself or delegate the RAG step to RAGSpine. Similarly, Dify workflows need an explicit
+policy for retrieval misses, citations, and unsupported claims.
 
-LangGraph's correctness is *emergent at runtime* — the model chooses the next node and writes
-the answer — so when the data isn't there, a live agent will typically produce a **plausible,
-unsourced number**. There is no built-in mechanism that overrides the model and refuses; you
-must engineer it. (And it cannot run keyless at all, so you can't even see this behavior
-offline.)
-
-A sketch of the LangGraph path (prebuilt agent — the *shortest* version, which also hides the
-graph you'd otherwise hand-build):
-
-```python
-from langchain.chat_models import init_chat_model
-from langgraph.prebuilt import create_react_agent
-
-model = init_chat_model("anthropic:claude-…")          # requires a real API key
-agent = create_react_agent(model, tools=[my_revenue_tool])
-out = agent.invoke({"messages": [("user", "中国内地FY2030的REVENUE是多少")]})
-# → a fluent answer that may invent a number; provenance is whatever you remembered to thread through.
-```
-
-The same missing fact in RAGSpine (`scripts/examples/minimal_rag.py`, fully offline, no key):
+RAGSpine's structured numeric path binds answers to stored facts and their provenance.
+The offline example in `scripts/examples/minimal_rag.py` creates one synthetic fact and
+asks for a present and an absent year:
 
 ```bash
-$ python scripts/examples/minimal_rag.py
-Q: 中国内地FY2024的REVENUE是多少
-A: ACME_CN FY2024 REVENUE：1320 USD_M（来源：ACME_FY2024_Results.pptx · slide=6,table=1,row=2,col=3）
-   source: ACME_FY2024_Results.pptx · slide=6,table=1,row=2,col=3
-
-Q: 中国内地FY2030的REVENUE是多少
-A: 查不到：REVENUE / ACME_CN / 2030（渠道 TOTAL）未在事实表中找到。为避免误导，不提供任何推测数字…
+python scripts/examples/minimal_rag.py
 ```
 
-When the structured channel returns no fact, the orchestrator **deterministically rewrites the
-answer to "not found"** regardless of what the model said — anti-fabrication lives in the
-control flow, not in a prompt. That refusal is frozen by a regression test and gated in CI.
+The present fact is returned with a source; the absent fact is refused in this example.
+The example has no narrative retriever. In a configured application, a structured miss
+can instead try a grounded narrative fallback, enabled by default; if no acceptable
+fallback is found, the structured refusal remains. See
+[ADR 0023](adr/0023-structured-miss-narrative-fallback.md).
 
-**The honest tax comparison** (order of magnitude, not a benchmark):
+The narrative number guard is also enabled by default and checks numbers against retrieved
+evidence, rewriting unsupported numeric answers. It has documented limits and can be
+explicitly disabled; it is not a proof of every natural-language claim or of the source
+document's truth. See [ADR 0024](adr/0024-narrative-number-guard.md). Keep domain-specific
+acceptance tests for source quality, authorization, units, and answer meaning.
 
-| | concepts to first answer | LOC (first hand-built) | API key | network |
-|---|---|---|---|---|
-| LangGraph (hand-built graph) | ~5–7 (StateGraph, State, nodes, edges, tools, messages) | ~60 | required | required |
-| LangGraph (prebuilt `create_react_agent`) | ~3 (hides the graph) | ~10 | required | required |
-| **RAGSpine** | **4** (`FactStore`, `Fact`, `MockProvider`, `answer_question`) | **~15** | **none** | **none** |
+| Execution choice | API key needed for this path? | Network needed for this path? |
+|---|---|---|
+| LangGraph with pure local Python nodes | No | No |
+| LangGraph calling a hosted model | Depends on the provider | Normally yes |
+| RAGSpine's synthetic example with `MockProvider` | No | No |
+| RAGSpine calling a hosted model or remote store | Depends on the provider | Depends on the configured services |
 
-## When NOT to use RAGSpine
+These are runtime requirements after dependencies are installed, not installation or
+model-download requirements. They are not a performance or code-size benchmark.
 
-Route yourself fairly — these are real reasons to stay where you are:
+## When to retain the existing system
 
-- **Stay on LangGraph** if you need arbitrary stateful / multi-agent **graphs**, human-in-the-
-  loop interrupts, durable execution, time-travel checkpointing, token streaming, or the
-  LangChain/LangSmith ecosystem. RAGSpine **deliberately does not** compete on general graph
-  orchestration — copying that would require giving the model control of routing, which would
-  destroy the determinism that makes its guarantees provable (see the non-goals in
-  [ADR 0012](adr/0012-onboarding-complexity-budget.md) and the product direction in
-  [ADR 0002](adr/0002-product-direction.md)).
-- **Stay on Dify** if you need a no-code platform, a non-developer team, a hosted chat UI,
-  multi-tenant app management, or a bundled vector store + model marketplace. RAGSpine is a
-  library you import, not a platform you operate.
-- **Use RAGSpine** when you need grounded numeric + narrative Q&A with **refusal-on-missing-
-  data and citations**, as plain Python embedded in your own backend, runnable offline with no
-  key. RAGSpine targets the cold-`pip install` engineer evaluating exactly that
-  ([ADR 0003](adr/0003-audience-oss-library.md)).
+- Keep **LangGraph** for stateful workflow orchestration, interrupts, streaming, and
+  checkpoint-based durable execution or time travel that your application relies on.
+  RAGSpine can be one operation inside that workflow. Durability also requires appropriate
+  checkpointing and application design; a graph compiled without checkpointing cannot
+  recover interrupted work. See the official [persistence documentation](https://docs.langchain.com/oss/python/langgraph/persistence).
+- Keep **Dify** for visual authoring, application publishing, and platform operations your
+  team already uses. Export the DSL to preserve the application definition, then inventory
+  its models, plugins, knowledge data, and credentials separately before migration.
+- Use **RAGSpine** for the grounded Q&A component when its data model and answer policies
+  match your use case. Expanding beyond that component should follow the family roadmap
+  and its staged tests, rather than assuming feature parity with either system.
 
-## A note on lock-in (precise, not loaded)
+## How to move a RAG use case
 
-- **LangGraph** lock-in is **conceptual** (your logic is expressed as a graph) plus ecosystem
-  gravity — **not** licensing (MIT) and **not** platform (the OSS checkpointers work without
-  the paid LangGraph Platform).
-- **Dify** lock-in is the deepest: your application is a visual DSL + plugin configuration
-  living in Postgres behind a running cluster, with **no portable Python artifact** to lift
-  out.
-- **RAGSpine** is plain Python calling typed `Protocol`s; the core imports zero SDKs and runs
-  offline. The thing you "lock into" is ordinary functions you can read in an afternoon.
+1. Capture acceptance cases before changing the workflow: successful retrieval, missing
+   facts, conflicting evidence, unsupported numbers, source attribution, and any access
+   restrictions. Preserve representative expected results from the existing application.
+2. Map structured numbers into `SqliteFactStore` with `source_doc_id` and `source_locator`.
+   Use the ingestion layers or upsert synthetic `Fact` values as shown in the minimal
+   example. Keep units, periods, and entity/profile mappings explicit.
+3. Replace only the relevant RAG node/tool with
+   `answer_question(question, store, provider)`. Preserve surrounding orchestration,
+   checkpoints, approvals, and error handling until their replacements pass their own tests.
+4. Start with `MockProvider` for deterministic offline tests. Select a live or local model
+   provider only when needed, and test the provider separately from the retrieval contract.
+5. Configure a narrative retriever for narrative/composite answers. Test the enabled
+   fallback and number-guard settings explicitly; structured-miss behavior depends on
+   whether acceptable narrative evidence is available.
+6. For Dify, retain the exported DSL as a reference and migrate knowledge content and
+   external dependencies separately. There is no automatic Dify DSL importer or LangGraph
+   checkpoint converter promised by this guide.
 
-## How to actually move a RAG use case over
-
-1. Put your numbers in a `FactStore` (sqlite) with their provenance (`source_doc_id` +
-   `source_locator`) — RAGSpine's extraction/ingestion layers do this from xlsx/pptx/pdf, or
-   you upsert `Fact`s directly as in `scripts/examples/minimal_rag.py`.
-2. Replace your graph + tool wiring with a single `answer_question(question, store, provider)`.
-3. Start with `MockProvider` (offline, deterministic) to validate behavior and your tests with
-   no key; swap in `AnthropicProvider` (the `[llm]` extra) only when you want a live model for
-   the narrative channel.
-4. Keep your narrative documents in the chunk store for the narrative/composite path; the
-   structured numeric channel already answers "what's the number" deterministically.
-
-For the 10-second offline tour, run `ragspine quickstart` (no key, no network).
+For the offline tour, run `ragspine quickstart`. For requirements beyond the Q&A operation,
+start with the [family capability roadmap and test plan](prd-langgraph-dify-capabilities.md).

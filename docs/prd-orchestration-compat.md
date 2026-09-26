@@ -1,5 +1,7 @@
 # PRD — Orchestration Compatibility: Dify / n8n ingress, the Studio console & external-API shape cloning
 
+> 后续能力规划见 [LangGraph 状态编排与 Dify 应用能力 PRD](prd-langgraph-dify-capabilities.md)：复用本文已有实现，先交付可选 SQLite public run history，再分期建设状态编排与产品闭环；后续规划不表示已经实现。
+
 > **status:** in progress (Dify compiler+runner, per-node trace, n8n↔Dify conversion, Studio editor,
 > and Dify/n8n **API shape clones** are implemented; the 1,000-template catalog, preview v1 and the local
 > preview/run/serve/open loop are implemented in the 0.11 source worktree but not yet released)
