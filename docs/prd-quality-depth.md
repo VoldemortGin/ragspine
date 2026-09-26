@@ -994,3 +994,38 @@ conformance-bound path, then "core/supported."
 - The compound moat is the whole spine family in one offline, deterministic, invariant-clean pipeline:
   pdf/ppt/doc → ocrspine OCR → structured + narrative → semantic hybrid → cross-encoder → grounded answer →
   graph multi-hop. No breadth framework can rent that, because no breadth framework owns the producers.
+
+
+## 2026-09-26：历史分支整合需求与验收（先规格，再测试，再合并）
+
+基线 `7dbecdf`；历史分支 `ff44408`（W8–W12）和 `787da94`（W12-B）未被 main 包含。
+前者不是可逐提交 cherry-pick 的等价补丁：main 已用独立实现完成同类功能。本次通过真实 merge
+保留祖先关系，以现有接口与更严格的溯源合同为准，独有能力补齐后才能标记整合完成。
+
+| 历史实现 | main 保留的实现与裁决 |
+|---|---|
+| W8 `postprocess/` package | 保留 `postprocess.py`，禁止同名包遮蔽；MMR/LITM/压缩/逗号链复用现有类。压缩保持 `text` 不变，输出 `prompt_text`，不恢复旧版直接改正文的语义 |
+| W8 任意 retriever 包裹、别名与预设 | 这是独有可组合入口：移入现有模块，增加 `PostprocessingRetriever` / `make_postprocessing_retriever` 与旧 spec 别名、recommended/all/default 预设；默认仍不挂链 |
+| W9 `decompose.py` 的 Adaptive + `query_transform.py` | 保留现有 `query_transform.py` 的分类器、AdaptiveDecomposer 与工厂；不复制第二套分类协议到 decompose，不倒退已有单跳/多跳与 provider 退化行为 |
+| W10 RAPTOR chunker / `Chunk.is_synthesis` | 保留 `retrieval/raptor.py` 的树、summarizer、RaptorRetriever 与合成标记；摘要属于树/检索层，不回填进原始 Chunk 文本。sentence-window/semantic 保留现有 chunker 与其 factory |
+| W11 representation package | 保留 `rerank/colbert.py` / `rerank/splade.py`，复用现有 MaxSim、SPLADE 与工厂，避免第二套计算语义 |
+| W12 visual package | 保留 `vision/colpali.py`，保留 RESTRICTED 建索引入口隔离与模型权重许可说明；新融合适配实际 `page_no` / `scores.visual_maxsim` |
+| W12-B `fusion/route_fusion.py` | 真正增量：文本和视觉按同一文档页 RRF 融合，沿用旧分支公开名称，使用现有 lexical `rrf_fuse`；不默认接线、不需要真实 GPU |
+
+W12-B 验收合同（此次合并必须先有测试）：
+
+1. 无视觉腿时 factory 返回原文本 retriever；直接构造 wrapper 也必须将 query/filters/top_k
+   原样传递，不扩大 top_k，不添加融合字段。
+2. 两腿按 `(doc_id, page)` 合并。支持当前 `page_no`、旧 `page` 和页/slide locator；para
+   不是 page；不同文档不能合并。每腿同页只计一次排名，避免一个页的多个 chunk 重复投票。
+3. 文本代表保留原 `text`、locator、chunk_id；同页视觉确认只加分与元数据。当前
+   `visual_maxsim` 与旧 `colpali_maxsim` 均能作为 visual_score；纯视觉命中不生成正文。
+4. top_k 截断、相同分数稳定顺序、空结果与零 top_k 均确定；不修改两腿原返回对象。
+5. RESTRICTED 两腿输出不进入融合结果。视觉协议没有 metadata filters，因此 filters 非空时
+   视觉只允许确认已由文本腿返回的同文档页，不能新增未通过过滤的视觉页；不将文本过滤施加
+   给不支持该参数的视觉实现。
+6. 用现有 ColPaliVisualRetriever + fake embedder 做离线集成测试，证明真实页字段与分数形状
+   可用；原分支行为测试保留，新增回归测试在实现前记录失败。
+
+验证：W8 postprocess/query-transform/chunking/RAPTOR/rerank/vision 相关测试、W12-B fusion
+测试，最后运行完整 `scripts/ci.sh`。GPU 和真实权重 E2E 仍是后续项，不因本次离线测试变成已完成。
