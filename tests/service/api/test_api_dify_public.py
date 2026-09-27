@@ -1272,7 +1272,8 @@ def _open_connections() -> set:
     gc.collect()
     opened = set()
     for obj in gc.get_objects():
-        if isinstance(obj, sqlite3.Connection):
+        # 只看真实类型：isinstance() 会读对象自身的 __class__，torch 等废弃对象借此发 FutureWarning。
+        if issubclass(type(obj), sqlite3.Connection):
             try:
                 obj.total_changes  # noqa: B018 —— 已关闭连接会抛 ProgrammingError
             except sqlite3.ProgrammingError:
@@ -1305,3 +1306,28 @@ def test_hist_018_no_leaked_handles_after_app_closes(tmp_path):
     fresh = _make_store_client(tmp_path, store)
     assert fresh.get(f"/v1/workflows/run/{run_id}", headers=AUTH).status_code == 404
     assert fresh.post("/v1/workflows/run", json=_run_body(), headers=AUTH).status_code == 200
+
+
+class _WarnsOnClassAccess:
+    """模拟 torch.distributed.reduce_op 这类废弃对象：访问 __class__ 即发 FutureWarning。"""
+
+    @property
+    def __class__(self):  # type: ignore[override]
+        import warnings
+
+        warnings.warn("deprecated sentinel", FutureWarning, stacklevel=2)
+        return _WarnsOnClassAccess
+
+
+def test_hist_018_helper_tolerates_objects_warning_on_class_access(tmp_path):
+    # 回归：全量测试时 torch 已导入，isinstance() 会访问废弃对象的 __class__ 而发 FutureWarning，
+    # 在 filterwarnings=error 下让 HIST-018 失败。辅助函数必须不触发它，且仍能发现未关闭的连接。
+    sentinel = _WarnsOnClassAccess()
+    baseline = _open_connections()
+    leaked = sqlite3.connect(tmp_path / "leak.db")
+    try:
+        assert id(leaked) in _open_connections() - baseline
+    finally:
+        leaked.close()
+    assert id(leaked) not in _open_connections()
+    del sentinel
