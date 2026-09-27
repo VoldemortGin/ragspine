@@ -133,3 +133,11 @@ HIST-006 还须覆盖 key 轮换：同一路径的新 key 不能查询旧 key �
 ## 8. 本轮执行记录
 
 尚未开始新增测试或代码实现。以下字段由实际执行者在相应阶段填写，不预填通过结论：需求 commit、测试 commit、red 命令与摘要、实现 commit、green 命令与摘要、相关回归、required CI、同步 SHA、仍未交付的后续 FR。
+
+| 日期 | 阶段 | 代码版本 | 命令 | 结果 |
+|---|---|---|---|---|
+| 2026-09-26 | S1 G1 红灯 | `329ded7`（仅测试；需求基线 `ab93782`） | `.venv/bin/python -m pytest tests/service/api/test_api_dify_public.py -q`；`tests/service/api/test_dify_run_store.py` 单独运行（macOS，Python 3.12.9） | API 文件 34 failed / 24 passed：新 HIST 用例均为行为失败（重建 app 后 `404 != 200`、`200 != 503`，2 例为 `ServiceConfig` 缺新字段），旧用例与 HIST-001 内存回归全过；存储文件 36 例因 `dify_run_store` 模块缺失在收集阶段失败。全量 35 failed，第 35 个为已知环境问题 AIA smoke（见下） |
+| 2026-09-26 | S1 G2 绿灯 | `e4fe90a` | 同上两文件 | 94 passed（58 API + 36 存储），测试未改动、无 skip/xfail |
+| 2026-09-26 | S1 G3 回归 | `d8a83f3`（`service/CLAUDE.md` 复核漂移） | `scripts/ci.sh` | 步骤 1–4 通过（docstring 引用、doc-drift、mypy --strict 570 文件、ruff）；步骤 5：6341 passed / 94 skipped / 1 failed——唯一失败 `tests/enterprise_pdf_rag/adapters/test_document_catalog_aia_smoke.py::test_the_three_side_by_side_charts_on_page_thirteen_each_keep_their_own_market`（本机 gitignore 的 AIA 处理库陈旧，改动前 main 基线同样失败，未修改、未跳过）；因 `set -e` 中断，步骤 6–9 按脚本原样单独执行后全部通过（`✅ local CI passed`） |
+
+S1 仍未交付：FR-303 工作区/身份迁移、按时间保留、运行列表接口、checkpoint/恢复（FR-2xx）均不在本片范围。
