@@ -268,7 +268,8 @@ def _linearize_table(grid: TableGrid) -> list[str]:
 def extract_di_markdown_narrative(path: str | Path) -> NarrativeDoc:
     """抽取一个 DI markdown（.md）的叙事文本：每页内按标题路径连续分组，一组一段。
 
-    locator='page={N}'（N=物理页序），段带 heading_path；标题文本作为段首行保留。
+    locator='page={N}'（N=DiPage.index：PageBreak 分页时为物理页序，含 `<!-- page: N -->` 页标记时为
+    真实 PDF 页码，ADR 0027；空页不出段），段带 heading_path；标题文本作为段首行保留。
     UTF-8 读取，容错 errors='replace'。纯 stdlib、确定性、不涉及任何公司。
     """
     path = Path(path)

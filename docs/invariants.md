@@ -60,6 +60,12 @@ citation / period numbers pass, sources kept, off ≡ snapshot), and the QA ratc
 
 <!-- TODO: source_doc_id + locator carried end to end; where lineage could be dropped. -->
 
+**DI markdown page locators are PDF pages.** A `.md` chunk's locator is `{doc_id}@page={DiPage.index}#para…`. With
+`<!-- PageBreak -->` pages, `index` is the physical page order in the markdown; with `<!-- page: N -->` markers
+(SuperIndex azure_di output, [ADR 0027](adr/0027-di-markdown-page-markers.md)) it is the true PDF page N, gaps are
+empty pages, and a table cut by a marker is split so each number stays on the page it is on. Page tags, page images
+and `page_key` use the same `index`, so text, image and citation point at one page.
+
 ## RESTRICTED isolation (two exits)
 
 **Guarantees** `sensitivity == RESTRICTED` content never reaches an LLM prompt or an answer.
@@ -105,7 +111,8 @@ holds any RESTRICTED chunk (`ingestion/page_images/index.py`, `n_withheld`), and
 re-checks the chunk store at query time and sends no image for such a page even if a mapping row exists (e.g. the
 sensitivity changed after rendering). Public text on that page still flows through the normal exits. Traces record
 counts / reason codes only (`op=narrative.page_images`, `op=narrative.page_image_index`, request-trace `page_images`),
-never paths or image bytes; each image part carries `doc_id` + physical `page` (provenance). **Frozen by**
+never paths or image bytes; each image part carries `doc_id` + PDF `page` (physical order for PageBreak markdown, the
+true PDF page under `<!-- page: N -->` markers, ADR 0027) (provenance). **Frozen by**
 `tests/conformance/test_page_image_isolation.py` (+ reverse-proof) and the off-mode prompt snapshot
 `tests/retrieval/page_images/test_page_images_off_snapshot.py`. **The trigger only removes, never adds**
 ([ADR 0025](adr/0025-page-image-trigger-policy.md)): `retrieval/page_images/trigger/retriever.py` wraps the image
