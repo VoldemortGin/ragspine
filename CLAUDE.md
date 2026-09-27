@@ -47,7 +47,7 @@ Docs describing code carry `covers:` + `verified-against:` frontmatter;
 - **Setup:** `uv venv .venv` then `VIRTUAL_ENV="$(pwd)/.venv" uv pip install -e ".[dev,service,vector]"`
   (the `VIRTUAL_ENV=` prefix is required so `uv` targets this venv, not a system Python).
   Extras: `[pdf]` `[ocr]` `[llm]` `[embed]`.
-- **Tests:** `.venv/bin/python -m pytest tests/ -q` → as split by `scripts/ci.sh` (all extras via `uv sync --all-extras`, no Postgres): step 5 **11 + 6678 passed, 88 skipped** (39 gpu/docling/network deselected), step 6 docling **19 passed**.
+- **Tests:** `.venv/bin/python -m pytest tests/ -q` → as split by `scripts/ci.sh` (all extras via `uv sync --all-extras`, no Postgres): step 5 **11 + 6717 passed, 88 skipped** (39 gpu/docling/network deselected), step 6 docling **19 passed**.
 - **CI (local):** `scripts/ci.sh` is the gate (tests + 4-gate QA eval ratchet + demo smoke); enable the pre-push hook
   once with `git config core.hooksPath .githooks`. GitHub Actions is dormant (manual-only) to
   avoid consuming quota — see README "Continuous integration (local)".
