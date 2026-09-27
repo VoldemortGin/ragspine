@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/extraction/
-verified-against: 07e5bb17c5ce2ead9fec86743e5acc2f02a4f79d
+verified-against: eb721368d2943c7b05a25f98ab0105301cd53934
 ---
 
 # extraction — agent contract
@@ -33,7 +33,8 @@ comments) makes N the split and `DiPage.index == N` (true PDF page; gaps = empty
 table (paired on its own) cut by markers is rewritten per page from its parsed grid in O(cells + pages)
 (`html_table.parse_html_table_with_offsets` gives each cell's offset): header block repeated with rowspans clipped to it,
 cross-page rowspan anchors re-emitted, other-page cells left as empty `<td>` placeholders except a cut row's label (leading
-non-numeric `<th>`s, else a column 0 that is not `_is_value_like`) copied to each later page, pages without data rows get no
+non-numeric, non-placeholder `<th>`s, else such a column 0) copied as `<td>` to each later page; each page keeps the
+original `header_row_count`, pages without data rows get no
 table, so columns stay aligned and no numeric cell is lost (only a cross-page numeric rowspan repeats).
 Still stdlib-only: `di_markdown` imports nothing outside the stdlib and itself (tested). No marker ⇒ byte-identical (`test_legacy_parse_snapshot.py`). Contract in `di_markdown/parse.py`'s docstring.
 `di_markdown/page_tags.py` (ADR 0025) derives per-page raw measures from the blocks — `has_table` (Table block or a

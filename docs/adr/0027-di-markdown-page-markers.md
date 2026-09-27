@@ -56,9 +56,16 @@ page image was off by the gap, and `source_pdf`'s page-count equality check reje
   - **Data rows** stay in their columns. A rowspan anchor coming from an earlier page is re-emitted in the page's
     first row with the remaining row count; a cell of the same row that belongs to another page (a marker in the
     middle of a `<tr>` or a `<td>` / `<th>`) leaves an empty placeholder, always a `<td>` so it cannot turn a data
-    row into a header row. The exception is the row label: the row's leading consecutive non-numeric `<th>` cells,
-    or without them its column-0 cell if it is not value-like, is copied to the same position on each later page of
-    that row; a label that is itself a rowspan anchor goes through the same re-emission, once per page.
+    row into a header row. The exception is the row label: the row's leading consecutive non-empty `<th>` cells
+    that are neither placeholders nor value-like, or without them its column-0 cell under the same conditions, is
+    copied to the same position on each later page of that row, always as a `<td>`; a label that is itself a
+    rowspan anchor goes through the same re-emission, once per page.
+  - **Header guard**: every page keeps the original `header_row_count`. If a page's grid would count more header
+    rows (an all-`<th>` data row, such as a total row, cut after its label or opening the page right under the
+    header block), the `<th>` cells of that page's first data row are emitted as `<td>`.
+  - **No-data placeholders** (`_is_placeholder`: `-`, `—`, `–`, `n/a`, `n.a.`, `n.m.`, `nm`, `nil`, `none`,
+    case-insensitive, after trimming and trailing footnotes) are neither values nor labels: they stop the leading
+    `<th>` run and are never taken from column 0.
     "Value-like" is `_is_value_like` in `parse.py`, a private stdlib function. The rule: a cell that carries a
     numeric fact is a value and is not copied; a cell that identifies the row is a label and is copied.
     - Trailing footnotes are stripped first (superscript digits U+00B9 / U+00B2 / U+00B3 / U+2070 / U+2074–U+2079
@@ -87,6 +94,9 @@ page image was off by the gap, and `source_pdf`'s page-count equality check reje
     appears once on each page, like any cross-page rowspan anchor; this matches linearization, where every row it
     covers repeats its value. A row cut across pages has its label once on each page while its numbers are not
     repeated.
+  - Accepted costs: a label-like value in the leading `<th>` run (`Q1`, a year such as `1999`) is copied as a label
+    by construction of the rule. A table cut inside its header block with no data row on the earlier page shifts
+    its page: the header cells after the marker ride along with the header copy of the next page that has data.
   - A page left with no data row (for example a marker right after the header) gets no header-only table; the
     caption goes with the first page that has one. Other comments inside the table (PageHeader / PageFooter /
     PageNumber) stay on their page.
