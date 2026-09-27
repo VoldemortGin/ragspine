@@ -14,7 +14,8 @@ A thin argparse wrapper over the zero-SDK offline core — **never** shells out 
     provenance), one absent (honest "not found" refusal). Demonstrates the two code-level
     invariants in seconds.
   - `ask` — mirrors `scripts/ask.py`: `FactStore` from `--db`, `MockProvider` by default
-    (`anthropic` only with the `[llm]` extra + key, lazy-imported), prints answer + sources.
+    (`anthropic` only with the `[llm]` extra + key, lazy-imported; `litellm` with the `[litellm]` extra, model from
+    `RAGSPINE_LITELLM_MODEL`, default `deepseek/deepseek-chat` — `batch` builds it the same way), prints answer + sources.
   - `version` — `importlib.metadata.version("rag-spine")`.
   - `batch <questions> --workspace DIR [--retrieval-only]` — batch ask / retrieval-only eval;
     orchestration in `batch.py` (lazy-imported: resume, `--concurrency`, `results.jsonl` +

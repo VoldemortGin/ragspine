@@ -6,6 +6,18 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ### Added
 
+- **`LiteLLMProvider` — OpenAI-compatible models through litellm (new `[litellm]` extra).**
+  `--provider litellm` in `scripts/ask.py`, `ragspine ask`, `ragspine batch` and `scripts/run_nl_gold_ragspine.py`
+  (`--litellm-model` / `--litellm-api-base` / `--litellm-image-input`); `RAGSPINE_PROVIDER=litellm` with
+  `RAGSPINE_LITELLM_MODEL` (default `deepseek/deepseek-chat`, picked for fast, cheap eval runs),
+  `RAGSPINE_LITELLM_API_BASE` and `RAGSPINE_LITELLM_IMAGE_INPUT` (default off). Model names use litellm's form
+  (`deepseek/…`, `openai/<model>` + api_base, `azure/…`, `ollama/…`); keys come from the vendor's env var
+  (e.g. `DEEPSEEK_API_KEY`). Native OpenAI tool calling; image parts go out as base64 `image_url` only when image input
+  is declared (no `supports_vision` auto-detection). litellm is imported on the first call, with telemetry, callbacks
+  and message logging turned off and the bundled cost map (no import-time fetch); network / API / timeout errors map to
+  `ProviderError`, retries use litellm's `num_retries`, and in-flight requests are capped (default 8). Query translation
+  and listwise rerank reuse the same provider. `ragspine doctor` checks the dependency. Default providers stay `mock`;
+  base dependencies are unchanged. The lock moves `openai` 3.16.2 → 2.54.0 because litellm requires `openai<3`.
 - **Page images on demand: `RAGSPINE_PAGE_IMAGES=off|tagged|all`**
   ([ADR 0025](docs/adr/0025-page-image-trigger-policy.md)). `on` stays as an alias of `all` and is
   byte-identical to before; the default is still `off`. `tagged` attaches an image only to the top-N pages whose

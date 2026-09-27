@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/service/
-verified-against: e4fe90a3c99bb3be9eaba6e882e538f62b44b518
+verified-against: e141b2b8accf94ff614331880a41ce6e316b2b9e
 ---
 
 # service — agent contract
@@ -183,7 +183,10 @@ calls, so a not-found answer can only ever stream the refusal.
   `provider_expr` to a serialized payload (Dify trust boundary, above).
   `provider_type` is `mock` | `anthropic` | `claude-cli` (eval-only local `claude -p`; its model is
   the separate `claude_cli_model` / `RAGSPINE_CLAUDE_CLI_MODEL`, default unset — it does **not**
-  inherit the anthropic `model` default).
+  inherit the anthropic `model` default) | `litellm` (`[litellm]`; `litellm_model` /
+  `RAGSPINE_LITELLM_MODEL`, default `deepseek/deepseek-chat`; `litellm_api_base` / `RAGSPINE_LITELLM_API_BASE`;
+  `litellm_image_input` / `RAGSPINE_LITELLM_IMAGE_INPUT`, default off — all three travel in
+  `provider_config_dict`). The default `provider_type` stays `mock`.
 - **Ingest-path validation is defense-in-depth — re-run it in the worker.**
   `config.validate_ingest_path` (allowed-upload-root + suffix allowlist) runs at enqueue **and
   again** in `tasks/jobs.py` before landing; the worker never trusts the enqueuer. `PathNotAllowedError`

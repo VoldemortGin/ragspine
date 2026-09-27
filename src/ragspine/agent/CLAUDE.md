@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/agent/
-verified-against: 6ebaaa4c3340f5dfcb69c255c94b3b6bc4724c74
+verified-against: e141b2b8accf94ff614331880a41ce6e316b2b9e
 ---
 
 # agent — agent contract
@@ -55,6 +55,19 @@ loop, LLM provider abstraction.
   is auto-denied — deliberately **not** `--allowedTools Read`, which would pre-approve any path), and the prompt
   gets a one-line hint naming the relative files. Original storage paths never reach prompt / argv. No images ⇒
   the command line is exactly the old one.
+- `litellm_provider.py` — `LiteLLMProvider`: OpenAI-compatible models through `litellm.completion` (`[litellm]`
+  extra; model names in litellm form — default `DEFAULT_LITELLM_MODEL = "deepseek/deepseek-chat"`, `openai/<model>` +
+  `api_base`, `azure/…`, `ollama/…`; keys come from each vendor's env var). litellm is imported on the **first call**
+  (`_load_litellm`; missing ⇒ `ImportError` naming the extra), which also turns off telemetry, clears every callback
+  list, sets `turn_off_message_logging` / `suppress_debug_info` and forces the bundled cost map
+  (`LITELLM_LOCAL_MODEL_COST_MAP=True`, no import-time fetch). Native OpenAI tool calling (tools passed through,
+  `tool_calls` mapped to corespine `ToolCall`, empty arguments ⇒ `"{}"`); `chat_stream` yields text deltas.
+  `LITELLM_EXCEPTION_TYPES` ⇒ `ProviderError`, program errors propagate; retries are litellm's `num_retries`, plus a
+  `max_concurrency` semaphore (default 8). **Images are declared, not detected**: `image_input=` (default `False`) sets
+  `supports_image_input`; `litellm.supports_vision` is deliberately not used (misses `openai/<self-hosted>` models and
+  would force the import). When on, image parts become a filename text part + a base64 `image_url`; when off, a part
+  list is flattened to its text. `from_env` reads `RAGSPINE_LITELLM_MODEL` / `_API_BASE` / `_IMAGE_INPUT` (same keys as
+  the `ServiceConfig` fields).
 - `number_guard.py` — **narrative number guard (ADR 0024)**: `guard_narrative_answer` /
   `ungrounded_numbers` (deterministic, zero LLM; normalization from `common/answer_text`),
   `NUMBER_GUARD_RULE` (prompt), `NUMBER_GUARD_NOTICE`, `resolve_number_guard` /
@@ -149,7 +162,8 @@ loop, LLM provider abstraction.
   (stable `code="provider.error"`); the network-only wrapping contract is unchanged.
 - **provider & retriever are Protocols; `agent.py` imports no SDK and no retrieval impl**
   (`LLMProvider` in `llm_provider.py`, `NarrativeRetriever` Protocol in `agent.py`). The
-  `anthropic` SDK is lazy-imported inside `AnthropicProvider` only.
+  `anthropic` SDK is lazy-imported inside `AnthropicProvider` only; `litellm` only inside
+  `litellm_provider._load_litellm` (never at module import or construction).
 - **Tool loop is capped** at `MAX_TOOL_ITERATIONS = 5` (`agent.py`); the SDK owns
   retry/backoff — don't add your own.
 
