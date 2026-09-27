@@ -46,6 +46,7 @@ from ragspine.extraction.di_markdown.models import (
 
 _PAGE_BREAK = re.compile(r"<!--\s*PageBreak\s*-->")
 _PAGE_MARKER = re.compile(r"<!--\s*page:\s*(\d+)\s*-->", re.IGNORECASE)
+MAX_MARKER_PAGE = 10_000  # 页号上限：缺页要补空页，超限的标记不算页标记（防一行注释撑出上亿空页）
 _LINE_COMMENT = re.compile(
     r"^[ \t]*<!--((?:(?!-->).)*)-->[ \t]*(?:\n|\Z)", re.MULTILINE | re.DOTALL
 )
@@ -159,14 +160,23 @@ def _blocks(body: str, stack: list[tuple[int, str]]) -> list[Block]:
     return blocks
 
 
+def _page_markers(text: str) -> list[tuple[re.Match[str], int]]:
+    marks: list[tuple[re.Match[str], int]] = []
+    for m in _PAGE_MARKER.finditer(text):
+        digits = m.group(1).lstrip("0") or "0"
+        if len(digits) <= len(str(MAX_MARKER_PAGE)) and int(digits) <= MAX_MARKER_PAGE:
+            marks.append((m, max(1, int(digits))))
+    return marks
+
+
 def has_page_markers(text: str) -> bool:
-    """全文是否含 `<!-- page: N -->` 页标记（即 marker 模式）。"""
-    return _PAGE_MARKER.search(text) is not None
+    """全文是否含页号不超过 `MAX_MARKER_PAGE` 的 `<!-- page: N -->` 页标记（即 marker 模式）。"""
+    return bool(_page_markers(text))
 
 
 def page_marker_numbers(text: str) -> frozenset[int]:
-    """全文出现过的页标记页号（去重，`page: 0` 按 1）；无标记为空集。"""
-    return frozenset(max(1, int(m.group(1))) for m in _PAGE_MARKER.finditer(text))
+    """全文出现过的合法页标记页号（去重，`page: 0` 按 1，超限的不算）；无标记为空集。"""
+    return frozenset(page for _, page in _page_markers(text))
 
 
 def _header_rows(table: str) -> str:
@@ -179,11 +189,11 @@ def _header_rows(table: str) -> str:
 
 
 def _marker_pages(text: str) -> list[tuple[int, str]]:
-    marks = list(_PAGE_MARKER.finditer(text))
-    prev = max(1, int(marks[0].group(1)))
-    buckets: dict[int, list[str]] = {prev: [text[: marks[0].start()]]}
+    marks = _page_markers(text)
+    prev = marks[0][1]
+    buckets: dict[int, list[str]] = {prev: [text[: marks[0][0].start()]]}
     depth, table_start, scanned = 0, 0, 0
-    for k, mark in enumerate(marks):
+    for k, (mark, page) in enumerate(marks):
         for tag in _TABLE_TAG.finditer(text, scanned, mark.start()):
             if tag.group(1):
                 depth = max(0, depth - 1)
@@ -191,8 +201,7 @@ def _marker_pages(text: str) -> list[tuple[int, str]]:
                 table_start = tag.start() if depth == 0 else table_start
                 depth += 1
         scanned = mark.start()
-        page = max(1, int(mark.group(1)))
-        seg = text[mark.end() : marks[k + 1].start() if k + 1 < len(marks) else len(text)]
+        seg = text[mark.end() : marks[k + 1][0].start() if k + 1 < len(marks) else len(text)]
         if depth > 0 and page != prev and seg.strip():
             seg = "<table>\n" + _header_rows(text[table_start : mark.start()]) + seg
         buckets.setdefault(page, []).append(seg)

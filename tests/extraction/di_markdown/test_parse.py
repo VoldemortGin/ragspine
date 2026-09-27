@@ -7,6 +7,7 @@
 """
 
 import os
+import time
 
 import rootutils
 
@@ -14,6 +15,7 @@ ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpa
 
 from ragspine.extraction.di_markdown.models import Figure, Heading, Paragraph, Table
 from ragspine.extraction.di_markdown.parse import (
+    MAX_MARKER_PAGE,
     has_page_markers,
     page_marker_numbers,
     parse_di_markdown,
@@ -257,7 +259,7 @@ def test_crlf_line_endings_are_normalized():
 # ---- `<!-- page: N -->` 页标记模式（SuperIndex azure_di 抽取器的输出）--------------------------
 
 
-def _mark(n: int) -> str:
+def _mark(n: int | str) -> str:
     # 与 SuperIndex azure_di.to_markdown 插入的形状一致：前后各一个换行
     return f"\n<!-- page: {n} -->\n"
 
@@ -277,6 +279,34 @@ def test_page_marker_numbers_are_distinct_and_zero_counts_as_one():
     text = f"{_mark(0)}a{_mark(5)}b{_mark(5)}c{_mark(1)}<!-- PageBreak -->"
     assert page_marker_numbers(text) == frozenset({1, 5})
     assert page_marker_numbers("a\n<!-- PageBreak -->\nb") == frozenset()
+
+
+def test_page_numbers_above_the_cap_are_not_markers():
+    assert MAX_MARKER_PAGE == 10_000
+    assert has_page_markers(_mark(MAX_MARKER_PAGE))
+    for huge in (MAX_MARKER_PAGE + 1, 99_999_999, "9" * 5000, "0" * 20 + "10001"):
+        text = f"one{_mark(huge)}two\n<!-- PageBreak -->\nthree"
+        assert not has_page_markers(text)
+        assert page_marker_numbers(text) == frozenset()
+        start = time.perf_counter()
+        doc = parse_di_markdown(text)
+        assert time.perf_counter() - start < 1.0
+        # 回到 PageBreak 模式，超限标记按普通注释剥掉
+        assert [_texts(p) for p in doc.pages] == [
+            [("Paragraph", "one\ntwo")],
+            [("Paragraph", "three")],
+        ]
+
+
+def test_page_numbers_above_the_cap_do_not_disturb_valid_markers():
+    text = f"{_mark(2)}two{_mark(99_999_999)}still two{_mark(3)}three"
+    assert page_marker_numbers(text) == frozenset({2, 3})
+    start = time.perf_counter()
+    doc = parse_di_markdown(text)
+    assert time.perf_counter() - start < 1.0
+    assert [p.index for p in doc.pages] == [1, 2, 3]
+    assert [t for _, t in _texts(doc.pages[1])] == ["two\nstill two"]
+    assert _texts(doc.pages[2]) == [("Paragraph", "three")]
 
 
 def test_page_markers_only_split_pages_and_index_is_the_marker():
