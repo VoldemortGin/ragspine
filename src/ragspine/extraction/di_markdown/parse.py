@@ -6,13 +6,17 @@
 - **分页**：`<!-- PageBreak -->` 为页间分隔符，页数 = 分隔符数 + 1（空输入 = 1 个空页）。
   `DiPage.index` 为物理页序（1 起）。
 - **页标记（marker 模式，ADR 0027）**：全文只要有一个整体为 `page: N` 的注释（`<!-- page: N -->`，
-  忽略大小写与空白；SuperIndex azure_di 抽取器在每页起点插入，N 为原 PDF 真实页码）就改由它分页，
-  `has_page_markers` 判定；此时 PageBreak 不再分页，按未知注释删除。第 N 页放在第 N 个位置
-  （`DiPage.index == N`），没有标记的页补空页（`blocks=()`，`number=index`），页数 = 最大 N。
-  `page: 0` 按 1；同一 N 重复或倒序时按 N 归桶、桶内按文档顺序拼接。第一个标记之前的内容归入第一个
-  标记所在的页；行内标记在标记处切开。标记落在未闭合的 `<table>` 内且下一段换了页、又非空时，
-  下一段开头补 `<table>` 和原表开头连续的全 `<th>` 行（逐字复制），使每行数字记在它真实所在的页；
-  前半段仍按「未闭合的表延伸到本页末」处理。落在 `<figure>` 内不修复。
+  忽略大小写与空白；SuperIndex azure_di 抽取器在每页起点插入，N 为原 PDF 真实页码）且 N 不超过
+  `MAX_MARKER_PAGE`（10000，超限的不算页标记、按普通注释删除）就改由它分页，`has_page_markers` 判定；
+  此时 PageBreak 不再分页，按未知注释删除。第 N 页放在第 N 个位置（`DiPage.index == N`），没有标记的页
+  补空页（`blocks=()`，`number=index`），页数 = 最大 N。`page: 0` 按 1；同一 N 重复或倒序时按 N 归桶、
+  桶内按文档顺序拼接。第一个标记之前的内容归入第一个标记所在的页；行内标记在标记处切开。
+- **被页标记切开的表**（起始标签在行首、有配对 `</table>`）：整表解析一次，每个格按它首个文字（无文字取
+  起始标签）所在的页归页，改写成每页一张表：表头块（`header_row_count` 行）每页都有，跨出表头块的
+  rowspan 在复制时截断到块内；本页的数据行照原位置输出；从前一页跨进来的 rowspan 锚点在本页首行重出
+  （行数取剩余），同一行里属于别页的格留空占位，保证列对齐。数值格不重复、不丢失，跨页的 rowspan 锚点
+  两页各出现一次。表内其他注释（PageHeader 等）留在所在页。没有配对 `</table>` 的表不改写，仍按
+  「未闭合的表延伸到本页末」处理；落在 `<figure>` 内不修复。
 - **页码**：`<!-- PageNumber="..." -->` 的标签恰含一个整数（如 "12"、"Page 12"、"- 12 -"）
   时取之作 `DiPage.number`；无注释或不可解析（"iv"、"3 of 10"）时回落为物理页序。
   多条时取第一条可解析的；原标签保存在 `page_number_label`。
@@ -32,8 +36,12 @@
 
 import html
 import re
+from bisect import bisect_right
 
-from ragspine.extraction.di_markdown.html_table import parse_html_table
+from ragspine.extraction.di_markdown.html_table import (
+    parse_html_table,
+    parse_html_table_with_offsets,
+)
 from ragspine.extraction.di_markdown.models import (
     Block,
     DiDocument,
@@ -42,6 +50,8 @@ from ragspine.extraction.di_markdown.models import (
     Heading,
     Paragraph,
     Table,
+    TableCell,
+    TableGrid,
 )
 
 _PAGE_BREAK = re.compile(r"<!--\s*PageBreak\s*-->")
@@ -60,8 +70,6 @@ _TABLE_TAG = re.compile(r"<(/?)table\b[^>]*>?", re.IGNORECASE)
 _FIGURE_OPEN = re.compile(r"<figure\b[^>]*>", re.IGNORECASE)
 _FIGURE_CLOSE = re.compile(r"</figure\s*>", re.IGNORECASE)
 _FIGCAPTION = re.compile(r"<figcaption\b[^>]*>(.*?)</figcaption\s*>", re.IGNORECASE | re.DOTALL)
-_ROW = re.compile(r"<tr\b[^>]*>.*?</tr\s*>", re.IGNORECASE | re.DOTALL)
-_CELL_KIND = re.compile(r"<(t[hd])\b", re.IGNORECASE)
 
 
 class _Meta:
@@ -179,33 +187,142 @@ def page_marker_numbers(text: str) -> frozenset[int]:
     return frozenset(page for _, page in _page_markers(text))
 
 
-def _header_rows(table: str) -> str:
-    rows: list[str] = []
-    for row in _ROW.finditer(table):
-        if {kind.lower() for kind in _CELL_KIND.findall(row.group(0))} != {"th"}:
-            break
-        rows.append(row.group(0))
-    return "".join(f"{row}\n" for row in rows)
+def _closed_tables(text: str) -> list[tuple[int, int]]:
+    """顶层 `<table>…</table>` 的区间（起始标签独占行首、有配对的闭合标签）。"""
+    spans: list[tuple[int, int]] = []
+    depth, start = 0, 0
+    for tag in _TABLE_TAG.finditer(text):
+        if tag.group(1):
+            if depth == 0:
+                continue  # 游离的 </table>
+            depth -= 1
+            if depth == 0 and text[text.rfind("\n", 0, start) + 1 : start].strip() == "":
+                spans.append((start, tag.end()))
+        else:
+            start = tag.start() if depth == 0 else start
+            depth += 1
+    return spans
+
+
+def _cell_html(cell: TableCell, text: str, row_span: int) -> str:
+    tag = "th" if cell.is_header else "td"
+    attrs = f' rowspan="{row_span}"' if row_span > 1 else ""
+    attrs += f' colspan="{cell.col_span}"' if cell.col_span > 1 else ""
+    return f"<{tag}{attrs}>{html.escape(text, quote=False)}</{tag}>"
+
+
+def _page_table(
+    grid: TableGrid,
+    owner: dict[tuple[int, int], TableCell],
+    page_of: dict[TableCell, int],
+    page: int,
+    rows: list[int],
+    caption: bool,
+) -> str:
+    """跨页表在 `page` 上的那部分：表头块整块复制（跨出表头块的 rowspan 截断在块内），
+    再接本页的数据行；从前面的页跨进来的 rowspan 锚点在本页首行重出（剩余行数），同一行里
+    属于别页的格留空占位，保证列对齐。"""
+    head = grid.header_row_count
+    claimed: set[tuple[int, int]] = set()
+    lines = ["<table>"]
+    if caption and grid.caption:
+        lines.append(f"<caption>{html.escape(grid.caption, quote=False)}</caption>")
+    for i, r in enumerate(rows):
+        cells: list[str] = []
+        for c in range(grid.n_cols):
+            if (i, c) in claimed:
+                continue
+            anchor = owner.get((r, c))
+            if anchor is None:
+                cells.append("<td></td>")
+                continue
+            native = page_of[anchor] == page
+            limit = anchor.row + anchor.row_span
+            if r < head and not native:
+                limit = min(limit, head)
+            span = 1
+            while i + span < len(rows) and rows[i + span] < limit:
+                span += 1
+            text = "" if r >= head and anchor.row == r and not native else anchor.text
+            claimed.update(
+                (ii, cc)
+                for ii in range(i, i + span)
+                for cc in range(anchor.col, anchor.col + anchor.col_span)
+            )
+            cells.append(_cell_html(anchor, text, span))
+        lines.append("<tr>" + "".join(cells) + "</tr>")
+    lines.append("</table>")
+    return "\n".join(lines)
+
+
+def _split_table(source: str, bounds: list[int], pages: list[int], first: int) -> dict[int, str]:
+    """把一张被页标记切开的表按格所在的页拆成每页一张表：{页号: 表 HTML}。"""
+    grid, offsets = parse_html_table_with_offsets(source)
+
+    def page_at(offset: int) -> int:
+        k = bisect_right(bounds, offset)
+        return first if k == 0 else pages[k - 1]
+
+    owner: dict[tuple[int, int], TableCell] = {}
+    page_of: dict[TableCell, int] = {}
+    starts: dict[int, list[int]] = {}
+    for cell in grid.cells:
+        page_of[cell] = page_at(offsets[(cell.row, cell.col)])
+        starts.setdefault(cell.row, []).append(page_of[cell])
+        for r in range(cell.row, cell.row + cell.row_span):
+            for c in range(cell.col, cell.col + cell.col_span):
+                owner[(r, c)] = cell
+    head = grid.header_row_count
+    row_pages = [set(starts.get(r, ())) for r in range(head, grid.n_rows)]  # 每行至少起一个格
+    return {
+        page: _page_table(
+            grid,
+            owner,
+            page_of,
+            page,
+            list(range(head)) + [head + k for k, ps in enumerate(row_pages) if page in ps],
+            caption=page == first,
+        )
+        for page in sorted({first}.union(*row_pages))
+    }
+
+
+def _split_tables(text: str, marks: list[tuple[re.Match[str], int]]) -> str:
+    """被页标记切开、且有配对 `</table>` 的表，改写为每页一张完整的表（标记原位保留，
+    表内其他注释如 PageHeader / PageNumber 跟在该页的表后面）。"""
+    out: list[str] = []
+    pos = 0
+    starts = [m.start() for m, _ in marks]
+    for s, e in _closed_tables(text):
+        lo = bisect_right(starts, s)
+        inside = marks[lo : bisect_right(starts, e)]
+        if not inside:
+            continue
+        first = marks[lo - 1][1] if lo > 0 else marks[0][1]
+        tables = _split_table(
+            text[s:e], [m.start() - s for m, _ in inside], [p for _, p in inside], first
+        )
+        cuts = [s] + [m.end() for m, _ in inside]
+        ends = [m.start() for m, _ in inside] + [e]
+        piece_pages = [first] + [p for _, p in inside]
+        out.append(text[pos:s])
+        for j, (a, b, page) in enumerate(zip(cuts, ends, piece_pages, strict=True)):
+            comments = "".join(f"\n{c.group(0)}" for c in _INLINE_COMMENT.finditer(text, a, b))
+            out.append(f"\n{tables.pop(page, '')}{comments}\n")
+            if j < len(inside):
+                out.append(inside[j][0].group(0))
+        pos = e
+    out.append(text[pos:])
+    return "".join(out)
 
 
 def _marker_pages(text: str) -> list[tuple[int, str]]:
+    text = _split_tables(text, _page_markers(text))
     marks = _page_markers(text)
-    prev = marks[0][1]
-    buckets: dict[int, list[str]] = {prev: [text[: marks[0][0].start()]]}
-    depth, table_start, scanned = 0, 0, 0
+    buckets: dict[int, list[str]] = {marks[0][1]: [text[: marks[0][0].start()]]}
     for k, (mark, page) in enumerate(marks):
-        for tag in _TABLE_TAG.finditer(text, scanned, mark.start()):
-            if tag.group(1):
-                depth = max(0, depth - 1)
-            else:
-                table_start = tag.start() if depth == 0 else table_start
-                depth += 1
-        scanned = mark.start()
         seg = text[mark.end() : marks[k + 1][0].start() if k + 1 < len(marks) else len(text)]
-        if depth > 0 and page != prev and seg.strip():
-            seg = "<table>\n" + _header_rows(text[table_start : mark.start()]) + seg
         buckets.setdefault(page, []).append(seg)
-        prev = page
     return [(i, "\n\n".join(buckets.get(i, []))) for i in range(1, max(buckets) + 1)]
 
 

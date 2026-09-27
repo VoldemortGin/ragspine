@@ -22,6 +22,8 @@ class _RawCell:
     row_span: int
     col_span: int
     parts: list[str] = field(default_factory=list)
+    start: tuple[int, int] = (1, 0)  # 起始标签的 HTMLParser.getpos()
+    text_at: tuple[int, int] | None = None  # 首个非空文字的 getpos()
 
 
 def _span(value: str | None, cap: int) -> int:
@@ -92,6 +94,7 @@ class _TableCollector(HTMLParser):
                 is_header=tag == "th",
                 row_span=_span(attr.get("rowspan"), _MAX_ROWSPAN),
                 col_span=_span(attr.get("colspan"), _MAX_COLSPAN),
+                start=self.getpos(),
             )
         elif tag == "br":
             self._gap()
@@ -120,6 +123,8 @@ class _TableCollector(HTMLParser):
         if self._done:
             return
         if self._cell is not None:
+            if self._cell.text_at is None and data.strip():
+                self._cell.text_at = self.getpos()
             self._cell.parts.append(data)
         elif self._in_caption:
             self.caption_parts.append(data)
@@ -130,9 +135,19 @@ class _TableCollector(HTMLParser):
 
 
 def _layout(rows: list[list[_RawCell]]) -> TableGrid:
+    return _grid(_place(rows), len(rows))
+
+
+def _grid(placed: list[tuple[TableCell, _RawCell]], n_rows: int) -> TableGrid:
+    n_cols = max((cell.col + cell.col_span for cell, _ in placed), default=0)
+    cells = sorted((cell for cell, _ in placed), key=lambda cell: (cell.row, cell.col))
+    return TableGrid(n_rows=n_rows, n_cols=n_cols, cells=tuple(cells))
+
+
+def _place(rows: list[list[_RawCell]]) -> list[tuple[TableCell, _RawCell]]:
     n_rows = len(rows)
     occupied: set[tuple[int, int]] = set()
-    cells: list[TableCell] = []
+    cells: list[tuple[TableCell, _RawCell]] = []
     for r, row in enumerate(rows):
         c = 0
         for raw in row:
@@ -145,11 +160,10 @@ def _layout(rows: list[list[_RawCell]]) -> TableGrid:
             for rr in range(r, r + row_span):
                 for cc in range(c, c + col_span):
                     occupied.add((rr, cc))
-            cells.append(TableCell(r, c, _collapse(raw.parts), raw.is_header, row_span, col_span))
+            cell = TableCell(r, c, _collapse(raw.parts), raw.is_header, row_span, col_span)
+            cells.append((cell, raw))
             c += col_span
-    n_cols = max((c for _, c in occupied), default=-1) + 1
-    cells.sort(key=lambda cell: (cell.row, cell.col))
-    return TableGrid(n_rows=n_rows, n_cols=n_cols, cells=tuple(cells))
+    return cells
 
 
 def parse_html_table(html: str) -> TableGrid:
@@ -160,3 +174,21 @@ def parse_html_table(html: str) -> TableGrid:
     grid = _layout(collector.rows)
     caption = _collapse(collector.caption_parts) or None
     return TableGrid(grid.n_rows, grid.n_cols, grid.cells, caption)
+
+
+def parse_html_table_with_offsets(html: str) -> tuple[TableGrid, dict[tuple[int, int], int]]:
+    """同 `parse_html_table`，另给每个锚点格 `(row, col)` → 它在 `html` 中的偏移：首个非空文字处，
+    没有文字时取起始标签处（跨页切表时据此判定格子属于哪一页）。"""
+    collector = _TableCollector()
+    collector.feed(html)
+    collector.finish()
+    placed = _place(collector.rows)
+    line_starts = [0]
+    line_starts.extend(i + 1 for i, ch in enumerate(html) if ch == "\n")
+    offsets = {}
+    for cell, raw in placed:
+        line, col = raw.text_at or raw.start
+        offsets[(cell.row, cell.col)] = line_starts[line - 1] + col
+    grid = _grid(placed, len(collector.rows))
+    caption = _collapse(collector.caption_parts) or None
+    return TableGrid(grid.n_rows, grid.n_cols, grid.cells, caption), offsets
