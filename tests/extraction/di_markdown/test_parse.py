@@ -23,6 +23,7 @@ from ragspine.extraction.di_markdown.html_table import parse_html_table
 from ragspine.extraction.di_markdown.models import Figure, Heading, Paragraph, Table
 from ragspine.extraction.di_markdown.parse import (
     MAX_MARKER_PAGE,
+    _is_placeholder,
     _is_value_like,
     has_page_markers,
     page_marker_numbers,
@@ -614,6 +615,47 @@ def test_all_th_total_row_opening_a_new_page_stays_out_of_the_header():
 def test_only_leading_non_numeric_th_cells_are_labels():
     _, (_, second) = _cut_row("<tr><th>Asia</th><th>Life</th><td>1</td>{m2}<td>2</td></tr>\n")
     assert _data_rows(second) == (("Asia", "Life", "", "2"),)
+
+
+@pytest.mark.parametrize(
+    ("text", "placeholder"),
+    [
+        ("-", True),
+        ("\u2014", True),
+        ("\u2013", True),
+        ("\u2212", True),
+        (" n/a ", True),
+        ("N/A", True),
+        ("n.m.", True),
+        ("NM", True),
+        ("nil", True),
+        ("None", True),
+        ("n.a.", True),
+        ("n/a*", True),
+        ("\uff0d", True),
+        ("-12", False),
+        ("--", False),
+        ("Revenue", False),
+        ("Nominal", False),
+        ("", False),
+    ],
+)
+def test_is_placeholder(text, placeholder):
+    assert _is_placeholder(text) is placeholder
+    if placeholder:
+        assert not _is_value_like(text)
+
+
+def test_placeholder_column_zero_is_not_a_label():
+    _, (_, second) = _cut_row("<tr><td>n/a</td><td>90</td>{m2}<td>100</td><td>110</td></tr>\n")
+    assert _data_rows(second) == (("", "", "100", "110"),)
+
+
+def test_placeholder_th_stops_the_leading_labels():
+    _, (_, second) = _cut_row("<tr><th>Asia</th><th>\u2014</th><td>1</td>{m2}<td>2</td></tr>\n")
+    assert _data_rows(second) == (("Asia", "", "", "2"),)
+    _, (_, second) = _cut_row("<tr><th>-</th><td>Life</td><td>1</td>{m2}<td>2</td></tr>\n")
+    assert _data_rows(second) == (("", "", "", "2"),)
 
 
 def test_cut_row_td_text_label_in_column_zero_is_copied():

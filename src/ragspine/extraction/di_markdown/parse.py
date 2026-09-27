@@ -88,6 +88,7 @@ _MINUS = str.maketrans(
 _FOOTNOTES = "\u00b9\u00b2\u00b3\u2070\u2074\u2075\u2076\u2077\u2078\u2079*\u2020\u2021"
 _APPROX = (">=", "<=", "~", ">", "<", "\u2265", "\u2264", "\u2248")
 _MAX_VALUE_CHARS = 64
+_PLACEHOLDERS = frozenset({"-", "\u2014", "n/a", "n.a.", "n.m.", "nm", "nil", "none"})
 _JOINERS = "-\u2014~/"  # 范围连接符（– 已归一为 -）与分数线
 _DATE = re.compile(r"\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}")
 _MONTH = re.compile(
@@ -309,6 +310,14 @@ def _page_table(
     return "\n".join(lines), TableGrid(len(rows), n_cols, tuple(placed), page_caption)
 
 
+def _is_placeholder(text: str) -> bool:
+    """「无数据」占位（`-`、`—`、`–`、`n/a`、`n.a.`、`n.m.`、`nm`、`nil`、`none`，不分大小写，去首尾空白
+    与末尾脚注后判断）：既不算数值，也不当行标签。"""
+    value = text.strip().rstrip(_FOOTNOTES).strip()
+    value = unicodedata.normalize("NFKC", value).translate(_MINUS).strip().lower()
+    return value in _PLACEHOLDERS
+
+
 def _is_value_like(text: str) -> bool:
     """单元格是否承载数值事实（行标签过滤用：像数值的不当标签复制）。
 
@@ -370,18 +379,20 @@ def _single_value(value: str) -> bool:
 def _row_labels(
     grid: TableGrid, owner: dict[tuple[int, int], TableCell], row: int
 ) -> list[TableCell]:
-    """行标签格：该行行首连续的非数值 `<th>` 格；没有时取第 0 列（非空、不像数值）。"""
+    """行标签格：该行行首连续的非空、非占位、不像数值的 `<th>` 格；没有时取第 0 列（同样的条件）。"""
     labels: list[TableCell] = []
     col = 0
     while (cell := owner.get((row, col))) is not None and cell.row == row and cell.is_header:
-        if not cell.text.strip() or _is_value_like(cell.text):
+        if not cell.text.strip() or _is_placeholder(cell.text) or _is_value_like(cell.text):
             break
         labels.append(cell)
         col = cell.col + cell.col_span
     if labels:
         return labels
     first = owner.get((row, 0))
-    if first is None or first.row != row or not first.text.strip() or _is_value_like(first.text):
+    if first is None or first.row != row or not first.text.strip():
+        return []
+    if _is_placeholder(first.text) or _is_value_like(first.text):
         return []
     return [first]
 
