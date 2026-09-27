@@ -122,6 +122,32 @@ _HTTP_BODY_TYPES: frozenset[str] = frozenset(
     }
 )
 
+# if-else / loop break 条件已建模的比较算子（含 Dify 上游符号 "=" / "≠"）；其余算子
+# （in / all of / exists / null 等）不猜语义：整节点落 UnsupportedNode，绝不静默降级成相等。
+_COMPARISON_OPERATORS: frozenset[str] = frozenset(
+    {
+        "==",
+        "=",
+        "is",
+        "equals",
+        "!=",
+        "≠",
+        "is not",
+        ">",
+        "<",
+        "≥",
+        ">=",
+        "≤",
+        "<=",
+        "contains",
+        "not contains",
+        "empty",
+        "not empty",
+        "start with",
+        "end with",
+    }
+)
+
 # loop 最大轮数护栏（对齐 Dify 画布 loop_count 上限；编译期钳制，杜绝死循环）。
 _LOOP_MAX_ROUNDS: int = 100
 
@@ -462,10 +488,23 @@ def _lower_code(node_id: str, title: str, data: dict[str, Any]) -> CodeNode:
 
 def _lower_if_else(
     node_id: str, title: str, data: dict[str, Any], all_edges: list[DifyEdge]
-) -> IfElseNode:
-    """if-else / question-classifier：把每个 case 的条件渲染成 Python 表达式 + 记录 handle。"""
+) -> IRNode:
+    """if-else / question-classifier：把每个 case 的条件渲染成 Python 表达式 + 记录 handle。
+
+    含未建模比较算子 → 整节点落 UnsupportedNode（显式诊断，不静默降级）。
+    """
     branches: list[IfBranch] = []
     cases = data.get("cases")
+    if isinstance(cases, list) and any(
+        isinstance(case, dict) and _has_unsupported_operator(case.get("conditions"))
+        for case in cases
+    ):
+        return UnsupportedNode(
+            id=node_id,
+            title=title,
+            node_type=str(data.get("type", "") or ""),
+            raw=tuple(sorted((k, v) for k, v in data.items() if k != "type")),
+        )
     if isinstance(cases, list):
         for case in cases:
             if not isinstance(case, dict):
@@ -730,8 +769,18 @@ def _lower_loop(
     data: dict[str, Any],
     body: list[DifyNode],
     all_edges: list[DifyEdge],
-) -> LoopNode:
-    """loop：内层子图 lower + loop_count 钳制 + break 条件渲染 + 循环变量初值归一。"""
+) -> IRNode:
+    """loop：内层子图 lower + loop_count 钳制 + break 条件渲染 + 循环变量初值归一。
+
+    break 条件含未建模比较算子 → 整节点落 UnsupportedNode（显式诊断，不静默降级）。
+    """
+    if _has_unsupported_operator(data.get("break_conditions")):
+        return UnsupportedNode(
+            id=node_id,
+            title=title,
+            node_type="loop",
+            raw=tuple(sorted((k, v) for k, v in data.items() if k != "type")),
+        )
     sub_ir: WorkflowIR | None = None
     if body:
         sub_node_ids = {n.id for n in body}
@@ -857,14 +906,27 @@ def _render_conditions(case: dict[str, Any]) -> tuple[str | None, tuple[VarRef, 
     return (op_join.join(exprs) if exprs else None), tuple(refs)
 
 
+def _has_unsupported_operator(conditions: Any) -> bool:
+    """条件列表里是否含未建模的比较算子（非列表/非 dict 条件项按既有逻辑跳过）。"""
+    if not isinstance(conditions, list):
+        return False
+    return any(
+        isinstance(cond, dict)
+        and str(cond.get("comparison_operator", "==")) not in _COMPARISON_OPERATORS
+        for cond in conditions
+    )
+
+
 def _condition_expr(lhs: str, op: str, rhs_raw: Any) -> str:
     """渲染单个比较为 Python 表达式（数值/字符串/包含等常见算子）。"""
     rhs = _render_rhs(rhs_raw)
     mapping = {
         "==": f"{lhs} == {rhs}",
+        "=": f"{lhs} == {rhs}",
         "is": f"{lhs} == {rhs}",
         "equals": f"{lhs} == {rhs}",
         "!=": f"{lhs} != {rhs}",
+        "≠": f"{lhs} != {rhs}",
         "is not": f"{lhs} != {rhs}",
         ">": f"{_num(lhs)} > {_num(rhs)}",
         "<": f"{_num(lhs)} < {_num(rhs)}",
