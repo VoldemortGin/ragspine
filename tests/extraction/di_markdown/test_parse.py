@@ -13,7 +13,7 @@ import rootutils
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
 from ragspine.extraction.di_markdown.models import Figure, Heading, Paragraph, Table
-from ragspine.extraction.di_markdown.parse import parse_di_markdown
+from ragspine.extraction.di_markdown.parse import has_page_markers, parse_di_markdown
 
 
 def _texts(page):
@@ -248,3 +248,170 @@ def test_crlf_line_endings_are_normalized():
     doc = parse_di_markdown("# T\r\n\r\npara\r\n<!-- PageBreak -->\r\nnext\r\n")
     assert _texts(doc.pages[0]) == [("Heading", "T"), ("Paragraph", "para")]
     assert _texts(doc.pages[1]) == [("Paragraph", "next")]
+
+
+# ---- `<!-- page: N -->` 页标记模式（SuperIndex azure_di 抽取器的输出）--------------------------
+
+
+def _mark(n: int) -> str:
+    # 与 SuperIndex azure_di.to_markdown 插入的形状一致：前后各一个换行
+    return f"\n<!-- page: {n} -->\n"
+
+
+def test_has_page_markers_needs_a_whole_comment_body():
+    assert has_page_markers("a <!-- page: 3 --> b")
+    assert has_page_markers("<!--page:12-->")
+    assert has_page_markers("<!--  PAGE:  4  -->")
+    assert not has_page_markers("a\n<!-- PageBreak -->\nb")
+    assert not has_page_markers('<!-- PageNumber="3" -->')
+    assert not has_page_markers("<!-- page: x -->")
+    assert not has_page_markers("<!-- see page: 3 -->")
+    assert not has_page_markers("")
+
+
+def test_page_markers_only_split_pages_and_index_is_the_marker():
+    doc = parse_di_markdown(f"{_mark(1)}# One\n\nbody one\n{_mark(2)}body two\n")
+    assert [p.index for p in doc.pages] == [1, 2]
+    assert [_texts(p) for p in doc.pages] == [
+        [("Heading", "One"), ("Paragraph", "body one")],
+        [("Paragraph", "body two")],
+    ]
+    assert doc.pages[1].blocks[0].heading_path == ("One",)  # 标题栈按页序延续
+
+
+def test_page_marker_wins_and_page_break_is_dropped():
+    doc = parse_di_markdown(
+        f"{_mark(1)}one\n\n<!-- PageBreak -->\n{_mark(2)}two\n<!-- PageBreak -->\n{_mark(3)}three"
+    )
+    assert [p.index for p in doc.pages] == [1, 2, 3]
+    assert [_texts(p) for p in doc.pages] == [
+        [("Paragraph", "one")],
+        [("Paragraph", "two")],
+        [("Paragraph", "three")],
+    ]
+
+
+def test_missing_pages_are_filled_with_empty_pages():
+    doc = parse_di_markdown(f"{_mark(2)}page two\n{_mark(4)}page four\n")
+    assert [p.index for p in doc.pages] == [1, 2, 3, 4]
+    assert [p.number for p in doc.pages] == [1, 2, 3, 4]
+    assert doc.pages[0].blocks == () and doc.pages[2].blocks == ()
+    assert _texts(doc.pages[1]) == [("Paragraph", "page two")]
+    assert _texts(doc.pages[3]) == [("Paragraph", "page four")]
+
+
+def test_partial_analysis_keeps_true_pdf_page_numbers():
+    text = "".join(f"{_mark(n)}# P{n}\n\nbody {n}\n" for n in range(5, 21))
+    doc = parse_di_markdown(text)
+    assert len(doc.pages) == 20
+    assert doc.pages[4].index == 5
+    assert _texts(doc.pages[4]) == [("Heading", "P5"), ("Paragraph", "body 5")]
+    assert all(p.blocks == () for p in doc.pages[:4])
+
+
+def test_page_number_label_sets_number_while_marker_sets_index():
+    doc = parse_di_markdown(
+        f'{_mark(7)}body\n<!-- PageNumber="iii" -->{_mark(8)}more\n<!-- PageNumber="42" -->'
+    )
+    assert [(p.index, p.number, p.page_number_label) for p in doc.pages[6:]] == [
+        (7, 7, "iii"),
+        (8, 42, "42"),
+    ]
+
+
+def test_leading_content_belongs_to_the_first_marked_page():
+    doc = parse_di_markdown(f"Intro before any marker.\n{_mark(2)}Page two.\n")
+    assert len(doc.pages) == 2
+    assert doc.pages[0].blocks == ()
+    assert _texts(doc.pages[1]) == [
+        ("Paragraph", "Intro before any marker."),
+        ("Paragraph", "Page two."),
+    ]
+
+
+def test_inline_marker_splits_the_line():
+    doc = parse_di_markdown("alpha <!-- page: 1 --> beta <!--page:2--> gamma")
+    assert [p.index for p in doc.pages] == [1, 2]
+    assert [t for _, t in _texts(doc.pages[0])] == ["alpha", "beta"]
+    assert _texts(doc.pages[1]) == [("Paragraph", "gamma")]
+
+
+def test_abnormal_page_numbers_zero_repeats_and_reverse_order():
+    doc = parse_di_markdown(
+        f"{_mark(0)}zero\n{_mark(3)}three a\n{_mark(2)}two\n{_mark(3)}three b\n"
+    )
+    assert [p.index for p in doc.pages] == [1, 2, 3]
+    assert _texts(doc.pages[0]) == [("Paragraph", "zero")]  # page: 0 按第 1 页
+    assert _texts(doc.pages[1]) == [("Paragraph", "two")]
+    # 同一页号的内容按文档顺序拼接
+    assert _texts(doc.pages[2]) == [("Paragraph", "three a"), ("Paragraph", "three b")]
+
+
+_HEAD = (
+    '<tr><th rowspan="2">Metric</th><th colspan="2">FY</th></tr>\n'
+    "<tr><th>2024</th><th>2025</th></tr>\n"
+)
+_ROWS = [
+    "<tr><td>Revenue</td><td>100</td><td>110</td></tr>\n",
+    "<tr><td>Profit</td><td>30</td><td>33</td></tr>\n",
+    "<tr><td>Margin</td><td>7.5</td><td>8.25</td></tr>\n",
+]
+
+
+def _data_rows(grid):
+    return grid.rows[grid.header_row_count :]
+
+
+def _only_table(page):
+    (table,) = [b for b in page.blocks if isinstance(b, Table)]
+    return table.grid
+
+
+def test_marker_inside_a_table_reopens_it_with_the_verbatim_header():
+    whole = f"## Results\n\n<table>\n{_HEAD}{''.join(_ROWS)}</table>\nFootnote.\n"
+    original = _only_table(parse_di_markdown(whole).pages[0])
+    split = (
+        f"{_mark(1)}## Results\n\n<table>\n{_HEAD}{_ROWS[0]}"
+        f"{_mark(2)}{''.join(_ROWS[1:])}</table>\nFootnote.\n"
+    )
+    doc = parse_di_markdown(split)
+    first, second = _only_table(doc.pages[0]), _only_table(doc.pages[1])
+
+    # 补上的表头与原表头逐字相同，且不带任何数值格
+    head_rows = original.header_row_count
+    assert head_rows == 2
+    assert second.header_row_count == head_rows
+    assert second.rows[:head_rows] == original.rows[:head_rows]
+    assert [c for c in second.cells if c.row < head_rows and not c.is_header] == []
+    # 两页数值格合起来与原表完全一致：不重复、不丢失
+    assert _data_rows(first) + _data_rows(second) == _data_rows(original)
+    # 每一行数字落在它真实所在的页
+    assert _data_rows(first) == (("Revenue", "100", "110"),)
+    assert _data_rows(second) == (("Profit", "30", "33"), ("Margin", "7.5", "8.25"))
+    assert [type(b) for b in doc.pages[1].blocks] == [Table, Paragraph]
+    assert doc.pages[1].blocks[0].heading_path == ("Results",)
+    assert _texts(doc.pages[1])[-1] == ("Paragraph", "Footnote.")
+
+
+def test_table_spanning_three_pages_keeps_every_row_once():
+    whole = f"<table>\n{_HEAD}{''.join(_ROWS)}</table>\n"
+    original = _only_table(parse_di_markdown(whole).pages[0])
+    split = (
+        f"{_mark(4)}<table>\n{_HEAD}{_ROWS[0]}{_mark(5)}{_ROWS[1]}{_mark(6)}{_ROWS[2]}</table>\n"
+    )
+    doc = parse_di_markdown(split)
+    grids = [_only_table(doc.pages[i]) for i in (3, 4, 5)]
+    assert all(g.rows[:2] == original.rows[:2] for g in grids)
+    assert tuple(r for g in grids for r in _data_rows(g)) == _data_rows(original)
+    assert [_data_rows(g)[0][0] for g in grids] == ["Revenue", "Profit", "Margin"]
+
+
+def test_marker_inside_a_headerless_table_reopens_only_the_table():
+    doc = parse_di_markdown(f"{_mark(1)}<table>\n{_ROWS[0]}{_mark(2)}{_ROWS[1]}</table>\n")
+    assert _only_table(doc.pages[0]).rows == (("Revenue", "100", "110"),)
+    assert _only_table(doc.pages[1]).rows == (("Profit", "30", "33"),)
+
+
+def test_marker_after_a_closed_table_adds_nothing():
+    doc = parse_di_markdown(f"{_mark(1)}<table>\n{_HEAD}{_ROWS[0]}</table>\n{_mark(2)}after\n")
+    assert _texts(doc.pages[1]) == [("Paragraph", "after")]

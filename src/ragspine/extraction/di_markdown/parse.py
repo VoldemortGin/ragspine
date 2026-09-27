@@ -5,6 +5,14 @@
 
 - **分页**：`<!-- PageBreak -->` 为页间分隔符，页数 = 分隔符数 + 1（空输入 = 1 个空页）。
   `DiPage.index` 为物理页序（1 起）。
+- **页标记（marker 模式，ADR 0027）**：全文只要有一个整体为 `page: N` 的注释（`<!-- page: N -->`，
+  忽略大小写与空白；SuperIndex azure_di 抽取器在每页起点插入，N 为原 PDF 真实页码）就改由它分页，
+  `has_page_markers` 判定；此时 PageBreak 不再分页，按未知注释删除。第 N 页放在第 N 个位置
+  （`DiPage.index == N`），没有标记的页补空页（`blocks=()`，`number=index`），页数 = 最大 N。
+  `page: 0` 按 1；同一 N 重复或倒序时按 N 归桶、桶内按文档顺序拼接。第一个标记之前的内容归入第一个
+  标记所在的页；行内标记在标记处切开。标记落在未闭合的 `<table>` 内且下一段换了页、又非空时，
+  下一段开头补 `<table>` 和原表开头连续的全 `<th>` 行（逐字复制），使每行数字记在它真实所在的页；
+  前半段仍按「未闭合的表延伸到本页末」处理。落在 `<figure>` 内不修复。
 - **页码**：`<!-- PageNumber="..." -->` 的标签恰含一个整数（如 "12"、"Page 12"、"- 12 -"）
   时取之作 `DiPage.number`；无注释或不可解析（"iv"、"3 of 10"）时回落为物理页序。
   多条时取第一条可解析的；原标签保存在 `page_number_label`。
@@ -37,6 +45,7 @@ from ragspine.extraction.di_markdown.models import (
 )
 
 _PAGE_BREAK = re.compile(r"<!--\s*PageBreak\s*-->")
+_PAGE_MARKER = re.compile(r"<!--\s*page:\s*(\d+)\s*-->", re.IGNORECASE)
 _LINE_COMMENT = re.compile(
     r"^[ \t]*<!--((?:(?!-->).)*)-->[ \t]*(?:\n|\Z)", re.MULTILINE | re.DOTALL
 )
@@ -50,6 +59,8 @@ _TABLE_TAG = re.compile(r"<(/?)table\b[^>]*>?", re.IGNORECASE)
 _FIGURE_OPEN = re.compile(r"<figure\b[^>]*>", re.IGNORECASE)
 _FIGURE_CLOSE = re.compile(r"</figure\s*>", re.IGNORECASE)
 _FIGCAPTION = re.compile(r"<figcaption\b[^>]*>(.*?)</figcaption\s*>", re.IGNORECASE | re.DOTALL)
+_ROW = re.compile(r"<tr\b[^>]*>.*?</tr\s*>", re.IGNORECASE | re.DOTALL)
+_CELL_KIND = re.compile(r"<(t[hd])\b", re.IGNORECASE)
 
 
 class _Meta:
@@ -148,12 +159,49 @@ def _blocks(body: str, stack: list[tuple[int, str]]) -> list[Block]:
     return blocks
 
 
+def has_page_markers(text: str) -> bool:
+    """全文是否含 `<!-- page: N -->` 页标记（即 marker 模式）。"""
+    return _PAGE_MARKER.search(text) is not None
+
+
+def _header_rows(table: str) -> str:
+    rows: list[str] = []
+    for row in _ROW.finditer(table):
+        if {kind.lower() for kind in _CELL_KIND.findall(row.group(0))} != {"th"}:
+            break
+        rows.append(row.group(0))
+    return "".join(f"{row}\n" for row in rows)
+
+
+def _marker_pages(text: str) -> list[tuple[int, str]]:
+    marks = list(_PAGE_MARKER.finditer(text))
+    prev = max(1, int(marks[0].group(1)))
+    buckets: dict[int, list[str]] = {prev: [text[: marks[0].start()]]}
+    depth, table_start, scanned = 0, 0, 0
+    for k, mark in enumerate(marks):
+        for tag in _TABLE_TAG.finditer(text, scanned, mark.start()):
+            if tag.group(1):
+                depth = max(0, depth - 1)
+            else:
+                table_start = tag.start() if depth == 0 else table_start
+                depth += 1
+        scanned = mark.start()
+        page = max(1, int(mark.group(1)))
+        seg = text[mark.end() : marks[k + 1].start() if k + 1 < len(marks) else len(text)]
+        if depth > 0 and page != prev and seg.strip():
+            seg = "<table>\n" + _header_rows(text[table_start : mark.start()]) + seg
+        buckets.setdefault(page, []).append(seg)
+        prev = page
+    return [(i, "\n\n".join(buckets.get(i, []))) for i in range(1, max(buckets) + 1)]
+
+
 def parse_di_markdown(text: str) -> DiDocument:
     """解析 DI markdown 全文 → DiDocument。契约见模块 docstring。"""
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     stack: list[tuple[int, str]] = []
     pages: list[DiPage] = []
-    for index, raw in enumerate(_PAGE_BREAK.split(text), start=1):
+    split = _marker_pages(text) if has_page_markers(text) else enumerate(_PAGE_BREAK.split(text), 1)
+    for index, raw in split:
         meta = _Meta()
         body = _INLINE_COMMENT.sub(meta.take, _LINE_COMMENT.sub(meta.take, raw))
         number, label = _page_number(meta.page_numbers, index)
