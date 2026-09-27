@@ -14,8 +14,9 @@
     - txt（纯文本）：按空行拆成段落块，逐块归一化后成段；定位串 'para={N}'（N 只给
       产出非空文本的块编号，1-based，与 docx 同口径）。零三方依赖。
     - md（DI markdown，Azure Document Intelligence 风格）：extraction.di_markdown 解析成
-      页 → 块，按（页, 标题路径）连续分组成段；定位串 'page={N}'（N=物理页序 DiPage.index，
-      与 PDF 同口径；PageNumber 标签不参与）。表格线性化为「行标题 | 列标题: 值」行、
+      页 → 块，按（页, 标题路径）连续分组成段；定位串 'page={N}'（N=DiPage.index：PageBreak 分页
+      时为物理页序；含 `<!-- page: N -->` 页标记时为真实 PDF 页码，缺页补空页、空页不出段，ADR 0027；
+      PageNumber 标签不参与）。表格线性化为「行标题 | 列标题: 值」行、
       图 caption 在前；页眉/页脚/页码注释不进正文。无 PageBreak 的普通 markdown 整份 = 第 1 页。
 
 统一返回 NarrativeDoc：segments 各段文本内部以 '\\n' 分行、to_text() 以空行
