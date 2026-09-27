@@ -63,19 +63,25 @@ page image was off by the gap, and `source_pdf`'s page-count equality check reje
     numeric fact is a value and is not copied; a cell that identifies the row is a label and is copied.
     - Trailing footnotes are stripped first (superscript digits U+00B9 / U+00B2 / U+00B3 / U+2070 / U+2074–U+2079
       and `*†‡`), then NFKC and minus unification; so `12¹` and `12*` are values, `Revenue¹` and `Total†` labels.
-    - **Dates are labels**: three parts (`2026-06-30`, `2026/06/30`, `6/30/2026`, `30.06.2026`) or an English month
-      name, short or full (`30 Jun 2026`, `June 30, 2026`, `Jun-26`).
+    - **Dates and years are labels** (checked before values and ranges, after the footnotes are stripped, so
+      `2024¹` is a label): three parts (`2026-06-30`, `2026/06/30`, `6/30/2026`, `30.06.2026`); an English month
+      name, short or full (`30 Jun 2026`, `June 30, 2026`, `Jun-26`); a bare four-digit year in 1900–2099
+      (`2024`); a fiscal year `YYYY-YY` with YY == (YYYY + 1) % 100, joined by `-`, `–`, `—` or `/` (`2024-25`,
+      `1999-00`, `2024/25`); a year span `YYYY-YYYY` with both ends in 1900–2099 and the later year larger
+      (`2024-2025`); a month `YYYY-MM` with MM 01–12 (`2026-06`). Forms that miss these stay values: `2024-27`,
+      `2024/27` (a fraction), `2025-2024`, `2026-13`, `1899`, `2100`, `1234`, and a year with a thousands comma, a
+      decimal, a unit or a currency (`2,024`, `2024.0`, `2024m`, `2024%`, `$2024`). Prefixed forms such as `FY2024`
+      or `1H24` were labels already.
     - **One value**: after peeling comparison / approximation signs (`~ > < >= <= ≥ ≤ ≈`), sign and Unicode minus,
       accounting parentheses, currency prefixes (`$`, `US$`, `HK$`, `RMB`, `¥`, `€`, `£`, …) and unit suffixes (`bn`,
       `mn`, `m`, `k`, `x`, `%`, `pp`, `bps`, …, case-insensitive), what is left is a number: thousands commas or
-      spaces, decimals, scientific notation (`1.2E-3`). A year is a value.
+      spaces, decimals, scientific notation (`1.2E-3`).
     - **Two parts, both values**: a range joined by `-`, `–`, `—` or `~` (`12-15`, `3.5x-4.0x`, `12%–15%`) or a
       fraction (`1/2`). So `/` and `-` separate a date from a range or fraction by the number of parts: a date has
       three (or a month name), a range or fraction has exactly two value-like ends.
     - Empty text, pure punctuation and text longer than 64 characters are labels.
     It is not shared with `extraction/evidence/`, which stays a separate line, so `di_markdown` keeps its
-    stdlib-only contract. Known consequences: `2024-25` and `2024-2025` read as ranges (values), `2026-06` as a
-    range, not a date.
+    stdlib-only contract.
   - So numeric cells are neither repeated nor lost, except that a numeric cell with a rowspan crossing pages
     appears once on each page, like any cross-page rowspan anchor; this matches linearization, where every row it
     covers repeats its value. A row cut across pages has its label once on each page while its numbers are not
