@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/extraction/
-verified-against: 4cb01273af900910fb698aa6f348d87c44076edb
+verified-against: 4fb663860024a49c571379f335816435d95ae492
 ---
 
 # extraction — agent contract
@@ -27,7 +27,10 @@ over the existing `extract_grids` impls).
 `outputContentFormat=markdown`) into a typed page → block IR (`Heading` with heading path /
 `Paragraph` / `Table` as an expanded rectangular `TableGrid` keeping rowspan/colspan anchors /
 `Figure`). Page = `<!-- PageBreak -->` split; `number` from `PageNumber` else physical order;
-PageHeader/PageFooter/PageNumber never reach the body. Contract in `di_markdown/parse.py`'s docstring.
+PageHeader/PageFooter/PageNumber never reach the body. **Marker mode** (ADR 0027): any `<!-- page: N -->`
+(`has_page_markers`, SuperIndex azure_di output) makes N the split and `DiPage.index == N` (true PDF page; gaps =
+empty pages; `PageBreak` dropped); a marker inside an open `<table>` reopens it on the next page with the original
+leading all-`<th>` rows verbatim. No marker ⇒ byte-identical (`test_legacy_parse_snapshot.py`). Contract in `di_markdown/parse.py`'s docstring.
 `di_markdown/page_tags.py` (ADR 0025) derives per-page raw measures from the blocks — `has_table` (Table block or a
 pipe separator row with a `|`), `n_figures` / `figure_max_chars` (largest figure's text + caption), `text_chars`
 (all block text minus whitespace and `|`) — and `page_tags(stats, low_text_chars=300, figure_min_chars=10)` turns

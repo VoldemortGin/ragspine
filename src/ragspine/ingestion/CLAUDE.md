@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/ingestion/
-verified-against: daacbd0e20e39c50b5fa970afd031e8852d91251
+verified-against: 4fb663860024a49c571379f335816435d95ae492
 ---
 
 # ingestion — agent contract
@@ -19,7 +19,8 @@ default + lazy-`httpx` `HttpConnector` / `NotionConnector` (behind `[connectors]
 `structured/` (fact ingestion + idempotent batch manifest ledger), `narrative/` (document chunk
 ingestion + extraction; sources: `.pptx` / `.pdf` / `.docx` / `.docm` + `.txt` plain text + `.md`
 DI markdown (`extract_di_markdown_narrative` over `extraction/di_markdown`: one segment per (page, heading
-path), locator `page={DiPage.index}` = physical page order, tables linearized to `row | col header: value`
+path), locator `page={DiPage.index}` = physical page order, or the true PDF page when the md has
+`<!-- page: N -->` markers (ADR 0027), tables linearized to `row | col header: value`
 lines, figure caption first; plain markdown = one page) —
 `ingest_narrative(..., chunker=, max_chars=, overlap_chars=)` routes chunking through the retrieval
 `Chunker` seam — size/overlap pass through to it, defaults `DEFAULT_CHUNK_CHARS` / `DEFAULT_OVERLAP_CHARS`;
@@ -32,7 +33,9 @@ by `" > "`, seq/chunk_id renumbered doc-wide; `.md` (`SEGMENT_CHUNKED_SUFFIXES`)
 `page_images/` (DI markdown ↔ original PDF, **explicit association only**: `source_pdf.py` resolves
 `RAGSpine.ingest(md, source_pdf=)` / CLI `--source-pdf` / worker payload `source_pdf` (one `.md` per explicit PDF), else
 the sidecar `<stem>.meta.json` field **`source_pdf`** (relative → sidecar dir, then cwd); validates PDF page count ==
-max `DiPage.index` and records its sha256 — missing / unreadable / outside `allowed_upload_root` / count mismatch raise
+max `DiPage.index` (marker mode, ADR 0027: max page ≤ PDF pages, a page beyond the PDF raises, and a sidecar integer
+`page_count` / else `pages` must equal the PDF pages) and records its sha256 — missing / unreadable / outside
+`allowed_upload_root` / count mismatch raise
 `SourcePdfError` **before any write** (a wrong pairing would put mismatched pages next to the text, worse than no
 image). No PDF ⇒ nothing happens, text ingest unchanged. `render.py`: pdfspine PNG, scale = `min(dpi/72,
 max_side/long edge pt)`, defaults **144 dpi / 1568 px** (Claude downsizes beyond ~1568 px; a 16:9 slide renders
