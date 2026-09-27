@@ -136,3 +136,39 @@ def test_missing_document_identity_cannot_authorize_a_visual_confirmation():
     )
     assert len(out) == 1
     assert out[0]["retrieval_routes"] == ["text"]
+
+
+def test_slide_locator_merges_like_page_and_para_is_not_a_page():
+    text_hits = [
+        {"chunk_id": "s", "doc_id": "d", "text": "s", "source_locator": "d#slide=3"},
+        {"chunk_id": "s-child", "doc_id": "d", "text": "s2", "source_locator": "d#slide=3"},
+        {"chunk_id": "p", "doc_id": "d", "text": "p", "source_locator": "d#para=3"},
+    ]
+    visual_hits = [visual(3)]
+    saved = deepcopy((text_hits, visual_hits))
+    out = FusedRetriever(Text(text_hits), Visual(visual_hits)).retrieve("q")
+    assert [row["chunk_id"] for row in out] == ["s", "p"]
+    assert out[0]["retrieval_routes"] == ["text", "visual"]
+    assert out[0]["fused_score"] == pytest.approx(2 / 61)
+    assert out[0]["visual_score"] == 0.75
+    assert out[0]["text"] == "s"
+    assert out[0]["source_locator"] == "d#slide=3"
+    assert out[1]["retrieval_routes"] == ["text"]
+    assert out[1]["fused_score"] == pytest.approx(1 / 62)
+    assert (text_hits, visual_hits) == saved
+
+
+@pytest.mark.parametrize("filters", [None, {"entity": "ACME"}])
+def test_both_legs_empty_returns_empty_list(filters):
+    text, visual_leg = Text([]), Visual([])
+    out = FusedRetriever(text, visual_leg).retrieve("q", filters=filters, top_k=5)
+    assert out == []
+    assert text.hits == [] and visual_leg.hits == []
+
+
+def test_empty_text_leg_with_filters_drops_unconfirmed_visual_pages():
+    visual_hits = [visual(1)]
+    saved = deepcopy(visual_hits)
+    out = FusedRetriever(Text([]), Visual(visual_hits)).retrieve("q", filters={"entity": "ACME"})
+    assert out == []
+    assert visual_hits == saved
