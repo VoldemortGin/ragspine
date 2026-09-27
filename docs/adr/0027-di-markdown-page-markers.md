@@ -66,10 +66,11 @@ page image was off by the gap, and `source_pdf`'s page-count equality check reje
     - **Dates and years are labels** (checked before values and ranges, after the footnotes are stripped, so
       `2024¹` is a label): three parts (`2026-06-30`, `2026/06/30`, `6/30/2026`, `30.06.2026`); an English month
       name, short or full (`30 Jun 2026`, `June 30, 2026`, `Jun-26`); a bare four-digit year in 1900–2099
-      (`2024`); a fiscal year `YYYY-YY` with YY == (YYYY + 1) % 100, joined by `-`, `–`, `—` or `/` (`2024-25`,
+      (`2024`); with YYYY also in 1900–2099 for every other form, a fiscal year `YYYY-YY` with
+      YY == (YYYY + 1) % 100, joined by `-`, `–`, `—` or `/` (`2024-25`,
       `1999-00`, `2024/25`); a year span `YYYY-YYYY` with both ends in 1900–2099 and the later year larger
       (`2024-2025`); a month `YYYY-MM` with MM 01–12 (`2026-06`). Forms that miss these stay values: `2024-27`,
-      `2024/27` (a fraction), `2025-2024`, `2026-13`, `1899`, `2100`, `1234`, and a year with a thousands comma, a
+      `2024/27` (a fraction), `2025-2024`, `2026-13`, `1234-35`, `1234-06`, `1899`, `2100`, `1234`, and a year with a thousands comma, a
       decimal, a unit or a currency (`2,024`, `2024.0`, `2024m`, `2024%`, `$2024`). Prefixed forms such as `FY2024`
       or `1H24` were labels already.
     - **One value**: after peeling comparison / approximation signs (`~ > < >= <= ≥ ≤ ≈`), sign and Unicode minus,
