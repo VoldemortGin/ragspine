@@ -268,6 +268,21 @@ def test_marker_mode_sidecar_field_of_wrong_type_is_an_error(tmp_path, field):
         validate_source_pdf(md, pdf)
 
 
+@pytest.mark.parametrize("key", ["source_pdf_sha256", "pdf_sha256", "source_sha256"])
+@pytest.mark.parametrize("value", ["", "   "])
+def test_marker_mode_empty_sha256_is_reported_as_empty(tmp_path, key, value):
+    md, pdf = _marker_deck(tmp_path, [5, 6, 7], pdf_pages=8, sidecar={key: value})
+    with pytest.raises(SourcePdfError, match="为空"):
+        validate_source_pdf(md, pdf)
+
+
+@pytest.mark.parametrize("pages", [0, -3])
+def test_marker_mode_non_positive_analyzed_pages_is_an_error(tmp_path, pages):
+    md, pdf = _marker_deck(tmp_path, [5, 6, 7], pdf_pages=8, sidecar=_superindex_sidecar(pages))
+    with pytest.raises(SourcePdfError, match="正整数"):
+        validate_source_pdf(md, pdf)
+
+
 def test_ragspine_pages_list_is_not_an_analyzed_count(tmp_path):
     sidecar = {"generator": "pdf_to_di_markdown.py", "pages": [{"page": 5}, {"page": 6}]}
     md, pdf = _marker_deck(tmp_path, [5, 6, 7], pdf_pages=8, sidecar=sidecar)

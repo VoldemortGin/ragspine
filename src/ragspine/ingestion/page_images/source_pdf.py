@@ -95,9 +95,7 @@ def read_sidecar_facts(md_path: str | Path) -> SidecarFacts:
         pdf_total_pages=_ragspine_pdf_total_pages(data, sidecar),
         analyzed_pages=_superindex_analyzed_pages(data, sidecar),
         pdf_sha256=tuple(
-            _typed(data, key, str, sidecar).strip().lower()
-            for key in SIDECAR_PDF_SHA256_KEYS
-            if key in data
+            _sha256(data, key, sidecar) for key in SIDECAR_PDF_SHA256_KEYS if key in data
         ),
     )
 
@@ -115,7 +113,19 @@ def _superindex_analyzed_pages(data: dict[str, object], sidecar: Path) -> int | 
     value = data.get(SIDECAR_ANALYZED_PAGES_KEY)
     if SIDECAR_ANALYZED_PAGES_KEY not in data or isinstance(value, list):
         return None
-    return _typed(data, SIDECAR_ANALYZED_PAGES_KEY, int, sidecar)
+    pages = _typed(data, SIDECAR_ANALYZED_PAGES_KEY, int, sidecar)
+    if pages <= 0:
+        raise SourcePdfError(
+            f"sidecar {sidecar.name} 的 {SIDECAR_ANALYZED_PAGES_KEY!r} 应为正整数，实际是 {pages}"
+        )
+    return pages
+
+
+def _sha256(data: dict[str, object], key: str, sidecar: Path) -> str:
+    value = _typed(data, key, str, sidecar).strip().lower()
+    if not value:
+        raise SourcePdfError(f"sidecar {sidecar.name} 的 {key!r} 字段为空")
+    return value
 
 
 def _typed[T](data: dict[str, object], key: str, kind: type[T], sidecar: Path) -> T:
