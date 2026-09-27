@@ -266,6 +266,9 @@ class ServiceConfig:
     )
     studio_dir: str = str(_PACKAGED_STUDIO_DIR)  # Studio 目录；默认 wheel 内置，""=显式禁用
     dify_public_apps: str = ""  # dify 公共 API app 注册表："key1=/path/a.yml;key2=/path/b.yml"（; 分条目、首个 = 分 key/路径）；""=未配置 -> /v1/workflows/* 一律 401
+    dify_public_run_store_path: str | None = (
+        None  # dify 公共 API 终态运行历史 SQLite 文件(opt-in,ADR 0026)；None=进程内最近 100 条(默认,不落盘)
+    )
     n8n_api_key: str | None = None  # n8n 公共 API key；None=未启用，/api/v1/* 一律 401
     n8n_store_path: str = "data/n8n_store"  # n8n workflow/execution 文件存储根目录
 

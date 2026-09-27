@@ -12,7 +12,9 @@
 - 执行失败（编译错/运行错）与 dify 行为一致：HTTP 200 + data.status="failed" + error。
 - 错误体 {code, message, status}：401 unauthorized / 400 invalid_param /
   400 app_unavailable / 404 not_found。
-- GET /v1/workflows/run/{id}：进程内 LRU（上限 _MAX_RUNS）缓存最近 run 摘要。
+- GET /v1/workflows/run/{id}：终态 run 摘要。默认进程内最近 _MAX_RUNS 条（按写入顺序淘汰）；
+  配置 RAGSPINE_DIFY_PUBLIC_RUN_STORE_PATH 后落 SQLite（每 app-key 最近 _MAX_RUNS_PER_OWNER 条，
+  ADR 0026），存储成功后才返回正常响应；存储故障统一 503 history_unavailable。
 - GET /v1/info、/v1/parameters：从注册 YAML（app 段 + start 节点 variables）派生。
 
 本文件自包含（schemas 不进 schemas.py，路由不进 routes.py）；app.py 仅 include_router。
@@ -21,7 +23,6 @@
 import json
 import time
 import uuid
-from collections import OrderedDict
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,10 +30,17 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from ragspine.agent.llm_provider import LLMProvider
 from ragspine.service.api.dependencies import get_config, get_provider
+from ragspine.service.api.dify_run_store import (
+    DifyRunStore,
+    HistoryUnavailable,
+    InMemoryRunStore,
+    SqliteRunStore,
+    owner_digest,
+)
 from ragspine.service.config import ServiceConfig, provider_config_dict
 
 router = APIRouter()
@@ -41,8 +49,10 @@ router = APIRouter()
 ConfigDep = Annotated[ServiceConfig, Depends(get_config)]
 ProviderDep = Annotated[LLMProvider, Depends(get_provider)]
 
-# 进程内 run 摘要 LRU 上限（挂在 app.state，测试间天然隔离）。
+# 进程内 run 摘要上限（挂在 app.state，测试间天然隔离）。
 _MAX_RUNS = 100
+# SQLite 历史每个 app-key 归属的保留上限（ADR 0026）。
+_MAX_RUNS_PER_OWNER = 100
 
 _RESPONSE_MODES = ("blocking", "streaming")
 
@@ -230,22 +240,24 @@ def _executed_traces(traces: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# run 摘要 LRU（进程内，挂 app.state；按 api_key 归属隔离）
+# run 摘要存储（挂 app.state；按 api_key 摘要归属隔离；默认内存，可选 SQLite）
 # ---------------------------------------------------------------------------
-def _run_store(request: Request) -> "OrderedDict[str, dict[str, Any]]":
-    store = getattr(request.app.state, "dify_public_runs", None)
+def _run_store(request: Request, config: ServiceConfig) -> DifyRunStore:
+    store: DifyRunStore | None = getattr(request.app.state, "dify_public_run_store", None)
     if store is None:
-        store = OrderedDict()
-        request.app.state.dify_public_runs = store
+        if config.dify_public_run_store_path:
+            store = SqliteRunStore(
+                config.dify_public_run_store_path, max_runs_per_owner=_MAX_RUNS_PER_OWNER
+            )
+        else:
+            store = InMemoryRunStore(max_runs=_MAX_RUNS)
+        request.app.state.dify_public_run_store = store
     return store
 
 
-def _store_run(request: Request, api_key: str, detail: WorkflowRunDetailResponse) -> None:
-    store = _run_store(request)
-    store[detail.id] = {"api_key": api_key, "detail": detail}
-    store.move_to_end(detail.id)
-    while len(store) > _MAX_RUNS:
-        store.popitem(last=False)
+def _history_unavailable() -> JSONResponse:
+    """存储不可用 / 损坏的脱敏 503（不含路径、key 或业务正文）。"""
+    return _dify_error(503, "history_unavailable", "Workflow run history is unavailable")
 
 
 # ---------------------------------------------------------------------------
@@ -366,23 +378,24 @@ def workflows_run(
     finished_at = int(time.time())
     total_steps = len(_executed_traces(outcome.traces))
 
-    _store_run(
-        request,
-        api_key,
-        WorkflowRunDetailResponse(
-            id=run_id,
-            workflow_id=workflow_id,
-            status=outcome.status,
-            inputs=req.inputs,
-            outputs=outcome.outputs,
-            error=outcome.error,
-            total_steps=total_steps,
-            total_tokens=0,
-            created_at=created_at,
-            finished_at=finished_at,
-            elapsed_time=outcome.elapsed_time,
-        ),
+    detail = WorkflowRunDetailResponse(
+        id=run_id,
+        workflow_id=workflow_id,
+        status=outcome.status,
+        inputs=req.inputs,
+        outputs=outcome.outputs,
+        error=outcome.error,
+        total_steps=total_steps,
+        total_tokens=0,
+        created_at=created_at,
+        finished_at=finished_at,
+        elapsed_time=outcome.elapsed_time,
     )
+    # 先持久化再返回（blocking / streaming 同一路径）：存储失败绝不先发成功终态，也不重试工作流。
+    try:
+        _run_store(request, config).save(owner_digest(api_key), run_id, detail.model_dump())
+    except HistoryUnavailable:
+        return _history_unavailable()
 
     if req.response_mode == "streaming":
         events = _sse_events(
@@ -424,10 +437,19 @@ def workflows_run_detail(
         return loaded
     api_key = loaded[0]
 
-    record = _run_store(request).get(workflow_run_id)
-    if record is None or record["api_key"] != api_key:
+    try:
+        payload = _run_store(request, config).get(owner_digest(api_key), workflow_run_id)
+    except HistoryUnavailable:
+        return _history_unavailable()
+    if payload is None:
         return _dify_error(404, "not_found", "Workflow run not found")
-    detail: WorkflowRunDetailResponse = record["detail"]
+    # 读取重新验证公开响应模型；结构损坏或 id 不符按存储损坏处理，不编造记录。
+    try:
+        detail = WorkflowRunDetailResponse.model_validate(payload)
+    except ValidationError:
+        return _history_unavailable()
+    if detail.id != workflow_run_id:
+        return _history_unavailable()
     return detail
 
 
