@@ -59,11 +59,23 @@ page image was off by the gap, and `source_pdf`'s page-count equality check reje
     row into a header row. The exception is the row label: the row's leading consecutive non-numeric `<th>` cells,
     or without them its column-0 cell if it is not value-like, is copied to the same position on each later page of
     that row; a label that is itself a rowspan anchor goes through the same re-emission, once per page.
-    "Value-like" is `_is_value_like` in `parse.py`, a private stdlib function (NFKC; sign and Unicode minus;
-    accounting parentheses; currency prefixes such as `$`, `US$`, `HK$`, `RMB`, `¥`, `€`, `£`; unit suffixes such as
-    `bn`, `mn`, `m`, `k`, `x`, `%`, `pp`, `bps`; footnote stars; thousands commas or spaces; decimals; a year counts
-    as a value). It is not shared with `extraction/evidence/`, which stays a separate line, so `di_markdown` keeps
-    its stdlib-only contract.
+    "Value-like" is `_is_value_like` in `parse.py`, a private stdlib function. The rule: a cell that carries a
+    numeric fact is a value and is not copied; a cell that identifies the row is a label and is copied.
+    - Trailing footnotes are stripped first (superscript digits U+00B9 / U+00B2 / U+00B3 / U+2070 / U+2074–U+2079
+      and `*†‡`), then NFKC and minus unification; so `12¹` and `12*` are values, `Revenue¹` and `Total†` labels.
+    - **Dates are labels**: three parts (`2026-06-30`, `2026/06/30`, `6/30/2026`, `30.06.2026`) or an English month
+      name, short or full (`30 Jun 2026`, `June 30, 2026`, `Jun-26`).
+    - **One value**: after peeling comparison / approximation signs (`~ > < >= <= ≥ ≤ ≈`), sign and Unicode minus,
+      accounting parentheses, currency prefixes (`$`, `US$`, `HK$`, `RMB`, `¥`, `€`, `£`, …) and unit suffixes (`bn`,
+      `mn`, `m`, `k`, `x`, `%`, `pp`, `bps`, …, case-insensitive), what is left is a number: thousands commas or
+      spaces, decimals, scientific notation (`1.2E-3`). A year is a value.
+    - **Two parts, both values**: a range joined by `-`, `–`, `—` or `~` (`12-15`, `3.5x-4.0x`, `12%–15%`) or a
+      fraction (`1/2`). So `/` and `-` separate a date from a range or fraction by the number of parts: a date has
+      three (or a month name), a range or fraction has exactly two value-like ends.
+    - Empty text, pure punctuation and text longer than 64 characters are labels.
+    It is not shared with `extraction/evidence/`, which stays a separate line, so `di_markdown` keeps its
+    stdlib-only contract. Known consequences: `2024-25` and `2024-2025` read as ranges (values), `2026-06` as a
+    range, not a date.
   - So numeric cells are neither repeated nor lost, except that a numeric cell with a rowspan crossing pages
     appears once on each page, like any cross-page rowspan anchor; this matches linearization, where every row it
     covers repeats its value. A row cut across pages has its label once on each page while its numbers are not
