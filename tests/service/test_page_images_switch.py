@@ -14,7 +14,7 @@ from ragspine.ingestion.page_images.source_pdf import SourcePdfError, sidecar_pa
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
 from ragspine.retrieval.page_images.attach import PageImageRetriever
 from ragspine.retrieval.page_images.store import PageImageStore
-from tests.ingestion.page_images.fixtures import make_pdf, write_deck
+from tests.ingestion.page_images.fixtures import make_marker_md, make_pdf, write_deck
 
 _PAGES = ["Agency channel mix overview.", "Partnership channel outlook.", "Closing remarks."]
 
@@ -205,6 +205,47 @@ def test_facade_ingest_links_pdf_and_ask_sends_images(tmp_path):
     assert [(p["name"], p["doc_id"], p["page"]) for p in parts] == [("p1.png", "deck.md", 1)]
     assert "图：p1.png" in text
     assert Path(parts[0]["path"]).is_file()
+
+
+def test_facade_page_markers_use_true_pdf_pages(tmp_path):
+    """SuperIndex 抽取器只分析了第 5–7 页：locator / 页图 / 附图都按真实 PDF 页码（ADR 0027）。"""
+    from ragspine import RAGSpine
+    from ragspine.service.config import make_retrieval_preset
+
+    md = tmp_path / "deck.md"
+    md.write_text(make_marker_md(dict(zip((5, 6, 7), _PAGES, strict=True))), encoding="utf-8")
+    pdf = make_pdf(tmp_path / "deck.pdf", [f"LABEL-{i}" for i in range(1, 9)])
+    ws = tmp_path / "ws"
+    RAGSpine.local(ws).ingest(md, source_pdf=pdf)
+
+    store = ChunkStore(ws / "knowledge.db")
+    try:
+        locators = [c.source_locator for c in store.iter_chunks(doc_id="deck.md")]
+    finally:
+        store.close()
+    assert [loc.split("#")[0] for loc in locators] == [
+        "deck.md@page=5",
+        "deck.md@page=6",
+        "deck.md@page=7",
+    ]
+    images = PageImageStore(ws / "knowledge.db")
+    try:
+        rows = {r.page: r for r in images.list_doc("deck.md")}
+    finally:
+        images.close()
+    assert 5 in rows
+    # 页图就是 PDF 第 5 页（按默认参数重渲染比对字节），不是 md 里的第 1 个物理页
+    from ragspine.ingestion.page_images.render import render_pdf_pages
+
+    page5, page1 = render_pdf_pages(pdf, pages=[5, 1])[::-1]
+    assert rows[5].path.read_bytes() == page5.png != page1.png
+
+    provider = _ImageRecorder()
+    preset = make_retrieval_preset(page_parent="dedup", page_images="on", page_images_top_n=1)
+    RAGSpine.local(ws, provider=provider, retrieval=preset).ask("agency channel mix")
+    _, parts = split_message_content(provider.seen[-1][-1]["content"])
+    assert [(p["doc_id"], p["page"]) for p in parts] == [("deck.md", 5)]
+    assert Path(parts[0]["path"]) == rows[5].path
 
 
 def test_facade_rejects_mismatched_pdf_before_writing(tmp_path):

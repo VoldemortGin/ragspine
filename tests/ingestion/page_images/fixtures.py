@@ -28,6 +28,11 @@ def make_md(pages: list[str]) -> str:
     )
 
 
+def make_marker_md(pages: dict[int, str]) -> str:
+    """SuperIndex azure_di 抽取器形状的 markdown：每页起点插 `<!-- page: N -->`（N 为真实 PDF 页码）。"""
+    return "".join(f"\n<!-- page: {n} -->\n# Page {n}\n\n{text}\n" for n, text in pages.items())
+
+
 def write_deck(
     tmp_path: Path, pages: list[str], labels: list[str] | None = None
 ) -> tuple[Path, Path]:

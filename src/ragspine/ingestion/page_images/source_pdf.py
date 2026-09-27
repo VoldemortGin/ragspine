@@ -10,6 +10,11 @@
 校验：PDF 页数必须等于 markdown 的页数（``DiPage.index`` 的最大值，即物理页序）。关联是调用方显式声明的，
 页数不一致通常意味着配错了文件（例如另一版 PDF），这时发出去的页图会与文本错位、把错误的数字带进上下文，
 比不发图更糟，所以直接抛 :class:`SourcePdfError`，在任何写入之前失败，而不是悄悄降级。
+
+marker 模式（markdown 含 ``<!-- page: N -->``，``DiPage.index`` 即真实 PDF 页码，ADR 0027）：只分析了部分页时
+md 页数可以少于 PDF，所以放宽为 ``max(index) <= PDF 页数``，页号超出 PDF 明确报错。补偿：sidecar 记了分析
+页数（ragspine 生成器的 ``page_count``，否则 SuperIndex 抽取器的 ``pages``，须为整数）时，它必须等于 PDF 页数；
+sidecar 缺失、不可解析或没有该字段才只按 ``<=`` 校验。
 """
 
 import hashlib
@@ -18,11 +23,12 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from ragspine.extraction.di_markdown.parse import parse_di_markdown
+from ragspine.extraction.di_markdown.parse import has_page_markers, parse_di_markdown
 from ragspine.ingestion.page_images.render import pdf_page_count
 
 SIDECAR_SUFFIX = ".meta.json"
 SIDECAR_SOURCE_PDF_KEY = "source_pdf"
+SIDECAR_PAGE_COUNT_KEYS = ("page_count", "pages")
 MARKDOWN_SUFFIX = ".md"
 
 
@@ -44,8 +50,24 @@ def sidecar_path(md_path: str | Path) -> Path:
 
 
 def markdown_page_count(md_path: str | Path) -> int:
-    doc = parse_di_markdown(Path(md_path).read_text(encoding="utf-8"))
-    return max((page.index for page in doc.pages), default=0)
+    return _page_count(Path(md_path).read_text(encoding="utf-8"))
+
+
+def _page_count(text: str) -> int:
+    return max((page.index for page in parse_di_markdown(text).pages), default=0)
+
+
+def sidecar_page_count(md_path: str | Path) -> int | None:
+    """sidecar 记录的分析页数；sidecar 缺失、不可解析或没有整数字段时为 None。"""
+    try:
+        data = json.loads(sidecar_path(md_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    for key in SIDECAR_PAGE_COUNT_KEYS:
+        value = data.get(key) if isinstance(data, dict) else None
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+    return None
 
 
 def resolve_source_pdf(md_path: str | Path, explicit: str | Path | None = None) -> Path | None:
@@ -76,11 +98,22 @@ def validate_source_pdf(md_path: str | Path, pdf_path: str | Path) -> SourcePdf:
         pages = pdf_page_count(pdf)
     except Exception as exc:  # noqa: BLE001 — pdfspine 的各类解析异常统一归为关联错误
         raise SourcePdfError(f"source PDF 无法打开：{pdf}（{type(exc).__name__}: {exc}）") from exc
-    expected = markdown_page_count(md_path)
-    if pages != expected:
+    text = Path(md_path).read_text(encoding="utf-8")
+    expected = _page_count(text)
+    name = Path(md_path).name
+    if not has_page_markers(text):
+        if pages != expected:
+            raise SourcePdfError(
+                f"source PDF 页数不一致：{pdf.name} 有 {pages} 页，{name} 有 {expected} 页（物理页序）"
+            )
+    elif expected > pages:
         raise SourcePdfError(
-            f"source PDF 页数不一致：{pdf.name} 有 {pages} 页，"
-            f"{Path(md_path).name} 有 {expected} 页（物理页序）"
+            f"source PDF 页数不足：{name} 的页标记页号 {expected} 超出 {pdf.name} 的 {pages} 页"
+        )
+    elif (analyzed := sidecar_page_count(md_path)) is not None and analyzed != pages:
+        raise SourcePdfError(
+            f"source PDF 页数与 sidecar 不一致：{pdf.name} 有 {pages} 页，"
+            f"{sidecar_path(md_path).name} 记录 {analyzed} 页"
         )
     sha = hashlib.sha256(pdf.read_bytes()).hexdigest()
     return SourcePdf(path=pdf, sha256=sha, page_count=pages)
