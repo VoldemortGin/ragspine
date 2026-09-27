@@ -9,7 +9,8 @@
 - ``low_text``：各块文字（标题、段落、表格锚点格、图的 text 与 caption）拼起来，去掉空白和 ``|`` 后
   不足 ``low_text_chars`` 个字符。页眉、页脚、页码和其他注释已被 ``parse.py`` 剥离，不计入。
 
-纯函数、只用 stdlib。页号用物理页序（``DiPage.index``），与块 locator 的 ``page=N`` 一致。
+纯函数、只用 stdlib。页号用 ``DiPage.index``（PageBreak 分页时为物理页序，``<!-- page: N -->`` 页标记时
+为真实 PDF 页码，ADR 0027），与块 locator 的 ``page=N`` 一致。
 """
 
 import re
