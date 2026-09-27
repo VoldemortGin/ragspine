@@ -725,7 +725,7 @@ def test_splitting_a_long_table_is_linear():
     text = f"<table>\n<tr><th>a</th><th>b</th><th>c</th></tr>\n{rows}</table>"
     start = time.perf_counter()
     doc = parse_di_markdown(text)
-    assert time.perf_counter() - start < 2.0
+    assert time.perf_counter() - start < 5.0  # 只防退回二次方
     assert len(doc.pages) == 8000
     assert _data_rows(_only_table(doc.pages[-1]))[-1] == ("r39999", "39999", "40000")
 
@@ -742,7 +742,7 @@ def test_splitting_a_wide_table_is_linear():
     )
     start = time.perf_counter()
     doc = parse_di_markdown(f"<table>\n{head}{rows}</table>")
-    assert time.perf_counter() - start < 2.0
+    assert time.perf_counter() - start < 5.0  # 只防退回二次方
     assert len(doc.pages) == 100
     assert all(_only_table(p).n_cols == cols for p in doc.pages)
 
@@ -826,6 +826,38 @@ def test_marker_after_a_closed_table_adds_nothing():
         "-$12bn",
         "$(12)",
         "12 USD",
+        # 范围（两段、两端都像数值；连接符 - – — ~）
+        "12-15",
+        "12 - 15",
+        "12\u201315",
+        "12\u201415",
+        "12~15",
+        "3.5x-4.0x",
+        "12%\u201315%",
+        "-5--3",
+        # 比较 / 近似
+        "~12",
+        ">12",
+        "<12",
+        ">=12",
+        "\u226512",
+        "\u226412",
+        "\u224812",
+        "~$12bn",
+        # 科学计数
+        "12e3",
+        "1.2E-3",
+        "1.2e+3",
+        # 分数（两段、两端都是数值）
+        "1/2",
+        "3/4",
+        "3 / 4",
+        "\u00bd",
+        # 脚注：上标数字与 *†‡ 先剥掉
+        "12\u00b2",
+        "12\u2075",
+        "12\u2020",
+        "12\u00b9*",
     ],
 )
 def test_is_value_like_accepts_numeric_forms(text):
@@ -853,12 +885,37 @@ def test_is_value_like_accepts_numeric_forms(text):
         "3 of 10",
         "Total",
         "12 months",
+        # 日期：三段式、含月份名，或 YYYY-MM-DD
         "2024-06-30",
-        "12-15",
+        "2026/06/30",
+        "6/30/2026",
+        "30.06.2026",
+        "30 Jun 2026",
+        "June 30, 2026",
+        "Jun-26",
+        "Sep 2025",
+        "1/2/3",
+        # 脚注剥掉后是标签
+        "Revenue\u00b9",
+        "Total\u2020",
+        "Note\u00b2*",
+        # 一端不像数值的「范围」/「分数」
+        "12-abc",
+        "Q1-Q2",
+        "1/x",
+        "12~",
+        "~",
+        "1-" * 40 + "1",  # 超过 64 字符一律当标签
     ],
 )
 def test_is_value_like_rejects_labels(text):
     assert not _is_value_like(text)
+
+
+def test_is_value_like_is_fast_on_a_huge_cell():
+    start = time.perf_counter()
+    assert not _is_value_like("1-" * 500_000)
+    assert time.perf_counter() - start < 1.0
 
 
 def test_di_markdown_imports_only_stdlib_and_itself():

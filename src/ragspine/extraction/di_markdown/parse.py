@@ -80,8 +80,18 @@ _CURRENCY = re.compile(
 _UNIT = re.compile(
     r"(?:bn|mn|tn|bps|bp|pp|usd|hkd|rmb|cny|eur|gbp|jpy|%|x|k|m|b|t)$", re.IGNORECASE
 )
-_PLAIN_NUMBER = re.compile(r"(?:\d{1,3}(?:[, ]\d{3})+|\d+)(?:\.\d+)?|\.\d+")
-_MINUS = str.maketrans({"\u2212": "-", "\u2012": "-", "\u2013": "-", "\ufe63": "-"})
+_PLAIN_NUMBER = re.compile(r"(?:(?:\d{1,3}(?:[, ]\d{3})+|\d+)(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?", re.I)
+_MINUS = str.maketrans(
+    {"\u2212": "-", "\u2012": "-", "\u2013": "-", "\ufe63": "-", "\u2044": "/", "\u2215": "/"}
+)
+_FOOTNOTES = "\u00b9\u00b2\u00b3\u2070\u2074\u2075\u2076\u2077\u2078\u2079*\u2020\u2021"
+_APPROX = (">=", "<=", "~", ">", "<", "\u2265", "\u2264", "\u2248")
+_MAX_VALUE_CHARS = 64
+_JOINERS = "-\u2014~/"  # 范围连接符（– 已归一为 -）与分数线
+_DATE = re.compile(r"\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}")
+_MONTH = re.compile(
+    r"(?<![a-z])(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*(?![a-z])", re.I
+)
 _FIGCAPTION = re.compile(r"<figcaption\b[^>]*>(.*?)</figcaption\s*>", re.IGNORECASE | re.DOTALL)
 
 
@@ -292,12 +302,34 @@ def _page_table(
 
 
 def _is_value_like(text: str) -> bool:
-    """单元格文字看起来是不是一个数值（行标签过滤用）：NFKC 归一化（全角、上标、不换行空格），
-    去脚注星号，再逐层剥掉正负号 / Unicode 减号、括号负数、货币前缀、单位后缀，剩下的须是一个
-    数（千分位逗号或空格、小数）。年份也算数值；空串和纯标点不算。"""
-    value = unicodedata.normalize("NFKC", text).translate(_MINUS).strip().rstrip("*†‡").strip()
+    """单元格是否承载数值事实（行标签过滤用：像数值的不当标签复制）。
+
+    先剥掉末尾脚注（上标数字 ¹²³⁰⁴–⁹ 与 `*†‡`），再 NFKC（全角、不换行空格、½ → 1⁄2）并统一减号。
+    日期不算数值：三段式（`2026-06-30`、`6/30/2026`、`30.06.2026`）或含英文月份名（`30 Jun 2026`、
+    `Jun-26`）。单个数值见 `_single_value`；两段式且两端都像数值的也算：范围（`-`、`–`、`—`、`~` 连接，
+    如 `12-15`、`3.5x-4.0x`）与分数（`1/2`）。空串、纯标点和超过 64 个字符的文本不算。"""
+    value = text.strip().rstrip(_FOOTNOTES).strip()
+    value = unicodedata.normalize("NFKC", value).translate(_MINUS).strip()
+    if len(value) > _MAX_VALUE_CHARS:
+        return False  # 数值都很短；长文本直接当标签，也免得逐个连接符切分成二次方
+    if _DATE.fullmatch(value) or (_MONTH.search(value) and any(ch.isdigit() for ch in value)):
+        return False
+    if _single_value(value):
+        return True
+    return any(
+        _single_value(value[:i]) and _single_value(value[i + 1 :])
+        for i, ch in enumerate(value)
+        if i and ch in _JOINERS
+    )
+
+
+def _single_value(value: str) -> bool:
+    """一个数：逐层剥掉比较 / 近似符号、正负号、括号负数、货币前缀、单位后缀，剩下的须是一个数
+    （千分位逗号或空格、小数、科学计数）。年份也算。"""
+    value = value.strip()
     while True:
         before = value
+        value = next((value[len(p) :].strip() for p in _APPROX if value.startswith(p)), value)
         if value[:1] in ("+", "-"):
             value = value[1:].strip()
         if value.startswith("(") and value.endswith(")"):
