@@ -56,11 +56,20 @@ Markdown without markers keeps physical order.
 - **PageBreak / no markers**: PDF page count must equal max `DiPage.index` — unchanged.
 - **Marker mode**: `max(index) <= PDF page count`, since a partially analyzed markdown covers fewer pages than
   the PDF. A marker beyond the PDF's last page is an explicit `SourcePdfError` (no silent truncation).
-- **Compensation**: relaxing to `<=` weakens the wrong-pairing guard, so when the sidecar `<stem>.meta.json`
-  records the analyzed page count, it must **equal** the PDF page count. The field is `page_count` (ragspine's
-  `pdf_to_di_markdown` sidecar) or else `pages` (SuperIndex `extract_corpus`, from `describe(result)`), and only an
-  integer counts (ragspine's `pages` is a per-page list and is ignored). With no sidecar, an unparseable one, or
-  no such field, only `<=` applies.
+- **Compensation** (marker mode only): relaxing to `<=` weakens the wrong-pairing guard, so the sidecar
+  `<stem>.meta.json` is checked. The two producers give a page count different meanings, so they are read by
+  separate functions (`read_sidecar_facts` → `SidecarFacts.analyzed_pages` / `.pdf_total_pages`), never by a
+  fallback order:
+  - **SuperIndex** (`azure_di.extract_corpus`): integer `pages` = the number of pages *analyzed*
+    (`describe(result)`). It must equal the number of **distinct** `page:` numbers in the markdown
+    (`page_marker_numbers`). This checks that the markdown matches the extraction, not the PDF total, so a
+    partial analysis (PDF 20 pages, markers 5..7, `pages: 3`) passes.
+  - **ragspine** (`pdf_to_di_markdown`): `page_count` = the **total** pages of the source PDF. It must equal the
+    PDF's page count, with no partial-analysis relaxation. Its `pages` is a per-page list and is not a count.
+  - **PDF sha256**: `source_pdf_sha256` (also accepted: `pdf_sha256`, `source_sha256`; hex, case-insensitive)
+    must equal the actual PDF's sha256. Neither producer writes it yet (SuperIndex will in its next version);
+    `source_pdf_sha256` is the name new producers should use.
+  - A missing field skips that check; a missing or unparseable sidecar skips them all.
 
 ## Compatibility and migration
 
@@ -77,13 +86,13 @@ Markdown without markers keeps physical order.
 ## Consequences
 
 - Frozen by `tests/extraction/di_markdown/test_parse.py` (marker cases, table split proof),
-  `tests/ingestion/page_images/test_source_pdf.py` (each validation rule),
+  `tests/ingestion/page_images/test_source_pdf.py` (each validation rule, both sidecar sources, sha256),
   `tests/service/test_page_images_switch.py::test_facade_page_markers_use_true_pdf_pages` (8-page PDF, markers
   5..7: locator `@page=5`, stored image = PDF page 5, `ask` attaches `(deck.md, 5)`) and the legacy snapshot.
 - Page images still render every PDF page, including pages the markdown does not cover; rendering only covered
   pages is a possible follow-up.
-- A SuperIndex sidecar from a partial analysis (`pages` = analyzed count < PDF pages) fails the compensation
-  check; such a pairing needs the sidecar field removed or corrected.
+- Until producers write `source_pdf_sha256`, a marker-mode pairing without a ragspine `page_count` is guarded
+  only by `max(index) <= PDF pages` and the analyzed-page consistency check.
 
 ## Alternatives considered
 
