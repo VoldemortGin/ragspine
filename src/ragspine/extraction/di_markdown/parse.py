@@ -164,6 +164,11 @@ def has_page_markers(text: str) -> bool:
     return _PAGE_MARKER.search(text) is not None
 
 
+def page_marker_numbers(text: str) -> frozenset[int]:
+    """全文出现过的页标记页号（去重，`page: 0` 按 1）；无标记为空集。"""
+    return frozenset(max(1, int(m.group(1))) for m in _PAGE_MARKER.finditer(text))
+
+
 def _header_rows(table: str) -> str:
     rows: list[str] = []
     for row in _ROW.finditer(table):

@@ -13,7 +13,11 @@ import rootutils
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
 from ragspine.extraction.di_markdown.models import Figure, Heading, Paragraph, Table
-from ragspine.extraction.di_markdown.parse import has_page_markers, parse_di_markdown
+from ragspine.extraction.di_markdown.parse import (
+    has_page_markers,
+    page_marker_numbers,
+    parse_di_markdown,
+)
 
 
 def _texts(page):
@@ -267,6 +271,12 @@ def test_has_page_markers_needs_a_whole_comment_body():
     assert not has_page_markers("<!-- page: x -->")
     assert not has_page_markers("<!-- see page: 3 -->")
     assert not has_page_markers("")
+
+
+def test_page_marker_numbers_are_distinct_and_zero_counts_as_one():
+    text = f"{_mark(0)}a{_mark(5)}b{_mark(5)}c{_mark(1)}<!-- PageBreak -->"
+    assert page_marker_numbers(text) == frozenset({1, 5})
+    assert page_marker_numbers("a\n<!-- PageBreak -->\nb") == frozenset()
 
 
 def test_page_markers_only_split_pages_and_index_is_the_marker():

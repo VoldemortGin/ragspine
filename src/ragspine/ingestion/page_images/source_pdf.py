@@ -12,9 +12,15 @@
 比不发图更糟，所以直接抛 :class:`SourcePdfError`，在任何写入之前失败，而不是悄悄降级。
 
 marker 模式（markdown 含 ``<!-- page: N -->``，``DiPage.index`` 即真实 PDF 页码，ADR 0027）：只分析了部分页时
-md 页数可以少于 PDF，所以放宽为 ``max(index) <= PDF 页数``，页号超出 PDF 明确报错。补偿：sidecar 记了分析
-页数（ragspine 生成器的 ``page_count``，否则 SuperIndex 抽取器的 ``pages``，须为整数）时，它必须等于 PDF 页数；
-sidecar 缺失、不可解析或没有该字段才只按 ``<=`` 校验。
+md 页数可以少于 PDF，所以放宽为 ``max(index) <= PDF 页数``，页号超出 PDF 明确报错。放宽削弱了错配保护，由
+sidecar 补偿（字段缺失即跳过该项；sidecar 缺失或不可解析则全部跳过）。两种来源的页数语义不同，分开读：
+
+- SuperIndex azure_di ``extract_corpus`` 的整数 ``pages`` = **本次分析的页数**，必须等于 md 中不重复的页标记
+  页号个数（校验 md 与抽取结果一致，不与 PDF 总页数比）；
+- ragspine ``pdf_to_di_markdown`` 的 ``page_count`` = **原 PDF 总页数**，必须等于 PDF 页数（它的 ``pages`` 是
+  逐页列表，不是计数）；
+- 原 PDF 的 sha256（``source_pdf_sha256``，兼容 ``pdf_sha256`` / ``source_sha256``，不分大小写）必须等于
+  实际 PDF 的 sha256。
 """
 
 import hashlib
@@ -23,12 +29,18 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from ragspine.extraction.di_markdown.parse import has_page_markers, parse_di_markdown
+from ragspine.extraction.di_markdown.parse import (
+    has_page_markers,
+    page_marker_numbers,
+    parse_di_markdown,
+)
 from ragspine.ingestion.page_images.render import pdf_page_count
 
 SIDECAR_SUFFIX = ".meta.json"
 SIDECAR_SOURCE_PDF_KEY = "source_pdf"
-SIDECAR_PAGE_COUNT_KEYS = ("page_count", "pages")
+SIDECAR_PDF_TOTAL_PAGES_KEY = "page_count"  # ragspine pdf_to_di_markdown：原 PDF 总页数
+SIDECAR_ANALYZED_PAGES_KEY = "pages"  # SuperIndex azure_di extract_corpus：本次分析的页数
+SIDECAR_PDF_SHA256_KEYS = ("source_pdf_sha256", "pdf_sha256", "source_sha256")
 MARKDOWN_SUFFIX = ".md"
 
 
@@ -57,17 +69,45 @@ def _page_count(text: str) -> int:
     return max((page.index for page in parse_di_markdown(text).pages), default=0)
 
 
-def sidecar_page_count(md_path: str | Path) -> int | None:
-    """sidecar 记录的分析页数；sidecar 缺失、不可解析或没有整数字段时为 None。"""
+@dataclass(frozen=True)
+class SidecarFacts:
+    """sidecar 里供 marker 模式校验的字段，按来源区分语义；没有的字段为 None。"""
+
+    pdf_total_pages: int | None  # ragspine：原 PDF 总页数
+    analyzed_pages: int | None  # SuperIndex：本次分析的页数
+    pdf_sha256: tuple[str, ...]  # 记录的原 PDF sha256（小写；可能来自多个兼容字段）
+
+
+def read_sidecar_facts(md_path: str | Path) -> SidecarFacts:
+    """读 sidecar；缺失或不可解析时各项为空（校验跳过，与 ``resolve_source_pdf`` 的报错互不影响）。"""
     try:
         data = json.loads(sidecar_path(md_path).read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return None
-    for key in SIDECAR_PAGE_COUNT_KEYS:
-        value = data.get(key) if isinstance(data, dict) else None
-        if isinstance(value, int) and not isinstance(value, bool):
-            return value
-    return None
+        data = None
+    if not isinstance(data, dict):
+        return SidecarFacts(pdf_total_pages=None, analyzed_pages=None, pdf_sha256=())
+    return SidecarFacts(
+        pdf_total_pages=_ragspine_pdf_total_pages(data),
+        analyzed_pages=_superindex_analyzed_pages(data),
+        pdf_sha256=tuple(
+            value.strip().lower()
+            for key in SIDECAR_PDF_SHA256_KEYS
+            if isinstance(value := data.get(key), str) and value.strip()
+        ),
+    )
+
+
+def _ragspine_pdf_total_pages(data: dict[str, object]) -> int | None:
+    return _int(data.get(SIDECAR_PDF_TOTAL_PAGES_KEY))
+
+
+def _superindex_analyzed_pages(data: dict[str, object]) -> int | None:
+    # ragspine sidecar 的 pages 是逐页列表，_int 不认，只有 SuperIndex 的整数 pages 进来
+    return _int(data.get(SIDECAR_ANALYZED_PAGES_KEY))
+
+
+def _int(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def resolve_source_pdf(md_path: str | Path, explicit: str | Path | None = None) -> Path | None:
@@ -110,13 +150,28 @@ def validate_source_pdf(md_path: str | Path, pdf_path: str | Path) -> SourcePdf:
         raise SourcePdfError(
             f"source PDF 页数不足：{name} 的页标记页号 {expected} 超出 {pdf.name} 的 {pages} 页"
         )
-    elif (analyzed := sidecar_page_count(md_path)) is not None and analyzed != pages:
+    sha = hashlib.sha256(pdf.read_bytes()).hexdigest()
+    if has_page_markers(text):
+        _check_sidecar(md_path, text, pdf, pages, sha)
+    return SourcePdf(path=pdf, sha256=sha, page_count=pages)
+
+
+def _check_sidecar(md_path: str | Path, text: str, pdf: Path, pages: int, sha: str) -> None:
+    facts = read_sidecar_facts(md_path)
+    sidecar = sidecar_path(md_path).name
+    if facts.pdf_total_pages is not None and facts.pdf_total_pages != pages:
         raise SourcePdfError(
             f"source PDF 页数与 sidecar 不一致：{pdf.name} 有 {pages} 页，"
-            f"{sidecar_path(md_path).name} 记录 {analyzed} 页"
+            f"{sidecar} 的 {SIDECAR_PDF_TOTAL_PAGES_KEY} 记录 {facts.pdf_total_pages} 页"
         )
-    sha = hashlib.sha256(pdf.read_bytes()).hexdigest()
-    return SourcePdf(path=pdf, sha256=sha, page_count=pages)
+    marked = len(page_marker_numbers(text))
+    if facts.analyzed_pages is not None and facts.analyzed_pages != marked:
+        raise SourcePdfError(
+            f"markdown 与 sidecar 不一致：{Path(md_path).name} 有 {marked} 个不重复页标记，"
+            f"{sidecar} 的 {SIDECAR_ANALYZED_PAGES_KEY} 记录分析了 {facts.analyzed_pages} 页"
+        )
+    if any(recorded != sha for recorded in facts.pdf_sha256):
+        raise SourcePdfError(f"source PDF 的 sha256 与 sidecar {sidecar} 记录的不一致：{pdf.name}")
 
 
 def prepare_source_pdfs(

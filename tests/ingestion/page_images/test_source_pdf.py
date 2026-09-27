@@ -145,6 +145,16 @@ def _marker_deck(tmp_path, pages, pdf_pages: int, sidecar: dict | None = None):
     return md, pdf
 
 
+def _superindex_sidecar(pages: int, **extra) -> dict:
+    # SuperIndex azure_di.extract_corpus 的 sidecar 形状：pages = describe(result) 的分析页数
+    base = {"source": "deck.pdf", "model": "prebuilt-layout", "page_markers": True, "pages": pages}
+    return base | extra
+
+
+def _sha(path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def test_marker_markdown_page_count_is_max_true_page(tmp_path):
     md, _ = _marker_deck(tmp_path, [5, 6, 7], pdf_pages=8)
     assert markdown_page_count(md) == 7
@@ -164,39 +174,78 @@ def test_marker_mode_page_beyond_pdf_is_an_explicit_error(tmp_path):
     md, pdf = _marker_deck(tmp_path, [7, 9], pdf_pages=8)
     with pytest.raises(SourcePdfError, match="超出"):
         validate_source_pdf(md, pdf)
+    # sidecar 与 md 一致也救不了超出 PDF 的页号
+    sidecar_path(md).write_text(json.dumps(_superindex_sidecar(2)), encoding="utf-8")
+    with pytest.raises(SourcePdfError, match="超出"):
+        validate_source_pdf(md, pdf)
 
 
-def test_marker_mode_sidecar_without_page_count_falls_back_to_le(tmp_path):
+def test_marker_mode_sidecar_without_checked_fields_is_skipped(tmp_path):
     md, pdf = _marker_deck(tmp_path, [5, 6], pdf_pages=8, sidecar={"model": "prebuilt-layout"})
     assert validate_source_pdf(md, pdf).page_count == 8
 
 
-@pytest.mark.parametrize(
-    "sidecar",
-    [
-        {"pages": 8, "tables": 0},  # SuperIndex azure_di 抽取器（describe 的 pages）
-        {
-            "page_count": 8,
-            "pages": [{"page": 1}],
-        },  # ragspine pdf_to_di_markdown（pages 是逐页列表）
-    ],
-    ids=["superindex_pages", "ragspine_page_count"],
-)
-def test_marker_mode_sidecar_page_count_must_equal_pdf(tmp_path, sidecar):
-    md, pdf = _marker_deck(tmp_path, [5, 6, 7], pdf_pages=8, sidecar=sidecar)
+def test_superindex_sidecar_partial_analysis_passes(tmp_path):
+    md, pdf = _marker_deck(tmp_path, [5, 6, 7], pdf_pages=20, sidecar=_superindex_sidecar(3))
+    assert validate_source_pdf(md, pdf).page_count == 20
+
+
+def test_superindex_sidecar_counts_distinct_marker_pages(tmp_path):
+    md = tmp_path / "deck.md"
+    md.write_text(make_marker_md({5: "a", 6: "b"}) + make_marker_md({5: "again"}), encoding="utf-8")
+    pdf = make_pdf(tmp_path / "deck.pdf", [f"L{i}" for i in range(1, 9)])
+    sidecar_path(md).write_text(json.dumps(_superindex_sidecar(2)), encoding="utf-8")
     assert validate_source_pdf(md, pdf).page_count == 8
-    key = "page_count" if "page_count" in sidecar else "pages"
-    sidecar_path(md).write_text(json.dumps({**sidecar, key: 7}), encoding="utf-8")
+
+
+@pytest.mark.parametrize("recorded", [2, 4, 20])
+def test_superindex_sidecar_pages_must_equal_distinct_marker_pages(tmp_path, recorded):
+    md, pdf = _marker_deck(tmp_path, [5, 6, 7], pdf_pages=20, sidecar=_superindex_sidecar(recorded))
     with pytest.raises(SourcePdfError, match="sidecar"):
         validate_source_pdf(md, pdf)
 
 
+@pytest.mark.parametrize(
+    "key", ["source_pdf_sha256", "pdf_sha256", "source_sha256"], ids=lambda k: k
+)
+def test_sidecar_pdf_sha256_must_match(tmp_path, key):
+    md, pdf = _marker_deck(tmp_path, [5, 6, 7], pdf_pages=8)
+    sidecar_path(md).write_text(
+        json.dumps(_superindex_sidecar(3, **{key: _sha(pdf).upper()})), encoding="utf-8"
+    )
+    assert validate_source_pdf(md, pdf).sha256 == _sha(pdf)
+    sidecar_path(md).write_text(
+        json.dumps(_superindex_sidecar(3, **{key: "0" * 64})), encoding="utf-8"
+    )
+    with pytest.raises(SourcePdfError, match="sha256"):
+        validate_source_pdf(md, pdf)
+
+
+def test_sidecar_without_sha256_skips_the_hash_check(tmp_path):
+    md, pdf = _marker_deck(tmp_path, [5, 6, 7], pdf_pages=8, sidecar=_superindex_sidecar(3))
+    assert validate_source_pdf(md, pdf).page_count == 8
+
+
+def test_ragspine_sidecar_page_count_is_pdf_total_and_must_equal(tmp_path):
+    # ragspine pdf_to_di_markdown 的 sidecar：page_count = 原 PDF 总页数，pages 是逐页列表
+    sidecar = {"generator": "pdf_to_di_markdown.py", "page_count": 8, "pages": [{"page": 5}]}
+    md, pdf = _marker_deck(tmp_path, [5, 6, 7], pdf_pages=8, sidecar=sidecar)
+    assert validate_source_pdf(md, pdf).page_count == 8
+    for wrong in (3, 7):  # 3 = 标记页数：总页数不享受部分分析的放宽
+        sidecar_path(md).write_text(json.dumps({**sidecar, "page_count": wrong}), encoding="utf-8")
+        with pytest.raises(SourcePdfError, match="sidecar"):
+            validate_source_pdf(md, pdf)
+
+
 def test_page_break_mode_still_requires_equal_count(tmp_path):
-    md, _ = write_deck(tmp_path, ["a", "b"])
+    md, pdf = write_deck(tmp_path, ["a", "b"])
     more = make_pdf(tmp_path / "more.pdf", ["x", "y", "z"])
     with pytest.raises(SourcePdfError, match="页数不一致"):
         validate_source_pdf(md, more)
-    # sidecar 的页数字段不影响 PageBreak 模式：仍按相等校验
-    sidecar_path(md).write_text(json.dumps({"page_count": 3}), encoding="utf-8")
+    # sidecar 的各字段不影响 PageBreak 模式：仍只按相等校验
+    sidecar_path(md).write_text(
+        json.dumps({"page_count": 3, "pages": 1, "source_pdf_sha256": "0" * 64}), encoding="utf-8"
+    )
     with pytest.raises(SourcePdfError, match="页数不一致"):
         validate_source_pdf(md, more)
+    assert validate_source_pdf(md, pdf).page_count == 2
