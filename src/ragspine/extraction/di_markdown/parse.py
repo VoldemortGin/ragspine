@@ -14,8 +14,9 @@
 - **被页标记切开的表**（起始标签在行首、有配对 `</table>`）：整表解析一次，每个格按它首个文字（无文字取
   起始标签）所在的页归页，改写成每页一张表：表头块（`header_row_count` 行）每页都有，跨出表头块的
   rowspan 在复制时截断到块内；本页的数据行照原位置输出；从前一页跨进来的 rowspan 锚点在本页首行重出
-  （行数取剩余），同一行里属于别页的格留空占位，保证列对齐。数值格不重复、不丢失，跨页的 rowspan 锚点
-  两页各出现一次。表内其他注释（PageHeader 等）留在所在页。没有配对 `</table>` 的表不改写，仍按
+  （行数取剩余）；被切开的行把行标签格（该行的 `<th>`，没有 th 时取第 0 列且不是纯数值）复制到后续各页的
+  同一位置，其余属于别页的格留空占位，保证列对齐。数值格不重复、不丢失，跨页的 rowspan 锚点和被切开行的
+  行标签在两页各出现一次。表内其他注释（PageHeader 等）留在所在页。没有配对 `</table>` 的表不改写，仍按
   「未闭合的表延伸到本页末」处理；落在 `<figure>` 内不修复。
 - **页码**：`<!-- PageNumber="..." -->` 的标签恰含一个整数（如 "12"、"Page 12"、"- 12 -"）
   时取之作 `DiPage.number`；无注释或不可解析（"iv"、"3 of 10"）时回落为物理页序。
@@ -217,11 +218,12 @@ def _page_table(
     page_of: dict[TableCell, int],
     page: int,
     rows: list[int],
+    labels: set[TableCell],
     caption: bool,
 ) -> str:
     """跨页表在 `page` 上的那部分：表头块整块复制（跨出表头块的 rowspan 截断在块内），
-    再接本页的数据行；从前面的页跨进来的 rowspan 锚点在本页首行重出（剩余行数），同一行里
-    属于别页的格留空占位，保证列对齐。"""
+    再接本页的数据行；从前面的页跨进来的 rowspan 锚点在本页首行重出（剩余行数）；被切开的行
+    把前页的行标签格（`labels`）复制过来，同一行里属于别页的其他格留空占位；列位置不变。"""
     head = grid.header_row_count
     claimed: set[tuple[int, int]] = set()
     lines = ["<table>"]
@@ -240,10 +242,13 @@ def _page_table(
             limit = anchor.row + anchor.row_span
             if r < head and not native:
                 limit = min(limit, head)
+            text = anchor.text
+            if r >= head and anchor.row == r and not native:
+                if anchor not in labels or page < page_of[anchor]:
+                    text, limit = "", r + 1  # 占位只占本行；下一行起按跨页 rowspan 重出
             span = 1
             while i + span < len(rows) and rows[i + span] < limit:
                 span += 1
-            text = "" if r >= head and anchor.row == r and not native else anchor.text
             claimed.update(
                 (ii, cc)
                 for ii in range(i, i + span)
@@ -253,6 +258,21 @@ def _page_table(
         lines.append("<tr>" + "".join(cells) + "</tr>")
     lines.append("</table>")
     return "\n".join(lines)
+
+
+def _row_labels(
+    grid: TableGrid, owner: dict[tuple[int, int], TableCell], row: int
+) -> list[TableCell]:
+    """行标签格：该行起始的 `<th>` 格；没有 th 时取第 0 列（归一化后不是纯数值才算）。"""
+    from ragspine.extraction.evidence.figures.validation import explicit_number
+
+    headers = [c for c in grid.cells if c.row == row and c.is_header]
+    if headers:
+        return headers
+    first = owner.get((row, 0))
+    if first is None or first.row != row or not first.text.strip():
+        return []
+    return [] if explicit_number(first.text) is not None else [first]
 
 
 def _split_table(source: str, bounds: list[int], pages: list[int], first: int) -> dict[int, str]:
@@ -274,6 +294,12 @@ def _split_table(source: str, bounds: list[int], pages: list[int], first: int) -
                 owner[(r, c)] = cell
     head = grid.header_row_count
     row_pages = [set(starts.get(r, ())) for r in range(head, grid.n_rows)]  # 每行至少起一个格
+    labels = {
+        label
+        for k, ps in enumerate(row_pages)
+        if len(ps) > 1
+        for label in _row_labels(grid, owner, head + k)
+    }
     return {
         page: _page_table(
             grid,
@@ -281,6 +307,7 @@ def _split_table(source: str, bounds: list[int], pages: list[int], first: int) -
             page_of,
             page,
             list(range(head)) + [head + k for k, ps in enumerate(row_pages) if page in ps],
+            labels,
             caption=page == first,
         )
         for page in sorted({first}.union(*row_pages))

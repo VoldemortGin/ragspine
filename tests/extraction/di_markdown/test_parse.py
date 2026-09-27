@@ -468,7 +468,8 @@ def test_marker_in_the_middle_of_a_td_keeps_the_value_on_its_page():
     )
     _, (first, second) = _split_pages(split, 1, 2)
     assert _data_rows(first) == (("Revenue", "", ""),)
-    assert _data_rows(second) == (("", "100", "110"), ("Profit", "30", "33"))
+    # 被切开的行：行标签（第 0 列 td 文本）补到第 2 页，数值不复制
+    assert _data_rows(second) == (("Revenue", "100", "110"), ("Profit", "30", "33"))
     assert _numbers(first, second) == _numbers(original)
     _aligned(first, original)
     _aligned(second, original)
@@ -490,9 +491,68 @@ def test_marker_in_the_middle_of_a_th_or_tr_keeps_values():
     assert _numbers(*grids) == _numbers(original)
     assert [_data_rows(g) for g in grids] == [
         (("Revenue", "100", "110"), ("Profit", "", "")),  # th 的文字在标记之前
-        (("", "30", "33"),),  # 同一行其余的格在第 2 页
+        (("Profit", "30", "33"),),  # 同一行其余的格在第 2 页，th 行标签补上
         (("Margin", "7.5", "8.25"),),  # 标记在 <tr> 与 <td> 之间：整行在第 3 页
     ]
+
+
+_HEAD4 = "<tr><th>Metric</th><th>2023</th><th>2024</th><th>2025</th></tr>\n"
+
+
+def _cut_row(row: str):
+    whole = f"<table>\n{_HEAD4}{row.format(m2='', m3='')}</table>\n"
+    original = _only_table(parse_di_markdown(whole).pages[0])
+    split = f"{_mark(1)}<table>\n{_HEAD4}{row.format(m2=_mark(2), m3=_mark(3))}</table>\n"
+    doc = parse_di_markdown(split)
+    grids = [_only_table(p) for p in doc.pages]
+    assert _numbers(*grids) == _numbers(original)  # 数值格多重集不变
+    for grid in grids:
+        _aligned(grid, original)
+    return original, grids
+
+
+def test_cut_row_th_label_is_copied_to_the_next_page():
+    original, (first, second) = _cut_row(
+        "<tr><th>Revenue</th><td>90</td><td>100</td>{m2}<td>110</td></tr>\n"
+    )
+    assert _data_rows(first) == (("Revenue", "90", "100", ""),)
+    assert _data_rows(second) == (("Revenue", "", "", "110"),)
+    assert _data_rows(second)[0][0] == original.rows[1][0]
+    (label,) = [c for c in second.cells if c.text == "Revenue"]
+    assert (label.col, label.is_header) == (0, True)
+
+
+def test_cut_row_td_text_label_in_column_zero_is_copied():
+    _, (_, second) = _cut_row("<tr><td>Revenue</td><td>90</td>{m2}<td>100</td><td>110</td></tr>\n")
+    assert _data_rows(second) == (("Revenue", "", "100", "110"),)
+
+
+def test_cut_row_numeric_column_zero_is_not_copied():
+    _, (first, second) = _cut_row("<tr><td>2022</td><td>90</td>{m2}<td>100</td><td>110</td></tr>\n")
+    assert _data_rows(first) == (("2022", "90", "", ""),)
+    assert _data_rows(second) == (("", "", "100", "110"),)
+    _, (_, second) = _cut_row("<tr><td>1,234.5%</td><td>90</td>{m2}<td>100</td><td>110</td></tr>\n")
+    assert _data_rows(second) == (("", "", "100", "110"),)
+
+
+def test_cut_row_across_three_pages_gets_its_label_on_each():
+    _, grids = _cut_row("<tr><td>Revenue</td><td>90</td>{m2}<td>100</td>{m3}<td>110</td></tr>\n")
+    assert [_data_rows(g) for g in grids] == [
+        (("Revenue", "90", "", ""),),
+        (("Revenue", "", "100", ""),),
+        (("Revenue", "", "", "110"),),
+    ]
+
+
+def test_cut_row_rowspan_label_is_emitted_once_per_page():
+    _, (first, second) = _cut_row(
+        '<tr><td rowspan="2">Asia</td><td>90</td>{m2}<td>100</td><td>110</td></tr>\n'
+        "<tr><td>91</td><td>101</td><td>111</td></tr>\n"
+    )
+    assert _data_rows(first) == (("Asia", "90", "", ""),)
+    assert _data_rows(second) == (("Asia", "", "100", "110"), ("Asia", "91", "101", "111"))
+    (label,) = [c for c in second.cells if c.text == "Asia"]
+    assert (label.col, label.row_span) == (0, 2)
 
 
 def test_header_rowspan_into_data_rows_is_clipped_to_the_header_block():
