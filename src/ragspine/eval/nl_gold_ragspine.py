@@ -646,6 +646,11 @@ class RecordingRetriever:
         """首次检索的排序后 locator（叙事通路每问只检索一次）。"""
         return list(self._calls[0]) if self._calls else []
 
+    @property
+    def called(self) -> bool:
+        """自上次 reset 以来是否检索过。"""
+        return bool(self._calls)
+
     def reset(self) -> None:
         self._calls = []
 
@@ -698,6 +703,8 @@ class CaseRun:
     retrieved_pages: list[int] = field(default_factory=list)
     # 第几次重复运行（0 起，``--repeat N``）。
     repeat: int = 0
+    # 本次检索用到的查询译文（跨语言查询翻译）；没翻译 / 没走检索为 None。只进评测产物，不进 trace。
+    translated_query: str | None = None
 
 
 _PAGE_NUM_RE = re.compile(r"@page=(\d+)(?:#|$)")
@@ -719,8 +726,13 @@ def run_route(
     languages: Sequence[str] | None = None,
     progress: Callable[[CaseRun], None] | None = None,
     repeat: int = 0,
+    translation_of: Callable[[str], str | None] | None = None,
 ) -> list[CaseRun]:
-    """跑一条路由：每条未跳过的 case、每种（被选中的）语言问一次并判定；``repeat`` 标记第几次重复。"""
+    """跑一条路由：每条未跳过的 case、每种（被选中的）语言问一次并判定；``repeat`` 标记第几次重复。
+
+    ``translation_of``：问题 → 检索用的查询译文（如 ``LLMQueryTranslator.translations().get``）；
+    给了且本题走过检索即记进 ``CaseRun.translated_query``。
+    """
     if route not in ROUTES:
         raise ValueError(f"未知路由 {route!r}，可选 {ROUTES}")
     parser: IntentParser | None = (
@@ -759,6 +771,11 @@ def run_route(
             if error is not None:
                 judgement = replace(judgement, passed=False, reason=f"error: {error}")
             retrieved = recorder.locators() if recorder is not None else []
+            translated = (
+                translation_of(question)
+                if translation_of is not None and recorder is not None and recorder.called
+                else None
+            )
             run = CaseRun(
                 route=route,
                 case_id=case.case_id,
@@ -777,6 +794,7 @@ def run_route(
                 error=error,
                 retrieved_pages=[p for p in (_page_of(loc) for loc in retrieved) if p is not None],
                 repeat=repeat,
+                translated_query=translated,
             )
             runs.append(run)
             if progress is not None:
@@ -1177,6 +1195,7 @@ def _failure_lines(run: CaseRun, case: GoldCase) -> list[str]:
         f"- **{run.case_id}** ({run.case_class}, {run.language}{repeat}, route={run.route_label}) — "
         f"{run.judgement.reason}",
         f"  - Q: {run.question}",
+        f"  - translated query: {run.translated_query or '-'}",
         f"  - expected: {_expected_text(case)}",
         f"  - answer: {_clip(run.answer_plain)}",
         f"  - source pages: {source_pages or '-'}; retrieved pages (ranked): "

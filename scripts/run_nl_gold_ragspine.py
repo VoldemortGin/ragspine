@@ -226,6 +226,7 @@ def main(argv: list[str] | None = None) -> int:
         make_triggered_page_image_retriever,
     )
     from ragspine.retrieval.rerank.cross_encoder import make_reranker
+    from ragspine.retrieval.translation import LLMQueryTranslator
     from ragspine.retrieval.vector.chunk_index import embedding_model_id
     from ragspine.retrieval.vector.embedding_backends import make_embedding_backend
     from ragspine.service.config import ServiceConfig, open_vector_channel
@@ -365,6 +366,9 @@ def main(argv: list[str] | None = None) -> int:
 
     rerank_counter = CountingProvider(provider) if args.reranker == "llm" else None
     translation_counter = CountingProvider(provider) if args.query_translation == "auto" else None
+    # 自建翻译器注入检索器，好把每题实际用的译文读回来记进报告（只进评测产物，不进 trace）。
+    translator = LLMQueryTranslator(translation_counter) if translation_counter else None
+    translation_of = (lambda q: translator.translations().get(q)) if translator else None
     retriever, chunk_store = build_narrative_retriever(
         db,
         provider=rerank_counter,
@@ -375,6 +379,7 @@ def main(argv: list[str] | None = None) -> int:
         contextual_index=args.contextual_index,
         query_translation=args.query_translation,
         translation_provider=translation_counter,
+        query_translator=translator,
     )
     retriever = make_triggered_page_image_retriever(
         retriever,
@@ -417,6 +422,7 @@ def main(argv: list[str] | None = None) -> int:
                     languages=languages,
                     progress=progress,
                     repeat=repeat,
+                    translation_of=translation_of,
                 )
             timings[f"{route}_s"] = round(time.perf_counter() - t0, 1)
     finally:

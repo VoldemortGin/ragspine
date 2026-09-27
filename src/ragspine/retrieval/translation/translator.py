@@ -132,6 +132,10 @@ class LLMQueryTranslator:
         self._cache[key] = result
         return result
 
+    def translations(self) -> dict[str, str]:
+        """已缓存的可用译文 {问题: 译文}（不含失败结果）；只供评测产物等调用方记录，不进 trace。"""
+        return {query: r.text for (query, _), r in self._cache.items() if r.text is not None}
+
 
 def translated_queries(translator: QueryTranslator, query: str, chunks: Sequence[Any]) -> list[str]:
     """问题与候选块语言不一致时的额外检索查询（0 或 1 条）；每次都记一条只含代码与计数的 trace。"""

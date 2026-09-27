@@ -47,6 +47,7 @@ from ragspine.retrieval.rerank.listwise_rerank import (
 from ragspine.retrieval.translation import (
     QUERY_TRANSLATION_AUTO,
     LLMQueryTranslator,
+    QueryTranslator,
     make_query_translation_mode,
 )
 from ragspine.retrieval.vector.persistence_policy import PersistencePolicy
@@ -181,6 +182,7 @@ def build_narrative_retriever(
     contextual_index: str | None = CONTEXTUAL_INDEX_OFF,
     query_translation: str | None = QUERY_TRANSLATION_AUTO,
     translation_provider: LLMProvider | None = None,
+    query_translator: QueryTranslator | None = None,
 ) -> tuple[NarrativeIndexRetriever, ChunkStore]:
     """开块库并组装默认叙事检索链（CLI/服务接线入口）。
 
@@ -206,10 +208,13 @@ def build_narrative_retriever(
     query_translation：跨语言查询翻译开关（'off' | 'auto'，见 ragspine.retrieval.translation），默认 'auto'：问题与
     文档语言不一致即用 translation_provider（缺省用 provider）把问题译成文档语言，译文作额外的 BM25 与向量查询
     （71 页中文桶实验：同时进向量比只进 BM25 更好），精排与生成仍用原问题；没有 provider 即降级不翻译并记 trace。'off'（或 None）＝检索输出与引入前字节不变。
+    query_translator：可选注入的翻译器（'auto' 时代替按 provider 新建的 LLMQueryTranslator，如评测要读回译文）；'off' 时忽略。
     """
     translator = None
     if make_query_translation_mode(query_translation) == QUERY_TRANSLATION_AUTO:
-        translator = LLMQueryTranslator(translation_provider or provider)
+        translator = query_translator
+        if translator is None:
+            translator = LLMQueryTranslator(translation_provider or provider)
     index_text_fn = make_index_text_fn(make_contextual_index_mode(contextual_index))
     store = ChunkStore(chunk_db)
     store.init_schema()
