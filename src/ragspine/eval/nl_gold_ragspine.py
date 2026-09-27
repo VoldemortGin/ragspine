@@ -23,6 +23,8 @@ gold 文件（``nl-answers-gold-v1``，如 AIA 样本
   （``5.14 亿美元`` 附 ``514 million``）；只在小数位足够时换算（不补零、不丢精度），``%`` 不受影响。
 - 跨语言引用（放宽）：quote 逐字不中时，若其 ≥3 个关键片段（去停用词）全部落在答案的一个窄窗口内，
   也算内容命中；这类命中在 claim 上标 ``fragment_hit`` 并在报告里单独计数。
+- 繁体拒答（v3）：拒答识别前先用内置小对照表把拒答相关的繁体常用字（資料 / 沒有 / 給出 / 無法…）
+  归一成简体再匹配；表里只有繁体字，简体文本原样不变。
 - 重复运行：同一路由多次运行（``CaseRun.repeat``）逐次计分，报告每题通过率、主分均值±标准差和
   不稳定题；不做多数票。
 
@@ -71,8 +73,9 @@ ROUTE_DESCRIPTIONS = {
 }
 RECALL_KS = (1, 3, 5, 10)
 # 判分器版本：判定口径一变就升版本并写进报告 meta，不同版本的分数不直接比较。
-# v1 = 初版；v2 = 拒答看开头 + 数量级金额换算 + 跨语言关键片段 + 重复运行统计。
-JUDGE_VERSION = "nl-gold-judge-v2"
+# v1 = 初版；v2 = 拒答看开头 + 数量级金额换算 + 跨语言关键片段 + 重复运行统计；
+# v3 = 拒答识别前先把拒答相关的繁体常用字归一成简体（繁体拒答也能识别，简体判定不变）。
+JUDGE_VERSION = "nl-gold-judge-v3"
 
 ADVERSARIAL_SKIP_REASON = (
     "adversarial probe: it mutates an enterprise_pdf_rag answer envelope (scripted "
@@ -505,8 +508,25 @@ def _answer_lead(text: str) -> str:
     return _PARENTHETICAL_RE.sub(" ", " ".join(lead))
 
 
+# 繁 → 简：只收拒答措辞 / 猜测式作答 / 编排层文案里用到的常用字（不引依赖）；键全是繁体专用字，
+# 简体文本经它不变。
+_TRADITIONAL_TO_SIMPLIFIED = str.maketrans(
+    "資沒給無關檢從確說並內裡裏來檔圖頁結與該問題於現識庫別參數斷為",
+    "资没给无关检从确说并内里里来档图页结与该问题于现识库别参数断为",
+)
+
+
+def _to_simplified(text: str) -> str:
+    """把拒答相关的繁体常用字归一成简体（仅供拒答识别）。"""
+    return text.translate(_TRADITIONAL_TO_SIMPLIFIED)
+
+
 def is_refusal(answer: str) -> bool:
-    """答案是否为拒答 / 未找到：编排层固定文案（位置不限），或开头即拒答措辞（猜测式作答除外）。"""
+    """答案是否为拒答 / 未找到：编排层固定文案（位置不限），或开头即拒答措辞（猜测式作答除外）。
+
+    繁体答案先把拒答相关常用字归一成简体再匹配（v3）。
+    """
+    answer = _to_simplified(answer)
     if _TEMPLATE_REFUSAL_RE.search(unicodedata.normalize("NFKC", answer)):
         return True
     lead = normalize_answer(_answer_lead(answer))
