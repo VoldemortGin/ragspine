@@ -8,8 +8,10 @@
 
 import ast
 import os
+import re
 import sys
 import time
+from collections import Counter
 
 import pytest
 import rootutils
@@ -413,14 +415,69 @@ def _only_table(page):
     return table.grid
 
 
-def _numbers(*grids):
-    """数值格（非表头、承载数值事实的锚点格文本，口径同 `_is_value_like`），多重集比较用。"""
-    return sorted(
-        cell.text
-        for grid in grids
-        for cell in grid.cells
-        if not cell.is_header and _is_value_like(cell.text)
+# 拆表的独立判定（不调用被测的 _is_value_like / _is_placeholder）：
+# 含数字的格都算「数值样」；允许的重复只有跨页 rowspan 锚点与被复制的行标签，行标签按结构规则
+# （行首非空 th，否则第 0 列）加这张写死的小表独立算出。
+_LABELS_WITH_DIGITS = {"2024", "2025"}
+_PLACEHOLDER_TEXTS = {"-", "\u2014", "\u2013", "n/a", "N/A", "nil", "n.m."}
+_PAGE_MARK = re.compile(r"<!--\s*page:\s*\d+\s*-->", re.IGNORECASE)
+
+
+def _digit_cells(grid):
+    head = grid.header_row_count
+    return Counter(
+        c.text for c in grid.cells if c.row >= head and any(ch.isdigit() for ch in c.text)
     )
+
+
+def _labelish(text):
+    text = text.strip()
+    if not text or text in _PLACEHOLDER_TEXTS:
+        return False
+    return text in _LABELS_WITH_DIGITS or not any(ch.isdigit() for ch in text)
+
+
+def _expected_labels(grid):
+    labels = set()
+    for r in range(grid.header_row_count, grid.n_rows):
+        row = sorted((c for c in grid.cells if c.row == r), key=lambda c: c.col)
+        leading, col = [], 0
+        for cell in row:
+            if cell.col != col or not cell.is_header or not _labelish(cell.text):
+                break
+            leading.append(cell.text)
+            col = cell.col + cell.col_span
+        first = next((c for c in row if c.col == 0), None)
+        if leading:
+            labels.update(leading)
+        elif first is not None and _labelish(first.text):
+            labels.add(first.text)
+    return labels
+
+
+def _check_split(original, grids):
+    """每页表头行数等于原表；含数字的格一个不丢；多出来的只能是跨页 rowspan 锚点或行标签；列对齐。"""
+    head = original.header_row_count
+    assert [g.header_row_count for g in grids] == [head] * len(grids)
+    before = _digit_cells(original)
+    after = sum((_digit_cells(g) for g in grids), Counter())
+    assert not before - after, f"lost: {before - after}"
+    spanning = {c.text for c in original.cells if c.row_span > 1 and c.row + c.row_span > head}
+    extra = set(after - before)
+    assert extra <= _expected_labels(original) | spanning, f"unexpected repeats: {extra}"
+    for grid in grids:
+        _aligned(grid, original)
+
+
+def _checked_doc(split):
+    """解析拆分文本，并与去掉页标记后的同一张表逐项核对（文中恰好一张表时）。"""
+    doc = parse_di_markdown(split)
+    whole = parse_di_markdown(_PAGE_MARK.sub("", split))
+    tables = [b.grid for p in whole.pages for b in p.blocks if isinstance(b, Table)]
+    if len(tables) == 1:
+        grids = [b.grid for p in doc.pages for b in p.blocks if isinstance(b, Table)]
+        _check_split(tables[0], grids)
+    return doc
 
 
 def _aligned(grid, original):
@@ -433,7 +490,7 @@ def _aligned(grid, original):
 
 
 def _split_pages(split, *indexes):
-    doc = parse_di_markdown(split)
+    doc = _checked_doc(split)
     return doc, [_only_table(doc.pages[i - 1]) for i in indexes]
 
 
@@ -453,7 +510,6 @@ def test_marker_inside_a_table_reopens_it_with_the_header_rows():
     assert first.rows[:head_rows] == second.rows[:head_rows] == original.rows[:head_rows]
     assert [c for c in second.cells if c.row < head_rows and not c.is_header] == []
     # 两页数值格合起来与原表完全一致：不重复、不丢失；每一行数字落在它真实所在的页
-    assert _numbers(first, second) == _numbers(original)
     assert _data_rows(first) == (("Revenue", "100", "110"),)
     assert _data_rows(second) == (("Profit", "30", "33"), ("Margin", "7.5", "8.25"))
     assert [type(b) for b in doc.pages[1].blocks] == [Table, Paragraph]
@@ -472,7 +528,6 @@ def test_marker_in_the_middle_of_a_td_keeps_the_value_on_its_page():
     assert _data_rows(first) == (("Revenue", "", ""),)
     # 被切开的行：行标签（第 0 列 td 文本）补到第 2 页，数值不复制
     assert _data_rows(second) == (("Revenue", "100", "110"), ("Profit", "30", "33"))
-    assert _numbers(first, second) == _numbers(original)
     _aligned(first, original)
     _aligned(second, original)
 
@@ -490,7 +545,6 @@ def test_marker_in_the_middle_of_a_th_or_tr_keeps_values():
         assert grid.rows[:1] == original.rows[:1]  # 表头各页完整
         assert grid.header_row_count == 1
         _aligned(grid, original)
-    assert _numbers(*grids) == _numbers(original)
     assert [_data_rows(g) for g in grids] == [
         (("Revenue", "100", "110"), ("Profit", "", "")),  # th 的文字在标记之前
         (("Profit", "30", "33"),),  # 同一行其余的格在第 2 页，th 行标签补上
@@ -505,11 +559,9 @@ def _cut_row(row: str):
     whole = f"<table>\n{_HEAD4}{row.format(m2='', m3='')}</table>\n"
     original = _only_table(parse_di_markdown(whole).pages[0])
     split = f"{_mark(1)}<table>\n{_HEAD4}{row.format(m2=_mark(2), m3=_mark(3))}</table>\n"
-    doc = parse_di_markdown(split)
+    doc = _checked_doc(split)
     grids = [_only_table(p) for p in doc.pages]
-    assert _numbers(*grids) == _numbers(original)  # 数值格多重集不变
-    for grid in grids:
-        _aligned(grid, original)
+    _check_split(original, grids)
     return original, grids
 
 
@@ -521,7 +573,7 @@ def test_cut_row_th_label_is_copied_to_the_next_page():
     assert _data_rows(second) == (("Revenue", "", "", "110"),)
     assert _data_rows(second)[0][0] == original.rows[1][0]
     (label,) = [c for c in second.cells if c.text == "Revenue"]
-    assert (label.col, label.is_header) == (0, True)
+    assert (label.col, label.is_header) == (0, False)  # 复制出来的标签一律 td
 
 
 def test_numeric_th_is_not_a_label_and_col_zero_td_still_is():
@@ -538,9 +590,25 @@ def test_cut_all_th_total_row_keeps_its_numbers_out_of_the_header():
     assert first.header_row_count == second.header_row_count == 1
     assert _data_rows(first) == (("Life", "90", "100", "110"), ("Total", "200", "", ""))
     assert _data_rows(second) == (("Total", "", "210", "220"),)
-    # 占位格一律是 td
-    assert [c.is_header for c in second.cells if c.row == 1] == [True, False, True, True]
+    # 复制的标签与占位格一律是 td
+    assert [c.is_header for c in second.cells if c.row == 1] == [False, False, True, True]
     assert [c.is_header for c in first.cells if c.row == 2] == [True, True, False, False]
+
+
+def test_all_th_row_cut_after_its_label_stays_out_of_the_header():
+    _, (_, second) = _cut_row(
+        "<tr><td>Life</td><td>90</td><td>100</td><td>110</td></tr>\n"
+        "<tr><th>Total</th>{m2}<th>200</th><th>300</th><th>400</th></tr>\n"
+    )
+    assert _data_rows(second) == (("Total", "200", "300", "400"),)
+
+
+def test_all_th_total_row_opening_a_new_page_stays_out_of_the_header():
+    _, (_, second) = _cut_row(
+        "<tr><td>Life</td><td>90</td><td>100</td><td>110</td></tr>\n"
+        "{m2}<tr><th>Total</th><th>200</th><th>300</th><th>400</th></tr>\n"
+    )
+    assert _data_rows(second) == (("Total", "200", "300", "400"),)
 
 
 def test_only_leading_non_numeric_th_cells_are_labels():
@@ -595,7 +663,6 @@ def test_header_rowspan_into_data_rows_is_clipped_to_the_header_block():
     assert first.rows == (("Metric", "FY2024"), ("Metric", "100"))
     assert second.rows == (("Metric", "FY2024"), ("Metric", "110"))
     assert first.header_row_count == second.header_row_count == 1
-    assert _numbers(first, second) == _numbers(original)
     _aligned(first, original)
     _aligned(second, original)
 
@@ -614,7 +681,6 @@ def test_data_rowspan_across_pages_repeats_its_anchor_once_per_page():
     )
     assert _data_rows(first) == (("Asia", "Revenue", "100"), ("Asia", "Profit", "30"))
     assert _data_rows(second) == (("Asia", "Margin", "7.5"), ("Europe", "Revenue", "80"))
-    assert _numbers(first, second) == _numbers(original)
     # 锚点格（行标签）在两页各出现一次
     assert [c.text for g in (first, second) for c in g.cells if c.text == "Asia"] == [
         "Asia",
@@ -639,13 +705,12 @@ def test_header_and_data_rowspans_across_pages_together():
     assert first.rows == original.rows[:3]
     assert second.rows == (original.rows[0], original.rows[3])
     assert first.header_row_count == second.header_row_count == 1
-    assert _numbers(first, second) == _numbers(original)
     _aligned(first, original)
     _aligned(second, original)
 
 
 def test_comments_inside_a_split_table_stay_on_their_page():
-    doc = parse_di_markdown(
+    doc = _checked_doc(
         f"{_mark(1)}<table>\n<caption>T1</caption>\n{_HEAD}{_ROWS[0]}"
         f'<!-- PageFooter="F1" -->{_mark(2)}<!-- PageHeader="H2" -->\n{_ROWS[1]}</table>\n'
     )
@@ -656,7 +721,7 @@ def test_comments_inside_a_split_table_stay_on_their_page():
 
 
 def test_page_without_data_rows_gets_no_header_only_table():
-    doc = parse_di_markdown(
+    doc = _checked_doc(
         f"{_mark(1)}Intro.\n\n<table>\n<caption>T1</caption>\n{_HEAD}{_mark(2)}{''.join(_ROWS)}</table>\n"
     )
     assert _texts(doc.pages[0]) == [("Paragraph", "Intro.")]
@@ -667,7 +732,7 @@ def test_page_without_data_rows_gets_no_header_only_table():
 
 
 def test_header_only_table_cut_by_a_marker_is_kept_once():
-    doc = parse_di_markdown(f"{_mark(1)}<table>\n{_HEAD}{_mark(2)}</table>\ntail\n")
+    doc = _checked_doc(f"{_mark(1)}<table>\n{_HEAD}{_mark(2)}</table>\ntail\n")
     assert _only_table(doc.pages[0]).header_row_count == 2
     assert _texts(doc.pages[1]) == [("Paragraph", "tail")]
 
@@ -758,7 +823,7 @@ def test_table_spanning_three_pages_keeps_every_row_once():
     split = (
         f"{_mark(4)}<table>\n{_HEAD}{_ROWS[0]}{_mark(5)}{_ROWS[1]}{_mark(6)}{_ROWS[2]}</table>\n"
     )
-    doc = parse_di_markdown(split)
+    doc = _checked_doc(split)
     grids = [_only_table(doc.pages[i]) for i in (3, 4, 5)]
     assert all(g.rows[:2] == original.rows[:2] for g in grids)
     assert tuple(r for g in grids for r in _data_rows(g)) == _data_rows(original)
@@ -766,13 +831,13 @@ def test_table_spanning_three_pages_keeps_every_row_once():
 
 
 def test_marker_inside_a_headerless_table_reopens_only_the_table():
-    doc = parse_di_markdown(f"{_mark(1)}<table>\n{_ROWS[0]}{_mark(2)}{_ROWS[1]}</table>\n")
+    doc = _checked_doc(f"{_mark(1)}<table>\n{_ROWS[0]}{_mark(2)}{_ROWS[1]}</table>\n")
     assert _only_table(doc.pages[0]).rows == (("Revenue", "100", "110"),)
     assert _only_table(doc.pages[1]).rows == (("Profit", "30", "33"),)
 
 
 def test_marker_after_a_closed_table_adds_nothing():
-    doc = parse_di_markdown(f"{_mark(1)}<table>\n{_HEAD}{_ROWS[0]}</table>\n{_mark(2)}after\n")
+    doc = _checked_doc(f"{_mark(1)}<table>\n{_HEAD}{_ROWS[0]}</table>\n{_mark(2)}after\n")
     assert _texts(doc.pages[1]) == [("Paragraph", "after")]
 
 

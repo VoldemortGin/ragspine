@@ -42,6 +42,7 @@ import html
 import re
 import unicodedata
 from bisect import bisect_right
+from dataclasses import replace
 
 from ragspine.extraction.di_markdown.html_table import (
     parse_html_table,
@@ -238,11 +239,11 @@ def _closed_tables(text: str) -> list[tuple[int, int]]:
     return spans
 
 
-def _cell_html(cell: TableCell, text: str, row_span: int, *, placeholder: bool = False) -> str:
-    tag = "th" if cell.is_header and not placeholder else "td"
-    attrs = f' rowspan="{row_span}"' if row_span > 1 else ""
+def _cell_html(cell: TableCell) -> str:
+    tag = "th" if cell.is_header else "td"
+    attrs = f' rowspan="{cell.row_span}"' if cell.row_span > 1 else ""
     attrs += f' colspan="{cell.col_span}"' if cell.col_span > 1 else ""
-    return f"<{tag}{attrs}>{html.escape(text, quote=False)}</{tag}>"
+    return f"<{tag}{attrs}>{html.escape(cell.text, quote=False)}</{tag}>"
 
 
 def _page_table(
@@ -257,31 +258,30 @@ def _page_table(
 ) -> tuple[str, TableGrid]:
     """跨页表在 `page` 上的那部分：表头块整块复制（跨出表头块的 rowspan 截断在块内），
     再接本页的数据行；从前面的页跨进来的 rowspan 锚点在本页首行重出（剩余行数）；被切开的行
-    把前页的行标签格（`labels`）复制过来，同一行里属于别页的其他格留空占位；列位置不变。"""
+    把前页的行标签格（`labels`，一律输出为 td）复制过来，同一行里属于别页的其他格留空占位（td）；
+    列位置不变。兜底：本页表头行数若超过原表（整行 th 的数据行紧接表头），把第一行数据行的 th
+    降为 td，保证每页的 `header_row_count` 与原表相等。"""
     claimed: set[tuple[int, int]] = set()
     placed: list[TableCell] = []
-    lines = ["<table>"]
-    if caption and grid.caption:
-        lines.append(f"<caption>{html.escape(grid.caption, quote=False)}</caption>")
     for i, r in enumerate(rows):
-        cells: list[str] = []
         for c in range(grid.n_cols):
             if (i, c) in claimed:
                 continue
             anchor = owner.get((r, c))
             if anchor is None:
-                cells.append("<td></td>")
                 placed.append(TableCell(i, c, "", False))
                 continue
             native = page_of[anchor] == page
             limit = anchor.row + anchor.row_span
             if r < head and not native:
                 limit = min(limit, head)
-            text, placeholder = anchor.text, False
+            text, is_header = anchor.text, anchor.is_header
+            if r >= head and not native and anchor in labels:
+                is_header = False  # 复制到后续页的行标签一律 td
             if r >= head and anchor.row == r and not native:
                 if anchor not in labels or page < page_of[anchor]:
                     # 占位只占本行（下一行起按跨页 rowspan 重出），一律 td，不改变表头判定
-                    text, limit, placeholder = "", r + 1, True
+                    text, limit, is_header = "", r + 1, False
             span = 1
             while i + span < len(rows) and rows[i + span] < limit:
                 span += 1
@@ -290,16 +290,23 @@ def _page_table(
                 for ii in range(i, i + span)
                 for cc in range(anchor.col, anchor.col + anchor.col_span)
             )
-            cells.append(_cell_html(anchor, text, span, placeholder=placeholder))
-            is_header = anchor.is_header and not placeholder
             placed.append(TableCell(i, anchor.col, text, is_header, span, anchor.col_span))
-        lines.append("<tr>" + "".join(cells) + "</tr>")
-    lines.append("</table>")
     n_cols = max((cell.col + cell.col_span for cell in placed), default=0)
-    page_grid = TableGrid(
-        len(rows), n_cols, tuple(placed), grid.caption if caption and grid.caption else None
-    )
-    return "\n".join(lines), page_grid
+    page_caption = grid.caption if caption and grid.caption else None
+    if TableGrid(len(rows), n_cols, tuple(placed), page_caption).header_row_count > head:
+        placed = [
+            replace(cell, is_header=False) if cell.row == head and cell.is_header else cell
+            for cell in placed
+        ]
+    lines = ["<table>"]
+    if page_caption:
+        lines.append(f"<caption>{html.escape(page_caption, quote=False)}</caption>")
+    by_row: list[list[str]] = [[] for _ in rows]
+    for cell in placed:
+        by_row[cell.row].append(_cell_html(cell))
+    lines.extend("<tr>" + "".join(cells) + "</tr>" for cells in by_row)
+    lines.append("</table>")
+    return "\n".join(lines), TableGrid(len(rows), n_cols, tuple(placed), page_caption)
 
 
 def _is_value_like(text: str) -> bool:
