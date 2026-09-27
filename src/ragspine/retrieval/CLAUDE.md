@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/
-verified-against: e9702534f3b0c709654ef53675fad9734c6bf6a5
+verified-against: 9a3a32d9d4102c618a287b4816ac23df9c7eeeea
 ---
 
 # retrieval — agent contract
@@ -82,10 +82,12 @@ header; prompt text unchanged; `page+child` whole-page units carry `page_heading
 sign the index text, `ChunkVectorIndex` records `contextual_index` and the query side raises on mismatch; off frozen by
 `tests/retrieval/contextual_index/test_contextual_index_off_snapshot.py`),
 `translation/` (cross-lingual query translation, `RAGSPINE_QUERY_TRANSLATION=off|auto` / `ServiceConfig.query_translation` /
-`RetrievalPreset.query_translation` / `build_narrative_retriever(query_translation=, translation_provider=)`, default
+`RetrievalPreset.query_translation` / `build_narrative_retriever(query_translation=, translation_provider=, query_translator=)` (the last injects a ready
+translator, e.g. the eval harness's), default
 `auto`; `NarrativeIndex(query_translator=None)` stays off. `language.py` = deterministic CJK-char vs Latin-word
 detection, corpus language from uniform chunk `language` metadata else text stats; `translator.py` =
-`LLMQueryTranslator` (one provider call per (question, target), cached; provider errors not cached; reason codes
+`LLMQueryTranslator` (one provider call per (question, target), cached; `seed={question: translation}` pre-fills the
+cache keyed by the translation's detected language; `translations()` reads back usable ones; provider errors not cached; reason codes
 `no_provider` / `provider_error` / `empty_output` / `unchanged` / `wrong_language` / `too_long`). The translation is an
 extra query via `HybridRetriever.search(extra_queries=, extra_vector=)` — BM25 and (as wired) vector, plus the
 `page+child` whole-page BM25; rerank and generation keep the original question. Trace `op=narrative.query_translation`

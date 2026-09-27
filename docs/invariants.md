@@ -5,7 +5,7 @@ covers:
   - src/ragspine/retrieval/link/
   - src/ragspine/retrieval/rerank/
   - src/ragspine/common/observability/
-verified-against: 6ebaaa4c3340f5dfcb69c255c94b3b6bc4724c74
+verified-against: 9a3a32d9d4102c618a287b4816ac23df9c7eeeea
 ---
 
 # Invariants (code-enforced)
@@ -87,7 +87,8 @@ page unit, the judge or a prompt; RESTRICTED chunks are still never embedded. **
 question is an extra BM25 / vector query inside `NarrativeIndex.retrieve`; the rerank judge, the prompt, the
 anti-fabrication rewrite and citations all keep the original question, and retrieval output is still real chunks
 filtered at the same two RESTRICTED exits. The trace (`op=narrative.query_translation`) carries language / reason codes
-and counts, never the question or the translation. **Frozen by**
+and counts, never the question or the translation (the nl-gold eval records the translation only in its report
+artifacts, `tests/eval/test_nl_gold_translation.py`). **Frozen by**
 `tests/retrieval/query_translation/test_query_translation.py` (generation-prompt isolation, trace privacy) and the
 off-mode snapshot `tests/retrieval/query_translation/test_query_translation_off_snapshot.py`.
 

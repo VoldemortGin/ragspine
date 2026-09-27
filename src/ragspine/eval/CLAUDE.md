@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/eval/
-verified-against: 84902f3aa2815c475544d0e69c2bf368cf894834
+verified-against: 9a3a32d9d4102c618a287b4816ac23df9c7eeeea
 ---
 
 # eval — agent contract
@@ -86,16 +86,23 @@ scoring changes. It retrieves without `ask`'s entity/period filters; hit text go
   `pinned.selected_physical_pages` (`select_di_pages` blanks the rest, page numbers kept).
   Known-gap is run but unscored; adversarial / `offline_only` cases are skipped with a
   reason. Answers go only into report artifacts — never into observability traces; `RecordingRetriever` /
-  `CountingProvider` observe locators and call counts only.
+  `CountingProvider` observe locators and call counts only. `CaseRun.translated_query` (None when the case was
+  not translated / did not retrieve) is read back from the script's own `LLMQueryTranslator.translations()` (injected via
+  `build_narrative_retriever(query_translator=)`) into report.json / per-case files / the report.md failure list —
+  artifacts only, never traces. `--translation-cache <json>` (off by default; meta unchanged when off) seeds that
+  translator (`seed=`) from a `{question: translation}` file so listed questions call no LLM, appends new usable
+  translations back, and records `translation_cache` / `_hits` / `_new` in the meta.
 - **Gold v1 is frozen; v2 carries its evidence** — `nl-answers-gold-v1.json` is never edited. `-v2` requires a
   non-empty top-level `changelog` (each entry: `case_id`, `change`, `old`, `new`, `evidence`; the loader rejects
   it otherwise) and is registered in the benchmark `manifest.json`. Fix a gold with a new version, not an edit.
-- **Judge changes are versioned** — `JUDGE_VERSION` (now `nl-gold-judge-v2`) is written into every report's
+- **Judge changes are versioned** — `JUDGE_VERSION` (now `nl-gold-judge-v3`) is written into every report's
   `meta` by `write_report`, next to the script's `gold_version` / `gold_sha256`; scores of different judge or gold
   versions are not directly comparable (use `--rejudge` to compare on the same answers). Judge v2 rules:
   refusal = orchestrator template anywhere (line-start `查不到` / `无法识别参数`, no-material text) **or** a refusal
   phrase in the answer's lead (headings + first sentence, parentheticals dropped), unless the lead is a hedged
-  answer (`most likely` / `很可能`…); scaled currency amounts (`5.14 亿美元`, `US$1.168b`) get their exact
+  answer (`most likely` / `很可能`…) — v3 first folds refusal-related Traditional characters (`資料` / `沒有` /
+  `給出` / `無法`…) to Simplified via a tiny built-in table (`_to_simplified`, identity on Simplified text, no
+  dependency); scaled currency amounts (`5.14 亿美元`, `US$1.168b`) get their exact
   millions appended in `normalize_answer` (only when no zero-padding is needed; `%` untouched) — the
   `normalize_answer` / `contains_normalized` signatures stay fixed (imported elsewhere; they now live in
   `common/answer_text.py`, shared with the narrative number guard of ADR 0024, and are re-exported here); the cross-lingual
