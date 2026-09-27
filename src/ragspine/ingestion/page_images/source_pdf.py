@@ -13,7 +13,8 @@
 
 marker 模式（markdown 含 ``<!-- page: N -->``，``DiPage.index`` 即真实 PDF 页码，ADR 0027）：只分析了部分页时
 md 页数可以少于 PDF，所以放宽为 ``max(index) <= PDF 页数``，页号超出 PDF 明确报错。放宽削弱了错配保护，由
-sidecar 补偿（字段缺失即跳过该项；sidecar 缺失或不可解析则全部跳过）。两种来源的页数语义不同，分开读：
+sidecar 补偿（字段缺失即跳过该项，没有 sidecar 则全部跳过；sidecar 存在却不可解析、不是 JSON 对象，或下列
+字段类型不对时报错）。两种来源的页数语义不同，分开读：
 
 - SuperIndex azure_di ``extract_corpus`` 的整数 ``pages`` = **本次分析的页数**，必须等于 md 中不重复的页标记
   页号个数（校验 md 与抽取结果一致，不与 PDF 总页数比）；
@@ -79,35 +80,51 @@ class SidecarFacts:
 
 
 def read_sidecar_facts(md_path: str | Path) -> SidecarFacts:
-    """读 sidecar；缺失或不可解析时各项为空（校验跳过，与 ``resolve_source_pdf`` 的报错互不影响）。"""
-    try:
-        data = json.loads(sidecar_path(md_path).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        data = None
-    if not isinstance(data, dict):
+    """读 sidecar（marker 模式的补偿校验用）。没有 sidecar 时各项为空；sidecar 存在却不可解析、不是
+    JSON 对象，或校验字段类型不对时抛 SourcePdfError（与 ``resolve_source_pdf`` 遇损坏报错同口径）。"""
+    sidecar = sidecar_path(md_path)
+    if not sidecar.is_file():
         return SidecarFacts(pdf_total_pages=None, analyzed_pages=None, pdf_sha256=())
+    try:
+        data = json.loads(sidecar.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise SourcePdfError(f"sidecar 无法解析：{sidecar}（{exc}）") from exc
+    if not isinstance(data, dict):
+        raise SourcePdfError(f"sidecar 不是 JSON 对象：{sidecar}")
     return SidecarFacts(
-        pdf_total_pages=_ragspine_pdf_total_pages(data),
-        analyzed_pages=_superindex_analyzed_pages(data),
+        pdf_total_pages=_ragspine_pdf_total_pages(data, sidecar),
+        analyzed_pages=_superindex_analyzed_pages(data, sidecar),
         pdf_sha256=tuple(
-            value.strip().lower()
+            _typed(data, key, str, sidecar).strip().lower()
             for key in SIDECAR_PDF_SHA256_KEYS
-            if isinstance(value := data.get(key), str) and value.strip()
+            if key in data
         ),
     )
 
 
-def _ragspine_pdf_total_pages(data: dict[str, object]) -> int | None:
-    return _int(data.get(SIDECAR_PDF_TOTAL_PAGES_KEY))
+def _ragspine_pdf_total_pages(data: dict[str, object], sidecar: Path) -> int | None:
+    """ragspine ``pdf_to_di_markdown``：``page_count`` 是原 PDF 的总页数。"""
+    if SIDECAR_PDF_TOTAL_PAGES_KEY not in data:
+        return None
+    return _typed(data, SIDECAR_PDF_TOTAL_PAGES_KEY, int, sidecar)
 
 
-def _superindex_analyzed_pages(data: dict[str, object]) -> int | None:
-    # ragspine sidecar 的 pages 是逐页列表，_int 不认，只有 SuperIndex 的整数 pages 进来
-    return _int(data.get(SIDECAR_ANALYZED_PAGES_KEY))
+def _superindex_analyzed_pages(data: dict[str, object], sidecar: Path) -> int | None:
+    """SuperIndex azure_di ``extract_corpus``：整数 ``pages`` 是本次分析的页数。ragspine sidecar 的
+    ``pages`` 是逐页列表（不是计数），放行且不当作分析页数。"""
+    value = data.get(SIDECAR_ANALYZED_PAGES_KEY)
+    if SIDECAR_ANALYZED_PAGES_KEY not in data or isinstance(value, list):
+        return None
+    return _typed(data, SIDECAR_ANALYZED_PAGES_KEY, int, sidecar)
 
 
-def _int(value: object) -> int | None:
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
+def _typed[T](data: dict[str, object], key: str, kind: type[T], sidecar: Path) -> T:
+    value = data[key]
+    if not isinstance(value, kind) or isinstance(value, bool):
+        raise SourcePdfError(
+            f"sidecar {sidecar.name} 的 {key!r} 应为 {kind.__name__}，实际是 {value!r}"
+        )
+    return value
 
 
 def resolve_source_pdf(md_path: str | Path, explicit: str | Path | None = None) -> Path | None:

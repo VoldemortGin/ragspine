@@ -237,6 +237,49 @@ def test_ragspine_sidecar_page_count_is_pdf_total_and_must_equal(tmp_path):
             validate_source_pdf(md, pdf)
 
 
+@pytest.mark.parametrize("raw", ["{not json", "[1, 2]", '"text"'], ids=["broken", "list", "string"])
+def test_marker_mode_corrupt_sidecar_is_an_error(tmp_path, raw):
+    md, pdf = _marker_deck(tmp_path, [5, 6, 7], pdf_pages=8)
+    sidecar_path(md).write_text(raw, encoding="utf-8")
+    with pytest.raises(SourcePdfError, match="sidecar"):
+        validate_source_pdf(md, pdf)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        {"page_count": "8"},
+        {"page_count": True},
+        {"page_count": None},
+        {"page_count": 8.0},
+        {"pages": "3"},
+        {"pages": 3.0},
+        {"pages": False},
+        {"pages": {"n": 3}},
+        {"source_pdf_sha256": 123},
+        {"pdf_sha256": None},
+        {"source_sha256": ["abc"]},
+    ],
+    ids=lambda f: f"{next(iter(f))}={next(iter(f.values()))!r}",
+)
+def test_marker_mode_sidecar_field_of_wrong_type_is_an_error(tmp_path, field):
+    md, pdf = _marker_deck(tmp_path, [5, 6, 7], pdf_pages=8, sidecar=field)
+    with pytest.raises(SourcePdfError, match="sidecar"):
+        validate_source_pdf(md, pdf)
+
+
+def test_ragspine_pages_list_is_not_an_analyzed_count(tmp_path):
+    sidecar = {"generator": "pdf_to_di_markdown.py", "pages": [{"page": 5}, {"page": 6}]}
+    md, pdf = _marker_deck(tmp_path, [5, 6, 7], pdf_pages=8, sidecar=sidecar)
+    assert validate_source_pdf(md, pdf).page_count == 8
+
+
+def test_page_break_mode_ignores_a_corrupt_sidecar(tmp_path):
+    md, pdf = write_deck(tmp_path, ["a", "b"])
+    sidecar_path(md).write_text("{not json", encoding="utf-8")
+    assert validate_source_pdf(md, pdf).page_count == 2
+
+
 def test_page_break_mode_still_requires_equal_count(tmp_path):
     md, pdf = write_deck(tmp_path, ["a", "b"])
     more = make_pdf(tmp_path / "more.pdf", ["x", "y", "z"])
