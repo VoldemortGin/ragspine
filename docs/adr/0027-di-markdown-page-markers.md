@@ -44,25 +44,39 @@ page image was off by the gap, and `source_pdf`'s page-count equality check reje
   document order. The heading stack carries over in page order. Parsing never raises.
 - **Leading content** (before the first marker) belongs to the first marker's page.
 - **Inline marker**: the line is cut at the marker — text before it stays, text after it moves.
-- **Marker inside `<table>`** (the `<table` tag starts a line and has a matching `</table>`): the table is parsed
-  once, each cell is assigned to the page its first text is on (its start tag when empty), and the table is
-  rewritten as one table per page, with the markers kept in place:
+- **Marker inside `<table>`** (the `<table` tag starts a line and pairs with a `</table>`; tables are paired one by
+  one with a stack, so a table that never closes is given up on its own and does not stop later tables): the table
+  is parsed once, each cell is assigned to the page its first text is on (its start tag when empty), and the table
+  is rewritten as one table per page, with the markers kept in place. Each page's grid is built directly and handed
+  to the block parser, so the split is O(cells + pages).
   - **Header**: the header block (`header_row_count` rows) is repeated on every page. A rowspan reaching out of the
     header block into data rows is clipped to the block in the copy. This replaces the earlier "header copied
     verbatim" rule: copying verbatim a `<th rowspan>` that also covers data rows would drag the page's first data
     rows under it, shift their columns and change `header_row_count`.
   - **Data rows** stay in their columns. A rowspan anchor coming from an earlier page is re-emitted in the page's
     first row with the remaining row count; a cell of the same row that belongs to another page (a marker in the
-    middle of a `<tr>` or a `<td>` / `<th>`) leaves an empty placeholder cell, except the row label: the row's
-    `<th>` cells, or with no `<th>` its column-0 cell unless it is a plain number (`explicit_number` from
-    `extraction/evidence/figures/validation.py`), are copied to the same position on each later page of that row;
-    a label that is itself a rowspan anchor goes through the same re-emission, once per page. So numeric cells are
-    neither repeated nor lost; a rowspan anchor crossing pages appears once on each page (usually a row label), and
-    a row cut across pages has its label once on each page while its numbers are not repeated.
-  - Other comments inside the table (PageHeader / PageFooter / PageNumber) stay on their page; the caption stays on
-    the first page.
+    middle of a `<tr>` or a `<td>` / `<th>`) leaves an empty placeholder, always a `<td>` so it cannot turn a data
+    row into a header row. The exception is the row label: the row's leading consecutive non-numeric `<th>` cells,
+    or without them its column-0 cell if it is not value-like, is copied to the same position on each later page of
+    that row; a label that is itself a rowspan anchor goes through the same re-emission, once per page.
+    "Value-like" is `_is_value_like` in `parse.py`, a private stdlib function (NFKC; sign and Unicode minus;
+    accounting parentheses; currency prefixes such as `$`, `US$`, `HK$`, `RMB`, `¥`, `€`, `£`; unit suffixes such as
+    `bn`, `mn`, `m`, `k`, `x`, `%`, `pp`, `bps`; footnote stars; thousands commas or spaces; decimals; a year counts
+    as a value). It is not shared with `extraction/evidence/`, which stays a separate line, so `di_markdown` keeps
+    its stdlib-only contract.
+  - So numeric cells are neither repeated nor lost, except that a numeric cell with a rowspan crossing pages
+    appears once on each page, like any cross-page rowspan anchor; this matches linearization, where every row it
+    covers repeats its value. A row cut across pages has its label once on each page while its numbers are not
+    repeated.
+  - A page left with no data row (for example a marker right after the header) gets no header-only table; the
+    caption goes with the first page that has one. Other comments inside the table (PageHeader / PageFooter /
+    PageNumber) stay on their page.
   - A table **without** a matching `</table>` is not rewritten and keeps the existing "an unclosed table runs to the
-    page end" rule, so it cannot swallow the text of later pages. A marker inside `<figure>` is not repaired.
+    page end" rule, so it cannot swallow the text of later pages.
+  - `<figure>` is not repaired. A table inside a figure whose `<table` starts a line is still split per page like any
+    other; the cut figure then runs to the end of its first page (the first half of the table HTML becomes figure
+    text), the later page gets a Table block, and the leftover `</figure>` / `<figcaption>` lines become a
+    paragraph. A table written on the same line as `<figure>` is not split.
 
 ### 2. Provenance
 
@@ -89,8 +103,9 @@ Markdown without markers keeps physical order.
     `source_pdf_sha256` is the name new producers should use.
   - A missing field skips that check; no sidecar skips them all. A sidecar that exists but is not valid JSON or not
     a JSON object, or a checked field of the wrong type (`page_count` / integer `pages` not an int, a sha256 field
-    not a string), is a `SourcePdfError`, as `resolve_source_pdf` already does for a corrupt sidecar. ragspine's
-    list `pages` is allowed and is not an analyzed count.
+    not a string), an integer `pages` <= 0, or an empty sha256 (reported as empty, not as a mismatch) is a
+    `SourcePdfError`, as `resolve_source_pdf` already does for a corrupt sidecar. ragspine's list `pages` is
+    allowed and is not an analyzed count. A UTF-8 BOM is not accepted (unchanged).
   - **Known limit, blank pages**: the SuperIndex extractor inserts a marker only for a page with content
     (`azure_di.py` `to_markdown` skips pages without spans), so for a PDF with blank pages `pages` exceeds the
     distinct marker count and the check fails. Remedy: re-extract with a SuperIndex version that also marks blank

@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/extraction/
-verified-against: 4a038084de6cca26f6c80667e187f1b24e0dfdd3
+verified-against: 78521db97ea504f92929070865fb5fe26ec5f743
 ---
 
 # extraction — agent contract
@@ -30,10 +30,12 @@ over the existing `extract_grids` impls).
 PageHeader/PageFooter/PageNumber never reach the body. **Marker mode** (ADR 0027): any `<!-- page: N -->`
 (`has_page_markers`, `page_marker_numbers`; SuperIndex azure_di output; N ≤ `MAX_MARKER_PAGE` = 10000, larger ones are plain
 comments) makes N the split and `DiPage.index == N` (true PDF page; gaps = empty pages; `PageBreak` dropped); a closed
-table cut by markers is rewritten per page from its parsed grid (`html_table.parse_html_table_with_offsets` gives each
-cell's offset): header block repeated with rowspans clipped to it, cross-page rowspan anchors re-emitted, other-page cells
-left as empty placeholders except a cut row's label (its `<th>`, else a non-numeric column 0) copied to each later page,
-so columns stay aligned and no numeric cell is lost or repeated. No marker ⇒ byte-identical (`test_legacy_parse_snapshot.py`). Contract in `di_markdown/parse.py`'s docstring.
+table (paired on its own) cut by markers is rewritten per page from its parsed grid in O(cells + pages)
+(`html_table.parse_html_table_with_offsets` gives each cell's offset): header block repeated with rowspans clipped to it,
+cross-page rowspan anchors re-emitted, other-page cells left as empty `<td>` placeholders except a cut row's label (leading
+non-numeric `<th>`s, else a column 0 that is not `_is_value_like`) copied to each later page, pages without data rows get no
+table, so columns stay aligned and no numeric cell is lost (only a cross-page numeric rowspan repeats).
+Still stdlib-only: `di_markdown` imports nothing outside the stdlib and itself (tested). No marker ⇒ byte-identical (`test_legacy_parse_snapshot.py`). Contract in `di_markdown/parse.py`'s docstring.
 `di_markdown/page_tags.py` (ADR 0025) derives per-page raw measures from the blocks — `has_table` (Table block or a
 pipe separator row with a `|`), `n_figures` / `figure_max_chars` (largest figure's text + caption), `text_chars`
 (all block text minus whitespace and `|`) — and `page_tags(stats, low_text_chars=300, figure_min_chars=10)` turns

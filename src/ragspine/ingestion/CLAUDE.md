@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/ingestion/
-verified-against: 4a038084de6cca26f6c80667e187f1b24e0dfdd3
+verified-against: 78521db97ea504f92929070865fb5fe26ec5f743
 ---
 
 # ingestion — agent contract
@@ -36,7 +36,7 @@ the sidecar `<stem>.meta.json` field **`source_pdf`** (relative → sidecar dir,
 max `DiPage.index` (marker mode, ADR 0027: max page ≤ PDF pages, a page beyond the PDF raises; sidecar checks by source —
 SuperIndex integer `pages` (analyzed) == distinct marker pages, ragspine `page_count` (PDF total) == PDF pages,
 `source_pdf_sha256` (or `pdf_sha256` / `source_sha256`) == PDF sha256; a missing field skips its check, a corrupt
-sidecar or a mistyped field raises) and records its sha256 — missing / unreadable / outside
+sidecar, a mistyped field, an empty sha256 or `pages` ≤ 0 raises) and records its sha256 — missing / unreadable / outside
 `allowed_upload_root` / count mismatch raise
 `SourcePdfError` **before any write** (a wrong pairing would put mismatched pages next to the text, worse than no
 image). No PDF ⇒ nothing happens, text ingest unchanged. `render.py`: pdfspine PNG, scale = `min(dpi/72,
