@@ -129,17 +129,20 @@ def _figure(inner: str, path: tuple[str, ...]) -> Figure:
     )
 
 
-def _blocks(body: str, stack: list[tuple[int, str]]) -> list[Block]:
+def _path(stack: list[tuple[int, str]]) -> tuple[str, ...]:
+    return tuple(text for _, text in stack)
+
+
+def _flush(blocks: list[Block], para: list[str], stack: list[tuple[int, str]]) -> None:
+    # 模块级而非 _blocks 内的闭包：beartype claw 会在每次调用时重新包装内层函数，逐页都编译一遍
+    if para:
+        blocks.append(Paragraph(text="\n".join(para), heading_path=_path(stack)))
+        para.clear()
+
+
+def _blocks(body: str, stack: list[tuple[int, str]], tables: dict[str, TableGrid]) -> list[Block]:
     blocks: list[Block] = []
     para: list[str] = []
-
-    def path() -> tuple[str, ...]:
-        return tuple(text for _, text in stack)
-
-    def flush() -> None:
-        if para:
-            blocks.append(Paragraph(text="\n".join(para), heading_path=path()))
-            para.clear()
 
     pos, n = 0, len(body)
     while pos < n:
@@ -150,31 +153,34 @@ def _blocks(body: str, stack: list[tuple[int, str]]) -> list[Block]:
         lead = pos + len(line) - len(line.lstrip())
         heading = _HEADING.match(line)
         if not stripped:
-            flush()
+            _flush(blocks, para, stack)
             pos = eol + 1
         elif heading is not None:
-            flush()
+            _flush(blocks, para, stack)
             level = len(heading.group(1))
             text = html.unescape(_CLOSING_HASHES.sub("", heading.group(2) or "").strip())
             while stack and stack[-1][0] >= level:
                 stack.pop()
             stack.append((level, text))
-            blocks.append(Heading(text=text, level=level, heading_path=path()))
+            blocks.append(Heading(text=text, level=level, heading_path=_path(stack)))
             pos = eol + 1
         elif _TABLE_OPEN.match(stripped):
-            flush()
+            _flush(blocks, para, stack)
             end = _table_end(body, lead)
-            blocks.append(Table(grid=parse_html_table(body[lead:end]), heading_path=path()))
+            source = body[lead:end]
+            grid = tables.get(source)  # 拆表时已直接建好的网格，免得逐页再解析一遍
+            grid = parse_html_table(source) if grid is None else grid
+            blocks.append(Table(grid=grid, heading_path=_path(stack)))
             pos = end
         elif (opener := _FIGURE_OPEN.match(body, lead)) is not None:
-            flush()
+            _flush(blocks, para, stack)
             close = _FIGURE_CLOSE.search(body, opener.end())
             inner_end, pos = (close.start(), close.end()) if close else (n, n)
-            blocks.append(_figure(body[opener.end() : inner_end], path()))
+            blocks.append(_figure(body[opener.end() : inner_end], _path(stack)))
         else:
             para.append(html.unescape(stripped))
             pos = eol + 1
-    flush()
+    _flush(blocks, para, stack)
     return blocks
 
 
@@ -226,15 +232,16 @@ def _page_table(
     owner: dict[tuple[int, int], TableCell],
     page_of: dict[TableCell, int],
     page: int,
+    head: int,
     rows: list[int],
     labels: set[TableCell],
     caption: bool,
-) -> str:
+) -> tuple[str, TableGrid]:
     """跨页表在 `page` 上的那部分：表头块整块复制（跨出表头块的 rowspan 截断在块内），
     再接本页的数据行；从前面的页跨进来的 rowspan 锚点在本页首行重出（剩余行数）；被切开的行
     把前页的行标签格（`labels`）复制过来，同一行里属于别页的其他格留空占位；列位置不变。"""
-    head = grid.header_row_count
     claimed: set[tuple[int, int]] = set()
+    placed: list[TableCell] = []
     lines = ["<table>"]
     if caption and grid.caption:
         lines.append(f"<caption>{html.escape(grid.caption, quote=False)}</caption>")
@@ -246,6 +253,7 @@ def _page_table(
             anchor = owner.get((r, c))
             if anchor is None:
                 cells.append("<td></td>")
+                placed.append(TableCell(i, c, "", False))
                 continue
             native = page_of[anchor] == page
             limit = anchor.row + anchor.row_span
@@ -265,9 +273,15 @@ def _page_table(
                 for cc in range(anchor.col, anchor.col + anchor.col_span)
             )
             cells.append(_cell_html(anchor, text, span, placeholder=placeholder))
+            is_header = anchor.is_header and not placeholder
+            placed.append(TableCell(i, anchor.col, text, is_header, span, anchor.col_span))
         lines.append("<tr>" + "".join(cells) + "</tr>")
     lines.append("</table>")
-    return "\n".join(lines)
+    n_cols = max((cell.col + cell.col_span for cell in placed), default=0)
+    page_grid = TableGrid(
+        len(rows), n_cols, tuple(placed), grid.caption if caption and grid.caption else None
+    )
+    return "\n".join(lines), page_grid
 
 
 def _is_value_like(text: str) -> bool:
@@ -305,8 +319,11 @@ def _row_labels(
     return [first]
 
 
-def _split_table(source: str, bounds: list[int], pages: list[int], first: int) -> dict[int, str]:
-    """把一张被页标记切开的表按格所在的页拆成每页一张表：{页号: 表 HTML}。"""
+def _split_table(
+    source: str, bounds: list[int], pages: list[int], first: int
+) -> dict[int, tuple[str, TableGrid]]:
+    """把一张被页标记切开的表按格所在的页拆成每页一张表：{页号: (表 HTML, 它的网格)}。
+    复杂度 O(格子数 + 各页输出)：页 → 行的索引只建一次。"""
     grid, offsets = parse_html_table_with_offsets(source)
 
     def page_at(offset: int) -> int:
@@ -324,6 +341,10 @@ def _split_table(source: str, bounds: list[int], pages: list[int], first: int) -
                 owner[(r, c)] = cell
     head = grid.header_row_count
     row_pages = [set(starts.get(r, ())) for r in range(head, grid.n_rows)]  # 每行至少起一个格
+    page_rows: dict[int, list[int]] = {first: []}
+    for k, ps in enumerate(row_pages):
+        for page in ps:
+            page_rows.setdefault(page, []).append(head + k)
     labels = {
         label
         for k, ps in enumerate(row_pages)
@@ -336,17 +357,20 @@ def _split_table(source: str, bounds: list[int], pages: list[int], first: int) -
             owner,
             page_of,
             page,
-            list(range(head)) + [head + k for k, ps in enumerate(row_pages) if page in ps],
+            head,
+            list(range(head)) + rows,
             labels,
             caption=page == first,
         )
-        for page in sorted({first}.union(*row_pages))
+        for page, rows in sorted(page_rows.items())
     }
 
 
-def _split_tables(text: str, marks: list[tuple[re.Match[str], int]]) -> str:
+def _split_tables(
+    text: str, marks: list[tuple[re.Match[str], int]], grids: dict[str, TableGrid]
+) -> str:
     """被页标记切开、且有配对 `</table>` 的表，改写为每页一张完整的表（标记原位保留，
-    表内其他注释如 PageHeader / PageNumber 跟在该页的表后面）。"""
+    表内其他注释如 PageHeader / PageNumber 跟在该页的表后面）；每张新表的网格记入 `grids`。"""
     out: list[str] = []
     pos = 0
     starts = [m.start() for m, _ in marks]
@@ -365,7 +389,10 @@ def _split_tables(text: str, marks: list[tuple[re.Match[str], int]]) -> str:
         out.append(text[pos:s])
         for j, (a, b, page) in enumerate(zip(cuts, ends, piece_pages, strict=True)):
             comments = "".join(f"\n{c.group(0)}" for c in _INLINE_COMMENT.finditer(text, a, b))
-            out.append(f"\n{tables.pop(page, '')}{comments}\n")
+            table_html = ""
+            if page in tables:
+                table_html, grids[table_html] = tables.pop(page)
+            out.append(f"\n{table_html}{comments}\n")
             if j < len(inside):
                 out.append(inside[j][0].group(0))
         pos = e
@@ -373,8 +400,8 @@ def _split_tables(text: str, marks: list[tuple[re.Match[str], int]]) -> str:
     return "".join(out)
 
 
-def _marker_pages(text: str) -> list[tuple[int, str]]:
-    text = _split_tables(text, _page_markers(text))
+def _marker_pages(text: str, grids: dict[str, TableGrid]) -> list[tuple[int, str]]:
+    text = _split_tables(text, _page_markers(text), grids)
     marks = _page_markers(text)
     buckets: dict[int, list[str]] = {marks[0][1]: [text[: marks[0][0].start()]]}
     for k, (mark, page) in enumerate(marks):
@@ -388,7 +415,12 @@ def parse_di_markdown(text: str) -> DiDocument:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     stack: list[tuple[int, str]] = []
     pages: list[DiPage] = []
-    split = _marker_pages(text) if has_page_markers(text) else enumerate(_PAGE_BREAK.split(text), 1)
+    tables: dict[str, TableGrid] = {}
+    split = (
+        _marker_pages(text, tables)
+        if has_page_markers(text)
+        else enumerate(_PAGE_BREAK.split(text), 1)
+    )
     for index, raw in split:
         meta = _Meta()
         body = _INLINE_COMMENT.sub(meta.take, _LINE_COMMENT.sub(meta.take, raw))
@@ -400,7 +432,7 @@ def parse_di_markdown(text: str) -> DiDocument:
                 page_number_label=label,
                 headers=tuple(meta.headers),
                 footers=tuple(meta.footers),
-                blocks=tuple(_blocks(body, stack)),
+                blocks=tuple(_blocks(body, stack, tables)),
             )
         )
     return DiDocument(pages=tuple(pages))

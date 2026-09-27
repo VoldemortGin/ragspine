@@ -16,6 +16,8 @@ import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
+from ragspine.extraction.di_markdown import parse as parse_module
+from ragspine.extraction.di_markdown.html_table import parse_html_table
 from ragspine.extraction.di_markdown.models import Figure, Heading, Paragraph, Table
 from ragspine.extraction.di_markdown.parse import (
     MAX_MARKER_PAGE,
@@ -663,6 +665,57 @@ def test_stray_closing_tags_and_inline_tables_are_left_alone():
     )
     assert [p.index for p in doc.pages] == [1, 2]
     assert not any(isinstance(b, Table) for p in doc.pages for b in p.blocks)
+
+
+def test_prebuilt_page_grids_equal_reparsing_their_html():
+    samples = [
+        f"{_mark(1)}<table>\n<caption>T</caption>\n{_HEAD}{_ROWS[0]}{_mark(2)}{''.join(_ROWS[1:])}</table>",
+        f"{_mark(1)}<table>\n{_HEAD4}"
+        '<tr><td rowspan="2">Asia</td><td>90</td>{_mark(2)}<td>100</td><td>110</td></tr>\n'
+        "<tr><td>91</td><td>101</td><td>111</td></tr>\n"
+        f"<tr><th>Total</th><th>1</th>{_mark(3)}<th>2</th><td></td></tr>\n</table>",
+        f"{_mark(1)}<table>\n"
+        '<tr><th rowspan="4">Metric</th><th colspan="2">FY</th></tr>\n'
+        '<tr><td rowspan="3">Asia</td><td>100</td></tr>\n'
+        f"<tr><td>110</td></tr>\n{_mark(2)}<tr><td>120</td></tr>\n</table>",
+    ]
+    for text in samples:
+        grids = {}
+        parse_module._marker_pages(text, grids)
+        assert len(grids) >= 2
+        for source, grid in grids.items():
+            assert parse_html_table(source) == grid
+
+
+def test_splitting_a_long_table_is_linear():
+    rows = "".join(
+        (f"<!-- page: {i // 5 + 1} -->\n" if i % 5 == 0 else "")
+        + f"<tr><td>r{i}</td><td>{i}</td><td>{i + 1}</td></tr>\n"
+        for i in range(40_000)
+    )
+    text = f"<table>\n<tr><th>a</th><th>b</th><th>c</th></tr>\n{rows}</table>"
+    start = time.perf_counter()
+    doc = parse_di_markdown(text)
+    assert time.perf_counter() - start < 2.0
+    assert len(doc.pages) == 8000
+    assert _data_rows(_only_table(doc.pages[-1]))[-1] == ("r39999", "39999", "40000")
+
+
+def test_splitting_a_wide_table_is_linear():
+    cols = 300
+    head = "<tr>" + "<th>h</th>" * cols + "</tr>\n"
+    rows = "".join(
+        (f"<!-- page: {i // 5 + 1} -->\n" if i % 5 == 0 else "")
+        + "<tr>"
+        + "".join(f"<td>{i * cols + j}</td>" for j in range(cols))
+        + "</tr>\n"
+        for i in range(500)
+    )
+    start = time.perf_counter()
+    doc = parse_di_markdown(f"<table>\n{head}{rows}</table>")
+    assert time.perf_counter() - start < 2.0
+    assert len(doc.pages) == 100
+    assert all(_only_table(p).n_cols == cols for p in doc.pages)
 
 
 def test_never_closed_table_is_not_carried_to_later_pages():

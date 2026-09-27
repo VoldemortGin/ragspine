@@ -184,7 +184,10 @@ def parse_html_table_with_offsets(html: str) -> tuple[TableGrid, dict[tuple[int,
     collector.finish()
     placed = _place(collector.rows)
     line_starts = [0]
-    line_starts.extend(i + 1 for i, ch in enumerate(html) if ch == "\n")
+    newline = html.find("\n")
+    while newline >= 0:
+        line_starts.append(newline + 1)
+        newline = html.find("\n", newline + 1)
     offsets = {}
     for cell, raw in placed:
         line, col = raw.text_at or raw.start
