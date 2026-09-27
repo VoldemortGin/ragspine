@@ -37,6 +37,7 @@
 
 import html
 import re
+import unicodedata
 from bisect import bisect_right
 
 from ragspine.extraction.di_markdown.html_table import (
@@ -70,6 +71,14 @@ _TABLE_OPEN = re.compile(r"<table\b", re.IGNORECASE)
 _TABLE_TAG = re.compile(r"<(/?)table\b[^>]*>?", re.IGNORECASE)
 _FIGURE_OPEN = re.compile(r"<figure\b[^>]*>", re.IGNORECASE)
 _FIGURE_CLOSE = re.compile(r"</figure\s*>", re.IGNORECASE)
+_CURRENCY = re.compile(
+    r"^(?:US\$|HK\$|NT\$|S\$|A\$|C\$|RMB|CNY|USD|HKD|EUR|GBP|JPY|\$|¥|€|£|₩|₹)", re.IGNORECASE
+)
+_UNIT = re.compile(
+    r"(?:bn|mn|tn|bps|bp|pp|usd|hkd|rmb|cny|eur|gbp|jpy|%|x|k|m|b|t)$", re.IGNORECASE
+)
+_PLAIN_NUMBER = re.compile(r"(?:\d{1,3}(?:[, ]\d{3})+|\d+)(?:\.\d+)?|\.\d+")
+_MINUS = str.maketrans({"\u2212": "-", "\u2012": "-", "\u2013": "-", "\ufe63": "-"})
 _FIGCAPTION = re.compile(r"<figcaption\b[^>]*>(.*?)</figcaption\s*>", re.IGNORECASE | re.DOTALL)
 
 
@@ -260,19 +269,33 @@ def _page_table(
     return "\n".join(lines)
 
 
+def _is_value_like(text: str) -> bool:
+    """单元格文字看起来是不是一个数值（行标签过滤用）：NFKC 归一化（全角、上标、不换行空格），
+    去脚注星号，再逐层剥掉正负号 / Unicode 减号、括号负数、货币前缀、单位后缀，剩下的须是一个
+    数（千分位逗号或空格、小数）。年份也算数值；空串和纯标点不算。"""
+    value = unicodedata.normalize("NFKC", text).translate(_MINUS).strip().rstrip("*†‡").strip()
+    while True:
+        before = value
+        if value[:1] in ("+", "-"):
+            value = value[1:].strip()
+        if value.startswith("(") and value.endswith(")"):
+            value = value[1:-1].strip()
+        value = _UNIT.sub("", _CURRENCY.sub("", value).strip()).strip()
+        if value == before:
+            return _PLAIN_NUMBER.fullmatch(value) is not None
+
+
 def _row_labels(
     grid: TableGrid, owner: dict[tuple[int, int], TableCell], row: int
 ) -> list[TableCell]:
     """行标签格：该行起始的 `<th>` 格；没有 th 时取第 0 列（归一化后不是纯数值才算）。"""
-    from ragspine.extraction.evidence.figures.validation import explicit_number
-
     headers = [c for c in grid.cells if c.row == row and c.is_header]
     if headers:
         return headers
     first = owner.get((row, 0))
     if first is None or first.row != row or not first.text.strip():
         return []
-    return [] if explicit_number(first.text) is not None else [first]
+    return [] if _is_value_like(first.text) else [first]
 
 
 def _split_table(source: str, bounds: list[int], pages: list[int], first: int) -> dict[int, str]:

@@ -6,9 +6,12 @@
 空行分段，HTML `<table>`，`<figure>`（可含 `<figcaption>`）。
 """
 
+import ast
 import os
+import sys
 import time
 
+import pytest
 import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
@@ -16,6 +19,7 @@ ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpa
 from ragspine.extraction.di_markdown.models import Figure, Heading, Paragraph, Table
 from ragspine.extraction.di_markdown.parse import (
     MAX_MARKER_PAGE,
+    _is_value_like,
     has_page_markers,
     page_marker_numbers,
     parse_di_markdown,
@@ -668,3 +672,104 @@ def test_marker_inside_a_headerless_table_reopens_only_the_table():
 def test_marker_after_a_closed_table_adds_nothing():
     doc = parse_di_markdown(f"{_mark(1)}<table>\n{_HEAD}{_ROWS[0]}</table>\n{_mark(2)}after\n")
     assert _texts(doc.pages[1]) == [("Paragraph", "after")]
+
+
+# ---- 数值判断（行标签过滤）与纯 stdlib 契约 --------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "2022",
+        "100",
+        "1,234",
+        "1,234.56",
+        "1 234",
+        "1\u00a0234",
+        "0.5",
+        ".5",
+        "+12",
+        "-12",
+        "\u221212",
+        "\u201312",
+        "(130)",
+        "(1,234.5)",
+        "(12%)",
+        "12%",
+        "12 %",
+        "$1,234",
+        "US$ 5",
+        "HK$1,234",
+        "RMB 12.3",
+        "¥100",
+        "€ 3.5",
+        "£12",
+        "12bn",
+        "12 BN",
+        "3m",
+        "4.5mn",
+        "7k",
+        "1.2x",
+        "30pp",
+        "25 bps",
+        "12*",
+        "12**",
+        "12\u00b9",
+        "\uff11\uff12",
+        "\uff04\uff11\uff12",
+        "-$12bn",
+        "$(12)",
+        "12 USD",
+    ],
+)
+def test_is_value_like_accepts_numeric_forms(text):
+    assert _is_value_like(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "   ",
+        "-",
+        "—",
+        "n/a",
+        "*",
+        "()",
+        "$",
+        "Revenue",
+        "2023 年上半年",
+        "Q1",
+        "1H24",
+        "FY2024",
+        "Asia (ex-China)",
+        "Note 3",
+        "3 of 10",
+        "Total",
+        "12 months",
+        "2024-06-30",
+        "12-15",
+    ],
+)
+def test_is_value_like_rejects_labels(text):
+    assert not _is_value_like(text)
+
+
+def test_di_markdown_imports_only_stdlib_and_itself():
+    root = ROOT_DIR / "src" / "ragspine" / "extraction" / "di_markdown"
+    allowed = ("ragspine.extraction.di_markdown", "ragspine")
+    for path in sorted(root.glob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                names = [node.module]
+            elif isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            else:
+                continue
+            for name in names:
+                ok = (
+                    name.split(".")[0] in sys.stdlib_module_names
+                    or name in allowed
+                    or (name.startswith("ragspine.extraction.di_markdown."))
+                )
+                assert ok, f"{path.name} imports {name}"
