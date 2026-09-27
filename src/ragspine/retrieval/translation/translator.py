@@ -9,7 +9,7 @@ import，故移植规则而非引用）：译文只进检索（BM25，可选向�
 - trace 只记语言代码、原因码、计数和缓存命中，绝不记问题原文或译文。
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
@@ -94,11 +94,20 @@ def _clean(output: str) -> str:
 
 
 class LLMQueryTranslator:
-    """经 LLMProvider（corespine chat 协议）翻译，按 (问题, 目标语言) 缓存。provider 为 None 即不翻译。"""
+    """经 LLMProvider（corespine chat 协议）翻译，按 (问题, 目标语言) 缓存。provider 为 None 即不翻译。
 
-    def __init__(self, provider: LLMProvider | None) -> None:
+    seed：预填缓存的 {问题: 译文}（如评测复用上次的译文以排除翻译波动）；目标语言取译文自身的检测语言，
+    命中即不调 provider。
+    """
+
+    def __init__(
+        self, provider: LLMProvider | None, *, seed: Mapping[str, str] | None = None
+    ) -> None:
         self.provider = provider
-        self._cache: dict[tuple[str, str], TranslationResult] = {}
+        self._cache: dict[tuple[str, str], TranslationResult] = {
+            (query, detect_language(text)): TranslationResult(text, REASON_TRANSLATED)
+            for query, text in (seed or {}).items()
+        }
 
     def translate(self, query: str, *, target_language: str) -> TranslationResult:
         key = (query, target_language)

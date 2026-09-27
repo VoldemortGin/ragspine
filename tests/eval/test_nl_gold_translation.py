@@ -5,9 +5,12 @@
 - ``build_narrative_retriever(query_translator=...)`` 可注入翻译器，检索照常用它。
 - ``run_route(translation_of=...)`` 把本次检索用到的译文记进 ``CaseRun.translated_query``；没翻译 / 没检索为 None。
 - report.json 每条记录带 ``translated_query``，report.md 失败清单显示译文；旧报告重判时缺该字段记 None。
+- ``--translation-cache``：预填翻译器缓存，文件里有的问题不调 LLM，新译文写回；meta 记文件 / 命中 / 新增；
+  不开启时 meta 不变。
 - 隐私：译文只进评测产物，observability trace 里没有原文也没有译文。
 """
 
+import importlib.util
 import json
 import logging
 import os
@@ -34,11 +37,14 @@ from ragspine.retrieval.link.narrative_link import build_narrative_retriever
 from ragspine.retrieval.translation import LANG_EN, LLMQueryTranslator
 from ragspine.session import RAGSpine
 from ragspine.storage.fact_store import SqliteFactStore
-from tests.eval.test_nl_gold_ragspine import _DECK
+from tests.eval.test_nl_gold_ragspine import _DECK, _gold_payload
 
 ZH_Q = "代理人渠道的新业务价值占比是多少"
 EN_TRANSLATION = "Agency share of VONB"
 EN_Q = "What was the record ROE?"
+# _gold_payload() 里 p-mix-zh 的问题与一条可用译文。
+MIX_ZH_Q = "Agency 和 Partnerships 的 VONB 占比"
+MIX_EN = "Agency Partnerships VONB share"
 
 
 class _TranslatingProvider:
@@ -169,3 +175,87 @@ def test_rejudge_of_an_old_report_without_translated_query(db: Path, tmp_path: P
     report_path.write_text(json.dumps(report, ensure_ascii=False), encoding="utf-8")
     rejudged = rejudge_report(report_path, _cases())["B"]
     assert [r.translated_query for r in rejudged] == [None, None]
+
+
+# ---------------------------------------------------------------------------
+# --translation-cache：预填翻译器缓存，命中不调 LLM；新译文写回文件
+# ---------------------------------------------------------------------------
+
+
+def test_seeded_translation_is_served_from_the_cache_without_a_call() -> None:
+    provider = _TranslatingProvider({ZH_Q: "something else"})
+    translator = LLMQueryTranslator(provider, seed={ZH_Q: EN_TRANSLATION})
+    result = translator.translate(ZH_Q, target_language=LANG_EN)
+    assert (result.text, result.cache_hit, provider.calls) == (EN_TRANSLATION, True, 0)
+    assert translator.translations() == {ZH_Q: EN_TRANSLATION}
+
+
+def _script():  # noqa: ANN202
+    spec = importlib.util.spec_from_file_location(
+        "run_nl_gold_ragspine", ROOT_DIR / "scripts/run_nl_gold_ragspine.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_translation_cache_arg_is_off_by_default() -> None:
+    script = _script()
+    assert script._parse_args([]).translation_cache is None
+    assert script._parse_args(["--translation-cache", "c.json"]).translation_cache == Path("c.json")
+
+
+def test_translation_cache_file_io(tmp_path: Path) -> None:
+    script = _script()
+    path = tmp_path / "sub" / "cache.json"
+    assert script._load_translation_cache(path) == {}
+    new = script._save_translation_cache(
+        path, {"问题一": "question one"}, {"问题一": "ignored", "问题二": "question two"}
+    )
+    assert new == 1
+    # 文件里已有的译文优先（不被本次结果覆盖），新增的追加在后。
+    assert script._load_translation_cache(path) == {
+        "问题一": "question one",
+        "问题二": "question two",
+    }
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps({"q": 1}), encoding="utf-8")
+    with pytest.raises(ValueError, match="bad.json"):
+        script._load_translation_cache(bad)
+
+
+def _script_run(tmp_path: Path, *extra: str) -> dict:
+    deck = tmp_path / "deck.md"
+    deck.write_text(_DECK, encoding="utf-8")
+    gold = tmp_path / "gold.json"
+    gold.write_text(json.dumps(_gold_payload(), ensure_ascii=False), encoding="utf-8")
+    label = f"t{len(list(tmp_path.glob('out/*')))}"
+    argv = ["--gold", str(gold), "--document", str(deck), "--out-root", str(tmp_path / "out")]
+    argv += ["--workspace", str(tmp_path / "ws"), "--routes", ROUTE_FORCED_NARRATIVE]
+    argv += ["--cases", "p-mix-zh,p-roe", "--label", label, *extra]
+    assert _script().main(argv) == 0
+    (out,) = (tmp_path / "out").glob(f"*-{label}")
+    return json.loads((out / "report.json").read_text(encoding="utf-8"))
+
+
+def test_script_serves_translations_from_the_cache_file(tmp_path: Path) -> None:
+    cache = tmp_path / "translations.json"
+    cache.write_text(json.dumps({MIX_ZH_Q: MIX_EN}, ensure_ascii=False), encoding="utf-8")
+    report = _script_run(tmp_path, "--translation-cache", str(cache))
+    meta = report["meta"]
+    assert meta["translation_cache"] == str(cache)
+    assert (meta["translation_cache_hits"], meta["translation_cache_new"]) == (1, 0)
+    assert meta["llm_calls_translation"] == 0
+    runs = {r["case_id"]: r for r in report["cases"][ROUTE_FORCED_NARRATIVE]}
+    assert runs["p-mix-zh"]["translated_query"] == MIX_EN
+    assert json.loads(cache.read_text(encoding="utf-8")) == {MIX_ZH_Q: MIX_EN}
+
+
+def test_script_without_translation_cache_leaves_meta_unchanged(tmp_path: Path) -> None:
+    report = _script_run(tmp_path)
+    assert not [k for k in report["meta"] if k.startswith("translation_cache")]
+    # mock provider 不会翻译（原样返回）→ 无译文，翻译调用照常发生。
+    assert report["meta"]["llm_calls_translation"] == 1
+    runs = {r["case_id"]: r for r in report["cases"][ROUTE_FORCED_NARRATIVE]}
+    assert runs["p-mix-zh"]["translated_query"] is None

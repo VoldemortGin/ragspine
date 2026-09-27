@@ -14,6 +14,8 @@ embedding / 精排为 none，即零模型零网络。真实模型基线（先 ``
 主口径是整份文档（``--pages all``，默认）；``--pages gold`` 只入库 gold 冻结的页。``--repeat N`` 每题跑 N 次，
 报告每题通过率、主分均值±标准差和不稳定题（不做多数票）。``--rejudge <旧报告目录>`` 不入库、不调模型，
 只用当前判分器 + ``--gold`` 重判旧报告里记录的答案，看判分器 / gold 修正本身让分数变了多少。
+``--translation-cache <json>`` 用 {问题: 译文} 文件预填查询翻译缓存（命中不调 LLM，新译文写回），排除翻译波动；
+报告 meta 记文件、命中与新增条数，每题译文记在 ``translated_query``。
 
 图文混合上下文：``--source-pdf <原 PDF>`` 在入库时关联并渲染页图（同时写页标签）；``--page-images all``（``on`` 是别名，
 需 ``--page-parent dedup|page+child``）给检索结果的前 ``--page-images-top-n`` 页附页图，``tagged`` 只附其中命中
@@ -145,6 +147,13 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "把问题译成文档语言，译文作额外的 BM25 与向量查询（每题只译一次，缓存）",
     )
     parser.add_argument(
+        "--translation-cache",
+        type=Path,
+        default=None,
+        help="{问题: 译文} JSON（缺省不用）：文件里有的问题直接用其译文、不调 LLM，其余照常翻译并把可用译文写回，"
+        "重跑基线时排除翻译波动；文件不存在即新建",
+    )
+    parser.add_argument(
         "--source-pdf",
         type=Path,
         default=None,
@@ -187,6 +196,30 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--cases", default="", help="只跑这些 case_id（逗号分隔）")
     parser.add_argument("--reference-date", default=None, help="ISO 日期，缺省今天")
     return parser.parse_args(argv)
+
+
+def _load_translation_cache(path: Path) -> dict[str, str]:
+    """读 {问题: 译文} JSON；文件不存在返回空表，形状不对抛 ValueError。"""
+    if not path.is_file():
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) for k, v in data.items()
+    ):
+        raise ValueError(f"{path} 须为 {{问题: 译文}} 的 JSON 对象（字符串到字符串）")
+    return data
+
+
+def _save_translation_cache(
+    path: Path, cached: Mapping[str, str], translations: Mapping[str, str]
+) -> int:
+    """把本次新得到的译文追加写回（文件里已有的问题保持原译文），返回新增条数。"""
+    new = {q: t for q, t in translations.items() if q not in cached}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({**cached, **new}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    return len(new)
 
 
 def _git_head() -> str:
@@ -367,7 +400,19 @@ def main(argv: list[str] | None = None) -> int:
     rerank_counter = CountingProvider(provider) if args.reranker == "llm" else None
     translation_counter = CountingProvider(provider) if args.query_translation == "auto" else None
     # 自建翻译器注入检索器，好把每题实际用的译文读回来记进报告（只进评测产物，不进 trace）。
-    translator = LLMQueryTranslator(translation_counter) if translation_counter else None
+    cached_translations: dict[str, str] = {}
+    if args.translation_cache is not None:
+        if translation_counter is None:
+            print(
+                "警告：--translation-cache 需要 --query-translation auto，本次不会用到",
+                file=sys.stderr,
+            )
+        cached_translations = _load_translation_cache(args.translation_cache)
+    translator = (
+        LLMQueryTranslator(translation_counter, seed=cached_translations)
+        if translation_counter
+        else None
+    )
     translation_of = (lambda q: translator.translations().get(q)) if translator else None
     retriever, chunk_store = build_narrative_retriever(
         db,
@@ -471,6 +516,20 @@ def main(argv: list[str] | None = None) -> int:
         "llm_calls_translation": translation_counter.calls if translation_counter else 0,
         "timings": timings,
     }
+    if args.translation_cache is not None:
+        # 命中 = 本次实际用到、且就是文件里那条译文的问题（去重）；新增 = 写回文件的新问题。
+        used = {
+            r.question: r.translated_query for rs in runs.values() for r in rs if r.translated_query
+        }
+        meta["translation_cache"] = str(args.translation_cache)
+        meta["translation_cache_hits"] = sum(
+            cached_translations.get(q) == t for q, t in used.items()
+        )
+        meta["translation_cache_new"] = _save_translation_cache(
+            args.translation_cache,
+            cached_translations,
+            translator.translations() if translator else {},
+        )
     out = write_report(
         args.out_root / f"{date.today().isoformat()}-{args.label}",
         meta=meta,
