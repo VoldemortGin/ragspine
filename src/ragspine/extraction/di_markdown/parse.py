@@ -328,14 +328,16 @@ def _is_value_like(text: str) -> bool:
 
 
 def _is_year_label(value: str) -> bool:
-    """年份类写法（标签）：1900–2099 的四位年份；财年 `YYYY-YY`（YY == (YYYY+1) % 100，连接符
-    `-`、`–`、`—`、`/`）；`YYYY-YYYY`（两端 1900–2099、后年更大）；`YYYY-MM`（MM 为 01–12）。"""
+    """年份类写法（标签），YYYY 一律限定 1900–2099：四位年份；财年 `YYYY-YY`（YY == (YYYY+1) % 100，
+    连接符 `-`、`–`、`—`、`/`）；`YYYY-YYYY`（两端都在范围内、后年更大）；`YYYY-MM`（MM 为 01–12）。"""
     m = _YEAR_SPAN.fullmatch(value)
     if m is None:
         return False
     year, joiner, tail = int(m.group(1)), m.group(2), m.group(3)
+    if not 1900 <= year <= 2099:
+        return False
     if tail is None:
-        return 1900 <= year <= 2099
+        return True
     end = int(tail)
     if len(tail) == 4:
         return 1900 <= year < end <= 2099

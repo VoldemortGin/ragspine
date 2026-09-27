@@ -950,6 +950,14 @@ def test_is_value_like_rejects_labels(text):
         ("2026-12", False),
         ("2026-13", True),
         ("2026-00", True),
+        # YYYY 也限定 1900–2099
+        ("1234-35", True),
+        ("1234-06", True),
+        ("1899-00", True),
+        ("2100-01", True),
+        ("1234/35", True),
+        ("1900-01", False),
+        ("2099-00", False),
         # 带前缀的原本就是标签
         ("FY2024", False),
         ("1H24", False),
