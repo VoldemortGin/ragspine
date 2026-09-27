@@ -526,6 +526,30 @@ def test_cut_row_th_label_is_copied_to_the_next_page():
     assert (label.col, label.is_header) == (0, True)
 
 
+def test_numeric_th_is_not_a_label_and_col_zero_td_still_is():
+    _, (first, second) = _cut_row("<tr><td>a</td><th>1</th>{m2}<td>2</td><td>3</td></tr>\n")
+    assert _data_rows(second) == (("a", "", "2", "3"),)
+    assert first.header_row_count == second.header_row_count == 1
+
+
+def test_cut_all_th_total_row_keeps_its_numbers_out_of_the_header():
+    _, (first, second) = _cut_row(
+        "<tr><td>Life</td><td>90</td><td>100</td><td>110</td></tr>\n"
+        "<tr><th>Total</th><th>200</th>{m2}<th>210</th><th>220</th></tr>\n"
+    )
+    assert first.header_row_count == second.header_row_count == 1
+    assert _data_rows(first) == (("Life", "90", "100", "110"), ("Total", "200", "", ""))
+    assert _data_rows(second) == (("Total", "", "210", "220"),)
+    # 占位格一律是 td
+    assert [c.is_header for c in second.cells if c.row == 1] == [True, False, True, True]
+    assert [c.is_header for c in first.cells if c.row == 2] == [True, True, False, False]
+
+
+def test_only_leading_non_numeric_th_cells_are_labels():
+    _, (_, second) = _cut_row("<tr><th>Asia</th><th>Life</th><td>1</td>{m2}<td>2</td></tr>\n")
+    assert _data_rows(second) == (("Asia", "Life", "", "2"),)
+
+
 def test_cut_row_td_text_label_in_column_zero_is_copied():
     _, (_, second) = _cut_row("<tr><td>Revenue</td><td>90</td>{m2}<td>100</td><td>110</td></tr>\n")
     assert _data_rows(second) == (("Revenue", "", "100", "110"),)

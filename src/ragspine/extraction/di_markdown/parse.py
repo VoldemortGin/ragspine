@@ -214,8 +214,8 @@ def _closed_tables(text: str) -> list[tuple[int, int]]:
     return spans
 
 
-def _cell_html(cell: TableCell, text: str, row_span: int) -> str:
-    tag = "th" if cell.is_header else "td"
+def _cell_html(cell: TableCell, text: str, row_span: int, *, placeholder: bool = False) -> str:
+    tag = "th" if cell.is_header and not placeholder else "td"
     attrs = f' rowspan="{row_span}"' if row_span > 1 else ""
     attrs += f' colspan="{cell.col_span}"' if cell.col_span > 1 else ""
     return f"<{tag}{attrs}>{html.escape(text, quote=False)}</{tag}>"
@@ -251,10 +251,11 @@ def _page_table(
             limit = anchor.row + anchor.row_span
             if r < head and not native:
                 limit = min(limit, head)
-            text = anchor.text
+            text, placeholder = anchor.text, False
             if r >= head and anchor.row == r and not native:
                 if anchor not in labels or page < page_of[anchor]:
-                    text, limit = "", r + 1  # 占位只占本行；下一行起按跨页 rowspan 重出
+                    # 占位只占本行（下一行起按跨页 rowspan 重出），一律 td，不改变表头判定
+                    text, limit, placeholder = "", r + 1, True
             span = 1
             while i + span < len(rows) and rows[i + span] < limit:
                 span += 1
@@ -263,7 +264,7 @@ def _page_table(
                 for ii in range(i, i + span)
                 for cc in range(anchor.col, anchor.col + anchor.col_span)
             )
-            cells.append(_cell_html(anchor, text, span))
+            cells.append(_cell_html(anchor, text, span, placeholder=placeholder))
         lines.append("<tr>" + "".join(cells) + "</tr>")
     lines.append("</table>")
     return "\n".join(lines)
@@ -288,14 +289,20 @@ def _is_value_like(text: str) -> bool:
 def _row_labels(
     grid: TableGrid, owner: dict[tuple[int, int], TableCell], row: int
 ) -> list[TableCell]:
-    """行标签格：该行起始的 `<th>` 格；没有 th 时取第 0 列（归一化后不是纯数值才算）。"""
-    headers = [c for c in grid.cells if c.row == row and c.is_header]
-    if headers:
-        return headers
+    """行标签格：该行行首连续的非数值 `<th>` 格；没有时取第 0 列（非空、不像数值）。"""
+    labels: list[TableCell] = []
+    col = 0
+    while (cell := owner.get((row, col))) is not None and cell.row == row and cell.is_header:
+        if not cell.text.strip() or _is_value_like(cell.text):
+            break
+        labels.append(cell)
+        col = cell.col + cell.col_span
+    if labels:
+        return labels
     first = owner.get((row, 0))
-    if first is None or first.row != row or not first.text.strip():
+    if first is None or first.row != row or not first.text.strip() or _is_value_like(first.text):
         return []
-    return [] if _is_value_like(first.text) else [first]
+    return [first]
 
 
 def _split_table(source: str, bounds: list[int], pages: list[int], first: int) -> dict[int, str]:
