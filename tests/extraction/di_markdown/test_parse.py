@@ -659,6 +659,18 @@ def test_comments_inside_a_split_table_stay_on_their_page():
     assert _data_rows(_only_table(doc.pages[1])) == (("Profit", "30", "33"),)
 
 
+def test_an_unclosed_table_does_not_stop_later_tables_from_splitting():
+    doc = parse_di_markdown(
+        f"{_mark(1)}<table>\n<tr><td>never closed</td></tr>\n\n"
+        f"{_mark(2)}Intro.\n\n<table>\n{_HEAD}{_ROWS[0]}{_mark(3)}{_ROWS[1]}</table>\nAfter.\n"
+    )
+    assert _data_rows(_only_table(doc.pages[1])) == (("Revenue", "100", "110"),)
+    third = _only_table(doc.pages[2])
+    assert third.header_row_count == 2
+    assert _data_rows(third) == (("Profit", "30", "33"),)
+    assert _texts(doc.pages[2])[-1] == ("Paragraph", "After.")
+
+
 def test_stray_closing_tags_and_inline_tables_are_left_alone():
     doc = parse_di_markdown(
         f"{_mark(1)}stray </table> text\nsee <table><tr><td>1</td>{_mark(2)}<td>2</td></tr></table>\n"

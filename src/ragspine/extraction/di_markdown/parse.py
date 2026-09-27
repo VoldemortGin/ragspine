@@ -204,19 +204,23 @@ def page_marker_numbers(text: str) -> frozenset[int]:
 
 
 def _closed_tables(text: str) -> list[tuple[int, int]]:
-    """顶层 `<table>…</table>` 的区间（起始标签独占行首、有配对的闭合标签）。"""
-    spans: list[tuple[int, int]] = []
-    depth, start = 0, 0
+    """最外层的已闭合 `<table>…</table>` 区间（起始标签独占行首）。每张表按栈独立配对：
+    没有配对 `</table>` 的表整张放弃，不影响它后面的表。"""
+    closed: list[tuple[int, int]] = []
+    opened: list[int] = []
     for tag in _TABLE_TAG.finditer(text):
-        if tag.group(1):
-            if depth == 0:
-                continue  # 游离的 </table>
-            depth -= 1
-            if depth == 0 and text[text.rfind("\n", 0, start) + 1 : start].strip() == "":
-                spans.append((start, tag.end()))
-        else:
-            start = tag.start() if depth == 0 else start
-            depth += 1
+        if not tag.group(1):
+            opened.append(tag.start())
+        elif opened:  # 游离的 </table> 忽略
+            closed.append((opened.pop(), tag.end()))
+    spans: list[tuple[int, int]] = []
+    outer_end = -1
+    for start, end in sorted(closed):
+        if start < outer_end:
+            continue  # 嵌在已取的外层表里
+        outer_end = end
+        if text[text.rfind("\n", 0, start) + 1 : start].strip() == "":
+            spans.append((start, end))
     return spans
 
 
