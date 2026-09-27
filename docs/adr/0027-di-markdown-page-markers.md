@@ -28,8 +28,12 @@ page image was off by the gap, and `source_pdf`'s page-count equality check reje
 
 - **Detection**: the whole text contains a comment whose entire body is `page: N`
   (`<!--\s*page:\s*(\d+)\s*-->`, case-insensitive, same as SuperIndex `md_ingest.py`). Exposed as
-  `has_page_markers(text)`; `models.py` is unchanged (a new field would change `repr` and break the
-  byte-identical guarantee below).
+  `has_page_markers(text)` and `page_marker_numbers(text)`; `models.py` is unchanged (a new field would change
+  `repr` and break the byte-identical guarantee below).
+- **Page number cap**: `MAX_MARKER_PAGE = 10000`. Gaps are filled with empty pages, so without a cap one line
+  `<!-- page: 99999999 -->` would build a hundred million pages (hours, gigabytes) on the upload / ingest path.
+  A marker above the cap is not a page marker: it is stripped like any unknown comment, and if no marker within
+  the cap remains the text takes the PageBreak / no-marker path. Detection and `page_marker_numbers` obey the cap.
 - **`page: N` wins**: in marker mode `PageBreak` does not split pages; it is dropped as an unknown comment.
 - **`index == N`, gaps become empty pages**: page N sits at position N; a page with no marker is an empty
   `DiPage` (`blocks=()`, `number=index`). Page count = max N. Every consumer (narrative locator
@@ -40,11 +44,21 @@ page image was off by the gap, and `source_pdf`'s page-count equality check reje
   document order. The heading stack carries over in page order. Parsing never raises.
 - **Leading content** (before the first marker) belongs to the first marker's page.
 - **Inline marker**: the line is cut at the marker — text before it stays, text after it moves.
-- **Marker inside `<table>`**: if the table is still open at the marker, the next segment goes to a different
-  page and is not empty, the next page starts with `<table>` plus the original table's leading consecutive
-  all-`<th>` rows, copied verbatim. The first half keeps the existing "an unclosed table runs to the page end"
-  rule. So every data row is recorded on the page it is really on, and the data cells of the halves together
-  equal the original table's, with none repeated or lost. A marker inside `<figure>` is not repaired.
+- **Marker inside `<table>`** (the `<table` tag starts a line and has a matching `</table>`): the table is parsed
+  once, each cell is assigned to the page its first text is on (its start tag when empty), and the table is
+  rewritten as one table per page, with the markers kept in place:
+  - **Header**: the header block (`header_row_count` rows) is repeated on every page. A rowspan reaching out of the
+    header block into data rows is clipped to the block in the copy. This replaces the earlier "header copied
+    verbatim" rule: copying verbatim a `<th rowspan>` that also covers data rows would drag the page's first data
+    rows under it, shift their columns and change `header_row_count`.
+  - **Data rows** stay in their columns. A rowspan anchor coming from an earlier page is re-emitted in the page's
+    first row with the remaining row count; a cell of the same row that belongs to another page (a marker in the
+    middle of a `<tr>` or a `<td>` / `<th>`) leaves an empty placeholder cell. So numeric cells are neither
+    repeated nor lost; a rowspan anchor crossing pages appears once on each page (usually a row label).
+  - Other comments inside the table (PageHeader / PageFooter / PageNumber) stay on their page; the caption stays on
+    the first page.
+  - A table **without** a matching `</table>` is not rewritten and keeps the existing "an unclosed table runs to the
+    page end" rule, so it cannot swallow the text of later pages. A marker inside `<figure>` is not repaired.
 
 ### 2. Provenance
 
@@ -69,7 +83,14 @@ Markdown without markers keeps physical order.
   - **PDF sha256**: `source_pdf_sha256` (also accepted: `pdf_sha256`, `source_sha256`; hex, case-insensitive)
     must equal the actual PDF's sha256. Neither producer writes it yet (SuperIndex will in its next version);
     `source_pdf_sha256` is the name new producers should use.
-  - A missing field skips that check; a missing or unparseable sidecar skips them all.
+  - A missing field skips that check; no sidecar skips them all. A sidecar that exists but is not valid JSON or not
+    a JSON object, or a checked field of the wrong type (`page_count` / integer `pages` not an int, a sha256 field
+    not a string), is a `SourcePdfError`, as `resolve_source_pdf` already does for a corrupt sidecar. ragspine's
+    list `pages` is allowed and is not an analyzed count.
+  - **Known limit, blank pages**: the SuperIndex extractor inserts a marker only for a page with content
+    (`azure_di.py` `to_markdown` skips pages without spans), so for a PDF with blank pages `pages` exceeds the
+    distinct marker count and the check fails. Remedy: re-extract with a SuperIndex version that also marks blank
+    pages, or drop `pages` from the sidecar. The extractor fix is scheduled separately.
 
 ## Compatibility and migration
 
@@ -85,8 +106,10 @@ Markdown without markers keeps physical order.
 
 ## Consequences
 
-- Frozen by `tests/extraction/di_markdown/test_parse.py` (marker cases, table split proof),
-  `tests/ingestion/page_images/test_source_pdf.py` (each validation rule, both sidecar sources, sha256),
+- Frozen by `tests/extraction/di_markdown/test_parse.py` (marker cases, page cap with a time guard, table split:
+  numeric cells, column alignment, header / data rowspans, markers inside `td` / `th` / `tr`, unclosed tables),
+  `tests/ingestion/page_images/test_source_pdf.py` (each validation rule, both sidecar sources, sha256, corrupt
+  and mistyped sidecars),
   `tests/service/test_page_images_switch.py::test_facade_page_markers_use_true_pdf_pages` (8-page PDF, markers
   5..7: locator `@page=5`, stored image = PDF page 5, `ask` attaches `(deck.md, 5)`) and the legacy snapshot.
 - Page images still render every PDF page, including pages the markdown does not cover; rendering only covered
@@ -97,6 +120,9 @@ Markdown without markers keeps physical order.
 ## Alternatives considered
 
 - **Map true page → page without empty pages.** Needs a new `DiPage` field and changes in four consumers.
+- **Reopen the cut table textually (SuperIndex `_repair_html_tables`).** Re-opening `<table>` + header rows +
+  open `<tr>` / `<td>` keeps cell text, but a rowspan crossing the cut or reaching out of the header still shifts
+  columns; rewriting from the parsed grid keeps positions exact.
 - **Move a marker inside a table to after `</table>`.** Simpler, but the rest of the table's numbers would be
   recorded on the previous page.
 - **Keep the equality check in marker mode.** Rejects every partially analyzed markdown.
