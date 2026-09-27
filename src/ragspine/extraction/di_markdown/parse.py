@@ -345,10 +345,14 @@ def _split_table(
                 owner[(r, c)] = cell
     head = grid.header_row_count
     row_pages = [set(starts.get(r, ())) for r in range(head, grid.n_rows)]  # 每行至少起一个格
-    page_rows: dict[int, list[int]] = {first: []}
+    page_rows: dict[int, list[int]] = {}
     for k, ps in enumerate(row_pages):
         for page in ps:
             page_rows.setdefault(page, []).append(head + k)
+    # 没有数据行的页不出表（只有表头的空表）；caption 跟着文档中第一个出表的页
+    data = [c for c in grid.cells if c.row >= head]
+    caption_page = page_of[min(data, key=lambda c: offsets[(c.row, c.col)])] if data else first
+    page_rows = page_rows or {first: []}
     labels = {
         label
         for k, ps in enumerate(row_pages)
@@ -364,7 +368,7 @@ def _split_table(
             head,
             list(range(head)) + rows,
             labels,
-            caption=page == first,
+            caption=page == caption_page,
         )
         for page, rows in sorted(page_rows.items())
     }

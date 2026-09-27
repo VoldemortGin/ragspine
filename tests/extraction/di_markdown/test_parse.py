@@ -659,6 +659,23 @@ def test_comments_inside_a_split_table_stay_on_their_page():
     assert _data_rows(_only_table(doc.pages[1])) == (("Profit", "30", "33"),)
 
 
+def test_page_without_data_rows_gets_no_header_only_table():
+    doc = parse_di_markdown(
+        f"{_mark(1)}Intro.\n\n<table>\n<caption>T1</caption>\n{_HEAD}{_mark(2)}{''.join(_ROWS)}</table>\n"
+    )
+    assert _texts(doc.pages[0]) == [("Paragraph", "Intro.")]
+    second = _only_table(doc.pages[1])
+    assert second.caption == "T1"
+    assert second.header_row_count == 2
+    assert [r[0] for r in _data_rows(second)] == ["Revenue", "Profit", "Margin"]
+
+
+def test_header_only_table_cut_by_a_marker_is_kept_once():
+    doc = parse_di_markdown(f"{_mark(1)}<table>\n{_HEAD}{_mark(2)}</table>\ntail\n")
+    assert _only_table(doc.pages[0]).header_row_count == 2
+    assert _texts(doc.pages[1]) == [("Paragraph", "tail")]
+
+
 def test_an_unclosed_table_does_not_stop_later_tables_from_splitting():
     doc = parse_di_markdown(
         f"{_mark(1)}<table>\n<tr><td>never closed</td></tr>\n\n"
