@@ -1091,20 +1091,30 @@ def test_is_value_like_is_fast_on_a_huge_cell():
 
 
 def test_di_markdown_imports_only_stdlib_and_itself():
+    package = "ragspine.extraction.di_markdown"
     root = ROOT_DIR / "src" / "ragspine" / "extraction" / "di_markdown"
-    allowed = ("ragspine.extraction.di_markdown", "ragspine")
+
+    def inside(name):
+        return name == package or name.startswith(package + ".")
+
     for path in sorted(root.glob("*.py")):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if isinstance(node, ast.ImportFrom) and node.module:
-                names = [node.module]
+            if isinstance(node, ast.ImportFrom) and node.level > 0:
+                # 相对导入：解析出目标，必须仍在 di_markdown 包内
+                base = package.rsplit(".", node.level - 1)[0] if node.level > 1 else package
+                target = f"{base}.{node.module}" if node.module else base
+                assert inside(target), f"{path.name} imports {target}"
+                continue
+            if isinstance(node, ast.ImportFrom):
+                names = [node.module or ""]
+                # 唯一例外：包 __init__ 的惰性子模块钩子（全仓每个子包共用）
+                if path.name == "__init__.py" and node.module == "ragspine":
+                    assert [a.name for a in node.names] == ["_lazy_submodules"]
+                    continue
             elif isinstance(node, ast.Import):
                 names = [alias.name for alias in node.names]
             else:
                 continue
             for name in names:
-                ok = (
-                    name.split(".")[0] in sys.stdlib_module_names
-                    or name in allowed
-                    or (name.startswith("ragspine.extraction.di_markdown."))
-                )
+                ok = name.split(".")[0] in sys.stdlib_module_names or inside(name)
                 assert ok, f"{path.name} imports {name}"
