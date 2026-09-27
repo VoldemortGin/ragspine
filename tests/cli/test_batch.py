@@ -339,6 +339,32 @@ def test_claude_cli_provider_and_concurrency_note(tmp_path, workspace, questions
     assert "- provider: `claude-cli`" in summary and "- concurrency: `6`" in summary
 
 
+def test_litellm_provider_built_from_env(tmp_path, workspace, questions, monkeypatch):
+    from ragspine.agent.litellm_provider import LiteLLMProvider
+
+    monkeypatch.setenv("RAGSPINE_LITELLM_MODEL", "openai/qwen3")
+    built: list[LiteLLMProvider] = []
+    original = LiteLLMProvider.from_env.__func__
+
+    def spy(cls, env=None):
+        provider = original(cls, env)
+        built.append(provider)
+        return provider
+
+    monkeypatch.setattr(LiteLLMProvider, "from_env", classmethod(spy))
+    monkeypatch.setattr(
+        LiteLLMProvider, "chat", lambda self, messages, *, tools=None: MockProvider().chat(messages)
+    )
+    out = tmp_path / "out"
+    rc = main(
+        ["batch", str(questions), "--workspace", str(workspace), "--retrieval-only"]
+        + ["--provider", "litellm", "--query-translation", "off", "--out", str(out)]
+    )
+    assert rc == 0
+    assert [p.model for p in built] == ["openai/qwen3"]
+    assert "- provider: `litellm`" in (out / "summary.md").read_text(encoding="utf-8")
+
+
 @pytest.mark.parametrize(
     "changed",
     [

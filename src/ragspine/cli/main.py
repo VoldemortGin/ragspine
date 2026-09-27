@@ -145,6 +145,11 @@ def _cmd_ask(args: argparse.Namespace) -> int:
         from ragspine.agent.llm_provider import AnthropicProvider
 
         provider: object = AnthropicProvider()
+    elif args.provider == "litellm":
+        # litellm 惰性加载（缺 [litellm] extra 时首次调用报错）；模型 / api_base 读 RAGSPINE_LITELLM_*。
+        from ragspine.agent.litellm_provider import LiteLLMProvider
+
+        provider = LiteLLMProvider.from_env()
     else:
         provider = MockProvider()
 
@@ -1046,9 +1051,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_ask.add_argument(
         "--provider",
-        choices=["mock", "anthropic"],
+        choices=["mock", "anthropic", "litellm"],
         default="mock",
-        help="mock=离线确定性（默认）；anthropic=真实 Claude（需装 [llm] + key）",
+        help="mock=离线确定性（默认）；anthropic=真实 Claude（需装 [llm] + key）；"
+        "litellm=OpenAI 兼容模型（需 [litellm]，模型取 RAGSPINE_LITELLM_MODEL，缺省 deepseek/deepseek-chat）",
     )
     p_ask.set_defaults(func=_cmd_ask)
 
@@ -1159,9 +1165,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_batch.add_argument("--concurrency", type=int, default=1, help="并发数（默认 1）")
     p_batch.add_argument(
         "--provider",
-        choices=["mock", "anthropic", "claude-cli"],
+        choices=["mock", "anthropic", "claude-cli", "litellm"],
         default="mock",
-        help="mock=离线确定性（默认）；anthropic 需 [llm] + key；claude-cli 自带并发上限 4",
+        help="mock=离线确定性（默认）；anthropic 需 [llm] + key；claude-cli 自带并发上限 4；"
+        "litellm 需 [litellm]，模型取 RAGSPINE_LITELLM_MODEL（缺省 deepseek/deepseek-chat），自带并发上限 8",
     )
     p_batch.set_defaults(func=_cmd_batch)
 

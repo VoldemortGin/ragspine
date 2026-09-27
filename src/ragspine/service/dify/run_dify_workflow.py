@@ -73,6 +73,9 @@ def main() -> int:
             model=cast("str", spec.get("model", ServiceConfig.model)),
             base_url=cast("str | None", spec.get("base_url")),
             claude_cli_model=cast("str | None", spec.get("claude_cli_model")),
+            litellm_model=cast("str", spec.get("litellm_model", ServiceConfig.litellm_model)),
+            litellm_api_base=cast("str | None", spec.get("litellm_api_base")),
+            litellm_image_input=cast("bool", spec.get("litellm_image_input", False)),
             reference_date=cast("str | None", spec.get("reference_date")),
             tokens_per_minute=cast("int", spec.get("tokens_per_minute", 0)),
         )

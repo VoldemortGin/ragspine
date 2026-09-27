@@ -18,6 +18,7 @@ from corespine import CorespineError, RateLimitedProvider, env_key, load_from_en
 
 from ragspine.agent.agent import NarrativeRetriever
 from ragspine.agent.claude_cli_provider import ClaudeCliProvider
+from ragspine.agent.litellm_provider import DEFAULT_LITELLM_MODEL, LiteLLMProvider
 from ragspine.agent.llm_provider import (
     DEFAULT_ANTHROPIC_MODEL,
     AnthropicProvider,
@@ -217,12 +218,17 @@ class ServiceConfig:
     queue_db_path: str | None = None  # ReviewQueue（SME 复核）路径——非 job 队列
     manifest_db_path: str | None = None
     redis_url: str = "redis://localhost:6379/0"
-    provider_type: str = (
-        "mock"  # "mock" | "anthropic" | "claude-cli"(本机 `claude -p` 子进程，评测用)
-    )
+    provider_type: str = "mock"  # "mock" | "anthropic" | "claude-cli"(本机 `claude -p` 子进程，评测用) | "litellm"(需 [litellm])
     model: str = DEFAULT_ANTHROPIC_MODEL
     base_url: str | None = None
     claude_cli_model: str | None = None  # claude-cli 的 --model；None=不指定（CLI 默认）
+    litellm_model: str = DEFAULT_LITELLM_MODEL  # litellm 写法的模型名:deepseek/…、openai/<model>(配 api_base)、azure/…、ollama/…
+    litellm_api_base: str | None = (
+        None  # litellm 的 api_base(OpenAI 兼容网关 / 自部署);None=厂商默认
+    )
+    litellm_image_input: bool = (
+        False  # litellm 模型是否读页图(显式声明,不自动探测);False=只收纯文本
+    )
     retrieval_mode: str = "auto"  # 批次2.2④ 检索模式预设: "auto"/"hybrid"/"vector"(默认,embedding按下方配置装配,字节不变) | "economy"/"bm25"/"lexical"(零embedding成本,纯BM25关键词检索)
     embedding: str = "auto"  # "auto"(装[embed-onnx]→真语义ONNX,否则纯BM25) | "none" | "onnx" | "deterministic" | "openai" | "local-http"(/v1/embeddings,读 EMBEDDING_*)
     workflow_matcher: str = "auto"  # workflow scaffold: "auto" | "none" | "onnx"
@@ -314,6 +320,12 @@ def build_provider(config: ServiceConfig) -> LLMProvider:
         provider = AnthropicProvider(model=config.model, base_url=config.base_url)
     elif config.provider_type == "claude-cli":
         provider = ClaudeCliProvider(model=config.claude_cli_model)
+    elif config.provider_type == "litellm":
+        provider = LiteLLMProvider(
+            config.litellm_model,
+            api_base=config.litellm_api_base,
+            image_input=config.litellm_image_input,
+        )
     else:
         raise ValueError(f"未知 provider_type: {config.provider_type!r}")
     # 主动 TPM 限流(可选):tokens_per_minute>0 时用 corespine RateLimitedProvider 包装,
@@ -334,6 +346,9 @@ def provider_config_dict(config: ServiceConfig) -> dict[str, object]:
         "model": config.model,
         "base_url": config.base_url,
         "claude_cli_model": config.claude_cli_model,
+        "litellm_model": config.litellm_model,
+        "litellm_api_base": config.litellm_api_base,
+        "litellm_image_input": config.litellm_image_input,
         "reference_date": config.reference_date,
         "tokens_per_minute": config.tokens_per_minute,
     }

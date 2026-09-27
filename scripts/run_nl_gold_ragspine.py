@@ -11,6 +11,9 @@ embedding / 精排为 none，即零模型零网络。真实模型基线（先 ``
     .venv/bin/python scripts/run_nl_gold_ragspine.py --provider claude-cli \\
         --embedding local-http --reranker local-http --repeat 3 --label baseline
 
+``--provider litellm`` 经 litellm 调 OpenAI 兼容模型（需 ``[litellm]``）：``--litellm-model``（缺省
+``RAGSPINE_LITELLM_MODEL``，再缺省 ``deepseek/deepseek-chat``，key 读 ``DEEPSEEK_API_KEY``）、``--litellm-api-base``。
+
 主口径是整份文档（``--pages all``，默认）；``--pages gold`` 只入库 gold 冻结的页。``--repeat N`` 每题跑 N 次，
 报告每题通过率、主分均值±标准差和不稳定题（不做多数票）。``--rejudge <旧报告目录>`` 不入库、不调模型，
 只用当前判分器 + ``--gold`` 重判旧报告里记录的答案，看判分器 / gold 修正本身让分数变了多少。
@@ -118,8 +121,24 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=None,
         help="公司 profile TOML（设 RAGSPINE_COMPANY_CONFIG）；缺省沿用当前环境",
     )
-    parser.add_argument("--provider", choices=("mock", "claude-cli"), default="mock")
+    parser.add_argument("--provider", choices=("mock", "claude-cli", "litellm"), default="mock")
     parser.add_argument("--claude-model", default=None, help="claude-cli 的 --model（缺省不指定）")
+    parser.add_argument(
+        "--litellm-model",
+        default=None,
+        help="litellm 的模型名（litellm 写法，如 deepseek/deepseek-chat、openai/<model>）；"
+        "缺省取 RAGSPINE_LITELLM_MODEL，再缺省 deepseek/deepseek-chat",
+    )
+    parser.add_argument(
+        "--litellm-api-base",
+        default=None,
+        help="litellm 的 api_base（OpenAI 兼容网关）；缺省取 RAGSPINE_LITELLM_API_BASE",
+    )
+    parser.add_argument(
+        "--litellm-image-input",
+        action="store_true",
+        help="声明 litellm 模型能读页图（配合 --page-images）；缺省取 RAGSPINE_LITELLM_IMAGE_INPUT",
+    )
     parser.add_argument("--embedding", choices=("none", "local-http"), default="none")
     parser.add_argument(
         "--reranker",
@@ -220,6 +239,14 @@ def _save_translation_cache(
         json.dumps({**cached, **new}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
     return len(new)
+
+
+def _provider_label(args: argparse.Namespace, provider: object) -> str:
+    """报告里的 provider 标识：claude-cli 带 --claude-model，litellm 带实际模型名（及 api_base）。"""
+    if args.provider == "litellm":
+        base = getattr(provider, "api_base", None)
+        return f"litellm/{getattr(provider, 'model', '')}" + (f"@{base}" if base else "")
+    return args.provider + (f"/{args.claude_model}" if args.claude_model else "")
 
 
 def _git_head() -> str:
@@ -347,6 +374,15 @@ def main(argv: list[str] | None = None) -> int:
         from ragspine.agent.claude_cli_provider import ClaudeCliProvider
 
         provider = ClaudeCliProvider(model=args.claude_model)
+    elif args.provider == "litellm":
+        from ragspine.agent.litellm_provider import LiteLLMProvider
+
+        env_provider = LiteLLMProvider.from_env()
+        provider = LiteLLMProvider(
+            args.litellm_model or env_provider.model,
+            api_base=args.litellm_api_base or env_provider.api_base,
+            image_input=args.litellm_image_input or env_provider.supports_image_input,
+        )
     else:
         from ragspine.agent.llm_provider import MockProvider
 
@@ -494,7 +530,7 @@ def main(argv: list[str] | None = None) -> int:
         ),
         "chunks": chunk_count,
         "vectors": vectors,
-        "provider": args.provider + (f"/{args.claude_model}" if args.claude_model else ""),
+        "provider": _provider_label(args, provider),
         "embedding": models.get("embedding", args.embedding),
         "reranker": models.get("reranker", args.reranker),
         "page_parent": args.page_parent,

@@ -143,3 +143,45 @@ def test_ask_claude_cli_provider_selected(seeded_db, capsys, monkeypatch):
     assert rc == 0
     assert seen["model"] is None
     assert "1702" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("extra", "env", "expected"),
+    [
+        ([], {}, ("deepseek/deepseek-chat", None)),
+        (
+            [],
+            {"RAGSPINE_LITELLM_MODEL": "openai/qwen3", "RAGSPINE_LITELLM_API_BASE": "http://gw/v1"},
+            ("openai/qwen3", "http://gw/v1"),
+        ),
+        (
+            ["--model", "ollama/qwen3", "--base-url", "http://127.0.0.1:11434"],
+            {"RAGSPINE_LITELLM_MODEL": "openai/qwen3"},
+            ("ollama/qwen3", "http://127.0.0.1:11434"),
+        ),
+    ],
+)
+def test_ask_litellm_provider_selected(seeded_db, capsys, monkeypatch, extra, env, expected):
+    """--provider litellm 选到 LiteLLMProvider；--model/--base-url 优先于 RAGSPINE_LITELLM_*。"""
+    from ragspine.agent.litellm_provider import LiteLLMProvider
+    from ragspine.agent.llm_provider import MockProvider
+
+    for key in ("RAGSPINE_LITELLM_MODEL", "RAGSPINE_LITELLM_API_BASE"):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    seen = {}
+
+    def fake_chat(self, messages, *, tools=None):
+        seen["model_base"] = (self.model, self.api_base)
+        return MockProvider().chat(messages, tools=tools)
+
+    monkeypatch.setattr(LiteLLMProvider, "chat", fake_chat)
+    rc = ask_main(
+        ["--provider", "litellm", "--db", str(seeded_db), "--reference-date", "2026-06-12"]
+        + extra
+        + ["香港FY2025的REVENUE是多少"]
+    )
+    assert rc == 0
+    assert seen["model_base"] == expected
+    assert "1702" in capsys.readouterr().out

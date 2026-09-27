@@ -259,3 +259,24 @@ def test_script_without_translation_cache_leaves_meta_unchanged(tmp_path: Path) 
     assert report["meta"]["llm_calls_translation"] == 1
     runs = {r["case_id"]: r for r in report["cases"][ROUTE_FORCED_NARRATIVE]}
     assert runs["p-mix-zh"]["translated_query"] is None
+
+
+def test_litellm_provider_is_selectable_and_labelled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ragspine.agent.litellm_provider import LiteLLMProvider
+
+    models: list[str] = []
+
+    def fake_chat(self, messages, *, tools=None):  # noqa: ANN001, ANN202
+        models.append(self.model)
+        return MockProvider().chat(messages, tools=tools)
+
+    monkeypatch.setattr(LiteLLMProvider, "chat", fake_chat)
+    monkeypatch.delenv("RAGSPINE_LITELLM_API_BASE", raising=False)
+    monkeypatch.setenv("RAGSPINE_LITELLM_MODEL", "openai/from-env")
+    report = _script_run(
+        tmp_path, "--provider", "litellm", "--litellm-model", "deepseek/deepseek-chat"
+    )
+    assert report["meta"]["provider"] == "litellm/deepseek/deepseek-chat"
+    assert models and set(models) == {"deepseek/deepseek-chat"}

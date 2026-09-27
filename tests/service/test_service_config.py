@@ -202,6 +202,37 @@ def test_build_provider_claude_cli_type():
     assert provider_config_dict(cfg)["claude_cli_model"] == "sonnet"
 
 
+def test_build_provider_litellm_type():
+    # litellm 惰性加载：装配时不 import litellm，离线也能验证；默认 provider 仍是 mock。
+    from ragspine.agent.litellm_provider import DEFAULT_LITELLM_MODEL, LiteLLMProvider
+
+    assert ServiceConfig(db_path="/tmp/x.db").provider_type == "mock"
+    provider = build_provider(ServiceConfig(db_path="/tmp/x.db", provider_type="litellm"))
+    assert isinstance(provider, LiteLLMProvider)
+    assert provider.model == DEFAULT_LITELLM_MODEL == "deepseek/deepseek-chat"
+    assert provider.api_base is None and provider.supports_image_input is False
+
+    cfg = ServiceConfig.from_env(
+        {
+            "RAGSPINE_PROVIDER": "litellm",
+            "RAGSPINE_LITELLM_MODEL": "openai/qwen3",
+            "RAGSPINE_LITELLM_API_BASE": "http://127.0.0.1:8000/v1",
+            "RAGSPINE_LITELLM_IMAGE_INPUT": "true",
+        }
+    )
+    provider = build_provider(cfg)
+    assert isinstance(provider, LiteLLMProvider)
+    assert (provider.model, provider.api_base, provider.supports_image_input) == (
+        "openai/qwen3",
+        "http://127.0.0.1:8000/v1",
+        True,
+    )
+    spec = provider_config_dict(cfg)
+    assert spec["litellm_model"] == "openai/qwen3"
+    assert spec["litellm_api_base"] == "http://127.0.0.1:8000/v1"
+    assert spec["litellm_image_input"] is True
+
+
 def test_build_provider_unknown_raises():
     cfg = ServiceConfig(db_path="/tmp/x.db", provider_type="bogus")
     with pytest.raises(ValueError):

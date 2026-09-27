@@ -61,6 +61,23 @@ def test_doctor_reports_missing_anthropic_setup_without_exposing_values(
     assert "API_KEY" not in str(report.to_dict().get("config"))
 
 
+def test_doctor_checks_litellm_dependency_not_unknown_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("ragspine.diagnostics.doctor.importlib.util.find_spec", lambda _name: None)
+    config = load_effective_config(
+        env={},
+        overrides={
+            "provider_type": "litellm",
+            "db_path": str(tmp_path / "facts.db"),
+            "n8n_store_path": str(tmp_path),
+        },
+    )
+    codes = {finding.code for finding in run_doctor(config, env={}).findings}
+    assert "dependency.litellm.missing" in codes
+    assert "provider.unknown" not in codes
+
+
 def test_doctor_reports_missing_database_parent(tmp_path: Path) -> None:
     config = load_effective_config(
         env={},

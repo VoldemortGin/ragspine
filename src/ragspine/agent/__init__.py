@@ -8,6 +8,7 @@ Submodules:
     claude_cli_provider.py — ClaudeCliProvider：本机 `claude -p` 子进程模拟 LLM（评测用；tool calling 靠提示词模拟）。
     decompose.py — opt-in LLM 查询分解（W6a）：真多跳子问题拆解；默认 none 时旁路、字节不变。
     intent.py — 规则式（无 LLM）意图&范围解析 + 澄清网关。
+    litellm_provider.py — LiteLLMProvider：经 litellm 接 OpenAI 兼容各家模型（默认 deepseek/deepseek-chat；需 [litellm]，惰性加载）。
     llm_provider.py — LLMProvider 协议 + AnthropicProvider（真实）+ MockProvider（离线确定性）。
     number_guard.py — 叙事数字防编造（ADR 0024）：答案数字须在检索片段原样可找，否则确定性改写。
     query_tools.py — 参数化 query_metric 查询工具：found/not_found/unrecognized，绝不臆造。

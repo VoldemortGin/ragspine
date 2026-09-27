@@ -115,6 +115,27 @@ def test_ask_not_found_refuses(capsys, tiny_fact_db):
     assert "查不到" in out
 
 
+def test_ask_litellm_provider_reads_env_model(capsys, tiny_fact_db, monkeypatch):
+    """ask --provider litellm：模型取 RAGSPINE_LITELLM_MODEL，经 LiteLLMProvider 作答。"""
+    from ragspine.agent.litellm_provider import LiteLLMProvider
+    from ragspine.agent.llm_provider import MockProvider
+
+    monkeypatch.setenv("RAGSPINE_LITELLM_MODEL", "openai/qwen3")
+    seen = []
+
+    def fake_chat(self, messages, *, tools=None):
+        seen.append(self.model)
+        return MockProvider().chat(messages, tools=tools)
+
+    monkeypatch.setattr(LiteLLMProvider, "chat", fake_chat)
+    rc = main(
+        ["ask", "中国内地FY2030的REVENUE是多少", "--db", str(tiny_fact_db), "--provider", "litellm"]
+    )
+    assert rc == 0
+    assert seen and set(seen) == {"openai/qwen3"}
+    assert "查不到" in capsys.readouterr().out
+
+
 def test_ask_missing_db_is_honest_error(capsys, tmp_path):
     """ask 指向不存在的库：诚实报错、非零退出，绝不悄悄返回空答案。"""
     missing = tmp_path / "nope.db"

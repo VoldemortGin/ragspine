@@ -4,6 +4,7 @@
     python scripts/ask.py --provider mock "香港去年REVENUE多少"
     python scripts/ask.py --provider anthropic --base-url https://gw.example.com "..."
     python scripts/ask.py --provider claude-cli "..."   # 本机 `claude -p` 子进程（评测用）
+    python scripts/ask.py --provider litellm --model deepseek/deepseek-chat "..."   # 需 [litellm]
 mock 模式离线确定性，不需要任何 API key。
 """
 
@@ -14,6 +15,7 @@ from pathlib import Path
 
 from ragspine.agent.agent import answer_question
 from ragspine.agent.claude_cli_provider import ClaudeCliProvider
+from ragspine.agent.litellm_provider import LiteLLMProvider
 from ragspine.agent.llm_provider import (
     DEFAULT_ANTHROPIC_MODEL,
     AnthropicProvider,
@@ -31,10 +33,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("question", help="用户问题，如：香港去年REVENUE多少")
     parser.add_argument(
         "--provider",
-        choices=["mock", "anthropic", "claude-cli"],
+        choices=["mock", "anthropic", "claude-cli", "litellm"],
         default="mock",
         help="mock=离线确定性（默认）；anthropic=真实 Claude 调用；"
-        "claude-cli=本机 `claude -p` 子进程（评测用，需已安装并登录 Claude Code）",
+        "claude-cli=本机 `claude -p` 子进程（评测用，需已安装并登录 Claude Code）；"
+        "litellm=经 litellm 调 OpenAI 兼容模型（需 [litellm]，key 走厂商环境变量）",
     )
     parser.add_argument("--db", default=str(DEFAULT_FACT_DB), help="fact_metric sqlite 路径")
     parser.add_argument(
@@ -61,12 +64,14 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--model",
         default=None,
-        help=f"模型名：anthropic 默认 {DEFAULT_ANTHROPIC_MODEL}；claude-cli 默认不指定（CLI 自身默认）",
+        help=f"模型名：anthropic 默认 {DEFAULT_ANTHROPIC_MODEL}；claude-cli 默认不指定（CLI 自身默认）；"
+        "litellm 用 litellm 写法（如 deepseek/deepseek-chat、openai/<model>），默认取 RAGSPINE_LITELLM_MODEL"
+        "，再缺省 deepseek/deepseek-chat",
     )
     parser.add_argument(
         "--base-url",
         default=None,
-        help="覆盖 Anthropic API base_url（适配企业网关）",
+        help="覆盖 Anthropic API base_url（适配企业网关）；litellm 时作为 api_base（OpenAI 兼容网关）",
     )
     return parser
 
@@ -95,6 +100,13 @@ def main(argv: list[str] | None = None) -> int:
         )
     elif args.provider == "claude-cli":
         provider = ClaudeCliProvider(model=args.model)
+    elif args.provider == "litellm":
+        env_provider = LiteLLMProvider.from_env()
+        provider = LiteLLMProvider(
+            args.model or env_provider.model,
+            api_base=args.base_url or env_provider.api_base,
+            image_input=env_provider.supports_image_input,
+        )
     else:
         provider = MockProvider(reference_date=reference_date)
 

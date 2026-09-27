@@ -145,6 +145,9 @@ def run_doctor(
                     "key.anthropic.missing", "error", "key", "ANTHROPIC_API_KEY is not configured"
                 )
             )
+    elif runtime.provider_type == "litellm":
+        # key 由 litellm 按模型厂商读各自的环境变量，这里只查依赖。
+        findings.append(_dependency("litellm", "litellm"))
     elif runtime.provider_type != "mock":
         findings.append(
             DoctorFinding(

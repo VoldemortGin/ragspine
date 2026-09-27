@@ -138,6 +138,13 @@ llm = [
     "anthropic>=0.40.0",
     "openai>=1.0",
 ]
+# LiteLLMProvider（agent/litellm_provider.py）：经 litellm 统一接 OpenAI 兼容的各家模型
+# （deepseek/…、openai/<model>+api_base、azure/…、ollama/…），不自写 HTTP 层。litellm 核心是 MIT
+# （过 ADR 0009 的 ≤Apache-2.0 许可门）。单开 extra 而不并入 [llm]：它带 tokenizers/tiktoken/aiohttp/boto3 等
+# 一串传递依赖，只用 Anthropic 的人不该为此买单。延迟 import（首次调用时），不装也能 import 核心、跑离线默认。
+litellm = [
+    "litellm>=1.80",
+]
 # 通用 SentenceTransformer 向量后端（默认 Qwen3-Embedding-0.6B）。
 # 延迟 import：不装也能 import 模块、跑离线/纯 BM25 默认；transformers/torch 由其带入。
 # 真实模型加载/编码在 GPU 盒子上跑（pytest -m gpu），不在离线单测内。
@@ -281,7 +288,7 @@ service = [
 # GPU 与否无需在此区分——torch/transformers/paddleocr 装的是自适应版，运行时探测到
 # CUDA 即用 GPU、否则回落 CPU；embed 的 transformers 上限已按 darwin 平台标记处理。
 all = [
-    "rag-spine[pdf,ocr,doc,llm,embed,embed-onnx,rerank,colbert,splade,colpali,vector,graph,otel,connectors,service,dify]",
+    "rag-spine[pdf,ocr,doc,llm,litellm,embed,embed-onnx,rerank,colbert,splade,colpali,vector,graph,otel,connectors,service,dify]",
 ]
 
 [build-system]
@@ -429,6 +436,6 @@ module = [
     "sentence_transformers.*", "fastembed.*", "docling.*", "pdfspine.*", "docspine.*", "pptspine.*", "rq.*", "redis.*",
     "pptx.*", "markdown.*", "reportlab.*", "rootutils.*", "sqlite_vec.*", "pg8000.*",
     "qdrant_client.*", "yaml", "numpy.*", "torch.*", "networkx.*", "opentelemetry.*",
-    "pandas.*", "pyarrow.*", "transformers.*", "PIL.*",
+    "pandas.*", "pyarrow.*", "transformers.*", "PIL.*", "litellm.*",
 ]
 ignore_missing_imports = true

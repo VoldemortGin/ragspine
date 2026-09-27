@@ -66,7 +66,7 @@ _CLAUDE_CLI_NOTE = "claude-cli provider 自带并发上限（默认 4 个 `claud
 # MockProvider 收到翻译请求会原样返回问题：auto 在 mock 下等于没翻译。
 _MOCK_TRANSLATION_NOTE = (
     "query_translation=auto 但 provider 是 mock：MockProvider 对翻译请求原样返回问题，"
-    "本次跨语言翻译实际没有生效；要评测真实翻译效果请换成真实 provider（anthropic / claude-cli）。"
+    "本次跨语言翻译实际没有生效；要评测真实翻译效果请换成真实 provider（anthropic / claude-cli / litellm）。"
 )
 
 # claude-cli 的 token 取自 `claude -p` JSON 的 usage；页图由模型经 Read 工具读取，是否完整计入未经核实。
@@ -129,6 +129,10 @@ def _make_provider(name: str) -> LLMProvider:
 
         provider: LLMProvider = claude_cli_provider.ClaudeCliProvider()
         return provider
+    if name == "litellm":
+        from ragspine.agent.litellm_provider import LiteLLMProvider
+
+        return LiteLLMProvider.from_env()
     return MockProvider()
 
 
