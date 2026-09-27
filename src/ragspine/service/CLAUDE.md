@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/service/
-verified-against: 4cb01273af900910fb698aa6f348d87c44076edb
+verified-against: e4fe90a3c99bb3be9eaba6e882e538f62b44b518
 ---
 
 # service — agent contract
@@ -66,6 +66,13 @@ The L2 subprocess entry ships inside the wheel (`dify/run_dify_workflow.py`, `py
 repo `scripts/` copy is a source-tree fallback). `dify/http_client.py` is the guarded client the
 runner injects for http-request nodes — default-off (`RAGSPINE_DIFY_HTTP_ENABLED`), stdlib-only,
 timeout-clamped, 1MB response cap, http(s)-only redirects; generated code never imports networking.
+
+The **Dify public Workflow API** (`api/dify_public.py`) keeps terminal run summaries for
+`GET /v1/workflows/run/{id}` in `api/dify_run_store.py` (ADR 0026): default in-memory, global
+last 100 (FIFO). `RAGSPINE_DIFY_PUBLIC_RUN_STORE_PATH` opts into a SQLite file (short-lived
+connections, per-app-key last 100, owner = SHA-256 of the key, JSON only); the run is persisted
+before any normal blocking/SSE response and every storage fault is a redacted
+`503 history_unavailable`. It is plaintext app data, never a trace, and not a checkpoint.
 
 The **OpenAI Chat Completions clone** (`api/openai_public.py`, self-contained like `dify_public.py`;
 `app.py` only `include_router`) exposes `POST /v1/chat/completions` (blocking + SSE) and
