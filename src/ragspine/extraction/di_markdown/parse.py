@@ -92,6 +92,7 @@ _DATE = re.compile(r"\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}")
 _MONTH = re.compile(
     r"(?<![a-z])(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*(?![a-z])", re.I
 )
+_YEAR_SPAN = re.compile(r"(\d{4})(?:\s*([-\u2014/])\s*(\d{2}|\d{4}))?")
 _FIGCAPTION = re.compile(r"<figcaption\b[^>]*>(.*?)</figcaption\s*>", re.IGNORECASE | re.DOTALL)
 
 
@@ -305,14 +306,17 @@ def _is_value_like(text: str) -> bool:
     """单元格是否承载数值事实（行标签过滤用：像数值的不当标签复制）。
 
     先剥掉末尾脚注（上标数字 ¹²³⁰⁴–⁹ 与 `*†‡`），再 NFKC（全角、不换行空格、½ → 1⁄2）并统一减号。
-    日期不算数值：三段式（`2026-06-30`、`6/30/2026`、`30.06.2026`）或含英文月份名（`30 Jun 2026`、
-    `Jun-26`）。单个数值见 `_single_value`；两段式且两端都像数值的也算：范围（`-`、`–`、`—`、`~` 连接，
+    日期和年份不算数值（先于数值 / 范围判定）：三段式（`2026-06-30`、`6/30/2026`、`30.06.2026`）、含英文
+    月份名（`30 Jun 2026`、`Jun-26`），以及 `_is_year_label` 的年份写法（`2024`、`2024-25`、`2024/25`、
+    `2024-2025`、`2026-06`）。单个数值见 `_single_value`；两段式且两端都像数值的也算：范围（`-`、`–`、`—`、`~` 连接，
     如 `12-15`、`3.5x-4.0x`）与分数（`1/2`）。空串、纯标点和超过 64 个字符的文本不算。"""
     value = text.strip().rstrip(_FOOTNOTES).strip()
     value = unicodedata.normalize("NFKC", value).translate(_MINUS).strip()
     if len(value) > _MAX_VALUE_CHARS:
         return False  # 数值都很短；长文本直接当标签，也免得逐个连接符切分成二次方
     if _DATE.fullmatch(value) or (_MONTH.search(value) and any(ch.isdigit() for ch in value)):
+        return False
+    if _is_year_label(value):
         return False
     if _single_value(value):
         return True
@@ -323,9 +327,24 @@ def _is_value_like(text: str) -> bool:
     )
 
 
+def _is_year_label(value: str) -> bool:
+    """年份类写法（标签）：1900–2099 的四位年份；财年 `YYYY-YY`（YY == (YYYY+1) % 100，连接符
+    `-`、`–`、`—`、`/`）；`YYYY-YYYY`（两端 1900–2099、后年更大）；`YYYY-MM`（MM 为 01–12）。"""
+    m = _YEAR_SPAN.fullmatch(value)
+    if m is None:
+        return False
+    year, joiner, tail = int(m.group(1)), m.group(2), m.group(3)
+    if tail is None:
+        return 1900 <= year <= 2099
+    end = int(tail)
+    if len(tail) == 4:
+        return 1900 <= year < end <= 2099
+    return end == (year + 1) % 100 or (joiner == "-" and 1 <= end <= 12)
+
+
 def _single_value(value: str) -> bool:
     """一个数：逐层剥掉比较 / 近似符号、正负号、括号负数、货币前缀、单位后缀，剩下的须是一个数
-    （千分位逗号或空格、小数、科学计数）。年份也算。"""
+    （千分位逗号或空格、小数、科学计数）。"""
     value = value.strip()
     while True:
         before = value

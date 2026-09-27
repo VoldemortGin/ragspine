@@ -414,17 +414,13 @@ def _only_table(page):
 
 
 def _numbers(*grids):
-    """数值格（非表头、可解析为数字的锚点格文本），多重集比较用。"""
-    out = []
-    for grid in grids:
-        for cell in grid.cells:
-            try:
-                float(cell.text)
-            except ValueError:
-                continue
-            if not cell.is_header:
-                out.append(cell.text)
-    return sorted(out)
+    """数值格（非表头、承载数值事实的锚点格文本，口径同 `_is_value_like`），多重集比较用。"""
+    return sorted(
+        cell.text
+        for grid in grids
+        for cell in grid.cells
+        if not cell.is_header and _is_value_like(cell.text)
+    )
 
 
 def _aligned(grid, original):
@@ -558,8 +554,8 @@ def test_cut_row_td_text_label_in_column_zero_is_copied():
 
 
 def test_cut_row_numeric_column_zero_is_not_copied():
-    _, (first, second) = _cut_row("<tr><td>2022</td><td>90</td>{m2}<td>100</td><td>110</td></tr>\n")
-    assert _data_rows(first) == (("2022", "90", "", ""),)
+    _, (first, second) = _cut_row("<tr><td>1234</td><td>90</td>{m2}<td>100</td><td>110</td></tr>\n")
+    assert _data_rows(first) == (("1234", "90", "", ""),)
     assert _data_rows(second) == (("", "", "100", "110"),)
     _, (_, second) = _cut_row("<tr><td>1,234.5%</td><td>90</td>{m2}<td>100</td><td>110</td></tr>\n")
     assert _data_rows(second) == (("", "", "100", "110"),)
@@ -786,7 +782,6 @@ def test_marker_after_a_closed_table_adds_nothing():
 @pytest.mark.parametrize(
     "text",
     [
-        "2022",
         "100",
         "1,234",
         "1,234.56",
@@ -910,6 +905,68 @@ def test_is_value_like_accepts_numeric_forms(text):
 )
 def test_is_value_like_rejects_labels(text):
     assert not _is_value_like(text)
+
+
+@pytest.mark.parametrize(
+    ("text", "value_like"),
+    [
+        # 单独的四位年份：1900–2099 为标签
+        ("2024", False),
+        ("1900", False),
+        ("2099", False),
+        ("2024\u00b9", False),
+        ("2024*", False),
+        ("1899", True),
+        ("2100", True),
+        ("1234", True),
+        ("2,024", True),
+        ("2024.0", True),
+        ("2024m", True),
+        ("2024%", True),
+        ("$2024", True),
+        ("-2024", True),
+        # YYYY-YY：YY == (YYYY+1) % 100 为标签；连接符 - – — /
+        ("2024-25", False),
+        ("1999-00", False),
+        ("2024\u201325", False),
+        ("2024\u201425", False),
+        ("2024/25", False),
+        ("2024 - 25", False),
+        ("2024-26", True),
+        ("2024-27", True),
+        ("2024/27", True),  # 不是财年 → 按分数
+        ("1/2", True),
+        # YYYY-YYYY：两端都在 1900–2099 且后年更大为标签
+        ("2024-2025", False),
+        ("1999-2030", False),
+        ("2024/2025", False),
+        ("2025-2024", True),
+        ("2024-2024", True),
+        ("1899-1950", True),
+        ("2050-2100", True),
+        # YYYY-MM：MM 在 01–12 为标签
+        ("2026-06", False),
+        ("2026-01", False),
+        ("2026-12", False),
+        ("2026-13", True),
+        ("2026-00", True),
+        # 带前缀的原本就是标签
+        ("FY2024", False),
+        ("1H24", False),
+        ("FY2024-25", False),
+    ],
+)
+def test_year_forms_are_labels(text, value_like):
+    assert _is_value_like(text) is value_like
+
+
+def test_cut_row_with_year_in_column_zero_copies_the_year():
+    _, (first, second) = _cut_row(
+        "<tr><td>2024</td><td>90</td>{m2}<td>100</td><td>110</td></tr>\n"
+        "<tr><td>2025</td><td>91</td><td>101</td><td>111</td></tr>\n"
+    )
+    assert _data_rows(first) == (("2024", "90", "", ""),)
+    assert _data_rows(second) == (("2024", "", "100", "110"), ("2025", "91", "101", "111"))
 
 
 def test_is_value_like_is_fast_on_a_huge_cell():
