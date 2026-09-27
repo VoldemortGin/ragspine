@@ -53,8 +53,12 @@ page image was off by the gap, and `source_pdf`'s page-count equality check reje
     rows under it, shift their columns and change `header_row_count`.
   - **Data rows** stay in their columns. A rowspan anchor coming from an earlier page is re-emitted in the page's
     first row with the remaining row count; a cell of the same row that belongs to another page (a marker in the
-    middle of a `<tr>` or a `<td>` / `<th>`) leaves an empty placeholder cell. So numeric cells are neither
-    repeated nor lost; a rowspan anchor crossing pages appears once on each page (usually a row label).
+    middle of a `<tr>` or a `<td>` / `<th>`) leaves an empty placeholder cell, except the row label: the row's
+    `<th>` cells, or with no `<th>` its column-0 cell unless it is a plain number (`explicit_number` from
+    `extraction/evidence/figures/validation.py`), are copied to the same position on each later page of that row;
+    a label that is itself a rowspan anchor goes through the same re-emission, once per page. So numeric cells are
+    neither repeated nor lost; a rowspan anchor crossing pages appears once on each page (usually a row label), and
+    a row cut across pages has its label once on each page while its numbers are not repeated.
   - Other comments inside the table (PageHeader / PageFooter / PageNumber) stay on their page; the caption stays on
     the first page.
   - A table **without** a matching `</table>` is not rewritten and keeps the existing "an unclosed table runs to the

@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/extraction/
-verified-against: 5bfc2028af0c14cd887f10a7b74921be6364187d
+verified-against: 4a038084de6cca26f6c80667e187f1b24e0dfdd3
 ---
 
 # extraction — agent contract
@@ -32,7 +32,8 @@ PageHeader/PageFooter/PageNumber never reach the body. **Marker mode** (ADR 0027
 comments) makes N the split and `DiPage.index == N` (true PDF page; gaps = empty pages; `PageBreak` dropped); a closed
 table cut by markers is rewritten per page from its parsed grid (`html_table.parse_html_table_with_offsets` gives each
 cell's offset): header block repeated with rowspans clipped to it, cross-page rowspan anchors re-emitted, other-page cells
-left as empty placeholders, so columns stay aligned and no numeric cell is lost or repeated. No marker ⇒ byte-identical (`test_legacy_parse_snapshot.py`). Contract in `di_markdown/parse.py`'s docstring.
+left as empty placeholders except a cut row's label (its `<th>`, else a non-numeric column 0) copied to each later page,
+so columns stay aligned and no numeric cell is lost or repeated. No marker ⇒ byte-identical (`test_legacy_parse_snapshot.py`). Contract in `di_markdown/parse.py`'s docstring.
 `di_markdown/page_tags.py` (ADR 0025) derives per-page raw measures from the blocks — `has_table` (Table block or a
 pipe separator row with a `|`), `n_figures` / `figure_max_chars` (largest figure's text + caption), `text_chars`
 (all block text minus whitespace and `|`) — and `page_tags(stats, low_text_chars=300, figure_min_chars=10)` turns
