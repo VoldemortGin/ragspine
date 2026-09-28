@@ -3,7 +3,7 @@ covers:
   - src/ragspine/agent/
   - src/ragspine/retrieval/
   - src/ragspine/service/faq/
-verified-against: da5066c58ffa68864e672735f8755b90c640fdc2
+verified-against: 0dd6fefc8680435f27e8453aa1e7522d828dd34f
 ---
 
 # Architecture — request flow & dual channel
@@ -24,6 +24,7 @@ canonical one-liner diagram in `README.md`; the control-flow detail lives here.
 - **Composite** — run both, compare, merge.
 - **Route fallback (ADR 0023)** — a structured-route question with a missing metric or no `found` fact first tries the narrative channel (`RAGSPINE_NARRATIVE_FALLBACK`, default `on`). The answer is kept only if it's grounded (a number from the snippets, no `NO_ANSWER`); otherwise the structured ask / not-found result stands.
 - **LLM output truncation** — every provider call (tool loop, narrative synthesis, translation, rerank, decompose) goes through `chat`, so the provider layer handles a length cut: `agent/truncation.retry_on_truncation` doubles the output budget (cap `RAGSPINE_LLM_TRUNCATION_MAX_TOKENS`, default 16384; at most 2 retries) with reasoning turned off, and raises `TruncatedOutputError` (a `ProviderError`) when the output is still cut, so the existing honest degrade applies — a half answer or half tool-call JSON is never used. `RAGSPINE_LLM_TRUNCATION_RETRY`, default `on`; no truncation ⇒ one call with byte-identical request parameters.
+- **Per-call LLM telemetry (ADR 0028)** — `answer_question` opens one collector bucket per request, decorated provider `chat`s append one entry per call, and each call site carries a closed-enum stage (`decompose` / `classify` / `hyde` / `rag_fusion` / `step_back` / `translation` / `listwise_rerank` / `tool_round` / `synthesis`). The request trace gains `llm_calls` (counts, ms, attempts, truncation flags, tokens, error code — no model name, no prompt size) and `llm_n_calls` / `llm_n_retried` / `llm_ms` (a sum, not wall-clock) only when the request called an LLM; the truncation keys are derived from it. A split decomposition emits its sub-question traces plus one parent trace (`route="decomposed"`) carrying only the decompose / classify calls.
 - **Narrative number guard (ADR 0024)** — every narrative answer (narrative route, composite attribution, accepted fallback) may only carry numbers found in the retrieved snippets (`RAGSPINE_NARRATIVE_NUMBER_GUARD`, default `on`; `agent/number_guard.py`). Otherwise it is rewritten deterministically: "not directly given" plus the grounded raw values, or just the offending sentences dropped. The narrative prompt also forbids calculation and order / causal inference.
 
 Optional composition preserves the default request flow: `retrieval.postprocess.make_postprocessing_retriever`

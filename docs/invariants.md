@@ -5,7 +5,7 @@ covers:
   - src/ragspine/retrieval/link/
   - src/ragspine/retrieval/rerank/
   - src/ragspine/common/observability/
-verified-against: 131e229bdb16d3a95b4f9cd4ad0978927b624dfe
+verified-against: 0dd6fefc8680435f27e8453aa1e7522d828dd34f
 ---
 
 # Invariants (code-enforced)
@@ -46,7 +46,8 @@ Trace: `narrative_number_guard={ungrounded, rewritten}` (counts only, only on re
 (`agent/truncation.py`, `RAGSPINE_LLM_TRUNCATION_RETRY`, default `on`) raises `TruncatedOutputError`, a
 `ProviderError`: the tool loop and `_run_narrative` take their fixed degrade text, and a fallback has no sources, so it
 is not accepted. It never returns the cut text, because nothing upstream reads `finish_reason` and a half sentence can
-pass the number guard. Trace: `llm_truncation_retries` / `llm_truncated_final` (counts only, only when non-zero).
+pass the number guard. Trace: `llm_truncation_retries` / `llm_truncated_final` (counts only, only when non-zero; derived from the
+per-call `llm_calls` since ADR 0028, so a truncation during decomposition counts too).
 **Frozen by** `tests/agent/test_agent_orchestrator.py` (not-found / unrecognized rewrite,
 `test_found_path_discards_fabricated_extra_number`), `tests/agent/test_narrative_fallback.py`
 (fallback grounded / ungrounded / fabricated-number rejected / off ≡ old behavior),
@@ -271,6 +272,15 @@ first — a forbidden content key (`answer` / `value` / `text` / `content` / `pr
 `chunk_text` / `body`, case-insensitive exact key match against `FORBIDDEN_KEYS`) raises `TraceError` **before
 anything is logged**. The default `emit_trace` path is byte-identical to how it has always worked.
 
+**Recursive, with value constraints (ADR 0028).** Before the corespine sink, `emit_trace` runs ragspine's
+`enforce_trace_privacy`, which checks keys at **every level** — Mapping keys and list / tuple elements (strings are
+not expanded) — and names the path in the error (`llm_calls[0].prompt`). A payload with more than
+`MAX_TRACE_DEPTH = 8` container levels (counting the top level) is rejected as suspicious, never truncated and let
+through. Keys cannot catch body text under a harmless key, so the per-call LLM entries are also value-constrained:
+they are built only from the frozen `LLMCall` dataclass (ints / bools / `None`, `stage` and `error` from closed
+enums), and no model name or prompt size is recorded. corespine's `InProcessPrivacyTraceSink` still checks only the
+top level; a recursive corespine check is a follow-up.
+
 **Formalized as a seam (B1).** `common/observability/sink.py` lifts this into a **pluggable, privacy-enforced
 `TraceSink` seam** so observability can fan out to OTel/files *through the privacy conformance test, never
 around it*. It **reuses** corespine's `@runtime_checkable TraceSink` Protocol + `InProcessPrivacyTraceSink`
@@ -281,9 +291,12 @@ gate `enforce_trace_privacy` that **every** sink calls first. The `OtelTraceSink
 gate before any span attribute is set — so the OTel exit cannot leak content either.
 
 **Frozen by** `tests/conformance/test_trace_sink.py` (the privacy-trace conformance pack): every registered
-`TraceSink` (`in_process` + OTel) must reject/scrub a payload containing answer / fact value / chunk text, and
-two content-leaking reverse-proof stubs — `_LeakyTraceSink` (records the forbidden payload verbatim) and
-`_ValueSmugglingTraceSink` (drops the forbidden key but smuggles the value under a benign key) — fed the same
-decision-core **must FAIL**, proving the assertion has teeth. Plus the pre-existing
+`TraceSink` (`in_process` + OTel) must reject/scrub a payload containing answer / fact value / chunk text — at the
+top level or nested in a list / Mapping — and three content-leaking reverse-proof stubs — `_LeakyTraceSink` (records
+the forbidden payload verbatim), `_ValueSmugglingTraceSink` (drops the forbidden key but smuggles the value under a
+benign key) and `_TopLevelOnlyGateTraceSink` (the pre-ADR-0028 top-level-only gate) — fed the same decision-core
+**must FAIL**, proving the assertion has teeth. `tests/common/test_trace_privacy_recursive.py` pins the paths, the
+depth limit (8 passes, 9 fails) and the old gate's blindness; `tests/common/test_llm_calls.py` pins the value
+constraints. Plus the pre-existing
 `tests/common/test_observability_resilience.py` (R6–R9: exactly-one trace, no sensitive value leaks,
 forbidden-key rejection, byte-identical default paths).

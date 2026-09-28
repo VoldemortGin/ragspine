@@ -29,9 +29,12 @@ A thin argparse wrapper over the zero-SDK offline core — **never** shells out 
     -figure-min-chars` override only the preset's page-image fields (ADR 0025; invalid → exit 2); the summary and
     `run_settings.json` show the effective values. Ask mode listens to its own thread's request traces
     (`_RequestTraceCapture`, counts only) and adds a per-question `trace` (`requests`, `input_tokens`/`output_tokens`
-    or `None`, `page_images_sent`/`_dropped`, `number_guard_rewrites`); the summary adds images per question
-    (dropped ones shown when the provider cannot read images), latency p50/p95, token totals or "未采集到", and a
-    claude-cli token caveat.
+    or `None`, `page_images_sent`/`_dropped`, `number_guard_rewrites`, plus `llm_calls` concatenated from every trace on
+    the thread — the decomposed parent trace included, which does not count as a request — and `llm_n_calls` /
+    `llm_n_retried` / `llm_ms`, ADR 0028); the summary adds images per question
+    (dropped ones shown when the provider cannot read images), latency p50/p95, token totals or "未采集到", a
+    claude-cli token caveat, and an "LLM 调用（按阶段）" table (count, per question, mean / max ms, share of Σllm_ms,
+    retry rate; `llm_ms` is a sum, not wall-clock).
     `run_settings.json` pins the run's scoring settings; `--resume` with different settings → exit 2.
     A precheck opens the retriever once (ask's guards) and reports the actual vector channel in the summary.
   - `workflow serve <file-or-template-id> [--port N] [--open]` — starts the API + packaged

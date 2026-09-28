@@ -35,6 +35,20 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ### Added
 
+- **Per-call, per-stage LLM telemetry in the request trace** ([ADR 0028](docs/adr/0028-per-call-llm-telemetry.md)).
+  New stdlib-only `common/observability/llm_calls.py`: `record_llm_calls()` opens a per-request bucket
+  (`answer_question` is decorated with it, signature unchanged), `llm_stage()` labels call sites with a closed enum
+  (`decompose` / `classify` / `hyde` / `rag_fusion` / `step_back` / `translation` / `listwise_rerank` / `tool_round` /
+  `synthesis`, else `other`; an unknown stage raises `ValueError` at definition time), and `instrument_llm_call`
+  decorates the Anthropic / Mock / litellm / claude-cli `chat`. A request with LLM calls gains `llm_calls` (per call:
+  stage, ms, attempts, truncation retries, retried, truncated, reasoning disabled, in/out tokens, error code — ints,
+  bools, `None` and enum values only) plus `llm_n_calls` / `llm_n_retried` / `llm_ms` (a sum, not wall-clock).
+  Decomposition is now counted; a decomposed request also emits a parent trace (`route="decomposed"`,
+  `n_subquestions`, its decompose / classify calls). Zero-LLM traces are byte-identical; no model name or prompt size
+  is recorded. `ragspine batch` (ask mode) records each question's `llm_calls` and totals and adds an
+  "LLM 调用（按阶段）" summary table. The privacy gate `enforce_trace_privacy` now checks nested Mapping / list keys
+  (path in the error, more than 8 levels rejected as suspicious), and `emit_trace` plus every registered sink run it.
+
 - **LLM truncation retry in the provider layer (`agent/truncation.py`).** When `LiteLLMProvider`
   (`finish_reason="length"`), `AnthropicProvider` (`stop_reason="max_tokens"`) or `ClaudeCliProvider` (its
   "exceeded the N output token maximum" error) gets a length cut, it retries with the output budget doubled and
@@ -140,6 +154,11 @@ All notable changes to RAGSpine are documented here. This project follows Semant
   84.9%±2.6), but route B page recall@1 drops 59% → 53% and probe BM25 recall@5 slips 2–3 points.
 
 ### Changed
+
+- **Internal API: `TruncationStats`, `bind_truncation_stats` and `unbind_truncation_stats` are removed**
+  (`agent/truncation.py`; only `agent.py` and tests used them). Truncation retries now write to the per-call probe
+  (ADR 0028), and the request trace's `llm_truncation_retries` / `llm_truncated_final` are derived from `llm_calls`
+  with the same meaning and still only when non-zero. Truncations during query decomposition are now counted too.
 
 - **Page-level parent/child now defaults to `page+child`** (was `off`). `RAGSPINE_PAGE_PARENT` /
   `ServiceConfig.page_parent`, the facade's `RetrievalPreset.page_parent` (every profile),

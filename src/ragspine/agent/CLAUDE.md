@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/agent/
-verified-against: da5066c58ffa68864e672735f8755b90c640fdc2
+verified-against: 0dd6fefc8680435f27e8453aa1e7522d828dd34f
 ---
 
 # agent — agent contract
@@ -83,9 +83,9 @@ loop, LLM provider abstraction.
   `truncation=` override) and `retry_on_truncation`. On a cut, the budget is doubled up to the cap; retries stop when
   the budget can't grow any more. A cut that survives the retries ⇒ `TruncatedOutputError(ProviderError)`, which takes
   the existing honest degrade and is never returned as an answer (see Invariants). No cut ⇒ one call with a
-  byte-identical request. Off ⇒ a cut result comes back unchanged, as before. Counts reach the request trace through a
-  `ContextVar` (`bind_truncation_stats`, bound by `answer_question`): `llm_truncation_retries` /
-  `llm_truncated_final`, only when non-zero.
+  byte-identical request. Off ⇒ a cut result comes back unchanged, as before. Counts go to the current LLM call probe
+  (`note_attempt(truncation=True)` / `note_truncated()`, `common/observability/llm_calls`, ADR 0028); the request
+  trace's `llm_truncation_retries` / `llm_truncated_final` are derived from `llm_calls`, only when non-zero.
 - `number_guard.py` — **narrative number guard (ADR 0024)**: `guard_narrative_answer` /
   `ungrounded_numbers` (deterministic, zero LLM; normalization from `common/answer_text`),
   `NUMBER_GUARD_RULE` (prompt), `NUMBER_GUARD_NOTICE`, `resolve_number_guard` /
@@ -159,6 +159,16 @@ loop, LLM provider abstraction.
   Never backfill "ACME".
 - **Privacy-aware traces** — `_TraceCtx` records metadata only (tokens, timings,
   chunk_id, scores), never answer / fact value / chunk text.
+- **Per-call LLM telemetry (ADR 0028)** — `answer_question` is wrapped in `@record_llm_calls()` (one bucket per
+  request, signature unchanged); every provider `chat` here is decorated with `instrument_llm_call`, and each LLM
+  call site carries an `llm_stage` label from the closed enum (`decompose` / `classify` / `hyde` / `rag_fusion` /
+  `step_back` / `tool_round` / `synthesis` here; `translation` / `listwise_rerank` in `retrieval/`). In `agent.py`
+  the `with llm_stage(...)` wraps **only the `provider.chat` line** (retrieval inside synthesis keeps its own
+  stages). A new LLM call site needs a stage, or it shows up as `other`; a new provider needs the decorator, or it
+  is not recorded. The trace gains `llm_calls` + `llm_n_calls` / `llm_n_retried` / `llm_ms` only when there were
+  calls; a split decomposition also emits a parent trace (`route="decomposed"`, `n_subquestions`, decompose /
+  classify calls only). `provider_seconds` / `token_usage` keep their old tool-loop + synthesis scope. No model
+  name, no prompt size. Any in-request thread pool must run each task under `copy_context().run`.
 
 ## Read before editing
 

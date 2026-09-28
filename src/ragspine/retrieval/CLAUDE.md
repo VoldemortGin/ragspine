@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/
-verified-against: 9a3a32d9d4102c618a287b4816ac23df9c7eeeea
+verified-against: 0dd6fefc8680435f27e8453aa1e7522d828dd34f
 ---
 
 # retrieval — agent contract
@@ -91,7 +91,9 @@ cache keyed by the translation's detected language; `translations()` reads back 
 `no_provider` / `provider_error` / `empty_output` / `unchanged` / `wrong_language` / `too_long`). The translation is an
 extra query via `HybridRetriever.search(extra_queries=, extra_vector=)` — BM25 and (as wired) vector, plus the
 `page+child` whole-page BM25; rerank and generation keep the original question. Trace `op=narrative.query_translation`
-= status / reason / language codes / counts, never text. off frozen by
+= status / reason / language codes / counts, never text. `LLMQueryTranslator.translate` is labelled
+`@llm_stage("translation")` and `link/`'s `ProviderListwiseJudge.judge` `@llm_stage("listwise_rerank")` (per-call LLM
+telemetry, ADR 0028; the request trace's `llm_calls`). off frozen by
 `tests/retrieval/query_translation/test_query_translation_off_snapshot.py`),
 `lexical/` (Okapi BM25, CJK uni+bigram, RRF fusion — `HybridRetriever` delegates
 its vector **scoring** to the `VectorStore` seam), `vector/` (injectable embedding

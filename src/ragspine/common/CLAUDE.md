@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/common/
-verified-against: da5066c58ffa68864e672735f8755b90c640fdc2
+verified-against: 0dd6fefc8680435f27e8453aa1e7522d828dd34f
 ---
 
 # common — agent contract
@@ -19,7 +19,12 @@ behavior unchanged) + `sink.py` (the **`TraceSink` seam** — `make_trace_sink` 
 `RAGSPINE_TRACE_SINK` registry + `ragspine.trace_sinks` entry-point discovery + the reusable
 `enforce_trace_privacy` gate; **reuses** corespine's `@runtime_checkable TraceSink` Protocol +
 `InProcessPrivacyTraceSink` default, no duplicate Protocol) + `adapters/otel.py` (`OtelTraceSink`,
-behind `[otel]`, privacy-gated before any span).
+behind `[otel]`, privacy-gated before any span) + `llm_calls.py` (per-call, per-stage LLM telemetry, ADR 0028,
+stdlib only: `record_llm_calls` bucket, `llm_stage` closed-enum label — unknown ⇒ `ValueError` at definition time,
+`instrument_llm_call` for provider `chat`, `note_attempt` / `note_truncated` / `note_reasoning_disabled`,
+`llm_trace_fields`; entries are frozen `LLMCall`s of ints / bools / `None` / enum values; the collector never raises
+and, with no bucket, returns the same object / re-raises the same exception; appends are locked, and an in-request
+thread pool must use `copy_context().run` per task).
 
 `answer_text.py` — `normalize_answer` / `contains_normalized`: number-friendly text normalization
 (NFKC, thousands, `per cent`→`%`, magnitude amounts) + digit-boundary containment. One definition shared by the
@@ -45,14 +50,18 @@ before. Used by `agent/decompose`, `agent/query_transform` (RAG-Fusion) and `gra
 
 - **Privacy-aware traces** — `observability` records codes / counts / timings
   only, never answer / fact value / chunk text. **Mechanically enforced**: `emit_trace`
-  runs every payload through a corespine `InProcessPrivacyTraceSink` first — a forbidden
-  content key (answer/value/text/content/prompt/completion/chunk/chunk_text/body) raises
-  `TraceError` before anything is logged. Privacy by construction, not by convention.
+  runs every payload through `enforce_trace_privacy` and a corespine `InProcessPrivacyTraceSink` first — a
+  forbidden content key (answer/value/text/content/prompt/completion/chunk/chunk_text/body) raises
+  `TraceError` before anything is logged. The ragspine gate is **recursive** (ADR 0028): Mapping keys and
+  list/tuple elements at any depth, error with a path like `llm_calls[0].prompt`; more than `MAX_TRACE_DEPTH = 8`
+  container levels is rejected as suspicious, never truncated. corespine's sink itself still checks only the top
+  level (recursive corespine check is a follow-up). Privacy by construction, not by convention.
   **Formalized as a seam** (`sink.py`): any fan-out sink (incl. `OtelTraceSink`) calls
-  `enforce_trace_privacy` first, so it goes *through* the same privacy gate, never around it —
-  bound for every registered sink by `tests/conformance/test_trace_sink.py` (+ two content-leaking
-  reverse-proof stubs that must FAIL). `make_trace_sink()` defaults to `None` ⇒ `emit_trace` path
-  byte-identical.
+  `enforce_trace_privacy` first, so it goes *through* the same privacy gate, never around it (the built-in
+  `in_process` sink is a thin corespine subclass that does) — bound for every registered sink by
+  `tests/conformance/test_trace_sink.py` (nested-leak payloads included, + three reverse-proof stubs that must
+  FAIL: verbatim leak, value smuggling, top-level-only gate). `make_trace_sink()` defaults to `None` ⇒
+  `emit_trace` path byte-identical.
 - **Config-driven** — identity / metrics / competitors come from `CompanyProfile`;
   never hardcode a company.
 
