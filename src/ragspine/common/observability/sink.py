@@ -45,6 +45,7 @@ __all__ = [
     "FORBIDDEN_KEYS",
     "TRACE_SINK_ENTRY_POINT_GROUP",
     "TRACE_SINK_ENV",
+    "MAX_TRACE_DEPTH",
     "InProcessPrivacyTraceSink",
     "TraceError",
     "TraceEvent",
@@ -54,19 +55,55 @@ __all__ = [
 ]
 
 
+# 隐私门递归扫描的容器层数上限（含顶层载荷）；更深的载荷按"可疑"报错，不截断放行。
+MAX_TRACE_DEPTH = 8
+
+
+def _scan(value: object, path: str, depth: int, offending: list[str]) -> None:
+    """递归收集禁词键路径：遍历 Mapping 的键与 list/tuple 的元素（字符串不展开）。"""
+    if isinstance(value, Mapping):
+        items: list[tuple[str, object]] = []
+        for key, item in value.items():
+            key_path = f"{path}.{key}" if path else str(key)
+            if str(key).strip().lower() in FORBIDDEN_KEYS:
+                offending.append(key_path)
+            items.append((key_path, item))
+    elif isinstance(value, list | tuple):
+        items = [(f"{path}[{i}]", item) for i, item in enumerate(value)]
+    else:
+        return
+    if depth > MAX_TRACE_DEPTH:
+        raise TraceError(
+            f"trace 载荷嵌套超过 {MAX_TRACE_DEPTH} 层（{path}）：按可疑载荷拒绝，不截断放行。"
+        )
+    for item_path, item in items:
+        _scan(item, item_path, depth + 1, offending)
+
+
 def enforce_trace_privacy(fields: Mapping[str, object]) -> None:
-    """隐私门：载荷键命中 corespine FORBIDDEN_KEYS 即抛 TraceError（归一小写后精确匹配）。
+    """隐私门：载荷里任何一层的键命中 corespine FORBIDDEN_KEYS 即抛 TraceError（归一小写后精确匹配）。
 
     这是每个 TraceSink 扇出前的强制关卡——「答案正文 / 事实数值 / chunk 正文」一类禁词键宁可报错
-    也绝不外发。复用 corespine 的 FORBIDDEN_KEYS 与 TraceError，语义与 InProcessPrivacyTraceSink
-    逐字一致，故任何自定义 / OTel sink 只要先调用它，就【经】同一条隐私门——扇出而不绕过。
+    也绝不外发。复用 corespine 的 FORBIDDEN_KEYS 与 TraceError；顶层键的判定与 InProcessPrivacyTraceSink
+    逐字一致，此外递归检查 Mapping 的键与 list/tuple 的元素（ADR 0028），报错给出路径（如
+    `llm_calls[0].prompt`）；容器层数（含顶层）超过 MAX_TRACE_DEPTH 按可疑载荷报错。任何自定义 / OTel
+    sink 只要先调用它，就【经】同一条隐私门——扇出而不绕过。
     """
-    offending = sorted(k for k in fields if k.strip().lower() in FORBIDDEN_KEYS)
+    offending: list[str] = []
+    _scan(fields, "", 1, offending)
     if offending:
         raise TraceError(
-            f"trace 载荷含受限字段 {offending}：trace 只记 code / 计数 / 耗时，"
+            f"trace 载荷含受限字段 {sorted(offending)}：trace 只记 code / 计数 / 耗时，"
             "不得携带答案正文 / 字段取值 / chunk 正文。"
         )
+
+
+class _RecursivePrivacyTraceSink(InProcessPrivacyTraceSink):
+    """内置 in_process sink：先过递归隐私门，再交给 corespine 的进程内默认（其自身只查顶层）。"""
+
+    def emit(self, code: str, **fields: object) -> None:
+        enforce_trace_privacy(fields)
+        super().emit(code, **fields)
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +112,7 @@ def enforce_trace_privacy(fields: Mapping[str, object]) -> None:
 # 别名共指同一 loader（大小写 / 留白 / 连字符由 make_trace_sink 归一化时以显式别名键覆盖）。
 # ---------------------------------------------------------------------------
 def _load_in_process() -> type[TraceSink]:
-    return InProcessPrivacyTraceSink
+    return _RecursivePrivacyTraceSink
 
 
 def _load_otel() -> type[TraceSink]:

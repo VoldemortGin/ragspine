@@ -47,6 +47,10 @@ _FORBIDDEN_PAYLOADS: tuple[dict[str, object], ...] = (
     {"body": _SECRET},
     {"prompt": _SECRET},
     {"completion": _SECRET},
+    # 嵌套泄漏（ADR 0028 递归隐私门）：禁词键藏在 list / Mapping 里，只查顶层的门查不出。
+    {"llm_calls": [{"stage": "synthesis", "prompt": _SECRET}]},
+    {"page_images": {"text": _SECRET}},
+    {"rows": [[{"ok": 1}], [{"answer": _SECRET}]]},
 )
 
 
@@ -150,6 +154,25 @@ class _ValueSmugglingTraceSink:
         if smuggled:
             safe["note"] = smuggled[0]  # 正文换个 benign 键偷运 -> 值扫描应抓到
         self.events.append(TraceEvent(code=code, fields=safe))
+
+
+class _TopLevelOnlyGateTraceSink:
+    """反证 stub：引入递归前的旧门——只拒顶层禁词键，嵌套在 list / Mapping 里的正文照样落库。"""
+
+    def __init__(self) -> None:
+        self.events: list[TraceEvent] = []
+
+    def emit(self, code: str, **fields: object) -> None:
+        offending = [k for k in fields if k.strip().lower() in FORBIDDEN_KEYS]
+        if offending:
+            raise TraceError(f"含受限键 {offending}")
+        self.events.append(TraceEvent(code=code, fields=dict(fields)))
+
+
+def test_top_level_only_gate_sink_fails_privacy_core():
+    """只查顶层键的旧门喂进同一判定核必须 AssertionError——证明嵌套载荷用例有牙齿。"""
+    with pytest.raises(AssertionError, match="llm_calls|page_images|rows"):
+        _assert_sink_never_leaks(_TopLevelOnlyGateTraceSink())
 
 
 def test_leaky_sink_fails_privacy_core():

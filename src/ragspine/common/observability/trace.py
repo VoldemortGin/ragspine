@@ -7,7 +7,8 @@
 
 强制机制：每条 trace 先过 corespine 的 InProcessPrivacyTraceSink，载荷若含禁词键
 （answer / value / text / content / prompt / completion / chunk / chunk_text / body，
-大小写不敏感、精确键名匹配）会【直接抛 TraceError】、绝不写日志——隐私 by construction，
+大小写不敏感、精确键名匹配；先经 sink.enforce_trace_privacy 递归检查嵌套 Mapping / list，ADR 0028）
+会【直接抛 TraceError】、绝不写日志——隐私 by construction，
 而非靠 reviewer 自觉。通过校验后再以 stdlib logging 落盘（字段经 extra 挂到 LogRecord
 属性，供 caplog/宿主消费）。
 
@@ -19,6 +20,8 @@ import logging
 import uuid
 
 from corespine import InProcessPrivacyTraceSink
+
+from ragspine.common.observability.sink import enforce_trace_privacy
 
 # 全链路 trace 专用 logger（宿主配置 handler；默认不刷屏）
 TRACE_LOGGER_NAME = "ragspine.trace"
@@ -44,7 +47,8 @@ def emit_trace(logger: logging.Logger | None = None, **fields: object) -> None:
     载荷先过 corespine 隐私 sink 强制校验：若含受限正文字段（answer/text/content/...）
     则抛 TraceError、不落盘——隐私由机制保证，而非约定。
     """
-    # 隐私强制：载荷含禁词键即抛 TraceError（在落盘之前），绝不悄悄记下去。
+    # 隐私强制：载荷任何一层含禁词键即抛 TraceError（在落盘之前），绝不悄悄记下去。
+    enforce_trace_privacy(fields)
     _privacy_sink.emit(_TRACE_CODE, **fields)
     log = logger or _trace_logger
     log.info(_TRACE_CODE, extra=fields)

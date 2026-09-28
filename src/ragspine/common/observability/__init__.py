@@ -16,6 +16,7 @@ Submodules:
 
 from ragspine.common.observability.sink import (
     FORBIDDEN_KEYS,
+    MAX_TRACE_DEPTH,
     TRACE_SINK_ENTRY_POINT_GROUP,
     TRACE_SINK_ENV,
     InProcessPrivacyTraceSink,
@@ -33,6 +34,7 @@ from ragspine.common.observability.trace import (
 
 __all__ = [
     "FORBIDDEN_KEYS",
+    "MAX_TRACE_DEPTH",
     "TRACE_LOGGER_NAME",
     "TRACE_SINK_ENTRY_POINT_GROUP",
     "TRACE_SINK_ENV",
