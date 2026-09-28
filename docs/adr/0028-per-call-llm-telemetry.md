@@ -28,7 +28,8 @@ checked top-level keys, so a nested `llm_calls[0].prompt` would have passed.
 
 - **Bucket.** `record_llm_calls()` opens a per-request bucket (a `with`, or a decorator — each call gets a fresh
   one). `answer_question` is decorated with it (`functools.wraps` keeps the signature; the ADR 0012 signature test
-  still passes). A nested bucket is isolated from the outer one until it exits. No bucket ⇒ everything is silent.
+  still passes). A nested bucket is isolated from the outer one until it exits, and its stage starts again from
+  `other` (an `ask` called inside an outer stage does not inherit it). No bucket ⇒ everything is silent.
 - **Stage label.** `llm_stage(stage)` (a `with`, or a decorator) sets the stage for the calls inside it. The stage is
   a **closed enum** `STAGES`: `decompose`, `classify`, `hyde`, `rag_fusion`, `step_back`, `translation`,
   `listwise_rerank`, `tool_round`, `synthesis`, and `other` for unlabelled calls. An unknown value raises
@@ -45,7 +46,8 @@ checked top-level keys, so a nested `llm_calls[0].prompt` would have passed.
   When a probe is already open (a forwarding wrapper around a decorated provider, or a subclass that decorates its
   override and calls `super().chat`) the inner call passes straight through, so a call is recorded once.
   Forwarding wrappers (`CountingProvider`, corespine `RateLimitedProvider`) are not decorated; the inner provider
-  records. **A provider whose `chat` is not decorated produces no entries.**
+  records. **A provider whose `chat` is not decorated produces no entries.** `chat_stream` is not instrumented:
+  streamed calls are not counted (MockProvider's stream counts only because it calls `chat`).
 - **Never raises, never changes the call.** Collector failures are swallowed. The decorated `chat` returns the same
   object and re-raises the same exception (type, args, attributes, traceback origin). Without a bucket the cost is
   one `ContextVar` read (frozen by an identity test and a coarse 10k-call overhead test).
@@ -81,14 +83,20 @@ Only when the request made at least one LLM call — a zero-LLM request's trace 
 
 ### 3. Privacy gate
 
-- `enforce_trace_privacy` (ragspine `common/observability/sink.py`) now checks **recursively**: Mapping keys and
-  list / tuple elements (strings are not expanded), reporting a path such as `llm_calls[0].prompt`. Top-level
-  checks and their message are unchanged. More than `MAX_TRACE_DEPTH = 8` container levels (counting the top-level
-  payload) is rejected as **suspicious** with `TraceError` and the path — never truncated and let through; a cycle
-  hits the same limit.
-- `emit_trace` runs it before the corespine `InProcessPrivacyTraceSink`; the `in_process` registry sink is a thin
-  subclass that runs it first, so every registered sink (in_process, OTel) gets the recursive check. The
-  conformance pack adds nested-leak payloads and a reverse-proof stub (a top-level-only gate) that must fail.
+- `enforce_trace_privacy` (ragspine `common/observability/sink.py`) now checks **recursively** and **fails
+  closed**. Mapping keys, dataclass instances (field names as keys) and NamedTuples (`_asdict()`, field names as
+  keys) are checked key by key; list / tuple elements are walked as `x[i]`, set / frozenset elements as `x{*}`.
+  Leaves may only be `str` / `bytes` / `int` / `float` / `bool` / `None` (so `StrEnum` / `IntEnum` members pass as
+  their base type); **any other object** — a plain `Enum`, `SimpleNamespace`, an arbitrary object, a dataclass
+  class — raises `TraceError` with its path. Paths read like `llm_calls[0].prompt` or `x{*}.prompt`. Top-level checks
+  and their message are unchanged. More than `MAX_TRACE_DEPTH = 8` container levels (counting the top-level payload)
+  is rejected as **suspicious** — never truncated and let through; a cycle hits the same limit.
+- `emit_trace` runs it through ragspine's `InProcessPrivacyTraceSink`, a same-name subclass of corespine's that
+  runs the recursive gate first (the name the package has always exported, so `isinstance` against either class
+  still holds). The `in_process` registry sink is that class and `OtelTraceSink` calls the gate itself; a
+  third-party entry-point sink is held to the same rule by the conformance pack
+  (`tests/conformance/test_trace_sink.py`), which adds nested-leak payloads (a dataclass among them) and a
+  reverse-proof stub (a top-level-only gate) that must fail.
 - Keys alone cannot stop body text under a harmless key (`stage="<prompt>"`), so entries are also **value
   constrained**: built only from the frozen `LLMCall` dataclass, whose `stage` / `error` must be enum members.
 - corespine's own `InProcessPrivacyTraceSink` still checks only top-level keys. Making it recursive (and delegating

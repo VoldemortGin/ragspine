@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/common/
-verified-against: 0dd6fefc8680435f27e8453aa1e7522d828dd34f
+verified-against: c863dedfe37d52dc6f10a5472c19e331ffaff809
 ---
 
 # common — agent contract
@@ -52,13 +52,16 @@ before. Used by `agent/decompose`, `agent/query_transform` (RAG-Fusion) and `gra
   only, never answer / fact value / chunk text. **Mechanically enforced**: `emit_trace`
   runs every payload through `enforce_trace_privacy` and a corespine `InProcessPrivacyTraceSink` first — a
   forbidden content key (answer/value/text/content/prompt/completion/chunk/chunk_text/body) raises
-  `TraceError` before anything is logged. The ragspine gate is **recursive** (ADR 0028): Mapping keys and
-  list/tuple elements at any depth, error with a path like `llm_calls[0].prompt`; more than `MAX_TRACE_DEPTH = 8`
-  container levels is rejected as suspicious, never truncated. corespine's sink itself still checks only the top
-  level (recursive corespine check is a follow-up). Privacy by construction, not by convention.
+  `TraceError` before anything is logged. The ragspine gate is **recursive and fail-closed** (ADR 0028): Mapping
+  keys, dataclass / NamedTuple field names, list / tuple / set elements at any depth (paths `x.key`, `x[i]`,
+  `x{*}`); leaves may only be str / bytes / int / float / bool / None (StrEnum / IntEnum pass as their base type),
+  any other object — plain `Enum`, `SimpleNamespace`, arbitrary objects — is rejected with its path; more than
+  `MAX_TRACE_DEPTH = 8` container levels is rejected as suspicious, never truncated. The exported
+  `InProcessPrivacyTraceSink` is a same-name subclass of corespine's that runs this gate first; corespine's own
+  sink still checks only the top level (recursive corespine check is a follow-up). Privacy by construction, not by convention.
   **Formalized as a seam** (`sink.py`): any fan-out sink (incl. `OtelTraceSink`) calls
   `enforce_trace_privacy` first, so it goes *through* the same privacy gate, never around it (the built-in
-  `in_process` sink is a thin corespine subclass that does) — bound for every registered sink by
+  `in_process` sink is the recursive `InProcessPrivacyTraceSink` subclass) — bound for every registered sink by
   `tests/conformance/test_trace_sink.py` (nested-leak payloads included, + three reverse-proof stubs that must
   FAIL: verbatim leak, value smuggling, top-level-only gate). `make_trace_sink()` defaults to `None` ⇒
   `emit_trace` path byte-identical.

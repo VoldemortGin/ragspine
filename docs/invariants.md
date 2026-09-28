@@ -5,7 +5,7 @@ covers:
   - src/ragspine/retrieval/link/
   - src/ragspine/retrieval/rerank/
   - src/ragspine/common/observability/
-verified-against: 0dd6fefc8680435f27e8453aa1e7522d828dd34f
+verified-against: c863dedfe37d52dc6f10a5472c19e331ffaff809
 ---
 
 # Invariants (code-enforced)
@@ -272,9 +272,12 @@ first — a forbidden content key (`answer` / `value` / `text` / `content` / `pr
 `chunk_text` / `body`, case-insensitive exact key match against `FORBIDDEN_KEYS`) raises `TraceError` **before
 anything is logged**. The default `emit_trace` path is byte-identical to how it has always worked.
 
-**Recursive, with value constraints (ADR 0028).** Before the corespine sink, `emit_trace` runs ragspine's
-`enforce_trace_privacy`, which checks keys at **every level** — Mapping keys and list / tuple elements (strings are
-not expanded) — and names the path in the error (`llm_calls[0].prompt`). A payload with more than
+**Recursive, fail-closed, with value constraints (ADR 0028).** `emit_trace` goes through ragspine's
+`InProcessPrivacyTraceSink` (a same-name subclass of corespine's) which first runs `enforce_trace_privacy`: keys are
+checked at **every level** — Mapping keys, dataclass / NamedTuple field names, list / tuple / set elements (strings
+are not expanded) — and the error names the path (`llm_calls[0].prompt`, `x{*}.prompt`). Leaves may only be str /
+bytes / int / float / bool / None; any other object (a plain `Enum`, `SimpleNamespace`, an arbitrary object) is
+rejected with its path. A payload with more than
 `MAX_TRACE_DEPTH = 8` container levels (counting the top level) is rejected as suspicious, never truncated and let
 through. Keys cannot catch body text under a harmless key, so the per-call LLM entries are also value-constrained:
 they are built only from the frozen `LLMCall` dataclass (ints / bools / `None`, `stage` and `error` from closed

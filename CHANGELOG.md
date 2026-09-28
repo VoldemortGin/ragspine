@@ -46,8 +46,12 @@ All notable changes to RAGSpine are documented here. This project follows Semant
   Decomposition is now counted; a decomposed request also emits a parent trace (`route="decomposed"`,
   `n_subquestions`, its decompose / classify calls). Zero-LLM traces are byte-identical; no model name or prompt size
   is recorded. `ragspine batch` (ask mode) records each question's `llm_calls` and totals and adds an
-  "LLM 调用（按阶段）" summary table. The privacy gate `enforce_trace_privacy` now checks nested Mapping / list keys
-  (path in the error, more than 8 levels rejected as suspicious), and `emit_trace` plus every registered sink run it.
+  "LLM 调用（按阶段）" summary table. **Schema change:** every ask-mode record in `results.jsonl` now carries
+  `trace.llm_calls` (`[]` when the question made no LLM call) and `llm_n_calls` / `llm_n_retried` / `llm_ms`. The
+  privacy gate `enforce_trace_privacy` now checks nested keys (Mapping keys, dataclass / NamedTuple field names;
+  list / tuple / set elements), rejects any non-scalar leaf it cannot inspect (fail-closed; a plain `Enum` included),
+  names the path in the error and rejects more than 8 levels as suspicious; `emit_trace` and every registered sink
+  run it, and `ragspine.common.observability.InProcessPrivacyTraceSink` is now the recursive same-name subclass.
 
 - **LLM truncation retry in the provider layer (`agent/truncation.py`).** When `LiteLLMProvider`
   (`finish_reason="length"`), `AnthropicProvider` (`stop_reason="max_tokens"`) or `ClaudeCliProvider` (its
