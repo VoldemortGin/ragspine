@@ -45,6 +45,23 @@ that: `_Grounding.build` no longer keeps a source ref that the page-reference pa
 (or `page=12-13` into `2-13`), which the guard would report. The page-reference pattern still exempts those refs
 wherever they are not glued to a preceding letter, which is how a locator appears in an answer.
 
+That change widened an old gap in the page-reference pattern, shared with `@page` locators: its page list also ate a
+number that followed with a unit, so with a bare `page=77` ref, `收入 100（page=77, 44 亿美元）` reported `44` before
+and nothing after (likewise `（page=77、44%）`, `page=3, 44%`, `d.md@page=77, 44%`). The page list now stops before a
+number carrying `%`, a decimal part or a magnitude word (`亿`, `million`, `m`, `bn`, …): `44`, `44%` and `4.5%` (from
+`slide=2, 4.5%`) are checked again. A plain `.` is not a stop, so a sentence-final `see page 18.` stays exempt.
+Merged suffixes never have a unit after a page, so they are unaffected.
+
+### Known limits (display only, not fixed)
+
+None of these touches `sources`, `answer_plain` or the guard; they only make a merged suffix read ambiguously.
+
+- A verbatim item (a locator without a page) that starts with a digit, e.g. `12`, prints as `page=3, 12`, which
+  reads like a third page.
+- `slide=2,notes` and `slide=2,frame=1` both parse as slide 2 and merge into one `slide=2`; the difference is lost.
+- An empty locator is dropped silently from a merged document's suffix.
+- `Page=3` (capital P) is not parsed as a page; it is kept as a verbatim item.
+
 ### Why default on, against the "opt-in, default off, flipped by evaluation" convention
 
 That convention ([prd-quality-depth](../prd-quality-depth.md)) is for batches that change retrieval or answer
@@ -71,5 +88,6 @@ content, where the eval decides. This one does not fit it:
   one-locator-per-doc byte-identical to the old join, off byte-identical with duplicates, `sources` and
   `answer_plain` equal on and off, guard-before-suffix order, merged suffixes through `ungrounded_numbers` and
   `guard_narrative_answer` (orchestrator output and a model echoing the merged form), and the counter-case where
-  source numbers do not excuse body numbers. `test_answer_plain.py` and `test_narrative_number_guard.py` pass
+  source numbers do not excuse body numbers, a page list that does not swallow a trailing unit number (bare `page=` /
+  `slide=` and `@page`), and a sentence-final page ref that stays exempt. `test_answer_plain.py` and `test_narrative_number_guard.py` pass
   unchanged.

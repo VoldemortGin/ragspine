@@ -5,7 +5,7 @@ covers:
   - src/ragspine/retrieval/link/
   - src/ragspine/retrieval/rerank/
   - src/ragspine/common/observability/
-verified-against: d39231843ded9cbdce8da7b43437389f1bddc067
+verified-against: 104273dda402f24b709cd7fcf68a59a18dfea38f
 ---
 
 # Invariants (code-enforced)
@@ -44,7 +44,9 @@ system prompt also carries `NUMBER_GUARD_RULE` (no calculation / order / causal 
 Trace: `narrative_number_guard={ungrounded, rewritten}` (counts only, only on rewrite). The `（资料来源：…）` suffix is
 appended after the guard and, with `RAGSPINE_CITATION_MERGE` (default `on`, [ADR 0029](adr/0029-narrative-citation-merge.md)),
 merged per document (`deck.md page=5-6, 14`); its page lists are exempt as page refs, and a bare `page=` / `slide=`
-locator is not used as a whole-string ref, so it cannot split such a list.
+locator is not used as a whole-string ref, so it cannot split such a list. A page / slide list no longer swallows a
+number that follows it with a unit (`page=77, 44 亿美元`, `page=3, 44%`, `slide=2, 4.5%`): that number is checked like
+any other (a gap the `@page` locators shared).
 **Truncated LLM output is never adopted.** A provider that still gets a length cut after its truncation retries
 (`agent/truncation.py`, `RAGSPINE_LLM_TRUNCATION_RETRY`, default `on`) raises `TruncatedOutputError`, a
 `ProviderError`: the tool loop and `_run_narrative` take their fixed degrade text, and a fallback has no sources, so it
@@ -58,7 +60,8 @@ per-call `llm_calls` since ADR 0028, so a truncation during decomposition counts
 without truncation),
 `tests/agent/test_narrative_number_guard.py` (computed number rewritten, raw / format-variant / question /
 citation / period numbers pass, sources kept, off ≡ snapshot), `tests/agent/test_citation_merge.py` (merged suffix
-passes the guard, body numbers still caught, guard before suffix), and the QA ratchet
+passes the guard, body numbers still caught, guard before suffix, a page list does not swallow a trailing unit
+number), and the QA ratchet
 (`data/golden/qa_baseline.json`, fabrication count 0).
 
 ## Provenance

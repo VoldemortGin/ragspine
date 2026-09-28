@@ -24,6 +24,12 @@ All notable changes to RAGSpine are documented here. This project follows Semant
   was replaced as a whole-string source ref before the page-reference exemption ran, so `slide=2, 4` left a stray
   `4` that was reported as ungrounded. These refs are now left to the page-reference pattern, which already exempts
   them.
+- **Number guard: a page / slide list no longer swallows a number that follows it with a unit.** The page-reference
+  exemption matched `page=77, 44 亿美元`, `page=3, 44%` or `slide=2, 4.5%` as one page list, so the trailing `44` /
+  `44%` / `4.5%` was never checked. The gap was old and shared with `@page` locators (`d.md@page=77, 44%`); leaving
+  bare `page=` / `slide=` refs to the pattern (above) made it wider. The list now stops before a number carrying `%`,
+  a decimal part or a magnitude word (`亿`, `million`, `m`, `bn`, …). Merged suffixes and a sentence-final
+  `page 18.` are still exempt; all 608 merged nl-gold suffixes still pass with no report.
 
 ## [0.17.2] - 2026-09-28
 
