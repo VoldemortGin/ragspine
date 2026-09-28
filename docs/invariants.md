@@ -5,7 +5,7 @@ covers:
   - src/ragspine/retrieval/link/
   - src/ragspine/retrieval/rerank/
   - src/ragspine/common/observability/
-verified-against: 9a3a32d9d4102c618a287b4816ac23df9c7eeeea
+verified-against: 131e229bdb16d3a95b4f9cd4ad0978927b624dfe
 ---
 
 # Invariants (code-enforced)
@@ -42,9 +42,16 @@ number in the lead ⇒ `NUMBER_GUARD_NOTICE` + the original sentences that hold 
 only those sentences are dropped, plus a trailing note. No second LLM call. Sources are still forced. When on, the
 system prompt also carries `NUMBER_GUARD_RULE` (no calculation / order / causal inference). Off ⇒ byte-identical.
 Trace: `narrative_number_guard={ungrounded, rewritten}` (counts only, only on rewrite).
+**Truncated LLM output is never adopted.** A provider that still gets a length cut after its truncation retries
+(`agent/truncation.py`, `RAGSPINE_LLM_TRUNCATION_RETRY`, default `on`) raises `TruncatedOutputError`, a
+`ProviderError`: the tool loop and `_run_narrative` take their fixed degrade text, and a fallback has no sources, so it
+is not accepted. It never returns the cut text, because nothing upstream reads `finish_reason` and a half sentence can
+pass the number guard. Trace: `llm_truncation_retries` / `llm_truncated_final` (counts only, only when non-zero).
 **Frozen by** `tests/agent/test_agent_orchestrator.py` (not-found / unrecognized rewrite,
 `test_found_path_discards_fabricated_extra_number`), `tests/agent/test_narrative_fallback.py`
 (fallback grounded / ungrounded / fabricated-number rejected / off ≡ old behavior),
+`tests/agent/test_llm_truncation.py` (half narrative answer / half tool-call JSON degrade, byte-identical requests
+without truncation),
 `tests/agent/test_narrative_number_guard.py` (computed number rewritten, raw / format-variant / question /
 citation / period numbers pass, sources kept, off ≡ snapshot), and the QA ratchet
 (`data/golden/qa_baseline.json`, fabrication count 0).

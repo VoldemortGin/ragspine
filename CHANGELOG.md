@@ -6,6 +6,17 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ### Added
 
+- **LLM truncation retry in the provider layer (`agent/truncation.py`).** When `LiteLLMProvider`
+  (`finish_reason="length"`), `AnthropicProvider` (`stop_reason="max_tokens"`) or `ClaudeCliProvider` (its
+  "exceeded the N output token maximum" error) gets a length cut, it retries with the output budget doubled and
+  reasoning turned off. litellm gets `reasoning_effort="none"` + `drop_params`, sent again without them if the
+  gateway rejects them. The CLI gets `CLAUDE_CODE_MAX_OUTPUT_TOKENS` + `alwaysThinkingEnabled: false`. There are at
+  most 2 retries, and the budget is capped by `RAGSPINE_LLM_TRUNCATION_MAX_TOKENS` (default 16384). This covers the
+  tool loop (a cut tool-call JSON) and narrative synthesis, since both call `chat`. An output that is still cut
+  raises `TruncatedOutputError` (a `ProviderError`), so it takes the existing honest degrade and a half answer is
+  never used. The request trace gains `llm_truncation_retries` / `llm_truncated_final` (counts, only when non-zero).
+  `RAGSPINE_LLM_TRUNCATION_RETRY=on|off`, default `on`. With no truncation, the request parameters are
+  byte-identical to before.
 - **`LiteLLMProvider` — OpenAI-compatible models through litellm (new `[litellm]` extra).**
   `--provider litellm` in `scripts/ask.py`, `ragspine ask`, `ragspine batch` and `scripts/run_nl_gold_ragspine.py`
   (`--litellm-model` / `--litellm-api-base` / `--litellm-image-input`); `RAGSPINE_PROVIDER=litellm` with

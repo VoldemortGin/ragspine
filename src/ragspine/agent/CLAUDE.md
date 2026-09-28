@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/agent/
-verified-against: e141b2b8accf94ff614331880a41ce6e316b2b9e
+verified-against: 131e229bdb16d3a95b4f9cd4ad0978927b624dfe
 ---
 
 # agent — agent contract
@@ -54,7 +54,12 @@ loop, LLM provider abstraction.
   `--tools Read` + `--permission-prompts none` (reads inside cwd need no approval; anything outside needs one and
   is auto-denied — deliberately **not** `--allowedTools Read`, which would pre-approve any path), and the prompt
   gets a one-line hint naming the relative files. Original storage paths never reach prompt / argv. No images ⇒
-  the command line is exactly the old one.
+  the command line is exactly the old one. **Truncation:** the json result has no usable stop reason (it reads
+  `stop_sequence` even when cut); the signal is a non-zero exit with `is_error` and `result` "…exceeded the N output
+  token maximum…". The retry sets env `CLAUDE_CODE_MAX_OUTPUT_TOKENS` and adds `--settings
+  '{"alwaysThinkingEnabled": false}'` (thinking counts against the output budget; `MAX_THINKING_TOKENS=0` does not
+  work under `-p`). The CLI default of 32000 is above the default cap, so by default a cut raises
+  `TruncatedOutputError` with no retry.
 - `litellm_provider.py` — `LiteLLMProvider`: OpenAI-compatible models through `litellm.completion` (`[litellm]`
   extra; model names in litellm form — default `DEFAULT_LITELLM_MODEL = "deepseek/deepseek-chat"`, `openai/<model>` +
   `api_base`, `azure/…`, `ollama/…`; keys come from each vendor's env var). litellm is imported on the **first call**
@@ -67,7 +72,20 @@ loop, LLM provider abstraction.
   `supports_image_input`; `litellm.supports_vision` is deliberately not used (misses `openai/<self-hosted>` models and
   would force the import). When on, image parts become a filename text part + a base64 `image_url`; when off, a part
   list is flattened to its text. `from_env` reads `RAGSPINE_LITELLM_MODEL` / `_API_BASE` / `_IMAGE_INPUT` (same keys as
-  the `ServiceConfig` fields).
+  the `ServiceConfig` fields). **Truncation:** `finish_reason="length"` ⇒ retry with `max_tokens` doubled (base: the
+  `max_tokens` argument, else the call's `usage.completion_tokens`) plus `reasoning_effort="none"` + `drop_params=True`;
+  a `BadRequestError` on that request ⇒ the same request is sent again without the two params, and this instance stops
+  sending them. `chat_stream` does not retry.
+- `truncation.py` — **provider-layer truncation retry** shared by `LiteLLMProvider` / `ClaudeCliProvider` /
+  `AnthropicProvider` (`stop_reason="max_tokens"`; it never enables thinking, so there is nothing to turn off).
+  `TruncationPolicy` (`RAGSPINE_LLM_TRUNCATION_RETRY=on|off`, default `on`; `RAGSPINE_LLM_TRUNCATION_MAX_TOKENS`,
+  default `DEFAULT_TRUNCATION_MAX_TOKENS = 16384`; `DEFAULT_TRUNCATION_MAX_RETRIES = 2`; each provider takes a
+  `truncation=` override) and `retry_on_truncation`. On a cut, the budget is doubled up to the cap; retries stop when
+  the budget can't grow any more. A cut that survives the retries ⇒ `TruncatedOutputError(ProviderError)`, which takes
+  the existing honest degrade and is never returned as an answer (see Invariants). No cut ⇒ one call with a
+  byte-identical request. Off ⇒ a cut result comes back unchanged, as before. Counts reach the request trace through a
+  `ContextVar` (`bind_truncation_stats`, bound by `answer_question`): `llm_truncation_retries` /
+  `llm_truncated_final`, only when non-zero.
 - `number_guard.py` — **narrative number guard (ADR 0024)**: `guard_narrative_answer` /
   `ungrounded_numbers` (deterministic, zero LLM; normalization from `common/answer_text`),
   `NUMBER_GUARD_RULE` (prompt), `NUMBER_GUARD_NOTICE`, `resolve_number_guard` /
@@ -159,13 +177,16 @@ loop, LLM provider abstraction.
 - **`ProviderError` wraps only network / API / timeout errors** (`llm_provider.py`);
   program errors (KeyError/TypeError) must propagate. Never `except Exception` into a
   degrade path — it buries real bugs. It now inherits the family base `corespine.CorespineError`
-  (stable `code="provider.error"`); the network-only wrapping contract is unchanged.
+  (stable `code="provider.error"`); the network-only wrapping contract is unchanged. One addition: an output
+  still cut after the truncation retries is `TruncatedOutputError` (`code="provider.truncated"`), a subclass,
+  so it takes the same degrade.
 - **provider & retriever are Protocols; `agent.py` imports no SDK and no retrieval impl**
   (`LLMProvider` in `llm_provider.py`, `NarrativeRetriever` Protocol in `agent.py`). The
   `anthropic` SDK is lazy-imported inside `AnthropicProvider` only; `litellm` only inside
   `litellm_provider._load_litellm` (never at module import or construction).
 - **Tool loop is capped** at `MAX_TOOL_ITERATIONS = 5` (`agent.py`); the SDK owns
-  retry/backoff — don't add your own.
+  retry/backoff — don't add your own. The one provider-level retry is the length-cut retry in
+  `truncation.py` (a larger output budget, not a network retry).
 
 ## Deep dives
 
