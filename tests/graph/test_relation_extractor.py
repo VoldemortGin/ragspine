@@ -21,6 +21,8 @@ from dataclasses import dataclass
 
 import pytest
 import rootutils
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
@@ -221,6 +223,78 @@ def test_llm_degrades_on_bad_json():
 def test_llm_degrades_on_empty_output():
     extractor = LLMRelationExtractor(ConstantProvider(""))
     assert extractor.extract([FakeChunk("d", text="t")]) == ()
+
+
+# json.loads 默认接受的全部值（含 NaN / Infinity）；strip 后能被 json.loads 解析的文本。
+_JSON_ANY = st.recursive(
+    st.none() | st.booleans() | st.integers() | st.floats() | st.text(max_size=8),
+    lambda children: (
+        st.lists(children, max_size=4) | st.dictionaries(st.text(max_size=8), children, max_size=4)
+    ),
+    max_leaves=12,
+)
+
+
+def _legacy_full_parse(text: str) -> tuple[tuple[str, str, str], ...]:
+    """改用 extract_json 之前的 LLMRelationExtractor._parse 全文（strip + json.loads）。"""
+
+    def field(value, default=""):
+        return value.strip() if isinstance(value, str) and value.strip() else default
+
+    try:
+        parsed = json.loads(text.strip())
+    except (TypeError, ValueError):
+        return ()
+    if not isinstance(parsed, dict):
+        return ()
+    raw = parsed.get("relations")
+    if not isinstance(raw, list):
+        return ()
+    out = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        source = field(item.get("source"))
+        target = field(item.get("target"))
+        if not source or not target:
+            continue
+        out.append((source, target, field(item.get("kind"), "related_to")))
+    return tuple(out)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '{"relations": [{"source": "A", "target": "B", "kind": "k"}], "score": NaN}',
+        '{"relations": [{"source": "A", "target": "B", "kind": "k", "w": Infinity}]}',
+        '  {"relations": [{"source": "A", "target": "B", "kind": -Infinity}]}  ',
+        "null",
+    ],
+)
+def test_parse_same_as_legacy_on_json_loads_accepted_input(text):
+    """json.loads 能解析的输入（含 NaN / Infinity）结果与旧解析完全相同。"""
+    json.loads(text.strip())
+    assert LLMRelationExtractor._parse(text) == _legacy_full_parse(text)
+
+
+_RELATION_ITEM = st.fixed_dictionaries(
+    {"source": st.text(max_size=4) | st.floats(), "target": st.text(max_size=4)},
+    optional={"kind": _JSON_ANY},
+)
+
+
+@settings(derandomize=True, deadline=None)
+@given(
+    value=_JSON_ANY
+    | st.fixed_dictionaries(
+        {"relations": st.lists(_RELATION_ITEM | _JSON_ANY, max_size=4)},
+        optional={"score": st.floats()},
+    ),
+    pad=st.sampled_from(["", " ", "\n  "]),
+)
+def test_parse_matches_legacy_whenever_legacy_parses(value, pad):
+    text = f"{pad}{json.dumps(value, ensure_ascii=False)}{pad}"
+    assert LLMRelationExtractor._parse(text) == _legacy_full_parse(text)
 
 
 def _legacy_parse(text: str) -> tuple[tuple[str, str, str], ...] | None:

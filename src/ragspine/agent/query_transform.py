@@ -53,7 +53,7 @@ from ragspine.agent.llm_provider import LLMProvider, ProviderError
 from ragspine.agent.security_gate import SECURITY_REFUSE_OUT_OF_SCOPE, SecurityGate
 from ragspine.common.company_profile import load_company_profile
 from ragspine.common.glossary import EXTERNAL_ENTITY_SYNONYMS
-from ragspine.common.llm_json import extract_json
+from ragspine.common.llm_json import parse_llm_json
 from ragspine.retrieval.lexical.retrieval import rrf_fuse
 
 # 查询变换选型读取的环境变量名（缺省 spec 时生效）。
@@ -187,7 +187,7 @@ def _fuse_snippets(
 
 def _parse_json_string_array(text: str) -> list[str]:
     """从模型回文鲁棒解析 JSON 字符串数组；任何不合规一律返回空表（视为"无变体"）。"""
-    parsed = extract_json(text, expect="array")
+    parsed = parse_llm_json(text, expect="array")
     if parsed is None:
         return []
     if not isinstance(parsed, list):

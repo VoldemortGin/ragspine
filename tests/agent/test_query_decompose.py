@@ -11,6 +11,8 @@ from datetime import date
 
 import pytest
 import rootutils
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
@@ -25,6 +27,7 @@ from ragspine.agent.agent import AgentResult, answer_question
 from ragspine.agent.decompose import (
     ROUTE_DECOMPOSED,
     LLMQueryDecomposer,
+    _parse_subquestions,
     make_decomposer,
 )
 from ragspine.agent.llm_provider import MockProvider
@@ -245,6 +248,41 @@ def _legacy_parse_subquestions(text: str) -> list[str]:
     if not isinstance(parsed, list):
         return []
     return [s.strip() for s in parsed if isinstance(s, str) and s.strip()]
+
+
+# json.loads 默认接受的全部值（含 NaN / Infinity）；strip 后能被 json.loads 解析的文本。
+_JSON_ANY = st.recursive(
+    st.none() | st.booleans() | st.integers() | st.floats() | st.text(max_size=8),
+    lambda children: (
+        st.lists(children, max_size=4) | st.dictionaries(st.text(max_size=8), children, max_size=4)
+    ),
+    max_leaves=12,
+)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '["子问题一", NaN, "子问题二"]',
+        '["子问题一", Infinity, -Infinity]',
+        '  ["子问题一", {"x": NaN}]  ',
+        "null",
+    ],
+)
+def test_parse_subquestions_same_as_legacy_on_json_loads_accepted_input(text):
+    """json.loads 能解析的输入（含 NaN / Infinity）结果与旧解析完全相同。"""
+    json.loads(text.strip())
+    assert _parse_subquestions(text) == _legacy_parse_subquestions(text)
+
+
+@settings(derandomize=True, deadline=None)
+@given(
+    value=_JSON_ANY | st.lists(st.text(max_size=8) | st.floats(), max_size=5),
+    pad=st.sampled_from(["", " ", "\n  "]),
+)
+def test_parse_subquestions_matches_legacy_whenever_legacy_parses(value, pad):
+    text = f"{pad}{json.dumps(value, ensure_ascii=False)}{pad}"
+    assert _parse_subquestions(text) == _legacy_parse_subquestions(text)
 
 
 @pytest.mark.parametrize(

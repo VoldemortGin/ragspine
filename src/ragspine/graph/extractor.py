@@ -24,7 +24,7 @@ from typing import Any, Protocol, runtime_checkable
 from ragspine.agent.llm_provider import LLMProvider, ProviderError
 from ragspine.agent.security_gate import SecurityGate
 from ragspine.common.company_profile import DomainProfile
-from ragspine.common.llm_json import extract_json
+from ragspine.common.llm_json import parse_llm_json
 from ragspine.graph.store import RESTRICTED_SENSITIVITY, GraphEdge
 
 # 抽取器选型读取的环境变量名（缺省 spec 时生效；范式同 RAGSPINE_NARRATIVE_GRAPH）。
@@ -226,7 +226,7 @@ class LLMRelationExtractor:
     @staticmethod
     def _parse(text: str) -> tuple[tuple[str, str, str], ...]:
         """从模型回文鲁棒解析 relations 数组；任何不合规一律降级（空 / 跳过该条），绝不抛、绝不编造。"""
-        parsed = extract_json(text, expect="object")
+        parsed = parse_llm_json(text, expect="object")
         if parsed is None:
             return ()
         if not isinstance(parsed, dict):
