@@ -9,6 +9,7 @@ Submodules:
     core.py — 跨切面全局常量（数据根 + 各 sqlite 库默认路径）的单一出处。
     evidence/ — 证据链（enterprise-pdf-rag 产品线）的 APP_* 配置、血缘日志与模型访问（ADR 0022）。
     glossary.py — 维度同义词词典与归一化。
+    llm_json.py — LLM 回文 JSON 容错提取（围栏 / 说明文字 / 尾逗号 / 裸值），只依赖 stdlib，失败返回 None 不抛。
     observability/ — 隐私安全可观测性：trace 发射原语 + 可插拔 TraceSink 缝（含 OTel 适配器）。
     sensitivity.py — 叙事入库的确定性敏感度分级策略与纯函数分级器。
 """
