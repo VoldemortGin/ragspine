@@ -151,11 +151,11 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 - **LLM JSON replies with a code fence, surrounding prose, a trailing comma or a bare value no longer fall back.**
   `LLMQueryDecomposer`, RAG-Fusion variant generation and `LLMRelationExtractor` parsed the reply with
   `strip` + `json.loads`, so ```` ```json ```` fences, "here is the result: …" wrappers, `[..., ]` or
-  `"kind": supplier` meant no decomposition, no variants or no edges. All three now use the new
-  `ragspine.common.llm_json.extract_json` (stdlib only, returns dict / list / `None`, never raises). Repairs apply only
-  outside string literals; truncated JSON, single quotes, unquoted keys, comments and Python literals still fall
-  back as before. One narrowing: a reply containing `NaN` / `Infinity`, which `json.loads` used to accept, now falls
-  back too. All three features stay opt-in (default `none`).
+  `"kind": supplier` meant no decomposition, no variants or no edges. All three still try `json.loads` first and
+  only hand a failed reply to the new `ragspine.common.llm_json.extract_json` (stdlib only, returns dict / list /
+  `None`, never raises), so this only adds tolerance: every reply that parsed before gives exactly the same result.
+  Repairs apply only outside string literals; truncated JSON, single quotes, unquoted keys and comments still fall
+  back. All three features stay opt-in (default `none`).
 
 ## [0.16.1] - 2026-09-22
 

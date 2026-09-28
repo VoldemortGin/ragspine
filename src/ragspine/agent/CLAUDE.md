@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/agent/
-verified-against: 8c3b8f1f160a1d64165765d5ae07a3ada9035b57
+verified-against: 241ec9dc1705ab7e9fe39688266505aac5ff9f8b
 ---
 
 # agent — agent contract
@@ -93,7 +93,7 @@ loop, LLM provider abstraction.
 - `query_tools.py` — profile-driven `query_metric` tool schema + execution
   (`found` / `not_found` / `unrecognized_param` — never fabricates).
 - `decompose.py` — **W6a query decomposition (opt-in, default-off).** `QueryDecomposer` Protocol +
-  `LLMQueryDecomposer` (provider→JSON sub-question array parsed by `common/llm_json.extract_json`, bounded,
+  `LLMQueryDecomposer` (provider→JSON sub-question array parsed by `common/llm_json.parse_llm_json`, bounded,
   deterministic degrade) +
   `make_decomposer` / `RAGSPINE_QUERY_DECOMPOSE`. `answer_question(decomposer=…)` defaults `None`
   ⇒ main loop **byte-identical**; when injected and the question splits (>1 sub-q), each sub-question
@@ -104,7 +104,7 @@ loop, LLM provider abstraction.
   `QueryRewriter` / `IntentParser` seam (ADR 0010), all byte-identical when unselected. Three are
   `NarrativeRetriever` wrappers (the W6b `CorrectiveRetriever` idiom): `HyDERetriever` (hypothetical-doc
   probe — **never a citable fact**; it replaces only the query *text* fed to `base.retrieve`), `RAGFusionRetriever`
-  (LLM N variants, parsed by `common/llm_json.extract_json` → **RRF via `retrieval.rrf_fuse`**), `StepBackRetriever` (abstract question + original,
+  (LLM N variants, parsed by `common/llm_json.parse_llm_json` → **RRF via `retrieval.rrf_fuse`**), `StepBackRetriever` (abstract question + original,
   RRF-merged); selected by `make_query_transform(base, spec, *, provider)` / `RAGSPINE_QUERY_TRANSFORM` (`none`
   → **base unchanged**; degrades to base when no provider injected). The fourth is **Adaptive-RAG**:
   `HeuristicComplexityClassifier` (deterministic default — routes by listed-axis count / comparison cues) /
