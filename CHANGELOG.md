@@ -4,6 +4,27 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ## [Unreleased]
 
+### Changed
+
+- **Narrative citation suffix merged per document: `RAGSPINE_CITATION_MERGE=on|off`, default `on`**
+  ([ADR 0029](docs/adr/0029-narrative-citation-merge.md)). When the model's prose names no source document, the
+  `（资料来源：…）` suffix used to list every retrieved snippet as `{doc} {locator}` (up to 50 entries, 5,543
+  characters on nl-gold). It is now grouped by document in retrieval order, with page numbers deduped, sorted and
+  collapsed into ranges: `deck.md page=5-6, 14, 18；X.pptx slide=2, 4`. Locators without a page are kept verbatim
+  after the page / slide groups; a document with a single locator prints exactly as before. On the 608 suffixed
+  nl-gold answers the median suffix goes from 1,106 to 85 characters. New pure module `agent/citations.py`
+  (`merge_citation`, `resolve_citation_merge`). Display only: `answer_plain` and `sources` (one `{doc, locator}` per
+  snippet) are unchanged, and the suffix is still appended after the number guard. `off` restores the old bytes; any
+  other value raises `ValueError`. It shows up in the API / SSE `answer`, the openai-compatible extension and CLI
+  `ask`.
+
+### Fixed
+
+- **Number guard no longer splits a page list on a bare `page=` / `slide=` locator.** Such a locator (e.g. `slide=2`)
+  was replaced as a whole-string source ref before the page-reference exemption ran, so `slide=2, 4` left a stray
+  `4` that was reported as ungrounded. These refs are now left to the page-reference pattern, which already exempts
+  them.
+
 ## [0.17.2] - 2026-09-28
 
 0.17.0 and 0.17.1 were both tagged but never published to PyPI; 0.17.2 is the first published release of this line.
