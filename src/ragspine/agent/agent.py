@@ -21,6 +21,7 @@ from typing import Protocol, cast, runtime_checkable
 
 from corespine import Usage
 
+from ragspine.agent.citations import merge_citation, resolve_citation_merge
 from ragspine.agent.decompose import ROUTE_DECOMPOSED, QueryDecomposer
 from ragspine.agent.intent import (
     CLARIFY_ANSWER_WITH_ASSUMPTIONS,
@@ -529,6 +530,7 @@ def _run_narrative(
     *,
     fallback: bool = False,
     number_guard: bool = False,
+    citation_merge: bool = False,
 ) -> tuple[str, str, list[dict[str, object]]]:
     """叙事通路：检索 → 合成 → 附来源。检索未接入/无结果时坦白降级；返回
     (answer, answer_plain, sources)。answer_plain 是模型散文本身（不含编排层追加的
@@ -541,6 +543,9 @@ def _run_narrative(
 
     number_guard=True（叙事数字防编造，ADR 0024）：system prompt 追加推断约束；答案里有片段找不到
     的数字时确定性改写（number_guard.guard_narrative_answer），再照常强制附来源。
+
+    citation_merge=True（ADR 0029）：血缘兜底后缀按文档合并（citations.merge_citation）；仍在 guard
+    之后追加。sources / answer_plain 不变。
     """
     if retriever is None:
         degraded = "叙事检索通路尚未接入，暂时无法回答归因/监管/进展类问题；数字类问题可直接提问。"
@@ -612,7 +617,11 @@ def _run_narrative(
     # 血缘兜底：来源文件名必须出现在回答里
     missing = [s for s in sources if s["doc"] and str(s["doc"]) not in answer]
     if missing:
-        cite = "；".join(f"{s['doc']} {s['locator']}".strip() for s in missing)
+        cite = (
+            merge_citation(missing)
+            if citation_merge
+            else "；".join(f"{s['doc']} {s['locator']}".strip() for s in missing)
+        )
         answer = f"{answer}\n（资料来源：{cite}）"
     return answer, answer_plain, sources
 
@@ -756,6 +765,7 @@ def _try_fallback(
     ctx: _TraceCtx,
     history_messages: list[dict[str, object]],
     number_guard: bool,
+    citation_merge: bool,
 ) -> tuple[str, str, list[dict[str, object]]] | None:
     """结构化回落叙事：有依据（带来源）返回 (answer, answer_plain, sources)，否则 None。"""
     answer, answer_plain, sources = _run_narrative(
@@ -767,6 +777,7 @@ def _try_fallback(
         history_messages,
         fallback=True,
         number_guard=number_guard,
+        citation_merge=citation_merge,
     )
     return (answer, answer_plain, sources) if sources else None
 
@@ -826,6 +837,7 @@ def answer_question(
     """
     use_fallback = _resolve_narrative_fallback(narrative_fallback)
     use_number_guard = resolve_number_guard(narrative_number_guard)
+    use_citation_merge = resolve_citation_merge()
     # W6a：注入了分解器且真分解（>1 子问题）时走 fan-out；否则（含 decomposer=None）落到下方
     # 既有主流程——此分支不命中时主流程逐位不变，默认 loop 字节等价。
     if decomposer is not None:
@@ -888,7 +900,14 @@ def answer_question(
         fallback: tuple[str, bool] | None = None
         if can_fallback:
             fb = _try_fallback(
-                question, provider, narrative_retriever, intent, ctx, hist_msgs, use_number_guard
+                question,
+                provider,
+                narrative_retriever,
+                intent,
+                ctx,
+                hist_msgs,
+                use_number_guard,
+                use_citation_merge,
             )
             fallback = (FALLBACK_MISSING_METRIC, fb is not None)
             if fb is not None:
@@ -925,6 +944,7 @@ def answer_question(
             ctx,
             hist_msgs,
             number_guard=use_number_guard,
+            citation_merge=use_citation_merge,
         )
         _emit_request_trace(request_id, intent, clar, [], ctx)
         return AgentResult(
@@ -955,7 +975,14 @@ def answer_question(
     no_hit_fallback: tuple[str, bool] | None = None
     if can_fallback and not any(r.get("status") == "found" for r in tool_results):
         fb = _try_fallback(
-            question, provider, narrative_retriever, intent, ctx, hist_msgs, use_number_guard
+            question,
+            provider,
+            narrative_retriever,
+            intent,
+            ctx,
+            hist_msgs,
+            use_number_guard,
+            use_citation_merge,
         )
         no_hit_fallback = (FALLBACK_STRUCTURED_NO_HIT, fb is not None)
         if fb is not None:
@@ -971,6 +998,7 @@ def answer_question(
             ctx,
             hist_msgs,
             number_guard=use_number_guard,
+            citation_merge=use_citation_merge,
         )
         answer = f"{answer}\n\n归因分析：\n{narrative_answer}"
         answer_plain = f"{answer_plain}\n\n归因分析：\n{narrative_answer_plain}"

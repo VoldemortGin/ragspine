@@ -119,7 +119,15 @@ class _Grounding:
     ) -> "_Grounding":
         ev = normalize_answer("\n".join(evidence))
         q = normalize_answer(question)
-        refs = tuple(sorted({r for r in source_refs if r}, key=len, reverse=True))
+        # 裸 page= / slide= locator 本就被 _PAGE_REF_RE 整段豁免；不拿它整串替换，免得把合并后的
+        # "slide=2, 4"（ADR 0029）切成孤立的 ", 4"。
+        refs = tuple(
+            sorted(
+                {r for r in source_refs if r and not _PAGE_REF_RE.fullmatch(r)},
+                key=len,
+                reverse=True,
+            )
+        )
         return cls(
             evidence=ev,
             question=q,
