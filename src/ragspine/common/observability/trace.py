@@ -5,9 +5,9 @@
   period/channel）、状态计数、分数、布尔标志、耗时、token 用量等；
 - 绝不记原始答案正文、事实数值、chunk 正文——这些一旦进 INFO 日志即成为受限数据泄露面。
 
-强制机制：每条 trace 先过 corespine 的 InProcessPrivacyTraceSink，载荷若含禁词键
+强制机制：每条 trace 先过 InProcessPrivacyTraceSink（sink.py 里 corespine 同名实现的子类），载荷若含禁词键
 （answer / value / text / content / prompt / completion / chunk / chunk_text / body，
-大小写不敏感、精确键名匹配；先经 sink.enforce_trace_privacy 递归检查嵌套 Mapping / list，ADR 0028）
+大小写不敏感、精确键名匹配；先经 sink.enforce_trace_privacy 递归检查嵌套容器、非标量 fail-closed，ADR 0028）
 会【直接抛 TraceError】、绝不写日志——隐私 by construction，
 而非靠 reviewer 自觉。通过校验后再以 stdlib logging 落盘（字段经 extra 挂到 LogRecord
 属性，供 caplog/宿主消费）。
@@ -19,9 +19,7 @@
 import logging
 import uuid
 
-from corespine import InProcessPrivacyTraceSink
-
-from ragspine.common.observability.sink import enforce_trace_privacy
+from ragspine.common.observability.sink import InProcessPrivacyTraceSink
 
 # 全链路 trace 专用 logger（宿主配置 handler；默认不刷屏）
 TRACE_LOGGER_NAME = "ragspine.trace"
@@ -31,7 +29,7 @@ _TRACE_CODE = "trace"
 
 _trace_logger = logging.getLogger(TRACE_LOGGER_NAME)
 
-# 进程内隐私校验 sink：emit 时扫字段键，命中禁词即抛 TraceError，拦在落盘之前。
+# 进程内隐私校验 sink（ragspine 同名子类，先过递归隐私门）：命中禁词即抛 TraceError，拦在落盘之前。
 _privacy_sink = InProcessPrivacyTraceSink()
 
 
@@ -48,7 +46,6 @@ def emit_trace(logger: logging.Logger | None = None, **fields: object) -> None:
     则抛 TraceError、不落盘——隐私由机制保证，而非约定。
     """
     # 隐私强制：载荷任何一层含禁词键即抛 TraceError（在落盘之前），绝不悄悄记下去。
-    enforce_trace_privacy(fields)
     _privacy_sink.emit(_TRACE_CODE, **fields)
     log = logger or _trace_logger
     log.info(_TRACE_CODE, extra=fields)

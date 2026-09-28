@@ -6,7 +6,7 @@
 
     1. Protocol —— 直接【复用】corespine 的 @runtime_checkable TraceSink（emit(code, **fields)），
        不重复定义；ragspine 侧只在此把它连同隐私门与注册表一并抬到缝的高度。
-    2. 离线默认 —— corespine InProcessPrivacyTraceSink（进程内、构造即隐私安全，命中禁词键即抛
+    2. 离线默认 —— InProcessPrivacyTraceSink（corespine 同名实现的子类，先过递归隐私门；进程内、构造即隐私安全，命中禁词键即抛
        TraceError），与 common/observability.emit_trace 的默认兜底同一实现。
     3. 薄 adapter —— adapters/otel.py 的 OtelTraceSink（behind [otel] extra，延迟 import，扇出前先过隐私门）。
     4. 注册表 —— make_trace_sink / RAGSPINE_TRACE_SINK，内置 in_process / otel + entry-point 自动
@@ -21,17 +21,18 @@ FORBIDDEN_KEYS 即抛 TraceError），故「扇出经隐私 conformance 而非�
 InProcessPrivacyTraceSink 隐私兜底，本缝是【形式化 + 可选注册】，不改现有 trace 记录路径。
 """
 
+import dataclasses
 import os
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from corespine import (
     FORBIDDEN_KEYS,
-    InProcessPrivacyTraceSink,
     TraceError,
     TraceEvent,
     TraceSink,
 )
+from corespine import InProcessPrivacyTraceSink as _CorespineInProcessPrivacyTraceSink
 
 # 工厂缺省 spec 时读取的环境变量名（范式同 store.VECTOR_STORE_ENV / graph.GRAPH_STORE_ENV）。
 TRACE_SINK_ENV = "RAGSPINE_TRACE_SINK"
@@ -59,8 +60,24 @@ __all__ = [
 MAX_TRACE_DEPTH = 8
 
 
-def _scan(value: object, path: str, depth: int, offending: list[str]) -> None:
-    """递归收集禁词键路径：遍历 Mapping 的键与 list/tuple 的元素（字符串不展开）。"""
+# 允许直接出现在 trace 里的标量叶子（bool 是 int 子类；StrEnum / IntEnum 成员按 str / int 放行）。
+_SCALARS = (str, bytes, int, float, bool, type(None))
+
+
+def _children(value: object, path: str, offending: list[str]) -> list[tuple[str, object]] | None:
+    """展开一层容器：返回 (路径, 子值) 列表并收集禁词键；标量返回 None；其余对象 fail-closed 抛 TraceError。
+
+    - Mapping：按键检查，路径 `x.key`；
+    - dataclass 实例（不含 dataclass 类本身）：按字段名当键检查，路径 `x.field`；
+    - NamedTuple（有 `_asdict` 的 tuple）：先 `_asdict()`，按字段名当键检查，路径 `x.field`；
+    - list / tuple：逐元素，路径 `x[i]`；set / frozenset：逐元素，路径 `x{*}`（无序，不给下标）。
+    """
+    if isinstance(value, _SCALARS):
+        return None
+    if isinstance(value, tuple) and hasattr(value, "_asdict"):
+        value = value._asdict()
+    elif dataclasses.is_dataclass(value) and not isinstance(value, type):
+        value = {f.name: getattr(value, f.name) for f in dataclasses.fields(value)}
     if isinstance(value, Mapping):
         items: list[tuple[str, object]] = []
         for key, item in value.items():
@@ -68,9 +85,21 @@ def _scan(value: object, path: str, depth: int, offending: list[str]) -> None:
             if str(key).strip().lower() in FORBIDDEN_KEYS:
                 offending.append(key_path)
             items.append((key_path, item))
-    elif isinstance(value, list | tuple):
-        items = [(f"{path}[{i}]", item) for i, item in enumerate(value)]
-    else:
+        return items
+    if isinstance(value, list | tuple):
+        return [(f"{path}[{i}]", item) for i, item in enumerate(value)]
+    if isinstance(value, set | frozenset):
+        return [(f"{path}{{*}}", item) for item in value]
+    raise TraceError(
+        f"trace 载荷含无法检查的非标量值（{path}：{type(value).__qualname__}）：只允许 str / bytes / int / "
+        "float / bool / None 及 Mapping / list / tuple / set / dataclass / NamedTuple 容器，其余一律拒绝。"
+    )
+
+
+def _scan(value: object, path: str, depth: int, offending: list[str]) -> None:
+    """递归收集禁词键路径；容器层数超过 MAX_TRACE_DEPTH 按可疑载荷拒绝。"""
+    items = _children(value, path, offending)
+    if items is None:
         return
     if depth > MAX_TRACE_DEPTH:
         raise TraceError(
@@ -85,8 +114,9 @@ def enforce_trace_privacy(fields: Mapping[str, object]) -> None:
 
     这是每个 TraceSink 扇出前的强制关卡——「答案正文 / 事实数值 / chunk 正文」一类禁词键宁可报错
     也绝不外发。复用 corespine 的 FORBIDDEN_KEYS 与 TraceError；顶层键的判定与 InProcessPrivacyTraceSink
-    逐字一致，此外递归检查 Mapping 的键与 list/tuple 的元素（ADR 0028），报错给出路径（如
-    `llm_calls[0].prompt`）；容器层数（含顶层）超过 MAX_TRACE_DEPTH 按可疑载荷报错。任何自定义 / OTel
+    逐字一致，此外递归检查（ADR 0028）：Mapping 的键、dataclass / NamedTuple 的字段名、list / tuple / set 的
+    元素；无法检查的非标量对象 fail-closed 拒绝；报错给出路径（如 `llm_calls[0].prompt`、`x{*}.prompt`）；
+    容器层数（含顶层）超过 MAX_TRACE_DEPTH 按可疑载荷报错。任何自定义 / OTel
     sink 只要先调用它，就【经】同一条隐私门——扇出而不绕过。
     """
     offending: list[str] = []
@@ -98,8 +128,12 @@ def enforce_trace_privacy(fields: Mapping[str, object]) -> None:
         )
 
 
-class _RecursivePrivacyTraceSink(InProcessPrivacyTraceSink):
-    """内置 in_process sink：先过递归隐私门，再交给 corespine 的进程内默认（其自身只查顶层）。"""
+class InProcessPrivacyTraceSink(_CorespineInProcessPrivacyTraceSink):
+    """进程内隐私 sink（ragspine 版）：先过递归隐私门，再交给 corespine 同名默认实现（其自身只查顶层键）。
+
+    与 corespine 同名的子类：包门面一直以这个名字导出它，下游 `isinstance` 对两者都成立，记录 / 扇出行为不变，
+    只是嵌套载荷也会被拦下（ADR 0028）。
+    """
 
     def emit(self, code: str, **fields: object) -> None:
         enforce_trace_privacy(fields)
@@ -112,7 +146,7 @@ class _RecursivePrivacyTraceSink(InProcessPrivacyTraceSink):
 # 别名共指同一 loader（大小写 / 留白 / 连字符由 make_trace_sink 归一化时以显式别名键覆盖）。
 # ---------------------------------------------------------------------------
 def _load_in_process() -> type[TraceSink]:
-    return _RecursivePrivacyTraceSink
+    return InProcessPrivacyTraceSink
 
 
 def _load_otel() -> type[TraceSink]:
@@ -178,7 +212,8 @@ def make_trace_sink(spec: str | None = None, **kwargs: Any) -> TraceSink | None:
     spec 取值（大小写 / 留白不敏感；缺省读环境变量 RAGSPINE_TRACE_SINK）：
         - None / 'none'                       -> None（不注入具体 sink；observability.emit_trace 仍走
           其内置 InProcessPrivacyTraceSink 隐私兜底，默认行为字节不变）。
-        - 'in_process' / 'memory' / 'privacy' -> InProcessPrivacyTraceSink（零依赖、构造即隐私安全）。
+        - 'in_process' / 'memory' / 'privacy' -> InProcessPrivacyTraceSink（ragspine 的同名子类：先过递归隐私门
+          再交给 corespine 默认实现；零依赖、构造即隐私安全）。
         - 'otel' / 'opentelemetry'            -> OtelTraceSink（behind [otel] extra，延迟 import，扇出前先过隐私门）。
         - 其余                                -> entry-point 自动发现（第三方包在 TRACE_SINK_ENTRY_POINT_GROUP
           下注册即可被选中）；都不命中 -> ValueError 列出可选名字。

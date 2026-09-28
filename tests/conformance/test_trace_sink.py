@@ -17,6 +17,7 @@
 """
 
 import os
+from dataclasses import dataclass
 
 import pytest
 import rootutils
@@ -37,6 +38,16 @@ from tests.conformance.conftest import TRACE_SINK_SUITE
 # 键的载荷；_SECRET 取一段独一无二的正文，便于「取值偷运」检测扫描其原文是否落进记录。
 _SECRET = "机密答案正文：香港 REVENUE=4500 与整段 chunk 全文——绝不得进 trace"
 _SECRET_NUM = 424242.0
+
+
+@dataclass(frozen=True)
+class _LeakyCall:
+    """带禁词字段的 dataclass 载荷（非 Mapping 容器，旧门与只查 Mapping 的门都看不见）。"""
+
+    stage: str
+    prompt: str
+
+
 _FORBIDDEN_PAYLOADS: tuple[dict[str, object], ...] = (
     {"answer": _SECRET},  # 答案正文
     {"value": _SECRET_NUM},  # 事实数值
@@ -51,6 +62,7 @@ _FORBIDDEN_PAYLOADS: tuple[dict[str, object], ...] = (
     {"llm_calls": [{"stage": "synthesis", "prompt": _SECRET}]},
     {"page_images": {"text": _SECRET}},
     {"rows": [[{"ok": 1}], [{"answer": _SECRET}]]},
+    {"llm_calls": [_LeakyCall("synthesis", _SECRET)]},
 )
 
 
@@ -290,3 +302,19 @@ def test_unknown_name_lists_discovered(monkeypatch):
     msg = str(excinfo.value)
     assert "in_process" in msg  # 内置名字被列出
     assert "dummy" in msg  # 已发现的 entry-point 名字也被列出
+
+
+def test_package_exports_the_recursive_in_process_sink():
+    """包门面导出的 InProcessPrivacyTraceSink 是递归版（corespine 同名实现的子类），嵌套正文也被拒绝。"""
+    import corespine
+
+    from ragspine.common.observability import InProcessPrivacyTraceSink as Exported
+
+    assert Exported is InProcessPrivacyTraceSink
+    assert issubclass(Exported, corespine.InProcessPrivacyTraceSink)
+    with pytest.raises(TraceError):
+        Exported().emit("trace", llm_calls=[_LeakyCall("synthesis", _SECRET)])
+    # 反证：corespine 原实现只查顶层，同一载荷照样收下——递归来自 ragspine 子类。
+    corespine.InProcessPrivacyTraceSink().emit(
+        "trace", llm_calls=[_LeakyCall("synthesis", _SECRET)]
+    )

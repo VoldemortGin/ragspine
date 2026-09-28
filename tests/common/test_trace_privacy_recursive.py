@@ -1,12 +1,17 @@
 """隐私门递归检查（common/observability/sink.enforce_trace_privacy，ADR 0028）。
 
-递归遍历 Mapping 的键与 list/tuple 的元素（字符串不展开），报错时给出路径（如 `llm_calls[0].prompt`）；
+递归遍历 Mapping 的键、dataclass / NamedTuple 的字段名、list/tuple/set/frozenset 的元素（字符串不展开），
+其余非标量对象 fail-closed 拒绝；报错时给出路径（如 `llm_calls[0].prompt`、`x{*}.prompt`）；
 容器层数（含顶层载荷）超过 8 层按"可疑"报错，不截断放行。反证：只检查顶层的旧门对这些载荷一个都查不出。
 """
 
+import enum
 import logging
 import os
 from collections.abc import Mapping
+from dataclasses import dataclass
+from types import SimpleNamespace
+from typing import NamedTuple
 
 import pytest
 import rootutils
@@ -20,6 +25,18 @@ from ragspine.common.observability.sink import (
     TraceError,
     enforce_trace_privacy,
 )
+
+
+class _Color(enum.Enum):
+    RED = "red"
+
+
+class _Code(enum.StrEnum):
+    OK = "ok"
+
+
+class _Level(enum.IntEnum):
+    HIGH = 2
 
 
 def _old_top_level_gate(fields: Mapping[str, object]) -> None:
@@ -108,3 +125,100 @@ def test_strings_are_not_expanded_and_benign_nesting_passes():
             "llm_calls": [{"stage": "synthesis", "ms": 1, "error": ""}],
         }
     )
+
+
+# ---------------------------------------------------------------------------
+# 非 Mapping 容器（审阅补充）：dataclass / NamedTuple 按字段名当键检查；set / frozenset 逐元素（路径 `x{*}`）；
+# 其余非标量对象（SimpleNamespace、普通对象、dataclass 类本身、未知类型）一律 fail-closed 拒绝并附路径。
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _LeakCall:
+    stage: str
+    prompt: str
+
+
+@dataclass(frozen=True)
+class _SafeCall:
+    stage: str
+    ms: int
+
+
+class _LeakTuple(NamedTuple):
+    stage: str
+    prompt: str
+
+
+class _SafeTuple(NamedTuple):
+    stage: str
+    ms: int
+
+
+class _Plain:
+    def __init__(self) -> None:
+        self.prompt = "正文"
+
+
+_CONTAINER_LEAKS: tuple[tuple[str, dict[str, object], str], ...] = (
+    ("dataclass", {"x": _LeakCall("synthesis", "正文")}, "x.prompt"),
+    (
+        "dataclass_in_list",
+        {"x": [_SafeCall("hyde", 1), _LeakCall("synthesis", "正文")]},
+        "x[1].prompt",
+    ),
+    ("namedtuple", {"x": _LeakTuple("synthesis", "正文")}, "x.prompt"),
+    ("set", {"x": {_LeakTuple("synthesis", "正文")}}, "x{*}.prompt"),
+    ("frozenset", {"x": frozenset({_LeakCall("synthesis", "正文")})}, "x{*}.prompt"),
+)
+
+_UNKNOWN_OBJECTS: tuple[tuple[str, dict[str, object], str], ...] = (
+    ("simple_namespace", {"x": SimpleNamespace(prompt="正文")}, "x"),
+    ("plain_object", {"x": [_Plain()]}, "x[0]"),
+    ("dataclass_class", {"x": _LeakCall}, "x"),
+    ("object", {"x": {"y": object()}}, "x.y"),
+    ("enum", {"x": _Color.RED}, "x"),
+)
+
+
+@pytest.mark.parametrize(
+    ("kind", "payload", "path"), _CONTAINER_LEAKS, ids=[c[0] for c in _CONTAINER_LEAKS]
+)
+def test_non_mapping_container_leak_is_rejected_with_path(kind, payload, path):
+    with pytest.raises(TraceError) as exc_info:
+        emit_trace(None, request_id="r1", **payload)
+    assert path in str(exc_info.value)
+    _old_top_level_gate(payload)  # 反证：旧门放行
+
+
+@pytest.mark.parametrize(
+    ("kind", "payload", "path"), _UNKNOWN_OBJECTS, ids=[c[0] for c in _UNKNOWN_OBJECTS]
+)
+def test_unknown_object_is_rejected_fail_closed(kind, payload, path):
+    with pytest.raises(TraceError, match="非标量") as exc_info:
+        enforce_trace_privacy(payload)
+    assert f"（{path}：" in str(exc_info.value)
+    _old_top_level_gate(payload)  # 反证：旧门放行
+
+
+def test_legal_dataclass_namedtuple_and_set_payloads_pass():
+    enforce_trace_privacy(
+        {
+            "calls": [_SafeCall("hyde", 1), _SafeTuple("synthesis", 2)],
+            "one": _SafeCall("tool_round", 3),
+            "codes": {"a", "b"},
+            "frozen": frozenset({1, 2}),
+            "scalars": [None, True, 1, 1.5, "s", b"b"],
+            "str_enum": _Code.OK,
+            "int_enum": _Level.HIGH,
+        }
+    )
+
+
+def test_container_depth_limit_counts_dataclass_and_set_levels():
+    inner: object = _SafeCall("hyde", 1)  # dataclass 自身算一层
+    for _ in range(6):
+        inner = [inner]
+    enforce_trace_privacy({"x": inner})  # 顶层 + 6 层 list + dataclass = 8 层
+    with pytest.raises(TraceError, match="嵌套超过"):
+        enforce_trace_privacy({"x": [inner]})

@@ -1,7 +1,8 @@
 """common.observability —— 隐私安全可观测性：trace 发射原语 + 可插拔 TraceSink 缝（🛡）。
 
 trace 只记【非敏感元数据】（request_id / route / 受控代码 / 计数 / 耗时），绝不记答案正文 /
-事实数值 / chunk 正文——由 corespine InProcessPrivacyTraceSink 构造即兜底（隐私 by construction）。
+事实数值 / chunk 正文——由 InProcessPrivacyTraceSink（corespine 同名实现的子类，先过递归隐私门，ADR 0028）
+构造即兜底（隐私 by construction）。
 TraceSink 缝把这条隐私约定形式化为一个【可注册 / 可选择 / 带 conformance pack】的出口：观测可扇出
 到 OTel / 文件【经隐私 conformance 而非绕过】（见 sink.py + tests/conformance/test_trace_sink.py）。
 
