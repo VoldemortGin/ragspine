@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/ingestion/
-verified-against: 4cb01273af900910fb698aa6f348d87c44076edb
+verified-against: daacbd0e20e39c50b5fa970afd031e8852d91251
 ---
 
 # ingestion — agent contract
@@ -51,6 +51,11 @@ without a PDF loses its tags with its images, dry-run writes nothing, trace `op=
   `source_doc_id` (= filename, the lineage root — same as `narrative_ingest`'s `doc_id = path.name`)
   + `locator`. Bound for *every* registered connector by `tests/conformance/test_source_connector_provenance.py`
   (with a lineage-dropping reverse-proof stub). A connector that drops lineage fails CI, not production.
+- **One `doc_id`, one source file** — narrative `doc_id = path.name` (never changes: locators and gold ids key on it).
+  A file whose name is already owned by a *different existing* file (earlier in the batch, or `narrative_doc.source_path`)
+  fails with `DocIdConflictError` instead of replacing its chunks / vectors / page images; a vanished registered
+  source (moved / deleted) or a legacy row with no path updates as before. `prepare_source_pdfs` rejects two same-named
+  `.md` with linked PDFs in one batch before any write.
 - **Idempotent structured ingestion** — re-running a batch must not double-write;
   the manifest ledger is the guard.
 - **Review write-back closes the loop** — `review/apply.py` `ResolvedReviewApplier`

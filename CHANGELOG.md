@@ -127,6 +127,19 @@ All notable changes to RAGSpine are documented here. This project follows Semant
   substituting the new key for the old one makes each regenerated schema equal to the old one,
   so no wire payload changes.
 
+### Fixed
+
+- **Same-named narrative files no longer overwrite each other.** `doc_id` is the file name, so ingesting
+  `a/report.md` and then `b/report.md` replaced the first document's chunks, ledger row, persisted vectors and page
+  images, and re-ingesting either flipped them back. The `doc_id` rule and locator format are unchanged; a file whose
+  name is already owned by a different existing file (earlier in the batch, or registered in `narrative_doc`) now fails
+  with `DocIdConflictError` and the rest of the batch continues. A registered source that no longer exists (moved or
+  deleted) or a legacy ledger row without a path still updates as before. A batch with two same-named `.md` files that
+  both link a PDF raises `SourcePdfError` before any write.
+- **`ReindexRequiredError` no longer points at a nonexistent `ragspine ingest --reindex`.** The message now shows the
+  stored and requested `indexing` contracts and the two remedies that exist: reopen the workspace with the stored
+  config, or ingest into a new empty workspace. The error carries `stored_indexing` / `requested_indexing`.
+
 ## [0.16.1] - 2026-09-22
 
 ### Changed
