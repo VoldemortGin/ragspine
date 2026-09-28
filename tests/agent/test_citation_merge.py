@@ -361,3 +361,40 @@ def test_model_echo_with_ungrounded_body_number_is_still_rewritten(store):
     assert result.answer_plain.startswith(NUMBER_GUARD_NOTICE)
     assert "7%" not in result.answer_plain
     assert result.answer == f"{result.answer_plain}\n（资料来源：d.md page=3, 5）"
+
+
+# ---------------------------------------------------------------------------
+# 页码引用模式不吞紧跟的带单位数字（与 @page 来源共有的老口子）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "refs", "expected"),
+    [
+        ("收入 100（page=77, 44 亿美元）", ["d.md", "page=77"], ["44"]),
+        ("收入 100（page=77、44%）", ["d.md", "page=77"], ["44%"]),
+        ("收入 100，page=3, 44%", ["d.md", "page=3"], ["44%"]),
+        ("收入 100，slides 3, 7 亿美元", ["X.pptx", "slide=3"], ["7"]),
+        ("收入 100（d.md@page=77, 44 亿美元）", ["d.md", "d.md@page=77#para1"], ["44"]),
+        ("收入 100（d.md@page=77, 44%）", ["d.md", "d.md@page=77#para1"], ["44%"]),
+        ("收入 100，slide=2, 4.5%", ["X.pptx", "slide=2"], ["4.5%"]),
+        ("收入 100，page=3, 12 million", ["d.md", "page=3"], ["12"]),
+    ],
+)
+def test_page_list_does_not_swallow_trailing_unit_number(text, refs, expected):
+    evidence = ["收入 100"]
+    assert ungrounded_numbers(text, question="", evidence=evidence, source_refs=refs) == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Agency grew, see page 18.",
+        "见 page=6。",
+        "Pages 4, 8, 22.",
+        "见 d.md@page=18#para1-19。",
+    ],
+)
+def test_page_ref_before_sentence_end_is_still_exempt(text):
+    refs = ["d.md", "d.md@page=18#para1-19"]
+    assert ungrounded_numbers(text, question="", evidence=[], source_refs=refs) == []

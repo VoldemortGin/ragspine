@@ -38,7 +38,9 @@ _LEAD_MIN_CHARS = 12
 # ---- 豁免：先在原文上剔除（不是数值主张） ----
 _CITE_RE = re.compile(r"[\[［〔【]\s*\d+(?:\s*[,，、\-–]\s*\d+)*\s*[\]］〕】]")
 _PAGE_REF_RE = re.compile(
-    r"(?i)(?<![a-z])(?:pages?|slides?|pp?\.)\s*[=:：]?\s*\d+(?:\s*[-–,，、]\s*\d+)*(?:#[\w\-]+)?"
+    r"(?i)(?<![a-z])(?:pages?|slides?|pp?\.)\s*[=:：]?\s*\d+(?:\s*[-–,，、]\s*\d+)*"
+    r"(?![\d%％]|\.\d|\s*(?:%|％|十亿|billion|bn|亿|百万|million|mn|万|千|thousand|[mbk](?![a-z])))"
+    r"(?:#[\w\-]+)?"
     r"|(?<![a-z])#?para\d+(?:-\d+)?"
     r"|第\s*\d+\s*[页頁张張]"
     r"|(?<![a-z0-9])p\d+(?:-\d+)?\.png"
