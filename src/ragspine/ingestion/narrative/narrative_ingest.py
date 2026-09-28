@@ -216,6 +216,7 @@ def ingest_narrative(
     registry = sqlite3.connect(store.db_path)
     try:
         _ensure_registry(registry)
+        claimed: dict[str, Path] = {}
         for path in _resolve_inputs(inputs):
             report.files.append(
                 _ingest_one(
@@ -228,6 +229,7 @@ def ingest_narrative(
                     max_chars,
                     overlap_chars,
                     segment_chunking,
+                    claimed,
                 )
             )
     finally:
@@ -250,6 +252,7 @@ def _ingest_one(
     max_chars: int = DEFAULT_CHUNK_CHARS,
     overlap_chars: int = DEFAULT_OVERLAP_CHARS,
     segment_chunking: bool = False,
+    claimed: dict[str, Path] | None = None,
 ) -> FileReport:
     """单文件：hash 比对 -> 抽取 -> 切块 -> 写入；任何异常落进 failed 报告。"""
     doc_id = path.name
@@ -260,6 +263,17 @@ def _ingest_one(
     except OSError as exc:
         rep.error = f"{type(exc).__name__}: {exc}"
         return rep
+
+    # doc_id = 文件名：同名的另一个现存文件已占用此 doc_id 时拒绝，绝不静默覆盖其块 / 向量 / 页图。
+    owner = _doc_id_owner(registry, doc_id, claimed if claimed is not None else {})
+    if owner is not None and owner != path.resolve():
+        rep.error = (
+            f"DocIdConflictError: doc_id {doc_id!r} 已属于 {owner}；不同目录的同名文件不会覆盖它，"
+            "请改名后再入库，或入到另一个 workspace"
+        )
+        return rep
+    if claimed is not None:
+        claimed[doc_id] = path.resolve()
 
     if _registered_hash(registry, doc_id) == rep.file_hash:
         rep.status = STATUS_SKIPPED
@@ -361,6 +375,19 @@ def _ensure_registry(conn: sqlite3.Connection) -> None:
         """
     )
     conn.commit()
+
+
+def _doc_id_owner(conn: sqlite3.Connection, doc_id: str, claimed: dict[str, Path]) -> Path | None:
+    """占用 doc_id 的现存来源文件：本批已认领的优先，否则台账登记的路径（已不在 / 未记路径 → None）。"""
+    if doc_id in claimed:
+        return claimed[doc_id]
+    row = conn.execute(
+        "SELECT source_path FROM narrative_doc WHERE doc_id = ?", (doc_id,)
+    ).fetchone()
+    if row is None or not row[0]:
+        return None
+    registered = Path(row[0])
+    return registered.resolve() if registered.is_file() else None
 
 
 def _registered_hash(conn: sqlite3.Connection, doc_id: str) -> str | None:

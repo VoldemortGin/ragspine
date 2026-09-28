@@ -104,12 +104,19 @@ def prepare_source_pdfs(
         )
     root = Path(allowed_root).resolve() if allowed_root is not None else None
     sources: dict[str, SourcePdf] = {}
+    owners: dict[str, set[Path]] = {}
+    for md in markdown:
+        owners.setdefault(md.name, set()).add(md.resolve())
     for md in markdown:
         pdf = resolve_source_pdf(md, explicit)
         if pdf is None:
             continue
         if root is not None and not pdf.is_relative_to(root):
             raise SourcePdfError(f"source PDF 不在 allowed_upload_root 内：{pdf}")
+        if len(owners[md.name]) > 1:
+            raise SourcePdfError(
+                f"本批有多个同名 {md.name!r}（doc_id 相同），无法确定页图挂哪份 PDF；请改名后再入库"
+            )
         sources[md.name] = validate_source_pdf(md, pdf)
     return sources
 
