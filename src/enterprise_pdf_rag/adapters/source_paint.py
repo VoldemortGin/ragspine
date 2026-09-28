@@ -814,8 +814,20 @@ def _producer(prepared: PreparedFigure, sdk_version: str) -> str:
     return f"pdfspine/{sdk_version};fonttools/{version('fonttools')};source-replay-font-closure-v2;{prepared.view.renderer_fingerprint}"
 
 
+# Reviewed SDK upgrades: the running pdfspine → the earlier SDKs whose proofs it may
+# revalidate. Each entry is added only after the release notes were reviewed for changes to
+# paint profile, text/glyph replay or SVG export (0.11.1: OCR ordering; 0.11.2: table sort
+# comparators). The whole proof is still re-derived and compared; only the producer's SDK
+# label is carried over. An unlisted runtime or SDK fails closed.
+_REVIEWED_SDK_UPGRADES: Mapping[str, frozenset[str]] = {
+    "0.11.0": frozenset({"0.10.0"}),
+    "0.11.1": frozenset({"0.10.0", "0.11.0"}),
+    "0.11.2": frozenset({"0.10.0", "0.11.0", "0.11.1"}),
+}
+
+
 def _validator_identity() -> str:
-    return f"pdfspine/{pdfspine.__version__};trusted-profile-v1;legacy-0.10.0-to-0.11.0-v1"
+    return f"pdfspine/{pdfspine.__version__};trusted-profile-v1;reviewed-sdk-upgrades-v2"
 
 
 def build_source_paint_proof(pdf: bytes, *, prepared: PreparedFigure) -> SourcePaintProof:
@@ -833,7 +845,10 @@ def revalidate_source_paint_proof(
     pdf: bytes, *, prepared: PreparedFigure, proof: SourcePaintProof
 ) -> SourcePaintRevalidation:
     producer = _producer(prepared, pdfspine.__version__)
-    if pdfspine.__version__ == "0.11.0" and proof.producer == _producer(prepared, "0.10.0"):
+    if any(
+        proof.producer == _producer(prepared, sdk)
+        for sdk in _REVIEWED_SDK_UPGRADES.get(pdfspine.__version__, frozenset())
+    ):
         producer = proof.producer
     verified = _build_source_paint_proof(pdf, prepared, producer, _validator_identity())
     if verified.proof != proof:

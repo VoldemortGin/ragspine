@@ -15,6 +15,7 @@ from enterprise_pdf_rag.adapters.donut_qualification import DonutQualification
 from enterprise_pdf_rag.adapters.figure_reasoning import PreparedFigure, prepare_figure
 from enterprise_pdf_rag.adapters.pdfspine_document import PdfspineDocumentAdapter
 from enterprise_pdf_rag.adapters.source_paint import (
+    SourcePaintProof,
     build_source_paint_proof,
     verify_source_paint_proof,
 )
@@ -169,6 +170,56 @@ def test_reviewed_sdk_upgrade_revalidates_the_entire_old_proof_identity() -> Non
     ):
         with pytest.raises(ValueError, match="source_paint_proof_revalidation_mismatch"):
             verify_source_paint_proof(source, prepared=prepared, proof=changed)
+
+
+@pytest.mark.parametrize(
+    ("runtime", "reviewed"),
+    [
+        ("0.11.0", ("0.10.0",)),
+        ("0.11.1", ("0.10.0", "0.11.0")),
+        ("0.11.2", ("0.10.0", "0.11.0", "0.11.1")),
+    ],
+)
+def test_each_reviewed_runtime_accepts_exactly_its_reviewed_earlier_sdks(
+    monkeypatch: pytest.MonkeyPatch, runtime: str, reviewed: tuple[str, ...]
+) -> None:
+    source, prepared, _ = glyph_source()
+    monkeypatch.setattr(pdfspine, "__version__", runtime)
+    current = build_source_paint_proof(source, prepared=prepared)
+    assert f"pdfspine/{runtime};" in current.producer
+
+    def labelled(sdk: str) -> SourcePaintProof:
+        return replace(
+            current, producer=current.producer.replace(f"pdfspine/{runtime};", f"pdfspine/{sdk};")
+        )
+
+    for sdk in reviewed:
+        assert verify_source_paint_proof(source, prepared=prepared, proof=labelled(sdk)) == (
+            labelled(sdk)
+        )
+    # A downgrade, an unreviewed older SDK and a tampered legacy proof all fail closed.
+    for proof in (
+        labelled("0.11.3"),
+        labelled("0.9.0"),
+        replace(labelled(reviewed[-1]), trace_digest="0" * 64),
+    ):
+        with pytest.raises(ValueError, match="source_paint_proof_revalidation_mismatch"):
+            verify_source_paint_proof(source, prepared=prepared, proof=proof)
+
+
+def test_an_unreviewed_runtime_rejects_every_legacy_proof(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, prepared, _ = glyph_source()
+    monkeypatch.setattr(pdfspine, "__version__", "0.12.0")
+    current = build_source_paint_proof(source, prepared=prepared)
+    assert verify_source_paint_proof(source, prepared=prepared, proof=current) == current
+    for sdk in ("0.10.0", "0.11.0", "0.11.2"):
+        old = replace(
+            current, producer=current.producer.replace("pdfspine/0.12.0;", f"pdfspine/{sdk};")
+        )
+        with pytest.raises(ValueError, match="source_paint_proof_revalidation_mismatch"):
+            verify_source_paint_proof(source, prepared=prepared, proof=old)
 
 
 def test_legacy_proof_cannot_bypass_a_missing_trusted_source_profile(
