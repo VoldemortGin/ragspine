@@ -148,6 +148,14 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 - **`ReindexRequiredError` no longer points at a nonexistent `ragspine ingest --reindex`.** The message now shows the
   stored and requested `indexing` contracts and the two remedies that exist: reopen the workspace with the stored
   config, or ingest into a new empty workspace. The error carries `stored_indexing` / `requested_indexing`.
+- **LLM JSON replies with a code fence, surrounding prose, a trailing comma or a bare value no longer fall back.**
+  `LLMQueryDecomposer`, RAG-Fusion variant generation and `LLMRelationExtractor` parsed the reply with
+  `strip` + `json.loads`, so ```` ```json ```` fences, "here is the result: …" wrappers, `[..., ]` or
+  `"kind": supplier` meant no decomposition, no variants or no edges. All three now use the new
+  `ragspine.common.llm_json.extract_json` (stdlib only, returns dict / list / `None`, never raises). Repairs apply only
+  outside string literals; truncated JSON, single quotes, unquoted keys, comments and Python literals still fall
+  back as before. One narrowing: a reply containing `NaN` / `Infinity`, which `json.loads` used to accept, now falls
+  back too. All three features stay opt-in (default `none`).
 
 ## [0.16.1] - 2026-09-22
 

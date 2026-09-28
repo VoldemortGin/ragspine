@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/common/
-verified-against: 6ebaaa4c3340f5dfcb69c255c94b3b6bc4724c74
+verified-against: 8c3b8f1f160a1d64165765d5ae07a3ada9035b57
 ---
 
 # common — agent contract
@@ -25,6 +25,14 @@ behind `[otel]`, privacy-gated before any span).
 (NFKC, thousands, `per cent`→`%`, magnitude amounts) + digit-boundary containment. One definition shared by the
 nl-gold judge (`eval/`, re-exported with unchanged signatures) and the narrative number guard (`agent/number_guard`,
 ADR 0024).
+
+`llm_json.py` — `extract_json(text, *, expect=None)`: the one tolerant parser for JSON in LLM replies. Strict parse
+first, then only these repairs, outside string literals: strip code fences, drop a comma right before `]` / `}`,
+quote a bare ASCII identifier in value position (only when the segment already has a double-quoted string; never
+`true/false/null/None/NaN/Infinity/undefined`), take the first top-level container out of surrounding prose.
+Returns dict / list / `None`, never raises (RecursionError included), never looks inside a top-level span, tries
+at most 64 starts. No truncation completion, single quotes, unquoted keys, comments, Python literals or `NaN`.
+stdlib only, no trace. Used by `agent/decompose`, `agent/query_transform` (RAG-Fusion) and `graph/extractor`.
 
 `evidence/` — the evidence chain's APP_* settings, lineage logging and model access
 (ADR 0022); its own contract is [`evidence/CLAUDE.md`](evidence/CLAUDE.md).
