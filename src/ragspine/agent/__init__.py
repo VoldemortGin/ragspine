@@ -14,6 +14,7 @@ Submodules:
     query_tools.py — 参数化 query_metric 查询工具：found/not_found/unrecognized，绝不臆造。
     query_transform.py — opt-in LLM 查询变换（W9）：HyDE + RAG-Fusion + step-back + Adaptive-RAG；默认 none 时旁路、字节不变。
     security_gate.py — 确定性安全门（ADR 0010）：越权/竞品拒答 + 命中遮蔽。
+    truncation.py — provider 层 LLM 输出截断重试：预算翻倍 + 关 reasoning，仍截断抛 TruncatedOutputError。
 """
 
 from ragspine import _lazy_submodules

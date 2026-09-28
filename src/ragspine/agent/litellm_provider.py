@@ -14,6 +14,11 @@ key 由 litellm 按厂商读环境变量（DEEPSEEK_API_KEY / OPENAI_API_KEY / A
 - 惰性：import 本模块不加载 litellm，首次调用时才 import；未安装时报 ImportError 并提示装 `rag-spine[litellm]`。
 - 韧性：超时 `timeout`、重试交给 litellm 自带 `num_retries`（不自己再包一层）；litellm 的网络 / API / 超时异常
   （`LITELLM_EXCEPTION_TYPES`）归一到 ProviderError，程序错误照常抛出；`max_concurrency` 限制同时在途请求数。
+- 截断：`finish_reason="length"`（文本或 tool_call 被截断）时经 `agent/truncation.retry_on_truncation` 把
+  `max_tokens` 翻倍重试（初始预算取构造参数 `max_tokens`，未设则取本次 `usage.completion_tokens`），重试请求带
+  `reasoning_effort="none"` + `drop_params=True` 关掉思考（litellm 的通用写法，不支持的模型由 litellm 丢弃该参数）；
+  网关仍以 BadRequest 拒绝时去掉这两个参数再发一次，并记住本实例不再带。仍截断则抛 `TruncatedOutputError`。
+  `chat_stream` 不重试（delta 已经发出，无法撤回）。
 - 隐私：加载时关掉 litellm 遥测、清空全部回调、`turn_off_message_logging`、`suppress_debug_info`，并用本地模型
   价格表（`LITELLM_LOCAL_MODEL_COST_MAP=True`，import 不联网）；本 provider 自身不打日志、不写 trace——请求 trace
   由编排层记计数与耗时。
@@ -39,6 +44,7 @@ from corespine import (
 )
 
 from ragspine.agent.llm_provider import IMAGE_PART_TYPE, split_message_content
+from ragspine.agent.truncation import TruncationPolicy, retry_on_truncation
 
 DEFAULT_LITELLM_MODEL = "deepseek/deepseek-chat"
 DEFAULT_LITELLM_TIMEOUT_S = 120.0
@@ -51,6 +57,9 @@ ENV_API_BASE = "RAGSPINE_LITELLM_API_BASE"
 ENV_IMAGE_INPUT = "RAGSPINE_LITELLM_IMAGE_INPUT"
 
 _TRUE = {"1", "true", "yes", "on"}
+
+# 截断重试时关掉思考：litellm 的通用参数值（deepseek → thinking disabled，OpenAI 系 → reasoning_effort=none）。
+_REASONING_OFF = {"reasoning_effort": "none", "drop_params": True}
 
 _litellm: Any = None
 _load_lock = threading.Lock()
@@ -157,6 +166,7 @@ class LiteLLMProvider:
         num_retries: int = DEFAULT_LITELLM_RETRIES,
         max_concurrency: int = DEFAULT_LITELLM_CONCURRENCY,
         max_tokens: int | None = None,
+        truncation: TruncationPolicy | None = None,
     ) -> None:
         if max_concurrency < 1:
             raise ValueError("max_concurrency 必须 >= 1")
@@ -167,6 +177,9 @@ class LiteLLMProvider:
         self.timeout = timeout
         self.num_retries = num_retries
         self.max_tokens = max_tokens
+        self.truncation = truncation or TruncationPolicy.from_env()
+        # 网关拒绝 reasoning 关闭参数（BadRequest）后置 False，之后的截断重试不再带。
+        self._reasoning_off_ok = True
         self._slots = threading.BoundedSemaphore(max_concurrency)
 
     @classmethod
@@ -204,16 +217,45 @@ class LiteLLMProvider:
             kwargs["max_tokens"] = self.max_tokens
         return kwargs
 
+    def _completion(self, litellm: Any, kwargs: dict[str, Any]) -> Any:
+        with self._slots:
+            try:
+                return litellm.completion(**kwargs)
+            except tuple(litellm.LITELLM_EXCEPTION_TYPES) as exc:
+                raise ProviderError(f"litellm 调用失败（{self.model}）：{exc}") from exc
+
+    def _retry_completion(self, litellm: Any, kwargs: dict[str, Any], budget: int) -> Any:
+        """截断重试：放大 max_tokens 并关掉 reasoning；网关拒绝关闭参数时去掉它再发一次。"""
+        kwargs = {**kwargs, "max_tokens": budget}
+        if not self._reasoning_off_ok:
+            return self._completion(litellm, kwargs)
+        with self._slots:
+            try:
+                return litellm.completion(**kwargs, **_REASONING_OFF)
+            except litellm.BadRequestError:
+                self._reasoning_off_ok = False
+            except tuple(litellm.LITELLM_EXCEPTION_TYPES) as exc:
+                raise ProviderError(f"litellm 调用失败（{self.model}）：{exc}") from exc
+        return self._completion(litellm, kwargs)
+
     def chat(
         self, messages: list[dict[str, Any]], *, tools: list[dict[str, Any]] | None = None
     ) -> ChatCompletion:
         litellm = _load_litellm()
         kwargs = self._request(messages, tools)
-        with self._slots:
-            try:
-                resp = litellm.completion(**kwargs)
-            except tuple(litellm.LITELLM_EXCEPTION_TYPES) as exc:
-                raise ProviderError(f"litellm 调用失败（{self.model}）：{exc}") from exc
+
+        def attempt(budget: int | None) -> tuple[Any, int | None]:
+            if budget is None:
+                resp = self._completion(litellm, kwargs)
+            else:
+                resp = self._retry_completion(litellm, kwargs, budget)
+            if resp.choices[0].finish_reason != "length":
+                return resp, None
+            usage = getattr(resp, "usage", None)
+            used = int(getattr(usage, "completion_tokens", 0) or 0)
+            return resp, budget or self.max_tokens or used
+
+        resp = retry_on_truncation(attempt, self.truncation, what=f"litellm（{self.model}）")
         choice = resp.choices[0]
         tool_calls = _tool_calls(choice.message)
         message = ResponseMessage(

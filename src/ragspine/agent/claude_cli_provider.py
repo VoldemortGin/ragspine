@@ -17,6 +17,15 @@
   读取都要授权，而无人应答即自动拒绝（实测 ``../`` 之外的文件读取被拒）。刻意不用 ``--allowedTools Read``，
   它会预先放行任意路径的 Read。prompt 末尾追加一句用相对文件名读图的指引，原图存储路径不进 prompt / argv。
   没有图片时命令行与之前完全一样（``--tools ""``）。
+- 截断：`--output-format json` 的结果**没有**可用的 stop_reason（实测输出超限时 stop_reason 仍是
+  "stop_sequence"）；CLI 的信号是非零退出 + `is_error: true` + `result` 为
+  "API Error: Claude's response exceeded the N output token maximum…"（terminal_reason="api_error"）。认出这条
+  后经 `agent/truncation.retry_on_truncation` 重试：环境变量 `CLAUDE_CODE_MAX_OUTPUT_TOKENS` 设为翻倍预算（不超过
+  上限），并加 `--settings '{"alwaysThinkingEnabled": false}'` 关掉思考（实测思考 token 计入输出预算；
+  `MAX_THINKING_TOKENS=0` 在 `-p` 下不生效）。CLI 默认输出上限 32000 已高于默认重试上限 16384，所以只有
+  在调用方环境把 `CLAUDE_CODE_MAX_OUTPUT_TOKENS` 设得更低、或调高上限时才会真正重试；否则直接抛
+  `TruncatedOutputError`（ProviderError 子类，与原先的非零退出同样走诚实降级）。首次调用的命令行与环境不变。
+  tool 模式下截断同样表现为这条错误（不会返回半截 JSON），故同样覆盖。
 - 不支持：流式（不实现 StreamingProvider）、采样参数（temperature / max_tokens 由 CLI 决定）、
   原生 JSON mode（JSON 由提示词约束 + 解析保证）。
 
@@ -31,6 +40,7 @@ lazy：import 本模块不检查 claude 是否存在；首次 chat 时用 shutil
 """
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -50,6 +60,7 @@ from corespine import (
 )
 
 from ragspine.agent.llm_provider import split_message_content
+from ragspine.agent.truncation import TruncationPolicy, retry_on_truncation
 
 DEFAULT_CLAUDE_CLI_TIMEOUT_S = 300.0
 DEFAULT_CLAUDE_CLI_CONCURRENCY = 4
@@ -74,6 +85,12 @@ _IMAGE_HINT = (
     "\n\n[页图] 以下页图文件就在当前工作目录中：{names}。作答前请用 Read 工具逐一查看这些图片，"
     "图中的信息与上面的文字片段同样可以作为依据；不要读取其他文件。"
 )
+
+# CLI 输出超限时的错误文本（is_error=true 的 result）；N 为当时生效的输出上限。
+_TRUNCATED_RE = re.compile(r"exceeded the (\d+) output token maximum")
+# 截断重试：输出上限走 CLI 的环境变量，思考经 flag 设置关闭。
+_MAX_OUTPUT_ENV = "CLAUDE_CODE_MAX_OUTPUT_TOKENS"
+_THINKING_OFF_SETTINGS = '{"alwaysThinkingEnabled": false}'
 
 _FORMAT_FIX = (
     "你上一条回复不符合工具调用协议（{error}）。请只输出一个合法 JSON 对象："
@@ -177,6 +194,36 @@ def _parse_tool_reply(text: str, tool_names: set[str]) -> ResponseMessage:
     return ResponseMessage(role="assistant", content=content)
 
 
+class _CliTruncated(ProviderError):
+    """`claude -p` 因输出超限失败；limit 为当时的输出上限。"""
+
+    def __init__(self, message: str, limit: int) -> None:
+        super().__init__(message)
+        self.limit = limit
+
+
+def _result_payload(stdout: str) -> object:
+    """解析 CLI 的 json 输出；verbose 下是事件数组，取其中 type=result 的那条。"""
+    payload = json.loads(stdout)
+    if isinstance(payload, list):
+        payload = next(
+            (e for e in payload if isinstance(e, dict) and e.get("type") == "result"), None
+        )
+    return payload
+
+
+def _truncation_limit(stdout: str) -> int | None:
+    """CLI 输出超限错误里的上限值；不是这类错误返回 None。"""
+    try:
+        payload = _result_payload(stdout)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict) or not payload.get("is_error"):
+        return None
+    match = _TRUNCATED_RE.search(str(payload.get("result") or ""))
+    return int(match.group(1)) if match else None
+
+
 def _tool_name(tool: dict[str, Any]) -> str:
     return str(tool.get("function", tool)["name"])
 
@@ -194,6 +241,7 @@ class ClaudeCliProvider:
         timeout: float = DEFAULT_CLAUDE_CLI_TIMEOUT_S,
         max_concurrency: int = DEFAULT_CLAUDE_CLI_CONCURRENCY,
         format_retries: int = DEFAULT_FORMAT_RETRIES,
+        truncation: TruncationPolicy | None = None,
     ) -> None:
         if max_concurrency < 1:
             raise ValueError("max_concurrency 必须 >= 1")
@@ -201,6 +249,7 @@ class ClaudeCliProvider:
         self.claude_bin = claude_bin
         self.timeout = timeout
         self.format_retries = format_retries
+        self.truncation = truncation or TruncationPolicy.from_env()
         self._slots = threading.BoundedSemaphore(max_concurrency)
 
     def _resolve_bin(self) -> str:
@@ -213,11 +262,16 @@ class ClaudeCliProvider:
         return path
 
     def _run(
-        self, system: str, prompt: str, images: list[dict[str, Any]] | None = None
+        self,
+        system: str,
+        prompt: str,
+        images: list[dict[str, Any]] | None = None,
+        budget: int | None = None,
     ) -> tuple[str, Usage | None, str]:
         """跑一次 `claude -p`，返回 (结果文本, usage, 模型名)。失败归一到 ProviderError。
 
         images 非空时把图片复制进 cwd、只放开 Read 工具，并在 prompt 末尾附读图指引。
+        budget 非 None 是截断重试：输出上限设为 budget、关掉思考；输出超限抛 `_CliTruncated`。
         """
         exe = self._resolve_bin()
         images = images or []
@@ -250,6 +304,10 @@ class ClaudeCliProvider:
                 cmd += ["--permission-prompts", "none"]
             if self.model:
                 cmd += ["--model", self.model]
+            run_kwargs: dict[str, Any] = {}
+            if budget is not None:
+                cmd += ["--settings", _THINKING_OFF_SETTINGS]
+                run_kwargs["env"] = {**os.environ, _MAX_OUTPUT_ENV: str(budget)}
             try:
                 proc = subprocess.run(
                     cmd,
@@ -260,34 +318,54 @@ class ClaudeCliProvider:
                     cwd=workdir,
                     timeout=self.timeout,
                     check=False,
+                    **run_kwargs,
                 )
             except subprocess.TimeoutExpired as exc:
                 raise ProviderError(f"claude -p 超时（{self.timeout}s）") from exc
+        limit = _truncation_limit(proc.stdout or "")
         if proc.returncode != 0:
             detail = (proc.stderr or proc.stdout or "").strip()[:500]
-            raise ProviderError(f"claude -p 退出码 {proc.returncode}：{detail}")
+            message = f"claude -p 退出码 {proc.returncode}：{detail}"
+            if limit is not None:
+                raise _CliTruncated(message, limit)
+            raise ProviderError(message)
         try:
-            payload = json.loads(proc.stdout)
+            payload = _result_payload(proc.stdout)
         except json.JSONDecodeError as exc:
             raise ProviderError(f"claude -p 输出不是 JSON：{proc.stdout[:200]!r}") from exc
-        # verbose 配置下 json 输出是事件数组，取其中 type=result 的那条。
-        if isinstance(payload, list):
-            payload = next(
-                (e for e in payload if isinstance(e, dict) and e.get("type") == "result"), None
-            )
         if not isinstance(payload, dict) or payload.get("is_error"):
-            raise ProviderError(f"claude -p 返回错误：{str(payload)[:500]}")
+            message = f"claude -p 返回错误：{str(payload)[:500]}"
+            if limit is not None:
+                raise _CliTruncated(message, limit)
+            raise ProviderError(message)
         result = payload.get("result")
         if not isinstance(result, str):
             raise ProviderError("claude -p 结果缺少文本 result 字段")
         return result, _usage(payload), _model_name(payload, self.model)
+
+    def _complete(
+        self, system: str, prompt: str, images: list[dict[str, Any]]
+    ) -> tuple[str, Usage | None, str]:
+        """`_run` + 截断重试（关闭时输出超限照旧抛原 ProviderError）。"""
+
+        def attempt(budget: int | None) -> tuple[tuple[str, Usage | None, str] | None, int | None]:
+            try:
+                return self._run(system, prompt, images, budget), None
+            except _CliTruncated as exc:
+                if not self.truncation.enabled:
+                    raise
+                return None, exc.limit
+
+        result = retry_on_truncation(attempt, self.truncation, what="claude -p")
+        assert result is not None  # 截断未消除时 retry_on_truncation 已抛错
+        return result
 
     def chat(
         self, messages: list[dict[str, Any]], *, tools: list[dict[str, Any]] | None = None
     ) -> ChatCompletion:
         system, prompt, images = _render_transcript(messages)
         if not tools:
-            text, usage, model = self._run(system, prompt, images)
+            text, usage, model = self._complete(system, prompt, images)
             return _completion(ResponseMessage(role="assistant", content=text), usage, model)
 
         system = system + _TOOL_PROTOCOL.format(tools=json.dumps(tools, ensure_ascii=False))
@@ -295,7 +373,7 @@ class ClaudeCliProvider:
         attempt_prompt = prompt
         last_error = ""
         for _ in range(self.format_retries + 1):
-            text, usage, model = self._run(system, attempt_prompt, images)
+            text, usage, model = self._complete(system, attempt_prompt, images)
             try:
                 message = _parse_tool_reply(text, names)
             except ValueError as exc:

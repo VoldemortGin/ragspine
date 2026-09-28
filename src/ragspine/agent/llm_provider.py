@@ -11,6 +11,9 @@ query_metric 的 tool-use 循环与三态最终回答，绝不编造数字。
 - base_url 可覆盖：适配企业网关（GenAI Hub）转发 Anthropic API。
 - SDK 自带 max_retries（撞 429 被动退避）做兜底；主动 TPM 限流由 corespine RateLimitedProvider
   在 build_provider 处包装（见 service/config.py），两层互补。
+- 截断：AnthropicProvider 遇 `stop_reason="max_tokens"`（文本或 tool_use 被截断）时经
+  `agent/truncation.retry_on_truncation` 把 max_tokens 翻倍重试（有上限）；本 provider 从不开 extended
+  thinking，重试时没有 reasoning 可关。仍截断则抛 `TruncatedOutputError`（ProviderError 子类）。
 """
 
 import json
@@ -30,6 +33,7 @@ from corespine import (
 )
 
 from ragspine.agent.intent import parse_intent
+from ragspine.agent.truncation import TruncationPolicy, retry_on_truncation
 from ragspine.retrieval.translation import QUERY_TRANSLATION_PROMPT_PREFIX
 
 # 默认模型名（唯一出处，改这里即全局生效）
@@ -189,6 +193,7 @@ class AnthropicProvider:
         max_tokens: int = 16000,
         timeout: float = 30.0,
         max_retries: int = 2,
+        truncation: TruncationPolicy | None = None,
     ) -> None:
         try:
             import anthropic
@@ -208,6 +213,7 @@ class AnthropicProvider:
         self._client = anthropic.Anthropic(**client_kwargs)
         self.model = model
         self.max_tokens = max_tokens
+        self.truncation = truncation or TruncationPolicy.from_env()
 
     def chat(
         self, messages: list[dict[str, Any]], *, tools: list[dict[str, Any]] | None = None
@@ -216,16 +222,22 @@ class AnthropicProvider:
         kwargs: dict[str, Any] = {}
         if tools:
             kwargs["tools"] = [_openai_tool_to_anthropic(t) for t in tools]
-        try:
-            resp = self._client.messages.create(
-                model=self.model,
-                max_tokens=self.max_tokens,
-                system=system,
-                messages=convo,
-                **kwargs,
-            )
-        except Exception as exc:  # noqa: BLE001 — SDK 网络/API 异常归一到 ProviderError
-            raise ProviderError(f"Anthropic 调用失败：{exc}") from exc
+
+        def attempt(budget: int | None) -> tuple[Any, int | None]:
+            max_tokens = budget or self.max_tokens
+            try:
+                resp = self._client.messages.create(
+                    model=self.model,
+                    max_tokens=max_tokens,
+                    system=system,
+                    messages=convo,
+                    **kwargs,
+                )
+            except Exception as exc:  # noqa: BLE001 — SDK 网络/API 异常归一到 ProviderError
+                raise ProviderError(f"Anthropic 调用失败：{exc}") from exc
+            return resp, (max_tokens if resp.stop_reason == "max_tokens" else None)
+
+        resp = retry_on_truncation(attempt, self.truncation, what=f"Anthropic（{self.model}）")
 
         text = "".join(b.text for b in resp.content if b.type == "text")
         tool_calls = tuple(

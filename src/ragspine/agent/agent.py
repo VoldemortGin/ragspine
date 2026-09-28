@@ -15,6 +15,7 @@ import os
 import re
 import time
 from collections.abc import Sequence
+from contextvars import Token
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Protocol, cast, runtime_checkable
@@ -51,6 +52,11 @@ from ragspine.agent.number_guard import (
     resolve_number_guard,
 )
 from ragspine.agent.query_tools import QUERY_METRIC_TOOL_OPENAI, execute_query_metric
+from ragspine.agent.truncation import (
+    TruncationStats,
+    bind_truncation_stats,
+    unbind_truncation_stats,
+)
 from ragspine.common.company_profile import load_company_profile
 from ragspine.common.glossary import normalize_period, resolve_relative_period
 from ragspine.common.observability import emit_trace, new_request_id
@@ -173,6 +179,9 @@ class _TraceCtx:
     # 叙事数字防编造（ADR 0024）：被改写的叙事答案数 / 其中无依据数字个数（只记计数）。
     number_guard_rewrites: int = 0
     number_guard_ungrounded: int = 0
+    # LLM 输出截断（agent/truncation）：provider 层重试次数 / 重试后仍截断的调用数（只记计数）。
+    llm_truncation: TruncationStats = field(default_factory=TruncationStats)
+    truncation_token: Token[TruncationStats | None] | None = None
 
     def record_provider(self, seconds: float, usage: dict[str, int | None] | None) -> None:
         self.provider_seconds += seconds
@@ -674,6 +683,12 @@ def _emit_request_trace(
             "dropped": ctx.page_images_dropped,
             "dropped_reason": _DROPPED_NO_IMAGE_INPUT if ctx.page_images_dropped else "",
         }
+    if ctx.truncation_token is not None:
+        unbind_truncation_stats(ctx.truncation_token)
+        ctx.truncation_token = None
+    if ctx.llm_truncation.retries or ctx.llm_truncation.truncated_final:
+        fields["llm_truncation_retries"] = ctx.llm_truncation.retries
+        fields["llm_truncated_final"] = ctx.llm_truncation.truncated_final
     if ctx.has_usage:
         fields["token_usage"] = {
             "input_tokens": ctx.input_tokens,
@@ -835,6 +850,8 @@ def answer_question(
 
     request_id = new_request_id()
     ctx = _TraceCtx()
+    # 本请求内 provider 的截断重试计数记到 ctx（发 trace 时解绑）。
+    ctx.truncation_token = bind_truncation_stats(ctx.llm_truncation)
     ref = reference_date or date.today()
     parser = intent_parser or RuleIntentParser()
     # 意图解析只看当前 question——历史绝不参与（修复产品层「历史污染意图解析」痛点的本质）。
