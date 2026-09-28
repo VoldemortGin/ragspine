@@ -16,6 +16,7 @@ from typing import Any, Protocol, runtime_checkable
 from corespine import LLMProvider, ProviderError
 
 from ragspine.common.observability import emit_trace
+from ragspine.common.observability.llm_calls import llm_stage
 from ragspine.retrieval.translation.language import (
     LANG_EN,
     LANG_UNKNOWN,
@@ -109,6 +110,7 @@ class LLMQueryTranslator:
             for query, text in (seed or {}).items()
         }
 
+    @llm_stage("translation")
     def translate(self, query: str, *, target_language: str) -> TranslationResult:
         key = (query, target_language)
         cached = self._cache.get(key)

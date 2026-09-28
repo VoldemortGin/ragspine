@@ -45,6 +45,11 @@ from corespine import (
 
 from ragspine.agent.llm_provider import IMAGE_PART_TYPE, split_message_content
 from ragspine.agent.truncation import TruncationPolicy, retry_on_truncation
+from ragspine.common.observability.llm_calls import (
+    instrument_llm_call,
+    note_attempt,
+    note_reasoning_disabled,
+)
 
 DEFAULT_LITELLM_MODEL = "deepseek/deepseek-chat"
 DEFAULT_LITELLM_TIMEOUT_S = 120.0
@@ -231,13 +236,19 @@ class LiteLLMProvider:
             return self._completion(litellm, kwargs)
         with self._slots:
             try:
-                return litellm.completion(**kwargs, **_REASONING_OFF)
+                resp = litellm.completion(**kwargs, **_REASONING_OFF)
             except litellm.BadRequestError:
                 self._reasoning_off_ok = False
             except tuple(litellm.LITELLM_EXCEPTION_TYPES) as exc:
                 raise ProviderError(f"litellm 调用失败（{self.model}）：{exc}") from exc
+            else:
+                note_reasoning_disabled()
+                return resp
+        note_attempt()
+        note_reasoning_disabled(False)
         return self._completion(litellm, kwargs)
 
+    @instrument_llm_call
     def chat(
         self, messages: list[dict[str, Any]], *, tools: list[dict[str, Any]] | None = None
     ) -> ChatCompletion:

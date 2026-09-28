@@ -10,16 +10,18 @@
 循环 `json.loads` 直接崩。抛 ProviderError 则走各调用点现成的诚实降级（固定降级文案 / 原序 / 不翻译）。
 
 没有截断时一次调用、请求参数逐字节不变；`RAGSPINE_LLM_TRUNCATION_RETRY=off` 时截断结果照旧原样返回
-（与引入本模块前一致）。trace 只记计数：编排层用 `bind_truncation_stats` 把本次请求的计数器挂到当前上下文，
-provider 每次重试 / 最终截断各记一次；不在请求内（未绑定）时计数静默丢弃。
+（与引入本模块前一致）。trace 只记计数：每次重试 / 最终截断记到当前 LLM 调用探针
+（`common/observability/llm_calls`，ADR 0028），请求 trace 的 `llm_truncation_retries` / `llm_truncated_final`
+由 `llm_calls` 推导；不在采集桶内时计数静默丢弃。
 """
 
 import os
 from collections.abc import Callable, Mapping
-from contextvars import ContextVar, Token
 from dataclasses import dataclass
 
 from corespine import ProviderError
+
+from ragspine.common.observability.llm_calls import note_attempt, note_truncated
 
 DEFAULT_TRUNCATION_MAX_RETRIES = 2
 DEFAULT_TRUNCATION_MAX_TOKENS = 16384
@@ -61,36 +63,6 @@ class TruncationPolicy:
         return budget if budget > current else None
 
 
-@dataclass
-class TruncationStats:
-    """一次请求内的截断计数（只记次数）。"""
-
-    retries: int = 0
-    truncated_final: int = 0
-
-
-_STATS: ContextVar[TruncationStats | None] = ContextVar("ragspine_llm_truncation", default=None)
-
-
-def bind_truncation_stats(stats: TruncationStats) -> Token[TruncationStats | None]:
-    """把请求级计数器挂到当前上下文，返回用于 `unbind_truncation_stats` 的 token。"""
-    return _STATS.set(stats)
-
-
-def unbind_truncation_stats(token: Token[TruncationStats | None]) -> None:
-    _STATS.reset(token)
-
-
-def _record(*, retry: bool) -> None:
-    stats = _STATS.get()
-    if stats is None:
-        return
-    if retry:
-        stats.retries += 1
-    else:
-        stats.truncated_final += 1
-
-
 def retry_on_truncation[T](
     attempt: Callable[[int | None], tuple[T, int | None]],
     policy: TruncationPolicy,
@@ -108,11 +80,11 @@ def retry_on_truncation[T](
     while hit is not None and policy.enabled:
         budget = policy.next_budget(hit)
         if budget is None or retries >= policy.max_retries:
-            _record(retry=False)
+            note_truncated()
             raise TruncatedOutputError(
                 f"{what} 输出被截断（已重试 {retries} 次，最后预算 {hit} tokens）"
             )
         retries += 1
-        _record(retry=True)
+        note_attempt(truncation=True)
         result, hit = attempt(budget)
     return result

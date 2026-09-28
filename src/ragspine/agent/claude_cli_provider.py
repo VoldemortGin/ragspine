@@ -61,6 +61,11 @@ from corespine import (
 
 from ragspine.agent.llm_provider import split_message_content
 from ragspine.agent.truncation import TruncationPolicy, retry_on_truncation
+from ragspine.common.observability.llm_calls import (
+    instrument_llm_call,
+    note_attempt,
+    note_reasoning_disabled,
+)
 
 DEFAULT_CLAUDE_CLI_TIMEOUT_S = 300.0
 DEFAULT_CLAUDE_CLI_CONCURRENCY = 4
@@ -341,6 +346,7 @@ class ClaudeCliProvider:
         result = payload.get("result")
         if not isinstance(result, str):
             raise ProviderError("claude -p 结果缺少文本 result 字段")
+        note_reasoning_disabled(budget is not None)
         return result, _usage(payload), _model_name(payload, self.model)
 
     def _complete(
@@ -360,6 +366,7 @@ class ClaudeCliProvider:
         assert result is not None  # 截断未消除时 retry_on_truncation 已抛错
         return result
 
+    @instrument_llm_call
     def chat(
         self, messages: list[dict[str, Any]], *, tools: list[dict[str, Any]] | None = None
     ) -> ChatCompletion:
@@ -372,7 +379,9 @@ class ClaudeCliProvider:
         names = {_tool_name(t) for t in tools}
         attempt_prompt = prompt
         last_error = ""
-        for _ in range(self.format_retries + 1):
+        for i in range(self.format_retries + 1):
+            if i:
+                note_attempt()  # 格式重试：又发一次请求，不算截断重试
             text, usage, model = self._complete(system, attempt_prompt, images)
             try:
                 message = _parse_tool_reply(text, names)

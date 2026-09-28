@@ -36,11 +36,9 @@ from ragspine.agent.truncation import (
     TRUNCATION_RETRY_ENV,
     TruncatedOutputError,
     TruncationPolicy,
-    TruncationStats,
-    bind_truncation_stats,
     retry_on_truncation,
-    unbind_truncation_stats,
 )
+from ragspine.common.observability.llm_calls import record_llm_calls
 from ragspine.eval.nl_gold_ragspine import ForcedNarrativeIntentParser
 from ragspine.storage.fact_store import Fact, SqliteFactStore
 
@@ -63,12 +61,29 @@ def _clear_env(monkeypatch):
         monkeypatch.delenv(key, raising=False)
 
 
+class _Counts:
+    """采集桶上的截断计数视图：口径与原 TruncationStats 相同（重试次数 / 重试后仍截断的调用数）。"""
+
+    def __init__(self, bucket):
+        self.bucket = bucket
+
+    @property
+    def calls(self):
+        return self.bucket.calls
+
+    @property
+    def retries(self):
+        return sum(c.trunc_retries for c in self.bucket.calls)
+
+    @property
+    def truncated_final(self):
+        return sum(1 for c in self.bucket.calls if c.truncated)
+
+
 @pytest.fixture
 def stats():
-    s = TruncationStats()
-    token = bind_truncation_stats(s)
-    yield s
-    unbind_truncation_stats(token)
+    with record_llm_calls() as bucket:
+        yield _Counts(bucket)
 
 
 # ---------------------------------------------------------------------------
@@ -195,6 +210,10 @@ def test_litellm_truncated_once_then_succeeds(fake, stats):
         max_tokens=2000, reasoning_effort="none", drop_params=True
     )
     assert (stats.retries, stats.truncated_final) == (1, 0)
+    (call,) = stats.calls
+    assert (call.attempts, call.trunc_retries, call.retried) == (2, 1, True)
+    assert (call.reasoning_disabled, call.truncated, call.error) == (True, False, "")
+    assert (call.in_tokens, call.out_tokens) == (11, 7)
 
 
 def test_litellm_unknown_budget_uses_observed_completion_tokens(fake):
@@ -212,6 +231,9 @@ def test_litellm_truncated_until_limit_raises(fake, stats):
     assert isinstance(exc_info.value, ProviderError)  # 走上层现成的诚实降级
     assert [c.get("max_tokens") for c in f.calls] == [2000, 4000, 8000]  # 最多重试 2 次
     assert (stats.retries, stats.truncated_final) == (2, 1)
+    (call,) = stats.calls
+    assert (call.attempts, call.truncated, call.error) == (3, True, "provider.truncated")
+    assert (call.in_tokens, call.out_tokens) == (None, None)
 
 
 def test_litellm_stops_at_cap(fake, stats):
@@ -241,7 +263,7 @@ def test_litellm_truncated_tool_call_is_retried(fake):
         lambda: litellm.BadRequestError(message="bad param", model="m", llm_provider="openai"),
     ],
 )
-def test_litellm_reasoning_param_rejected_falls_back_without_it(fake, rejection):
+def test_litellm_reasoning_param_rejected_falls_back_without_it(fake, rejection, stats):
     f = fake(
         _resp("半截", finish_reason="length"),
         rejection(),
@@ -257,6 +279,22 @@ def test_litellm_reasoning_param_rejected_falls_back_without_it(fake, rejection)
     assert f.calls[2] == _old_litellm_kwargs(max_tokens=200)  # 同一预算、去掉关闭参数再发
     assert f.calls[3] == _old_litellm_kwargs(max_tokens=400)  # 记住：之后不再带
     assert provider._reasoning_off_ok is False
+    (call,) = stats.calls
+    assert (call.attempts, call.trunc_retries, call.reasoning_disabled) == (4, 2, False)
+
+
+def test_litellm_bad_request_fallback_counts_three_attempts(fake, stats):
+    """截断一次 → 带关闭参数重试被网关 BadRequest → 去掉参数重发成功：attempts=3、reasoning 未关闭。"""
+    fake(
+        _resp("半截", finish_reason="length"),
+        litellm.BadRequestError(message="bad param", model="m", llm_provider="openai"),
+        _resp("完整", finish_reason="stop"),
+    )
+    out = LiteLLMProvider(max_tokens=100, truncation=ON).chat(MESSAGES)
+    assert out.choices[0].message.content == "完整"
+    (call,) = stats.calls
+    assert (call.attempts, call.trunc_retries, call.retried) == (3, 1, True)
+    assert (call.reasoning_disabled, call.truncated, call.error) == (False, False, "")
 
 
 def test_litellm_disabled_returns_truncated_result_unchanged(fake):
@@ -322,6 +360,8 @@ def test_tool_loop_truncated_tool_call_is_retried_and_traced(fake, store, caplog
     (trace,) = _traces(caplog)
     assert (trace.llm_truncation_retries, trace.llm_truncated_final) == (1, 0)
     assert trace.provider_error is False
+    assert sum(c["trunc_retries"] for c in trace.llm_calls) == trace.llm_truncation_retries
+    assert [c["stage"] for c in trace.llm_calls] == ["tool_round", "tool_round"]
 
 
 def test_tool_loop_still_truncated_degrades_honestly(fake, store, caplog):
@@ -339,6 +379,9 @@ def test_tool_loop_still_truncated_degrades_honestly(fake, store, caplog):
     (trace,) = _traces(caplog)
     assert (trace.llm_truncation_retries, trace.llm_truncated_final) == (2, 1)
     assert trace.provider_error is True
+    assert sum(c["trunc_retries"] for c in trace.llm_calls) == trace.llm_truncation_retries
+    assert sum(c["truncated"] for c in trace.llm_calls) == trace.llm_truncated_final
+    assert trace.llm_calls[0]["error"] == "provider.truncated"
 
 
 class _Retriever:
@@ -467,6 +510,8 @@ def test_anthropic_truncated_until_limit_raises(monkeypatch, stats):
         AnthropicProvider(api_key="k", max_tokens=1000, truncation=ON).chat(MESSAGES)
     assert [c["max_tokens"] for c in calls] == [1000, 2000, 4000]
     assert (stats.retries, stats.truncated_final) == (2, 1)
+    (call,) = stats.calls
+    assert (call.attempts, call.truncated, call.error) == (3, True, "provider.truncated")
 
 
 def test_anthropic_truncated_tool_use_is_retried(monkeypatch):
@@ -588,6 +633,22 @@ def test_cli_truncated_once_then_succeeds(cli, stats, monkeypatch):
     assert second["env"]["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] == "8000"
     assert {k: v for k, v in second.items() if k not in ("cmd", "env")} == _OLD_CLI_KWARGS
     assert (stats.retries, stats.truncated_final) == (1, 0)
+    (call,) = stats.calls
+    assert (call.attempts, call.trunc_retries, call.reasoning_disabled) == (2, 1, True)
+
+
+def test_cli_format_retry_counts_attempt_not_truncation(cli, stats):
+    """工具模式格式重试计入 attempts，不计入 trunc_retries。"""
+    f = cli(
+        _cli_ok("不是 JSON"),
+        _cli_ok(json.dumps({"tool_calls": [{"name": "query_metric", "arguments": ARGS}]})),
+    )
+    out = ClaudeCliProvider(truncation=ON).chat(MESSAGES, tools=TOOLS)
+    assert len(f.calls) == 2
+    assert json.loads(out.choices[0].message.tool_calls[0].function.arguments) == ARGS
+    (call,) = stats.calls
+    assert (call.attempts, call.trunc_retries, call.retried) == (2, 0, True)
+    assert (call.reasoning_disabled, call.truncated) == (False, False)
 
 
 def test_cli_truncated_until_limit_raises(cli, stats):
@@ -609,6 +670,8 @@ def test_cli_default_limit_above_cap_raises_without_retry(cli, stats):
         ClaudeCliProvider(truncation=ON).chat(MESSAGES)
     assert len(f.calls) == 1
     assert (stats.retries, stats.truncated_final) == (0, 1)
+    (call,) = stats.calls
+    assert (call.attempts, call.trunc_retries, call.truncated) == (1, 0, True)
 
 
 def test_cli_truncated_tool_mode_is_retried(cli):

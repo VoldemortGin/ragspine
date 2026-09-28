@@ -22,6 +22,7 @@ from typing import Protocol, runtime_checkable
 
 from ragspine.agent.llm_provider import LLMProvider, ProviderError
 from ragspine.common.llm_json import parse_llm_json
+from ragspine.common.observability.llm_calls import llm_stage
 
 # 分解结果的路由标记：与 structured/narrative/composite 区分，仅在注入 decomposer 且真分解时出现。
 ROUTE_DECOMPOSED = "decomposed"
@@ -63,6 +64,7 @@ class LLMQueryDecomposer:
         self.provider = provider
         self.max_subquestions = max(1, max_subquestions)
 
+    @llm_stage("decompose")
     def decompose(self, question: str, *, reference_date: date | None = None) -> list[str]:
         try:
             resp = self.provider.chat(

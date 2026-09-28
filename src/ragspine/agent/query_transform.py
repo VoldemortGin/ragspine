@@ -54,6 +54,7 @@ from ragspine.agent.security_gate import SECURITY_REFUSE_OUT_OF_SCOPE, SecurityG
 from ragspine.common.company_profile import load_company_profile
 from ragspine.common.glossary import EXTERNAL_ENTITY_SYNONYMS
 from ragspine.common.llm_json import parse_llm_json
+from ragspine.common.observability.llm_calls import llm_stage
 from ragspine.retrieval.lexical.retrieval import rrf_fuse
 
 # 查询变换选型读取的环境变量名（缺省 spec 时生效）。
@@ -214,6 +215,7 @@ class HyDERetriever:
         self.base = base
         self.provider = provider
 
+    @llm_stage("hyde")
     def _hypothetical_document(self, query: str) -> str | None:
         try:
             resp = self.provider.chat(
@@ -263,6 +265,7 @@ class RAGFusionRetriever:
         self.max_variants = max(1, max_variants)
         self.gate = security_gate or _default_security_gate()
 
+    @llm_stage("rag_fusion")
     def _variants(self, query: str) -> list[str]:
         try:
             resp = self.provider.chat(
@@ -315,6 +318,7 @@ class StepBackRetriever:
         self.provider = provider
         self.gate = security_gate or _default_security_gate()
 
+    @llm_stage("step_back")
     def _step_back_question(self, query: str) -> str | None:
         try:
             resp = self.provider.chat(
@@ -386,6 +390,7 @@ class LLMComplexityClassifier:
         self.provider = provider
         self._fallback = HeuristicComplexityClassifier()
 
+    @llm_stage("classify")
     def classify(self, question: str, *, reference_date: date | None = None) -> str:
         try:
             resp = self.provider.chat(

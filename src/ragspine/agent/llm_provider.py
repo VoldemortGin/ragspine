@@ -34,6 +34,7 @@ from corespine import (
 
 from ragspine.agent.intent import parse_intent
 from ragspine.agent.truncation import TruncationPolicy, retry_on_truncation
+from ragspine.common.observability.llm_calls import instrument_llm_call
 from ragspine.retrieval.translation import QUERY_TRANSLATION_PROMPT_PREFIX
 
 # 默认模型名（唯一出处，改这里即全局生效）
@@ -215,6 +216,7 @@ class AnthropicProvider:
         self.max_tokens = max_tokens
         self.truncation = truncation or TruncationPolicy.from_env()
 
+    @instrument_llm_call
     def chat(
         self, messages: list[dict[str, Any]], *, tools: list[dict[str, Any]] | None = None
     ) -> ChatCompletion:
@@ -330,6 +332,7 @@ class MockProvider:
     def __init__(self, reference_date: date | None = None) -> None:
         self.reference_date = reference_date
 
+    @instrument_llm_call
     def chat(
         self, messages: list[dict[str, Any]], *, tools: list[dict[str, Any]] | None = None
     ) -> ChatCompletion:

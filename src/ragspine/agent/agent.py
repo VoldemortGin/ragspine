@@ -15,7 +15,6 @@ import os
 import re
 import time
 from collections.abc import Sequence
-from contextvars import Token
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Protocol, cast, runtime_checkable
@@ -52,14 +51,15 @@ from ragspine.agent.number_guard import (
     resolve_number_guard,
 )
 from ragspine.agent.query_tools import QUERY_METRIC_TOOL_OPENAI, execute_query_metric
-from ragspine.agent.truncation import (
-    TruncationStats,
-    bind_truncation_stats,
-    unbind_truncation_stats,
-)
 from ragspine.common.company_profile import load_company_profile
 from ragspine.common.glossary import normalize_period, resolve_relative_period
 from ragspine.common.observability import emit_trace, new_request_id
+from ragspine.common.observability.llm_calls import (
+    current_llm_calls,
+    llm_stage,
+    llm_trace_fields,
+    record_llm_calls,
+)
 from ragspine.storage.fact_store import FactStore
 
 MAX_TOOL_ITERATIONS = 5
@@ -179,9 +179,6 @@ class _TraceCtx:
     # 叙事数字防编造（ADR 0024）：被改写的叙事答案数 / 其中无依据数字个数（只记计数）。
     number_guard_rewrites: int = 0
     number_guard_ungrounded: int = 0
-    # LLM 输出截断（agent/truncation）：provider 层重试次数 / 重试后仍截断的调用数（只记计数）。
-    llm_truncation: TruncationStats = field(default_factory=TruncationStats)
-    truncation_token: Token[TruncationStats | None] | None = None
 
     def record_provider(self, seconds: float, usage: dict[str, int | None] | None) -> None:
         self.provider_seconds += seconds
@@ -266,7 +263,8 @@ def _run_tool_loop(
     for _ in range(MAX_TOOL_ITERATIONS):
         started = time.perf_counter()
         try:
-            resp = provider.chat(messages, tools=tools)
+            with llm_stage("tool_round"):
+                resp = provider.chat(messages, tools=tools)
         except ProviderError:
             ctx.provider_error = True
             ctx.record_provider(time.perf_counter() - started, None)
@@ -579,20 +577,21 @@ def _run_narrative(
     # 当前 question，历史绝不进检索、绝不成为新“证据”，空历史时消息序列逐字节不变。
     started = time.perf_counter()
     try:
-        resp = provider.chat(
-            [
-                {
-                    "role": "system",
-                    "content": _NARRATIVE_SYSTEM_PROMPT_TEMPLATE.format(
-                        company=_PROFILE.home_company_name
-                    )
-                    + (_FALLBACK_RULE if fallback else "")
-                    + (NUMBER_GUARD_RULE if number_guard else ""),
-                },
-                *history_messages,
-                {"role": "user", "content": user_content},
-            ]
-        )
+        with llm_stage("synthesis"):
+            resp = provider.chat(
+                [
+                    {
+                        "role": "system",
+                        "content": _NARRATIVE_SYSTEM_PROMPT_TEMPLATE.format(
+                            company=_PROFILE.home_company_name
+                        )
+                        + (_FALLBACK_RULE if fallback else "")
+                        + (NUMBER_GUARD_RULE if number_guard else ""),
+                    },
+                    *history_messages,
+                    {"role": "user", "content": user_content},
+                ]
+            )
     except ProviderError:
         ctx.provider_error = True
         ctx.record_provider(time.perf_counter() - started, None)
@@ -683,12 +682,8 @@ def _emit_request_trace(
             "dropped": ctx.page_images_dropped,
             "dropped_reason": _DROPPED_NO_IMAGE_INPUT if ctx.page_images_dropped else "",
         }
-    if ctx.truncation_token is not None:
-        unbind_truncation_stats(ctx.truncation_token)
-        ctx.truncation_token = None
-    if ctx.llm_truncation.retries or ctx.llm_truncation.truncated_final:
-        fields["llm_truncation_retries"] = ctx.llm_truncation.retries
-        fields["llm_truncated_final"] = ctx.llm_truncation.truncated_final
+    # 本请求采集桶里的逐次 LLM 调用（ADR 0028）；截断两个顶层键由其推导，只在非零时出现。
+    fields.update(llm_trace_fields(current_llm_calls()))
     if ctx.has_usage:
         fields["token_usage"] = {
             "input_tokens": ctx.input_tokens,
@@ -793,6 +788,7 @@ def _fallback_result(
     )
 
 
+@record_llm_calls()
 def answer_question(
     question: str,
     store: FactStore,
@@ -836,7 +832,7 @@ def answer_question(
         ref0 = reference_date or date.today()
         subquestions = decomposer.decompose(question, reference_date=ref0)
         if len(subquestions) > 1:
-            return _answer_decomposed(
+            result = _answer_decomposed(
                 subquestions,
                 store,
                 provider,
@@ -847,11 +843,20 @@ def answer_question(
                 narrative_fallback=use_fallback,
                 narrative_number_guard=use_number_guard,
             )
+            # 子问题各开自己的采集桶、各发请求 trace；父桶里只剩分解 / 分类的调用，单独发一条。
+            llm_fields = llm_trace_fields(current_llm_calls())
+            if llm_fields:
+                emit_trace(
+                    None,
+                    request_id=new_request_id(),
+                    route=ROUTE_DECOMPOSED,
+                    n_subquestions=len(subquestions),
+                    **llm_fields,
+                )
+            return result
 
     request_id = new_request_id()
     ctx = _TraceCtx()
-    # 本请求内 provider 的截断重试计数记到 ctx（发 trace 时解绑）。
-    ctx.truncation_token = bind_truncation_stats(ctx.llm_truncation)
     ref = reference_date or date.today()
     parser = intent_parser or RuleIntentParser()
     # 意图解析只看当前 question——历史绝不参与（修复产品层「历史污染意图解析」痛点的本质）。

@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from ragspine.agent.llm_provider import LLMProvider
+from ragspine.common.observability.llm_calls import llm_stage
 from ragspine.retrieval.chunking.chunk_store import ChunkStore
 from ragspine.retrieval.contextual import (
     CONTEXTUAL_INDEX_OFF,
@@ -69,6 +70,7 @@ class ProviderListwiseJudge:
     def __init__(self, provider: LLMProvider):
         self.provider = provider
 
+    @llm_stage("listwise_rerank")
     def judge(self, query: str, candidates: list[str]) -> list[int]:
         """构造 listwise prompt → provider 单轮调用 → 鲁棒解析为下标排列。"""
         prompt = build_listwise_prompt(query, candidates)
