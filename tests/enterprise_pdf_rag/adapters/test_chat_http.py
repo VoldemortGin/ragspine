@@ -322,7 +322,9 @@ def test_the_envelope_reports_the_page_context_that_reached_the_prompt(
 ) -> None:
     root = tmp_path / "ingestion"
     # Twelve pages fill the prompt seats, so the table sharing the last page with its
-    # narrative line is left over — exactly what the page window is for.
+    # narrative line is left over — exactly what the page window is for. The question names
+    # page 12 so its narrative line always takes a seat: the other pages tie on BM25, and
+    # ties break by member id, which carries the SDK version and so is not a stable order.
     document = publish_generic_document(
         tmp_path,
         monkeypatch,
@@ -335,9 +337,10 @@ def test_the_envelope_reports_the_page_context_that_reached_the_prompt(
     )
     app, prompts = _app(root, tmp_path / "llm", max_live_calls=2)
     model = model_id(document.source_sha256)
+    question = "What do page 2 and page 12 say?"
 
     async def scenario(client: AsyncClient) -> None:
-        response = await client.post(_URL, json=_body(model))
+        response = await client.post(_URL, json=_body(model, question))
         assert response.status_code == 200, response.text
         envelope = response.json()["enterprise_pdf_rag"]
         assert envelope["status"] == "answered"
@@ -356,7 +359,7 @@ def test_the_envelope_reports_the_page_context_that_reached_the_prompt(
         assert not any(path in chunk for path in ("| member ", "fragments.", "cells."))
 
         # The request switch removes the blocks and their report alike.
-        closed = await client.post(_URL, json=_body(model, page_window=False))
+        closed = await client.post(_URL, json=_body(model, question, page_window=False))
         assert closed.status_code == 200, closed.text
         assert closed.json()["enterprise_pdf_rag"]["page_windows"] == []
         assert "[page_context" not in prompts[-1]
