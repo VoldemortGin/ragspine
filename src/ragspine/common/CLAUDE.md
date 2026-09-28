@@ -36,8 +36,9 @@ that strictly parses to the expected container is returned as is; otherwise stri
 first, then the whole text), then only these repairs, outside string literals: strip code fences, drop a comma right before `]` / `}`,
 quote a bare ASCII identifier in value position (only when the segment already has a double-quoted string; never
 `true/false/null/None/NaN/Infinity/undefined`), take the first top-level container out of surrounding prose.
-Returns dict / list / `None`, never raises (RecursionError included), never looks inside a top-level span, tries
-at most 64 starts. No truncation completion, single quotes, unquoted keys, comments, Python literals or `NaN`.
+Returns dict / list / `None`, never raises, never looks inside a top-level span, tries
+at most 64 starts. Nesting deeper than `MAX_JSON_DEPTH` (512 `[` / `{` levels outside strings) is `None` in both functions, decided
+by a string-aware scan before any `json.loads` — never by the platform's stack / RecursionError. No truncation completion, single quotes, unquoted keys, comments, Python literals or `NaN`.
 stdlib only, no trace. Known limit: with prose around the JSON, ``` inside a JSON string can still be taken as a
 fence. Call sites use `parse_llm_json`: the original `json.loads(text.strip())` first, returned unchanged (any type,
 `NaN` / `Infinity` included), and `extract_json` only on failure — replies that parsed before behave exactly as

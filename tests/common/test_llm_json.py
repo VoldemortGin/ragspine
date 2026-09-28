@@ -5,7 +5,8 @@
 - 两轮解析：先严格解析，失败后再修复。修复只有四种：去代码围栏、去 ``]`` / ``}`` 前的尾逗号、
   给值位置的裸标识符原样补引号、从前后说明文字里提取第一个顶层 JSON。修复只作用于字符串字面量之外。
 - 不做的修复（截断补全、单引号、无引号键、注释、Python 字面量、NaN、连续逗号……）一律返回 ``None``。
-- 只取顶层值：类型不符或解析失败的整段不往里面找，递归过深（RecursionError）也返回 ``None``。
+- 只取顶层值：类型不符或解析失败的整段不往里面找。
+- 嵌套深度超过 ``MAX_JSON_DEPTH`` 一律返回 ``None``（解析前扫描判定，不依赖平台栈深 / RecursionError）。
 - 只依赖 stdlib，不写 trace。
 """
 
@@ -314,20 +315,66 @@ def test_many_open_brackets_is_bounded():
     assert time.perf_counter() - start < _TIME_LIMIT_S
 
 
-def test_deep_nesting_recursion_error_returns_none():
-    """10 万层嵌套会让 json.loads 抛 RecursionError：吞掉并返回 None，不返回截了一半的结构。"""
+def _nested(depth: int) -> str:
+    return "[" * depth + "]" * depth
+
+
+def test_deep_nesting_returns_none(monkeypatch):
+    """10 万层嵌套超过深度上限：返回 None，不返回结构；由深度上限判定，不碰 json.loads。"""
     depth = 100_000
     texts = [
-        "[" * depth + "]" * depth,
-        '{"a": ' + "[" * depth + "]" * depth + "}",
+        _nested(depth),
+        '{"a": ' + _nested(depth) + "}",
         '["x", ' + "[" * depth + '"y"' + "]" * depth + ",]",
     ]
+
+    def _no_loads(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("json.loads must not see over-deep input")
+
+    monkeypatch.setattr(llm_json.json, "loads", _no_loads)
     for text in texts:
         start = time.perf_counter()
         assert extract_json(text) is None
         assert extract_json(text, expect="array") is None
         assert extract_json(text, expect="object") is None
         assert time.perf_counter() - start < _TIME_LIMIT_S
+
+
+def test_max_depth_is_named_512():
+    assert llm_json.MAX_JSON_DEPTH == 512
+
+
+def test_depth_at_limit_parses_one_over_returns_none():
+    limit = llm_json.MAX_JSON_DEPTH
+    at_limit = json.loads(_nested(limit))
+    assert extract_json(_nested(limit)) == at_limit
+    assert parse_llm_json(_nested(limit), expect="array") == at_limit
+    assert extract_json(_nested(limit + 1)) is None
+    assert parse_llm_json(_nested(limit + 1), expect="array") is None
+    obj_at_limit = '{"a": ' + _nested(limit - 1) + "}"
+    assert extract_json(obj_at_limit) == json.loads(obj_at_limit)
+    assert extract_json('{"a": ' + _nested(limit) + "}") is None
+
+
+def test_deep_fenced_candidate_is_skipped_even_if_whole_text_scan_misses_it(monkeypatch):
+    """全文扫描把围栏当成字符串内部时，围栏候选本身超深仍不交给 json.loads。"""
+    deep = _nested(llm_json.MAX_JSON_DEPTH + 1)
+    real_loads = json.loads
+
+    def _guarded_loads(s: str, *args: Any, **kwargs: Any) -> Any:
+        assert not s.strip().startswith("[" * (llm_json.MAX_JSON_DEPTH + 1))
+        return real_loads(s, *args, **kwargs)
+
+    monkeypatch.setattr(llm_json.json, "loads", _guarded_loads)
+    assert extract_json('"\n```json\n' + deep + "\n```\n") is None
+
+
+def test_brackets_inside_strings_do_not_count_toward_depth():
+    limit = llm_json.MAX_JSON_DEPTH
+    noise = json.dumps("[{" * 5_000 + '\\"]')
+    text = "[" * (limit - 1) + "[" + noise + "]" + "]" * (limit - 1)
+    assert extract_json(text) == json.loads(text)
+    assert parse_llm_json(text, expect="array") == json.loads(text)
 
 
 # ---------------------------------------------------------------------------
@@ -359,9 +406,12 @@ def test_parse_llm_json_falls_back_to_extract_json():
     assert parse_llm_json("see [appendix]", expect="array") is None
 
 
-def test_parse_llm_json_swallows_recursion_error():
-    depth = 100_000
-    assert parse_llm_json("[" * depth + "]" * depth, expect="array") is None
+def test_parse_llm_json_rejects_deep_nesting(monkeypatch):
+    def _no_loads(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("json.loads must not see over-deep input")
+
+    monkeypatch.setattr(llm_json.json, "loads", _no_loads)
+    assert parse_llm_json(_nested(100_000), expect="array") is None
 
 
 # ---------------------------------------------------------------------------

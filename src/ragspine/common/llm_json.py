@@ -10,6 +10,9 @@ JSON 字符串里的 ```` ``` ```` 仍可能被当成围栏边界（已知局限
 给值位置的裸标识符原样补引号（该段已有合法双引号字符串时才补，``true/null/None/NaN`` 等不补）；
 从前后说明文字里提取第一个 JSON。不补截断、不转单引号、不补键的引号、不删注释、
 不认 Python 字面量和 ``NaN`` / ``Infinity``、不处理连续或开头的逗号、不返回裸标量。
+
+嵌套深度（字符串外的 ``[`` / ``{`` 层数）超过 ``MAX_JSON_DEPTH`` 的输入在解析前一律判为 ``None``：
+结果不随平台栈深变化，超深输入也打不爆栈。
 """
 
 import json
@@ -17,6 +20,7 @@ import re
 from collections.abc import Callable
 from typing import Any, Literal, NoReturn, TypeGuard
 
+MAX_JSON_DEPTH = 512
 _MAX_STARTS = 64
 
 _FENCE_RE = re.compile(r"```[A-Za-z0-9_-]*[ \t]*\n?(.*?)```", re.DOTALL)
@@ -38,13 +42,18 @@ def extract_json(
     text: str, *, expect: Literal["object", "array"] | None = None
 ) -> dict[str, Any] | list[Any] | None:
     """返回 ``text`` 里第一个类型符合 ``expect`` 的顶层 JSON 容器；找不到返回 ``None``，从不抛异常。"""
+    if _too_deep(text):
+        return None
     found = _extract(text, expect)
     return None if found is None else found[0]
 
 
 def parse_llm_json(text: str, *, expect: Literal["object", "array"] | None = None) -> Any:
     """调用点用的解析：先按原来的 ``json.loads(text.strip())`` 解析，成功就原样返回（任何类型，
-    含 ``NaN`` / ``Infinity``），保证原来能解析的输入行为不变；失败才交给 ``extract_json``。"""
+    含 ``NaN`` / ``Infinity``），保证原来能解析的输入行为不变；失败才交给 ``extract_json``。
+    嵌套超过 ``MAX_JSON_DEPTH`` 直接返回 ``None``。"""
+    if _too_deep(text):
+        return None
     try:
         return json.loads(text.strip())
     except (ValueError, RecursionError):
@@ -68,6 +77,8 @@ def _extract(
         for candidate, fenced, starts in spans:
             for start, end in starts:
                 segment = candidate[start:end]
+                if _too_deep(segment):
+                    continue
                 fixes: set[str] = set()
                 if repair:
                     segment, fixes = _repair(segment)
@@ -85,6 +96,20 @@ def _extract(
                     fixes.add("surrounding_text")
                 return value, frozenset(fixes)
     return None
+
+
+def _too_deep(text: str) -> bool:
+    """字符串感知地一次扫描：字符串外的括号嵌套是否超过 ``MAX_JSON_DEPTH``。"""
+    depth = 0
+    for m in _TOKEN_RE.finditer(text):
+        token = m.group()
+        if token in _CLOSERS:
+            depth += 1
+            if depth > MAX_JSON_DEPTH:
+                return True
+        elif token in ("]", "}"):
+            depth = max(depth - 1, 0)
+    return False
 
 
 def _is_expected(value: Any, expect: Literal["object", "array"] | None) -> TypeGuard[_Container]:

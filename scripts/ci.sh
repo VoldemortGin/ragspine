@@ -74,11 +74,13 @@ echo "==> [9/10] enterprise_pdf_rag structural gates (scoped to src/enterprise_p
 
 echo "==> [10/10] latest-dependency lane (fresh venv on the newest supported Python, newest PyPI releases — what the release runner installs)"
 # uv.lock pins pdfspine & co. for the steps above, but release.yml runs `pip install -e ".[dev,service,pdf]"`,
-# which resolves the newest releases. Re-run the PDF-facing suites in a throwaway venv resolved the same
-# way, on the top of the runner's Python matrix (CI_LATEST_PYTHON, default 3.14; e.g. 3.13+ warns about
-# unclosed sqlite connections), so a new pdfspine release turns this gate red before the release gate
-# does. Skipped on the runner itself (it already runs on the newest releases); CI_LATEST_DEPS=0 skips it
-# offline.
+# which resolves the newest releases. Re-run the whole suite (same markers as step 5; ~11 min) in a throwaway
+# venv resolved the same way, on the top of the runner's Python matrix (CI_LATEST_PYTHON, default 3.14; e.g.
+# 3.13+ warns about unclosed sqlite connections), so a new pdfspine release or a Python-version behavior change
+# turns this gate red before the release gate does. Limit: this still runs on your OS. Linux-only behavior (the
+# release runner is ubuntu; e.g. Linux + 3.14 json.loads parsed 100k-deep nesting that raises RecursionError
+# on macOS — the 0.17.1 gate failure) is only caught by the release gate itself.
+# Skipped on the runner itself (it already runs on the newest releases); CI_LATEST_DEPS=0 skips it offline.
 if [ -n "${GITHUB_ACTIONS:-}" ] || [ "${CI_LATEST_DEPS:-1}" = "0" ]; then
   echo "  (skipped: GitHub Actions already runs on the newest releases, or CI_LATEST_DEPS=0)"
 else
@@ -91,8 +93,9 @@ else
   echo "  pdfspine $("$latest_py" -c 'import pdfspine; print(pdfspine.__version__)') (locked: $("$PY" -c 'import pdfspine; print(pdfspine.__version__)'))"
   # The two AIA sample suites replay a local release whose proofs pin the locked toolchain (fonttools
   # included); the runner has no such store and skips them, so they stay on the locked lane above.
-  "$latest_py" -m pytest -q -p no:cacheprovider -m "not gpu and not docling and not network" \
-    tests/enterprise_pdf_rag tests/extraction tests/ingestion \
+  "$latest_py" -m pytest -q -p no:cacheprovider tests/workflows/test_workflow_catalog_export.py
+  "$latest_py" -m pytest -q -p no:cacheprovider -m "not gpu and not docling and not network" tests/ \
+    --ignore=tests/workflows/test_workflow_catalog_export.py \
     --ignore=tests/enterprise_pdf_rag/adapters/test_document_catalog_aia_smoke.py \
     --ignore=tests/enterprise_pdf_rag/answers/test_nl_gold.py
 fi
