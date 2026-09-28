@@ -25,7 +25,7 @@ from hypothesis import strategies as st
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
 from ragspine.common import llm_json
-from ragspine.common.llm_json import extract_json
+from ragspine.common.llm_json import extract_json, parse_llm_json
 
 # 病态输入的耗时上限：原型实测 0.14s / 1.8s，放宽到 5s 防慢机误报。
 _TIME_LIMIT_S = 5.0
@@ -72,6 +72,22 @@ def test_strict_json_parses_without_fixes(text, expected):
 def test_fence_is_stripped(text):
     assert extract_json(text) == ["a", "b"]
     assert _fixes(text) == frozenset({"fence"})
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ('["```json\\n[1]\\n```"]', ["```json\n[1]\n```"]),
+        (
+            '{"code": "```python\\nx = [1]\\n```", "n": 2}',
+            {"code": "```python\nx = [1]\n```", "n": 2},
+        ),
+    ],
+)
+def test_whole_text_wins_over_fence_inside_string(text, expected):
+    """全文本身能严格解析成符合 expect 的值时直接用全文，不去看字符串里的 ```。"""
+    assert extract_json(text) == expected
+    assert _fixes(text) == frozenset()
 
 
 def test_fenced_block_wins_over_brackets_in_prose():
@@ -249,31 +265,44 @@ def test_never_raises_and_returns_container_or_none(text):
         assert value is None or isinstance(value, dict | list)
 
 
-_JSON_SCALARS = (
-    st.none()
-    | st.booleans()
-    | st.integers()
-    | st.floats(allow_nan=False, allow_infinity=False)
-    | st.text(alphabet=st.characters(blacklist_characters="`"))
-)
-_JSON_CONTAINERS = st.recursive(
-    _JSON_SCALARS,
-    lambda children: (
-        st.lists(children)
-        | st.dictionaries(st.text(alphabet=st.characters(blacklist_characters="`")), children)
-    ),
-    max_leaves=20,
-).filter(lambda v: isinstance(v, dict | list))
-# 字符串里不放反引号：围栏优先于全文，字符串里的 ``` 会被当成围栏边界（已知局限）。
+def _json_containers(strings: st.SearchStrategy[str]) -> st.SearchStrategy[Any]:
+    scalars = (
+        st.none()
+        | st.booleans()
+        | st.integers()
+        | st.floats(allow_nan=False, allow_infinity=False)
+        | strings
+    )
+    return st.recursive(
+        scalars,
+        lambda children: st.lists(children) | st.dictionaries(strings, children),
+        max_leaves=20,
+    ).filter(lambda v: isinstance(v, dict | list))
+
+
 # 说明文字里不能有容器起点或反引号，否则它本身就是合法的"第一个 JSON"。
 _PROSE = st.text(alphabet=st.characters(blacklist_characters="[{`"), max_size=40)
 
 
 @settings(derandomize=True, deadline=None)
-@given(value=_JSON_CONTAINERS, prose=_PROSE, suffix=_PROSE)
+@given(value=_json_containers(st.text()))
+def test_round_trip_whole_text(value):
+    """全文能严格解析时直接用全文，字符串里含 ``` 也不会被当成围栏。"""
+    dumped = json.dumps(value, ensure_ascii=False)
+    assert extract_json(f"  {dumped}\n") == value
+    assert _fixes(dumped) == frozenset()
+
+
+# 带说明文字时全文不能严格解析，会按围栏优先：字符串里的 ``` 仍可能被当成围栏边界（已知局限），
+# 所以这里的字符串不放反引号。
+@settings(derandomize=True, deadline=None)
+@given(
+    value=_json_containers(st.text(alphabet=st.characters(blacklist_characters="`"))),
+    prose=_PROSE,
+    suffix=_PROSE,
+)
 def test_round_trip_with_prose_or_fence(value, prose, suffix):
     dumped = json.dumps(value, ensure_ascii=False)
-    assert extract_json(dumped) == value
     assert extract_json(f"{prose}{dumped}{suffix}") == value
     assert extract_json(f"{prose}\n```json\n{dumped}\n```\n{suffix}") == value
 
@@ -299,6 +328,40 @@ def test_deep_nesting_recursion_error_returns_none():
         assert extract_json(text, expect="array") is None
         assert extract_json(text, expect="object") is None
         assert time.perf_counter() - start < _TIME_LIMIT_S
+
+
+# ---------------------------------------------------------------------------
+# parse_llm_json：先按调用点原来的 strip + json.loads 解析，失败才走 extract_json
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '["a", NaN]',
+        '  {"a": Infinity, "b": -Infinity}\n',
+        "null",
+        "42",
+        '"hello"',
+        '{"subquestions": ["a"]}',
+        '{"a": 1, "a": 2}',
+    ],
+)
+def test_parse_llm_json_keeps_whatever_json_loads_accepts(text):
+    expected = json.loads(text.strip())
+    for expect in (None, "object", "array"):
+        got = parse_llm_json(text, expect=expect)
+        assert json.dumps(got) == json.dumps(expected)
+
+
+def test_parse_llm_json_falls_back_to_extract_json():
+    assert parse_llm_json('好的：["a", "b",]', expect="array") == ["a", "b"]
+    assert parse_llm_json("see [appendix]", expect="array") is None
+
+
+def test_parse_llm_json_swallows_recursion_error():
+    depth = 100_000
+    assert parse_llm_json("[" * depth + "]" * depth, expect="array") is None
 
 
 # ---------------------------------------------------------------------------

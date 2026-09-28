@@ -1,7 +1,8 @@
 """从 LLM 回文里容错提取 JSON 对象 / 数组：只依赖 stdlib，不抛异常，不写 trace。
 
-``extract_json`` 分两轮：先对候选文本严格解析，失败后才做修复。候选文本依次是各个代码围栏
-（```` ``` ````）里的内容和全文。每轮在候选文本里找 ``{`` / ``[`` 起点，按字符串感知的括号配对
+``extract_json`` 先看全文：全文能严格解析成符合 ``expect`` 的容器就直接返回。否则分两轮：先对候选文本
+严格解析，失败后才做修复。候选文本依次是各个代码围栏（```` ``` ````）里的内容和全文；全文带说明文字时，
+JSON 字符串里的 ```` ``` ```` 仍可能被当成围栏边界（已知局限）。每轮在候选文本里找 ``{`` / ``[`` 起点，按字符串感知的括号配对
 找到闭合位置，只取顶层整段：一段解析失败或类型不符就整段跳过，不往里面找；最多试
 ``_MAX_STARTS`` 个起点。
 
@@ -41,11 +42,26 @@ def extract_json(
     return None if found is None else found[0]
 
 
+def parse_llm_json(text: str, *, expect: Literal["object", "array"] | None = None) -> Any:
+    """调用点用的解析：先按原来的 ``json.loads(text.strip())`` 解析，成功就原样返回（任何类型，
+    含 ``NaN`` / ``Infinity``），保证原来能解析的输入行为不变；失败才交给 ``extract_json``。"""
+    try:
+        return json.loads(text.strip())
+    except (ValueError, RecursionError):
+        return extract_json(text, expect=expect)
+
+
 def _extract(
     text: str, expect: Literal["object", "array"] | None
 ) -> tuple[_Container, frozenset[str]] | None:
     """``extract_json`` 的实现，另外返回用到的修复（``fence`` / ``surrounding_text`` /
     ``trailing_comma`` / ``bare_value``），供测试观测。"""
+    try:
+        whole = json.loads(text.strip(), parse_constant=_reject_constant)
+    except (ValueError, RecursionError):
+        whole = None
+    if _is_expected(whole, expect):
+        return whole, frozenset()
     candidates = [(m.group(1), True) for m in _FENCE_RE.finditer(text)] + [(text, False)]
     spans = [(c, fenced, _top_level_spans(c)) for c, fenced in candidates]
     for repair in (False, True):
