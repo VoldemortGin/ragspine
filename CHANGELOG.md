@@ -4,7 +4,27 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ## [Unreleased]
 
+## [0.17.2] - 2026-09-28
+
+0.17.0 and 0.17.1 were both tagged but never published to PyPI; 0.17.2 is the first published release of this line.
+It contains everything listed under [0.17.1] and [0.17.0] (not repeated here), plus the fix below.
+
+### Fixed
+
+- **Explicit JSON nesting-depth limit in `common/llm_json`.** `extract_json` and `parse_llm_json` now return `None`
+  for input nested deeper than `MAX_JSON_DEPTH = 512` (`[` / `{` levels outside string literals), decided by a
+  string-aware O(n) scan before any `json.loads` — including `parse_llm_json`'s first, as-is parse. Previously the
+  outcome depended on whether `json.loads` hit `RecursionError`: 100,000 levels raised on macOS but parsed on
+  Linux + Python 3.14, so the 0.17.1 release gate failed there. It also bounds stack use on hostile input. Normal
+  LLM replies (a few levels deep) behave exactly as before at all three call sites (`agent/decompose`,
+  `agent/query_transform`, `graph/extractor`).
+- **Local CI latest-dependency lane runs the full suite.** Step 10 of `scripts/ci.sh` now runs the whole test suite
+  (same markers as step 5) against the newest releases on the newest supported Python, instead of only the
+  PDF-facing subset.
+
 ## [0.17.1] - 2026-09-28
+
+> Tagged but never published to PyPI (the release gate failed on Linux / Python 3.14); see [0.17.2].
 
 0.17.0 was tagged but never published to PyPI; 0.17.1 is the first published release of this line and includes
 everything below plus fixes. It also contains everything listed under [0.17.0], whose entries are not repeated here;
@@ -1179,7 +1199,8 @@ the entries below complete what that section left out, and add the changes made 
 - The package-root API now exposes the `RAGSpine` facade alongside the four original primitives.
 - Installed users can complete ingestion, querying, and local visualization without repository scripts.
 
-[Unreleased]: https://github.com/VoldemortGin/ragspine/compare/v0.17.1...HEAD
+[Unreleased]: https://github.com/VoldemortGin/ragspine/compare/v0.17.2...HEAD
+[0.17.2]: https://github.com/VoldemortGin/ragspine/compare/v0.17.1...v0.17.2
 [0.17.1]: https://github.com/VoldemortGin/ragspine/compare/v0.17.0...v0.17.1
 [0.17.0]: https://github.com/VoldemortGin/ragspine/compare/v0.16.1...v0.17.0
 [0.16.1]: https://github.com/VoldemortGin/ragspine/compare/v0.16.0...v0.16.1
