@@ -29,6 +29,15 @@ All notable changes to RAGSpine are documented here. This project follows Semant
   `ProviderError`, retries use litellm's `num_retries`, and in-flight requests are capped (default 8). Query translation
   and listwise rerank reuse the same provider. `ragspine doctor` checks the dependency. Default providers stay `mock`;
   base dependencies are unchanged. The lock moves `openai` 3.16.2 → 2.54.0 because litellm requires `openai<3`.
+- **DI markdown `<!-- page: N -->` page markers** ([ADR 0027](docs/adr/0027-di-markdown-page-markers.md)). Markdown
+  from the SuperIndex azure_di extractor is split by its markers, so `DiPage.index` is the true PDF page: locators read
+  `deck.md@page=5#…`, missing pages are empty, and page tags / images / `ask` attachments follow the same page.
+  Markers above page 10000 are ignored. A table cut by a marker becomes one table per page (header block repeated,
+  columns aligned, no numeric cell lost; a cut row's label is copied to later pages). With `source_pdf`, marker
+  markdown needs `max page <= PDF pages` and the sidecar is checked by source: SuperIndex `pages` (pages analyzed) =
+  distinct marker pages, ragspine `page_count` (PDF total) = PDF pages, `source_pdf_sha256` = the PDF's sha256; a
+  corrupt or mistyped sidecar is an error. Markdown without markers parses byte-identically. Migration: marker
+  markdown ingested before this change keeps physical-order locators; delete its `narrative_doc` rows and re-ingest.
 - **Page images on demand: `RAGSPINE_PAGE_IMAGES=off|tagged|all`**
   ([ADR 0025](docs/adr/0025-page-image-trigger-policy.md)). `on` stays as an alias of `all` and is
   byte-identical to before; the default is still `off`. `tagged` attaches an image only to the top-N pages whose
