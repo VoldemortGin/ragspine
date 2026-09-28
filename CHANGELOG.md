@@ -4,6 +4,12 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-09-28
+
+0.17.0 was tagged but never published to PyPI; 0.17.1 is the first published release of this line and includes
+everything below plus fixes. It also contains everything listed under [0.17.0], whose entries are not repeated here;
+the entries below complete what that section left out, and add the changes made since.
+
 ### Added
 
 - **Per-call, per-stage LLM telemetry in the request trace** ([ADR 0028](docs/adr/0028-per-call-llm-telemetry.md)).
@@ -24,6 +30,131 @@ All notable changes to RAGSpine are documented here. This project follows Semant
   names the path in the error and rejects more than 8 levels as suspicious; `emit_trace` and every registered sink
   run it, and `ragspine.common.observability.InProcessPrivacyTraceSink` is now the recursive same-name subclass.
 
+- **Structured-miss fallback to the narrative channel: `RAGSPINE_NARRATIVE_FALLBACK=on|off`, default `on`**
+  ([ADR 0023](docs/adr/0023-structured-miss-narrative-fallback.md)). When a narrative retriever is injected, a
+  structured-route question that lacks a metric (the gate's `ask_first`, reason `missing_metric`) or yields no `found`
+  fact (`not_found` / `unrecognized_param` / no tool call, reason `structured_no_hit`) first runs the narrative channel
+  on the raw question, with a system-prompt rule to output only `NO_ANSWER` when the snippets cannot answer. The
+  fallback answer is accepted only when it is grounded, decided in code (`agent/agent.py::_fallback_grounded`): a
+  non-empty answer, no `NO_ANSWER`, and at least one number (thousands separators and `[n]` markers stripped, numbers
+  from the question excluded) that appears verbatim in the retrieved snippet text. A grounded fallback returns
+  `route="narrative"`, `clarification.mode="none"`, the new `AgentResult.fallback=<reason>`, forced sources and the
+  structured `tool_results` kept for audit. Otherwise `structured_no_hit` returns the old result unchanged, and
+  `missing_metric` answers "查不到：资料中没有能回答该问题的依据，不提供任何推测数字。" plus the original ask text, keeping the
+  `ask_first` clarification object. The `found` path, composite / narrative routes and the competitor refusal (still
+  the first early return) are unchanged. The request trace gains `narrative_fallback={reason, grounded}` (codes only)
+  only when a fallback was attempted; `ragspine batch` records `fallback` per question and the nl-gold route label
+  gains `fallback`. `answer_question(narrative_fallback=)` overrides the env var; any value other than `on` / `off`
+  raises `ValueError`. With `off`, or with no retriever injected, output is byte-identical to before.
+- **Narrative number guard: `RAGSPINE_NARRATIVE_NUMBER_GUARD=on|off`, default `on`**
+  ([ADR 0024](docs/adr/0024-narrative-number-guard.md)). Every narrative synthesis (the narrative route, the
+  attribution part of a composite answer, an accepted ADR 0023 fallback) may only carry numbers found in the retrieved
+  snippet text. The deterministic check lives in `agent/number_guard.py` and reuses the nl-gold normalization,
+  `normalize_answer` / `contains_normalized`, now in `common/answer_text.py` (the eval module re-exports them with the
+  same signatures). Exempt: source doc / locator strings, `[n]` / `〔n〕` / `【n】` markers, page / slide references,
+  line-leading list numbers, `（n）` enumerations and numbers already in the question; years and periods pass when the
+  year matches one in the question or snippets; amounts with a magnitude word are compared by value
+  (`5.14 亿美元` = `US$514m`); a percentage needs `n%` in the evidence. The rewrite makes no second LLM call: an
+  ungrounded number in the lead turns the answer into `NUMBER_GUARD_NOTICE` plus the original sentences whose numbers
+  are all grounded; an ungrounded number only later drops those sentences and appends a note with the count. Sources
+  are still forced. When on, the narrative system prompt also gains `NUMBER_GUARD_RULE` (use only numbers that appear
+  verbatim, no calculation, no inferred order / cause / trend); the prompt rule shares the switch. The request trace
+  gains `narrative_number_guard={ungrounded, rewritten}` (counts only) only when a rewrite happened; `ragspine batch`
+  counts `number_guard_rewrites`. `answer_question(narrative_number_guard=)` overrides the env var; other values
+  raise `ValueError`. `off` is byte-identical in system prompt, answer and trace (snapshot
+  `test_off_is_byte_identical_snapshot`). Known limits: numbers read only from a page image count as ungrounded,
+  numbers in words are not checked, and the check proves where the digits came from, not which claim they support.
+- **`ClaudeCliProvider` — the local `claude -p` CLI as an evaluation LLM (`agent/claude_cli_provider.py`).**
+  Subprocess only, no SDK. System messages go through `--system-prompt-file` (replacing Claude Code's default system
+  prompt), the rest as a transcript on stdin. Tool calling is emulated by a prompt protocol (the reply must be one JSON
+  object, `{"tool_calls": [...]}` or `{"content": "..."}`); tool names and arguments are validated and a bad reply is
+  retried with a correction prompt (default 2 format retries) before `ProviderError`. Every call runs isolated in a
+  fresh empty temporary cwd with `--setting-sources ""`, `--tools ""`, `--strict-mcp-config`,
+  `--disable-slash-commands` and `--no-session-persistence`, so no user / project `CLAUDE.md`, settings, MCP servers or
+  skills leak in. Image parts are supported (`supports_image_input = True`): images are copied into the call's cwd and
+  only the `Read` tool is enabled for them. Timeout (default 300 s), non-zero exit and `is_error` map to
+  `ProviderError`; concurrency is capped (default 4); the `claude` binary is resolved on the first call, and a missing
+  binary raises `FileNotFoundError` (a configuration error, not a degradable `ProviderError`). No streaming, no
+  sampling parameters. Selectable with `--provider claude-cli` in `scripts/ask.py` (model via `--model`, default
+  unset = the CLI's own default), `ragspine batch` and `scripts/run_nl_gold_ragspine.py` (`--claude-model`), and with
+  `RAGSPINE_PROVIDER=claude-cli` + `RAGSPINE_CLAUDE_CLI_MODEL` (`ServiceConfig.claude_cli_model`, default `None`); the
+  subprocess Dify runner forwards `claude_cli_model`. `ragspine ask` does not offer it. Requires an installed,
+  logged-in Claude Code CLI; default providers stay `mock`.
+- **DI markdown on the narrative channel (`ragspine.extraction.di_markdown` + `.md` narrative extraction).** New
+  pure-stdlib parser `parse_di_markdown` turns Azure Document Intelligence-style markdown into a typed page / block IR
+  (`DiDocument` → `DiPage` → heading / paragraph / `<figure>` / HTML `<table>` blocks): `` paging
+  (no break = one page), `PageNumber` comments read as the page number when they hold exactly one integer,
+  `PageHeader` / `PageFooter` / `PageNumber` kept out of the body, a heading stack that carries across pages, and HTML
+  tables parsed with `HTMLParser` (`th` / `td`, `rowspan` / `colspan` expanded to a rectangular grid). It never raises
+  on malformed input. `narrative_extract.extract_narrative` now dispatches `.md` to `extract_di_markdown_narrative`:
+  one segment per (page, heading path) run with locator `page={N}`, tables linearized as
+  `row title | column header: value` (caption first), figure caption before its text; `NarrativeSegment` gains
+  `heading_path`. A `.md` is always chunked per segment (`SEGMENT_CHUNKED_SUFFIXES`), giving chunk locators such as
+  `deck.md@page=3#para1-4`, `heading` = the heading path joined by `" > "`, and `seq` / `chunk_id` renumbered across
+  the document. `.md` is accepted by `RAGSpine.ingest` / `ragspine ingest` (narrative only; the structured channel does
+  not take it) and by `scripts/ingest_narrative.py`. Other suffixes can opt into the same per-segment chunking with
+  `--segment-chunking` on `scripts/ingest_narrative.py`, or `RAGSPINE_NARRATIVE_SEGMENT_CHUNKING`
+  (`ServiceConfig.narrative_segment_chunking`, default `False`, carried to the worker as payload `segment_chunking`);
+  off, their chunking is byte-identical (frozen by a legacy chunk snapshot). The HTTP route / worker `.md` support and
+  the `` markers are listed separately above (0.17.0).
+- **Persisted chunk vectors: `RAGSPINE_PERSIST_VECTORS`, default off.** Before this, `RAGSpine.ingest` and the
+  narrative worker wrote only chunks, while the retriever built its index over an empty in-memory vector store that
+  embeds only the query, so "hybrid" retrieval silently ran as BM25 only. With the switch on, ingest embeds the chunks
+  into a sqlite-vec file (`retrieval/vector/chunk_index.py`, `ChunkVectorIndex`; default `<chunk db stem>.vectors.db`
+  next to the chunk db, or `RAGSPINE_VECTOR_DB_PATH` / `ServiceConfig.vector_db_path`) and the query side reads it
+  back (`vector_store` is ignored then; needs `[vector]`). Sync is per document and idempotent (content signature;
+  changed docs are re-embedded, removed docs' vectors deleted); RESTRICTED chunks are never embedded under the default
+  isolation-first policy (counted as `withheld`); the first write records the embedding model id and dimension, and a
+  later mismatch raises `VectorIndexMismatchError` instead of mixing vectors. No embedding backend (or the `economy`
+  retrieval mode) or an empty index degrades to BM25 only. Both sides emit count-only traces
+  (`op=narrative.vector_index` / `op=narrative.vector_channel` with `vector_channel=hybrid|bm25_only` and a reason).
+  Wired through `ServiceConfig.persist_vectors`, the facade's `storage.persist_vectors`, the worker payload and
+  `ragspine batch --persist-vectors`. In the same change `make_embedding_backend("local-http")` /
+  `make_reranker("local-http")` register the OpenAI-compatible `/v1/embeddings` and Cohere-shaped `/v1/rerank`
+  adapters (read `EMBEDDING_*` / `RERANK_*`), and the `local-http` embedder adds Qwen3's query-side prefix
+  `Instruct: {task}\nQuery:` (default task "Given a web search query, retrieve relevant passages that answer the
+  query"; `RAGSPINE_EMBEDDING_QUERY_INSTRUCTION` overrides, `""` disables); documents get no prefix, so persisted
+  vectors stay valid, and other backends embed the query as before. Off, retrieval assembly is unchanged.
+- **Post-processing and visual + OCR-text fusion wrappers for any narrative retriever.** The W8–W12 retrieval
+  components (post-processors, HyDE / RAG-Fusion / step-back, sentence-window / semantic / RAPTOR chunking,
+  ColBERT / SPLADE, ColPali) already shipped before 0.17.0; this release adds the pieces that compose them.
+  `retrieval/postprocess.py` gains `PostprocessingRetriever` / `make_postprocessing_retriever(base, spec)`, which
+  wrap any already-isolated retriever with a post-processing chain and return `base` itself when the spec is
+  `none`; new aliases `diversity` (MMR), `reorder` / `long_context` / `lost_in_the_middle` (lost-in-the-middle) and
+  `extractive` (compression); and the presets `recommended` / `all` / `default` = `mmr,compress,reorder`, accepted
+  wherever `make_postprocessor` reads a spec (including `RAGSPINE_POSTPROCESSOR`, still default `none`). New
+  `retrieval/fusion/route_fusion.py`: `FusedRetriever` / `make_fused_retriever(text_retriever, visual_retriever=None)`
+  RRF-fuses an OCR→text / narrative leg with a ColPali visual leg (per-leg fetch 50 / 10). Hits with the same
+  `(doc_id, page)` are merged, the text hit stays the representative and gains `visual_score`, and each hit is
+  annotated with `fused_score` and `retrieval_routes` without touching its provenance. RESTRICTED hits are dropped
+  from both legs; since the visual leg takes no filters, with filters it can only confirm pages the text leg already
+  returned. With no visual leg the factory returns the text retriever unchanged. Neither wrapper is wired into
+  the default assembly.
+- **Optional SQLite run history for the Dify public API: `RAGSPINE_DIFY_PUBLIC_RUN_STORE_PATH`**
+  ([ADR 0026](docs/adr/0026-optional-dify-run-history.md)). `ServiceConfig.dify_public_run_store_path` (default
+  `None`) keeps the terminal run summaries of `POST /v1/workflows/run` in a local SQLite file so that
+  `GET /v1/workflows/run/{id}` works across restarts and processes (`service/api/dify_run_store.py`: `DifyRunStore`
+  protocol, `InMemoryRunStore`, `SqliteRunStore`). Stdlib `sqlite3` with short-lived connections, an immediate
+  transaction per write, JSON only (never pickle) and a versioned schema; at most 100 runs per owner, evicted in write
+  order. The owner is the SHA-256 of the bearer key, so the raw key is never stored and a different key sees the run as
+  missing. Blocking and streaming runs are persisted before the normal response is returned. A storage fault or a
+  corrupt record returns a redacted `503 history_unavailable` (no silent fallback to memory, no 404, no automatic
+  retry). Summaries include business inputs / outputs as authorized app data and never enter observability traces.
+  It stores terminal summaries only, not checkpoints or resumable state. Unset keeps the previous in-process history
+  (the latest 100 runs, global) byte-identical.
+- **Per-page text-layer diagnosis in the evidence chain (`ragspine.extraction.evidence.document.text_layer`).** Every
+  source page extracted by the pdfspine adapter now carries a `TextLayerDiagnostic` (`status` = `ok` /
+  `outlined_text` / `garbled`, plus span, character, undecodable-character, garbled-span and vector-path counts;
+  `PageExtraction.text_layer` / `PageRecord.text_layer`, `None` = extracted before this change). A page with no
+  non-space character and at least one vector path, or with at least 50 paths and at least 10 paths per character, is
+  `outlined_text`; a page with at least 5% undecodable characters (U+FFFD, private-use, unassigned, surrogates,
+  non-space controls) is `garbled`. A span containing any undecodable character is withheld from the text-span sidecar
+  (surviving span ids are unchanged), so nothing can quote, certify or index it, and a non-`ok` page gets a warning.
+  `ingest_pdf`'s `IngestionSummary` gains `text_layer_page_states` (counts per status, `unassessed` for older sources)
+  and `ocr_needed_pages` (1-based). Detection only: no OCR runs yet. The `aia-source-review-v1` schema gains the
+  optional `text_layer` field; the source producer id moves from `native-svg/text-dict-v1` to `text-dict-v2`, so
+  cached source stages are re-extracted once.
+
 ### Changed
 
 - **Internal API: `TruncationStats`, `bind_truncation_stats` and `unbind_truncation_stats` are removed**
@@ -31,7 +162,46 @@ All notable changes to RAGSpine are documented here. This project follows Semant
   (ADR 0028), and the request trace's `llm_truncation_retries` / `llm_truncated_final` are derived from `llm_calls`
   with the same meaning and still only when non-zero. Truncations during query decomposition are now counted too.
 
+- **`enterprise_pdf_rag` settings, logging and model access moved to `ragspine.common.evidence`** (ADR 0022, batch
+  B2; the extraction move listed under 0.17.0 Changed is batch B3). `enterprise_pdf_rag.core.settings` /
+  `core.logging` now live at `ragspine.common.evidence.settings` / `.logging`, and `enterprise_pdf_rag.adapters.`
+  `providers` / `json_completion` / `local_models` / `local_model_launcher` / `local_model_tunnel` at
+  `ragspine.common.evidence.providers.<same name>`. The legacy names still import as the same module objects with a
+  `DeprecationWarning`, and `enterprise_pdf_rag.core` is no longer a real package. **API change:**
+  `resource_path(relative)` is now `resource_path(package, relative)`, because the module no longer lives in the
+  package that owns the resources; pass the package name explicitly. The `APP_*` settings stay separate from
+  `RAGSpineConfig` / `ServiceConfig`. With B2 and B3 done, the 0.17.0 note "No module moves yet" on the ADR 0022
+  scaffolding is out of date; the AIA sample lane is still pending.
+
+- **Local CI covers the newest dependencies.** `scripts/ci.sh` gains step 10: it re-runs `tests/enterprise_pdf_rag`,
+  `tests/extraction` and `tests/ingestion` in a throwaway venv on Python 3.14 (`CI_LATEST_PYTHON`) resolved to the
+  newest PyPI releases, as the release runner does, so a pdfspine release that breaks them turns the local gate red
+  too. The two suites that replay the local AIA sample release (absent on the runner) stay on the locked lane.
+  Skipped on GitHub Actions; `CI_LATEST_DEPS=0` skips it offline.
+
+### Fixed
+
+- **Source-paint proofs revalidate on pdfspine 0.11.1 and 0.11.2.** Revalidation accepted a legacy producer label
+  only when the running pdfspine was exactly 0.11.0, so on 0.11.1+ every proof built under 0.10.0 or 0.11.0 failed
+  with `source_paint_proof_revalidation_mismatch`. `adapters/source_paint.py` now keeps an explicit table of reviewed
+  SDK upgrades (0.11.0 accepts 0.10.0; 0.11.1 accepts 0.10.0 / 0.11.0; 0.11.2 accepts 0.10.0 / 0.11.0 / 0.11.1;
+  their release notes touch OCR ordering and table sort comparators, not paint profile, glyph replay or SVG export).
+  The whole proof is still re-derived and compared; an unlisted runtime, a downgrade or an unreviewed SDK still fails
+  closed. The validator identity moves to `reviewed-sdk-upgrades-v2`.
+- **Release gate vs. the newest pdfspine.** The 0.17.0 release gate failed on pdfspine 0.11.2 (the runner installs
+  the newest release; `uv.lock` pins 0.11.0). Besides the fix above, the page-window chat test no longer depends on
+  how BM25 ties break (ties break by member id, which carries the SDK version), and the two linear-time guards in
+  `tests/extraction/di_markdown/test_parse.py` allow 10 s instead of 5 s (they only guard against a quadratic
+  regression). The unraisable `ResourceWarning: unclosed database` that failed an unrelated test on Python 3.13
+  came from `tests/ingestion/narrative/test_doc_id_collision.py`, which used `with sqlite3.connect(...)` (that
+  commits but never closes); it now closes its connections.
+- **Correction to the 0.17.0 highlights.** The W8–W12 components listed there (post-processors, HyDE / RAG-Fusion /
+  step-back, sentence-window / semantic / RAPTOR chunking, ColBERT / SPLADE, ColPali) already shipped before 0.17.0;
+  what is new is the composing wrappers described under Added.
+
 ## [0.17.0] - 2026-09-27
+
+> Tagged but never published to PyPI (the release gate failed on pdfspine 0.11.2); see [0.17.1].
 
 ### Highlights
 
@@ -1009,7 +1179,8 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 - The package-root API now exposes the `RAGSpine` facade alongside the four original primitives.
 - Installed users can complete ingestion, querying, and local visualization without repository scripts.
 
-[Unreleased]: https://github.com/VoldemortGin/ragspine/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/VoldemortGin/ragspine/compare/v0.17.1...HEAD
+[0.17.1]: https://github.com/VoldemortGin/ragspine/compare/v0.17.0...v0.17.1
 [0.17.0]: https://github.com/VoldemortGin/ragspine/compare/v0.16.1...v0.17.0
 [0.16.1]: https://github.com/VoldemortGin/ragspine/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/VoldemortGin/ragspine/compare/v0.15.0...v0.16.0
