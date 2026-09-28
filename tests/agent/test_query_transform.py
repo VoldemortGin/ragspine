@@ -10,6 +10,7 @@ make_adaptive_decomposer 返回 None，主流程逐位字节不变。
 - 三个 wrapper 只对 base.retrieve(...) 的输出取舍/融合，隔离继承自 base 出口（RESTRICTED 永不出域）。
 """
 
+import json
 import os
 from datetime import date
 
@@ -164,6 +165,66 @@ def test_rag_fusion_degrades_to_single_on_provider_error():
     out = fusion.retrieve(orig)
     assert base.seen == [orig]
     assert _ids(out) == ["A", "B"]
+
+
+def _legacy_parse_json_string_array(text: str) -> list[str]:
+    """改用 extract_json 之前的 _parse_json_string_array（strip + json.loads），作回退行为的对照。"""
+    try:
+        parsed = json.loads(text.strip())
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [s.strip() for s in parsed if isinstance(s, str) and s.strip()]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "这不是 JSON 数组",
+        "see [appendix]",
+        "[a, b]",
+        '["香港营收变化", "香港收',
+        "['香港营收变化']",
+        '{"variants": ["香港营收变化"]}',
+        '"香港营收变化"',
+        "[NaN]",
+    ],
+)
+def test_rag_fusion_fallback_unchanged_by_extract_json(text):
+    """旧解析在这些输入上得不到变体、只检索原 query；换成 extract_json 后仍然如此。"""
+    assert _legacy_parse_json_string_array(text) == []
+    orig = "香港REVENUE趋势"
+    base = FakeBase({orig: ["A", "B"], "香港营收变化": ["C"]})
+    fusion = RAGFusionRetriever(base, ScriptedProvider([_text_response(text)]))
+    out = fusion.retrieve(orig)
+    assert base.seen == [orig]
+    assert _ids(out) == ["A", "B"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '```json\n["香港营收变化", "香港收入走势"]\n```',
+        '变体如下：["香港营收变化", "香港收入走势"]。',
+    ],
+)
+def test_rag_fusion_parses_fenced_or_wrapped_variants(text):
+    """围栏或前后说明文字：旧解析得不到变体，现在能解析并融合。"""
+    assert _legacy_parse_json_string_array(text) == []
+    orig = "香港REVENUE趋势"
+    base = FakeBase(
+        {
+            orig: ["A", "B", "C"],
+            "香港营收变化": ["B", "C", "D"],
+            "香港收入走势": ["C", "D", "A"],
+        }
+    )
+    fusion = RAGFusionRetriever(base, ScriptedProvider([_text_response(text)]))
+    out = fusion.retrieve(orig)
+    assert _ids(out) == ["C", "B", "A", "D"]
+    assert set(base.seen) == {orig, "香港营收变化", "香港收入走势"}
 
 
 def test_rag_fusion_competitor_variant_is_screened_out():

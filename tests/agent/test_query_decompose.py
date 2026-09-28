@@ -236,6 +236,56 @@ def test_llm_decomposer_single_item_passthrough():
     assert dec.decompose("简单问题", reference_date=REF) == ["只有一个"]
 
 
+def _legacy_parse_subquestions(text: str) -> list[str]:
+    """改用 extract_json 之前的 _parse_subquestions（strip + json.loads），作回退行为的对照。"""
+    try:
+        parsed = json.loads(text.strip())
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [s.strip() for s in parsed if isinstance(s, str) and s.strip()]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "这不是 JSON 数组",
+        "see [appendix]",
+        "[a, b]",
+        '["子问题一", "子问',
+        "['子问题一', '子问题二']",
+        '{"subquestions": ["子问题一", "子问题二"]}',
+        "42",
+        '"一个问题"',
+        "[NaN]",
+        "[1, 2]",
+    ],
+)
+def test_llm_decomposer_fallback_unchanged_by_extract_json(text):
+    """旧解析在这些输入上回退为原问句，换成 extract_json 后仍回退为原问句。"""
+    assert _legacy_parse_subquestions(text) == []
+    dec = LLMQueryDecomposer(ScriptedProvider([_text_response(text)]))
+    assert dec.decompose("原问句", reference_date=REF) == ["原问句"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '```json\n["哪个区域增长最快", "增长最快的区域为什么增长"]\n```',
+        '分解如下：\n["哪个区域增长最快", "增长最快的区域为什么增长"]\n以上。',
+        '["哪个区域增长最快", "增长最快的区域为什么增长",]',
+    ],
+)
+def test_llm_decomposer_parses_fenced_or_wrapped_array(text):
+    """围栏、前后说明文字、尾逗号：旧解析会放弃分解，现在能解析出子问题。"""
+    assert _legacy_parse_subquestions(text) == []
+    dec = LLMQueryDecomposer(ScriptedProvider([_text_response(text)]))
+    subs = dec.decompose("哪个区域增长最快、为什么", reference_date=REF)
+    assert subs == ["哪个区域增长最快", "增长最快的区域为什么增长"]
+
+
 # ---------------------------------------------------------------------------
 # make_decomposer 工厂 + env 选型
 # ---------------------------------------------------------------------------

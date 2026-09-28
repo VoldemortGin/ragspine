@@ -223,6 +223,57 @@ def test_llm_degrades_on_empty_output():
     assert extractor.extract([FakeChunk("d", text="t")]) == ()
 
 
+def _legacy_parse(text: str) -> tuple[tuple[str, str, str], ...] | None:
+    """改用 extract_json 之前 _parse 的解析 + 类型检查（strip + json.loads），回退时返回 ()。"""
+    try:
+        parsed = json.loads(text.strip())
+    except (TypeError, ValueError):
+        return ()
+    if not isinstance(parsed, dict) or not isinstance(parsed.get("relations"), list):
+        return ()
+    return None
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "这不是 JSON",
+        "see [appendix]",
+        '{"relations": [{"source": "A", "target": "B", "kind": "k"}]',
+        '[{"source": "A", "target": "B", "kind": "k"}]',
+        '{"relations": "A 与 B 合作"}',
+        "{relations: []}",
+        "{'relations': []}",
+        "42",
+    ],
+)
+def test_llm_fallback_unchanged_by_extract_json(text):
+    """旧解析在这些输入上回退为空，换成 extract_json 后仍回退为空。"""
+    assert _legacy_parse(text) == ()
+    extractor = LLMRelationExtractor(ConstantProvider(text))
+    assert extractor.extract([FakeChunk("d", text="t")]) == ()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '好的，抽取结果如下：\n{"relations": [{"source": "A", "target": "B", "kind": "partners_with"}]}',
+        '```json\n{"relations": [{"source": "A", "target": "B", "kind": "partners_with"}]}\n```',
+        '{"relations": [{"source": "A", "target": "B", "kind": partners_with},],}',
+    ],
+)
+def test_llm_parses_fenced_or_wrapped_relations(text):
+    """说明文字、围栏、尾逗号、裸 kind：旧解析得不到边，现在能抽出（仍带模型标记）。"""
+    assert _legacy_parse(text) == ()
+    extractor = LLMRelationExtractor(ConstantProvider(text))
+    chunks = [FakeChunk("d1.pdf", source_locator="d1.pdf#p1", text="A 与 B 合作。")]
+    [edge] = extractor.extract(chunks)
+    assert (edge.src, edge.dst, edge.type) == ("A", "B", "partners_with")
+    assert edge.metadata[EDGE_META_DERIVED] == PROVENANCE_MODEL_DERIVED
+    assert edge.metadata[EDGE_META_VERIFIED] == PROVENANCE_UNVERIFIED
+
+
 def test_llm_degrades_on_provider_error():
     extractor = LLMRelationExtractor(BoomProvider())
     assert extractor.extract([FakeChunk("d", text="t")]) == ()

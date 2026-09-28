@@ -17,11 +17,11 @@ LLM 分解非确定，故仅作 opt-in 适配器（经 make_decomposer / RAGSPIN
 注入 provider 才生效）；默认仍是 RuleIntentParser 的确定性笛卡尔。
 """
 
-import json
 from datetime import date
 from typing import Protocol, runtime_checkable
 
 from ragspine.agent.llm_provider import LLMProvider, ProviderError
+from ragspine.common.llm_json import extract_json
 
 # 分解结果的路由标记：与 structured/narrative/composite 区分，仅在注入 decomposer 且真分解时出现。
 ROUTE_DECOMPOSED = "decomposed"
@@ -82,10 +82,8 @@ class LLMQueryDecomposer:
 
 def _parse_subquestions(text: str) -> list[str]:
     """从模型回文鲁棒解析 JSON 字符串数组；任何不合规一律视为"无法分解"返回空表。"""
-    stripped = text.strip()
-    try:
-        parsed = json.loads(stripped)
-    except (TypeError, ValueError):
+    parsed = extract_json(text, expect="array")
+    if parsed is None:
         return []
     if not isinstance(parsed, list):
         return []
