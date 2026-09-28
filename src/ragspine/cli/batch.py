@@ -9,7 +9,9 @@
   再用全量记录（同 id 取最后一条）重新生成 ``summary.md``。
 - 答案与命中块文本只进这两个评测产物，绝不送进 observability trace（trace 只记计数）。
 - 端到端模式每题旁听本线程的 trace（只取计数）：请求 trace 的 ``token_usage``、``page_images.sent/dropped``、
-  数字防护改写次数，记进该题的 ``trace`` 字段，summary 汇总每题附图数、token、延迟 p50/p95（ADR 0025 评测用）。
+  数字防护改写次数，记进该题的 ``trace`` 字段，summary 汇总每题附图数、token、延迟 p50/p95（ADR 0025 评测用）；
+  另拼接本线程各 trace 的 ``llm_calls``（含分解父请求那条），记逐次调用与汇总，summary 加"LLM 调用（按阶段）"表
+  （ADR 0028）。
 
 检索配置由 workspace + ``--profile`` 经 ``RAGSpine.local`` 决定；``RAGSpine.local`` 不读 ``RAGSPINE_*``
 环境变量，所以真实模型（Qwen embedding / reranker）用 ``--embedding`` / ``--reranker`` /
@@ -34,6 +36,7 @@ from typing import Any
 
 from ragspine.agent.agent import NarrativeRetriever
 from ragspine.agent.llm_provider import LLMProvider, MockProvider
+from ragspine.common.observability.llm_calls import STAGES
 from ragspine.common.observability.trace import TRACE_LOGGER_NAME
 from ragspine.config import RAGSpineConfig
 from ragspine.eval.retrieval_only import (
@@ -212,27 +215,38 @@ class _VectorChannelCapture(logging.Handler):
 
 
 class _RequestTraceCapture(logging.Handler):
-    """按线程旁听 agent 的请求 trace（只取计数）：token 用量、发出的页图数、数字防护改写次数。
+    """按线程旁听 agent 的请求 trace（只取计数）：token 用量、发出的页图数、数字防护改写次数，以及逐次 LLM 调用。
 
     ``RAGSpine.ask`` 在调用线程里同步完成，所以按 ``LogRecord.thread`` 归到当前这道题；多跳分解时每个子问题
-    各发一条请求 trace，这里累加。
+    各发一条请求 trace，这里累加。``llm_calls`` 从本线程所有带它的 trace 拼接（含没有 ``tool_status_counts``
+    的分解父请求 trace，它不计入 ``requests``）。
     """
 
     def __init__(self) -> None:
         super().__init__(level=logging.INFO)
         self._lock = threading.Lock()
         self._by_thread: dict[int, dict[str, int | None]] = {}
+        self._llm_by_thread: dict[int, list[dict[str, object]]] = {}
 
     def start(self) -> None:
         with self._lock:
             self._by_thread[threading.get_ident()] = _empty_trace_counts()
+            self._llm_by_thread[threading.get_ident()] = []
 
-    def pop(self) -> dict[str, int | None]:
+    def pop(self) -> dict[str, object]:
         with self._lock:
-            return self._by_thread.pop(threading.get_ident(), _empty_trace_counts())
+            counts = self._by_thread.pop(threading.get_ident(), _empty_trace_counts())
+            calls = self._llm_by_thread.pop(threading.get_ident(), [])
+        return {**counts, **_llm_totals(calls)}
 
     def emit(self, record: logging.LogRecord) -> None:
-        if not hasattr(record, "tool_status_counts"):  # 只要请求 trace
+        calls = getattr(record, "llm_calls", None)
+        if isinstance(calls, list):
+            with self._lock:
+                bucket = self._llm_by_thread.get(record.thread or 0)
+                if bucket is not None:
+                    bucket.extend(dict(c) for c in calls if isinstance(c, Mapping))
+        if not hasattr(record, "tool_status_counts"):  # 其余计数只要请求 trace
             return
         with self._lock:
             counts = self._by_thread.get(record.thread or 0)
@@ -256,6 +270,20 @@ class _RequestTraceCapture(logging.Handler):
                 counts["number_guard_rewrites"] = int(counts["number_guard_rewrites"] or 0) + int(
                     guard.get("rewritten") or 0
                 )
+
+
+def _llm_totals(calls: list[dict[str, object]]) -> dict[str, object]:
+    """一道题的逐次 LLM 调用与汇总（llm_ms 是各次调用耗时之和，不是墙钟时间）。"""
+    return {
+        "llm_calls": calls,
+        "llm_n_calls": len(calls),
+        "llm_n_retried": sum(1 for c in calls if c.get("retried")),
+        "llm_ms": sum(_as_int(c.get("ms")) for c in calls),
+    }
+
+
+def _as_int(value: object) -> int:
+    return value if isinstance(value, int) else 0
 
 
 def _empty_trace_counts() -> dict[str, int | None]:
@@ -780,6 +808,7 @@ def render_summary(
             f"| routes | {', '.join(f'{k}={v}' for k, v in routes.most_common())} |",
             *_cost_rows(records),
         ]
+        lines += _llm_stage_lines(records)
     lines += ["", "## 逐题", ""]
     for record in records:
         lines += _question_lines(record)
@@ -837,6 +866,55 @@ def _cost_rows(records: Sequence[Mapping[str, Any]]) -> list[str]:
         rewrites = sum(int(t.get("number_guard_rewrites") or 0) for t in traces)
         rows.append(f"| 数字防护改写次数 | {rewrites} |")
     return rows
+
+
+def _llm_stage_lines(records: Sequence[Mapping[str, Any]]) -> list[str]:
+    """ "LLM 调用（按阶段）"表：次数 / 每题平均 / 平均与最大 ms / 耗时占比 / 重试率；没有调用时不出表。"""
+    traces = _traces(records)
+    calls = [c for t in traces for c in t.get("llm_calls") or [] if isinstance(c, Mapping)]
+    if not calls:
+        return []
+    by_stage: dict[str, list[Mapping[str, Any]]] = {}
+    for call in calls:
+        by_stage.setdefault(str(call.get("stage")), []).append(call)
+    order = {stage: i for i, stage in enumerate(STAGES)}
+    total_ms = sum(_as_int(c.get("ms")) for c in calls)
+    lines = [
+        "",
+        "## LLM 调用（按阶段）",
+        "",
+        "| stage | 次数 | 每题平均 | 平均 ms | 最大 ms | 耗时占比 | 重试率 |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for stage in sorted(by_stage, key=lambda s: (order.get(s, len(order)), s)):
+        group = by_stage[stage]
+        ms = [_as_int(c.get("ms")) for c in group]
+        retried = sum(1 for c in group if c.get("retried"))
+        share = f"{sum(ms) / total_ms:.1%}" if total_ms else "—"
+        lines.append(
+            f"| {stage} | {len(group)} | {len(group) / len(traces):.2f} | {statistics.fmean(ms):.1f} "
+            f"| {max(ms)} | {share} | {retried / len(group):.1%} ({retried}/{len(group)}) |"
+        )
+    retried = sum(1 for c in calls if c.get("retried"))
+    seconds = sum(
+        float(r["seconds"])
+        for r in records
+        if isinstance(r.get("trace"), Mapping) and "seconds" in r
+    )
+    latency = (
+        f"，占端到端延迟合计（{seconds:.2f} s）的 {total_ms / 1000 / seconds:.1%}"
+        if seconds
+        else ""
+    )
+    lines += [
+        "",
+        f"全部 {len(calls)} 次调用，重试率 {retried / len(calls):.1%} ({retried}/{len(calls)})；"
+        f"Σllm_ms = {total_ms} ms{latency}。",
+        "",
+        "注：llm_ms 是各次调用耗时之和，不是墙钟时间（请求内有并发时可能超过端到端延迟）；"
+        "重试含截断重试、格式重试与去掉参数重发。",
+    ]
+    return lines
 
 
 def _question_lines(record: Mapping[str, Any]) -> list[str]:

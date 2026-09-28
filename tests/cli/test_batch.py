@@ -19,6 +19,7 @@ ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpa
 
 from ragspine.agent.llm_provider import LLMProvider, MockProvider
 from ragspine.cli import main
+from ragspine.common.observability.llm_calls import instrument_llm_call
 from ragspine.common.observability.trace import TRACE_LOGGER_NAME
 from ragspine.service.config import ServiceConfig
 from ragspine.session import RAGSpine
@@ -887,6 +888,7 @@ class _ImageReadingMock(MockProvider):
 
     supports_image_input = True
 
+    @instrument_llm_call  # 覆写 chat 的子类自己装饰：外层记一次（带 usage），内层 super().chat 透传
     def chat(self, messages, *, tools=None):  # type: ignore[no-untyped-def]
         import dataclasses
 
@@ -925,7 +927,18 @@ def test_ask_records_trace_counts(tmp_path, monkeypatch, image_mode, expected_se
         "page_images_sent",
         "page_images_dropped",
         "number_guard_rewrites",
+        "llm_calls",
+        "llm_n_calls",
+        "llm_n_retried",
+        "llm_ms",
     }
+    # 逐次 LLM 调用（ADR 0028）是全量口径：token_usage 只覆盖 tool 循环与合成的 4 次，llm_calls 另含 listwise
+    calls = trace.pop("llm_calls")
+    assert [c["stage"] for c in calls].count("listwise_rerank") == 1
+    assert [(c["in_tokens"], c["out_tokens"]) for c in calls] == [(100, 7)] * 5
+    assert "other" not in {c["stage"] for c in calls}
+    assert trace.pop("llm_n_calls") == 5 and trace.pop("llm_n_retried") == 0
+    assert trace.pop("llm_ms") == sum(c["ms"] for c in calls)
     # 一次请求、4 次 provider 调用（结构化工具环 + 回落叙事），每次报 100 / 7
     assert trace == {
         "requests": 1,
@@ -935,6 +948,7 @@ def test_ask_records_trace_counts(tmp_path, monkeypatch, image_mode, expected_se
         "page_images_dropped": 0,
         "number_guard_rewrites": 0,
     }
+    assert "## LLM 调用（按阶段）" in (out / "summary.md").read_text(encoding="utf-8")
     summary = (out / "summary.md").read_text(encoding="utf-8")
     assert "| 每题附图数（均值） |" in summary
     assert "| 延迟 p50 / p95（秒） |" in summary
