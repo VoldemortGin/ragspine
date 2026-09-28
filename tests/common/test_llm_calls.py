@@ -156,6 +156,15 @@ def test_nested_buckets_are_isolated():
     assert [c.stage for c in inner.calls] == ["synthesis"]
 
 
+def test_new_bucket_does_not_inherit_outer_stage():
+    with record_llm_calls() as outer, llm_stage("hyde"):
+        with record_llm_calls() as inner:
+            _Provider(_completion()).chat([])
+        _Provider(_completion()).chat([])
+    assert [c.stage for c in inner.calls] == [STAGE_OTHER]
+    assert [c.stage for c in outer.calls] == ["hyde"]  # 退出内层桶后外层 stage 恢复
+
+
 def test_record_llm_calls_as_decorator_opens_fresh_bucket_per_call():
     seen = []
 

@@ -31,6 +31,7 @@ from ragspine.agent.query_transform import (
 from ragspine.common.observability.llm_calls import (
     STAGE_OTHER,
     instrument_llm_call,
+    llm_stage,
     record_llm_calls,
 )
 from ragspine.eval.nl_gold_ragspine import ForcedNarrativeIntentParser
@@ -235,6 +236,33 @@ def test_real_ask_path_has_no_other(tmp_path: Path, caplog):
     assert stages, "ask 路径应至少有一次 LLM 调用"
     assert STAGE_OTHER not in stages
     assert {"translation", "listwise_rerank"} <= set(stages)
+
+
+class _UnlabelledBase(_Base):
+    """检索内部有一次未标注的 LLM 调用。"""
+
+    def __init__(self, provider):
+        self.provider = provider
+
+    def retrieve(self, query, *, filters=None, top_k=50):
+        self.provider.chat([{"role": "user", "content": query}])
+        return super().retrieve(query, filters=filters, top_k=top_k)
+
+
+def test_ask_inside_outer_stage_does_not_inherit_it(store, caplog):
+    """外层处在某个 stage 里调用 ask：ask 内部未标注的调用记为 other，不继承外层 stage。"""
+    provider = _Scripted(default="1H26 VONB 为 US$514m。")
+    with caplog.at_level(logging.INFO, logger="ragspine.trace"), llm_stage("hyde"):
+        answer_question(
+            "What was VONB in 1H26?",
+            store,
+            provider,
+            reference_date=REF,
+            narrative_retriever=_UnlabelledBase(provider),
+            intent_parser=ForcedNarrativeIntentParser(),
+        )
+    (trace,) = _traces(caplog)
+    assert [c["stage"] for c in trace.llm_calls] == [STAGE_OTHER, "synthesis"]
 
 
 # ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@
 
 三个 ContextVar：
 - `_BUCKET` —— 采集桶。`record_llm_calls()` 打开（with 或装饰器；`answer_question` 整个请求一个桶），
-  嵌套打开时内层与外层隔离，退出即恢复外层。没有桶时一切静默。
+  嵌套打开时内层与外层隔离（stage 也重置为 other，不继承外层），退出即恢复外层。没有桶时一切静默。
 - `_STAGE` —— 当前阶段标签。`llm_stage("hyde")` 设置（with 或装饰器），取值是闭集 `STAGES`，未知值在
   定义时就抛 `ValueError`；未标注的调用记为 `other`。
 - `_PROBE` —— 当前调用探针。`instrument_llm_call` 装饰 provider 的 `chat`：计时、打开探针，provider 内部用
@@ -119,12 +119,18 @@ _PROBE: ContextVar[_Probe | None] = ContextVar("ragspine_llm_probe", default=Non
 
 @contextmanager
 def record_llm_calls() -> Iterator[LLMCallBucket]:
-    """打开一个采集桶（with 产出该桶；也可当装饰器，每次调用各开一个新桶）。"""
+    """打开一个采集桶（with 产出该桶；也可当装饰器，每次调用各开一个新桶）。
+
+    新桶里的阶段标签从 other 重新开始，不继承外层的 stage（外层处在某个 stage 里调用 ask 时，ask 内部未标注
+    的调用记为 other）；退出时桶与 stage 一并恢复。
+    """
     bucket = LLMCallBucket()
     token = _BUCKET.set(bucket)
+    stage_token = _STAGE.set(STAGE_OTHER)
     try:
         yield bucket
     finally:
+        _STAGE.reset(stage_token)
         _BUCKET.reset(token)
 
 

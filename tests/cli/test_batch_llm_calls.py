@@ -124,10 +124,21 @@ def test_summary_llm_stage_table_matches_hand_computation():
         < summary.index("| synthesis |")
     )
     assert (
-        "全部 4 次调用，重试率 50.0% (2/4)；Σllm_ms = 500 ms，占端到端延迟合计（4.00 s）的 12.5%"
-        in summary
-    )
+        "全部 4 次调用，重试率 50.0% (2/4)；Σllm_ms = 500 ms；"
+        "未出错题的 Σllm_ms（500 ms）占其端到端延迟合计（4.00 s）的 12.5%"
+    ) in summary
     assert "llm_ms 是各次调用耗时之和，不是墙钟时间" in summary
+
+
+def test_summary_latency_share_excludes_errored_questions():
+    """延迟占比与 _cost_rows 同口径：出错题的耗时与 llm_ms 都不计入占比（表内计数仍含它的调用）。"""
+    ok = _record("a", 2.0, [_call("synthesis", 100)])
+    failed = _record("b", 9.0, [_call("synthesis", 700)])
+    failed.update(error="ProviderError: x", route="error")
+    summary = render_summary([ok, failed], {"mode": MODE_ASK, "provider": "mock"}, top_k=10)
+    assert "全部 2 次调用" in summary and "Σllm_ms = 800 ms" in summary
+    assert "未出错题的 Σllm_ms（100 ms）占其端到端延迟合计（2.00 s）的 5.0%" in summary
+    assert "| 延迟 p50 / p95（秒） | 2.00 / 2.00 |" in summary
 
 
 def test_summary_without_llm_calls_has_no_llm_table():

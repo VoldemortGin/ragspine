@@ -896,13 +896,13 @@ def _llm_stage_lines(records: Sequence[Mapping[str, Any]]) -> list[str]:
             f"| {max(ms)} | {share} | {retried / len(group):.1%} ({retried}/{len(group)}) |"
         )
     retried = sum(1 for c in calls if c.get("retried"))
-    seconds = sum(
-        float(r["seconds"])
-        for r in records
-        if isinstance(r.get("trace"), Mapping) and "seconds" in r
-    )
+    # 与 _cost_rows 的延迟口径一致：出错的题不计（分子分母都只取未出错的题）。
+    ok = [r for r in records if not r.get("error") and "seconds" in r]
+    seconds = sum(float(r["seconds"]) for r in ok)
+    ok_ms = sum(_as_int(t.get("llm_ms")) for t in _traces(ok))
     latency = (
-        f"，占端到端延迟合计（{seconds:.2f} s）的 {total_ms / 1000 / seconds:.1%}"
+        f"；未出错题的 Σllm_ms（{ok_ms} ms）占其端到端延迟合计（{seconds:.2f} s）的 "
+        f"{ok_ms / 1000 / seconds:.1%}"
         if seconds
         else ""
     )
