@@ -6,14 +6,22 @@ TraceSink 缝把这条隐私约定形式化为一个【可注册 / 可选择 / �
 到 OTel / 文件【经隐私 conformance 而非绕过】（见 sink.py + tests/conformance/test_trace_sink.py）。
 
 包级门面：为向后兼容（既有 `from ragspine.common.observability import emit_trace` 等）与缝的可发现性，
-在此再导出 trace 发射原语与 TraceSink 缝的公开面（两条子模块都只依赖 stdlib + corespine，轻量急切）。
+在此再导出 trace 发射原语、TraceSink 缝与 LLM 调用埋点的公开面（子模块都只依赖 stdlib + corespine，轻量急切）。
 
 Submodules:
     adapters/ — 第三方 TraceSink 适配器（OTel …），延迟 import，behind [otel] extra。
+    llm_calls.py — 按调用、分阶段的 LLM 埋点：采集桶 / 阶段标签 / provider chat 装饰器（ADR 0028，只用 stdlib）。
     sink.py — TraceSink 缝：复用 corespine Protocol + make_trace_sink / RAGSPINE_TRACE_SINK 注册表。
     trace.py — trace 发射原语：request_id 生成 + emit_trace 结构化发射（行为不变）。
 """
 
+from ragspine.common.observability.llm_calls import (
+    STAGES,
+    LLMCall,
+    instrument_llm_call,
+    llm_stage,
+    record_llm_calls,
+)
 from ragspine.common.observability.sink import (
     FORBIDDEN_KEYS,
     MAX_TRACE_DEPTH,
@@ -35,15 +43,20 @@ from ragspine.common.observability.trace import (
 __all__ = [
     "FORBIDDEN_KEYS",
     "MAX_TRACE_DEPTH",
+    "STAGES",
     "TRACE_LOGGER_NAME",
     "TRACE_SINK_ENTRY_POINT_GROUP",
     "TRACE_SINK_ENV",
     "InProcessPrivacyTraceSink",
+    "LLMCall",
     "TraceError",
     "TraceEvent",
     "TraceSink",
     "emit_trace",
     "enforce_trace_privacy",
+    "instrument_llm_call",
+    "llm_stage",
     "make_trace_sink",
     "new_request_id",
+    "record_llm_calls",
 ]
