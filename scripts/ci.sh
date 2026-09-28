@@ -72,23 +72,29 @@ echo "==> [9/10] enterprise_pdf_rag structural gates (scoped to src/enterprise_p
 "$PY" scripts/enterprise_pdf_rag/check_schema.py
 "$PY" scripts/enterprise_pdf_rag/check_drift.py
 
-echo "==> [10/10] latest-dependency lane (fresh venv, newest PyPI releases — what the release runner installs)"
+echo "==> [10/10] latest-dependency lane (fresh venv on the newest supported Python, newest PyPI releases — what the release runner installs)"
 # uv.lock pins pdfspine & co. for the steps above, but release.yml runs `pip install -e ".[dev,service,pdf]"`,
 # which resolves the newest releases. Re-run the PDF-facing suites in a throwaway venv resolved the same
-# way, so a new pdfspine release turns this gate red before the release gate does. Skipped on the runner
-# itself (it already runs on the newest releases); CI_LATEST_DEPS=0 skips it offline.
+# way, on the top of the runner's Python matrix (CI_LATEST_PYTHON, default 3.14; e.g. 3.13+ warns about
+# unclosed sqlite connections), so a new pdfspine release turns this gate red before the release gate
+# does. Skipped on the runner itself (it already runs on the newest releases); CI_LATEST_DEPS=0 skips it
+# offline.
 if [ -n "${GITHUB_ACTIONS:-}" ] || [ "${CI_LATEST_DEPS:-1}" = "0" ]; then
   echo "  (skipped: GitHub Actions already runs on the newest releases, or CI_LATEST_DEPS=0)"
 else
   latest_venv="$(mktemp -d)/venv"
   trap 'rm -rf "$(dirname "$latest_venv")"' EXIT
-  uv venv -q -p "$("$PY" -c 'import sys; print(sys.executable)')" "$latest_venv"
+  uv venv -q -p "${CI_LATEST_PYTHON:-3.14}" "$latest_venv"
   VIRTUAL_ENV="$latest_venv" uv pip install -q --refresh-package pdfspine -e ".[dev,service,pdf]"
   latest_py="$latest_venv/bin/python"
   [ -x "$latest_py" ] || latest_py="$latest_venv/Scripts/python.exe"
   echo "  pdfspine $("$latest_py" -c 'import pdfspine; print(pdfspine.__version__)') (locked: $("$PY" -c 'import pdfspine; print(pdfspine.__version__)'))"
+  # The two AIA sample suites replay a local release whose proofs pin the locked toolchain (fonttools
+  # included); the runner has no such store and skips them, so they stay on the locked lane above.
   "$latest_py" -m pytest -q -p no:cacheprovider -m "not gpu and not docling and not network" \
-    tests/enterprise_pdf_rag tests/extraction tests/ingestion
+    tests/enterprise_pdf_rag tests/extraction tests/ingestion \
+    --ignore=tests/enterprise_pdf_rag/adapters/test_document_catalog_aia_smoke.py \
+    --ignore=tests/enterprise_pdf_rag/answers/test_nl_gold.py
 fi
 
 echo
