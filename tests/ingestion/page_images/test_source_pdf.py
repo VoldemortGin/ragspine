@@ -307,3 +307,56 @@ def test_page_break_mode_still_requires_equal_count(tmp_path):
     with pytest.raises(SourcePdfError, match="页数不一致"):
         validate_source_pdf(md, more)
     assert validate_source_pdf(md, pdf).page_count == 2
+
+
+# ---- 与 doc_id 冲突规则的交叉（ADR 0027 × 同名拒绝）--------------------------------------------
+
+
+def _marker_deck_in(folder, pages, sidecar):
+    folder.mkdir(parents=True, exist_ok=True)
+    md = folder / "deck.md"
+    md.write_text(make_marker_md({n: f"{folder.name} body {n}" for n in pages}), encoding="utf-8")
+    make_pdf(folder / "deck.pdf", [f"LABEL-{i}" for i in range(1, 9)])
+    sidecar_path(md).write_text(
+        json.dumps({SIDECAR_SOURCE_PDF_KEY: "deck.pdf", **sidecar}), encoding="utf-8"
+    )
+    return md
+
+
+def test_same_named_marker_markdown_is_refused_before_marker_checks(tmp_path):
+    bad = _marker_deck_in(
+        tmp_path / "a", [5, 6, 7], {"pages": 99}
+    )  # 单独校验会因 sidecar 不一致失败
+    good = _marker_deck_in(tmp_path / "b", [5, 6, 7], {"pages": 3})
+    # 同一批两个同名 .md 都关联 PDF：同名规则先报错（在逐个 validate_source_pdf 之前）
+    with pytest.raises(SourcePdfError, match="同名"):
+        prepare_source_pdfs([bad, good])
+    # 各自单独入库时，marker 模式的规则照常生效
+    with pytest.raises(SourcePdfError, match="sidecar"):
+        prepare_source_pdfs([bad])
+    assert prepare_source_pdfs([good])["deck.md"].page_count == 8
+
+
+def test_same_named_marker_markdown_across_batches_hits_the_doc_id_conflict(tmp_path):
+    from ragspine.ingestion.narrative.narrative_ingest import (
+        STATUS_FAILED,
+        STATUS_INGESTED,
+        ingest_narrative,
+    )
+    from ragspine.retrieval.chunking.chunk_store import ChunkStore
+
+    first = _marker_deck_in(tmp_path / "a", [5, 6, 7], {"pages": 3})
+    second = _marker_deck_in(tmp_path / "b", [5, 6], {"pages": 2})
+    store = ChunkStore(tmp_path / "chunks.db")
+    store.init_schema()
+    try:
+        assert prepare_source_pdfs([first])["deck.md"].page_count == 8
+        assert ingest_narrative([first], store).files[0].status == STATUS_INGESTED
+        locators = [c.source_locator for c in store.iter_chunks(doc_id="deck.md")]
+        # 第二批单独校验通过（marker 规则），但 doc_id 已属于 a/deck.md：拒绝而不是覆盖
+        assert prepare_source_pdfs([second])["deck.md"].page_count == 8
+        assert ingest_narrative([second], store).files[0].status == STATUS_FAILED
+        assert [c.source_locator for c in store.iter_chunks(doc_id="deck.md")] == locators
+    finally:
+        store.close()
+    assert locators[0].startswith("deck.md@page=5#")
