@@ -5,7 +5,7 @@ covers:
   - src/ragspine/retrieval/link/
   - src/ragspine/retrieval/rerank/
   - src/ragspine/common/observability/
-verified-against: 66dc7bc9d907aa2269bb6805a0e1e2a2b278c1cb
+verified-against: d39231843ded9cbdce8da7b43437389f1bddc067
 ---
 
 # Invariants (code-enforced)
@@ -41,7 +41,10 @@ markers, page / slide refs, list numbers, and years / periods that match the que
 number in the lead ⇒ `NUMBER_GUARD_NOTICE` + the original sentences that hold only grounded numbers. Elsewhere ⇒
 only those sentences are dropped, plus a trailing note. No second LLM call. Sources are still forced. When on, the
 system prompt also carries `NUMBER_GUARD_RULE` (no calculation / order / causal inference). Off ⇒ byte-identical.
-Trace: `narrative_number_guard={ungrounded, rewritten}` (counts only, only on rewrite).
+Trace: `narrative_number_guard={ungrounded, rewritten}` (counts only, only on rewrite). The `（资料来源：…）` suffix is
+appended after the guard and, with `RAGSPINE_CITATION_MERGE` (default `on`, [ADR 0029](adr/0029-narrative-citation-merge.md)),
+merged per document (`deck.md page=5-6, 14`); its page lists are exempt as page refs, and a bare `page=` / `slide=`
+locator is not used as a whole-string ref, so it cannot split such a list.
 **Truncated LLM output is never adopted.** A provider that still gets a length cut after its truncation retries
 (`agent/truncation.py`, `RAGSPINE_LLM_TRUNCATION_RETRY`, default `on`) raises `TruncatedOutputError`, a
 `ProviderError`: the tool loop and `_run_narrative` take their fixed degrade text, and a fallback has no sources, so it
@@ -54,12 +57,17 @@ per-call `llm_calls` since ADR 0028, so a truncation during decomposition counts
 `tests/agent/test_llm_truncation.py` (half narrative answer / half tool-call JSON degrade, byte-identical requests
 without truncation),
 `tests/agent/test_narrative_number_guard.py` (computed number rewritten, raw / format-variant / question /
-citation / period numbers pass, sources kept, off ≡ snapshot), and the QA ratchet
+citation / period numbers pass, sources kept, off ≡ snapshot), `tests/agent/test_citation_merge.py` (merged suffix
+passes the guard, body numbers still caught, guard before suffix), and the QA ratchet
 (`data/golden/qa_baseline.json`, fabrication count 0).
 
 ## Provenance
 
 <!-- TODO: source_doc_id + locator carried end to end; where lineage could be dropped. -->
+
+**The narrative suffix is display, `sources` is lineage.** Merging the `（资料来源：…）` suffix per document
+([ADR 0029](adr/0029-narrative-citation-merge.md)) drops `#para…` from that text only; `AgentResult.sources` stays one
+`{doc, locator}` per snippet, same order and content with the switch on or off, and the page numbers stay in the suffix.
 
 **DI markdown page locators are PDF pages.** A `.md` chunk's locator is `{doc_id}@page={DiPage.index}#para…`. With
 `<!-- PageBreak -->` pages, `index` is the physical page order in the markdown; with `<!-- page: N -->` markers

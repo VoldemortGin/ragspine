@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/agent/
-verified-against: aaaf1bc613623df30611a5cece1eb63728e9666c
+verified-against: d39231843ded9cbdce8da7b43437389f1bddc067
 ---
 
 # agent — agent contract
@@ -43,6 +43,10 @@ loop, LLM provider abstraction.
   corespine `RateLimitedProvider` does not → text-only, traced). A query-translation request (system prompt starting
   with `QUERY_TRANSLATION_PROMPT_PREFIX`, `retrieval/translation`) gets the query back unchanged from `MockProvider`,
   so offline runs never add a translated query.
+- `citations.py` — **narrative citation suffix merge (ADR 0029)**: `merge_citation` (pure, no retrieval import)
+  groups the `（资料来源：…）` entries per document — pages / slides deduped into `page=5-6, 14`, other locators
+  verbatim after them, one distinct locator printed as before; `resolve_citation_merge` /
+  `RAGSPINE_CITATION_MERGE` (default `on`, off ⇒ byte-identical). Display only: `sources` stays per snippet.
 - `claude_cli_provider.py` — `ClaudeCliProvider`: eval-only provider that shells out to the local
   `claude -p` CLI (subprocess, no SDK; binary resolved lazily at call time). Each call runs in a
   fresh empty cwd with `--setting-sources ""` (the flag that keeps the user's global
@@ -135,7 +139,8 @@ loop, LLM provider abstraction.
     rewritten deterministically: an ungrounded number in the lead ⇒ `NUMBER_GUARD_NOTICE` + the grounded
     raw-value sentences; elsewhere ⇒ only those sentences are dropped, plus a note. On also appends
     `NUMBER_GUARD_RULE` to the system prompt. Off ⇒ byte-identical. The prose is otherwise trusted; there
-    is no found-fact rewrite here. Don't swap the rewrite for a second LLM "repair" call.
+    is no found-fact rewrite here. Don't swap the rewrite for a second LLM "repair" call. The lineage suffix
+    is appended **after** the guard (merged per document, ADR 0029); keep that order.
   - *route fallback (ADR 0023)* — `RAGSPINE_NARRATIVE_FALLBACK=on|off` (default `on`;
     `answer_question(narrative_fallback=)` overrides). With a retriever injected, a structured-route
     missing metric (`missing_metric`) or zero `found` (`structured_no_hit`) first runs
