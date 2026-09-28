@@ -4,6 +4,35 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-09-27
+
+### Highlights
+
+- **DI markdown ingestion with page provenance** — Azure DI-style `.md` goes through the narrative channel (CLI, facade, HTTP route, worker); `<!-- page: N -->` markers make every locator the true PDF page ([ADR 0027](docs/adr/0027-di-markdown-page-markers.md)).
+- **Page-level parent/child, on by default** — retrieval is de-duplicated per page and the representative chunk carries its whole page (`page+child`).
+- **Mixed image + text context** — page images from the linked source PDF, attached on demand by `RAGSPINE_PAGE_IMAGES=off|tagged|all` ([ADR 0025](docs/adr/0025-page-image-trigger-policy.md); default still `off`).
+- **Cross-lingual query translation, `auto` by default** — a question in another language than the document is restated once for retrieval only; rerank and generation keep the original.
+- **Two more anti-fabrication layers** — a structured miss falls back to the narrative channel before answering "not found" ([ADR 0023](docs/adr/0023-structured-miss-narrative-fallback.md)), and numbers in a narrative answer that no retrieved chunk contains are deterministically removed ([ADR 0024](docs/adr/0024-narrative-number-guard.md)).
+- **New providers** — `LiteLLMProvider` for OpenAI-compatible models (new `[litellm]` extra) and `ClaudeCliProvider` (`--provider claude-cli`, the local `claude -p` CLI, for evaluation).
+- **More robust LLM calls** — a length-truncated reply is retried with a larger budget instead of being used half-finished; JSON replies wrapped in fences / prose / trailing commas are parsed tolerantly.
+- **`ragspine batch`** — batch ask and retrieval-only evaluation (`recall@k` / `page_recall@k` / MRR) over a question set, plus `RAGSpine.open_retriever()`.
+- **Also new (opt-in, default output unchanged)** — persisted chunk vectors (`RAGSPINE_PERSIST_VECTORS`), heading-aware index text (`RAGSPINE_CONTEXTUAL_INDEX`), the W8–W12 retrieval toolkit (post-processors, HyDE / RAG-Fusion / step-back, sentence-window / semantic / RAPTOR chunking, ColBERT / SPLADE, ColPali visual retrieval, visual + OCR-text RRF fusion) and an optional SQLite run history for the Dify public API ([ADR 0026](docs/adr/0026-optional-dify-run-history.md)).
+
+### Behavior changes / Upgrade notes
+
+- **New defaults.** Each can be switched back to the previous behavior, which is byte-identical:
+  - `RAGSPINE_PAGE_PARENT=page+child` (was `off`) — answers may cite and quote whole pages; `off` restores the old output. Chunks without `@page=N` (pptx slides, whole-document PDFs) are unaffected.
+  - `RAGSPINE_QUERY_TRANSLATION=auto` (was no translation) — only a cross-language question calls the LLM provider once more (retrieval only); `off` disables it.
+  - `RAGSPINE_NARRATIVE_FALLBACK=on` — a structured miss (missing metric or no `found` fact) now tries the narrative channel when a narrative retriever is wired; a grounded, sourced narrative answer can replace the old "not found" / clarification. `off` restores it.
+  - `RAGSPINE_NARRATIVE_NUMBER_GUARD=on` — narrative answers containing numbers absent from the retrieved chunks are rewritten (notice + grounded sentences, or the ungrounded sentences dropped with a note). `off` restores it.
+  - `RAGSPINE_LLM_TRUNCATION_RETRY=on` — a length-cut reply is retried (at most 2 times, budget capped by `RAGSPINE_LLM_TRUNCATION_MAX_TOKENS`, default 16384); one still cut raises `TruncatedOutputError` and takes the honest degrade. `off` restores it.
+- **`.md` is a narrative input.** The HTTP narrative route and the narrative worker now accept `.md` alongside `.pptx` / `.pdf`; if you relied on `.md` uploads being rejected, filter them upstream.
+- **Same-named narrative files are refused.** Ingesting a second file whose name is already owned by another existing file raises `DocIdConflictError` for that file (the rest of the batch continues) instead of silently overwriting the first. Rename one of them, or delete the stale one first.
+- **Installing `[litellm]` caps `openai<3`.** litellm requires `openai<3`; the lock moves `openai` 3.16.2 → 2.54.0. Base dependencies are unchanged.
+- **`enterprise_pdf_rag` import paths are deprecated** ([ADR 0022](docs/adr/0022-dissolve-enterprise-pdf-rag-into-domain-evidence-subtrees.md)). Moved modules (settings / logging / providers → `ragspine.common.evidence`; documents / figures / extraction half of processing → `ragspine.extraction.evidence`) still import under their old names as the same module objects, but emit a `DeprecationWarning` (an error under `-W error`). Run `scripts/enterprise_pdf_rag/rewrite_legacy_imports.py` to migrate; the shim stays for at least two minor releases. The JSON schemas rename two `$defs` keys; payloads are unchanged.
+- **`ReindexRequiredError` message changed.** It no longer suggests the nonexistent `ragspine ingest --reindex`; it shows the stored vs requested `indexing` contract and the two real remedies, and carries `stored_indexing` / `requested_indexing`. Update anything that matches on the old text.
+- **Re-ingest marker markdown.** DI markdown with page markers ingested before this release keeps physical-order locators; delete its `narrative_doc` rows and re-ingest.
+
 ### Added
 
 - **LLM truncation retry in the provider layer (`agent/truncation.py`).** When `LiteLLMProvider`
@@ -953,7 +982,8 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 - The package-root API now exposes the `RAGSpine` facade alongside the four original primitives.
 - Installed users can complete ingestion, querying, and local visualization without repository scripts.
 
-[Unreleased]: https://github.com/VoldemortGin/ragspine/compare/v0.16.1...HEAD
+[Unreleased]: https://github.com/VoldemortGin/ragspine/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/VoldemortGin/ragspine/compare/v0.16.1...v0.17.0
 [0.16.1]: https://github.com/VoldemortGin/ragspine/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/VoldemortGin/ragspine/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/VoldemortGin/ragspine/compare/v0.14.0...v0.15.0
