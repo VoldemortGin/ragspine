@@ -21,15 +21,39 @@ _LEGACY_CONTRACT_JSON = json.dumps(
 
 
 class ReindexRequiredError(RuntimeError):
-    """The requested runtime plan is incompatible with the persisted index."""
+    """The requested runtime plan is incompatible with the persisted index.
 
-    def __init__(self, workspace: str | Path, categories: tuple[str, ...]) -> None:
+    A workspace's chunk index is never rebuilt in place, so the message names the two
+    remedies that exist: reopen with the stored ``indexing`` config, or ingest the
+    sources into a new empty workspace with the requested one.
+    """
+
+    def __init__(
+        self,
+        workspace: str | Path,
+        categories: tuple[str, ...],
+        *,
+        stored_indexing: dict[str, object] | None = None,
+        requested_indexing: dict[str, object] | None = None,
+    ) -> None:
         self.categories = categories
+        self.stored_indexing = stored_indexing
+        self.requested_indexing = requested_indexing
         changed = ", ".join(categories)
-        command = f'ragspine ingest SOURCE --workspace "{Path(workspace)}" --reindex'
+        stored = _compact_json(stored_indexing)
+        requested = _compact_json(requested_indexing)
         super().__init__(
-            f"workspace index is incompatible in {changed}; reindex required: {command}"
+            f'workspace index in "{Path(workspace)}" is incompatible in {changed}: '
+            f"stored indexing={stored}, requested indexing={requested}. "
+            "The chunk index is never rebuilt in place; either reopen the workspace with the "
+            f'stored config (RAGSpine.local(workspace, config={{"indexing": {stored}}})), '
+            "or ingest the sources into a new empty workspace directory with the requested "
+            "indexing config"
         )
+
+
+def _compact_json(value: object) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
 class WorkspaceIndexMetadata:
@@ -64,7 +88,7 @@ class WorkspaceIndexMetadata:
             return
         if stored is None:
             stored = ("legacy", _LEGACY_CONTRACT_JSON)
-        raise ReindexRequiredError(self._workspace, self._changed_categories(stored[1], plan))
+        raise self._reindex_error(stored[1], plan)
 
     def claim(self, plan: EffectivePlan) -> None:
         """Atomically claim an empty index or verify its existing contract."""
@@ -75,14 +99,9 @@ class WorkspaceIndexMetadata:
                 stored = self._read(connection)
                 if stored is None and self._has_narrative_chunks(connection):
                     if contract != _LEGACY_CONTRACT_JSON:
-                        raise ReindexRequiredError(
-                            self._workspace,
-                            self._changed_categories(_LEGACY_CONTRACT_JSON, plan),
-                        )
+                        raise self._reindex_error(_LEGACY_CONTRACT_JSON, plan)
                 elif stored is not None and stored[0] != plan.index_fingerprint:
-                    raise ReindexRequiredError(
-                        self._workspace, self._changed_categories(stored[1], plan)
-                    )
+                    raise self._reindex_error(stored[1], plan)
                 connection.execute(
                     """
                     INSERT INTO ragspine_index_metadata (singleton, fingerprint, contract_json)
@@ -118,6 +137,18 @@ class WorkspaceIndexMetadata:
             {"chunking": plan.config.indexing.model_dump(mode="json")},
             sort_keys=True,
             separators=(",", ":"),
+        )
+
+    def _reindex_error(self, stored_json: str, plan: EffectivePlan) -> ReindexRequiredError:
+        try:
+            stored_indexing = json.loads(stored_json).get("chunking")
+        except (AttributeError, TypeError, ValueError):
+            stored_indexing = None
+        return ReindexRequiredError(
+            self._workspace,
+            self._changed_categories(stored_json, plan),
+            stored_indexing=stored_indexing,
+            requested_indexing=json.loads(self._contract_json(plan))["chunking"],
         )
 
     @classmethod

@@ -230,8 +230,39 @@ def test_reopen_refuses_to_query_with_an_incompatible_indexing_contract(tmp_path
         rag.ingest(source)
 
     with RAGSpine.local(workspace) as rag:
-        with pytest.raises(ReindexRequiredError, match=r"chunking.*ragspine ingest.*--reindex"):
+        with pytest.raises(ReindexRequiredError, match="chunking") as excinfo:
             rag.ask("营收为什么增长？")
+
+    # The hint names only operations that exist: `ragspine ingest` has no --reindex flag.
+    message = str(excinfo.value)
+    assert "--reindex" not in message
+    assert '"chunker":"parent_child"' in message  # the stored contract to reopen with
+    assert "new empty workspace" in message
+
+
+def test_reindex_hint_is_actionable(tmp_path):
+    """Both remedies the error names actually work."""
+    from ragspine import RAGSpine
+    from ragspine.config import ReindexRequiredError
+
+    workspace = tmp_path / "knowledge-base"
+    source = tmp_path / "review.txt"
+    source.write_text("# 营收\n营收增长来自渠道扩张。\n毛利改善。", encoding="utf-8")
+    parent_child = {"indexing": {"chunker": "parent_child", "max_chars": 16, "overlap_chars": 0}}
+    with RAGSpine.local(workspace, config=parent_child) as rag:
+        rag.ingest(source)
+
+    with RAGSpine.local(workspace) as rag, pytest.raises(ReindexRequiredError) as excinfo:
+        rag.ingest(source)
+    assert excinfo.value.stored_indexing == parent_child["indexing"]
+
+    # Remedy 1: reopen with the stored indexing config.
+    with RAGSpine.local(workspace, config={"indexing": excinfo.value.stored_indexing}) as rag:
+        assert rag.ask("营收为什么增长？").sources
+    # Remedy 2: ingest into a new empty workspace with the requested (default) config.
+    with RAGSpine.local(tmp_path / "rebuilt") as rag:
+        rag.ingest(source)
+        assert rag.ask("营收为什么增长？").sources
 
 
 def test_reopen_refuses_incremental_ingest_with_an_incompatible_contract(tmp_path):
