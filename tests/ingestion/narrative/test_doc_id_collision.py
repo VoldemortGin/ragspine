@@ -6,6 +6,7 @@
 """
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -32,7 +33,7 @@ def _write(path: Path, text: str) -> Path:
 
 
 def _active_texts(db: Path) -> list[str]:
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         rows = conn.execute(
             "SELECT text FROM narrative_chunk WHERE active = 1 ORDER BY doc_id, seq"
         ).fetchall()
@@ -61,7 +62,7 @@ def test_same_name_in_another_directory_is_refused_not_overwritten(tmp_path):
     assert "report.md" in rep.error and str(first.resolve()) in rep.error
     assert any("Alpha" in text for text in _active_texts(db))
     assert not any("Beta" in text for text in _active_texts(db))
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         assert conn.execute("SELECT source_path FROM narrative_doc").fetchall() == [(str(first),)]
     # 冲突不破坏原文档的幂等：再入原文件仍是 skipped。
     assert _ingest(db, first).files[0].status == STATUS_SKIPPED
@@ -115,7 +116,7 @@ def test_legacy_ledger_row_without_source_path_is_not_a_conflict(tmp_path):
     db = tmp_path / "chunks.db"
     first = _write(tmp_path / "a" / "report.md", _ALPHA)
     _ingest(db, first)
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         conn.execute("UPDATE narrative_doc SET source_path = ''")
     second = _write(tmp_path / "b" / "report.md", _BETA)
     assert _ingest(db, second).files[0].status == STATUS_INGESTED
