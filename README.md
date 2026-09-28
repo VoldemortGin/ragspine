@@ -333,6 +333,10 @@ scripts/ci.sh                        # run the gate manually
 git config core.hooksPath .githooks  # enable the pre-push gate (once per clone)
 ```
 
+Its last step re-runs the PDF-facing suites in a throwaway venv resolved to the newest PyPI
+releases (what the release runner installs), so a new `pdfspine` release that breaks them turns
+the local gate red too; `CI_LATEST_DEPS=0 scripts/ci.sh` skips it offline.
+
 `.github/workflows/ci.yml` is included but **dormant** — manual-trigger only — so it consumes
 zero Actions minutes. Uncomment its `push:` / `pull_request:` triggers to enable server-side
 CI; it runs the exact same `scripts/ci.sh`. Lint / type-check (`scripts/lint.sh`, ruff + mypy)

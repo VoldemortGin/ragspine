@@ -8,6 +8,7 @@
 # Usage:
 #   scripts/ci.sh                 # use ./.venv if present, else system `python`
 #   PYTHON=python3.12 scripts/ci.sh
+#   CI_LATEST_DEPS=0 scripts/ci.sh   # skip the latest-dependency lane (offline)
 #
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -19,20 +20,20 @@ fi
 
 echo "==> using interpreter: $("$PY" -c 'import sys; print(sys.executable)')"
 
-echo "==> [1/9] docstring reference integrity (no dead src/ or docs/ links; package indexes match)"
+echo "==> [1/10] docstring reference integrity (no dead src/ or docs/ links; package indexes match)"
 "$PY" scripts/check_docstring_refs.py
 
-echo "==> [2/9] doc-drift (contracts re-verified against their covered code)"
+echo "==> [2/10] doc-drift (contracts re-verified against their covered code)"
 "$PY" scripts/check_doc_drift.py --quiet
 
-echo "==> [3/9] mypy --strict (static type contract — zero-warning gate, half 1 of 2)"
+echo "==> [3/10] mypy --strict (static type contract — zero-warning gate, half 1 of 2)"
 "$PY" -m mypy
 
-echo "==> [4/9] ruff lint + format (whole repo; enterprise_pdf_rag strict set scoped via per-file-ignores, ragspine keeps its E/F/I/W/UP/B)"
+echo "==> [4/10] ruff lint + format (whole repo; enterprise_pdf_rag strict set scoped via per-file-ignores, ragspine keeps its E/F/I/W/UP/B)"
 "$PY" -m ruff check .
 "$PY" -m ruff format --check .
 
-echo "==> [5/9] test suite (excludes gpu + docling + network — the bulk; filterwarnings=error + beartype runtime contracts active; includes tests/enterprise_pdf_rag, whose own conftest enforces no-network)"
+echo "==> [5/10] test suite (excludes gpu + docling + network — the bulk; filterwarnings=error + beartype runtime contracts active; includes tests/enterprise_pdf_rag, whose own conftest enforces no-network)"
 # The 1,000-file catalog exporter is intentionally isolated: after PDF/OCR native
 # libraries have raised the main process footprint, APFS copies become pathologically
 # slow. A fresh process keeps the same contract deterministic and cuts minutes from CI.
@@ -40,7 +41,7 @@ echo "==> [5/9] test suite (excludes gpu + docling + network — the bulk; filte
 "$PY" -m pytest tests/ -q -m "not gpu and not docling and not network" \
   --ignore=tests/workflows/test_workflow_catalog_export.py
 
-echo "==> [6/9] docling extractor tests (own process — isolates 3rd-party ML nondeterminism)"
+echo "==> [6/10] docling extractor tests (own process — isolates 3rd-party ML nondeterminism)"
 # `[pdf-docling]` is an optional extra; on a lean gate (no docling installed) every docling
 # test self-skips and pytest exits 5 ("no tests ran"). Tolerate ONLY that — any real failure
 # (exit 1) still propagates and fails the gate.
@@ -48,7 +49,7 @@ echo "==> [6/9] docling extractor tests (own process — isolates 3rd-party ML n
   && echo "  (no docling tests ran — [pdf-docling] not installed; lane skipped)" \
   || exit "$rc"; }
 
-echo "==> [7/9] QA eval + baseline ratchet (4-gate: numeric / citation / refusal / clarification + fabrication; W5 groundedness: faithfulness / answer-accuracy; ratchets up, never down)"
+echo "==> [7/10] QA eval + baseline ratchet (4-gate: numeric / citation / refusal / clarification + fabrication; W5 groundedness: faithfulness / answer-accuracy; ratchets up, never down)"
 # tool = zero-LLM deterministic direct test; agent = answer_question + MockProvider.
 # W5 groundedness uses the offline deterministic default (lexical-overlap entailment) — no model
 # download, no network, runs in CI; the opt-in ONNX-NLI / LLM-judge adapters are follow-ups.
@@ -57,10 +58,10 @@ echo "==> [7/9] QA eval + baseline ratchet (4-gate: numeric / citation / refusal
 "$PY" scripts/run_qa_eval.py --mode tool
 "$PY" scripts/run_qa_eval.py --mode agent
 
-echo "==> [8/9] end-to-end demo smoke"
+echo "==> [8/10] end-to-end demo smoke"
 "$PY" scripts/run_demo.py | tail -1
 
-echo "==> [9/9] enterprise_pdf_rag structural gates (scoped to src/enterprise_pdf_rag + docs/enterprise-pdf-rag; never judge ragspine by them)"
+echo "==> [9/10] enterprise_pdf_rag structural gates (scoped to src/enterprise_pdf_rag + docs/enterprise-pdf-rag; never judge ragspine by them)"
 # conformance: src layout / beartype claw hook / core-settings leaf / absolute imports / closed
 #   import whitelist outside adapters/.  architecture: pure figures/documents/processing (no IO).
 #   schema: versioned public JSON contracts under docs/enterprise-pdf-rag/schemas/ vs pydantic models.
@@ -70,6 +71,25 @@ echo "==> [9/9] enterprise_pdf_rag structural gates (scoped to src/enterprise_pd
 "$PY" scripts/enterprise_pdf_rag/check_architecture.py
 "$PY" scripts/enterprise_pdf_rag/check_schema.py
 "$PY" scripts/enterprise_pdf_rag/check_drift.py
+
+echo "==> [10/10] latest-dependency lane (fresh venv, newest PyPI releases — what the release runner installs)"
+# uv.lock pins pdfspine & co. for the steps above, but release.yml runs `pip install -e ".[dev,service,pdf]"`,
+# which resolves the newest releases. Re-run the PDF-facing suites in a throwaway venv resolved the same
+# way, so a new pdfspine release turns this gate red before the release gate does. Skipped on the runner
+# itself (it already runs on the newest releases); CI_LATEST_DEPS=0 skips it offline.
+if [ -n "${GITHUB_ACTIONS:-}" ] || [ "${CI_LATEST_DEPS:-1}" = "0" ]; then
+  echo "  (skipped: GitHub Actions already runs on the newest releases, or CI_LATEST_DEPS=0)"
+else
+  latest_venv="$(mktemp -d)/venv"
+  trap 'rm -rf "$(dirname "$latest_venv")"' EXIT
+  uv venv -q -p "$("$PY" -c 'import sys; print(sys.executable)')" "$latest_venv"
+  VIRTUAL_ENV="$latest_venv" uv pip install -q --refresh-package pdfspine -e ".[dev,service,pdf]"
+  latest_py="$latest_venv/bin/python"
+  [ -x "$latest_py" ] || latest_py="$latest_venv/Scripts/python.exe"
+  echo "  pdfspine $("$latest_py" -c 'import pdfspine; print(pdfspine.__version__)') (locked: $("$PY" -c 'import pdfspine; print(pdfspine.__version__)'))"
+  "$latest_py" -m pytest -q -p no:cacheprovider -m "not gpu and not docling and not network" \
+    tests/enterprise_pdf_rag tests/extraction tests/ingestion
+fi
 
 echo
 echo "✅ local CI passed"
