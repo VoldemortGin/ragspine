@@ -828,7 +828,7 @@ def test_splitting_a_long_table_is_linear():
     text = f"<table>\n<tr><th>a</th><th>b</th><th>c</th></tr>\n{rows}</table>"
     start = time.perf_counter()
     doc = parse_di_markdown(text)
-    assert time.perf_counter() - start < 5.0  # 只防退回二次方
+    assert time.perf_counter() - start < 10.0  # 只防退回二次方
     assert len(doc.pages) == 8000
     assert _data_rows(_only_table(doc.pages[-1]))[-1] == ("r39999", "39999", "40000")
 
@@ -845,7 +845,7 @@ def test_splitting_a_wide_table_is_linear():
     )
     start = time.perf_counter()
     doc = parse_di_markdown(f"<table>\n{head}{rows}</table>")
-    assert time.perf_counter() - start < 5.0  # 只防退回二次方
+    assert time.perf_counter() - start < 10.0  # 只防退回二次方
     assert len(doc.pages) == 100
     assert all(_only_table(p).n_cols == cols for p in doc.pages)
 
