@@ -4,6 +4,8 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ## [Unreleased]
 
+## [0.17.3] - 2026-09-28
+
 ### Changed
 
 - **Narrative citation suffix merged per document: `RAGSPINE_CITATION_MERGE=on|off`, default `on`**
@@ -1226,7 +1228,8 @@ the entries below complete what that section left out, and add the changes made 
 - The package-root API now exposes the `RAGSpine` facade alongside the four original primitives.
 - Installed users can complete ingestion, querying, and local visualization without repository scripts.
 
-[Unreleased]: https://github.com/VoldemortGin/ragspine/compare/v0.17.2...HEAD
+[Unreleased]: https://github.com/VoldemortGin/ragspine/compare/v0.17.3...HEAD
+[0.17.3]: https://github.com/VoldemortGin/ragspine/compare/v0.17.2...v0.17.3
 [0.17.2]: https://github.com/VoldemortGin/ragspine/compare/v0.17.1...v0.17.2
 [0.17.1]: https://github.com/VoldemortGin/ragspine/compare/v0.17.0...v0.17.1
 [0.17.0]: https://github.com/VoldemortGin/ragspine/compare/v0.16.1...v0.17.0
