@@ -1090,13 +1090,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--embedding",
         choices=["none", "deterministic", "onnx", "local-http"],
         default=None,
-        help="覆盖预设的 embedding（local-http 读 EMBEDDING_* 环境变量；需 --profile balanced/quality）",
+        help="覆盖预设的 embedding（local-http 读 APP_EMBEDDING_* 环境变量；需 --profile balanced/quality）",
     )
     p_batch.add_argument(
         "--reranker",
         choices=["none", "cross_encoder", "local-http"],
         default=None,
-        help="覆盖预设的精排（local-http 读 RERANK_* 环境变量）",
+        help="覆盖预设的精排（local-http 读 APP_RERANK_* 环境变量）",
     )
     p_batch.add_argument(
         "--persist-vectors",

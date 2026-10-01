@@ -398,9 +398,9 @@ def test_cli_index_emits_expected_json(
     tmp_path: Path, capsys: CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     sources, outputs, processing_id = _semantics_draft(tmp_path)
-    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://127.0.0.1:9999")
-    monkeypatch.setenv("EMBEDDING_MODEL", "offline-test-model")
-    monkeypatch.setenv("EMBEDDING_API_KEY", "offline-test-key")
+    monkeypatch.setenv("APP_EMBEDDING_BASE_URL", "http://127.0.0.1:9999")
+    monkeypatch.setenv("APP_EMBEDDING_MODEL", "offline-test-model")
+    monkeypatch.setenv("APP_EMBEDDING_API_KEY", "offline-test-key")
     monkeypatch.setattr(
         "enterprise_pdf_rag.cli.LocalEmbeddingAdapter",
         lambda config: OfflineDescriptionEmbedder(),
@@ -431,7 +431,7 @@ def test_cli_index_fails_closed_on_missing_embedding_config(
     tmp_path: Path, capsys: CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     sources, outputs, processing_id = _semantics_draft(tmp_path)
-    for name in ("EMBEDDING_BASE_URL", "EMBEDDING_MODEL", "EMBEDDING_API_KEY"):
+    for name in ("APP_EMBEDDING_BASE_URL", "APP_EMBEDDING_MODEL", "APP_EMBEDDING_API_KEY"):
         monkeypatch.delenv(name, raising=False)
     code = main(
         [

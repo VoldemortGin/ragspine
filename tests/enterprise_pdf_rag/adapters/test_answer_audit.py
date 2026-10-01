@@ -293,15 +293,15 @@ def test_the_document_catalog_composition_root_honours_the_audit_switch(
     monkeypatch.setenv("APP_ANSWER_AUDIT_PATH", str(journal))
     monkeypatch.delenv("APP_LEGACY_DOCUMENT_ROOTS", raising=False)
     for name in (
-        "OPENAI_API_KEY",
-        "OPENAI_BASE_URL",
-        "OPENAI_MODEL",
-        "EMBEDDING_BASE_URL",
-        "EMBEDDING_MODEL",
-        "EMBEDDING_API_KEY",
-        "RERANK_BASE_URL",
-        "RERANK_MODEL",
-        "RERANK_API_KEY",
+        "APP_LLM_API_KEY",
+        "APP_LLM_BASE_URL",
+        "APP_LLM_MODEL",
+        "APP_EMBEDDING_BASE_URL",
+        "APP_EMBEDDING_MODEL",
+        "APP_EMBEDDING_API_KEY",
+        "APP_RERANK_BASE_URL",
+        "APP_RERANK_MODEL",
+        "APP_RERANK_API_KEY",
     ):
         monkeypatch.delenv(name, raising=False)
     try:

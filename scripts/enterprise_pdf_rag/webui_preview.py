@@ -30,18 +30,19 @@ GATE = ROOT / "src" / "enterprise_pdf_rag" / "adapters" / "http" / "webui_gate.p
 # Loopback ports; override both start and status with the same environment.
 API_PORT = int(os.environ.get("ENTERPRISE_API_PORT", "8766"))
 WEBUI_PORT = int(os.environ.get("ENTERPRISE_WEBUI_PORT", "8767"))
-_EMBEDDING_SETTINGS = ("EMBEDDING_BASE_URL", "EMBEDDING_MODEL", "EMBEDDING_API_KEY")
+_EMBEDDING_SETTINGS = ("APP_EMBEDDING_BASE_URL", "APP_EMBEDDING_MODEL", "APP_EMBEDDING_API_KEY")
 # Only the API child inherits provider settings, and only those its profile can use.
+# Values are resolved here (environment > project-root .env); children never read .env.
 _API_SETTINGS = {
     "aia-source-review": _EMBEDDING_SETTINGS,
     "document-catalog": (
         *_EMBEDDING_SETTINGS,
-        "OPENAI_API_KEY",
-        "OPENAI_BASE_URL",
-        "OPENAI_MODEL",
-        "RERANK_BASE_URL",
-        "RERANK_MODEL",
-        "RERANK_API_KEY",
+        "APP_LLM_API_KEY",
+        "APP_LLM_BASE_URL",
+        "APP_LLM_MODEL",
+        "APP_RERANK_BASE_URL",
+        "APP_RERANK_MODEL",
+        "APP_RERANK_API_KEY",
         "APP_INGESTION_DIR",
         "APP_LEGACY_DOCUMENT_ROOTS",
         "APP_ANSWER_MAX_LIVE_CALLS",
@@ -276,6 +277,9 @@ def start(profile: str = "aia-source-review", *, require_processing: bool = Fals
                     f"Loopback port {port} is occupied without a reusable project record. No process was stopped; inspect the port owner before retrying."
                 ) from None
     STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
+    from ragspine.common.evidence.configs import Settings
+
+    api_settings = Settings().as_environment(_API_SETTINGS.get(profile, ()))
     processes: dict[ProcessName, dict[str, str | int]] = {}
     commands: dict[ProcessName, list[str]] = {
         "api": [
@@ -312,9 +316,7 @@ def start(profile: str = "aia-source-review", *, require_processing: bool = Fals
         }
         if name == "api":
             environment["APP_EXECUTION_MODE"] = profile
-            for setting in _API_SETTINGS.get(profile, ()):
-                if setting in os.environ:
-                    environment[setting] = os.environ[setting]
+            environment.update(api_settings)
         elif profile == "document-catalog":
             # Explicit opt-in to the vendor's own login; the gate rebuilds the rest.
             for setting in _WEBUI_LOGIN_SETTINGS:

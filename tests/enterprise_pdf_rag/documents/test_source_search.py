@@ -83,9 +83,9 @@ def test_configured_app_search_uses_only_query_embedding_and_preserves_guard(
     ).run(source_id, selected_page_indices=(0,))
     assert manifest.pages[0].objects, repr(manifest)
     environment = {
-        "EMBEDDING_BASE_URL": "http://127.0.0.1:9999/v1",
-        "EMBEDDING_MODEL": "test-embedding",
-        "EMBEDDING_API_KEY": "test-embedding-secret",
+        "APP_EMBEDDING_BASE_URL": "http://127.0.0.1:9999/v1",
+        "APP_EMBEDDING_MODEL": "test-embedding",
+        "APP_EMBEDDING_API_KEY": "test-embedding-secret",
     }
     calls: list[dict[str, object]] = []
     query_phase = False
@@ -117,13 +117,13 @@ def test_configured_app_search_uses_only_query_embedding_and_preserves_guard(
         for name in environment:
             monkeypatch.delenv(name)
     elif configuration == "partial":
-        monkeypatch.delenv("EMBEDDING_API_KEY")
+        monkeypatch.delenv("APP_EMBEDDING_API_KEY")
     elif configuration == "remote":
-        monkeypatch.setenv("EMBEDDING_BASE_URL", "https://unapproved.example/v1")
+        monkeypatch.setenv("APP_EMBEDDING_BASE_URL", "https://unapproved.example/v1")
     elif configuration == "wrong-model":
-        monkeypatch.setenv("EMBEDDING_MODEL", "other-model")
+        monkeypatch.setenv("APP_EMBEDDING_MODEL", "other-model")
     monkeypatch.setenv("APP_EXECUTION_MODE", "aia-source-review")
-    monkeypatch.setenv("OPENAI_API_KEY", "unrelated-llm-secret")
+    monkeypatch.setenv("APP_LLM_API_KEY", "unrelated-llm-secret")
     monkeypatch.setattr(app_module, "AIA_OUTPUT", sources.root)
     monkeypatch.setattr(app_module, "PROCESSING_OUTPUT", outputs.root)
     monkeypatch.setattr(app_module, "create_aia_app", partial(create_aia_app, spec=spec))

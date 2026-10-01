@@ -521,8 +521,8 @@ def test_vendor_login_stays_off_unless_explicitly_opted_in(
 def test_login_opt_in_enables_vendor_auth_without_any_model_key(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "upstream-secret")
-    monkeypatch.setenv("EMBEDDING_API_KEY", "embedding-secret")
+    monkeypatch.setenv("APP_LLM_API_KEY", "upstream-secret")
+    monkeypatch.setenv("APP_EMBEDDING_API_KEY", "embedding-secret")
     monkeypatch.setenv("ENTERPRISE_WEBUI_AUTH", "1")
     monkeypatch.delenv("ENABLE_SIGNUP", raising=False)
     monkeypatch.delenv("DEFAULT_USER_ROLE", raising=False)

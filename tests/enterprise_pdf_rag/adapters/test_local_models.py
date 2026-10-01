@@ -31,9 +31,9 @@ def test_embedding_adapter_implements_document_and_query_contract() -> None:
         load_local_model_config(
             "embedding",
             {
-                "EMBEDDING_BASE_URL": "http://127.0.0.1:29002/v1/",
-                "EMBEDDING_MODEL": "embedding-model",
-                "EMBEDDING_API_KEY": "embedding-secret",
+                "APP_EMBEDDING_BASE_URL": "http://127.0.0.1:29002/v1/",
+                "APP_EMBEDDING_MODEL": "embedding-model",
+                "APP_EMBEDDING_API_KEY": "embedding-secret",
             },
         ),
         sender=sender,
@@ -90,9 +90,9 @@ def test_rerank_adapter_returns_typed_ranked_indexes_without_documents() -> None
         load_local_model_config(
             "rerank",
             {
-                "RERANK_BASE_URL": "http://127.0.0.1:29001",
-                "RERANK_MODEL": "rerank-model",
-                "RERANK_API_KEY": "rerank-secret",
+                "APP_RERANK_BASE_URL": "http://127.0.0.1:29001",
+                "APP_RERANK_MODEL": "rerank-model",
+                "APP_RERANK_API_KEY": "rerank-secret",
             },
         ),
         sender=sender,
@@ -133,9 +133,9 @@ def test_embedding_rejects_blank_text_before_any_request() -> None:
         load_local_model_config(
             "embedding",
             {
-                "EMBEDDING_BASE_URL": "http://127.0.0.1:29002",
-                "EMBEDDING_MODEL": "embedding-model",
-                "EMBEDDING_API_KEY": "embedding-secret",
+                "APP_EMBEDDING_BASE_URL": "http://127.0.0.1:29002",
+                "APP_EMBEDDING_MODEL": "embedding-model",
+                "APP_EMBEDDING_API_KEY": "embedding-secret",
             },
         ),
         sender=sender,
@@ -160,9 +160,9 @@ def test_rerank_rejects_out_of_range_or_duplicate_provider_indexes() -> None:
         load_local_model_config(
             "rerank",
             {
-                "RERANK_BASE_URL": "http://127.0.0.1:29001",
-                "RERANK_MODEL": "rerank-model",
-                "RERANK_API_KEY": "rerank-secret",
+                "APP_RERANK_BASE_URL": "http://127.0.0.1:29001",
+                "APP_RERANK_MODEL": "rerank-model",
+                "APP_RERANK_API_KEY": "rerank-secret",
             },
         ),
         sender=sender,

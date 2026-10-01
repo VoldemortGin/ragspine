@@ -76,14 +76,14 @@ _OFFLINE = OfflineDescriptionEmbedder()
 _LLM_SECRET = "test-openai-secret"
 _RERANK_SECRET = "test-rerank-secret"
 _LLM_ENV = {
-    "OPENAI_API_KEY": _LLM_SECRET,
-    "OPENAI_BASE_URL": "https://provider.invalid",
-    "OPENAI_MODEL": "test-chat-model",
+    "APP_LLM_API_KEY": _LLM_SECRET,
+    "APP_LLM_BASE_URL": "https://provider.invalid",
+    "APP_LLM_MODEL": "test-chat-model",
 }
 _RERANK_ENV = {
-    "RERANK_BASE_URL": "http://127.0.0.1:9/v1",
-    "RERANK_MODEL": "test-rerank",
-    "RERANK_API_KEY": _RERANK_SECRET,
+    "APP_RERANK_BASE_URL": "http://127.0.0.1:9/v1",
+    "APP_RERANK_MODEL": "test-rerank",
+    "APP_RERANK_API_KEY": _RERANK_SECRET,
 }
 
 Published = tuple[Path, DraftPublication, DraftPublication]
@@ -248,7 +248,7 @@ def test_models_lists_mounted_documents_and_chat_is_503_without_an_answer_model(
         )
         chat = await client.post(_URL, json=_body(model_id(meridian.source_sha256)))
         assert chat.status_code == 503, chat.text
-        assert "OPENAI_API_KEY" in chat.json()["detail"]
+        assert "APP_LLM_API_KEY" in chat.json()["detail"]
         assert (await client.get("/v1/documents")).status_code == 200
 
     _run(app, scenario)
@@ -884,7 +884,7 @@ def test_configured_app_builds_one_answer_client_and_serves_chat(
                 assert envelope["document_sha256"] == meridian.source_sha256
             else:
                 assert chat.status_code == 503, chat.text
-                assert "OPENAI_API_KEY" in chat.json()["detail"]
+                assert "APP_LLM_API_KEY" in chat.json()["detail"]
             for text in (documents.text, models.text, chat.text):
                 for secret in (_SECRET, _LLM_SECRET, _RERANK_SECRET):
                     assert secret not in text

@@ -328,9 +328,9 @@ def test_formula_qualifies_when_model_branches_are_budget_exhausted(
 
 def _ingest_rise_formula(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> IngestionSummary:
     for key, value in {
-        "OPENAI_API_KEY": "offline-secret",
-        "OPENAI_BASE_URL": PROVIDER_BASE_URL,
-        "OPENAI_MODEL": "offline-test",
+        "APP_LLM_API_KEY": "offline-secret",
+        "APP_LLM_BASE_URL": PROVIDER_BASE_URL,
+        "APP_LLM_MODEL": "offline-test",
     }.items():
         monkeypatch.setenv(key, value)
     pdf = rise_formula_pdf(tmp_path / "rise-formula.pdf")

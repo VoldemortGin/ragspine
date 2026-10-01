@@ -1,11 +1,12 @@
 """Explicit provider environment and a bounded, opt-in connectivity smoke.
 
-This module does not read .env files, configure the offline runtime, or qualify
-production chart understanding. Embedding/rerank never inherit LLM settings.
+Settings come from an injected mapping or, by default, from ``configs.Settings``
+(environment > project-root .env > yaml), read afresh on every call. This module does
+not configure the offline runtime or qualify production chart understanding.
+Embedding/rerank never inherit LLM settings.
 """
 
 import json
-import os
 from collections.abc import Mapping
 from http.client import HTTPException, HTTPSConnection
 from time import monotonic
@@ -13,6 +14,8 @@ from typing import Literal, Protocol, runtime_checkable
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, SecretStr, TypeAdapter, ValidationError
+
+from ragspine.common.evidence.configs import Settings
 
 
 class ProviderConfigurationError(ValueError):
@@ -92,10 +95,11 @@ def _loopback_base_url(value: str, *, name: str) -> str:
 
 
 def load_llm_config(environment: Mapping[str, str] | None = None) -> LLMConfig:
-    env = os.environ if environment is None else environment
-    key = _required(env, "OPENAI_API_KEY")
-    base = _base_url(_required(env, "OPENAI_BASE_URL"), name="OPENAI_BASE_URL", https_only=True)
-    model = _required(env, "OPENAI_MODEL")
+    names = ("APP_LLM_API_KEY", "APP_LLM_BASE_URL", "APP_LLM_MODEL")
+    env = Settings().as_environment(names) if environment is None else environment
+    key = _required(env, "APP_LLM_API_KEY")
+    base = _base_url(_required(env, "APP_LLM_BASE_URL"), name="APP_LLM_BASE_URL", https_only=True)
+    model = _required(env, "APP_LLM_MODEL")
     return LLMConfig(api_key=SecretStr(key), base_url=base, model=model)
 
 
@@ -103,8 +107,9 @@ def load_local_model_config(
     purpose: Literal["embedding", "rerank"],
     environment: Mapping[str, str] | None = None,
 ) -> LocalModelConfig:
-    env = os.environ if environment is None else environment
-    prefix = "EMBEDDING" if purpose == "embedding" else "RERANK"
+    prefix = "APP_EMBEDDING" if purpose == "embedding" else "APP_RERANK"
+    names = (f"{prefix}_BASE_URL", f"{prefix}_MODEL", f"{prefix}_API_KEY")
+    env = Settings().as_environment(names) if environment is None else environment
     base = _loopback_base_url(_required(env, f"{prefix}_BASE_URL"), name=f"{prefix}_BASE_URL")
     model = _required(env, f"{prefix}_MODEL")
     key = _required(env, f"{prefix}_API_KEY")

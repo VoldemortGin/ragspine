@@ -271,7 +271,7 @@ def test_authored_diagram_page_draws_native_shapes_and_two_label_spans(tmp_path:
 def test_public_api_accepts_pages_beyond_twenty_and_saves_full_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    for key in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL"):
+    for key in ("APP_LLM_API_KEY", "APP_LLM_BASE_URL", "APP_LLM_MODEL"):
         monkeypatch.delenv(key, raising=False)
     pdf = authored_pdf(tmp_path / "operations.pdf", page_count=22, label="Operations")
     result = ingest_pdf(pdf=pdf, pages="1,21-22", output_dir=tmp_path / "output")
@@ -394,9 +394,9 @@ def test_explicit_stages_share_budget_preserve_partial_branches_and_replay(
 ) -> None:
     pdf = authored_pdf(tmp_path / "metric.pdf", page_count=1, label="Metric", embedded_font=True)
     for key, value in {
-        "OPENAI_API_KEY": "unit-secret",
-        "OPENAI_BASE_URL": "https://provider.invalid",
-        "OPENAI_MODEL": "offline-test",
+        "APP_LLM_API_KEY": "unit-secret",
+        "APP_LLM_BASE_URL": "https://provider.invalid",
+        "APP_LLM_MODEL": "offline-test",
     }.items():
         monkeypatch.setenv(key, value)
     calls: list[bytes] = []

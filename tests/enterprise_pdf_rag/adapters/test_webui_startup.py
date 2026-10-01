@@ -153,7 +153,7 @@ def test_explicit_missing_vendor_runtime_is_not_replaced_by_another_python(
             "PATH": os.defpath,
             "APP_ROOT_DIR": str(root),
             "OPEN_WEBUI_PYTHON": str(root / "missing-vendor-python"),
-            "OPENAI_API_KEY": "must-never-be-printed",
+            "APP_LLM_API_KEY": "must-never-be-printed",
         },
         capture_output=True,
         text=True,
@@ -296,11 +296,11 @@ def test_launcher_passes_embedding_settings_only_to_api_child(
         return SimpleNamespace(pid=10000 + len(captured))
 
     for name, value in {
-        "EMBEDDING_BASE_URL": "http://127.0.0.1:9999/v1",
-        "EMBEDDING_MODEL": "test-model",
-        "EMBEDDING_API_KEY": "embedding-child-secret",
-        "OPENAI_API_KEY": "llm-must-not-pass",
-        "RERANK_API_KEY": "rerank-must-not-pass",
+        "APP_EMBEDDING_BASE_URL": "http://127.0.0.1:9999/v1",
+        "APP_EMBEDDING_MODEL": "test-model",
+        "APP_EMBEDDING_API_KEY": "embedding-child-secret",
+        "APP_LLM_API_KEY": "llm-must-not-pass",
+        "APP_RERANK_API_KEY": "rerank-must-not-pass",
         "AWS_SECRET_ACCESS_KEY": "aws-must-not-pass",
     }.items():
         monkeypatch.setenv(name, value)
@@ -312,13 +312,13 @@ def test_launcher_passes_embedding_settings_only_to_api_child(
     start_function()
     assert len(captured) == 2
     api, webui = captured
-    assert api["EMBEDDING_API_KEY"] == "embedding-child-secret"
-    assert api["EMBEDDING_MODEL"] == "test-model"
-    assert api["EMBEDDING_BASE_URL"] == "http://127.0.0.1:9999/v1"
+    assert api["APP_EMBEDDING_API_KEY"] == "embedding-child-secret"
+    assert api["APP_EMBEDDING_MODEL"] == "test-model"
+    assert api["APP_EMBEDDING_BASE_URL"] == "http://127.0.0.1:9999/v1"
     assert not any(name.startswith("EMBEDDING_") for name in webui)
     for child in captured:
-        assert "OPENAI_API_KEY" not in child
-        assert "RERANK_API_KEY" not in child
+        assert "APP_LLM_API_KEY" not in child
+        assert "APP_RERANK_API_KEY" not in child
         assert "AWS_SECRET_ACCESS_KEY" not in child
     output = capsys.readouterr()
     retained = (
@@ -328,3 +328,59 @@ def test_launcher_passes_embedding_settings_only_to_api_child(
     )
     assert "embedding-child-secret" not in retained
     assert "llm-must-not-pass" not in retained
+
+
+def test_dotenv_llm_key_reaches_only_the_catalog_api_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import FunctionType
+
+    from ragspine.common.evidence.configs import Settings
+
+    root = _project(tmp_path)
+    python = root / ".venv/bin/python"
+    python.parent.mkdir(parents=True)
+    python.symlink_to(sys.executable)
+    dotenv = tmp_path / ".env"
+    dotenv.write_text(
+        "APP_LLM_API_KEY=dotenv-llm-secret\n"
+        "APP_LLM_BASE_URL=https://provider.example\n"
+        "APP_LLM_MODEL=dotenv-model\n"
+        "APP_RERANK_API_KEY=dotenv-rerank-secret\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("PYTHON_DOTENV_DISABLED", raising=False)
+    for name in list(os.environ):
+        if name.startswith(("APP_LLM_", "APP_RERANK_", "APP_EMBEDDING_")):
+            monkeypatch.delenv(name)
+    monkeypatch.setitem(Settings.model_config, "env_file", dotenv)
+    namespace = runpy.run_path(str(root / "scripts/enterprise_pdf_rag/webui_preview.py"))
+    start_function = cast(FunctionType, namespace["start"])
+    captured: list[dict[str, str]] = []
+
+    def ignore(*_args: object) -> None:
+        pass
+
+    @contextmanager
+    def listener(*_args: object) -> Iterator[SimpleNamespace]:
+        yield SimpleNamespace(setsockopt=ignore, bind=ignore)
+
+    def spawn(_command: list[str], *, env: dict[str, str], **_kwargs: object) -> SimpleNamespace:
+        captured.append(env)
+        return SimpleNamespace(pid=10000 + len(captured))
+
+    monkeypatch.setitem(start_function.__globals__, "preview_python", lambda: Path(sys.executable))
+    monkeypatch.setitem(start_function.__globals__, "ready", lambda *_args: True)
+    monkeypatch.setattr("socket.socket", listener)
+    monkeypatch.setattr(subprocess, "Popen", spawn)
+    start_function("document-catalog")
+    api, webui = captured
+    assert api["APP_LLM_API_KEY"] == "dotenv-llm-secret"
+    assert api["APP_LLM_MODEL"] == "dotenv-model"
+    assert api["APP_RERANK_API_KEY"] == "dotenv-rerank-secret"
+    assert not any(name.startswith("APP_LLM_") for name in webui)
+    assert "dotenv-llm-secret" not in webui.values()
+    assert "dotenv-rerank-secret" not in webui.values()
+    assert "OPENAI_API_KEY" not in webui
+    for child in captured:
+        assert child["PYTHON_DOTENV_DISABLED"] == "1"

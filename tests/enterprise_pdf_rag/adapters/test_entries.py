@@ -62,12 +62,12 @@ def test_production_does_not_fall_back_to_offline_adapters() -> None:
 def test_llm_smoke_requires_an_explicit_model_without_secret_output(
     monkeypatch: pytest.MonkeyPatch, capsys: CaptureFixture[str]
 ) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "test-secret")
-    monkeypatch.setenv("OPENAI_BASE_URL", "https://provider.example")
-    monkeypatch.delenv("OPENAI_MODEL", raising=False)
+    monkeypatch.setenv("APP_LLM_API_KEY", "test-secret")
+    monkeypatch.setenv("APP_LLM_BASE_URL", "https://provider.example")
+    monkeypatch.delenv("APP_LLM_MODEL", raising=False)
     with pytest.raises(SystemExit) as caught:
         main(["llm-smoke"])
     assert caught.value.code == 2
     error = capsys.readouterr().err
-    assert "OPENAI_MODEL" in error
+    assert "APP_LLM_MODEL" in error
     assert "test-secret" not in error

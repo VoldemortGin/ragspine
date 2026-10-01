@@ -100,9 +100,9 @@ def test_chart_failure_keeps_description_and_source_assets_without_qualification
     client = JsonCompletionClient(
         load_llm_config(
             {
-                "OPENAI_API_KEY": "test",
-                "OPENAI_BASE_URL": "https://example.invalid",
-                "OPENAI_MODEL": "test",
+                "APP_LLM_API_KEY": "test",
+                "APP_LLM_BASE_URL": "https://example.invalid",
+                "APP_LLM_MODEL": "test",
             }
         ),
         cache_dir=tmp_path / "cache",
@@ -190,9 +190,9 @@ def test_unreadable_chart_keeps_source_svg_and_explicit_unavailable_description(
     client = JsonCompletionClient(
         load_llm_config(
             {
-                "OPENAI_API_KEY": "test",
-                "OPENAI_BASE_URL": "https://example.invalid",
-                "OPENAI_MODEL": "test",
+                "APP_LLM_API_KEY": "test",
+                "APP_LLM_BASE_URL": "https://example.invalid",
+                "APP_LLM_MODEL": "test",
             }
         ),
         cache_dir=tmp_path / "cache",
@@ -289,9 +289,9 @@ def test_explicit_chart_binding_correction_keeps_original_raw(tmp_path: Path) ->
 
     config = load_llm_config(
         {
-            "OPENAI_API_KEY": "test",
-            "OPENAI_BASE_URL": "https://example.invalid",
-            "OPENAI_MODEL": "test",
+            "APP_LLM_API_KEY": "test",
+            "APP_LLM_BASE_URL": "https://example.invalid",
+            "APP_LLM_MODEL": "test",
         }
     )
     client = JsonCompletionClient(

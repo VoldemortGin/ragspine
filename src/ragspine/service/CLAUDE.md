@@ -29,7 +29,7 @@ The high-level local facade selects retrieval through `RetrievalProfile` and the
 `RetrievalPreset`: `economy` is lexical-only, `balanced` adds deterministic in-process vectors,
 and `quality` opts into ONNX embeddings, cross-encoder reranking, and post-processing. `RetrievalPreset.persist_vectors`
 (facade config `storage.persist_vectors`, default `False`) turns on the persisted chunk vectors above; `embedding` /
-`reranker` also accept `"local-http"` (OpenAI-compatible `/v1/embeddings` / `/v1/rerank`, env `EMBEDDING_*` / `RERANK_*`).
+`reranker` also accept `"local-http"` (OpenAI-compatible `/v1/embeddings` / `/v1/rerank`, env `APP_EMBEDDING_*` / `APP_RERANK_*`).
 `ServiceConfig.page_parent` / `RAGSPINE_PAGE_PARENT` (`page+child` default | `dedup` | `off` byte-identical; flipped from
 `off` on the evidence in CHANGELOG Unreleased — blind review answerable@1 69% vs `dedup` 46%, real-LLM route B recall@1
 .31 → .56; facade

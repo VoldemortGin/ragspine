@@ -20,7 +20,7 @@ implementations + the `make_embedding_backend` factory live in `vector/embedding
 | `deterministic` | `DeterministicEmbeddingBackend` | **no** (lexical hash) | none | yes |
 | `openai` | `OpenAIEmbeddingBackend` | yes | `[llm]` | no (API) |
 | `qwen3` / `sentence-transformers` / `st` | `SentenceTransformerEmbeddingBackend` | yes | `[embed]` (torch) | first-pull-then-offline |
-| `local-http` | `SingleTextEmbeddingBackend(LocalEmbeddingAdapter)` (OpenAI-compatible `/v1/embeddings`, env `EMBEDDING_BASE_URL` / `_MODEL` / `_API_KEY`, `model_id='local-http:<model>'`) | yes | none (stdlib HTTP) | loopback server |
+| `local-http` | `SingleTextEmbeddingBackend(LocalEmbeddingAdapter)` (OpenAI-compatible `/v1/embeddings`, env `APP_EMBEDDING_BASE_URL` / `_MODEL` / `_API_KEY`, `model_id='local-http:<model>'`) | yes | none (stdlib HTTP) | loopback server |
 
 **Asymmetric query side (`local-http`).** Qwen3-Embedding wants an instruction on queries only:
 `Instruct: {task}\nQuery:{query}` (no space after `Query:`), documents unprefixed

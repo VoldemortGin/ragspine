@@ -240,7 +240,7 @@ def check(root: Path) -> list[str]:
 
         # settings 叶子:旧 core/ 在时查旧处;迁到 ragspine/common/evidence/ 后查新处。
         core = pkg / "core"
-        settings_new = ragspine / "common" / "evidence" / "settings.py"
+        settings_new = ragspine / "common" / "evidence" / "configs.py"
         if core.is_dir():
             core_init = core / "__init__.py"
             if not core_init.is_file():
@@ -260,7 +260,7 @@ def check(root: Path) -> list[str]:
                 )
         elif not settings_new.is_file():
             problems.append(
-                "缺少 settings:既无 core/settings.py,也无 src/ragspine/common/evidence/settings.py。"
+                "缺少 settings:既无 core/settings.py,也无 src/ragspine/common/evidence/configs.py。"
             )
         if settings_new.is_file() and (
             _first_party_import_lines(settings_new, CANONICAL)
@@ -325,10 +325,10 @@ def check(root: Path) -> list[str]:
                 "ragspine 只用规范路径,旧路径是给外部代码的兼容垫片(ADR 0022)。"
             )
 
-    # 仓库根锚点:common/evidence/settings.py 的 ROOT_DIR 从 CWD 向上找这个标记文件,缺了就抛错
+    # 仓库根锚点:common/evidence/configs.py 的 ROOT_DIR 从 CWD 向上找这个标记文件,缺了就抛错
     if not (root / ".project-root").is_file():
         problems.append(
-            "缺少 .project-root:它标记仓库根,common/evidence/settings.py 靠它定位 ROOT_DIR。"
+            "缺少 .project-root:它标记仓库根,common/evidence/configs.py 靠它定位 ROOT_DIR。"
         )
 
     return problems

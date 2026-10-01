@@ -4,9 +4,10 @@ APP_* 配置叶子与 ragspine 的 RAGSpineConfig / ServiceConfig 是两套,故�
 observability(后者有隐私不变量)。
 
 Submodules:
+    configs.py — APP_* 配置(环境变量 > 项目根 .env > yaml)、项目根锚点、运行期目录与包内资源定位的唯一来源。
     logging.py — 日志配置的唯一来源 + AI 产物的血缘与隐私纪律。
     providers/ — 显式 provider 环境、有界 JSON 模型调用与缓存、本地 embedding/rerank 适配与回环隧道。
-    settings.py — APP_* 配置、项目根锚点、运行期目录与包内资源定位的唯一来源。
+    settings.py — configs.py 的兼容 re-export(旧导入路径)。
 """
 
 from ragspine import _lazy_submodules

@@ -140,9 +140,9 @@ def test_independent_branches_bind_the_same_svg_and_do_not_promote_model_confide
 
     config = load_llm_config(
         {
-            "OPENAI_API_KEY": "test-key",
-            "OPENAI_BASE_URL": "https://test.invalid",
-            "OPENAI_MODEL": "test-model",
+            "APP_LLM_API_KEY": "test-key",
+            "APP_LLM_BASE_URL": "https://test.invalid",
+            "APP_LLM_MODEL": "test-model",
         }
     )
     client = JsonCompletionClient(config, cache_dir=tmp_path, max_live_calls=2, sender=sender)
@@ -182,9 +182,9 @@ def test_changed_source_is_rejected_before_any_model_call(tmp_path: Path) -> Non
     client = JsonCompletionClient(
         load_llm_config(
             {
-                "OPENAI_API_KEY": "test-key",
-                "OPENAI_BASE_URL": "https://test.invalid",
-                "OPENAI_MODEL": "test-model",
+                "APP_LLM_API_KEY": "test-key",
+                "APP_LLM_BASE_URL": "https://test.invalid",
+                "APP_LLM_MODEL": "test-model",
             }
         ),
         cache_dir=tmp_path,
@@ -235,9 +235,9 @@ def test_model_cannot_rebind_observations_to_another_svg(tmp_path: Path, branch:
     client = JsonCompletionClient(
         load_llm_config(
             {
-                "OPENAI_API_KEY": "test-key",
-                "OPENAI_BASE_URL": "https://test.invalid",
-                "OPENAI_MODEL": "test-model",
+                "APP_LLM_API_KEY": "test-key",
+                "APP_LLM_BASE_URL": "https://test.invalid",
+                "APP_LLM_MODEL": "test-model",
             }
         ),
         cache_dir=tmp_path,
@@ -318,9 +318,9 @@ def test_unsupported_financial_literal_preserves_raw_input_and_other_chart_point
     client = JsonCompletionClient(
         load_llm_config(
             {
-                "OPENAI_API_KEY": "test-key",
-                "OPENAI_BASE_URL": "https://test.invalid",
-                "OPENAI_MODEL": "test-model",
+                "APP_LLM_API_KEY": "test-key",
+                "APP_LLM_BASE_URL": "https://test.invalid",
+                "APP_LLM_MODEL": "test-model",
             }
         ),
         cache_dir=tmp_path,

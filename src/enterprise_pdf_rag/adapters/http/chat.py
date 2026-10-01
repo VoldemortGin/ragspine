@@ -48,9 +48,7 @@ from ragspine.extraction.evidence.figures.chart_qa.models import ChartQueryError
 
 MODEL_PREFIX = "enterprise-pdf-rag/"
 _MODEL_REFERENCE = re.compile(r"^enterprise-pdf-rag/([0-9a-f]{12,64})$")
-_LLM_UNCONFIGURED = (
-    "Answer model is not configured (OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL); no substitute"
-)
+_LLM_UNCONFIGURED = "Answer model is not configured (APP_LLM_API_KEY, APP_LLM_BASE_URL, APP_LLM_MODEL); no substitute"
 _EVIDENCE_CONFLICT = "Document evidence is missing or inconsistent; no fallback"
 _DONE = "data: [DONE]\n\n"
 

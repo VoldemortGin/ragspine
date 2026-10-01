@@ -90,9 +90,9 @@ def ingest_with_metadata(
 ) -> tuple[IngestionSummary, list[bytes], list[str]]:
     """Ingest an authored PDF with stubbed layout and metadata calls; budget covers both."""
     for key, value in {
-        "OPENAI_API_KEY": "offline-secret",
-        "OPENAI_BASE_URL": PROVIDER_BASE_URL,
-        "OPENAI_MODEL": "offline-test",
+        "APP_LLM_API_KEY": "offline-secret",
+        "APP_LLM_BASE_URL": PROVIDER_BASE_URL,
+        "APP_LLM_MODEL": "offline-test",
     }.items():
         monkeypatch.setenv(key, value)
     pdf = authored_pdf(tmp_path / filename, page_count=page_count, label=label, embedded_font=True)

@@ -1,6 +1,6 @@
 """local-http 工厂注册：RAGSPINE_EMBEDDING=local-http / RAGSPINE_RERANKER=local-http 直接可用。
 
-只验证装配（构造不发请求）：读 EMBEDDING_* / RERANK_* 环境变量，包成 T4 的薄适配器，带模型标识。
+只验证装配（构造不发请求）：读 APP_EMBEDDING_* / APP_RERANK_* 环境变量，包成 T4 的薄适配器，带模型标识。
 """
 
 import pytest
@@ -12,12 +12,12 @@ from ragspine.retrieval.vector.embedding_backends import make_embedding_backend
 from ragspine.retrieval.vector.single_text_backend import SingleTextEmbeddingBackend
 
 _ENV = {
-    "EMBEDDING_BASE_URL": "http://127.0.0.1:39002",
-    "EMBEDDING_MODEL": "Qwen/Qwen3-Embedding-4B",
-    "EMBEDDING_API_KEY": "test-key",
-    "RERANK_BASE_URL": "http://127.0.0.1:39001",
-    "RERANK_MODEL": "Qwen/Qwen3-Reranker-4B",
-    "RERANK_API_KEY": "test-key",
+    "APP_EMBEDDING_BASE_URL": "http://127.0.0.1:39002",
+    "APP_EMBEDDING_MODEL": "Qwen/Qwen3-Embedding-4B",
+    "APP_EMBEDDING_API_KEY": "test-key",
+    "APP_RERANK_BASE_URL": "http://127.0.0.1:39001",
+    "APP_RERANK_MODEL": "Qwen/Qwen3-Reranker-4B",
+    "APP_RERANK_API_KEY": "test-key",
 }
 
 
@@ -42,9 +42,9 @@ def test_reranker_factory_builds_scored_judge(local_env, spec):
 def test_local_http_requires_env(monkeypatch):
     for key in _ENV:
         monkeypatch.delenv(key, raising=False)
-    with pytest.raises(Exception, match="EMBEDDING_BASE_URL"):
+    with pytest.raises(Exception, match="APP_EMBEDDING_BASE_URL"):
         make_embedding_backend("local-http")
-    with pytest.raises(Exception, match="RERANK_BASE_URL"):
+    with pytest.raises(Exception, match="APP_RERANK_BASE_URL"):
         make_reranker("local-http")
 
 

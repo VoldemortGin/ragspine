@@ -128,7 +128,7 @@ class CrossEncoderReranker:
 # 连字符归一，故 "cross-encoder"/"CROSS_ENCODER"/" ce "/"late-interaction" 等都解析到同一工厂。
 # 三个后端类的构造均惰性（不 import fastembed），故本表在此登记零 SDK import。
 def _local_http_reranker(**kwargs: Any) -> ListwiseJudge:
-    """local-http：Cohere 形状 ``/v1/rerank``（如 vLLM 上的 Qwen3-Reranker），读 RERANK_* 环境变量。
+    """local-http：Cohere 形状 ``/v1/rerank``（如 vLLM 上的 Qwen3-Reranker），读 APP_RERANK_* 环境变量。
 
     延迟 import 适配器（零顶层依赖），包成 ScoredRerankJudge，照常走 listwise_rerank（RESTRICTED 不出域）。
     """
@@ -187,7 +187,7 @@ def make_reranker(spec: str | None = None, **kwargs: Any) -> ListwiseJudge | Non
                                                  import，[splade]；model_name 可经 kwargs 或
                                                  RAGSPINE_SPLADE_MODEL 覆盖）
         - 'local-http'                        -> ScoredRerankJudge(LocalRerankAdapter)（/v1/rerank，读
-                                                 RERANK_BASE_URL / _MODEL / _API_KEY）
+                                                 APP_RERANK_BASE_URL / _MODEL / _API_KEY）
         - 其他                                -> ValueError（Registry 列清当前可用名）
 
     返回 ListwiseJudge 实例或 None（可直接喂给 build_narrative_retriever 的 reranker 参数）。

@@ -35,9 +35,9 @@ def test_explicit_chart_correction_uses_the_same_view_and_never_repairs_model_ou
     client = JsonCompletionClient(
         load_llm_config(
             {
-                "OPENAI_API_KEY": "test",
-                "OPENAI_BASE_URL": "https://test.invalid",
-                "OPENAI_MODEL": "test",
+                "APP_LLM_API_KEY": "test",
+                "APP_LLM_BASE_URL": "https://test.invalid",
+                "APP_LLM_MODEL": "test",
             }
         ),
         cache_dir=tmp_path,

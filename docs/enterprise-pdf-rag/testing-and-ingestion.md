@@ -17,7 +17,7 @@
 
 第 20 页 typed ChartQA v2 已有工作树实现和候选证据，但不能在新 runtime 验收、发布与激活之前当成当前在线能力。多文档目录/切换与证据链聊天已有离线实现和测试（`document-catalog` 模式），但只有真实模型验收后才能称为已验收；完整图表能力与通用 TableQA 仍未验收——TABLE 成员目前只放行逐字转写 `VERIFIED` 的表；划线表另外证明行列关系（[ADR 0014](adr/0014-ruled-table-grid-proof.md)：每条行/列边界、每个单元格四边、每处合并都要在该页 `get_drawings()` 的实际线段里找到证据，`row`/`col`/`header` 引用只对网格 `VERIFIED` 的表开放），无线表、吸附/双线边界仍只证明原文。Diagram 与 Formula 成员自 [ADR 0015](adr/0015-diagram-and-formula-retrievable.md) 起可检索、可引用，前提是几何 / token 证明整体成立（任一规则失败则整对象不进索引并带逐字诊断）；Image 仍不可检索。
 
-本地 `8766` API 当前没有调用者 API key 校验。来源审阅、context、typed ChartQA 不需要 `OPENAI_API_KEY`。查询向量由后端使用独立的 `EMBEDDING_BASE_URL`、`EMBEDDING_MODEL`、`EMBEDDING_API_KEY`；客户端不提交这些凭证。Open WebUI 厂商进程仍拿不到 embedding/LLM/rerank key。
+本地 `8766` API 当前没有调用者 API key 校验。来源审阅、context、typed ChartQA 不需要 `APP_LLM_API_KEY`。查询向量由后端使用独立的 `APP_EMBEDDING_BASE_URL`、`APP_EMBEDDING_MODEL`、`APP_EMBEDDING_API_KEY`；客户端不提交这些凭证。Open WebUI 厂商进程仍拿不到 embedding/LLM/rerank key。
 
 ## 可复制的后端请求
 
@@ -84,9 +84,9 @@ curl --fail-with-body http://127.0.0.1:8766/v1/processing/context \
 
 ## 查询向量配置与启动
 
-app factory 在启动时读取既有独立配置，不读 `.env`，不在启动时连接模型。只接受 `127.0.0.1`、`localhost`、`::1` 的 HTTP(S) 地址；需要远端模型时使用已有受管 SSH 隧道。不要把云 LLM key 或任意远端 URL 填进 embedding 设置。模型 fingerprint 和向量维度必须与已发布索引一致，不能启动时重建或替换索引。
+app factory 在启动时读取既有独立配置（环境变量 > 项目根 `.env`；经启动器起的 API 子进程不读 `.env`，只收父进程给的白名单），不在启动时连接模型。只接受 `127.0.0.1`、`localhost`、`::1` 的 HTTP(S) 地址；需要远端模型时使用已有受管 SSH 隧道。不要把云 LLM key 或任意远端 URL 填进 embedding 设置。模型 fingerprint 和向量维度必须与已发布索引一致，不能启动时重建或替换索引。
 
-通过现有安全配置方式将上述三项环境变量提供给启动器，再运行 `./scripts/enterprise_pdf_rag/start.sh`。启动器仅将 `EMBEDDING_*` 传给 API 子进程，厂商 Open WebUI 环境不继承它们。已有健康进程会被复用；修改代码或配置后，要通过已有 owned-process `stop` / `start` 流程受控重启才能生效，不能以一次 `start` 输出推断配置已经更新。具体命令见 [Open WebUI 使用说明](open-webui.md)。
+将上述三项写入项目根 `.env` 或以环境变量提供给启动器，再运行 `./scripts/enterprise_pdf_rag/start.sh`。启动器仅将 `APP_EMBEDDING_*` 传给 API 子进程，厂商 Open WebUI 环境不继承它们。已有健康进程会被复用；修改代码或配置后，要通过已有 owned-process `stop` / `start` 流程受控重启才能生效，不能以一次 `start` 输出推断配置已经更新。具体命令见 [Open WebUI 使用说明](open-webui.md)。
 
 缺少、部分缺少或无效配置时，来源读取继续工作，search 返回 503；服务连接/响应失败返回 503，不自动重试。错 snapshot、损坏证据或不匹配的模型/维度会被拒绝，不回退合成向量。当前 HTTP 搜索为 cosine 排序，已有 CLI 的 rerank 验收不等于在线搜索含 rerank。该回环配置限制尚未在 Databricks 网络部署中验收，安装通过也不能代替部署通过。
 
@@ -95,16 +95,16 @@ app factory 在启动时读取既有独立配置，不读 `.env`，不在启动�
 如使用项目既有 SSH 隧道与容器 key 读取器，可在当前 shell 通过安全运维配置设置以下变量，再运行现有管理脚本；占位值必须替换为自己的已授权配置，任何 key 都不写进命令或文件：
 
 ```sh
-export LOCAL_MODELS_SSH_HOST='<SSH user@host>'
-export LOCAL_MODELS_SSH_PORT='<SSH port>'
-export EMBEDDING_LOCAL_PORT='<local embedding port>'
-export EMBEDDING_REMOTE_PORT='<remote embedding port>'
-export RERANK_LOCAL_PORT='<local rerank port>'
-export RERANK_REMOTE_PORT='<remote rerank port>'
-export EMBEDDING_MODEL='<model matching the published index>'
-export RERANK_MODEL='<configured rerank model>'
-export EMBEDDING_REMOTE_CONTAINER='<existing embedding container>'
-export RERANK_REMOTE_CONTAINER='<existing rerank container>'
+export APP_TUNNEL_SSH_HOST='<SSH user@host>'
+export APP_TUNNEL_SSH_PORT='<SSH port>'
+export APP_TUNNEL_EMBEDDING_LOCAL_PORT='<local embedding port>'
+export APP_TUNNEL_EMBEDDING_REMOTE_PORT='<remote embedding port>'
+export APP_TUNNEL_RERANK_LOCAL_PORT='<local rerank port>'
+export APP_TUNNEL_RERANK_REMOTE_PORT='<remote rerank port>'
+export APP_EMBEDDING_MODEL='<model matching the published index>'
+export APP_RERANK_MODEL='<configured rerank model>'
+export APP_TUNNEL_EMBEDDING_REMOTE_CONTAINER='<existing embedding container>'
+export APP_TUNNEL_RERANK_REMOTE_CONTAINER='<existing rerank container>'
 export OPEN_WEBUI_PYTHON='/path/to/python3.12-with-open-webui-0.6.5'
 
 .venv/bin/python scripts/enterprise_pdf_rag/local_model_tunnel.py status
@@ -168,7 +168,7 @@ print(result.model_dump_json(indent=2))
 | `activated` / `indexed` | 此命令始终为 `false`；没有索引构建、发布或服务切换 |
 | `retrieval_status` | 明确 `not_ready`；资格、索引和发布需要独立流程 |
 
-layout/semantics 即使 `--max-live-calls 0` 也需提供 `OPENAI_BASE_URL`、`OPENAI_MODEL`、`OPENAI_API_KEY`，以固定同一 provider/cache 身份；配置加载不连接模型。只有明确选择正预算才允许新请求，预算耗尽或缓存缺失体现在阶段诊断。入库从不执行 embedding/rerank。`source` 阶段若附带正预算会拒绝，避免把默认提取误当成推断。
+layout/semantics 即使 `--max-live-calls 0` 也需提供 `APP_LLM_BASE_URL`、`APP_LLM_MODEL`、`APP_LLM_API_KEY`，以固定同一 provider/cache 身份；配置加载不连接模型。只有明确选择正预算才允许新请求，预算耗尽或缓存缺失体现在阶段诊断。入库从不执行 embedding/rerank。`source` 阶段若附带正预算会拒绝，避免把默认提取误当成推断。
 
 坐标比较的规范化规则：layout / semantics 模型收到的是 canonical 坐标的全精度 repr，回传时常写成最短小数（`42.400000000000006` → `42.4`、`307.9999999999998` → `308`），因此所有"模型给出的区域框是否包含 canonical 图元（span / 原生表格网格 / 页面几何）"的判定统一走 `processing/geometry.py` 的 `contains(outer, inner, tolerance=1e-6)`，外框每边放宽 1e-6 pt——远高于浮点渲染噪声（< 1e-12 pt）、远低于任何真实版面偏移，所以差 0.5 pt 的越界 span 仍被拒绝；canonical 与 canonical 之间的比较（cell 中心、cell ⊂ 网格）不放宽。
 
@@ -218,7 +218,7 @@ enterprise-pdf-rag publish --source-store <src> --processing-store <proc> --proc
 enterprise-pdf-rag metadata --source-store <src> --processing-store <proc> --processing-id <id> --max-live-calls N [--timeout 180]
 ```
 
-对一个已保存的 draft 或已发布 release 的每一页各发一次文本模型调用（任务 `page-metadata-v1`，与 layout/semantics 同一份 `OPENAI_*` 配置、预算与 `<proc>/model-cache` 缓存），产出 `title / section / page_type / language / periods / regions`；每个字符串值必须逐字（折叠空白后）出现在它引用的 span、或该 span 与其后至多两个 span 的拼接里，否则剔除并记入该页 `dropped`。periods 另按确定性规则规范化（`1H26` / `2026年上半年` → `1H2026`，`FY24` → `FY2024`，`Q1 2025` → `Q1-2025`，裸年份 → `Y2026`；规范化失败只保留原文）。文档级 `display_title`（封面页标题）/ `report_period`（各页投票）/ `years` / `regions`（本文档自己的地区词表）零模型、确定性折叠，写在新 draft 的 manifest 上，加载时重算校验。输出 `annotated_processing_id` 是新的未索引 draft；`--max-live-calls 0` 只回放缓存，其余页 `deferred`；不切指针。
+对一个已保存的 draft 或已发布 release 的每一页各发一次文本模型调用（任务 `page-metadata-v1`，与 layout/semantics 同一份 `APP_LLM_*` 配置、预算与 `<proc>/model-cache` 缓存），产出 `title / section / page_type / language / periods / regions`；每个字符串值必须逐字（折叠空白后）出现在它引用的 span、或该 span 与其后至多两个 span 的拼接里，否则剔除并记入该页 `dropped`。periods 另按确定性规则规范化（`1H26` / `2026年上半年` → `1H2026`，`FY24` → `FY2024`，`Q1 2025` → `Q1-2025`，裸年份 → `Y2026`；规范化失败只保留原文）。文档级 `display_title`（封面页标题）/ `report_period`（各页投票）/ `years` / `regions`（本文档自己的地区词表）零模型、确定性折叠，写在新 draft 的 manifest 上，加载时重算校验。输出 `annotated_processing_id` 是新的未索引 draft；`--max-live-calls 0` 只回放缓存，其余页 `deferred`；不切指针。
 
 ### 表格网格证明的测试口径（ADR 0014）
 
@@ -256,7 +256,55 @@ enterprise-pdf-rag metadata --source-store <src> --processing-store <proc> --pro
 
 ### 离线验证 vs 真实验证
 
-离线 E2E `tests/enterprise_pdf_rag/adapters/test_generic_publication_e2e.py` 已用非 AIA 程序化三页财务 PDF `meridian-semiannual.pdf` 覆盖 ingest→qualify→index（`OfflineDescriptionEmbedder`，dims 64）→publish→`search`/`resolve`：命中带 snapshot_id/member_id，retrieval snapshot 的 `scope.source_manifest_id` 与 ingest 一致，另有 `cli.main` 三命令 JSON 状态推进 smoke；单元测试见 `tests/enterprise_pdf_rag/adapters/test_draft_publication.py`，`bash scripts/ci.sh` 随此全绿。真实 `qualify`/`publish` 已对真实 AIA store（`data/output/aia-2026-interim`）只读跑通并幂等（eligible=189、`publish` 回到同一 `a7384f0c`、dims [2560]）。但真实 `index` 需要本地 embedder，当前 shell 无隧道配置（`scripts/enterprise_pdf_rag/with_local_models.py` 报 `TunnelConfigurationError: Missing or invalid setting: LOCAL_MODELS_SSH_HOST`），真实链路 index 仍未覆盖，须在项目受管 SSH 隧道环境运行；通用 `ingest` 亦从未对真实 PDF 跑过。
+离线 E2E `tests/enterprise_pdf_rag/adapters/test_generic_publication_e2e.py` 已用非 AIA 程序化三页财务 PDF `meridian-semiannual.pdf` 覆盖 ingest→qualify→index（`OfflineDescriptionEmbedder`，dims 64）→publish→`search`/`resolve`：命中带 snapshot_id/member_id，retrieval snapshot 的 `scope.source_manifest_id` 与 ingest 一致，另有 `cli.main` 三命令 JSON 状态推进 smoke；单元测试见 `tests/enterprise_pdf_rag/adapters/test_draft_publication.py`，`bash scripts/ci.sh` 随此全绿。真实 `qualify`/`publish` 已对真实 AIA store（`data/output/aia-2026-interim`）只读跑通并幂等（eligible=189、`publish` 回到同一 `a7384f0c`、dims [2560]）。真实 `index` 需要本地 embedder，须在项目受管 SSH 隧道环境运行（无隧道配置时 `scripts/enterprise_pdf_rag/with_local_models.py` 报 `TunnelConfigurationError`）。通用 `ingest` 已在该环境用真实模型对两份程序化合成 PDF 走完 ingest → qualify → index → publish：`data/ingestion/3f7233e3…`（`meridian-capital-1h26.pdf`，3 页，8 成员）与 `data/ingestion/f41da5ba…`（`meridian-semiannual-1h26.pdf`，3 页，3 成员），两者都带 `current-processing`，`scan_catalog` 读为 `ready`（复验记录见 [交接文档](CLAUDE_HANDOFF.md) BUG-1 一节）。尚未对真实世界的长篇财报 PDF 跑过通用 `ingest`。
+
+## 一键流程：`run-folder`
+
+把一个文件夹里的 PDF 一次性跑完上文各步，可选再用一份题集在进程内问一遍。它只按既定顺序编排已有阶段，不改任何一步的行为：
+
+`ingest --stage semantics` → `requalify_visual_objects` → `qualify` → `index` → `publish`（`activate_source`）→ `tree`（作用在**已发布**的 processing id 上）→ 可选评测。
+
+```sh
+enterprise-pdf-rag run-folder --folder /path/to/pdfs --max-live-calls-per-pdf 60 \
+  [--max-live-calls-total 300] [--questions questions.jsonl] [--pages all] \
+  [--output-dir /path/to/ingestion] [--no-requalify] [--no-tree] [--tree-max-live-calls 50] \
+  [--fail-fast] [--report-dir /path/to/report]
+```
+
+stdout 是一个 `FolderPipelineResult` JSON（每份 PDF 一条 `DocumentRun`：`status` 为 `published` / `duplicate_of` / `nothing_to_index` / `failed` / `budget_starved`，各阶段原样嵌入 `IngestionSummary` / `DraftQualification` / `DraftIndex` / `DraftPublication` / `DocumentTreeSummary`；另有 `eval`、分项 `live_calls` 与 `budget_exhausted`）。`--report-dir` 另写 `report.json` 与 `report.md`。退出码：0 全部正常；2 跑完但有文档失败 / 饿死或评测有 `FAIL` / `http_error` / `routing_failed`；1 参数或前置检查错误（stdout 是 `{"error": …}`）。
+
+Notebook 里直接调同一个函数（已有运行中的 event loop 也可以，评测在独立线程的私有 loop 上走 ASGI，不占端口）：
+
+```python
+from pathlib import Path
+from enterprise_pdf_rag.adapters.folder_pipeline import run_folder_pipeline
+
+result = run_folder_pipeline(
+    Path("pdfs"),
+    questions=Path("questions.jsonl"),
+    max_live_calls_per_pdf=60,
+    max_live_calls_total=300,
+    report_dir=Path("report"),
+    progress=lambda event, payload: print(event, payload),
+)
+result.ok, result.live_calls, [(d.pdf_path, d.status) for d in result.documents]
+```
+
+`embedder` / `reranker` / `answer_llm` 可注入（离线测试即如此）；不注入时与 `index` 命令、`document-catalog` 服务的构造方式相同。
+
+- **前置检查**：花任何预算、调用任何 ingest 之前，先确认 `APP_LLM_API_KEY` / `APP_LLM_BASE_URL` / `APP_LLM_MODEL` 已在项目 `.env` 配好，并用 `embed_query("preflight")` 探测一次 embedding（`APP_EMBEDDING_*`，证明隧道通）；题集里有 `rerank: true` 的用例时还要求 `APP_RERANK_*`。失败即报错并指向这些变量名和 `scripts/enterprise_pdf_rag/local_model_tunnel.py start`——**它不会自己起隧道**。注入的依赖不检查。
+- **发现与去重**：递归找 `*.pdf`（后缀大小写不敏感），跳过隐藏文件 / 隐藏目录，按相对路径排序。同内容（sha256 相同）只处理第一份，其余标 `duplicate_of`——同 sha 不同文件名会落进同一个 sha 目录、生成两份 manifest 并互相覆盖 `current-*` 指针。
+- **预算**：每份 PDF 的 ingest 预算是 `min(--max-live-calls-per-pdf, 总额剩余)`；tree（每份 `--tree-max-live-calls`）和评测的回答调用（默认 `APP_ANSWER_MAX_LIVE_CALLS`）也从总额里扣，并在 `live_calls` 里分项列出。总额用完后其余 PDF 仍以预算 0 运行：缓存里已有的照常走完；被总额截短且仍有阶段 `deferred` 的标 `budget_starved`、不发布，`budget_exhausted=true`（只要有一次分配被总额截短就为真）。每份只跑一轮，不自动多轮。
+- **续跑**：同一目录再跑一次时全部命中缓存（`live_calls.total == 0`）；已发布的 release 恰是本次 draft 加同一 embedder 的索引时直接复用（`index_reused=true`，不再 embed），`publish` 幂等重放。换 embedder 会重建索引。
+- **失败隔离**：每份 PDF 的 `ValueError` / `OSError` 记进 `failed_stage` + `error`，其余继续；`--fail-fast` 改为直接抛出。已发布但 tree 失败的文档仍是 `published`，带 `failed_stage="tree"`。
+- **requalify 的含义与局限**：通用 ingest 写死 `qualification_policy="none"`，Chart 因此没有 `qualified_ir`，被检索资格排除；`requalify` 用快照里已落盘的分支按 [ADR 0016](adr/0016-verbatim-chart-points.md) 重投影，零模型、零联网。它**只采纳图上逐字印出的点值**，不证明点 ↔ 系列的几何对应（那是 [ADR 0008](adr/0008-traceable-chart-qa.md) 几何 + 源涂证明的范围）；Diagram 在 ingest 时已证明，这一步对它通常是 `unchanged`。没有对象改变时不产出新 draft，后续沿用 ingest 的 id。`--no-requalify` 跳过。
+
+### 题集的两种格式
+
+1. **`nl-answers-gold-v1`**（`.json` 且 `schema_version` 为此值）：用 `adapters/nl_gold.py` 的 `load_gold` + `judge`，与 `nl_gold_eval.py` 同一判定（共用 `adapters/nl_gold_runner.py`）；只跑 `offline_only=false` 的用例。`document_sha256` 不在本次已发布文档里的用例如实标 `routing_failed` 且不发请求。
+2. **轻量题集**：复用 `ragspine.eval.retrieval_only.load_questions`，支持 `.json` / `.jsonl` / `.csv` / `.txt`，字段 `id` / `question` / `expected` / `pages`（1 起，`"2"`、`"2,4-5"`）/ `doc`。判定为 `answered` / `abstained`；`failures` 记录引用页是否落在 `pages`、`expected` 是否出现在回答里。`doc` 可写文件名、去扩展名的文件名或 ≥12 位 sha 前缀；本次只有一份已发布文档时直接问它；否则不带 `document`，交给服务端的标题 / 年份路由，选不出唯一文档的 422 记 `routing_failed`（不会对每份文档各问一遍）。
+
+两种格式凡有页（金标取 `required_claims` 的页，轻量题集取 `pages`）都按 prompt 成员顺序算名次，`metrics` 是 `retrieval_metrics` 的 recall@k / page_recall@k / MRR（k = 1, 3, 5, 10）。评测只挂载本次跑出的文档（`scan_catalog` 后按 sha 过滤），答案缓存在 `<ingestion_root>/model-cache`，问答审计照常写 `answers-audit.sqlite`。
 
 ## document-catalog 模式：多文档目录、按文档检索与证据链聊天
 
@@ -272,11 +320,11 @@ export APP_INGESTION_DIR=/abs/path/data/ingestion   # 可省略；默认 APP_DAT
 # 可选：原地挂载 AIA 发布。每项是 processing store 根，其父目录即 source store 根；JSON 列表，默认空
 export APP_LEGACY_DOCUMENT_ROOTS='["/abs/path/data/output/aia-2026-interim/pages-001-020"]'
 # 检索 vector 通道：缺失 → 文档仍 mounted=true 但 embedding_configured=false，search 与 chat 503
-export EMBEDDING_BASE_URL='<loopback url>' EMBEDDING_MODEL='<model matching the index>' EMBEDDING_API_KEY='<key>'
+export APP_EMBEDDING_BASE_URL='<loopback url>' APP_EMBEDDING_MODEL='<model matching the index>' APP_EMBEDDING_API_KEY='<key>'
 # 聊天合成：缺失 → /v1/chat/completions 503（/v1/models、/v1/documents* 照常）
-export OPENAI_BASE_URL='<https url>' OPENAI_MODEL='<model>' OPENAI_API_KEY='<key>'
+export APP_LLM_BASE_URL='<https url>' APP_LLM_MODEL='<model>' APP_LLM_API_KEY='<key>'
 # 可选 rerank：只在请求显式 "rerank": true 时使用；缺失时该请求 503
-export RERANK_BASE_URL='<loopback url>' RERANK_MODEL='<model>' RERANK_API_KEY='<key>'
+export APP_RERANK_BASE_URL='<loopback url>' APP_RERANK_MODEL='<model>' APP_RERANK_API_KEY='<key>'
 export APP_ANSWER_MAX_LIVE_CALLS=200                 # 进程内模型真实调用预算；缓存回放不计，用尽即 503
 export APP_ANSWER_TIMEOUT_SECONDS=45                 # 单次模型调用等待上限（秒），(0, 180]；超时即 503
 
@@ -494,7 +542,7 @@ n0017 p16-20 FINANCIAL PERFORMANCE
 | 404 | 未知 `document_id`；`document`/`model` 引用不匹配任何目录条目 |
 | 409 | 目录可见但未挂载（`mounted=false`，附原因）；pinned manifest 漂移或证据损坏；hit 不属于该 snapshot；`ChartQueryError` `INVALID_EVIDENCE` / `PIN_CONFLICT` |
 | 422 | 文档引用前缀歧义；多文档未指定且按问题路由不到恰好一个（文案列出候选）；最后一条不是 `user`；空问题等 `AnswerRequest` 不变量；未声明字段；`filters` 超过 8 项或含未知键 |
-| 503 | `OPENAI_*` 未配置（chat）；`EMBEDDING_*` 未配置或 provider 失败（search / chat）；请求 `rerank` 但未配置 `RERANK_*`；模型传输失败或 `APP_ANSWER_MAX_LIVE_CALLS` 用尽（`DependencyUnavailable`）；`ChartQueryError` `UNAVAILABLE_EVIDENCE` |
+| 503 | `APP_LLM_*` 未配置（chat）；`APP_EMBEDDING_*` 未配置或 provider 失败（search / chat）；请求 `rerank` 但未配置 `APP_RERANK_*`；模型传输失败或 `APP_ANSWER_MAX_LIVE_CALLS` 用尽（`DependencyUnavailable`）；`ChartQueryError` `UNAVAILABLE_EVIDENCE` |
 
 错误文案固定，不含凭证、provider 响应体或磁盘路径。
 

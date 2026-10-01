@@ -11,7 +11,7 @@ from pydantic import (
     field_validator,
 )
 
-from ragspine.common.evidence.settings import resource_path
+from ragspine.common.evidence.configs import resource_path
 from ragspine.extraction.evidence.figures.models import Confidence, Verification
 from ragspine.extraction.evidence.page.models import LayoutObject, ObjectKind, PageInput
 

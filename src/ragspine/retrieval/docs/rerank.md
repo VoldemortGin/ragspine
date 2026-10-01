@@ -19,7 +19,7 @@ orchestration (RESTRICTED isolation + degrade-to-RRF) is unchanged — W2 only a
 | `none` / `None` | — (returns `None`) | — (identity/RRF, or injected LLM judge) | none | yes |
 | `auto` | `CrossEncoderReranker` *if* `fastembed` importable, else `None` | yes / falls back | `[rerank]` | first-pull-then-offline |
 | `cross_encoder` / `ce` / `ms_marco` | `CrossEncoderReranker` | **yes** | `[rerank]` (`fastembed`, Apache-2.0) | first-pull-then-offline |
-| `local-http` | `ScoredRerankJudge(LocalRerankAdapter)` (`/v1/rerank`, env `RERANK_BASE_URL` / `_MODEL` / `_API_KEY`) | yes | none (stdlib HTTP) | loopback server |
+| `local-http` | `ScoredRerankJudge(LocalRerankAdapter)` (`/v1/rerank`, env `APP_RERANK_BASE_URL` / `_MODEL` / `_API_KEY`) | yes | none (stdlib HTTP) | loopback server |
 | (injected) `ProviderListwiseJudge` | LLM listwise (`link/narrative_link.py`) | yes (higher-cost) | `[llm]` / any provider | no (API) |
 
 > **W11 extension.** `make_reranker` (`rerank/cross_encoder.py`) is the **reranker-factory hub** for

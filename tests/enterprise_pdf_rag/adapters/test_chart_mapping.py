@@ -77,9 +77,9 @@ def _infer(tmp_path: Path, prepared: PreparedFigure, dto: ChartObservationsDTO) 
     client = JsonCompletionClient(
         load_llm_config(
             {
-                "OPENAI_API_KEY": "test",
-                "OPENAI_BASE_URL": "https://test.invalid",
-                "OPENAI_MODEL": "test",
+                "APP_LLM_API_KEY": "test",
+                "APP_LLM_BASE_URL": "https://test.invalid",
+                "APP_LLM_MODEL": "test",
             }
         ),
         cache_dir=tmp_path,

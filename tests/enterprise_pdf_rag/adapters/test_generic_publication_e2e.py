@@ -149,9 +149,9 @@ def test_generic_pdf_cli_qualify_index_publish_smoke(
     assert qualify_payload["retrieval_status"] == "qualified; indexing pending"
     assert qualify_payload["indexed"] is False and qualify_payload["activated"] is False
 
-    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://127.0.0.1:9999")
-    monkeypatch.setenv("EMBEDDING_MODEL", "offline-test-model")
-    monkeypatch.setenv("EMBEDDING_API_KEY", "offline-test-key")
+    monkeypatch.setenv("APP_EMBEDDING_BASE_URL", "http://127.0.0.1:9999")
+    monkeypatch.setenv("APP_EMBEDDING_MODEL", "offline-test-model")
+    monkeypatch.setenv("APP_EMBEDDING_API_KEY", "offline-test-key")
     monkeypatch.setattr(
         "enterprise_pdf_rag.cli.LocalEmbeddingAdapter",
         lambda config: OfflineDescriptionEmbedder(),

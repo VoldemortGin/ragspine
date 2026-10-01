@@ -13,6 +13,8 @@ import pytest
 import rootutils
 
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
+# 与开发者本机项目根的 .env 隔离(configs 默认读它);要测 .env 的用例自行 delenv。
+os.environ["PYTHON_DOTENV_DISABLED"] = "1"
 
 from ragspine.fixtures.excel import GT_PATH, XLSX_PATH
 from ragspine.fixtures.excel import main as make_excel_fixtures

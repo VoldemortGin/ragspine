@@ -54,9 +54,9 @@ def test_explicit_binding_correction_preserves_old_result_and_reuses_new_attempt
     client = JsonCompletionClient(
         load_llm_config(
             {
-                "OPENAI_API_KEY": "test",
-                "OPENAI_BASE_URL": "https://test.invalid",
-                "OPENAI_MODEL": "test",
+                "APP_LLM_API_KEY": "test",
+                "APP_LLM_BASE_URL": "https://test.invalid",
+                "APP_LLM_MODEL": "test",
             }
         ),
         cache_dir=tmp_path,
@@ -102,9 +102,9 @@ def test_correction_requires_the_matching_cached_binding_failure(
     client = JsonCompletionClient(
         load_llm_config(
             {
-                "OPENAI_API_KEY": "test",
-                "OPENAI_BASE_URL": "https://test.invalid",
-                "OPENAI_MODEL": "test",
+                "APP_LLM_API_KEY": "test",
+                "APP_LLM_BASE_URL": "https://test.invalid",
+                "APP_LLM_MODEL": "test",
             }
         ),
         cache_dir=tmp_path,
@@ -142,9 +142,9 @@ def test_failed_correction_is_not_retried_by_a_client_with_retry_enabled(
     client = JsonCompletionClient(
         load_llm_config(
             {
-                "OPENAI_API_KEY": "test",
-                "OPENAI_BASE_URL": "https://test.invalid",
-                "OPENAI_MODEL": "test",
+                "APP_LLM_API_KEY": "test",
+                "APP_LLM_BASE_URL": "https://test.invalid",
+                "APP_LLM_MODEL": "test",
             }
         ),
         cache_dir=tmp_path,

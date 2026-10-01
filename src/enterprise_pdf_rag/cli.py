@@ -24,6 +24,7 @@ from enterprise_pdf_rag.adapters.draft_publication import (
     publish_draft,
     qualify_draft,
 )
+from enterprise_pdf_rag.adapters.folder_pipeline import run_folder_pipeline
 from enterprise_pdf_rag.adapters.http.app import create_configured_app
 from enterprise_pdf_rag.adapters.http.chart_qa_schemas import (
     ChartQueryRequest,
@@ -52,6 +53,7 @@ from enterprise_pdf_rag.adapters.processing_runtime import (
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.review import write_review
 from enterprise_pdf_rag.adapters.runtime import create_runtime
+from ragspine.common.evidence.configs import get_settings
 from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
 from ragspine.common.evidence.providers.local_models import LocalEmbeddingAdapter
 from ragspine.common.evidence.providers.providers import (
@@ -59,7 +61,6 @@ from ragspine.common.evidence.providers.providers import (
     load_llm_config,
     load_local_model_config,
 )
-from ragspine.common.evidence.settings import get_settings
 from ragspine.extraction.evidence.figures.chart_qa.displayed_service import (
     DisplayedChartQAService,
 )
@@ -96,7 +97,7 @@ def _parser() -> argparse.ArgumentParser:
         "--stage",
         choices=["source", "layout", "semantics", "metadata"],
         default="source",
-        help="source is offline; layout/semantics/metadata require OPENAI_API_KEY, OPENAI_BASE_URL and OPENAI_MODEL even for cache-only replay; semantics also runs page metadata, metadata runs it alone over the source stage",
+        help="source is offline; layout/semantics/metadata require APP_LLM_API_KEY, APP_LLM_BASE_URL and APP_LLM_MODEL even for cache-only replay; semantics also runs page metadata, metadata runs it alone over the source stage",
     )
     ingest.add_argument(
         "--max-live-calls",
@@ -163,6 +164,47 @@ def _parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Also switch current-manifest so the whole document becomes discoverable; on by default",
+    )
+    run_folder = commands.add_parser(
+        "run-folder",
+        help="Ingest, requalify, qualify, index, publish and tree every PDF under a folder, then optionally answer a question set in process; budgeted, resumable, never starts the tunnel",
+    )
+    run_folder.add_argument("--folder", type=Path, required=True)
+    run_folder.add_argument(
+        "--questions",
+        type=Path,
+        default=None,
+        help="nl-answers-gold-v1 JSON, or .json/.jsonl/.csv/.txt questions (id/question/expected/pages/doc)",
+    )
+    run_folder.add_argument(
+        "--max-live-calls-per-pdf",
+        type=int,
+        required=True,
+        help="Explicit ingest model-call budget per PDF (0-200); 0 replays the cache only",
+    )
+    run_folder.add_argument(
+        "--max-live-calls-total",
+        type=int,
+        default=None,
+        help="Optional budget shared by ingest, tree and answers; once spent, the rest replay the cache",
+    )
+    run_folder.add_argument("--pages", default="all")
+    run_folder.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help="Ingestion root shared by ingest and evaluation; default APP_DATA_DIR/ingestion",
+    )
+    run_folder.add_argument("--no-requalify", dest="requalify", action="store_false")
+    run_folder.add_argument("--no-tree", dest="build_tree", action="store_false")
+    run_folder.add_argument("--tree-max-live-calls", type=int, default=50)
+    run_folder.add_argument(
+        "--fail-fast",
+        action="store_true",
+        help="Stop at the first failing PDF instead of recording it and continuing",
+    )
+    run_folder.add_argument(
+        "--report-dir", type=Path, default=None, help="Also write report.json and report.md here"
     )
     serve = commands.add_parser(
         "serve", help="Serve the explicitly configured API; no ingestion or model calls"
@@ -378,6 +420,26 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
             sys.stdout.write(published.model_dump_json(indent=2) + "\n")
             return 0
+        if arguments.command == "run-folder":
+            try:
+                pipeline = run_folder_pipeline(
+                    arguments.folder,
+                    questions=arguments.questions,
+                    ingestion_root=arguments.output_dir,
+                    pages=arguments.pages,
+                    max_live_calls_per_pdf=arguments.max_live_calls_per_pdf,
+                    max_live_calls_total=arguments.max_live_calls_total,
+                    requalify=arguments.requalify,
+                    build_tree=arguments.build_tree,
+                    tree_max_live_calls=arguments.tree_max_live_calls,
+                    continue_on_error=not arguments.fail_fast,
+                    report_dir=arguments.report_dir,
+                )
+            except (ValueError, FileNotFoundError) as error:
+                sys.stdout.write(json.dumps({"error": str(error)}, indent=2) + "\n")
+                return 1
+            sys.stdout.write(pipeline.model_dump_json(indent=2) + "\n")
+            return 0 if pipeline.ok else 2
         if arguments.command == "audit":
             database = (
                 arguments.db if arguments.db is not None else get_settings().answer_audit_file

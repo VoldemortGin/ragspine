@@ -373,9 +373,9 @@ class OnnxEmbeddingBackend:
 # 各内置后端在此登记；qwen3 / sentence-transformers / st 是同一 ST 后端的别名，
 # 三个名字都指向同一工厂（Registry 内部对名字做大小写/留白/连字符归一）；
 def _local_http_embedding_backend(**kwargs: Any) -> EmbeddingBackend:
-    """local-http：OpenAI 兼容 ``/v1/embeddings``（如 vLLM 上的 Qwen3-Embedding），读 EMBEDDING_* 环境变量。
+    """local-http：OpenAI 兼容 ``/v1/embeddings``（如 vLLM 上的 Qwen3-Embedding），读 APP_EMBEDDING_* 环境变量。
 
-    延迟 import 适配器（零顶层依赖）；模型标识记为 ``local-http:<EMBEDDING_MODEL>``。
+    延迟 import 适配器（零顶层依赖）；模型标识记为 ``local-http:<APP_EMBEDDING_MODEL>``。
     查询端按 Qwen3 官方模板加指令前缀（任务描述缺省 DEFAULT_QWEN3_QUERY_INSTRUCTION，可经 kwargs
     ``query_instruction`` 或 RAGSPINE_EMBEDDING_QUERY_INSTRUCTION 覆盖，空串＝关闭）；文档端不加。
     """
@@ -434,7 +434,7 @@ def make_embedding_backend(spec: str | None = None, **kwargs: Any) -> EmbeddingB
         - 'deterministic'                     -> DeterministicEmbeddingBackend（dim 等经 kwargs 透传）
         - 'openai'                            -> OpenAIEmbeddingBackend（延迟 import，缺 SDK 抛友好错）
         - 'local-http'                        -> SingleTextEmbeddingBackend(LocalEmbeddingAdapter)（OpenAI
-                                                 兼容 /v1/embeddings，读 EMBEDDING_BASE_URL / _MODEL / _API_KEY）
+                                                 兼容 /v1/embeddings，读 APP_EMBEDDING_BASE_URL / _MODEL / _API_KEY）
         - 'qwen3' / 'sentence-transformers' / 'st'
                                               -> SentenceTransformerEmbeddingBackend
                                                  （缺省 Qwen3-Embedding-0.6B；model_name 可经

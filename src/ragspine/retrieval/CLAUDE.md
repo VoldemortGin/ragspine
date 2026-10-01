@@ -110,7 +110,7 @@ the pool covers the true top-k for the conformance datasets so `sqlite_vec`/`pgv
 — and `persistence_policy.py` gating what is written at rest; `single_text_backend.py` adapts any
 single-text `embed_query` embedder (e.g. the OpenAI-compatible HTTP `LocalEmbeddingAdapter`) into a batch
 `EmbeddingBackend`, duck-typed, zero imports, registered as `make_embedding_backend("local-http")` (reads
-`EMBEDDING_*`, `model_id="local-http:<model>"`; query side gets the Qwen3 `Instruct: {task}\nQuery:` prefix via
+`APP_EMBEDDING_*`, `model_id="local-http:<model>"`; query side gets the Qwen3 `Instruct: {task}\nQuery:` prefix via
 `embed_query` — `RAGSPINE_EMBEDDING_QUERY_INSTRUCTION` overrides the task, `""` disables; documents unprefixed, so
 `model_id` / persisted vectors unchanged — `HybridRetriever` embeds the query via `embed_query` when a backend has
 it, else `embed_texts([q])`, other backends byte-identical); `chunk_index.py`'s `ChunkVectorIndex` is the **persisted chunk
@@ -122,7 +122,7 @@ mix)), `rerank/` (the ⭐精排 exit:
 `listwise_rerank.py` orchestration + `ListwiseJudge` Protocol with RRF-fallback + RESTRICTED isolation;
 `scored_judge.py` adapts a scoring reranker (`/v1/rerank` `LocalRerankAdapter`: index + relevance_score) into a
 `ListwiseJudge` — score-descending, ties keep RRF order, blank candidates unscored + appended; registered as
-`make_reranker("local-http")` (reads `RERANK_*`);
+`make_reranker("local-http")` (reads `APP_RERANK_*`);
 judges — LLM listwise via `link/`, and three offline local brains all selected by `make_reranker`
 (`cross_encoder.py`): the **cross-encoder** `cross_encoder.py` (fastembed `TextCrossEncoder`,
 `[rerank]`, W2), plus two W11 retrieval-representation rerankers — **ColBERT late-interaction**

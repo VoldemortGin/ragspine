@@ -15,7 +15,7 @@
 
 检索配置由 workspace + ``--profile`` 经 ``RAGSpine.local`` 决定；``RAGSpine.local`` 不读 ``RAGSPINE_*``
 环境变量，所以真实模型（Qwen embedding / reranker）用 ``--embedding`` / ``--reranker`` /
-``--persist-vectors`` 指定；local-http 适配器自己读进程环境里的 ``EMBEDDING_*`` / ``RERANK_*``
+``--persist-vectors`` 指定；local-http 适配器自己读进程环境里的 ``APP_EMBEDDING_*`` / ``APP_RERANK_*``
 （先 ``source data/local-models/local-models.env``）。
 """
 

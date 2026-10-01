@@ -317,9 +317,9 @@ def ingest_generic_semantics(
     """
     spec = _spec(table_page)
     for key, value in {
-        "OPENAI_API_KEY": "offline-secret",
-        "OPENAI_BASE_URL": PROVIDER_BASE_URL,
-        "OPENAI_MODEL": "offline-test",
+        "APP_LLM_API_KEY": "offline-secret",
+        "APP_LLM_BASE_URL": PROVIDER_BASE_URL,
+        "APP_LLM_MODEL": "offline-test",
     }.items():
         monkeypatch.setenv(key, value)
     pdf = authored_pdf(

@@ -6,7 +6,7 @@
 
 默认值指向 AIA 样本（gold + DI markdown），公司 / gold / 文档全部可由参数改；默认 provider 为 mock、
 embedding / 精排为 none，即零模型零网络。真实模型基线（先 ``source data/local-models/local-models.env``
-取 EMBEDDING_* / RERANK_*，并确认 SSH 隧道在）：
+取 APP_EMBEDDING_* / APP_RERANK_*，并确认 SSH 隧道在）：
 
     .venv/bin/python scripts/run_nl_gold_ragspine.py --provider claude-cli \\
         --embedding local-http --reranker local-http --repeat 3 --label baseline
@@ -361,7 +361,9 @@ def main(argv: list[str] | None = None) -> int:
                 judge = make_reranker("local-http")
                 assert judge is not None
                 judge.judge("ping", ["ping", "pong"])
-                models["reranker"] = f"local-http/{os.environ.get('RERANK_MODEL', '')}"
+                from ragspine.common.evidence.configs import Settings
+
+                models["reranker"] = f"local-http/{Settings().rerank_model or ''}"
         except Exception as exc:  # noqa: BLE001 — 真实模型不可用即如实退出，绝不降级
             print(
                 f"真实模型不可用（{type(exc).__name__}: {exc}）。先 source "

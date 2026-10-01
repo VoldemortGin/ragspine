@@ -61,7 +61,7 @@ uv pip install --python data/open-webui-runtime/bin/python 'open-webui==0.6.5'
 OPEN_WEBUI_PYTHON="$PWD/data/open-webui-runtime/bin/python" ./scripts/enterprise_pdf_rag/start.sh
 ```
 
-缺少处理数据时须先恢复已有 `data/output/aia-2026-interim/` 资产，或按 README 显式执行处理流程。没有有效数据时启动命令不会生成演示数据替代。脚本不主动 source `~/.zshrc`、不读取 `.env`，不会将上游模型凭证传给厂商进程。
+缺少处理数据时须先恢复已有 `data/output/aia-2026-interim/` 资产，或按 README 显式执行处理流程。没有有效数据时启动命令不会生成演示数据替代。脚本不主动 source `~/.zshrc`；项目根 `.env` 由启动器解析，只把白名单项传给 API 子进程，不会将上游模型凭证传给厂商进程。
 
 `status` 的以下 HTTP 200 仅证明模型发现/UI 服务可达，不证明语义检索、模型回答或完整 RAG 通过：
 
@@ -117,15 +117,15 @@ uv run --locked python scripts/enterprise_pdf_rag/webui_preview.py start --profi
 
 ```sh
 export APP_INGESTION_DIR=/abs/path/data/ingestion              # 可省略；见测试与入库指南
-export EMBEDDING_BASE_URL='<loopback url>' EMBEDDING_MODEL='<model>' EMBEDDING_API_KEY='<key>'
-export OPENAI_BASE_URL='<https url>' OPENAI_MODEL='<model>' OPENAI_API_KEY='<key>'
+export APP_EMBEDDING_BASE_URL='<loopback url>' APP_EMBEDDING_MODEL='<model>' APP_EMBEDDING_API_KEY='<key>'
+export APP_LLM_BASE_URL='<https url>' APP_LLM_MODEL='<model>' APP_LLM_API_KEY='<key>'
 ENTERPRISE_API_PORT=8768 ENTERPRISE_WEBUI_PORT=3200 \
   ./scripts/enterprise_pdf_rag/start.sh --profile document-catalog
 ENTERPRISE_API_PORT=8768 ENTERPRISE_WEBUI_PORT=3200 \
   uv run --locked python scripts/enterprise_pdf_rag/webui_preview.py status --profile document-catalog
 ```
 
-只有 API 子进程继承 `EMBEDDING_*` / `OPENAI_*` / `RERANK_*` / `APP_INGESTION_DIR` / `APP_LEGACY_DOCUMENT_ROOTS` / `APP_ANSWER_MAX_LIVE_CALLS` / `APP_ANSWER_TIMEOUT_SECONDS`；Open WebUI 进程只收到构造的环境和占位 key。
+只有 API 子进程继承 `APP_EMBEDDING_*` / `APP_LLM_*` / `APP_RERANK_*` / `APP_INGESTION_DIR` / `APP_LEGACY_DOCUMENT_ROOTS` / `APP_ANSWER_MAX_LIVE_CALLS` / `APP_ANSWER_TIMEOUT_SECONDS`；Open WebUI 进程只收到构造的环境和占位 key。
 
 ### 可选：启用 Open WebUI 自带登录（对外暴露时）
 

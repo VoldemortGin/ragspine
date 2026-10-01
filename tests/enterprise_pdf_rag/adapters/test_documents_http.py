@@ -28,9 +28,9 @@ _MISSING_ID = "f" * 64
 _SECRET = "test-embedding-secret"
 _OFFLINE_FINGERPRINT = "offline-demo/token-hash-64-v1"
 _EMBEDDING_ENV = {
-    "EMBEDDING_BASE_URL": "http://127.0.0.1:9/v1",
-    "EMBEDDING_MODEL": "test-embedding",
-    "EMBEDDING_API_KEY": _SECRET,
+    "APP_EMBEDDING_BASE_URL": "http://127.0.0.1:9/v1",
+    "APP_EMBEDDING_MODEL": "test-embedding",
+    "APP_EMBEDDING_API_KEY": _SECRET,
 }
 _ROUTES = {
     "/v1/documents",

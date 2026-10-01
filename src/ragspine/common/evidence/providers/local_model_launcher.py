@@ -16,9 +16,9 @@ _INHERITED = (
     "LC_ALL",
     "LC_CTYPE",
     "LOGNAME",
-    "OPENAI_API_KEY",
-    "OPENAI_BASE_URL",
-    "OPENAI_MODEL",
+    "APP_LLM_API_KEY",
+    "APP_LLM_BASE_URL",
+    "APP_LLM_MODEL",
     "PATH",
     "SSL_CERT_DIR",
     "SSL_CERT_FILE",
@@ -62,12 +62,12 @@ def build_local_model_child_environment(
     child.update(
         {
             "PYTHON_DOTENV_DISABLED": "1",
-            "EMBEDDING_API_KEY": embedding_api_key.get_secret_value(),
-            "EMBEDDING_BASE_URL": tunnel.embedding_base_url,
-            "EMBEDDING_MODEL": _required(parent_environment, "EMBEDDING_MODEL"),
-            "RERANK_API_KEY": rerank_api_key.get_secret_value(),
-            "RERANK_BASE_URL": tunnel.rerank_base_url,
-            "RERANK_MODEL": _required(parent_environment, "RERANK_MODEL"),
+            "APP_EMBEDDING_API_KEY": embedding_api_key.get_secret_value(),
+            "APP_EMBEDDING_BASE_URL": tunnel.embedding_base_url,
+            "APP_EMBEDDING_MODEL": _required(parent_environment, "APP_EMBEDDING_MODEL"),
+            "APP_RERANK_API_KEY": rerank_api_key.get_secret_value(),
+            "APP_RERANK_BASE_URL": tunnel.rerank_base_url,
+            "APP_RERANK_MODEL": _required(parent_environment, "APP_RERANK_MODEL"),
         }
     )
     return child

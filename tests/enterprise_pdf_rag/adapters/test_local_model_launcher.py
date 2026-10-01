@@ -12,23 +12,23 @@ from ragspine.common.evidence.providers.local_model_tunnel import load_tunnel_co
 def test_child_environment_is_whitelisted_and_contains_no_deployment_fallback() -> None:
     tunnel = load_tunnel_config(
         {
-            "LOCAL_MODELS_SSH_HOST": "operator@gpu.example",
-            "LOCAL_MODELS_SSH_PORT": "6000",
-            "EMBEDDING_LOCAL_PORT": "39002",
-            "EMBEDDING_REMOTE_PORT": "28002",
-            "RERANK_LOCAL_PORT": "39001",
-            "RERANK_REMOTE_PORT": "28001",
+            "APP_TUNNEL_SSH_HOST": "operator@gpu.example",
+            "APP_TUNNEL_SSH_PORT": "6000",
+            "APP_TUNNEL_EMBEDDING_LOCAL_PORT": "39002",
+            "APP_TUNNEL_EMBEDDING_REMOTE_PORT": "28002",
+            "APP_TUNNEL_RERANK_LOCAL_PORT": "39001",
+            "APP_TUNNEL_RERANK_REMOTE_PORT": "28001",
         }
     )
     child = build_local_model_child_environment(
         {
             "PATH": "/usr/bin:/bin",
             "HOME": "/home/operator",
-            "OPENAI_API_KEY": "cloud-secret",
-            "OPENAI_BASE_URL": "https://provider.example",
-            "OPENAI_MODEL": "configured-model",
-            "EMBEDDING_MODEL": "embedding-model",
-            "RERANK_MODEL": "rerank-model",
+            "APP_LLM_API_KEY": "cloud-secret",
+            "APP_LLM_BASE_URL": "https://provider.example",
+            "APP_LLM_MODEL": "configured-model",
+            "APP_EMBEDDING_MODEL": "embedding-model",
+            "APP_RERANK_MODEL": "rerank-model",
             "AWS_SECRET_ACCESS_KEY": "must-not-inherit",
         },
         tunnel,
@@ -38,17 +38,17 @@ def test_child_environment_is_whitelisted_and_contains_no_deployment_fallback() 
 
     assert child == {
         "HOME": "/home/operator",
-        "OPENAI_API_KEY": "cloud-secret",
-        "OPENAI_BASE_URL": "https://provider.example",
-        "OPENAI_MODEL": "configured-model",
+        "APP_LLM_API_KEY": "cloud-secret",
+        "APP_LLM_BASE_URL": "https://provider.example",
+        "APP_LLM_MODEL": "configured-model",
         "PATH": "/usr/bin:/bin",
         "PYTHON_DOTENV_DISABLED": "1",
-        "EMBEDDING_API_KEY": "embedding-secret",
-        "EMBEDDING_BASE_URL": "http://127.0.0.1:39002",
-        "EMBEDDING_MODEL": "embedding-model",
-        "RERANK_API_KEY": "rerank-secret",
-        "RERANK_BASE_URL": "http://127.0.0.1:39001",
-        "RERANK_MODEL": "rerank-model",
+        "APP_EMBEDDING_API_KEY": "embedding-secret",
+        "APP_EMBEDDING_BASE_URL": "http://127.0.0.1:39002",
+        "APP_EMBEDDING_MODEL": "embedding-model",
+        "APP_RERANK_API_KEY": "rerank-secret",
+        "APP_RERANK_BASE_URL": "http://127.0.0.1:39001",
+        "APP_RERANK_MODEL": "rerank-model",
     }
     assert "AWS_SECRET_ACCESS_KEY" not in child
 
@@ -56,12 +56,12 @@ def test_child_environment_is_whitelisted_and_contains_no_deployment_fallback() 
 def test_remote_key_reader_returns_secret_without_placing_it_in_ssh_args() -> None:
     tunnel = load_tunnel_config(
         {
-            "LOCAL_MODELS_SSH_HOST": "operator@gpu.example",
-            "LOCAL_MODELS_SSH_PORT": "6000",
-            "EMBEDDING_LOCAL_PORT": "39002",
-            "EMBEDDING_REMOTE_PORT": "28002",
-            "RERANK_LOCAL_PORT": "39001",
-            "RERANK_REMOTE_PORT": "28001",
+            "APP_TUNNEL_SSH_HOST": "operator@gpu.example",
+            "APP_TUNNEL_SSH_PORT": "6000",
+            "APP_TUNNEL_EMBEDDING_LOCAL_PORT": "39002",
+            "APP_TUNNEL_EMBEDDING_REMOTE_PORT": "28002",
+            "APP_TUNNEL_RERANK_LOCAL_PORT": "39001",
+            "APP_TUNNEL_RERANK_REMOTE_PORT": "28001",
         }
     )
     commands: list[tuple[str, ...]] = []

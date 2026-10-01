@@ -22,9 +22,9 @@ from enterprise_pdf_rag.adapters.pdfspine_document import PdfspineDocumentAdapte
 from enterprise_pdf_rag.adapters.processing_export import export_processing_review
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.semantic_objects import SemanticObjectAdapter
+from ragspine.common.evidence.configs import get_settings
 from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
 from ragspine.common.evidence.providers.providers import load_llm_config
-from ragspine.common.evidence.settings import get_settings
 from ragspine.extraction.evidence.document.models import AssetRef, DocumentSnapshot, DocumentSpec
 from ragspine.extraction.evidence.document.service import ingest_document
 from ragspine.extraction.evidence.page.models import StageOutcome, StageState

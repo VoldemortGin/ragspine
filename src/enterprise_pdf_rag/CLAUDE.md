@@ -72,9 +72,13 @@ adapters/     every SDK and I/O: pdfspine, http/ (FastAPI app factory; documents
               pdfspine_formula.py + formula_qualification.py (the ADR 0015 proofs, receipts
               and replays), visual_requalification.py (re-prove a saved snapshot's visual
               objects from its stored branches), chart QA v1/v2, nl_gold.py (the frozen
-              natural-language gold set's schema and the judge both its runners share)
+              natural-language gold set's schema and the judge both its runners share),
+              nl_gold_runner.py (one case over an injected chat `post`: body, envelope,
+              verdict), folder_pipeline.py (`run-folder`: every PDF under a folder through
+              ingest → requalify → qualify → index → publish → tree, budgeted and
+              resumable, then a question set answered in process)
 resources/    packaged prompts / static data
-cli.py        enterprise-pdf-rag ingest|metadata|tree|qualify|index|publish|serve|audit|chart-qa|demo|extract|llm-smoke
+cli.py        enterprise-pdf-rag ingest|metadata|tree|qualify|index|publish|run-folder|serve|audit|chart-qa|demo|extract|llm-smoke
               + AIA-sample-only ingest-aia|process-aia-layout|process-aia-semantics|index-aia-processing
 _moves.py     frozen legacy → canonical module map (ADR 0022: this package is dissolving into
               ragspine.<domain>.evidence; PENDING = the AIA lane, which leaves the wheel)
@@ -101,7 +105,7 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
 - **document-catalog mode:** `APP_EXECUTION_MODE=document-catalog enterprise-pdf-rag serve`
   mounts every `ready` document under `APP_INGESTION_DIR` (default `data/ingestion`) plus the
   processing-store roots listed in `APP_LEGACY_DOCUMENT_ROOTS` (JSON list; the AIA release,
-  default empty). `EMBEDDING_*` enables search, `OPENAI_*` enables chat, `RERANK_*` enables
+  default empty). `APP_EMBEDDING_*` enables search, `APP_LLM_*` enables chat, `APP_RERANK_*` enables
   opt-in rerank; a missing group is a 503 on its routes, never a mock. Model cache
   `<ingestion_root>/model-cache` — `requests/<fingerprint>.json` the record, `responses/`
   the bodies, `contexts/<fingerprint>.json` the **full request body as sent** (system rules,

@@ -13,6 +13,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
+from ragspine.common.evidence.configs import Settings
+
 
 class TunnelConfigurationError(ValueError):
     """Tunnel configuration is absent or unsafe."""
@@ -23,6 +25,14 @@ class TunnelStateError(RuntimeError):
 
 
 _HOST = re.compile(r"[A-Za-z0-9_.@:-]+")
+_TUNNEL_SETTINGS = (
+    "APP_TUNNEL_SSH_HOST",
+    "APP_TUNNEL_SSH_PORT",
+    "APP_TUNNEL_EMBEDDING_LOCAL_PORT",
+    "APP_TUNNEL_EMBEDDING_REMOTE_PORT",
+    "APP_TUNNEL_RERANK_LOCAL_PORT",
+    "APP_TUNNEL_RERANK_REMOTE_PORT",
+)
 
 
 def _required(environment: Mapping[str, str], name: str) -> str:
@@ -96,17 +106,17 @@ class TunnelStatus(BaseModel):
 def load_tunnel_config(
     environment: Mapping[str, str] | None = None,
 ) -> LocalModelTunnelConfig:
-    env = os.environ if environment is None else environment
-    host = _required(env, "LOCAL_MODELS_SSH_HOST")
+    env = Settings().as_environment(_TUNNEL_SETTINGS) if environment is None else environment
+    host = _required(env, "APP_TUNNEL_SSH_HOST")
     if not _HOST.fullmatch(host) or host.startswith("-"):
         raise TunnelConfigurationError("Invalid SSH host")
     config = LocalModelTunnelConfig(
         ssh_host=host,
-        ssh_port=_port(env, "LOCAL_MODELS_SSH_PORT"),
-        embedding_local_port=_port(env, "EMBEDDING_LOCAL_PORT"),
-        embedding_remote_port=_port(env, "EMBEDDING_REMOTE_PORT"),
-        rerank_local_port=_port(env, "RERANK_LOCAL_PORT"),
-        rerank_remote_port=_port(env, "RERANK_REMOTE_PORT"),
+        ssh_port=_port(env, "APP_TUNNEL_SSH_PORT"),
+        embedding_local_port=_port(env, "APP_TUNNEL_EMBEDDING_LOCAL_PORT"),
+        embedding_remote_port=_port(env, "APP_TUNNEL_EMBEDDING_REMOTE_PORT"),
+        rerank_local_port=_port(env, "APP_TUNNEL_RERANK_LOCAL_PORT"),
+        rerank_remote_port=_port(env, "APP_TUNNEL_RERANK_REMOTE_PORT"),
     )
     if config.embedding_local_port == config.rerank_local_port:
         raise TunnelConfigurationError("Embedding and rerank local ports must differ")
