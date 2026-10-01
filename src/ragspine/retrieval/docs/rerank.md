@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/retrieval/rerank/cross_encoder.py
-verified-against: 5e1277dc06104ec6967005f059f9067f54d4c417
+verified-against: 164b3ab
 ---
 
 # Reranker seam — the ⭐ rerank stage's offline brain (W2)

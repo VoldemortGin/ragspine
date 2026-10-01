@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/common/evidence/
-verified-against: 9002e50
+verified-against: 164b3ab
 ---
 
 # common/evidence — agent contract
