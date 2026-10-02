@@ -24,6 +24,7 @@ from enterprise_pdf_rag.adapters.folder_pipeline import (
 from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.visual_requalification import RequalificationSummary
+from ragspine.common.evidence.configs import get_settings
 from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
 from ragspine.common.evidence.providers.providers import ProviderRequestError
 from ragspine.extraction.evidence.figures.ports import EmbeddingPort
@@ -590,3 +591,136 @@ def test_cli_prints_a_parseable_result_and_rejects_bad_arguments(
         code, printed = _cli(bad)
         assert code == 1
         assert "error" in json.loads(printed)
+
+
+# ---- 11. NB_* defaults ---------------------------------------------------------------------
+
+
+def _offline_embedding(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key, value in _EMBEDDING_ENV.items():
+        monkeypatch.setenv(key, value)
+    factory: Callable[[object], OfflineDescriptionEmbedder] = lambda _config: _OFFLINE  # noqa: E731
+    monkeypatch.setattr(folder_pipeline, "LocalEmbeddingAdapter", factory)
+
+
+def _notebook_settings(monkeypatch: pytest.MonkeyPatch, **values: Path) -> None:
+    for name, value in values.items():
+        monkeypatch.setenv(name, str(value))
+    get_settings.cache_clear()
+
+
+def _questions_file(tmp_path: Path) -> Path:
+    questions = tmp_path / "questions.jsonl"
+    row = {"id": "named", "question": "What does page 2 say?", "doc": "meridian.pdf", "pages": "2"}
+    questions.write_text(json.dumps(row) + "\n")
+    return questions
+
+
+def test_folder_questions_and_report_dir_default_to_the_notebook_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = _two_documents(tmp_path, monkeypatch)
+    questions = _questions_file(tmp_path)
+    llm, _prompts = _answer_llm(tmp_path)
+    _notebook_settings(
+        monkeypatch,
+        NB_PDF_DIR=folder,
+        NB_QUESTIONS_PATH=questions,
+        NB_REPORT_DIR=tmp_path / "report",
+    )
+
+    result = run_folder_pipeline(
+        ingestion_root=tmp_path / "ingestion",
+        max_live_calls_per_pdf=_PER_PDF,
+        build_tree=False,
+        embedder=_OFFLINE,
+        answer_llm=llm,
+    )
+
+    assert result.folder == str(folder.resolve())
+    assert [item.status for item in result.documents] == ["published", "published"]
+    assert result.eval is not None and [case.case_id for case in result.eval.cases] == ["named"]
+    assert result.report_dir == str((tmp_path / "report").resolve())
+    assert (tmp_path / "report" / "report.json").is_file()
+
+
+def test_explicit_arguments_beat_the_notebook_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = _two_documents(tmp_path, monkeypatch)
+    llm, _prompts = _answer_llm(tmp_path)
+    _notebook_settings(
+        monkeypatch,
+        NB_PDF_DIR=tmp_path / "missing",
+        NB_QUESTIONS_PATH=tmp_path / "missing.jsonl",
+        NB_REPORT_DIR=tmp_path / "configured-report",
+    )
+
+    result = run_folder_pipeline(
+        folder,
+        questions=_questions_file(tmp_path),
+        report_dir=tmp_path / "explicit-report",
+        ingestion_root=tmp_path / "ingestion",
+        max_live_calls_per_pdf=_PER_PDF,
+        build_tree=False,
+        embedder=_OFFLINE,
+        answer_llm=llm,
+    )
+
+    assert result.eval is not None and result.folder == str(folder.resolve())
+    assert (tmp_path / "explicit-report" / "report.json").is_file()
+    assert not (tmp_path / "configured-report").exists()
+
+
+def test_unset_questions_and_report_dir_keep_the_old_behaviour(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = _folder(tmp_path, ("meridian.pdf", _MERIDIAN))
+    _model_env(monkeypatch)
+    _notebook_settings(monkeypatch, NB_PDF_DIR=folder)
+
+    result = run_folder_pipeline(
+        ingestion_root=tmp_path / "ingestion",
+        max_live_calls_per_pdf=_PER_PDF,
+        build_tree=False,
+        embedder=_OFFLINE,
+    )
+
+    assert result.eval is None and result.report_dir is None
+
+
+def test_no_folder_from_either_place_is_a_clear_error_before_any_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _model_env(monkeypatch)
+    _forbid(monkeypatch, "ingest_pdf")
+    with pytest.raises(ValueError, match=r"pass folder or set NB_PDF_DIR"):
+        run_folder_pipeline(
+            ingestion_root=tmp_path / "ingestion", max_live_calls_per_pdf=0, embedder=_OFFLINE
+        )
+
+
+def test_cli_folder_defaults_to_nb_pdf_dir_and_errors_without_either(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _model_env(monkeypatch)
+    _offline_embedding(monkeypatch)
+    folder = _folder(tmp_path, ("meridian.pdf", _MERIDIAN))
+    arguments = [
+        "run-folder",
+        "--output-dir",
+        str(tmp_path / "ingestion"),
+        "--max-live-calls-per-pdf",
+        str(_PER_PDF),
+        "--no-tree",
+    ]
+
+    code, printed = _cli(arguments)
+    assert code == 1
+    assert "NB_PDF_DIR" in json.loads(printed)["error"]
+
+    _notebook_settings(monkeypatch, NB_PDF_DIR=folder)
+    code, printed = _cli(arguments)
+    assert code == 0
+    result = FolderPipelineResult.model_validate_json(printed)
+    assert result.folder == str(folder.resolve())

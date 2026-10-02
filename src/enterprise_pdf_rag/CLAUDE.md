@@ -76,7 +76,10 @@ adapters/     every SDK and I/O: pdfspine, http/ (FastAPI app factory; documents
               nl_gold_runner.py (one case over an injected chat `post`: body, envelope,
               verdict), folder_pipeline.py (`run-folder`: every PDF under a folder through
               ingest → requalify → qualify → index → publish → tree, budgeted and
-              resumable, then a question set answered in process)
+              resumable, then a question set answered in process; `folder` / questions / report
+              default to NB_PDF_DIR / NB_QUESTIONS_PATH / NB_REPORT_DIR, an argument wins),
+              answer_llm.py (`make_answer_llm()`: the answer `JsonCompletionClient` built from
+              settings, what `run_folder_pipeline` and `notebooks/run_folder.ipynb` call)
 resources/    packaged prompts / static data
 cli.py        enterprise-pdf-rag ingest|metadata|tree|qualify|index|publish|run-folder|serve|audit|chart-qa|demo|extract|llm-smoke
               + AIA-sample-only ingest-aia|process-aia-layout|process-aia-semantics|index-aia-processing
@@ -105,7 +108,8 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
 - **document-catalog mode:** `APP_EXECUTION_MODE=document-catalog enterprise-pdf-rag serve`
   mounts every `ready` document under `APP_INGESTION_DIR` (default `data/ingestion`) plus the
   processing-store roots listed in `APP_LEGACY_DOCUMENT_ROOTS` (JSON list; the AIA release,
-  default empty). `APP_EMBEDDING_*` enables search, `APP_LLM_*` enables chat, `APP_RERANK_*` enables
+  default empty). `APP_EMBEDDING_*` enables search, `APP_LLM_*` (each falling back to `OPENAI_*`; no other group
+  does) enables chat, `APP_RERANK_*` enables
   opt-in rerank; a missing group is a 503 on its routes, never a mock. Model cache
   `<ingestion_root>/model-cache` — `requests/<fingerprint>.json` the record, `responses/`
   the bodies, `contexts/<fingerprint>.json` the **full request body as sent** (system rules,

@@ -67,7 +67,7 @@ uv run --locked enterprise-pdf-rag ingest-aia
 
 ## 前 20 页处理
 
-模型调用仅由显式命令启动，普通 API/审阅不会自动运行推断。环境须独立提供 `APP_LLM_API_KEY`、`APP_LLM_BASE_URL`、`APP_LLM_MODEL`（可写在项目根 `.env`，同名真实环境变量优先）；程序不写入凭证。示例只处理第 18 页，`--page` 可重复选择物理页 1–20：
+模型调用仅由显式命令启动，普通 API/审阅不会自动运行推断。环境须独立提供 `APP_LLM_API_KEY`、`APP_LLM_BASE_URL`、`APP_LLM_MODEL`（可写在项目根 `.env`，同名真实环境变量优先；未设置时逐字段回退读 `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL`）；程序不写入凭证。示例只处理第 18 页，`--page` 可重复选择物理页 1–20：
 
 ```sh
 # 0 = 只复用已有模型缓存，不发新请求

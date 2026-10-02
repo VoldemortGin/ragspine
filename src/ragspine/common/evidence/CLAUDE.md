@@ -18,6 +18,7 @@ Long-form docs: `docs/enterprise-pdf-rag/` (`local-models.md`, `testing-and-inge
 ```
 configs.py    APP_* settings leaf: env (prefix APP_) > <ROOT_DIR>/.env >
               config/enterprise-pdf-rag/settings.yaml; LLM / embedding / rerank / tunnel fields;
+              notebook paths NB_PDF_DIR / NB_QUESTIONS_PATH / NB_REPORT_DIR (no APP_ prefix);
               ROOT_DIR / DATA_DIR / LOG_DIR; resource_path(package, relative)
 settings.py   compatibility re-export of configs.py (old import path)
 logging.py    the one logging config + lineage / privacy discipline for AI artifacts
@@ -38,6 +39,20 @@ providers/    providers.py (explicit APP_LLM_* / APP_EMBEDDING_* / APP_RERANK_* 
   real environment > `.env` > yaml > defaults; a missing `.env` is fine. A child started with
   `PYTHON_DOTENV_DISABLED=1` (launcher, `webui_preview`, the Open WebUI gate) skips `.env`, so
   its allowlisted environment, built by the parent from `Settings.as_environment`, is all it sees.
+- **Only the three LLM settings fall back to `OPENAI_*`** — `llm_api_key` / `llm_base_url` /
+  `llm_model` are declared `AliasChoices("APP_LLM_*", "OPENAI_*")`, so each falls back on its own
+  when its `APP_LLM_*` name is unset (aliases carry no `env_prefix`; `populate_by_name` keeps
+  `Settings(llm_model=...)` working). Inside one source `APP_LLM_*` wins; across sources the
+  real environment still beats `.env` as a whole, so a shell `OPENAI_MODEL` outranks the
+  `.env`'s `APP_LLM_MODEL` (pinned in `test_configs.py`). Embedding / rerank / tunnel have no
+  fallback, `as_environment` still answers under `APP_LLM_*` only, and an injected mapping given
+  to `load_llm_config` is taken as is. Controlled children never receive `OPENAI_*` (their
+  allowlists carry the resolved `APP_LLM_*`), and Open WebUI's `OPENAI_API_KEY` placeholder
+  lives in a child that never reads `Settings`.
+- **`NB_*` path settings are unvalidated and APP_-less** — `pdf_source_dir` (`NB_PDF_DIR`),
+  `questions_path` (`NB_QUESTIONS_PATH`), `report_dir` (`NB_REPORT_DIR`): `~` expanded, relative
+  to `ROOT_DIR`, no existence check, blank means unset. Callers (`run_folder_pipeline`, the
+  `run-folder` CLI) let an explicit argument win and raise only when a folder is needed.
 - **Model / tunnel fields are lenient** — all optional strings / `SecretStr`; nothing is validated
   at import. `load_*_config` / `load_tunnel_config` validate (https, loopback, ports) only when that
   group is used, and still accept an injected mapping.

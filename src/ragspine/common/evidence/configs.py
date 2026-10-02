@@ -15,7 +15,7 @@ from importlib.resources import files
 from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr, field_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -84,6 +84,8 @@ class Settings(BaseSettings):
         env_file=ROOT_DIR / ".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        # 带 validation_alias 的字段(LLM 三项的 OPENAI_* 回退、NB_*)仍可按字段名构造。
+        populate_by_name=True,
     )
 
     is_debug: bool = False  # 日志级别、prompt 缓存等(与 beartype 解耦)
@@ -122,12 +124,26 @@ class Settings(BaseSettings):
     # None → <ingestion_root>/answers-audit.sqlite;给绝对路径即用它。
     answer_audit_path: Path | None = None
 
+    # notebook / 一键流程(run_folder_pipeline)的输入输出位置,环境变量名不带 APP_ 前缀。
+    # 都可缺省且不校验存在性;相对路径相对项目根,~ 展开;空串视为未设置。
+    pdf_source_dir: Path | None = Field(default=None, validation_alias="NB_PDF_DIR")
+    questions_path: Path | None = Field(default=None, validation_alias="NB_QUESTIONS_PATH")
+    report_dir: Path | None = Field(default=None, validation_alias="NB_REPORT_DIR")
+
     # 模型与 SSH 隧道。全部可缺省:import / 构造时不校验,哪一组缺失或不合法,只在真正用到
     # 那一组的阶段报错(providers.load_*_config / local_model_tunnel.load_tunnel_config)。
     # 端口也保持字符串,由隧道加载器做原有的严格校验。
-    llm_api_key: SecretStr | None = None  # 云端 OpenAI 兼容 LLM
-    llm_base_url: str | None = None
-    llm_model: str | None = None
+    # 云端 OpenAI 兼容 LLM。仅这三项在 APP_LLM_* 未设置时逐字段回退到 OPENAI_*(别名顺序即
+    # 优先级;别名不带 env_prefix,须写全名)。embedding / rerank / 隧道没有回退。
+    llm_api_key: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("APP_LLM_API_KEY", "OPENAI_API_KEY")
+    )
+    llm_base_url: str | None = Field(
+        default=None, validation_alias=AliasChoices("APP_LLM_BASE_URL", "OPENAI_BASE_URL")
+    )
+    llm_model: str | None = Field(
+        default=None, validation_alias=AliasChoices("APP_LLM_MODEL", "OPENAI_MODEL")
+    )
     embedding_api_key: SecretStr | None = None  # 本地 embedding(loopback)
     embedding_base_url: str | None = None
     embedding_model: str | None = None
@@ -157,12 +173,18 @@ class Settings(BaseSettings):
     def resolve_runtime_directory(cls, value: Path) -> Path:
         return _resolve_directory(value)
 
-    @field_validator("ingestion_dir")
+    @field_validator("pdf_source_dir", "questions_path", "report_dir", mode="before")
+    @classmethod
+    def blank_path_is_unset(cls, value: object) -> object:
+        # `NB_PDF_DIR=` 留空不能解析成项目根(整个仓库会被当成 PDF 目录)。
+        return None if isinstance(value, str) and not value.strip() else value
+
+    @field_validator("ingestion_dir", "pdf_source_dir", "report_dir")
     @classmethod
     def resolve_optional_directory(cls, value: Path | None) -> Path | None:
         return None if value is None else _resolve_directory(value)
 
-    @field_validator("answer_audit_path")
+    @field_validator("answer_audit_path", "questions_path")
     @classmethod
     def resolve_optional_file(cls, value: Path | None) -> Path | None:
         return None if value is None else _resolve_directory(value)

@@ -384,3 +384,53 @@ def test_dotenv_llm_key_reaches_only_the_catalog_api_child(
     assert "OPENAI_API_KEY" not in webui
     for child in captured:
         assert child["PYTHON_DOTENV_DISABLED"] == "1"
+
+
+def test_openai_fallback_values_reach_only_the_catalog_api_child_under_app_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import FunctionType
+
+    from ragspine.common.evidence.configs import Settings
+
+    root = _project(tmp_path)
+    python = root / ".venv/bin/python"
+    python.parent.mkdir(parents=True)
+    python.symlink_to(sys.executable)
+    monkeypatch.delenv("PYTHON_DOTENV_DISABLED", raising=False)
+    for name in list(os.environ):
+        if name.startswith(("APP_LLM_", "APP_RERANK_", "APP_EMBEDDING_")):
+            monkeypatch.delenv(name)
+    monkeypatch.setitem(Settings.model_config, "env_file", tmp_path / "absent" / ".env")
+    monkeypatch.setenv("OPENAI_API_KEY", "shell-openai-secret")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://openai.example/v1")
+    monkeypatch.setenv("OPENAI_MODEL", "shell-openai-model")
+    namespace = runpy.run_path(str(root / "scripts/enterprise_pdf_rag/webui_preview.py"))
+    start_function = cast(FunctionType, namespace["start"])
+    captured: list[dict[str, str]] = []
+
+    def ignore(*_args: object) -> None:
+        pass
+
+    @contextmanager
+    def listener(*_args: object) -> Iterator[SimpleNamespace]:
+        yield SimpleNamespace(setsockopt=ignore, bind=ignore)
+
+    def spawn(_command: list[str], *, env: dict[str, str], **_kwargs: object) -> SimpleNamespace:
+        captured.append(env)
+        return SimpleNamespace(pid=10000 + len(captured))
+
+    monkeypatch.setitem(start_function.__globals__, "preview_python", lambda: Path(sys.executable))
+    monkeypatch.setitem(start_function.__globals__, "ready", lambda *_args: True)
+    monkeypatch.setattr("socket.socket", listener)
+    monkeypatch.setattr(subprocess, "Popen", spawn)
+    start_function("document-catalog")
+    api, webui = captured
+    assert api["APP_LLM_API_KEY"] == "shell-openai-secret"
+    assert api["APP_LLM_BASE_URL"] == "https://openai.example/v1"
+    assert api["APP_LLM_MODEL"] == "shell-openai-model"
+    for child in captured:
+        assert child["PYTHON_DOTENV_DISABLED"] == "1"
+        assert not any(name.startswith("OPENAI_") for name in child)
+    assert not any(name.startswith("APP_LLM_") for name in webui)
+    assert "shell-openai-secret" not in webui.values()
