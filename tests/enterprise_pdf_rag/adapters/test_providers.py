@@ -96,6 +96,38 @@ def test_a_separate_embedding_base_url_needs_its_own_model_and_key() -> None:
         )
 
 
+def test_the_template_placeholder_key_is_rejected_by_name_before_any_request() -> None:
+    separate = {
+        "APP_EMBEDDING_BASE_URL": "http://127.0.0.1:28002",
+        "APP_EMBEDDING_MODEL": "m",
+        "APP_RERANK_BASE_URL": "http://127.0.0.1:28001",
+        "APP_RERANK_MODEL": "m",
+    }
+    cases = (
+        ("embedding", _GATEWAY | {"APP_EMBEDDING_API_KEY": " ... "}, "APP_EMBEDDING_API_KEY"),
+        ("embedding", separate | {"APP_EMBEDDING_API_KEY": "..."}, "APP_EMBEDDING_API_KEY"),
+        ("embedding", _GATEWAY | {"APP_LLM_API_KEY": "..."}, "OPENAI_API_KEY"),
+        ("rerank", separate | {"APP_RERANK_API_KEY": "..."}, "APP_RERANK_API_KEY"),
+    )
+    for purpose, environment, name in cases:
+        with pytest.raises(ProviderConfigurationError, match=name) as raised:
+            load_local_model_config(purpose, environment)  # type: ignore[arg-type]
+        assert "placeholder" in str(raised.value)
+    llm = {"APP_LLM_BASE_URL": "https://gateway.example/v1", "APP_LLM_MODEL": "m"}
+    with pytest.raises(ProviderConfigurationError, match=r"OPENAI_API_KEY.*placeholder"):
+        load_llm_config(llm | {"APP_LLM_API_KEY": "..."})
+
+
+def test_real_looking_keys_and_an_unset_key_are_not_mistaken_for_the_placeholder() -> None:
+    for real in ("sk.abc.def", "k", "..a", "sk-..."):
+        config = load_local_model_config("embedding", _GATEWAY | {"APP_EMBEDDING_API_KEY": real})
+        assert config.api_key.get_secret_value() == real
+    # Unset (or blank) still falls back to the LLM key on the gateway.
+    for unset in ({}, {"APP_EMBEDDING_API_KEY": ""}):
+        fallback = load_local_model_config("embedding", _GATEWAY | unset)
+        assert fallback.api_key.get_secret_value() == "cloud-secret"
+
+
 def test_local_models_require_independent_redacted_api_keys() -> None:
     environment = {
         "APP_EMBEDDING_BASE_URL": "http://127.0.0.1:28002",

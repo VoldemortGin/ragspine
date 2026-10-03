@@ -600,6 +600,34 @@ def test_a_missing_embedding_model_names_the_gateway_setting_first(
     assert message.index("simplest") < message.index("APP_EMBEDDING_BASE_URL")
 
 
+def test_a_placeholder_embedding_key_fails_the_preflight_before_any_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _model_env(monkeypatch)
+    for key in _EMBEDDING_ENV:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("OPENAI_EMBEDDING_MODEL", "gateway-embedding")
+    monkeypatch.setenv("APP_EMBEDDING_API_KEY", "...")
+    folder = _folder(tmp_path, ("meridian.pdf", _MERIDIAN))
+    requests: list[object] = []
+
+    class Spy(OfflineDescriptionEmbedder):
+        def __init__(self, _config: object) -> None:
+            requests.append("init")
+
+        def embed_query(self, text: str) -> tuple[float, ...]:
+            requests.append(text)
+            return _OFFLINE.embed_query(text)
+
+    monkeypatch.setattr(folder_pipeline, "LocalEmbeddingAdapter", Spy)
+    _forbid(monkeypatch, "ingest_pdf")
+
+    with pytest.raises(PreflightError, match="Embedding is not configured") as raised:
+        _run(tmp_path, folder, embedder=None)
+    assert "APP_EMBEDDING_API_KEY" in str(raised.value) and "placeholder" in str(raised.value)
+    assert requests == []
+
+
 # ---- 10. CLI -----------------------------------------------------------------------------
 
 

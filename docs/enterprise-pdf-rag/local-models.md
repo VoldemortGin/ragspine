@@ -2,8 +2,8 @@
 
 本项目通过两个 OpenAI-compatible HTTP 适配器调用 embedding 与 rerank。
 
-- **Embedding 默认与 LLM 同一网关**：只设 `OPENAI_EMBEDDING_MODEL`（别名 `APP_EMBEDDING_MODEL`）时，embedding 走 `OPENAI_BASE_URL`（仍只接受 https）、用 `OPENAI_API_KEY`；网关上 embedding 的 key 不同时只额外设 `APP_EMBEDDING_API_KEY`。模型名永远不从 `OPENAI_MODEL` 继承。
-- **独立的 loopback embedding 服务**：设了 `APP_EMBEDDING_BASE_URL`（且不等于 `OPENAI_BASE_URL`）就不再走网关，`APP_EMBEDDING_BASE_URL` / `_MODEL` / `_API_KEY` 三项都必填，key 不回退到 LLM key。
+- **Embedding 默认与 LLM 同一网关**：只设 `OPENAI_EMBEDDING_MODEL`（别名 `APP_EMBEDDING_MODEL`）时，embedding 走 `OPENAI_BASE_URL`（仍只接受 https）、用 `OPENAI_API_KEY`；网关上 embedding 的 key 不同时只额外设 `APP_EMBEDDING_API_KEY`。模型名永远不从 `OPENAI_MODEL` 继承。**隐私：此模式下文档片段（chunk）文本与查询文本会发往该 LLM 网关**；要让文本留在本机，请显式配置 loopback 的 `APP_EMBEDDING_*`（下一条）。
+- **独立的 loopback embedding 服务**：设了 `APP_EMBEDDING_BASE_URL`（且不等于 `OPENAI_BASE_URL`）就不再走网关，`APP_EMBEDDING_BASE_URL` / `_MODEL` / `_API_KEY` 三项都必填，key 不回退到 LLM key。任何 API key 的值恰为 `...`（`.env.example` 的模板占位符）都会被明确拒绝并点名变量；不需要覆盖 key 时请删掉整行。
 - **Rerank 没有网关回退**：`APP_RERANK_*` 三项必填。
 
 独立服务的 HTTP base URL 只能是 `127.0.0.1`、`localhost` 或 `::1`；远端 GPU 服务必须先经项目管理的 SSH loopback tunnel 暴露到本机。受控子进程收到的是解析后的 `APP_EMBEDDING_*`（网关模式下即网关地址与 key）。embedding fingerprint 恒为 `local-http/<模型名>`，不含地址：换网关而模型名不变时 fingerprint 不变，已发布索引仍会挂载——请确认两边确是同一模型（向量维度不同会在挂载时被拒）。

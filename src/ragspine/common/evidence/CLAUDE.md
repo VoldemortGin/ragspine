@@ -77,7 +77,8 @@ providers/    providers.py (explicit APP_LLM_* / embedding / APP_RERANK_* enviro
   carries the LLM key under `APP_EMBEDDING_API_KEY`); Open WebUI inherits
   no model key. `local_model_launcher` injects credentials into one allowlisted child
   environment only; the tunnel binds loopback only. Do not send real reports to external
-  providers without task authorization.
+  providers without task authorization — note that gateway-mode embedding (no
+  `APP_EMBEDDING_BASE_URL`) sends chunk and query text to the LLM gateway.
 - **A missing provider group is an error, never a mock** — no `APP_LLM_*` / embedding /
   `APP_RERANK_*` means the routes that need it refuse (503), not a silent fallback.
 - **Live LLM tests are separate and conservative** — run them explicitly only for a major

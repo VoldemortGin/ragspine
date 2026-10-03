@@ -70,6 +70,20 @@ def _required(environment: Mapping[str, str], name: str, *, fallback: str | None
     return value
 
 
+_PLACEHOLDER_KEY = "..."  # the value .env.example ships for API-key lines
+
+
+def _api_key(environment: Mapping[str, str], name: str, *, fallback: str | None = None) -> str:
+    value = _required(environment, name, fallback=fallback)
+    if value == _PLACEHOLDER_KEY:
+        shown = name if fallback is None else f"{fallback} (or {name})"
+        raise ProviderConfigurationError(
+            f"Environment setting {shown} is still the .env.example placeholder; "
+            "delete that line or set a real key"
+        )
+    return value
+
+
 def _base_url(value: str, *, name: str, https_only: bool = False) -> str:
     try:
         parsed = urlsplit(value)
@@ -102,7 +116,7 @@ def load_llm_config(environment: Mapping[str, str] | None = None) -> LLMConfig:
     # OPENAI_API_KEY / OPENAI_BASE_URL / OPENAI_MODEL are the preferred names; Settings already
     # folded them in under these APP_LLM_* keys (the child-process allowlist names). An injected
     # mapping is taken as given, so it only ever carries the APP_LLM_* keys.
-    key = _required(env, "APP_LLM_API_KEY", fallback="OPENAI_API_KEY")
+    key = _api_key(env, "APP_LLM_API_KEY", fallback="OPENAI_API_KEY")
     base = _base_url(
         _required(env, "APP_LLM_BASE_URL", fallback="OPENAI_BASE_URL"),
         name="APP_LLM_BASE_URL",
@@ -130,9 +144,9 @@ def _gateway_embedding_config(env: Mapping[str, str]) -> LocalModelConfig:
         https_only=True,
     )
     key = (
-        _required(env, "APP_EMBEDDING_API_KEY")
+        _api_key(env, "APP_EMBEDDING_API_KEY")
         if env.get("APP_EMBEDDING_API_KEY", "").strip()
-        else _required(env, "APP_LLM_API_KEY", fallback="OPENAI_API_KEY")
+        else _api_key(env, "APP_LLM_API_KEY", fallback="OPENAI_API_KEY")
     )
     return LocalModelConfig(purpose="embedding", api_key=SecretStr(key), base_url=base, model=model)
 
@@ -168,7 +182,7 @@ def load_local_model_config(
             ) from None
         raise
     model = _required(env, f"{prefix}_MODEL")
-    key = _required(env, f"{prefix}_API_KEY")
+    key = _api_key(env, f"{prefix}_API_KEY")
     return LocalModelConfig(purpose=purpose, api_key=SecretStr(key), base_url=base, model=model)
 
 

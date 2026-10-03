@@ -4,7 +4,17 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ## [Unreleased]
 
+### Fixed
+
+- **A placeholder API key now fails with a named configuration error.** An `APP_EMBEDDING_API_KEY` /
+  `APP_RERANK_API_KEY` / `OPENAI_API_KEY` (or `APP_LLM_API_KEY`) whose value is exactly the `.env.example`
+  placeholder `...` raises `ProviderConfigurationError` naming the variable, before any request, instead of
+  being sent to the gateway and failing as an auth error at the preflight probe.
+
 ### Changed
+
+- Docs: gateway-mode embedding (no `APP_EMBEDDING_BASE_URL`) sends chunk and query text to the `OPENAI_BASE_URL`
+  gateway; configure a loopback `APP_EMBEDDING_*` to keep text local (`.env.example`, `local-models.md`).
 
 - **`questions_path` also reads `DATASET_PATH` as an alias of `NB_QUESTIONS_PATH`** (environment and project `.env`).
   `NB_QUESTIONS_PATH` wins; a blank `NB_QUESTIONS_PATH=` counts as unset and falls back to `DATASET_PATH`. Relative paths
