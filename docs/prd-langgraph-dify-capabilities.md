@@ -49,7 +49,7 @@ LangGraph 并不要求每张图都调用付费模型；普通 Python 节点与�
 | 产品与权限 | `../spinestudio/backend/src/spinestudio/`、`../spinestudio/docs/PRD.md` | 已有用户、工作区、权限、KB、聊天；需把工作流版本、运行与审批接入产品权限 |
 | 基础原语 | `../corespine/src/corespine/` | 复用 provider、trace、credential、queue、trigger；不要预先将工作流领域塞入薄核 |
 | RAG 质量 | `src/ragspine/{retrieval,agent,storage,eval}/`、`docs/invariants.md` | 继续复用双通道、来源与数字保护、RESTRICTED 过滤；任意图不得绕过它们 |
-| 文档网站 | `../rag-spine-web/` | 静态展示与模板发现，不承载后端执行和租户存储 |
+| 文档网站 | `../ragspine-web/` | 静态展示与模板发现，不承载后端执行和租户存储 |
 
 ## 4. 架构边界
 
@@ -59,7 +59,7 @@ LangGraph 并不要求每张图都调用付费模型；普通 Python 节点与�
 - **spineagent**：Python 状态图、状态归并、调度、checkpoint、恢复、子图与审批执行语义。
 - **spinestudio**：工作区、协作、版本发布、应用与凭据权限、审批收件箱、工作流运行管理。复用或组合 ragspine 现有画布，不未经评估重写。
 - **corespine**：已有中立原语；只有多个真实消费者需要的稳定抽象才上提。
-- **rag-spine-web**：公开文档与兼容性矩阵。
+- **ragspine-web**：公开文档与兼容性矩阵。
 
 持久化执行状态可能包含正文；它属于受访问控制的产品/运行数据，不能混入只允许 code/计数/耗时的 `TraceSink`。首片 SQLite 的输入输出也遵循这一分离，不宣称数据库无正文。
 
