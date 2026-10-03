@@ -34,14 +34,66 @@ def test_missing_model_is_an_error_and_secrets_are_redacted() -> None:
     )
 
 
-def test_local_models_never_inherit_the_cloud_llm_configuration() -> None:
-    with pytest.raises(ProviderConfigurationError, match="APP_EMBEDDING_BASE_URL"):
+def test_embedding_never_inherits_the_llm_model_and_rerank_has_no_gateway_fallback() -> None:
+    with pytest.raises(ProviderConfigurationError, match="OPENAI_EMBEDDING_MODEL"):
         load_local_model_config(
             "embedding",
-            {"APP_LLM_BASE_URL": "https://cloud.example", "APP_LLM_MODEL": "cloud-model"},
+            {
+                "APP_LLM_API_KEY": "cloud-secret",
+                "APP_LLM_BASE_URL": "https://cloud.example",
+                "APP_LLM_MODEL": "cloud-model",
+            },
         )
-    with pytest.raises(ProviderConfigurationError, match="APP_RERANK_BASE_URL"):
-        load_local_model_config("rerank", {})
+    with pytest.raises(ProviderConfigurationError, match=r"APP_RERANK_BASE_URL.*no gateway"):
+        load_local_model_config(
+            "rerank",
+            {"APP_LLM_API_KEY": "cloud-secret", "APP_LLM_BASE_URL": "https://cloud.example"},
+        )
+
+
+_GATEWAY = {
+    "APP_LLM_API_KEY": "cloud-secret",
+    "APP_LLM_BASE_URL": "https://gateway.example/v1/",
+    "APP_EMBEDDING_MODEL": "gateway-embedding",
+}
+
+
+def test_embedding_without_a_base_url_shares_the_llm_gateway_and_key() -> None:
+    config = load_local_model_config("embedding", _GATEWAY)
+    assert (config.base_url, config.model) == ("https://gateway.example/v1", "gateway-embedding")
+    assert config.api_key.get_secret_value() == "cloud-secret"
+    assert "cloud-secret" not in repr(config)
+    own_key = load_local_model_config("embedding", _GATEWAY | {"APP_EMBEDDING_API_KEY": "own"})
+    assert own_key.api_key.get_secret_value() == "own"
+    # The resolved form a child process receives: the base spelled out equals the gateway.
+    spelled = _GATEWAY | {"APP_EMBEDDING_BASE_URL": "https://gateway.example/v1"}
+    assert load_local_model_config("embedding", spelled).base_url == "https://gateway.example/v1"
+
+
+def test_the_shared_gateway_is_still_https_only_and_needs_a_key() -> None:
+    with pytest.raises(ProviderConfigurationError, match="Invalid service base URL"):
+        load_local_model_config("embedding", _GATEWAY | {"APP_LLM_BASE_URL": "http://gw.example"})
+    with pytest.raises(ProviderConfigurationError, match="OPENAI_API_KEY"):
+        load_local_model_config("embedding", {**_GATEWAY, "APP_LLM_API_KEY": ""})
+    with pytest.raises(ProviderConfigurationError, match="OPENAI_BASE_URL"):
+        load_local_model_config("embedding", {"APP_EMBEDDING_MODEL": "m", "APP_LLM_API_KEY": "k"})
+
+
+def test_a_separate_embedding_base_url_needs_its_own_model_and_key() -> None:
+    separate = {"APP_EMBEDDING_BASE_URL": "http://127.0.0.1:28002", **_GATEWAY}
+    with pytest.raises(ProviderConfigurationError, match="APP_EMBEDDING_API_KEY"):
+        load_local_model_config("embedding", separate)
+    with pytest.raises(ProviderConfigurationError, match="APP_EMBEDDING_MODEL"):
+        load_local_model_config(
+            "embedding",
+            {"APP_EMBEDDING_BASE_URL": "http://127.0.0.1:28002", "APP_EMBEDDING_API_KEY": "k"},
+        )
+    with pytest.raises(ProviderConfigurationError, match="loopback"):
+        load_local_model_config(
+            "embedding",
+            separate
+            | {"APP_EMBEDDING_BASE_URL": "https://other.example", "APP_EMBEDDING_API_KEY": "k"},
+        )
 
 
 def test_local_models_require_independent_redacted_api_keys() -> None:

@@ -8,6 +8,15 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ### Changed
 
+- **Embedding shares the LLM's OpenAI-compatible gateway by default.** New setting
+  `OPENAI_EMBEDDING_MODEL` (preferred name of `APP_EMBEDDING_MODEL`): with it and the `OPENAI_*` LLM
+  settings alone, embedding uses `OPENAI_BASE_URL` (https only) and `OPENAI_API_KEY`
+  (`APP_EMBEDDING_API_KEY` overrides the key), so `run_folder_pipeline`'s preflight no longer says
+  `Embedding is not configured`. Setting `APP_EMBEDDING_BASE_URL` keeps the separate loopback service
+  with its own required model and key; a blank `APP_EMBEDDING_BASE_URL=` counts as unset. Controlled
+  children receive the resolved `APP_EMBEDDING_*`; rerank has no gateway fallback. The embedding
+  fingerprint stays `local-http/<model>`. `.env.example` now lists `OPENAI_EMBEDDING_MODEL=` and
+  comments out the `APP_EMBEDDING_*` lines.
 - **Distribution renamed `rag-spine` → `ragspine` on PyPI.** `pip install ragspine` (extras: `ragspine[service]`,
   …) is the install name from 0.17.3 on; `rag-spine` becomes a transitional package that depends on
   `ragspine==` the same version (`packaging/rag-spine-transition/`). The import name (`import ragspine`) and the

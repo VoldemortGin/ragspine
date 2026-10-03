@@ -106,7 +106,7 @@ def test_injected_mapping_bypasses_settings(dotenv: Path) -> None:
         }
     )
     assert config.model == "injected-model"
-    with pytest.raises(ProviderConfigurationError, match="APP_EMBEDDING_BASE_URL"):
+    with pytest.raises(ProviderConfigurationError, match="OPENAI_EMBEDDING_MODEL"):
         load_local_model_config("embedding", {})
 
 
@@ -179,8 +179,12 @@ def test_env_example_lists_exactly_the_settings_fields() -> None:
 
 def test_env_example_documents_the_openai_preferred_names() -> None:
     text = (ROOT_DIR / ".env.example").read_text(encoding="utf-8")
-    for name in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL"):
-        assert name in text
+    for name in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL", "OPENAI_EMBEDDING_MODEL"):
+        assert re.search(rf"^{name}=", text, re.MULTILINE), name
+    # A separate loopback embedding service is optional: its three names stay commented out.
+    for name in ("APP_EMBEDDING_BASE_URL", "APP_EMBEDDING_MODEL", "APP_EMBEDDING_API_KEY"):
+        assert not re.search(rf"^{name}=", text, re.MULTILINE), name
+        assert re.search(rf"^#\s*{name}=", text, re.MULTILINE), name
 
 
 # ---- OPENAI_* preferred names (APP_LLM_* aliases) for the three LLM settings -------------------------------------------
@@ -340,18 +344,128 @@ def test_openai_secret_never_appears_in_repr(
     assert "openai-secret" not in rendered
 
 
-def test_only_the_llm_group_reads_openai_names(
+def test_openai_names_alone_never_configure_embedding_or_rerank(
     bare: Callable[[str], None], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "openai-secret")
-    monkeypatch.setenv("OPENAI_BASE_URL", "http://127.0.0.1:39002")
-    monkeypatch.setenv("OPENAI_MODEL", "openai-model")
+    for name, value in _OPENAI.items():
+        monkeypatch.setenv(name, value)
     settings = Settings()
     assert settings.embedding_api_key is None
     assert settings.embedding_base_url is None
     assert settings.rerank_model is None
-    with pytest.raises(ProviderConfigurationError, match="APP_EMBEDDING_BASE_URL"):
+    assert settings.as_environment(_EMBEDDING_NAMES) == {}
+    with pytest.raises(ProviderConfigurationError, match="OPENAI_EMBEDDING_MODEL"):
         load_local_model_config("embedding")
+    with pytest.raises(ProviderConfigurationError, match="APP_RERANK_BASE_URL"):
+        load_local_model_config("rerank")
+
+
+# ---- embedding on the shared LLM gateway (OPENAI_EMBEDDING_MODEL) ---------------------------
+
+_EMBEDDING_NAMES = ("APP_EMBEDDING_BASE_URL", "APP_EMBEDDING_MODEL", "APP_EMBEDDING_API_KEY")
+
+
+def test_openai_embedding_model_alone_puts_embedding_on_the_llm_gateway(
+    bare: Callable[[str], None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bare("OPENAI_EMBEDDING_MODEL=gateway-embedding\n")
+    for name, value in _OPENAI.items():
+        monkeypatch.setenv(name, value)
+    embedding = load_local_model_config("embedding")
+    assert (embedding.base_url, embedding.model) == (
+        "https://openai.example/v1",
+        "gateway-embedding",
+    )
+    assert embedding.api_key.get_secret_value() == "openai-secret"
+    # Children get the resolved group under the APP_EMBEDDING_* allowlist names.
+    assert Settings().as_environment(_EMBEDDING_NAMES) == {
+        "APP_EMBEDDING_BASE_URL": "https://openai.example/v1",
+        "APP_EMBEDDING_MODEL": "gateway-embedding",
+        "APP_EMBEDDING_API_KEY": "openai-secret",
+    }
+    # ...and a child given exactly that (plus the LLM base) resolves the same configuration.
+    child = Settings().as_environment((*_EMBEDDING_NAMES, "APP_LLM_BASE_URL"))
+    assert load_local_model_config("embedding", child) == embedding
+
+
+def test_an_embedding_key_of_its_own_overrides_the_llm_key_on_the_gateway(
+    bare: Callable[[str], None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bare("OPENAI_EMBEDDING_MODEL=gateway-embedding\nAPP_EMBEDDING_API_KEY=embedding-only\n")
+    for name, value in _OPENAI.items():
+        monkeypatch.setenv(name, value)
+    assert load_local_model_config("embedding").api_key.get_secret_value() == "embedding-only"
+    assert Settings().as_environment(("APP_EMBEDDING_API_KEY",)) == {
+        "APP_EMBEDDING_API_KEY": "embedding-only"
+    }
+
+
+def test_a_blank_embedding_base_url_from_an_old_dotenv_still_means_the_gateway(
+    bare: Callable[[str], None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bare("APP_EMBEDDING_BASE_URL=\nAPP_EMBEDDING_MODEL=app-named-embedding\n")
+    for name, value in _OPENAI.items():
+        monkeypatch.setenv(name, value)
+    embedding = load_local_model_config("embedding")
+    assert (embedding.base_url, embedding.model) == (
+        "https://openai.example/v1",
+        "app-named-embedding",
+    )
+
+
+def test_a_separate_embedding_base_url_keeps_the_loopback_rules(
+    bare: Callable[[str], None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for name, value in _OPENAI.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("OPENAI_EMBEDDING_MODEL", "gateway-embedding")
+    monkeypatch.setenv("APP_EMBEDDING_BASE_URL", "http://127.0.0.1:39002")
+    # No fallback to the LLM key for a separate service.
+    with pytest.raises(ProviderConfigurationError, match="APP_EMBEDDING_API_KEY"):
+        load_local_model_config("embedding")
+    assert Settings().as_environment(("APP_EMBEDDING_API_KEY",)) == {}
+    monkeypatch.setenv("APP_EMBEDDING_API_KEY", "loopback-secret")
+    embedding = load_local_model_config("embedding")
+    assert embedding.base_url == "http://127.0.0.1:39002"
+    assert embedding.api_key.get_secret_value() == "loopback-secret"
+    monkeypatch.setenv("APP_EMBEDDING_BASE_URL", "https://elsewhere.example/v1")
+    with pytest.raises(ProviderConfigurationError, match="loopback"):
+        load_local_model_config("embedding")
+
+
+def test_the_embedding_model_prefers_the_openai_name(
+    bare: Callable[[str], None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bare("APP_EMBEDDING_MODEL=app-named\nOPENAI_EMBEDDING_MODEL=openai-named\n")
+    assert Settings().embedding_model == "openai-named"
+    assert Settings(embedding_model="by-name").embedding_model == "by-name"
+
+
+def test_the_tunnel_launcher_settings_carry_the_openai_embedding_model(
+    bare: Callable[[str], None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ragspine.common.evidence.providers.local_model_launcher import (
+        build_local_model_child_environment,
+    )
+    from ragspine.common.evidence.providers.local_model_tunnel import LocalModelTunnelConfig
+
+    monkeypatch.setenv("OPENAI_EMBEDDING_MODEL", "gateway-embedding")
+    parent = Settings().as_environment(("APP_EMBEDDING_MODEL", "APP_RERANK_MODEL"))
+    tunnel = LocalModelTunnelConfig(
+        ssh_host="operator@gpu.example",
+        ssh_port=22,
+        embedding_local_port=39002,
+        embedding_remote_port=28002,
+        rerank_local_port=39001,
+        rerank_remote_port=28001,
+    )
+    child = build_local_model_child_environment(
+        parent | {"APP_RERANK_MODEL": "rerank-model"},
+        tunnel,
+        embedding_api_key=SecretStr("e"),
+        rerank_api_key=SecretStr("r"),
+    )
+    assert child["APP_EMBEDDING_MODEL"] == "gateway-embedding"
 
 
 # ---- NB_* notebook settings ---------------------------------------------------------------

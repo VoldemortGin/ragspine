@@ -34,7 +34,8 @@ _EMBEDDING_SETTINGS = ("APP_EMBEDDING_BASE_URL", "APP_EMBEDDING_MODEL", "APP_EMB
 # Only the API child inherits provider settings, and only those its profile can use.
 # Values are resolved here (environment > project-root .env); children never read .env.
 _API_SETTINGS = {
-    "aia-source-review": _EMBEDDING_SETTINGS,
+    # The (non-secret) LLM base lets a child accept a resolved embedding base that is the gateway.
+    "aia-source-review": (*_EMBEDDING_SETTINGS, "APP_LLM_BASE_URL"),
     "document-catalog": (
         *_EMBEDDING_SETTINGS,
         "APP_LLM_API_KEY",

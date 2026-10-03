@@ -1,6 +1,12 @@
 # 本地 embedding 与 rerank 服务
 
-本项目通过两个独立的 OpenAI-compatible HTTP 适配器调用 embedding 与 rerank。两者各自要求 base URL、模型名和 API key，不继承云端 LLM 配置（`OPENAI_*` / `APP_LLM_*`）。HTTP base URL 只能是 `127.0.0.1`、`localhost` 或 `::1`；远端 GPU 服务必须先经项目管理的 SSH loopback tunnel 暴露到本机。
+本项目通过两个 OpenAI-compatible HTTP 适配器调用 embedding 与 rerank。
+
+- **Embedding 默认与 LLM 同一网关**：只设 `OPENAI_EMBEDDING_MODEL`（别名 `APP_EMBEDDING_MODEL`）时，embedding 走 `OPENAI_BASE_URL`（仍只接受 https）、用 `OPENAI_API_KEY`；网关上 embedding 的 key 不同时只额外设 `APP_EMBEDDING_API_KEY`。模型名永远不从 `OPENAI_MODEL` 继承。
+- **独立的 loopback embedding 服务**：设了 `APP_EMBEDDING_BASE_URL`（且不等于 `OPENAI_BASE_URL`）就不再走网关，`APP_EMBEDDING_BASE_URL` / `_MODEL` / `_API_KEY` 三项都必填，key 不回退到 LLM key。
+- **Rerank 没有网关回退**：`APP_RERANK_*` 三项必填。
+
+独立服务的 HTTP base URL 只能是 `127.0.0.1`、`localhost` 或 `::1`；远端 GPU 服务必须先经项目管理的 SSH loopback tunnel 暴露到本机。受控子进程收到的是解析后的 `APP_EMBEDDING_*`（网关模式下即网关地址与 key）。embedding fingerprint 恒为 `local-http/<模型名>`，不含地址：换网关而模型名不变时 fingerprint 不变，已发布索引仍会挂载——请确认两边确是同一模型（向量维度不同会在挂载时被拒）。
 
 ## 建立与管理隧道
 
@@ -26,7 +32,7 @@ uv run --locked python scripts/enterprise_pdf_rag/local_model_tunnel.py stop
 
 ## 进程配置
 
-调用进程必须取得以下六个变量。这些值（含 API key）可写入项目根 `.env`（已被 `.gitignore` 忽略，建议权限 600；同名真实环境变量优先），或由受控启动器直接注入子进程环境；不要写入 shell history、日志或可提交文件。
+使用独立 loopback 服务时，调用进程必须取得以下六个变量（embedding 走网关时只需要下面 rerank 三项）。这些值（含 API key）可写入项目根 `.env`（已被 `.gitignore` 忽略，建议权限 600；同名真实环境变量优先），或由受控启动器直接注入子进程环境；不要写入 shell history、日志或可提交文件。
 
 ```text
 APP_EMBEDDING_BASE_URL=http://127.0.0.1:39002
@@ -77,4 +83,4 @@ uv run --locked python scripts/enterprise_pdf_rag/local_model_smoke.py
 
 它各发一个短请求，只输出 embedding fingerprint、向量维度和 rerank 候选索引，不输出 key、向量、provider body 或候选正文。该命令不是默认测试或 CI 的一部分，不会重试，也不能证明模型对财报语义的质量。默认 `bash scripts/ci.sh` 始终离线，使用 transport fake 验证请求与严格响应边界。
 
-云端图表理解使用独立的 `OPENAI_API_KEY`、`OPENAI_BASE_URL` 与 `OPENAI_MODEL`（别名 `APP_LLM_API_KEY` / `APP_LLM_BASE_URL` / `APP_LLM_MODEL`，仅这三项有别名；embedding / rerank / 隧道没有别名，受控子进程也只收到解析后的 `APP_LLM_*`，收不到 `OPENAI_*`）。需要时只给对应受控子进程显式设置；不得把云端 key 或本地模型 key 互相复用或写入全局 shell 配置。
+云端图表理解使用 `OPENAI_API_KEY`、`OPENAI_BASE_URL` 与 `OPENAI_MODEL`（别名 `APP_LLM_API_KEY` / `APP_LLM_BASE_URL` / `APP_LLM_MODEL`；另有 `OPENAI_EMBEDDING_MODEL` 是 `APP_EMBEDDING_MODEL` 的首选名；rerank / 隧道没有别名，受控子进程也只收到解析后的 `APP_LLM_*` / `APP_EMBEDDING_*`，收不到 `OPENAI_*`）。需要时只给对应受控子进程显式设置；网关模式之外不得把云端 key 或本地模型 key 互相复用，也不要写入全局 shell 配置。

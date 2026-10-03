@@ -108,8 +108,8 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
 - **document-catalog mode:** `APP_EXECUTION_MODE=document-catalog enterprise-pdf-rag serve`
   mounts every `ready` document under `APP_INGESTION_DIR` (default `data/ingestion`) plus the
   processing-store roots listed in `APP_LEGACY_DOCUMENT_ROOTS` (JSON list; the AIA release,
-  default empty). `APP_EMBEDDING_*` enables search, `OPENAI_*` (alias `APP_LLM_*`, read per field; no other group
-  has an alias) enables chat, `APP_RERANK_*` enables
+  default empty). `OPENAI_EMBEDDING_MODEL` (same gateway as the LLM; or `APP_EMBEDDING_*` for a separate loopback
+  service) enables search, `OPENAI_*` (alias `APP_LLM_*`, read per field) enables chat, `APP_RERANK_*` enables
   opt-in rerank; a missing group is a 503 on its routes, never a mock. Model cache
   `<ingestion_root>/model-cache` — `requests/<fingerprint>.json` the record, `responses/`
   the bodies, `contexts/<fingerprint>.json` the **full request body as sent** (system rules,

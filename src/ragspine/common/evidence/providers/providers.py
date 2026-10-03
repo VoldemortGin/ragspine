@@ -3,7 +3,8 @@
 Settings come from an injected mapping or, by default, from ``configs.Settings``
 (environment > project-root .env > yaml), read afresh on every call. This module does
 not configure the offline runtime or qualify production chart understanding.
-Embedding/rerank never inherit LLM settings.
+Embedding shares the LLM's OpenAI-compatible gateway unless ``APP_EMBEDDING_BASE_URL`` names a
+separate loopback service; rerank never inherits LLM settings.
 """
 
 import json
@@ -111,14 +112,61 @@ def load_llm_config(environment: Mapping[str, str] | None = None) -> LLMConfig:
     return LLMConfig(api_key=SecretStr(key), base_url=base, model=model)
 
 
+_GATEWAY_MODEL_HINT = (
+    "embedding shares the OPENAI_BASE_URL gateway; set OPENAI_EMBEDDING_MODEL, "
+    "or set APP_EMBEDDING_* for a separate loopback service"
+)
+
+
+def _gateway_embedding_config(env: Mapping[str, str]) -> LocalModelConfig:
+    model = env.get("APP_EMBEDDING_MODEL", "").strip()
+    if not model or "\n" in model or "\r" in model:
+        raise ProviderConfigurationError(
+            f"Missing or invalid environment setting: OPENAI_EMBEDDING_MODEL ({_GATEWAY_MODEL_HINT})"
+        )
+    base = _base_url(
+        _required(env, "APP_LLM_BASE_URL", fallback="OPENAI_BASE_URL"),
+        name="OPENAI_BASE_URL (or APP_LLM_BASE_URL)",
+        https_only=True,
+    )
+    key = (
+        _required(env, "APP_EMBEDDING_API_KEY")
+        if env.get("APP_EMBEDDING_API_KEY", "").strip()
+        else _required(env, "APP_LLM_API_KEY", fallback="OPENAI_API_KEY")
+    )
+    return LocalModelConfig(purpose="embedding", api_key=SecretStr(key), base_url=base, model=model)
+
+
 def load_local_model_config(
     purpose: Literal["embedding", "rerank"],
     environment: Mapping[str, str] | None = None,
 ) -> LocalModelConfig:
+    """Embedding/rerank endpoint, key and model.
+
+    Embedding without ``APP_EMBEDDING_BASE_URL`` (or with it set to the LLM gateway itself) uses
+    the LLM gateway: ``APP_LLM_BASE_URL`` (https only), ``APP_EMBEDDING_API_KEY`` else
+    ``APP_LLM_API_KEY``, and the required ``APP_EMBEDDING_MODEL`` (preferred name
+    ``OPENAI_EMBEDDING_MODEL``). Any other ``APP_EMBEDDING_BASE_URL`` is a separate service that
+    must be loopback with its own model and key. Rerank has no gateway fallback.
+    """
     prefix = "APP_EMBEDDING" if purpose == "embedding" else "APP_RERANK"
-    names = (f"{prefix}_BASE_URL", f"{prefix}_MODEL", f"{prefix}_API_KEY")
+    names: tuple[str, ...] = (f"{prefix}_BASE_URL", f"{prefix}_MODEL", f"{prefix}_API_KEY")
+    if purpose == "embedding":
+        names += ("APP_LLM_BASE_URL", "APP_LLM_API_KEY")
     env = Settings().as_environment(names) if environment is None else environment
-    base = _loopback_base_url(_required(env, f"{prefix}_BASE_URL"), name=f"{prefix}_BASE_URL")
+    if purpose == "embedding":
+        explicit = env.get("APP_EMBEDDING_BASE_URL", "").strip().rstrip("/")
+        gateway = env.get("APP_LLM_BASE_URL", "").strip().rstrip("/")
+        if not explicit or explicit == gateway:
+            return _gateway_embedding_config(env)
+    try:
+        base = _loopback_base_url(_required(env, f"{prefix}_BASE_URL"), name=f"{prefix}_BASE_URL")
+    except ProviderConfigurationError as error:
+        if purpose == "rerank":
+            raise ProviderConfigurationError(
+                f"{error} (rerank has no gateway fallback; it needs a separate loopback service)"
+            ) from None
+        raise
     model = _required(env, f"{prefix}_MODEL")
     key = _required(env, f"{prefix}_API_KEY")
     return LocalModelConfig(purpose=purpose, api_key=SecretStr(key), base_url=base, model=model)

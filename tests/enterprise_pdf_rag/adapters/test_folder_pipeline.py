@@ -26,7 +26,7 @@ from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.visual_requalification import RequalificationSummary
 from ragspine.common.evidence.configs import get_settings
 from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
-from ragspine.common.evidence.providers.providers import ProviderRequestError
+from ragspine.common.evidence.providers.providers import LocalModelConfig, ProviderRequestError
 from ragspine.extraction.evidence.figures.ports import EmbeddingPort
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
     PROVIDER_BASE_URL,
@@ -555,6 +555,49 @@ def test_an_unreachable_embedding_service_fails_before_any_ingest(
     with pytest.raises(PreflightError, match=r"local_model_tunnel\.py start"):
         _run(tmp_path, folder, embedder=None)
     assert probes == ["preflight"] and ingested == []
+
+
+def test_the_llm_gateway_alone_configures_embedding_for_the_preflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _model_env(monkeypatch)
+    for key in _EMBEDDING_ENV:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("OPENAI_EMBEDDING_MODEL", "gateway-embedding")
+    seen: list[object] = []
+
+    class Probe(OfflineDescriptionEmbedder):
+        def __init__(self, config: object) -> None:
+            super().__init__()
+            seen.append(config)
+
+        def embed_query(self, text: str) -> tuple[float, ...]:
+            return _OFFLINE.embed_query(text)
+
+    monkeypatch.setattr(folder_pipeline, "LocalEmbeddingAdapter", Probe)
+    embedder, reranker = folder_pipeline._preflight(
+        embedder=None, reranker=None, needs_rerank=False
+    )
+    assert isinstance(embedder, Probe) and reranker is None
+    (config,) = seen
+    assert isinstance(config, LocalModelConfig)
+    assert (config.base_url, config.model) == (PROVIDER_BASE_URL.rstrip("/"), "gateway-embedding")
+    assert config.api_key.get_secret_value() == _LLM_ENV["APP_LLM_API_KEY"]
+
+
+def test_a_missing_embedding_model_names_the_gateway_setting_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _model_env(monkeypatch)
+    for key in _EMBEDDING_ENV:
+        monkeypatch.delenv(key, raising=False)
+    folder = _folder(tmp_path, ("meridian.pdf", _MERIDIAN))
+    _forbid(monkeypatch, "ingest_pdf")
+
+    with pytest.raises(PreflightError, match="OPENAI_EMBEDDING_MODEL") as raised:
+        _run(tmp_path, folder, embedder=None)
+    message = str(raised.value)
+    assert message.index("simplest") < message.index("APP_EMBEDDING_BASE_URL")
 
 
 # ---- 10. CLI -----------------------------------------------------------------------------

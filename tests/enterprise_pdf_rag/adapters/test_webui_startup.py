@@ -434,3 +434,59 @@ def test_openai_fallback_values_reach_only_the_catalog_api_child_under_app_names
         assert not any(name.startswith("OPENAI_") for name in child)
     assert not any(name.startswith("APP_LLM_") for name in webui)
     assert "shell-openai-secret" not in webui.values()
+
+
+@pytest.mark.parametrize("profile", ["aia-source-review", "document-catalog"])
+def test_gateway_embedding_reaches_only_the_api_child_resolved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, profile: str
+) -> None:
+    from types import FunctionType
+
+    from ragspine.common.evidence.configs import Settings
+    from ragspine.common.evidence.providers.providers import load_local_model_config
+
+    root = _project(tmp_path)
+    python = root / ".venv/bin/python"
+    python.parent.mkdir(parents=True)
+    python.symlink_to(sys.executable)
+    monkeypatch.delenv("PYTHON_DOTENV_DISABLED", raising=False)
+    for name in list(os.environ):
+        if name.startswith(("APP_LLM_", "APP_RERANK_", "APP_EMBEDDING_")):
+            monkeypatch.delenv(name)
+    monkeypatch.setitem(Settings.model_config, "env_file", tmp_path / "absent" / ".env")
+    monkeypatch.setenv("OPENAI_API_KEY", "gateway-secret")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://gateway.example/v1")
+    monkeypatch.setenv("OPENAI_MODEL", "chat-model")
+    monkeypatch.setenv("OPENAI_EMBEDDING_MODEL", "embedding-model")
+    namespace = runpy.run_path(str(root / "scripts/enterprise_pdf_rag/webui_preview.py"))
+    start_function = cast(FunctionType, namespace["start"])
+    captured: list[dict[str, str]] = []
+
+    def ignore(*_args: object) -> None:
+        pass
+
+    @contextmanager
+    def listener(*_args: object) -> Iterator[SimpleNamespace]:
+        yield SimpleNamespace(setsockopt=ignore, bind=ignore)
+
+    def spawn(_command: list[str], *, env: dict[str, str], **_kwargs: object) -> SimpleNamespace:
+        captured.append(env)
+        return SimpleNamespace(pid=10000 + len(captured))
+
+    monkeypatch.setitem(start_function.__globals__, "current_processing_id", lambda **_kw: "a" * 64)
+    monkeypatch.setitem(start_function.__globals__, "preview_python", lambda: Path(sys.executable))
+    monkeypatch.setitem(start_function.__globals__, "ready", lambda *_args: True)
+    monkeypatch.setattr("socket.socket", listener)
+    monkeypatch.setattr(subprocess, "Popen", spawn)
+    start_function(profile)
+    api, webui = captured
+    assert api["APP_EMBEDDING_BASE_URL"] == "https://gateway.example/v1"
+    assert api["APP_EMBEDDING_MODEL"] == "embedding-model"
+    assert api["APP_EMBEDDING_API_KEY"] == "gateway-secret"
+    # What the API child's own loader makes of exactly that environment.
+    child = load_local_model_config("embedding", api)
+    assert (child.base_url, child.model) == ("https://gateway.example/v1", "embedding-model")
+    if profile == "aia-source-review":
+        assert "APP_LLM_API_KEY" not in api and "APP_LLM_MODEL" not in api
+    assert not any(name.startswith(("APP_", "OPENAI_")) for name in webui)
+    assert "gateway-secret" not in webui.values()

@@ -133,8 +133,9 @@ class Settings(BaseSettings):
     # 模型与 SSH 隧道。全部可缺省:import / 构造时不校验,哪一组缺失或不合法,只在真正用到
     # 那一组的阶段报错(providers.load_*_config / local_model_tunnel.load_tunnel_config)。
     # 端口也保持字符串,由隧道加载器做原有的严格校验。
-    # 云端 OpenAI 兼容 LLM。仅这三项以 OPENAI_* 为首选名、APP_LLM_* 为别名,逐字段取值(别名
-    # 顺序即同一来源内的优先级;别名不带 env_prefix,须写全名)。embedding / rerank / 隧道没有别名。
+    # 云端 OpenAI 兼容 LLM。这三项以 OPENAI_* 为首选名、APP_LLM_* 为别名,逐字段取值(别名
+    # 顺序即同一来源内的优先级;别名不带 env_prefix,须写全名)。embedding 模型名同理以
+    # OPENAI_EMBEDDING_MODEL 为首选名;embedding 其余两项、rerank、隧道没有别名。
     llm_api_key: SecretStr | None = Field(
         default=None, validation_alias=AliasChoices("OPENAI_API_KEY", "APP_LLM_API_KEY")
     )
@@ -144,9 +145,14 @@ class Settings(BaseSettings):
     llm_model: str | None = Field(
         default=None, validation_alias=AliasChoices("OPENAI_MODEL", "APP_LLM_MODEL")
     )
-    embedding_api_key: SecretStr | None = None  # 本地 embedding(loopback)
+    # embedding 默认与 LLM 共用 OPENAI_BASE_URL 网关(只需 OPENAI_EMBEDDING_MODEL);
+    # 设了 APP_EMBEDDING_BASE_URL 才是独立的 loopback 服务。解析规则见 as_environment。
+    embedding_api_key: SecretStr | None = None
     embedding_base_url: str | None = None
-    embedding_model: str | None = None
+    embedding_model: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("OPENAI_EMBEDDING_MODEL", "APP_EMBEDDING_MODEL"),
+    )
     rerank_api_key: SecretStr | None = None  # 本地 rerank(loopback)
     rerank_base_url: str | None = None
     rerank_model: str | None = None
@@ -177,6 +183,12 @@ class Settings(BaseSettings):
     @classmethod
     def blank_path_is_unset(cls, value: object) -> object:
         # `NB_PDF_DIR=` 留空不能解析成项目根(整个仓库会被当成 PDF 目录)。
+        return None if isinstance(value, str) and not value.strip() else value
+
+    @field_validator("embedding_api_key", "embedding_base_url", "embedding_model", mode="before")
+    @classmethod
+    def blank_embedding_is_unset(cls, value: object) -> object:
+        # 旧版 .env.example 留了 `APP_EMBEDDING_BASE_URL=` 空行;空串若算"已设",就永远走不到网关回退。
         return None if isinstance(value, str) and not value.strip() else value
 
     @field_validator("ingestion_dir", "pdf_source_dir", "report_dir")
@@ -210,14 +222,18 @@ class Settings(BaseSettings):
         供按名字取值的加载器与显式白名单的子进程环境使用;未配置的名字不出现。
         键名恒为 ``APP_*``(LLM 三项虽以 ``OPENAI_*`` 为首选名,这里仍以 ``APP_LLM_*`` 作答,
         子进程白名单与 Open WebUI 隔离依赖它)。返回值含密钥明文,只能交给加载器或子进程环境,不要打印或记录。
+
+        ``APP_EMBEDDING_BASE_URL`` / ``APP_EMBEDDING_API_KEY`` 给的是**解析后**的值:未设独立的
+        ``APP_EMBEDDING_BASE_URL`` 而设了 embedding 模型名时,embedding 共用 LLM 网关,两者分别
+        答 LLM 的 base URL 与(未单独设 embedding key 时)LLM key。子进程因此拿到完整的 embedding 组。
         """
         environment: dict[str, str] = {}
         for name in names:
             field = name.removeprefix("APP_").lower()
             if not name.startswith("APP_") or field not in type(self).model_fields:
                 raise KeyError(name)
-            value = getattr(self, field)
-            if field not in self.model_fields_set or value is None:
+            value = self._resolved(field)
+            if value is None:
                 continue
             if isinstance(value, SecretStr):
                 environment[name] = value.get_secret_value()
@@ -226,6 +242,22 @@ class Settings(BaseSettings):
             else:
                 environment[name] = str(value)
         return environment
+
+    def _configured(self, field: str) -> object:
+        return getattr(self, field) if field in self.model_fields_set else None
+
+    def _resolved(self, field: str) -> object:
+        value = self._configured(field)
+        shares_gateway = (
+            self._configured("embedding_base_url") is None
+            and self._configured("embedding_model") is not None
+        )
+        if value is None and shares_gateway:
+            if field == "embedding_base_url":
+                return self._configured("llm_base_url")
+            if field == "embedding_api_key":
+                return self._configured("llm_api_key")
+        return value
 
     @classmethod
     def settings_customise_sources(

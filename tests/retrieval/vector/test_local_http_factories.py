@@ -42,7 +42,7 @@ def test_reranker_factory_builds_scored_judge(local_env, spec):
 def test_local_http_requires_env(monkeypatch):
     for key in _ENV:
         monkeypatch.delenv(key, raising=False)
-    with pytest.raises(Exception, match="APP_EMBEDDING_BASE_URL"):
+    with pytest.raises(Exception, match="OPENAI_EMBEDDING_MODEL"):
         make_embedding_backend("local-http")
     with pytest.raises(Exception, match="APP_RERANK_BASE_URL"):
         make_reranker("local-http")

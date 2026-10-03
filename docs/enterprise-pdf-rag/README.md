@@ -92,7 +92,7 @@ uv run --locked enterprise-pdf-rag index-aia-processing \
   --processing-id <processing-id> --query "Distribution Mix chart" --limit 5
 ```
 
-该命令要求独立的 `APP_EMBEDDING_BASE_URL/MODEL/API_KEY` 和 `APP_RERANK_BASE_URL/MODEL/API_KEY`，仅允许本机回环服务；远端模型经项目管理的 SSH 隧道接入。`scripts/enterprise_pdf_rag/with_local_models.py` 可把运行时读取的服务 key 仅传给子进程，具体主机配置不入库。不会继承云端 LLM key 或回退为 hash embedding。向量、描述、IR、源 SVG、资格和原始两支属于同一固定检索 snapshot，任何缺失或失配都拒绝。
+该命令要求 embedding 配置（`OPENAI_EMBEDDING_MODEL` 与 LLM 同网关，或独立的 `APP_EMBEDDING_BASE_URL/MODEL/API_KEY`）和 `APP_RERANK_BASE_URL/MODEL/API_KEY`，独立服务仅允许本机回环；远端模型经项目管理的 SSH 隧道接入。`scripts/enterprise_pdf_rag/with_local_models.py` 可把运行时读取的服务 key 仅传给子进程，具体主机配置不入库。不会继承云端 LLM key 或回退为 hash embedding。向量、描述、IR、源 SVG、资格和原始两支属于同一固定检索 snapshot，任何缺失或失配都拒绝。
 
 每次验收另存 `retrieval-evaluations/<内容标识>/` 下的 `retrieval-example.json` 和 `retrieval-validation.json`，记录模型配置来源、维度、完整召回候选、cosine/重排分数、命中对象的审阅路径和金融 guard 检查。早期直接放在 run 目录的失败记录保留，不被后续验收覆盖。`coverage.json` 分开统计 IR/描述保存、仅转录资格、仅标签资格与数值关系资格；某个字段 unavailable 不会被总对象数量掩盖。
 
@@ -126,7 +126,7 @@ Open WebUI 的内置上传、PDF 解析、RAG、工具和后台自动生成被�
 - `GET /v1/models`、`POST /v1/chat/completions`：受限原文/处理状态审阅，支持非流式与 SSE。
 - `GET /v1/processing/status`、`GET /v1/processing/manifest`：固定处理批次的实际状态和完整依赖。
 - `GET /v1/processing/review/review.html`：本批次逐对象 SVG / IR / 描述 / 诊断。
-- `POST /v1/processing/search`、`POST /v1/processing/context`：固定 snapshot 的描述检索与无模型证据回填。新 app factory 从独立 `APP_EMBEDDING_*` 配置注入 query embedder；缺少/无效配置或服务失败返回 503，启动不调用模型。本轮实际在线搜索与同 snapshot 回填已通过；HTTP 搜索使用 cosine 排序，不执行 rerank 或 LLM。context 可按已有有效 hit 回填，不调用模型。
+- `POST /v1/processing/search`、`POST /v1/processing/context`：固定 snapshot 的描述检索与无模型证据回填。新 app factory 从 embedding 配置（`OPENAI_EMBEDDING_MODEL` + LLM 网关，或独立 `APP_EMBEDDING_*`）注入 query embedder；缺少/无效配置或服务失败返回 503，启动不调用模型。本轮实际在线搜索与同 snapshot 回填已通过；HTTP 搜索使用 cosine 排序，不执行 rerank 或 LLM。context 可按已有有效 hit 回填，不调用模型。
 - `POST /v1/queries`：结构化 ChartQA。仅在固定 member 的来源数值资格通过后，支持显式百分比查值与同图、同系列、同期间的百分点差；每个字段保留 SVG/来源 occurrence 引用。
 
 未知模型、越界页、错 snapshot、缺源证据或财务推断请求均明确拒绝。已有持久源资产、不可变 manifest 和本地原子指针；生产级多存储 CAS 发布、ACL/撤回、并发调度与完整财务 QA 尚未实现。
@@ -169,6 +169,6 @@ bash scripts/ci.sh                               # 唯一完整、只读、离�
 
 重大改动后和阶段收尾必须运行完整 `bash scripts/ci.sh`：Ruff、strict mypy、纯领域架构、版本化 schema、文档漂移、单元及离线集成测试，warnings 当作错误。测试不连接网络；真实语料测试在本地样本存在时执行，公共仓库不包含 PDF。协议与失败契约仍有独立小型离线 fixtures。
 
-真实 LLM 测试只在大版本或模型调用流程实质变化时显式触发，普通改动使用 transport 替身。来源 ingestion 不需要 LLM；前 20 页的视觉语义加工则使用有预算、可缓存的实际模型请求。已有 `llm-smoke` 仅验证连接；从环境变量或项目根 `.env`（环境变量优先）读取 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL`（别名 `APP_LLM_*`），不打印密钥，也不证明图表质量。本地 embedding/rerank 使用独立配置，未配置时拒绝，不继承云端 LLM。
+真实 LLM 测试只在大版本或模型调用流程实质变化时显式触发，普通改动使用 transport 替身。来源 ingestion 不需要 LLM；前 20 页的视觉语义加工则使用有预算、可缓存的实际模型请求。已有 `llm-smoke` 仅验证连接；从环境变量或项目根 `.env`（环境变量优先）读取 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL`（别名 `APP_LLM_*`），不打印密钥，也不证明图表质量。embedding 默认与 LLM 共用 `OPENAI_BASE_URL` 网关（只需 `OPENAI_EMBEDDING_MODEL`），也可用 `APP_EMBEDDING_*` 指向独立 loopback 服务；rerank 使用独立配置；未配置时拒绝，模型名不继承云端 LLM（[本地模型说明](local-models.md)）。
 
 架构和范围见 [ADR 0001](adr/0001-architecture.md)、[图表链 ADR 0002](adr/0002-figure-pipeline.md)、[UI ADR 0003](adr/0003-open-webui.md)、[真实来源 ADR 0004](adr/0004-aia-source-review.md)、[前 20 页 ADR 0005](adr/0005-first-twenty-pages-processing.md)、[其他视觉 ADR 0006](adr/0006-non-chart-visual-semantics.md)、[独立安装 ADR 0007](adr/0007-installable-runtime.md)、[通用入库 ADR 0010](adr/0010-generic-pdf-ingestion-entry.md)、[文档目录与回答链 ADR 0011](adr/0011-document-catalog-and-verified-answer-chain.md)、[图表索引与召回 ADR 0012](adr/0012-chart-index-text-and-retrieval-seats.md)、[页级元数据与前置过滤 ADR 0013](adr/0013-page-metadata-and-prefilters.md)、[划线表格网格证明 ADR 0014](adr/0014-ruled-table-grid-proof.md)、[Diagram 与 Formula 可检索 ADR 0015](adr/0015-diagram-and-formula-retrievable.md)、[逐字图表点位 ADR 0016](adr/0016-verbatim-chart-points.md)、[页级父子窗口 ADR 0017](adr/0017-page-context-window.md)、[通道选择与查询翻译 ADR 0018](adr/0018-query-classification-and-translation.md)、[文档树检索通道 ADR 0019](adr/0019-document-tree-channel.md)、[PRD v0.2](PRD-v0.2.md)。PDF、密钥、运行产物、虚拟环境与本地 IDE 配置不进入公共仓库。

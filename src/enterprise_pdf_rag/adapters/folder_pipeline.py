@@ -114,6 +114,11 @@ _LOCAL_HINT = (
     "the local-model tunnel first: .venv/bin/python "
     "scripts/enterprise_pdf_rag/local_model_tunnel.py start (this pipeline never starts it)"
 )
+_EMBEDDING_HINT = (
+    "simplest: set OPENAI_EMBEDDING_MODEL in the project .env to use the same OPENAI_BASE_URL "
+    "gateway as the LLM; for a separate loopback service instead, "
+    + _LOCAL_HINT.format(prefix="APP_EMBEDDING")
+)
 
 
 class PreflightError(ValueError):
@@ -278,7 +283,7 @@ def _preflight(
     except ValueError as error:
         raise PreflightError(f"LLM is not configured ({error}); {_LLM_HINT}") from error
     if embedder is None:
-        hint = _LOCAL_HINT.format(prefix="APP_EMBEDDING")
+        hint = _EMBEDDING_HINT
         try:
             embedder = LocalEmbeddingAdapter(load_local_model_config("embedding"))
         except ValueError as error:

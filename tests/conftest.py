@@ -25,7 +25,7 @@ def _isolate_ambient_openai_for_scoped_fixtures():
     """OPENAI_* 是 LLM 首选名,会盖过用例设的 APP_LLM_*;module/session 级 fixture 先于下面的
     函数级清理运行,所以这里在会话级先清一遍。"""
     with pytest.MonkeyPatch.context() as patch:
-        for name in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL"):
+        for name in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL", "OPENAI_EMBEDDING_MODEL"):
             patch.delenv(name, raising=False)
         yield
 
@@ -43,6 +43,7 @@ def _isolate_ambient_llm_and_notebook_settings(monkeypatch):
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
         "OPENAI_MODEL",
+        "OPENAI_EMBEDDING_MODEL",
         "NB_PDF_DIR",
         "NB_QUESTIONS_PATH",
         "NB_REPORT_DIR",

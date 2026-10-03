@@ -17,7 +17,7 @@
 
 第 20 页 typed ChartQA v2 已有工作树实现和候选证据，但不能在新 runtime 验收、发布与激活之前当成当前在线能力。多文档目录/切换与证据链聊天已有离线实现和测试（`document-catalog` 模式），但只有真实模型验收后才能称为已验收；完整图表能力与通用 TableQA 仍未验收——TABLE 成员目前只放行逐字转写 `VERIFIED` 的表；划线表另外证明行列关系（[ADR 0014](adr/0014-ruled-table-grid-proof.md)：每条行/列边界、每个单元格四边、每处合并都要在该页 `get_drawings()` 的实际线段里找到证据，`row`/`col`/`header` 引用只对网格 `VERIFIED` 的表开放），无线表、吸附/双线边界仍只证明原文。Diagram 与 Formula 成员自 [ADR 0015](adr/0015-diagram-and-formula-retrievable.md) 起可检索、可引用，前提是几何 / token 证明整体成立（任一规则失败则整对象不进索引并带逐字诊断）；Image 仍不可检索。
 
-本地 `8766` API 当前没有调用者 API key 校验。来源审阅、context、typed ChartQA 不需要 `APP_LLM_API_KEY`。查询向量由后端使用独立的 `APP_EMBEDDING_BASE_URL`、`APP_EMBEDDING_MODEL`、`APP_EMBEDDING_API_KEY`；客户端不提交这些凭证。Open WebUI 厂商进程仍拿不到 embedding/LLM/rerank key。
+本地 `8766` API 当前没有调用者 API key 校验。来源审阅、context、typed ChartQA 不需要 `APP_LLM_API_KEY`。查询向量由后端的 embedding 配置产生（默认 `OPENAI_EMBEDDING_MODEL` + LLM 网关，或独立 loopback 服务的 `APP_EMBEDDING_BASE_URL`、`APP_EMBEDDING_MODEL`、`APP_EMBEDDING_API_KEY`，见 [本地模型说明](local-models.md)）；客户端不提交这些凭证。Open WebUI 厂商进程仍拿不到 embedding/LLM/rerank key。
 
 ## 可复制的后端请求
 
@@ -84,9 +84,9 @@ curl --fail-with-body http://127.0.0.1:8766/v1/processing/context \
 
 ## 查询向量配置与启动
 
-app factory 在启动时读取既有独立配置（环境变量 > 项目根 `.env`；经启动器起的 API 子进程不读 `.env`，只收父进程给的白名单），不在启动时连接模型。只接受 `127.0.0.1`、`localhost`、`::1` 的 HTTP(S) 地址；需要远端模型时使用已有受管 SSH 隧道。不要把云 LLM key 或任意远端 URL 填进 embedding 设置。模型 fingerprint 和向量维度必须与已发布索引一致，不能启动时重建或替换索引。
+app factory 在启动时读取既有独立配置（环境变量 > 项目根 `.env`；经启动器起的 API 子进程不读 `.env`，只收父进程给的白名单），不在启动时连接模型。embedding 与 LLM 共用网关时只需 `OPENAI_EMBEDDING_MODEL`；独立服务的 `APP_EMBEDDING_BASE_URL` 只接受 `127.0.0.1`、`localhost`、`::1` 的 HTTP(S) 地址（或恰好等于 `OPENAI_BASE_URL`），需要远端模型时使用已有受管 SSH 隧道。不要把任意远端 URL 填进 embedding 设置。模型 fingerprint 和向量维度必须与已发布索引一致，不能启动时重建或替换索引。
 
-将上述三项写入项目根 `.env` 或以环境变量提供给启动器，再运行 `./scripts/enterprise_pdf_rag/start.sh`。启动器仅将 `APP_EMBEDDING_*` 传给 API 子进程，厂商 Open WebUI 环境不继承它们。已有健康进程会被复用；修改代码或配置后，要通过已有 owned-process `stop` / `start` 流程受控重启才能生效，不能以一次 `start` 输出推断配置已经更新。具体命令见 [Open WebUI 使用说明](open-webui.md)。
+将上述 embedding 配置写入项目根 `.env` 或以环境变量提供给启动器，再运行 `./scripts/enterprise_pdf_rag/start.sh`。启动器仅将 `APP_EMBEDDING_*` 传给 API 子进程，厂商 Open WebUI 环境不继承它们。已有健康进程会被复用；修改代码或配置后，要通过已有 owned-process `stop` / `start` 流程受控重启才能生效，不能以一次 `start` 输出推断配置已经更新。具体命令见 [Open WebUI 使用说明](open-webui.md)。
 
 缺少、部分缺少或无效配置时，来源读取继续工作，search 返回 503；服务连接/响应失败返回 503，不自动重试。错 snapshot、损坏证据或不匹配的模型/维度会被拒绝，不回退合成向量。当前 HTTP 搜索为 cosine 排序，已有 CLI 的 rerank 验收不等于在线搜索含 rerank。该回环配置限制尚未在 Databricks 网络部署中验收，安装通过也不能代替部署通过。
 
@@ -289,12 +289,12 @@ result.ok, result.live_calls, [(d.pdf_path, d.status) for d in result.documents]
 完整示例见 `notebooks/run_folder.ipynb`（一个配置 cell、一个运行 cell、结果表格；不含密钥、不带输出、不要在无模型环境里执行）。
 
 - **`NB_*` 路径设置**：`NB_PDF_DIR`（PDF 源目录）、`NB_QUESTIONS_PATH`（题集）、`NB_REPORT_DIR`（报告目录）经 `get_settings()` 读取，名字**不带** `APP_` 前缀；`~` 展开，相对路径相对项目根，不校验是否存在，留空等于未设置。函数参数 / CLI 参数始终优先；`folder` 两处都没有时抛 `ValueError`（CLI 退出码 1，写明"传 folder 或在 .env 设 NB_PDF_DIR"）；题集 / 报告目录两处都没有时保持原行为（不评测 / 不写报告）。
-- **LLM 的 `OPENAI_*` 首选名**：首选 `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL`，`APP_LLM_API_KEY` / `APP_LLM_BASE_URL` / `APP_LLM_MODEL` 为别名，逐字段读取（只这三项；embedding / rerank / 隧道没有别名）。同一来源内 `OPENAI_*` 优先；来源之间仍是 真实环境变量 > 项目根 `.env`，且按来源整体比较：shell 里导出的 `APP_LLM_MODEL` 会盖过 `.env` 里的 `OPENAI_MODEL`。校验不放宽（base URL 仍只接受 https）；受控子进程只收到解析后的 `APP_LLM_*`，不会收到 `OPENAI_*`；传入映射给 `load_llm_config` 时只认 `APP_LLM_*` 键。
+- **LLM 的 `OPENAI_*` 首选名**：首选 `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL`，`APP_LLM_API_KEY` / `APP_LLM_BASE_URL` / `APP_LLM_MODEL` 为别名，逐字段读取（另有 `OPENAI_EMBEDDING_MODEL` 是 `APP_EMBEDDING_MODEL` 的首选名；rerank / 隧道没有别名）。同一来源内 `OPENAI_*` 优先；来源之间仍是 真实环境变量 > 项目根 `.env`，且按来源整体比较：shell 里导出的 `APP_LLM_MODEL` 会盖过 `.env` 里的 `OPENAI_MODEL`。校验不放宽（base URL 仍只接受 https）；受控子进程只收到解析后的 `APP_LLM_*`，不会收到 `OPENAI_*`；传入映射给 `load_llm_config` 时只认 `APP_LLM_*` 键。
 - **单独取回答模型客户端**：`enterprise_pdf_rag.adapters.answer_llm.make_answer_llm(cache_dir=None, max_live_calls=None)` 返回 `JsonCompletionClient`，默认缓存 `<ingestion_root>/model-cache`、预算 `APP_ANSWER_MAX_LIVE_CALLS`、超时与种子取自设置；`run_folder_pipeline` 不注入 `answer_llm` 时就是调用它。
 
 `embedder` / `reranker` / `answer_llm` 可注入（离线测试即如此）；不注入时与 `index` 命令、`document-catalog` 服务的构造方式相同。
 
-- **前置检查**：花任何预算、调用任何 ingest 之前，先确认 `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL`（或其 `APP_LLM_*` 别名）已在项目 `.env` 配好，并用 `embed_query("preflight")` 探测一次 embedding（`APP_EMBEDDING_*`，证明隧道通）；题集里有 `rerank: true` 的用例时还要求 `APP_RERANK_*`。失败即报错并指向这些变量名和 `scripts/enterprise_pdf_rag/local_model_tunnel.py start`——**它不会自己起隧道**。注入的依赖不检查。
+- **前置检查**：花任何预算、调用任何 ingest 之前，先确认 `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL`（或其 `APP_LLM_*` 别名）已在项目 `.env` 配好，并用 `embed_query("preflight")` 探测一次 embedding（最简单是在 `.env` 设 `OPENAI_EMBEDDING_MODEL`，与 LLM 同网关；或独立 loopback 服务的 `APP_EMBEDDING_*`，证明隧道通）；题集里有 `rerank: true` 的用例时还要求 `APP_RERANK_*`。失败即报错并指向这些变量名和 `scripts/enterprise_pdf_rag/local_model_tunnel.py start`——**它不会自己起隧道**。注入的依赖不检查。
 - **发现与去重**：递归找 `*.pdf`（后缀大小写不敏感），跳过隐藏文件 / 隐藏目录，按相对路径排序。同内容（sha256 相同）只处理第一份，其余标 `duplicate_of`——同 sha 不同文件名会落进同一个 sha 目录、生成两份 manifest 并互相覆盖 `current-*` 指针。
 - **预算**：每份 PDF 的 ingest 预算是 `min(--max-live-calls-per-pdf, 总额剩余)`；tree（每份 `--tree-max-live-calls`）和评测的回答调用（默认 `APP_ANSWER_MAX_LIVE_CALLS`）也从总额里扣，并在 `live_calls` 里分项列出。总额用完后其余 PDF 仍以预算 0 运行：缓存里已有的照常走完；被总额截短且仍有阶段 `deferred` 的标 `budget_starved`、不发布，`budget_exhausted=true`（只要有一次分配被总额截短就为真）。每份只跑一轮，不自动多轮。
 - **续跑**：同一目录再跑一次时全部命中缓存（`live_calls.total == 0`）；已发布的 release 恰是本次 draft 加同一 embedder 的索引时直接复用（`index_reused=true`，不再 embed），`publish` 幂等重放。换 embedder 会重建索引。
@@ -322,7 +322,8 @@ export APP_INGESTION_DIR=/abs/path/data/ingestion   # 可省略；默认 APP_DAT
 # 可选：原地挂载 AIA 发布。每项是 processing store 根，其父目录即 source store 根；JSON 列表，默认空
 export APP_LEGACY_DOCUMENT_ROOTS='["/abs/path/data/output/aia-2026-interim/pages-001-020"]'
 # 检索 vector 通道：缺失 → 文档仍 mounted=true 但 embedding_configured=false，search 与 chat 503
-export APP_EMBEDDING_BASE_URL='<loopback url>' APP_EMBEDDING_MODEL='<model matching the index>' APP_EMBEDDING_API_KEY='<key>'
+export OPENAI_EMBEDDING_MODEL='<gateway model matching the index>'   # 与 LLM 同网关；或独立 loopback 服务：
+# export APP_EMBEDDING_BASE_URL='<loopback url>' APP_EMBEDDING_MODEL='<model matching the index>' APP_EMBEDDING_API_KEY='<key>'
 # 聊天合成：缺失 → /v1/chat/completions 503（/v1/models、/v1/documents* 照常）
 export APP_LLM_BASE_URL='<https url>' APP_LLM_MODEL='<model>' APP_LLM_API_KEY='<key>'
 # 可选 rerank：只在请求显式 "rerank": true 时使用；缺失时该请求 503
