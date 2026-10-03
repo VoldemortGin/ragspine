@@ -20,6 +20,29 @@ from ragspine.fixtures.excel import GT_PATH, XLSX_PATH
 from ragspine.fixtures.excel import main as make_excel_fixtures
 
 
+@pytest.fixture(autouse=True)
+def _isolate_ambient_llm_and_notebook_settings(monkeypatch):
+    """开发者 shell 里的 OPENAI_* / NB_* 不得影响测试(configs 会把它们读成 LLM 回退与 notebook 路径)。
+
+    要测这些变量的用例自己 monkeypatch.setenv;get_settings() 是进程级缓存,前后各清一次,
+    让它既不带着 import 期的环境,也不把某个用例的环境漏给下一个。
+    """
+    from ragspine.common.evidence.configs import get_settings
+
+    for name in (
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+        "OPENAI_MODEL",
+        "NB_PDF_DIR",
+        "NB_QUESTIONS_PATH",
+        "NB_REPORT_DIR",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _ensure_fixtures() -> None:
     """整轮测试前确保合成 fixture 与 ground truth 存在（缺失则一键再生）。"""

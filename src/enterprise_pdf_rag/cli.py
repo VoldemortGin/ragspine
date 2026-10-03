@@ -169,12 +169,17 @@ def _parser() -> argparse.ArgumentParser:
         "run-folder",
         help="Ingest, requalify, qualify, index, publish and tree every PDF under a folder, then optionally answer a question set in process; budgeted, resumable, never starts the tunnel",
     )
-    run_folder.add_argument("--folder", type=Path, required=True)
+    run_folder.add_argument(
+        "--folder",
+        type=Path,
+        default=None,
+        help="PDF folder; default NB_PDF_DIR from the environment / project .env",
+    )
     run_folder.add_argument(
         "--questions",
         type=Path,
         default=None,
-        help="nl-answers-gold-v1 JSON, or .json/.jsonl/.csv/.txt questions (id/question/expected/pages/doc)",
+        help="nl-answers-gold-v1 JSON, or .json/.jsonl/.csv/.txt questions (id/question/expected/pages/doc); default NB_QUESTIONS_PATH",
     )
     run_folder.add_argument(
         "--max-live-calls-per-pdf",
@@ -204,7 +209,10 @@ def _parser() -> argparse.ArgumentParser:
         help="Stop at the first failing PDF instead of recording it and continuing",
     )
     run_folder.add_argument(
-        "--report-dir", type=Path, default=None, help="Also write report.json and report.md here"
+        "--report-dir",
+        type=Path,
+        default=None,
+        help="Also write report.json and report.md here; default NB_REPORT_DIR",
     )
     serve = commands.add_parser(
         "serve", help="Serve the explicitly configured API; no ingestion or model calls"

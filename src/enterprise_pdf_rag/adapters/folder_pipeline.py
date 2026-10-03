@@ -30,6 +30,7 @@ from fastapi import FastAPI
 from pydantic import Field
 
 from enterprise_pdf_rag.adapters.answer_audit import open_audit_store
+from enterprise_pdf_rag.adapters.answer_llm import make_answer_llm
 from enterprise_pdf_rag.adapters.document_catalog import DocumentCatalog, scan_catalog
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.document_tree_extraction import (
@@ -105,7 +106,8 @@ _GOLD_VERDICTS: dict[str, CaseVerdict] = {
 _UNHEALTHY_VERDICTS = frozenset({"FAIL", "http_error", "routing_failed"})
 _HEALTHY_STATUSES = frozenset({"published", "duplicate_of", "nothing_to_index"})
 _LLM_HINT = (
-    "set APP_LLM_API_KEY, APP_LLM_BASE_URL and APP_LLM_MODEL in the project .env (see .env.example)"
+    "set APP_LLM_API_KEY, APP_LLM_BASE_URL and APP_LLM_MODEL (or OPENAI_API_KEY, "
+    "OPENAI_BASE_URL and OPENAI_MODEL) in the project .env (see .env.example)"
 )
 _LOCAL_HINT = (
     "set {prefix}_BASE_URL, {prefix}_MODEL and {prefix}_API_KEY in the project .env and start "
@@ -748,7 +750,7 @@ def _markdown(result: FolderPipelineResult) -> str:
 
 
 def run_folder_pipeline(
-    folder: Path,
+    folder: Path | None = None,
     *,
     questions: Path | None = None,
     ingestion_root: Path | None = None,
@@ -768,6 +770,11 @@ def run_folder_pipeline(
 ) -> FolderPipelineResult:
     """Ingest, requalify, qualify, index, publish and tree every PDF in ``folder``, then evaluate.
 
+    ``folder``, ``questions`` and ``report_dir`` default to ``NB_PDF_DIR`` / ``NB_QUESTIONS_PATH`` /
+    ``NB_REPORT_DIR`` (``get_settings()``); an argument always wins, and with neither the
+    question set is not run and no report is written. Without a folder from either place this
+    raises ``ValueError``.
+
     Raises ``ValueError`` for an invalid budget, ``FileNotFoundError`` for a missing folder or
     question set and ``PreflightError`` for a missing or unreachable dependency, all before
     any ingest or model call. An injected ``embedder`` / ``reranker`` / ``answer_llm`` skips
@@ -778,6 +785,15 @@ def run_folder_pipeline(
     _check_budget("tree_max_live_calls", tree_max_live_calls)
     _check_budget("answer_max_live_calls", answer_max_live_calls)
     _check_total(max_live_calls_total)
+    settings = get_settings()
+    if folder is None:
+        folder = settings.pdf_source_dir
+    if folder is None:
+        raise ValueError("no PDF folder: pass folder or set NB_PDF_DIR in the project .env")
+    if questions is None:
+        questions = settings.questions_path
+    if report_dir is None:
+        report_dir = settings.report_dir
     folder = folder.expanduser().resolve()
     if not folder.is_dir():
         raise FileNotFoundError(f"folder not found: {folder}")
@@ -786,7 +802,6 @@ def run_folder_pipeline(
         case.request.rerank for case in question_set.cases if not case.offline_only
     )
     embedder, reranker = _preflight(embedder=embedder, reranker=reranker, needs_rerank=needs_rerank)
-    settings = get_settings()
     root = ingestion_root if ingestion_root is not None else settings.ingestion_root
     root = root.expanduser().resolve()
     budget = _Budget(max_live_calls_total)
@@ -843,16 +858,13 @@ def run_folder_pipeline(
         mounted = frozenset(entry.document_id for entry in catalog.ready)
         llm = answer_llm
         if llm is None:
-            llm = JsonCompletionClient(
-                load_llm_config(),
+            llm = make_answer_llm(
                 cache_dir=root / "model-cache",
                 max_live_calls=budget.allot(
                     settings.answer_max_live_calls
                     if answer_max_live_calls is None
                     else answer_max_live_calls
                 ),
-                timeout=settings.answer_timeout_seconds,
-                seed=settings.answer_seed,
             )
         before = llm.live_call_count
         post: ChatPost | None = None

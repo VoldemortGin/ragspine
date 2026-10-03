@@ -77,4 +77,4 @@ uv run --locked python scripts/enterprise_pdf_rag/local_model_smoke.py
 
 它各发一个短请求，只输出 embedding fingerprint、向量维度和 rerank 候选索引，不输出 key、向量、provider body 或候选正文。该命令不是默认测试或 CI 的一部分，不会重试，也不能证明模型对财报语义的质量。默认 `bash scripts/ci.sh` 始终离线，使用 transport fake 验证请求与严格响应边界。
 
-云端图表理解使用独立的 `APP_LLM_API_KEY`、`APP_LLM_BASE_URL` 与 `APP_LLM_MODEL`。需要时只给对应受控子进程显式设置；不得把云端 key 或本地模型 key 互相复用或写入全局 shell 配置。
+云端图表理解使用独立的 `APP_LLM_API_KEY`、`APP_LLM_BASE_URL` 与 `APP_LLM_MODEL`（仅这三项在未设置时逐字段回退读 `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL`；embedding / rerank / 隧道没有回退，受控子进程也只收到解析后的 `APP_LLM_*`，收不到 `OPENAI_*`）。需要时只给对应受控子进程显式设置；不得把云端 key 或本地模型 key 互相复用或写入全局 shell 配置。
