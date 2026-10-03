@@ -288,7 +288,7 @@ result.ok, result.live_calls, [(d.pdf_path, d.status) for d in result.documents]
 
 完整示例见 `notebooks/run_folder.ipynb`（一个配置 cell、一个运行 cell、结果表格；不含密钥、不带输出、不要在无模型环境里执行）。
 
-- **`NB_*` 路径设置**：`NB_PDF_DIR`（PDF 源目录）、`NB_QUESTIONS_PATH`（题集）、`NB_REPORT_DIR`（报告目录）经 `get_settings()` 读取，名字**不带** `APP_` 前缀；`~` 展开，相对路径相对项目根，不校验是否存在，留空等于未设置。函数参数 / CLI 参数始终优先；`folder` 两处都没有时抛 `ValueError`（CLI 退出码 1，写明"传 folder 或在 .env 设 NB_PDF_DIR"）；题集 / 报告目录两处都没有时保持原行为（不评测 / 不写报告）。
+- **`NB_*` 路径设置**：`NB_PDF_DIR`（PDF 源目录）、`NB_QUESTIONS_PATH`（题集；别名 `DATASET_PATH`，主名优先，主名留空则回落到别名）、`NB_REPORT_DIR`（报告目录）经 `get_settings()` 读取，名字**不带** `APP_` 前缀；`~` 展开，相对路径相对项目根，不校验是否存在，留空等于未设置。函数参数 / CLI 参数始终优先；`folder` 两处都没有时抛 `ValueError`（CLI 退出码 1，写明"传 folder 或在 .env 设 NB_PDF_DIR"）；题集 / 报告目录两处都没有时保持原行为（不评测 / 不写报告）。
 - **LLM 的 `OPENAI_*` 首选名**：首选 `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL`，`APP_LLM_API_KEY` / `APP_LLM_BASE_URL` / `APP_LLM_MODEL` 为别名，逐字段读取（另有 `OPENAI_EMBEDDING_MODEL` 是 `APP_EMBEDDING_MODEL` 的首选名；rerank / 隧道没有别名）。同一来源内 `OPENAI_*` 优先；来源之间仍是 真实环境变量 > 项目根 `.env`，且按来源整体比较：shell 里导出的 `APP_LLM_MODEL` 会盖过 `.env` 里的 `OPENAI_MODEL`。校验不放宽（base URL 仍只接受 https）；受控子进程只收到解析后的 `APP_LLM_*`，不会收到 `OPENAI_*`；传入映射给 `load_llm_config` 时只认 `APP_LLM_*` 键。
 - **单独取回答模型客户端**：`enterprise_pdf_rag.adapters.answer_llm.make_answer_llm(cache_dir=None, max_live_calls=None)` 返回 `JsonCompletionClient`，默认缓存 `<ingestion_root>/model-cache`、预算 `APP_ANSWER_MAX_LIVE_CALLS`、超时与种子取自设置；`run_folder_pipeline` 不注入 `answer_llm` 时就是调用它。
 

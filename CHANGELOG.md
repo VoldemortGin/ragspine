@@ -4,6 +4,12 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ## [Unreleased]
 
+### Changed
+
+- **`questions_path` also reads `DATASET_PATH` as an alias of `NB_QUESTIONS_PATH`** (environment and project `.env`).
+  `NB_QUESTIONS_PATH` wins; a blank `NB_QUESTIONS_PATH=` counts as unset and falls back to `DATASET_PATH`. Relative paths
+  resolve exactly as before. Only this field gained an alias.
+
 ## [0.17.3] - 2026-09-28
 
 ### Changed

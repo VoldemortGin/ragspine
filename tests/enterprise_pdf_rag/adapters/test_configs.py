@@ -168,7 +168,7 @@ def _primary_name(field: str) -> str:
 
 def test_env_example_lists_exactly_the_settings_fields() -> None:
     text = (ROOT_DIR / ".env.example").read_text(encoding="utf-8")
-    listed = set(re.findall(r"^#?\s*((?:APP|NB|OPENAI)_[A-Z_]+)=", text, re.MULTILINE)) - {
+    listed = set(re.findall(r"^#?\s*((?:APP|NB|OPENAI|DATASET)_[A-Z_]+)=", text, re.MULTILINE)) - {
         "APP_ROOT_DIR"
     }
     primaries = {_primary_name(name) for name in Settings.model_fields}
@@ -185,6 +185,79 @@ def test_env_example_documents_the_openai_preferred_names() -> None:
     for name in ("APP_EMBEDDING_BASE_URL", "APP_EMBEDDING_MODEL", "APP_EMBEDDING_API_KEY"):
         assert not re.search(rf"^{name}=", text, re.MULTILINE), name
         assert re.search(rf"^#\s*{name}=", text, re.MULTILINE), name
+
+
+# ---- DATASET_PATH:questions_path 的回落别名(主名 NB_QUESTIONS_PATH 优先) ----------------------
+
+
+def _questions(root_relative: str) -> Path:
+    return (ROOT_DIR / root_relative).resolve()
+
+
+def test_dataset_path_alone_sets_questions_path_from_environment(
+    bare: Callable[[str], None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DATASET_PATH", "data/ds.json")
+    assert Settings().questions_path == _questions("data/ds.json")  # 相对路径与主名同样相对项目根
+
+
+def test_primary_name_wins_over_dataset_path_in_environment(
+    bare: Callable[[str], None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DATASET_PATH", "data/ds.json")
+    monkeypatch.setenv("NB_QUESTIONS_PATH", "data/nb.json")
+    assert Settings().questions_path == _questions("data/nb.json")
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_blank_primary_name_falls_back_to_dataset_path_in_environment(
+    bare: Callable[[str], None], monkeypatch: pytest.MonkeyPatch, blank: str
+) -> None:
+    monkeypatch.setenv("NB_QUESTIONS_PATH", blank)
+    monkeypatch.setenv("DATASET_PATH", "data/ds.json")
+    assert Settings().questions_path == _questions("data/ds.json")
+
+
+def test_both_blank_or_unset_means_none_in_environment(
+    bare: Callable[[str], None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert Settings().questions_path is None
+    monkeypatch.setenv("NB_QUESTIONS_PATH", "")
+    monkeypatch.setenv("DATASET_PATH", " ")
+    assert Settings().questions_path is None
+
+
+def test_dataset_path_alone_in_dotenv(bare: Callable[[str], None]) -> None:
+    bare("DATASET_PATH=data/ds.json\n")
+    assert Settings().questions_path == _questions("data/ds.json")
+
+
+def test_primary_name_wins_over_dataset_path_in_dotenv(bare: Callable[[str], None]) -> None:
+    bare("DATASET_PATH=data/ds.json\nNB_QUESTIONS_PATH=data/nb.json\n")
+    assert Settings().questions_path == _questions("data/nb.json")
+    bare("NB_QUESTIONS_PATH=data/nb.json\nDATASET_PATH=data/ds.json\n")  # 与书写顺序无关
+    assert Settings().questions_path == _questions("data/nb.json")
+
+
+def test_blank_primary_name_falls_back_to_dataset_path_in_dotenv(
+    bare: Callable[[str], None],
+) -> None:
+    bare("NB_QUESTIONS_PATH=\nDATASET_PATH=data/ds.json\n")
+    assert Settings().questions_path == _questions("data/ds.json")
+
+
+def test_both_blank_means_none_in_dotenv(bare: Callable[[str], None]) -> None:
+    bare("NB_QUESTIONS_PATH=\nDATASET_PATH=\n")
+    assert Settings().questions_path is None
+
+
+def test_dataset_path_in_environment_and_primary_name_in_dotenv(
+    bare: Callable[[str], None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 跨来源仍是「来源整体比较」(与 OPENAI_* / APP_LLM_* 同一机制):真实环境变量的别名盖过 .env 的主名。
+    bare("NB_QUESTIONS_PATH=data/nb.json\n")
+    monkeypatch.setenv("DATASET_PATH", "data/ds.json")
+    assert Settings().questions_path == _questions("data/ds.json")
 
 
 # ---- OPENAI_* preferred names (APP_LLM_* aliases) for the three LLM settings -------------------------------------------

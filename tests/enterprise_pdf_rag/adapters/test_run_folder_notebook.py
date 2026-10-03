@@ -10,6 +10,8 @@ from ragspine.common.evidence.configs import ROOT_DIR
 
 _NOTEBOOK = ROOT_DIR / "notebooks" / "run_folder.ipynb"
 _SECRET_ASSIGNMENT = re.compile(r"(api_key|secret|token|password)\s*=", re.IGNORECASE)
+# restart 格在 import ragspine 之前执行、拿不到 get_settings(); 只豁免这一个只读的平台探测表达式
+_ALLOWED_ENV_PROBE = 'os.environ.get("DATABRICKS_RUNTIME_VERSION")'
 
 
 def _notebook() -> dict[str, Any]:
@@ -59,6 +61,7 @@ def test_notebook_has_no_secrets_environment_writes_or_absolute_paths(cell_type:
         assert "sk-" not in source
         assert not _SECRET_ASSIGNMENT.search(source)
         if cell_type == "code":
-            assert "os.environ" not in source and "environ[" not in source
+            env_checked = source.replace(_ALLOWED_ENV_PROBE, "")
+            assert "os.environ" not in env_checked and "environ[" not in env_checked
             assert "/Users/" not in source and "C:\\" not in source
             assert not re.search(r"""["']/[A-Za-z]""", source)
