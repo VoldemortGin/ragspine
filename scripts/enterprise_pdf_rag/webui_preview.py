@@ -280,7 +280,11 @@ def start(profile: str = "aia-source-review", *, require_processing: bool = Fals
     STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
     from ragspine.common.evidence.configs import Settings
 
-    api_settings = Settings().as_environment(_API_SETTINGS.get(profile, ()))
+    settings = Settings()
+    api_settings = settings.as_environment(_API_SETTINGS.get(profile, ()))
+    if profile == "document-catalog" and settings.pdf_ingest_password is not None:
+        # Mounting re-proves pinned sources by re-opening their PDFs; an encrypted one needs it.
+        api_settings["PDF_INGEST_PASSWORD"] = settings.pdf_ingest_password.get_secret_value()
     processes: dict[ProcessName, dict[str, str | int]] = {}
     commands: dict[ProcessName, list[str]] = {
         "api": [

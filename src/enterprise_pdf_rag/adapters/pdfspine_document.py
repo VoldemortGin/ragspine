@@ -6,6 +6,7 @@ from xml.etree import ElementTree
 import pdfspine
 from pydantic import BaseModel, ConfigDict, FiniteFloat, TypeAdapter, field_validator
 
+from enterprise_pdf_rag.adapters.pdf_password import open_pdf
 from enterprise_pdf_rag.adapters.pdfspine_svg import (
     crop_native_svg,
     validate_native_svg,
@@ -181,7 +182,7 @@ class PdfspineDocumentAdapter:
         if not pdf.startswith(b"%PDF-"):
             raise ValueError("Expected PDF bytes")
         source_digest = sha256(pdf).hexdigest()
-        document = pdfspine.open(stream=pdf, filetype="pdf")
+        document = open_pdf(pdf)
         try:
             pages = tuple(
                 _checked_page(document, source_digest=source_digest, page_index=page_index)
@@ -197,7 +198,7 @@ class PdfspineDocumentAdapter:
         if not pdf.startswith(b"%PDF-"):
             raise ValueError("Expected PDF bytes")
         source_digest = sha256(pdf).hexdigest()
-        document = pdfspine.open(stream=pdf, filetype="pdf")
+        document = open_pdf(pdf)
         try:
             if not 0 <= page_index < document.page_count:
                 raise ValueError(f"Page index {page_index} is out of range")

@@ -168,9 +168,9 @@ def _primary_name(field: str) -> str:
 
 def test_env_example_lists_exactly_the_settings_fields() -> None:
     text = (ROOT_DIR / ".env.example").read_text(encoding="utf-8")
-    listed = set(re.findall(r"^#?\s*((?:APP|NB|OPENAI|DATASET)_[A-Z_]+)=", text, re.MULTILINE)) - {
-        "APP_ROOT_DIR"
-    }
+    listed = set(
+        re.findall(r"^#?\s*((?:APP|NB|OPENAI|DATASET|PDF)_[A-Z_]+)=", text, re.MULTILINE)
+    ) - {"APP_ROOT_DIR"}
     primaries = {_primary_name(name) for name in Settings.model_fields}
     aliases = set().union(*(_alias_names(name) for name in Settings.model_fields))
     assert primaries <= listed <= primaries | aliases
@@ -575,3 +575,30 @@ def test_notebook_settings_come_from_dotenv_and_blank_means_unset(
     monkeypatch.setenv("NB_PDF_DIR", "other")
     assert Settings().pdf_source_dir == (ROOT_DIR / "other").resolve()
     assert Settings(pdf_source_dir=Path("by-name")).pdf_source_dir == (ROOT_DIR / "by-name")
+
+
+# ---- PDF_INGEST_PASSWORD -----------------------------------------------------------------
+
+
+def test_pdf_ingest_password_is_unset_by_default_and_blank_means_unset(
+    bare: Callable[[str], None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert Settings().pdf_ingest_password is None
+    bare("PDF_INGEST_PASSWORD=   \n")
+    assert Settings().pdf_ingest_password is None
+    monkeypatch.setenv("PDF_INGEST_PASSWORD", "")
+    assert Settings().pdf_ingest_password is None
+
+
+def test_pdf_ingest_password_comes_from_dotenv_without_prefix_and_stays_secret(
+    bare: Callable[[str], None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bare("PDF_INGEST_PASSWORD=dotenv-pdf-secret\nAPP_PDF_INGEST_PASSWORD=prefixed-is-ignored\n")
+    settings = Settings()
+    assert isinstance(settings.pdf_ingest_password, SecretStr)
+    assert settings.pdf_ingest_password.get_secret_value() == "dotenv-pdf-secret"
+    rendered = repr(settings) + str(settings) + settings.model_dump_json()
+    assert "dotenv-pdf-secret" not in rendered
+    monkeypatch.setenv("PDF_INGEST_PASSWORD", "environment-pdf-secret")
+    password = Settings().pdf_ingest_password
+    assert password is not None and password.get_secret_value() == "environment-pdf-secret"

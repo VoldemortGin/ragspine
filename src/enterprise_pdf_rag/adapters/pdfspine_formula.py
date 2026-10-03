@@ -12,6 +12,7 @@ from math import isfinite
 import pdfspine
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
+from enterprise_pdf_rag.adapters.pdf_password import open_pdf
 from ragspine.extraction.evidence.document.models import Bounds
 from ragspine.extraction.evidence.objects.formulas.formula_models import (
     FormulaSourceObservation,
@@ -131,7 +132,7 @@ def observe_formula(pdf: bytes, *, page: PageInput, item: LayoutObject) -> Formu
     differs from the pinned sidecar, so a drifted source can never be proven.
     """
     _validate_input(pdf, page=page, item=item)
-    document = pdfspine.open(stream=pdf, filetype="pdf")
+    document = open_pdf(pdf)
     try:
         if page.page_index >= document.page_count:
             raise ValueError("Formula source page is absent from the PDF")

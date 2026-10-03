@@ -153,6 +153,11 @@ class Settings(BaseSettings):
         default=None, validation_alias=AliasChoices("NB_QUESTIONS_PATH", "DATASET_PATH")
     )
     report_dir: Path | None = Field(default=None, validation_alias="NB_REPORT_DIR")
+    # 口令加密 PDF 的打开口令(入库与之后每次重新打开源 PDF 都用它);环境变量名不带 APP_ 前缀,
+    # 与 SuperIndex 同名。空串视为未设置;SecretStr 保证不进 repr / 日志 / 报告。
+    pdf_ingest_password: SecretStr | None = Field(
+        default=None, validation_alias="PDF_INGEST_PASSWORD"
+    )
 
     # 模型与 SSH 隧道。全部可缺省:import / 构造时不校验,哪一组缺失或不合法,只在真正用到
     # 那一组的阶段报错(providers.load_*_config / local_model_tunnel.load_tunnel_config)。
@@ -207,6 +212,11 @@ class Settings(BaseSettings):
     @classmethod
     def blank_path_is_unset(cls, value: object) -> object:
         # `NB_PDF_DIR=` 留空不能解析成项目根(整个仓库会被当成 PDF 目录)。
+        return None if isinstance(value, str) and not value.strip() else value
+
+    @field_validator("pdf_ingest_password", mode="before")
+    @classmethod
+    def blank_pdf_password_is_unset(cls, value: object) -> object:
         return None if isinstance(value, str) and not value.strip() else value
 
     @field_validator("embedding_api_key", "embedding_base_url", "embedding_model", mode="before")

@@ -2,11 +2,11 @@
 
 from collections.abc import Sequence
 
-import pdfspine
 from pydantic import TypeAdapter
 
 from enterprise_pdf_rag.adapters.aia_ingestion import read_text_sidecar
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
+from enterprise_pdf_rag.adapters.pdf_password import open_pdf
 from enterprise_pdf_rag.adapters.pdfspine_svg import crop_native_svg
 from enterprise_pdf_rag.adapters.pdfspine_tables import fill_rectangles, ruling_segments
 from enterprise_pdf_rag.processing.retrieval import RetrievalMember
@@ -53,7 +53,7 @@ def _reprove_table_grid(
         return
     if (receipt.grid_scope, receipt.ruling_digest) != (GRID_SCOPE, evidence.ruling_digest):
         raise ValueError("Table grid qualification does not bind the proved rulings")
-    document = pdfspine.open(stream=pdf, filetype="pdf")
+    document = open_pdf(pdf)
     try:
         if page_index >= document.page_count:
             raise ValueError("Qualified table page is absent from the pinned source")

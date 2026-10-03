@@ -18,6 +18,7 @@ from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.http.schemas import BoundaryModel
 from enterprise_pdf_rag.adapters.page_metadata_extraction import annotate_page_metadata
 from enterprise_pdf_rag.adapters.page_partition import ModelPagePartitioner
+from enterprise_pdf_rag.adapters.pdf_password import open_pdf
 from enterprise_pdf_rag.adapters.pdfspine_document import PdfspineDocumentAdapter
 from enterprise_pdf_rag.adapters.processing_export import export_processing_review
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
@@ -114,7 +115,7 @@ def _source(
             raise ValueError("Cached source differs from its input identity")
         return snapshot, _selected_pages(pages, len(snapshot.manifest.pages)), True
     try:
-        with pdfspine.open(stream=pdf, filetype="pdf") as document:
+        with open_pdf(pdf) as document:
             count = document.page_count
             if count == 0:
                 raise ValueError("PDF has no pages")

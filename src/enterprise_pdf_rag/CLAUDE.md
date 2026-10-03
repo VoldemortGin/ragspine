@@ -56,7 +56,9 @@ answers/      pure answer chain — ports.py (MountedDocument, MemberText), mode
               query_filters.py / member_filter.py (period / region pre-filters derived
               from the question, relaxed when they starve), query_mode.py (which
               retrieval channels a question uses — ADR 0018); stdlib + pydantic only
-adapters/     every SDK and I/O: pdfspine, http/ (FastAPI app factory; documents.py + chat.py
+adapters/     every SDK and I/O: pdfspine (every source PDF opens through pdf_password.open_pdf,
+              which authenticates a password-protected one with PDF_INGEST_PASSWORD or refuses
+              it with a ValueError naming that setting), http/ (FastAPI app factory; documents.py + chat.py
               serve document-catalog mode), local models, stores, draft_publication.py
               (qualify / index / publish), page_metadata_extraction.py (page_metadata stage),
               document_catalog.py (scan / mount), hybrid_search.py (BM25 + RRF + opt-in
@@ -77,7 +79,8 @@ adapters/     every SDK and I/O: pdfspine, http/ (FastAPI app factory; documents
               verdict), folder_pipeline.py (`run-folder`: every PDF under a folder through
               ingest → requalify → qualify → index → publish → tree, budgeted and
               resumable, then a question set answered in process; `folder` / questions / report
-              default to NB_PDF_DIR / NB_QUESTIONS_PATH / NB_REPORT_DIR, an argument wins),
+              default to NB_PDF_DIR / NB_QUESTIONS_PATH / NB_REPORT_DIR, an argument wins;
+              a failed document's `document_done` progress event carries failed_stage / error),
               answer_llm.py (`make_answer_llm()`: the answer `JsonCompletionClient` built from
               settings, what `run_folder_pipeline` and `notebooks/run_folder.ipynb` call)
 resources/    packaged prompts / static data

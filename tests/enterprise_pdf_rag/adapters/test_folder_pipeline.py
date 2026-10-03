@@ -35,6 +35,14 @@ from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
 from tests.enterprise_pdf_rag.adapters.page_metadata_helpers import combined_sender
 from tests.enterprise_pdf_rag.adapters.test_chat_metadata_http import _quote_page
 from tests.enterprise_pdf_rag.adapters.test_pdf_ingestion import authored_pdf
+from tests.enterprise_pdf_rag.adapters.test_pdf_password import FIXTURES as PASSWORD_FIXTURES
+from tests.enterprise_pdf_rag.adapters.test_pdf_password import LABEL as PASSWORD_LABEL
+from tests.enterprise_pdf_rag.adapters.test_pdf_password import (
+    PASSWORD,
+    encrypted_pdf,
+    set_password,
+    source_span_texts,
+)
 from tests.enterprise_pdf_rag.answers.fake_llm import scripted_client
 
 _OFFLINE = OfflineDescriptionEmbedder()
@@ -795,3 +803,126 @@ def test_cli_folder_defaults_to_nb_pdf_dir_and_errors_without_either(
     assert code == 0
     result = FolderPipelineResult.model_validate_json(printed)
     assert result.folder == str(folder.resolve())
+
+
+# ---- 12. password-protected PDFs ---------------------------------------------------------
+
+
+def _encrypted_folder(tmp_path: Path) -> Path:
+    """One qpdf fixture with object streams and one pdfspine-encrypted PDF, same three pages."""
+    folder = tmp_path / "pdfs"
+    folder.mkdir(parents=True)
+    shutil.copy(PASSWORD_FIXTURES / "aes256-objstm.pdf", folder / "objstm.pdf")
+    encrypted_pdf(folder / "pdfspine.pdf")
+    return folder
+
+
+def _run_with_events(
+    tmp_path: Path, folder: Path, *, root: str, **kwargs: object
+) -> tuple[FolderPipelineResult, list[tuple[str, dict[str, object]]]]:
+    events: list[tuple[str, dict[str, object]]] = []
+    result = run_folder_pipeline(
+        folder,
+        ingestion_root=tmp_path / root,
+        max_live_calls_per_pdf=_PER_PDF,
+        requalify=True,
+        build_tree=False,
+        report_dir=tmp_path / f"report-{root}",
+        embedder=_OFFLINE,
+        progress=lambda event, payload: events.append((event, payload)),
+        **kwargs,  # type: ignore[arg-type]
+    )
+    return result, events
+
+
+def _done(events: list[tuple[str, dict[str, object]]]) -> list[dict[str, object]]:
+    return [payload for event, payload in events if event == "document_done"]
+
+
+def _assert_never_written(secret: str, result: FolderPipelineResult, events: object) -> None:
+    assert result.report_dir is not None
+    report = Path(result.report_dir)
+    texts = [
+        (report / "report.json").read_text(),
+        (report / "report.md").read_text(),
+        result.model_dump_json(),
+        repr(result),
+        repr(events),
+    ]
+    assert not [text for text in texts if secret in text]
+    encoded = secret.encode()
+    root = Path(result.ingestion_root)
+    leaked = [path for path in root.rglob("*") if path.is_file() and encoded in path.read_bytes()]
+    assert leaked == []
+
+
+def test_a_password_protected_pdf_fails_clearly_then_publishes_once_the_password_is_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _model_env(monkeypatch)
+    folder = _encrypted_folder(tmp_path)
+
+    set_password(monkeypatch, None)
+    failed, events = _run_with_events(tmp_path, folder, root="ingestion")
+
+    assert [(item.status, item.failed_stage) for item in failed.documents] == [
+        ("failed", "ingest"),
+        ("failed", "ingest"),
+    ]
+    for item, done in zip(failed.documents, _done(events), strict=True):
+        assert item.error is not None and "password-protected" in item.error
+        assert "PDF_INGEST_PASSWORD" in item.error
+        # The notebook's progress line carries the reason itself.
+        assert done == {
+            "pdf": item.pdf_path,
+            "status": "failed",
+            "failed_stage": "ingest",
+            "error": item.error,
+        }
+    assert calls == [] and not failed.ok
+    assert "PDF_INGEST_PASSWORD" in (tmp_path / "report-ingestion" / "report.md").read_text()
+
+    # The same ingestion root: nothing of the failure was cached, so the rerun just works.
+    set_password(monkeypatch, PASSWORD)
+    questions = tmp_path / "questions.jsonl"
+    row = {"id": "named", "question": "What does page 2 say?", "doc": "objstm.pdf", "pages": "2"}
+    questions.write_text(json.dumps(row) + "\n")
+    llm, prompts = _answer_llm(tmp_path)
+    published, events = _run_with_events(
+        tmp_path, folder, root="ingestion", questions=questions, answer_llm=llm
+    )
+
+    assert [item.status for item in published.documents] == ["published", "published"]
+    for item, done in zip(published.documents, _done(events), strict=True):
+        assert item.error is None and item.failed_stage is None
+        assert done == {"pdf": item.pdf_path, "status": "published"}
+        assert item.ingestion is not None and item.ingestion.source_page_count == _PAGES
+        texts = source_span_texts(
+            Path(item.ingestion.source_store), item.ingestion.source_manifest_id
+        )
+        assert texts == [f"{PASSWORD_LABEL} page {n}" for n in range(1, _PAGES + 1)]
+    assert published.eval is not None
+    (case,) = published.eval.cases
+    assert (case.verdict, case.cited_pages) == ("answered", (2,))
+    assert len(prompts) == 1
+    _assert_never_written(PASSWORD, published, events)
+
+
+def test_a_wrong_password_fails_the_document_without_writing_the_password(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _model_env(monkeypatch)
+    folder = _encrypted_folder(tmp_path)
+    wrong = "zq-wrong-folder-pw-8R2"
+    set_password(monkeypatch, wrong)
+
+    result, events = _run_with_events(tmp_path, folder, root="wrong")
+
+    for item, done in zip(result.documents, _done(events), strict=True):
+        assert (item.status, item.failed_stage) == ("failed", "ingest")
+        assert item.error is not None and "does not open" in item.error
+        assert "PDF_INGEST_PASSWORD" in item.error
+        assert (done["failed_stage"], done["error"]) == ("ingest", item.error)
+    assert calls == []
+    _assert_never_written(wrong, result, events)
+    _assert_never_written(PASSWORD, result, events)

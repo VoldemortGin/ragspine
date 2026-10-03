@@ -4,6 +4,17 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ## [Unreleased]
 
+### Added
+
+- **Password-protected PDFs open with `PDF_INGEST_PASSWORD`** (no `APP_` prefix, the SuperIndex name; `SecretStr`,
+  blank means unset). Every place `enterprise_pdf_rag` opens a source PDF — ingest, requalify / qualify re-proofs,
+  the `document-catalog` mount's table-grid re-check — goes through `adapters/pdf_password.open_pdf`. A PDF that needs
+  a password and has none (or a wrong one) now fails at `ingest` with an error naming the setting, instead of
+  `PDF has no pages` (object-stream PDFs) or a silently empty source. The password never reaches an error, progress
+  event, report or the ingestion directory; the source store keeps the original encrypted bytes.
+- **`document_done` progress events carry `failed_stage` and `error`** when the document recorded a failure, so a
+  notebook's progress line shows the reason; a clean completion's payload is unchanged.
+
 ### Fixed
 
 - **A placeholder API key now fails with a named configuration error.** An `APP_EMBEDDING_API_KEY` /

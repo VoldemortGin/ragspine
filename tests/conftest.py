@@ -32,7 +32,7 @@ def _isolate_ambient_openai_for_scoped_fixtures():
 
 @pytest.fixture(autouse=True)
 def _isolate_ambient_llm_and_notebook_settings(monkeypatch):
-    """开发者 shell 里的 OPENAI_* / NB_* 不得影响测试(configs 会把它们读成 LLM 首选名与 notebook 路径)。
+    """开发者 shell 里的 OPENAI_* / NB_* / PDF_INGEST_PASSWORD 不得影响测试(configs 会把它们读成 LLM 首选名与 notebook 路径)。
 
     要测这些变量的用例自己 monkeypatch.setenv;get_settings() 是进程级缓存,前后各清一次,
     让它既不带着 import 期的环境,也不把某个用例的环境漏给下一个。
@@ -48,6 +48,7 @@ def _isolate_ambient_llm_and_notebook_settings(monkeypatch):
         "NB_QUESTIONS_PATH",
         "DATASET_PATH",  # questions_path 的回落别名
         "NB_REPORT_DIR",
+        "PDF_INGEST_PASSWORD",
     ):
         monkeypatch.delenv(name, raising=False)
     get_settings.cache_clear()

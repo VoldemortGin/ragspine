@@ -34,6 +34,7 @@ from enterprise_pdf_rag.adapters.donut_geometry import (
     _transform,
 )
 from enterprise_pdf_rag.adapters.figure_reasoning import PreparedFigure, prepare_figure
+from enterprise_pdf_rag.adapters.pdf_password import open_pdf
 from enterprise_pdf_rag.adapters.pdfspine_document import _PageText, _spans
 from enterprise_pdf_rag.adapters.pdfspine_svg import crop_native_svg
 from enterprise_pdf_rag.adapters.source_profile import (
@@ -679,7 +680,7 @@ def _read_source_trace(pdf: bytes, prepared: PreparedFigure) -> _SourcePaintTrac
         raise ValueError("source_pdf_header_required")
     if source_hash != prepared.svg.source.document_sha256:
         raise ValueError("source_pdf_digest_mismatch")
-    with pdfspine.open(stream=pdf, filetype="pdf") as document:
+    with open_pdf(pdf) as document:
         page = document[prepared.svg.source.page_index]
         profile = read_source_profile(
             page, source_sha256=source_hash, page_index=prepared.svg.source.page_index

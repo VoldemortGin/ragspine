@@ -369,7 +369,9 @@ def _run_document(
 
     def finish(status: DocumentStatus) -> tuple[DocumentRun, int]:
         done = DocumentRun(status=status, elapsed_s=round(perf_counter() - started, 3), **run)
-        _emit(progress, "document_done", pdf=str(pdf), status=status)
+        # A recorded failure travels with the event, so a progress line shows its reason.
+        reason = {key: run[key] for key in ("failed_stage", "error") if key in run}
+        _emit(progress, "document_done", pdf=str(pdf), status=status, **reason)
         return done, tree_calls
 
     _emit(progress, "document_start", pdf=str(pdf), sha256=digest, budget=allotted)
