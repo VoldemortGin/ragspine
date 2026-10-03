@@ -37,7 +37,11 @@ def test_notebook_is_valid_nbformat_4_with_a_generic_kernel() -> None:
 def test_notebook_code_compiles_and_reads_configuration_from_settings() -> None:
     code = [_source(cell) for cell in _notebook()["cells"] if cell["cell_type"] == "code"]
     for index, source in enumerate(code):
-        compile(source, f"cell-{index}", "exec")
+        # IPython magic lines (%pip install ...) are not Python syntax; drop them before compiling
+        python_only = "\n".join(
+            line for line in source.splitlines() if not line.lstrip().startswith("%")
+        )
+        compile(python_only, f"cell-{index}", "exec")
     joined = "\n".join(code)
     assert "from ragspine.common.evidence.configs import get_settings" in joined
     assert "run_folder_pipeline(" in joined and "make_answer_llm()" in joined
