@@ -26,6 +26,13 @@ All notable changes to RAGSpine are documented here. This project follows Semant
   other value raises `ValueError`. It shows up in the API / SSE `answer`, the openai-compatible extension and CLI
   `ask`.
 
+- **LLM settings: `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL` are the preferred names, `APP_LLM_API_KEY` /
+  `APP_LLM_BASE_URL` / `APP_LLM_MODEL` are aliases.** Both spellings are still read, field by field; inside one source
+  `OPENAI_*` wins, across sources the real environment still beats the project `.env` as a whole. Missing-setting errors
+  now read `OPENAI_API_KEY (or APP_LLM_API_KEY)`. `Settings.as_environment` and the controlled-subprocess allowlists keep
+  the `APP_LLM_*` keys, so children never receive `OPENAI_*` and Open WebUI's placeholder isolation is unchanged. Only the
+  three LLM settings have an alias; embedding / rerank / tunnel have none.
+
 ### Fixed
 
 - **Number guard no longer splits a page list on a bare `page=` / `slide=` locator.** Such a locator (e.g. `slide=2`)

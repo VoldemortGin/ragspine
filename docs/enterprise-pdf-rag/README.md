@@ -67,7 +67,7 @@ uv run --locked enterprise-pdf-rag ingest-aia
 
 ## 前 20 页处理
 
-模型调用仅由显式命令启动，普通 API/审阅不会自动运行推断。环境须独立提供 `APP_LLM_API_KEY`、`APP_LLM_BASE_URL`、`APP_LLM_MODEL`（可写在项目根 `.env`，同名真实环境变量优先；未设置时逐字段回退读 `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL`）；程序不写入凭证。示例只处理第 18 页，`--page` 可重复选择物理页 1–20：
+模型调用仅由显式命令启动，普通 API/审阅不会自动运行推断。环境须独立提供 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL`（可写在项目根 `.env`，同名真实环境变量优先；别名 `APP_LLM_API_KEY` / `APP_LLM_BASE_URL` / `APP_LLM_MODEL` 同样可用，逐字段读取）；程序不写入凭证。示例只处理第 18 页，`--page` 可重复选择物理页 1–20：
 
 ```sh
 # 0 = 只复用已有模型缓存，不发新请求
@@ -169,6 +169,6 @@ bash scripts/ci.sh                               # 唯一完整、只读、离�
 
 重大改动后和阶段收尾必须运行完整 `bash scripts/ci.sh`：Ruff、strict mypy、纯领域架构、版本化 schema、文档漂移、单元及离线集成测试，warnings 当作错误。测试不连接网络；真实语料测试在本地样本存在时执行，公共仓库不包含 PDF。协议与失败契约仍有独立小型离线 fixtures。
 
-真实 LLM 测试只在大版本或模型调用流程实质变化时显式触发，普通改动使用 transport 替身。来源 ingestion 不需要 LLM；前 20 页的视觉语义加工则使用有预算、可缓存的实际模型请求。已有 `llm-smoke` 仅验证连接；从环境变量或项目根 `.env`（环境变量优先）读取 `APP_LLM_API_KEY`、`APP_LLM_BASE_URL`、`APP_LLM_MODEL`，不打印密钥，也不证明图表质量。本地 embedding/rerank 使用独立配置，未配置时拒绝，不继承云端 LLM。
+真实 LLM 测试只在大版本或模型调用流程实质变化时显式触发，普通改动使用 transport 替身。来源 ingestion 不需要 LLM；前 20 页的视觉语义加工则使用有预算、可缓存的实际模型请求。已有 `llm-smoke` 仅验证连接；从环境变量或项目根 `.env`（环境变量优先）读取 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL`（别名 `APP_LLM_*`），不打印密钥，也不证明图表质量。本地 embedding/rerank 使用独立配置，未配置时拒绝，不继承云端 LLM。
 
 架构和范围见 [ADR 0001](adr/0001-architecture.md)、[图表链 ADR 0002](adr/0002-figure-pipeline.md)、[UI ADR 0003](adr/0003-open-webui.md)、[真实来源 ADR 0004](adr/0004-aia-source-review.md)、[前 20 页 ADR 0005](adr/0005-first-twenty-pages-processing.md)、[其他视觉 ADR 0006](adr/0006-non-chart-visual-semantics.md)、[独立安装 ADR 0007](adr/0007-installable-runtime.md)、[通用入库 ADR 0010](adr/0010-generic-pdf-ingestion-entry.md)、[文档目录与回答链 ADR 0011](adr/0011-document-catalog-and-verified-answer-chain.md)、[图表索引与召回 ADR 0012](adr/0012-chart-index-text-and-retrieval-seats.md)、[页级元数据与前置过滤 ADR 0013](adr/0013-page-metadata-and-prefilters.md)、[划线表格网格证明 ADR 0014](adr/0014-ruled-table-grid-proof.md)、[Diagram 与 Formula 可检索 ADR 0015](adr/0015-diagram-and-formula-retrievable.md)、[逐字图表点位 ADR 0016](adr/0016-verbatim-chart-points.md)、[页级父子窗口 ADR 0017](adr/0017-page-context-window.md)、[通道选择与查询翻译 ADR 0018](adr/0018-query-classification-and-translation.md)、[文档树检索通道 ADR 0019](adr/0019-document-tree-channel.md)、[PRD v0.2](PRD-v0.2.md)。PDF、密钥、运行产物、虚拟环境与本地 IDE 配置不进入公共仓库。

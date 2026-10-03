@@ -39,13 +39,13 @@ providers/    providers.py (explicit APP_LLM_* / APP_EMBEDDING_* / APP_RERANK_* 
   real environment > `.env` > yaml > defaults; a missing `.env` is fine. A child started with
   `PYTHON_DOTENV_DISABLED=1` (launcher, `webui_preview`, the Open WebUI gate) skips `.env`, so
   its allowlisted environment, built by the parent from `Settings.as_environment`, is all it sees.
-- **Only the three LLM settings fall back to `OPENAI_*`** — `llm_api_key` / `llm_base_url` /
-  `llm_model` are declared `AliasChoices("APP_LLM_*", "OPENAI_*")`, so each falls back on its own
-  when its `APP_LLM_*` name is unset (aliases carry no `env_prefix`; `populate_by_name` keeps
-  `Settings(llm_model=...)` working). Inside one source `APP_LLM_*` wins; across sources the
-  real environment still beats `.env` as a whole, so a shell `OPENAI_MODEL` outranks the
-  `.env`'s `APP_LLM_MODEL` (pinned in `test_configs.py`). Embedding / rerank / tunnel have no
-  fallback, `as_environment` still answers under `APP_LLM_*` only, and an injected mapping given
+- **Only the three LLM settings use `OPENAI_*` as the preferred name** — `llm_api_key` / `llm_base_url` /
+  `llm_model` are declared `AliasChoices("OPENAI_*", "APP_LLM_*")`, so each reads its own
+  `OPENAI_*` name first and the `APP_LLM_*` alias otherwise (aliases carry no `env_prefix`;
+  `populate_by_name` keeps `Settings(llm_model=...)` working). Inside one source `OPENAI_*` wins; across
+  sources the real environment still beats `.env` as a whole, so a shell `APP_LLM_MODEL` outranks the
+  `.env`'s `OPENAI_MODEL` (pinned in `test_configs.py`). Embedding / rerank / tunnel have no
+  alias, `as_environment` still answers under `APP_LLM_*` only, and an injected mapping given
   to `load_llm_config` is taken as is. Controlled children never receive `OPENAI_*` (their
   allowlists carry the resolved `APP_LLM_*`), and Open WebUI's `OPENAI_API_KEY` placeholder
   lives in a child that never reads `Settings`.

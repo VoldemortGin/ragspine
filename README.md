@@ -361,7 +361,7 @@ version-controlled evaluation sets live under `data/golden/`. Nothing here is re
 
 安装（上文 Install 的 `uv pip install -e ".[dev,service,vector]"` 或 `uv sync`）即得 `enterprise-pdf-rag` 命令；PDF 引擎 `pdfspine` 在**基础依赖**里，此流水线无需额外 extra。
 
-**前置 env**（checkout 之外运行的约定见 [ADR 0007](docs/enterprise-pdf-rag/adr/0007-installable-runtime.md)）：`APP_ROOT_DIR` 指向已存在的工作目录、`APP_DATA_DIR` 指向持久数据目录；`APP_LLM_BASE_URL`(https 强制)/`APP_LLM_MODEL`/`APP_LLM_API_KEY`（未设置时逐字段回退读 `OPENAI_BASE_URL`/`OPENAI_MODEL`/`OPENAI_API_KEY`）供 layout 阶段每页一次模型调用——`--stage source` 可零模型，但文档检索状态为 `not_ready`；`APP_EMBEDDING_BASE_URL` 必须是回环地址（`127.0.0.1`/`localhost`/`::1`），远端模型走既有 SSH 隧道，另配 `APP_EMBEDDING_MODEL`/`APP_EMBEDDING_API_KEY`；`APP_RERANK_*` 可选，仅请求显式 `"rerank": true` 时使用。
+**前置 env**（checkout 之外运行的约定见 [ADR 0007](docs/enterprise-pdf-rag/adr/0007-installable-runtime.md)）：`APP_ROOT_DIR` 指向已存在的工作目录、`APP_DATA_DIR` 指向持久数据目录；`OPENAI_BASE_URL`(https 强制)/`OPENAI_MODEL`/`OPENAI_API_KEY`（别名 `APP_LLM_BASE_URL`/`APP_LLM_MODEL`/`APP_LLM_API_KEY`，逐字段读取）供 layout 阶段每页一次模型调用——`--stage source` 可零模型，但文档检索状态为 `not_ready`；`APP_EMBEDDING_BASE_URL` 必须是回环地址（`127.0.0.1`/`localhost`/`::1`），远端模型走既有 SSH 隧道，另配 `APP_EMBEDDING_MODEL`/`APP_EMBEDDING_API_KEY`；`APP_RERANK_*` 可选，仅请求显式 `"rerank": true` 时使用。
 
 ```bash
 # 1) 入库：完整来源始终保存，选页只驱动下游；此命令的 JSON 输出给出后三步要用的 store 路径

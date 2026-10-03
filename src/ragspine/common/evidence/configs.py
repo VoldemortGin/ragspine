@@ -84,7 +84,7 @@ class Settings(BaseSettings):
         env_file=ROOT_DIR / ".env",
         env_file_encoding="utf-8",
         extra="ignore",
-        # 带 validation_alias 的字段(LLM 三项的 OPENAI_* 回退、NB_*)仍可按字段名构造。
+        # 带 validation_alias 的字段(LLM 三项的 APP_LLM_* 别名、NB_*)仍可按字段名构造。
         populate_by_name=True,
     )
 
@@ -133,16 +133,16 @@ class Settings(BaseSettings):
     # 模型与 SSH 隧道。全部可缺省:import / 构造时不校验,哪一组缺失或不合法,只在真正用到
     # 那一组的阶段报错(providers.load_*_config / local_model_tunnel.load_tunnel_config)。
     # 端口也保持字符串,由隧道加载器做原有的严格校验。
-    # 云端 OpenAI 兼容 LLM。仅这三项在 APP_LLM_* 未设置时逐字段回退到 OPENAI_*(别名顺序即
-    # 优先级;别名不带 env_prefix,须写全名)。embedding / rerank / 隧道没有回退。
+    # 云端 OpenAI 兼容 LLM。仅这三项以 OPENAI_* 为首选名、APP_LLM_* 为别名,逐字段取值(别名
+    # 顺序即同一来源内的优先级;别名不带 env_prefix,须写全名)。embedding / rerank / 隧道没有别名。
     llm_api_key: SecretStr | None = Field(
-        default=None, validation_alias=AliasChoices("APP_LLM_API_KEY", "OPENAI_API_KEY")
+        default=None, validation_alias=AliasChoices("OPENAI_API_KEY", "APP_LLM_API_KEY")
     )
     llm_base_url: str | None = Field(
-        default=None, validation_alias=AliasChoices("APP_LLM_BASE_URL", "OPENAI_BASE_URL")
+        default=None, validation_alias=AliasChoices("OPENAI_BASE_URL", "APP_LLM_BASE_URL")
     )
     llm_model: str | None = Field(
-        default=None, validation_alias=AliasChoices("APP_LLM_MODEL", "OPENAI_MODEL")
+        default=None, validation_alias=AliasChoices("OPENAI_MODEL", "APP_LLM_MODEL")
     )
     embedding_api_key: SecretStr | None = None  # 本地 embedding(loopback)
     embedding_base_url: str | None = None
@@ -208,7 +208,8 @@ class Settings(BaseSettings):
         """把已配置的字段还原成 ``APP_*`` 环境变量(值已按 环境变量 > .env > yaml 合并)。
 
         供按名字取值的加载器与显式白名单的子进程环境使用;未配置的名字不出现。
-        返回值含密钥明文,只能交给加载器或子进程环境,不要打印或记录。
+        键名恒为 ``APP_*``(LLM 三项虽以 ``OPENAI_*`` 为首选名,这里仍以 ``APP_LLM_*`` 作答,
+        子进程白名单与 Open WebUI 隔离依赖它)。返回值含密钥明文,只能交给加载器或子进程环境,不要打印或记录。
         """
         environment: dict[str, str] = {}
         for name in names:

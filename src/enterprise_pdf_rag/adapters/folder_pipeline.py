@@ -106,8 +106,8 @@ _GOLD_VERDICTS: dict[str, CaseVerdict] = {
 _UNHEALTHY_VERDICTS = frozenset({"FAIL", "http_error", "routing_failed"})
 _HEALTHY_STATUSES = frozenset({"published", "duplicate_of", "nothing_to_index"})
 _LLM_HINT = (
-    "set APP_LLM_API_KEY, APP_LLM_BASE_URL and APP_LLM_MODEL (or OPENAI_API_KEY, "
-    "OPENAI_BASE_URL and OPENAI_MODEL) in the project .env (see .env.example)"
+    "set OPENAI_API_KEY, OPENAI_BASE_URL and OPENAI_MODEL (or APP_LLM_API_KEY, "
+    "APP_LLM_BASE_URL and APP_LLM_MODEL) in the project .env (see .env.example)"
 )
 _LOCAL_HINT = (
     "set {prefix}_BASE_URL, {prefix}_MODEL and {prefix}_API_KEY in the project .env and start "

@@ -44,7 +44,7 @@ fence. Call sites use `parse_llm_json`: the original `json.loads(text.strip())` 
 `NaN` / `Infinity` included), and `extract_json` only on failure — replies that parsed before behave exactly as
 before. Used by `agent/decompose`, `agent/query_transform` (RAG-Fusion) and `graph/extractor`.
 
-`evidence/` — the evidence chain's APP_* settings (LLM trio falls back to OPENAI_*; plus NB_* notebook paths), lineage logging and model access
+`evidence/` — the evidence chain's APP_* settings (LLM trio prefers OPENAI_*, APP_LLM_* are aliases; plus NB_* notebook paths), lineage logging and model access
 (ADR 0022); its own contract is [`evidence/CLAUDE.md`](evidence/CLAUDE.md).
 
 ## Invariants

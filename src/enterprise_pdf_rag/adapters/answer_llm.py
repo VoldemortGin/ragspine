@@ -10,7 +10,7 @@ from ragspine.common.evidence.providers.providers import load_llm_config
 def make_answer_llm(
     *, cache_dir: Path | None = None, max_live_calls: int | None = None
 ) -> JsonCompletionClient:
-    """A ``JsonCompletionClient`` for the configured LLM (``APP_LLM_*``, else ``OPENAI_*``).
+    """A ``JsonCompletionClient`` for the configured LLM (``OPENAI_*``, alias ``APP_LLM_*``).
 
     ``cache_dir`` defaults to ``<ingestion_root>/model-cache`` and ``max_live_calls`` to
     ``APP_ANSWER_MAX_LIVE_CALLS``; the per-call timeout and sampling seed always come from

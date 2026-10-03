@@ -289,12 +289,12 @@ result.ok, result.live_calls, [(d.pdf_path, d.status) for d in result.documents]
 完整示例见 `notebooks/run_folder.ipynb`（一个配置 cell、一个运行 cell、结果表格；不含密钥、不带输出、不要在无模型环境里执行）。
 
 - **`NB_*` 路径设置**：`NB_PDF_DIR`（PDF 源目录）、`NB_QUESTIONS_PATH`（题集）、`NB_REPORT_DIR`（报告目录）经 `get_settings()` 读取，名字**不带** `APP_` 前缀；`~` 展开，相对路径相对项目根，不校验是否存在，留空等于未设置。函数参数 / CLI 参数始终优先；`folder` 两处都没有时抛 `ValueError`（CLI 退出码 1，写明"传 folder 或在 .env 设 NB_PDF_DIR"）；题集 / 报告目录两处都没有时保持原行为（不评测 / 不写报告）。
-- **LLM 的 `OPENAI_*` 回退**：`APP_LLM_API_KEY` / `APP_LLM_BASE_URL` / `APP_LLM_MODEL` 未设置时，逐字段回退读 `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL`（只这三项；embedding / rerank / 隧道没有回退）。同一来源内 `APP_LLM_*` 优先；来源之间仍是 真实环境变量 > 项目根 `.env`，且按来源整体比较：shell 里导出的 `OPENAI_MODEL` 会盖过 `.env` 里的 `APP_LLM_MODEL`。校验不放宽（base URL 仍只接受 https）；受控子进程只收到解析后的 `APP_LLM_*`，不会收到 `OPENAI_*`；传入映射给 `load_llm_config` 时不做回退。
+- **LLM 的 `OPENAI_*` 首选名**：首选 `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL`，`APP_LLM_API_KEY` / `APP_LLM_BASE_URL` / `APP_LLM_MODEL` 为别名，逐字段读取（只这三项；embedding / rerank / 隧道没有别名）。同一来源内 `OPENAI_*` 优先；来源之间仍是 真实环境变量 > 项目根 `.env`，且按来源整体比较：shell 里导出的 `APP_LLM_MODEL` 会盖过 `.env` 里的 `OPENAI_MODEL`。校验不放宽（base URL 仍只接受 https）；受控子进程只收到解析后的 `APP_LLM_*`，不会收到 `OPENAI_*`；传入映射给 `load_llm_config` 时只认 `APP_LLM_*` 键。
 - **单独取回答模型客户端**：`enterprise_pdf_rag.adapters.answer_llm.make_answer_llm(cache_dir=None, max_live_calls=None)` 返回 `JsonCompletionClient`，默认缓存 `<ingestion_root>/model-cache`、预算 `APP_ANSWER_MAX_LIVE_CALLS`、超时与种子取自设置；`run_folder_pipeline` 不注入 `answer_llm` 时就是调用它。
 
 `embedder` / `reranker` / `answer_llm` 可注入（离线测试即如此）；不注入时与 `index` 命令、`document-catalog` 服务的构造方式相同。
 
-- **前置检查**：花任何预算、调用任何 ingest 之前，先确认 `APP_LLM_API_KEY` / `APP_LLM_BASE_URL` / `APP_LLM_MODEL`（或其 `OPENAI_*` 回退名）已在项目 `.env` 配好，并用 `embed_query("preflight")` 探测一次 embedding（`APP_EMBEDDING_*`，证明隧道通）；题集里有 `rerank: true` 的用例时还要求 `APP_RERANK_*`。失败即报错并指向这些变量名和 `scripts/enterprise_pdf_rag/local_model_tunnel.py start`——**它不会自己起隧道**。注入的依赖不检查。
+- **前置检查**：花任何预算、调用任何 ingest 之前，先确认 `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL`（或其 `APP_LLM_*` 别名）已在项目 `.env` 配好，并用 `embed_query("preflight")` 探测一次 embedding（`APP_EMBEDDING_*`，证明隧道通）；题集里有 `rerank: true` 的用例时还要求 `APP_RERANK_*`。失败即报错并指向这些变量名和 `scripts/enterprise_pdf_rag/local_model_tunnel.py start`——**它不会自己起隧道**。注入的依赖不检查。
 - **发现与去重**：递归找 `*.pdf`（后缀大小写不敏感），跳过隐藏文件 / 隐藏目录，按相对路径排序。同内容（sha256 相同）只处理第一份，其余标 `duplicate_of`——同 sha 不同文件名会落进同一个 sha 目录、生成两份 manifest 并互相覆盖 `current-*` 指针。
 - **预算**：每份 PDF 的 ingest 预算是 `min(--max-live-calls-per-pdf, 总额剩余)`；tree（每份 `--tree-max-live-calls`）和评测的回答调用（默认 `APP_ANSWER_MAX_LIVE_CALLS`）也从总额里扣，并在 `live_calls` 里分项列出。总额用完后其余 PDF 仍以预算 0 运行：缓存里已有的照常走完；被总额截短且仍有阶段 `deferred` 的标 `budget_starved`、不发布，`budget_exhausted=true`（只要有一次分配被总额截短就为真）。每份只跑一轮，不自动多轮。
 - **续跑**：同一目录再跑一次时全部命中缓存（`live_calls.total == 0`）；已发布的 release 恰是本次 draft 加同一 embedder 的索引时直接复用（`index_reused=true`，不再 embed），`publish` 幂等重放。换 embedder 会重建索引。

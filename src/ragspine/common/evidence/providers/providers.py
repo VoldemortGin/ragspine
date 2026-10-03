@@ -64,7 +64,7 @@ class LocalModelConfig(BaseModel):
 def _required(environment: Mapping[str, str], name: str, *, fallback: str | None = None) -> str:
     value = environment.get(name, "").strip()
     if not value or "\n" in value or "\r" in value:
-        shown = name if fallback is None else f"{name} (or {fallback})"
+        shown = name if fallback is None else f"{fallback} (or {name})"
         raise ProviderConfigurationError(f"Missing or invalid environment setting: {shown}")
     return value
 
@@ -98,8 +98,9 @@ def _loopback_base_url(value: str, *, name: str) -> str:
 def load_llm_config(environment: Mapping[str, str] | None = None) -> LLMConfig:
     names = ("APP_LLM_API_KEY", "APP_LLM_BASE_URL", "APP_LLM_MODEL")
     env = Settings().as_environment(names) if environment is None else environment
-    # Settings already folded OPENAI_API_KEY / OPENAI_BASE_URL / OPENAI_MODEL in under these
-    # names; an injected mapping is taken as given, so it has no fallback.
+    # OPENAI_API_KEY / OPENAI_BASE_URL / OPENAI_MODEL are the preferred names; Settings already
+    # folded them in under these APP_LLM_* keys (the child-process allowlist names). An injected
+    # mapping is taken as given, so it only ever carries the APP_LLM_* keys.
     key = _required(env, "APP_LLM_API_KEY", fallback="OPENAI_API_KEY")
     base = _base_url(
         _required(env, "APP_LLM_BASE_URL", fallback="OPENAI_BASE_URL"),

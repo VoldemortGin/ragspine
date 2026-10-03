@@ -151,6 +151,13 @@ def test_project_root_dotenv_is_found_from_a_nested_working_directory(tmp_path: 
     assert "dotenv-llm-secret" not in result.stdout + result.stderr
 
 
+def _alias_names(field: str) -> set[str]:
+    alias = Settings.model_fields[field].validation_alias
+    return (
+        {str(choice) for choice in alias.choices[1:]} if isinstance(alias, AliasChoices) else set()
+    )
+
+
 def _primary_name(field: str) -> str:
     """The name `.env.example` documents: the first alias, else the APP_-prefixed field name."""
     alias = Settings.model_fields[field].validation_alias
@@ -161,22 +168,34 @@ def _primary_name(field: str) -> str:
 
 def test_env_example_lists_exactly_the_settings_fields() -> None:
     text = (ROOT_DIR / ".env.example").read_text(encoding="utf-8")
-    listed = set(re.findall(r"^#?\s*((?:APP|NB)_[A-Z_]+)=", text, re.MULTILINE)) - {"APP_ROOT_DIR"}
-    assert listed == {_primary_name(name) for name in Settings.model_fields}
+    listed = set(re.findall(r"^#?\s*((?:APP|NB|OPENAI)_[A-Z_]+)=", text, re.MULTILINE)) - {
+        "APP_ROOT_DIR"
+    }
+    primaries = {_primary_name(name) for name in Settings.model_fields}
+    aliases = set().union(*(_alias_names(name) for name in Settings.model_fields))
+    assert primaries <= listed <= primaries | aliases
+    assert aliases <= listed
 
 
-def test_env_example_documents_the_openai_fallback_names() -> None:
+def test_env_example_documents_the_openai_preferred_names() -> None:
     text = (ROOT_DIR / ".env.example").read_text(encoding="utf-8")
     for name in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL"):
         assert name in text
 
 
-# ---- OPENAI_* fallback for the three LLM settings -------------------------------------------
+# ---- OPENAI_* preferred names (APP_LLM_* aliases) for the three LLM settings -------------------------------------------
 
 _OPENAI = {
     "OPENAI_API_KEY": "openai-secret",
     "OPENAI_BASE_URL": "https://openai.example/v1",
     "OPENAI_MODEL": "openai-model",
+}
+
+
+_APP_LLM = {
+    "APP_LLM_API_KEY": "alias-secret",
+    "APP_LLM_BASE_URL": "https://alias.example/v1",
+    "APP_LLM_MODEL": "alias-model",
 }
 
 
@@ -211,43 +230,58 @@ def test_openai_environment_variables_alone_configure_the_llm(
     }
 
 
-def test_app_names_win_and_the_fallback_is_per_field(
+def test_app_llm_aliases_alone_configure_the_llm(
+    bare: Callable[[str], None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for name, value in _APP_LLM.items():
+        monkeypatch.setenv(name, value)
+    llm = load_llm_config()
+    assert (llm.base_url, llm.model) == ("https://alias.example/v1", "alias-model")
+    assert llm.api_key.get_secret_value() == "alias-secret"
+    assert Settings().as_environment(_LLM_NAMES) == _APP_LLM
+
+
+def test_openai_names_win_and_the_choice_is_per_field(
     bare: Callable[[str], None], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     for name, value in _OPENAI.items():
         monkeypatch.setenv(name, value)
     monkeypatch.setenv("APP_LLM_MODEL", "app-model")
+    monkeypatch.setenv("APP_LLM_API_KEY", "app-secret")
     llm = load_llm_config()
-    assert llm.model == "app-model"
-    assert llm.base_url == "https://openai.example/v1"
+    assert llm.model == "openai-model"
     assert llm.api_key.get_secret_value() == "openai-secret"
+    # A field only given under its alias still resolves, next to a preferred-name field.
+    monkeypatch.delenv("OPENAI_MODEL")
+    assert load_llm_config().model == "app-model"
+    assert load_llm_config().base_url == "https://openai.example/v1"
 
 
-def test_openai_names_in_dotenv_also_fall_back(
+def test_alias_names_in_dotenv_also_work(
     bare: Callable[[str], None], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    bare("OPENAI_API_KEY=dotenv-openai-secret\nOPENAI_BASE_URL=https://dotenv.example\n")
-    monkeypatch.setenv("APP_LLM_MODEL", "environment-model")
+    bare("APP_LLM_API_KEY=dotenv-app-secret\nAPP_LLM_BASE_URL=https://dotenv.example\n")
+    monkeypatch.setenv("OPENAI_MODEL", "environment-model")
     llm = load_llm_config()
-    assert llm.api_key.get_secret_value() == "dotenv-openai-secret"
+    assert llm.api_key.get_secret_value() == "dotenv-app-secret"
     assert (llm.base_url, llm.model) == ("https://dotenv.example", "environment-model")
-    # Inside one source the APP_ name still wins.
+    # Inside one source the OPENAI_ name wins.
     bare("APP_LLM_MODEL=dotenv-app-model\nOPENAI_MODEL=dotenv-openai-model\n")
-    monkeypatch.delenv("APP_LLM_MODEL")
-    assert Settings().llm_model == "dotenv-app-model"
+    monkeypatch.delenv("OPENAI_MODEL")
+    assert Settings().llm_model == "dotenv-openai-model"
 
 
-def test_across_sources_the_real_environment_wins_even_through_a_fallback_name(
+def test_across_sources_the_real_environment_wins_even_through_an_alias_name(
     bare: Callable[[str], None], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # pydantic-settings resolves a field source by source: a shell OPENAI_MODEL therefore
-    # outranks the project .env's APP_LLM_MODEL, exactly as APP_LLM_MODEL in the shell would.
-    bare("APP_LLM_MODEL=dotenv-app-model\n")
-    monkeypatch.setenv("OPENAI_MODEL", "environment-openai-model")
-    assert Settings().llm_model == "environment-openai-model"
-    # ...and the real environment's APP_ name still beats its own OPENAI_ name.
+    # pydantic-settings resolves a field source by source: a shell APP_LLM_MODEL therefore
+    # outranks the project .env's OPENAI_MODEL, exactly as OPENAI_MODEL in the shell would.
+    bare("OPENAI_MODEL=dotenv-openai-model\n")
     monkeypatch.setenv("APP_LLM_MODEL", "environment-app-model")
     assert Settings().llm_model == "environment-app-model"
+    # ...and the real environment's OPENAI_ name still beats its own APP_LLM_ name.
+    monkeypatch.setenv("OPENAI_MODEL", "environment-openai-model")
+    assert Settings().llm_model == "environment-openai-model"
 
 
 def test_fields_stay_constructible_by_name(bare: Callable[[str], None]) -> None:
@@ -259,7 +293,7 @@ def test_fields_stay_constructible_by_name(bare: Callable[[str], None]) -> None:
     }
 
 
-def test_missing_llm_names_both_variables(
+def test_missing_llm_names_both_variables_preferred_first(
     bare: Callable[[str], None], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     for field, app, openai in (
@@ -270,9 +304,9 @@ def test_missing_llm_names_both_variables(
         environment = {f"APP_LLM_{name}": "https://x.example" for name in ("API_KEY", "BASE_URL")}
         environment["APP_LLM_MODEL"] = "m"
         del environment[f"APP_LLM_{field}"]
-        with pytest.raises(ProviderConfigurationError, match=rf"{app} \(or {openai}\)"):
+        with pytest.raises(ProviderConfigurationError, match=rf"{openai} \(or {app}\)"):
             load_llm_config(environment)
-    with pytest.raises(ProviderConfigurationError, match=r"APP_LLM_API_KEY \(or OPENAI_API_KEY\)"):
+    with pytest.raises(ProviderConfigurationError, match=r"OPENAI_API_KEY \(or APP_LLM_API_KEY\)"):
         load_llm_config()
 
 
@@ -306,7 +340,7 @@ def test_openai_secret_never_appears_in_repr(
     assert "openai-secret" not in rendered
 
 
-def test_only_the_llm_group_falls_back_to_openai_names(
+def test_only_the_llm_group_reads_openai_names(
     bare: Callable[[str], None], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "openai-secret")
