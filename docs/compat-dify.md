@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/dify/
-verified-against: dab3119d7ccccc18d8ea58a9868a98f9ec1b257d
+verified-against: 11dcfc0
 ---
 
 # Dify 兼容清单（固定版本）

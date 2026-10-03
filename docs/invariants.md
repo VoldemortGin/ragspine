@@ -5,7 +5,7 @@ covers:
   - src/ragspine/retrieval/link/
   - src/ragspine/retrieval/rerank/
   - src/ragspine/common/observability/
-verified-against: 164b3ab
+verified-against: 11dcfc0
 ---
 
 # Invariants (code-enforced)
