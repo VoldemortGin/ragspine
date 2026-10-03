@@ -93,12 +93,15 @@ _CURATED: dict[str, tuple[str, str]] = {
 
 __all__ = ("RAGSpine", "FactStore", "Fact", "MockProvider", "answer_question")
 
-# 包版本(对齐 corespine / spineagent;PyPI 分发名 rag-spine,源码/未装时回落)。
+# 包版本(对齐 corespine / spineagent;PyPI 分发名 ragspine,过渡期旧名 rag-spine 兜底,源码/未装时回落)。
 # module 级赋值 → ragspine.__version__ 直接命中 __dict__,不走下面的惰性 __getattr__。
 try:
-    __version__ = _pkg_version("rag-spine")
-except _PkgNotFound:  # 纯源码 / 未安装(无包元数据)场景
-    __version__ = "0.0.0+unknown"
+    __version__ = _pkg_version("ragspine")
+except _PkgNotFound:
+    try:
+        __version__ = _pkg_version("rag-spine")  # 旧分发名(0.17.2 及以前 / 未重装的 editable)
+    except _PkgNotFound:  # 纯源码 / 未安装(无包元数据)场景
+        __version__ = "0.0.0+unknown"
 
 
 def __getattr__(name: str) -> object:

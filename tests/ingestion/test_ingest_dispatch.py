@@ -725,7 +725,7 @@ def test_d11_injected_pptx_extractor_is_used_and_stamped(
 def test_d11_pptspine_extractor_e2e_ingest(store, registry, queue, make_pptx, tmp_path):
     """user story：注入家族 PptspineGridExtractor 后，pptspine 解析的 .pptx 表格事实
     真正落库且可检索，血缘 extractor_version 为 'pptspine@1'（更富表合并的 opt-in 路径）。"""
-    pytest.importorskip("pptspine", reason="pptspine 未安装（pip install rag-spine[ppt]）")
+    pytest.importorskip("pptspine", reason="pptspine 未安装（pip install ragspine[ppt]）")
     from ragspine.extraction.extractors.pptspine_extractor import PptspineGridExtractor
     from ragspine.ingestion.structured.ingestion import ingest_file
 

@@ -16,7 +16,7 @@ A thin argparse wrapper over the zero-SDK offline core — **never** shells out 
   - `ask` — mirrors `scripts/ask.py`: `FactStore` from `--db`, `MockProvider` by default
     (`anthropic` only with the `[llm]` extra + key, lazy-imported; `litellm` with the `[litellm]` extra, model from
     `RAGSPINE_LITELLM_MODEL`, default `deepseek/deepseek-chat` — `batch` builds it the same way), prints answer + sources.
-  - `version` — `importlib.metadata.version("rag-spine")`.
+  - `version` — `importlib.metadata.version("ragspine")`.
   - `batch <questions> --workspace DIR [--retrieval-only]` — batch ask / retrieval-only eval;
     orchestration in `batch.py` (lazy-imported: resume, `--concurrency`, `results.jsonl` +
     `summary.md` under `data/output/batch/`), pure logic in `eval/retrieval_only.py`. Retrieval-only

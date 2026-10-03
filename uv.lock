@@ -4232,7 +4232,7 @@ wheels = [
 ]
 
 [[package]]
-name = "rag-spine"
+name = "ragspine"
 version = "0.17.3"
 source = { editable = "." }
 dependencies = [
@@ -4416,7 +4416,7 @@ requires-dist = [
     { name = "pyyaml", marker = "extra == 'dify'", specifier = ">=6.0" },
     { name = "pyyaml", marker = "extra == 'service'", specifier = ">=6.0" },
     { name = "qdrant-client", marker = "extra == 'vector'", specifier = ">=1.7" },
-    { name = "rag-spine", extras = ["pdf", "ocr", "doc", "llm", "litellm", "embed", "embed-onnx", "rerank", "colbert", "splade", "colpali", "vector", "graph", "otel", "connectors", "service", "dify"], marker = "extra == 'all'" },
+    { name = "ragspine", extras = ["pdf", "ocr", "doc", "llm", "litellm", "embed", "embed-onnx", "rerank", "colbert", "splade", "colpali", "vector", "graph", "otel", "connectors", "service", "dify"], marker = "extra == 'all'" },
     { name = "redis", marker = "extra == 'service'", specifier = ">=5.0" },
     { name = "reportlab", marker = "extra == 'dev'", specifier = ">=4.0" },
     { name = "resvg-py", specifier = ">=0.5.0" },

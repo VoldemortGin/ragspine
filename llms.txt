@@ -6,7 +6,7 @@
 > reranker / OCR / vector store / task queue）都是注入式 `Protocol`，核心 import 零 SDK、可全离线跑
 > 确定性 `MockProvider`。本文件为 AI/LLM 消费者写，所有 API、签名、示例输出均经真实运行核对。
 
-- pip 安装名：**`rag-spine`**（带连字符！`pip install rag-spine`）
+- pip 安装名：**`ragspine`**（`pip install ragspine`；0.17.3 起改名，旧名 `rag-spine` 仅为过渡包）
 - import 名：**`import ragspine`**（无连字符）
 - Python：>=3.12 · 版本：0.17.3 · 许可：Apache-2.0
 - 依赖 **corespine**（Spine 家族薄共享核）：6 缝（config / registry / trace / queue / errors /
@@ -36,7 +36,7 @@
 | `[all]` | 上述全部（自引用聚合） | 一键装齐功能依赖（不含 dev） |
 | `[dev]` | pytest, ruff, mypy, build, twine … | 测试 + 构建 |
 
-装法：`pip install "rag-spine[service,vector]"`（注意 pip 名带连字符）。
+装法：`pip install "ragspine[service,vector]"`。
 
 ## 文档地图（docs/llms/）
 
@@ -46,7 +46,7 @@
   （retrieval / ingestion / extraction / service）。**写代码时查这篇。**
 - [recipes.md](docs/llms/recipes.md) —— 可运行最小示例（**全部离线、零网络、不下模型**，
   deterministic embedding + InProcessVectorStore + FakeQueue，逐个实跑过并附真实输出）。**照抄改写用这篇。**
-- [gotchas.md](docs/llms/gotchas.md) —— 易错点：pip 名 `rag-spine` 但 import `ragspine`、
+- [gotchas.md](docs/llms/gotchas.md) —— 易错点：pip 名已从 `rag-spine` 改为 `ragspine`（import 名不变）、
   各能力装对应 extra、GPU 自适应、向量后端别名、消费 corespine（隐私 trace 拒正文、统一异常）。**别踩坑读这篇。**
 - [docs/spine-family.md](docs/spine-family.md) —— Spine 家族成员、分层、依赖方向与实际依赖形式（非本包 API，跨仓关系用）。
 

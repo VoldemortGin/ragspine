@@ -73,7 +73,7 @@ def _load_yaml(text: str) -> Any:
     except ImportError as exc:  # 未装 PyYAML（[dify] extra）
         raise N8nConvertError(
             "输入不是合法 JSON，且未安装 PyYAML 无法按 YAML 解析："
-            "pip install 'rag-spine[dify]' 或 pip install PyYAML 后重试。",
+            "pip install 'ragspine[dify]' 或 pip install PyYAML 后重试。",
             code="n8n.missing_dependency",
         ) from exc
 

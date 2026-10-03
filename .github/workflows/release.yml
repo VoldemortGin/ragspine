@@ -2,12 +2,15 @@
 #
 # Trigger: publishing a GitHub Release. The `gate` job runs the exact same checks as
 # `scripts/ci.sh` across the support matrix; only if every leg is green does `publish`
-# build + upload the `rag-spine` distribution.
+# build + upload the `ragspine` distribution.
 #
 # ── One-time PyPI setup (web UI; needs account login) ──────────────────────────────────
-# The `rag-spine` project already exists, so add a trusted publisher on it directly:
-#   Manage → rag-spine → Publishing → "Add a new publisher":
-#   Owner: VoldemortGin   Repository: ragspine   Workflow: release.yml   Environment: (blank)
+# The distribution was renamed `rag-spine` → `ragspine` in 0.17.3. `ragspine` is a new PyPI
+# project, so register a *pending* trusted publisher for it (Account → Publishing →
+# "Add a new pending publisher"):
+#   PyPI project name: ragspine   Owner: VoldemortGin   Repository: ragspine
+#   Workflow: release.yml   Environment: (blank)
+# The `rag-spine` transitional package (packaging/rag-spine-transition/) is uploaded by hand.
 #
 # ── To cut a release ───────────────────────────────────────────────────────────────────
 # Bump `version` in pyproject.toml, commit, then publish a GitHub Release tagged e.g.

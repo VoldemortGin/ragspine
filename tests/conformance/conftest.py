@@ -523,7 +523,7 @@ def trace_sink(request):
     """
     if request.param == "otel":
         pytest.importorskip(
-            "opentelemetry", reason="opentelemetry 未装（pip install rag-spine[otel]）"
+            "opentelemetry", reason="opentelemetry 未装（pip install ragspine[otel]）"
         )
     return _build_trace_sink(request.param)
 
@@ -783,17 +783,17 @@ def extractor_case(
     if name == "pptx_styled":
         return get_extractor(PPTX_MIME), styled_deck_path
     if name == "pdf_spine":
-        pytest.importorskip("pdfspine", reason="pdfspine 未装（pip install rag-spine[pdf]）")
+        pytest.importorskip("pdfspine", reason="pdfspine 未装（pip install ragspine[pdf]）")
         # registry 的 .pdf 走 docling；本 pack 走 CLAUDE.md 声明的默认 pdfspine 路（确定性、纯 Rust）。
         from ragspine.extraction.extractors.pdf_spine_extractor import extract_grids
 
         return _FunctionExtractor(extract_grids, name="pdf_spine"), digital_pdf_path
     if name == "docspine":
-        pytest.importorskip("docspine", reason="docspine 未装（pip install rag-spine[doc]）")
+        pytest.importorskip("docspine", reason="docspine 未装（pip install ragspine[doc]）")
         path = make_docx(tmp_path / "conformance.docx", [("table", _table)])
         return get_extractor(DOCX_MIME), path
     if name == "pptspine":
-        pytest.importorskip("pptspine", reason="pptspine 未装（pip install rag-spine[ppt]）")
+        pytest.importorskip("pptspine", reason="pptspine 未装（pip install ragspine[ppt]）")
         path = make_pptx(tmp_path / "conformance.pptx", [[("table", _table)]])
         return get_extractor(PPTX_PPTSPINE_SELECTOR), path
     raise KeyError(name)

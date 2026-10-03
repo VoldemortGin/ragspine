@@ -2,21 +2,21 @@
 
 > 都是真实会绊倒人的坑，全部经代码核对。
 
-## 1 · pip 名 `rag-spine`（带连字符），import 名 `ragspine`（无连字符）
+## 1 · pip 名与 import 名都是 `ragspine`（0.17.3 起；旧分发名 `rag-spine` 已过渡）
 
 ```bash
-pip install rag-spine            # ✅ 分发名带连字符
-pip install ragspine             # ❌ 装不到（PyPI 上是 rag-spine）
+pip install ragspine             # ✅ 分发名（0.17.3 起）
+pip install rag-spine            # ⚠️ 旧名：0.17.3 起只是过渡包，依赖 ragspine==同版本；新代码别再写它
 ```
 ```python
-import ragspine                  # ✅ import 名无连字符
+import ragspine                  # ✅ import 名不变
 import rag_spine                 # ❌ 没有这个名字
 ```
-extras 也跟 pip 名走：`pip install "rag-spine[service,vector]"`。
+extras 跟 pip 名走：`pip install "ragspine[service,vector]"`（过渡包 `rag-spine` 不带 extras）。
 
-## 2 · 各能力装对应 extra（`pip install "rag-spine[xxx]"`）
+## 2 · 各能力装对应 extra（`pip install "ragspine[xxx]"`）
 
-精简核（`pip install rag-spine`）零重依赖、可全离线跑（纯 BM25 + `MockProvider` +
+精简核（`pip install ragspine`）零重依赖、可全离线跑（纯 BM25 + `MockProvider` +
 `deterministic` embedding + `InProcessVectorStore`）。真实后端经可选 extra 延迟 import：
 
 | 缺什么报错 | 装哪个 |

@@ -101,7 +101,7 @@ def test_import_and_construct_do_not_load_litellm():
 def test_missing_litellm_raises_clear_import_error(monkeypatch):
     monkeypatch.setattr(mod, "_litellm", None)
     monkeypatch.setitem(sys.modules, "litellm", None)
-    with pytest.raises(ImportError, match=r"rag-spine\[litellm\]"):
+    with pytest.raises(ImportError, match=r"ragspine\[litellm\]"):
         LiteLLMProvider().chat([{"role": "user", "content": "hi"}])
 
 

@@ -11,7 +11,7 @@ key 由 litellm 按厂商读环境变量（DEEPSEEK_API_KEY / OPENAI_API_KEY / A
   它依赖 litellm 的模型表，`openai/<自部署模型>` 这类查不到的一律报不支持、表过期时还会误判，且判断要先 import
   litellm（破坏惰性加载）。显式开关确定、可复现。开启时图片部件转成 OpenAI `image_url`（base64 data URL），
   图前插一个写着文件名的文本部件，对上 prompt 里的 `图：pN.png`。
-- 惰性：import 本模块不加载 litellm，首次调用时才 import；未安装时报 ImportError 并提示装 `rag-spine[litellm]`。
+- 惰性：import 本模块不加载 litellm，首次调用时才 import；未安装时报 ImportError 并提示装 `ragspine[litellm]`。
 - 韧性：超时 `timeout`、重试交给 litellm 自带 `num_retries`（不自己再包一层）；litellm 的网络 / API / 超时异常
   （`LITELLM_EXCEPTION_TYPES`）归一到 ProviderError，程序错误照常抛出；`max_concurrency` 限制同时在途请求数。
 - 截断：`finish_reason="length"`（文本或 tool_call 被截断）时经 `agent/truncation.retry_on_truncation` 把
@@ -81,7 +81,7 @@ def _load_litellm() -> Any:
                 module = importlib.import_module("litellm")
             except ImportError as exc:
                 raise ImportError(
-                    "未安装 litellm：pip install 'rag-spine[litellm]'；离线场景请用 --provider mock。"
+                    "未安装 litellm：pip install 'ragspine[litellm]'；离线场景请用 --provider mock。"
                 ) from exc
             _silence(module)
             _litellm = module

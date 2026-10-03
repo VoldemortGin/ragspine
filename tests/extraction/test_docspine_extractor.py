@@ -15,7 +15,7 @@ import rootutils
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
 # docspine 是可选 [doc] extra；未装则全文件 skip（真实解析测试需要它，离线纯 Rust）。
-docspine = pytest.importorskip("docspine", reason="docspine 未安装（pip install rag-spine[doc]）")
+docspine = pytest.importorskip("docspine", reason="docspine 未安装（pip install ragspine[doc]）")
 
 
 def test_extract_grids_maps_table_to_styled_grid(make_docx, tmp_path):
