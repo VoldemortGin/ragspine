@@ -218,7 +218,7 @@ class ServiceConfig:
     queue_db_path: str | None = None  # ReviewQueue（SME 复核）路径——非 job 队列
     manifest_db_path: str | None = None
     redis_url: str = "redis://localhost:6379/0"
-    provider_type: str = "mock"  # "mock" | "anthropic" | "claude-cli"(本机 `claude -p` 子进程，评测用) | "litellm"(需 [litellm])
+    provider_type: str = "mock"  # "mock" | "anthropic" | "claude-cli"(本机 `claude -p` 子进程，评测用) | "litellm"(需 [litellm]) | "openai"(直连 OpenAI 兼容 /v1/chat/completions，读 APP_LLM_*，无 SDK)
     model: str = DEFAULT_ANTHROPIC_MODEL
     base_url: str | None = None
     claude_cli_model: str | None = None  # claude-cli 的 --model；None=不指定（CLI 默认）
@@ -326,6 +326,13 @@ def build_provider(config: ServiceConfig) -> LLMProvider:
             api_base=config.litellm_api_base,
             image_input=config.litellm_image_input,
         )
+    elif config.provider_type == "openai":
+        # 直连 OpenAI 风格 /v1/chat/completions（无 SDK）；读 APP_LLM_*，缺项抛 ProviderConfigurationError。
+        # 延迟 import：不选 openai 时服务装配不加载证据链的 APP_* 设置（pydantic-settings）。
+        from ragspine.agent.openai_compat_provider import OpenAICompatProvider
+        from ragspine.common.evidence.providers.providers import load_llm_config
+
+        provider = OpenAICompatProvider(load_llm_config())
     else:
         raise ValueError(f"未知 provider_type: {config.provider_type!r}")
     # 主动 TPM 限流(可选):tokens_per_minute>0 时用 corespine RateLimitedProvider 包装,

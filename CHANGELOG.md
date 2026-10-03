@@ -4,6 +4,13 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ## [Unreleased]
 
+### Added
+
+- **`OpenAICompatProvider` / `provider_type="openai"`** (`agent/openai_compat_provider.py`): a stdlib-HTTP `LLMProvider`
+  for any OpenAI-style `/v1/chat/completions` endpoint, no openai SDK. Configured by `APP_LLM_API_KEY` /
+  `APP_LLM_BASE_URL` (https) / `APP_LLM_MODEL` through the evidence chain's `load_llm_config`; one request per call,
+  no retry; a length cut raises `TruncatedOutputError`. `ragspine doctor` validates the three settings for it.
+
 ## [0.17.3] - 2026-09-28
 
 ### Changed
