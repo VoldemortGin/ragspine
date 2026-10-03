@@ -64,7 +64,7 @@ def _pandas() -> Any:
         import pandas
     except ImportError as exc:  # pragma: no cover - 取决于安装的 extra
         raise ImportError(
-            "未安装 pandas/pyarrow：pip install 'rag-spine[graphrag-compat]' "
+            "未安装 pandas/pyarrow：pip install 'ragspine[graphrag-compat]' "
             "或 pip install pandas pyarrow"
         ) from exc
     return pandas

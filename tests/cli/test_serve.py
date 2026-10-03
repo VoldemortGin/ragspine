@@ -148,7 +148,7 @@ def test_missing_service_extra_has_exact_install_hint(tmp_path: Path) -> None:
     def missing() -> local_serve._ServiceComponents:
         raise local_serve.LocalServeDependencyError(
             "local serve requires the optional [service] extra; install it with: "
-            'pip install "rag-spine[service]"'
+            'pip install "ragspine[service]"'
         )
 
     with pytest.raises(local_serve.LocalServeDependencyError) as exc:
@@ -160,7 +160,7 @@ def test_missing_service_extra_has_exact_install_hint(tmp_path: Path) -> None:
 
     assert str(exc.value) == (
         "local serve requires the optional [service] extra; install it with: "
-        'pip install "rag-spine[service]"'
+        'pip install "ragspine[service]"'
     )
 
 

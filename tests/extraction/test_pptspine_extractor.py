@@ -19,7 +19,7 @@ import rootutils
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 
 # pptspine 是可选 [ppt] extra；未装则全文件 skip（真实解析测试需要它，离线纯 Rust）。
-pptspine = pytest.importorskip("pptspine", reason="pptspine 未安装（pip install rag-spine[ppt]）")
+pptspine = pytest.importorskip("pptspine", reason="pptspine 未安装（pip install ragspine[ppt]）")
 
 
 def test_extract_grids_maps_table_to_styled_grid(make_pptx, tmp_path):

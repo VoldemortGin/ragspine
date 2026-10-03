@@ -65,7 +65,7 @@ def _dependency(name: str, extra: str, *, required: bool = True) -> DoctorFindin
         severity,
         "dependency",
         f"optional dependency {name} is not installed",
-        f"install rag-spine[{extra}]",
+        f"install ragspine[{extra}]",
     )
 
 

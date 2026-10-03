@@ -1,7 +1,7 @@
 # overview —— ragspine 是什么、解决什么、核心概念
 
 > 本目录（`docs/llms/`）为 AI/LLM 消费者写。所有 API、签名、示例输出均经真实 `import ragspine`
-> 运行核对。pip 名 **`rag-spine`**（带连字符），import 名 **`ragspine`**（无连字符）。
+> 运行核对。pip 名与 import 名都是 **`ragspine`**（0.17.3 起；旧分发名 `rag-spine` 仅为过渡包）。
 
 ## 是什么
 

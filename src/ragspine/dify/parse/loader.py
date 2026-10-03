@@ -27,7 +27,7 @@ def _load_yaml(source: str | bytes) -> dict[str, object]:
         from ragspine.workflows.formats import parse_workflow
     except ImportError as exc:  # 未装 [dify] extra
         raise DifyCompileError(
-            "未安装 PyYAML：pip install 'rag-spine[dify]' 或 pip install PyYAML 后重试。",
+            "未安装 PyYAML：pip install 'ragspine[dify]' 或 pip install PyYAML 后重试。",
             code="dify.missing_dependency",
         ) from exc
 
@@ -68,7 +68,7 @@ def _read_source(source: str | Path) -> str | bytes:
         from ragspine.workflows.formats import MAX_WORKFLOW_BYTES, read_bounded_file
     except ImportError as exc:  # 未装 [dify] extra
         raise DifyCompileError(
-            "未安装 PyYAML：pip install 'rag-spine[dify]' 或 pip install PyYAML 后重试。",
+            "未安装 PyYAML：pip install 'ragspine[dify]' 或 pip install PyYAML 后重试。",
             code="dify.missing_dependency",
         ) from exc
     try:

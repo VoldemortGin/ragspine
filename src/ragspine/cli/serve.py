@@ -26,7 +26,7 @@ from ragspine.facade import RAGSpine
 
 _LOOPBACK_HOST = "127.0.0.1"
 _DEFAULT_PORT = 8000
-_SERVICE_EXTRA_HINT = 'pip install "rag-spine[service]"'
+_SERVICE_EXTRA_HINT = 'pip install "ragspine[service]"'
 
 
 class LocalServeError(RuntimeError):

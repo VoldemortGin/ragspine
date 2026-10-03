@@ -49,7 +49,7 @@ class OtelTraceSink:
                 from opentelemetry import trace as _otel_trace
             except ImportError as exc:  # pragma: no cover - 依赖缺失路径（CI 精简门不装 [otel]）
                 raise ImportError(
-                    "缺少可选依赖 opentelemetry：请先 `pip install rag-spine[otel]` 再重试。"
+                    "缺少可选依赖 opentelemetry：请先 `pip install ragspine[otel]` 再重试。"
                 ) from exc
             tracer = _otel_trace.get_tracer("ragspine")
         self._tracer = tracer

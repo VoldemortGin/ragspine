@@ -2,7 +2,7 @@
 
 > 每个示例都**实跑过**并附**真实输出**。全部走离线确定性路径：`deterministic` embedding（词法散列，
 > 非语义）+ `InProcessVectorStore` + `MockProvider` + `FakeQueue`。**不联网、不下模型、无 API key。**
-> 安装：`pip install rag-spine`（带连字符）；这些示例的依赖都在精简核内，无需任何 extra。
+> 安装：`pip install ragspine`；这些示例的依赖都在精简核内，无需任何 extra。
 
 ---
 
@@ -136,12 +136,12 @@ type(make_embedding_backend("DETERMINISTIC"))  # -> DeterministicEmbeddingBacken
 
 | 想要 | 装 | 然后 |
 |---|---|---|
-| 持久向量库 sqlite-vec | `pip install "rag-spine[vector]"` | `make_vector_store("sqlite_vec", db_path="vec.db")` |
-| pgvector / qdrant | `pip install "rag-spine[vector]"` | `make_vector_store("pgvector", ...)` / `make_vector_store("qdrant", ...)` |
-| 真实语义 embedding | `pip install "rag-spine[embed]"` | `make_embedding_backend("qwen3")`（cuda/mps/cpu 自适应） |
-| OpenAI embedding | `pip install "rag-spine[llm]"` | `make_embedding_backend("openai", api_key=...)` |
-| 真实 Claude | `pip install "rag-spine[llm]"` | `AnthropicProvider(model=..., base_url=...)` |
-| HTTP + 队列 | `pip install "rag-spine[service]"` | `ragspine.service.api` / `RQQueue` |
+| 持久向量库 sqlite-vec | `pip install "ragspine[vector]"` | `make_vector_store("sqlite_vec", db_path="vec.db")` |
+| pgvector / qdrant | `pip install "ragspine[vector]"` | `make_vector_store("pgvector", ...)` / `make_vector_store("qdrant", ...)` |
+| 真实语义 embedding | `pip install "ragspine[embed]"` | `make_embedding_backend("qwen3")`（cuda/mps/cpu 自适应） |
+| OpenAI embedding | `pip install "ragspine[llm]"` | `make_embedding_backend("openai", api_key=...)` |
+| 真实 Claude | `pip install "ragspine[llm]"` | `AnthropicProvider(model=..., base_url=...)` |
+| HTTP + 队列 | `pip install "ragspine[service]"` | `ragspine.service.api` / `RQQueue` |
 
 也可用 env（缺省 spec 时读）：`RAGSPINE_VECTOR_STORE` / `RAGSPINE_EMBEDDING_BACKEND` /
 `RAGSPINE_EMBEDDING_MODEL` / `RAGSPINE_EMBEDDING_DEVICE` / `RAGSPINE_PERSISTENCE_POLICY`。

@@ -74,7 +74,7 @@ class TatrStructureRecognizer:
             from transformers import AutoImageProcessor, AutoModelForObjectDetection
         except ImportError as exc:  # pragma: no cover - 取决于安装的 extra
             raise ImportError(
-                "未安装表格结构识别依赖：pip install 'rag-spine[tsr]' "
+                "未安装表格结构识别依赖：pip install 'ragspine[tsr]' "
                 "或 pip install torch transformers pillow"
             ) from exc
         # transformers 5.17 未给 from_pretrained 标注类型；不装 [tsr] 的环境（CI runner）里
@@ -97,7 +97,7 @@ class TatrStructureRecognizer:
         try:
             from PIL import Image
         except ImportError as exc:  # pragma: no cover
-            raise ImportError("未安装 pillow：pip install 'rag-spine[tsr]'") from exc
+            raise ImportError("未安装 pillow：pip install 'ragspine[tsr]'") from exc
 
         import io
 

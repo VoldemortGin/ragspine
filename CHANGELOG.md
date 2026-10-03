@@ -8,6 +8,12 @@ All notable changes to RAGSpine are documented here. This project follows Semant
 
 ### Changed
 
+- **Distribution renamed `rag-spine` → `ragspine` on PyPI.** `pip install ragspine` (extras: `ragspine[service]`,
+  …) is the install name from 0.17.3 on; `rag-spine` becomes a transitional package that depends on
+  `ragspine==` the same version (`packaging/rag-spine-transition/`). The import name (`import ragspine`) and the
+  `ragspine` CLI are unchanged. `ragspine.__version__` and `ragspine version` read the `ragspine` metadata and fall
+  back to `rag-spine` for environments that still have the old distribution installed. Wheels are now named
+  `ragspine-*.whl`.
 - **Narrative citation suffix merged per document: `RAGSPINE_CITATION_MERGE=on|off`, default `on`**
   ([ADR 0029](docs/adr/0029-narrative-citation-merge.md)). When the model's prose names no source document, the
   `（资料来源：…）` suffix used to list every retrieved snippet as `{doc} {locator}` (up to 50 entries, 5,543

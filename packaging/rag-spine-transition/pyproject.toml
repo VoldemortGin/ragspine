@@ -1,0 +1,27 @@
+# Transitional `rag-spine` distribution: the project was renamed to `ragspine` on PyPI in 0.17.3.
+# Ships no code; installing it pulls in `ragspine` at the same version. Published by hand
+# (see README.md), not by CI.
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "rag-spine"
+version = "0.17.3"
+description = "Renamed to `ragspine` - this transitional package only installs `ragspine`. Use `pip install ragspine`."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.12"
+authors = [{ name = "lin han", email = "voldemort22@126.com" }]
+classifiers = ["Development Status :: 7 - Inactive"]
+dependencies = ["ragspine==0.17.3"]
+
+[project.urls]
+Homepage = "https://pypi.org/project/ragspine/"
+Repository = "https://github.com/VoldemortGin/ragspine"
+
+[tool.hatch.build.targets.wheel]
+bypass-selection = true
+
+[tool.hatch.build.targets.sdist]
+include = ["pyproject.toml", "README.md"]

@@ -1,6 +1,6 @@
 """The base install must satisfy every third-party import of ``enterprise_pdf_rag``.
 
-``pip install rag-spine`` (no extras) ships the ``enterprise-pdf-rag`` console script, so each
+``pip install ragspine`` (no extras) ships the ``enterprise-pdf-rag`` console script, so each
 absolute third-party import in the package must resolve to a base ``[project].dependencies``
 entry, directly or through one of its unconditional requirements.
 """

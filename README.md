@@ -10,7 +10,7 @@
 
 > **🤖 给 AI / LLM:** 用本库前先读 [`llms.txt`](llms.txt)（精简索引）与 [`docs/llms/`](docs/llms/)（完整 API / recipes / 陷阱）；`pip install` 后这些文档随包位于 `site-packages/ragspine/_llms/`。
 
-[![PyPI](https://img.shields.io/pypi/v/rag-spine.svg)](https://pypi.org/project/rag-spine/)
+[![PyPI](https://img.shields.io/pypi/v/ragspine.svg)](https://pypi.org/project/ragspine/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![Tests](https://img.shields.io/badge/tests-5477%20collected-brightgreen)
@@ -124,7 +124,7 @@ question
 ## Install
 
 ```bash
-pip install rag-spine      # distribution name is hyphenated; the import is:  import ragspine
+pip install ragspine       # import ragspine  (renamed from `rag-spine` in 0.17.3; the old name is a transitional package)
 ```
 
 Optional extras:
@@ -145,7 +145,7 @@ Optional extras:
 | `[all]` | all of the above | one-shot install of every optional backend |
 | `[dev]` | pytest, reportlab, markdown | tests + fixture generation |
 
-Install optional backends on demand — the lean default (`pip install rag-spine`) runs offline on
+Install optional backends on demand — the lean default (`pip install ragspine`) runs offline on
 pure BM25 with zero heavy deps; the quality-depth backends are all opt-in.
 
 **From source**
@@ -200,7 +200,7 @@ without Redis:
 ragspine config init --profile balanced
 ragspine config show --config ragspine.toml --effective
 ragspine doctor --config ragspine.toml
-ragspine serve --workspace .ragspine --open   # requires rag-spine[service]
+ragspine serve --workspace .ragspine --open   # requires ragspine[service]
 ```
 
 **1. End-to-end demo on synthetic data — offline, no API key:**

@@ -160,6 +160,26 @@ def test_version_prints_version_string(capsys):
     assert any(ch.isdigit() for ch in out)
 
 
+@pytest.mark.parametrize(
+    ("installed", "expected"),
+    [({"ragspine": "1.2.3"}, "1.2.3"), ({"rag-spine": "0.9.0"}, "0.9.0"), ({}, "unknown")],
+)
+def test_version_falls_back_to_legacy_dist_name(monkeypatch, capsys, installed, expected):
+    """新分发名 ragspine 优先；找不到时回退旧名 rag-spine；都没有打印 unknown。"""
+    from importlib.metadata import PackageNotFoundError
+
+    cli_main = import_module("ragspine.cli.main")
+
+    def fake_version(dist: str) -> str:
+        if dist in installed:
+            return installed[dist]
+        raise PackageNotFoundError(dist)
+
+    monkeypatch.setattr(cli_main, "version", fake_version)
+    assert main(["version"]) == 0
+    assert capsys.readouterr().out.strip() == expected
+
+
 # ---------------------------------------------------------------------------
 # 无参 / 未知选项
 # ---------------------------------------------------------------------------

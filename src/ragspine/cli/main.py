@@ -41,8 +41,10 @@ from ragspine.common.core import DEFAULT_FACT_DB
 from ragspine.storage.fact_store import Fact, SqliteFactStore
 from ragspine.workflows.matching import TemplateMatcher
 
-# 分发名（PEP 621 [project] name = "rag-spine"，import 名仍是 ragspine）。
-_DIST_NAME = "rag-spine"
+# 分发名（PEP 621 [project] name = "ragspine"，import 名仍是 ragspine）。
+_DIST_NAME = "ragspine"
+# 旧分发名（0.17.2 及以前；过渡期用户可能仍装着它）。
+_LEGACY_DIST_NAME = "rag-spine"
 
 _KNOWN_COMMANDS = frozenset(
     {
@@ -270,10 +272,13 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
 def _cmd_version(args: argparse.Namespace) -> int:
     """打印分发版本号（未安装为可分发包时回退到 unknown）。"""
-    try:
-        print(version(_DIST_NAME))
-    except PackageNotFoundError:
-        print("unknown")
+    for dist in (_DIST_NAME, _LEGACY_DIST_NAME):
+        try:
+            print(version(dist))
+        except PackageNotFoundError:
+            continue
+        return 0
+    print("unknown")
     return 0
 
 
@@ -940,7 +945,7 @@ def _cmd_workflow_serve(args: argparse.Namespace) -> int:
         from ragspine.service.studio.launch import LaunchSessionRegistry
     except ImportError:
         print(
-            'error: workflow serve 需要 [service] extra，请先安装：pip install "rag-spine[service]"',
+            'error: workflow serve 需要 [service] extra，请先安装：pip install "ragspine[service]"',
             file=sys.stderr,
         )
         return 2

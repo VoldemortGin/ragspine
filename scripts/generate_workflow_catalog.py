@@ -1512,7 +1512,7 @@ def _request_json(
     _validate_metadata_url(url)
     headers = {
         "Accept": "application/json",
-        "User-Agent": "rag-spine-catalog-generator/1.0",
+        "User-Agent": "ragspine-catalog-generator/1.0",
     }
     data: bytes | None = None
     if body is not None:
