@@ -50,7 +50,7 @@ providers/    providers.py (explicit APP_LLM_* / APP_EMBEDDING_* / APP_RERANK_* 
   allowlists carry the resolved `APP_LLM_*`), and Open WebUI's `OPENAI_API_KEY` placeholder
   lives in a child that never reads `Settings`.
 - **`NB_*` path settings are unvalidated and APP_-less** — `pdf_source_dir` (`NB_PDF_DIR`),
-  `questions_path` (`NB_QUESTIONS_PATH`), `report_dir` (`NB_REPORT_DIR`): `~` expanded, relative
+  `questions_path` (`NB_QUESTIONS_PATH`, alias `DATASET_PATH` — primary wins, a blank primary falls back), `report_dir` (`NB_REPORT_DIR`): `~` expanded, relative
   to `ROOT_DIR`, no existence check, blank means unset. Callers (`run_folder_pipeline`, the
   `run-folder` CLI) let an explicit argument win and raise only when a folder is needed.
 - **Model / tunnel fields are lenient** — all optional strings / `SecretStr`; nothing is validated

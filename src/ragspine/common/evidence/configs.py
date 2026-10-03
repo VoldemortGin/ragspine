@@ -18,6 +18,7 @@ from typing import Literal
 from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import (
     BaseSettings,
+    EnvSettingsSource,
     PydanticBaseSettingsSource,
     SettingsConfigDict,
     YamlConfigSettingsSource,
@@ -75,6 +76,27 @@ def _resolve_directory(value: Path) -> Path:
     return (path if path.is_absolute() else ROOT_DIR / path).resolve()
 
 
+def _drop_blank_primary_questions_path(
+    source: PydanticBaseSettingsSource,
+) -> PydanticBaseSettingsSource:
+    """让留空的 ``NB_QUESTIONS_PATH=`` 不挡住别名 ``DATASET_PATH``(把它当作未设置)。
+
+    pydantic-settings 在同一来源内取别名列表里「第一个存在」的名字,空串也算存在,
+    于是 ``NB_QUESTIONS_PATH=`` 会让 ``DATASET_PATH`` 永远没机会回落。这里在取值前把来源里
+    空白的主名剔掉(真实环境变量与 .env 两个来源同样处理);键名大小写按来源自身配置而定,故用 casefold 比较。
+    """
+    if isinstance(source, EnvSettingsSource) and isinstance(source.env_vars, dict):
+        primary = "NB_QUESTIONS_PATH".casefold()
+        blank = [
+            k
+            for k, v in source.env_vars.items()
+            if k.casefold() == primary and not (v or "").strip()
+        ]
+        for name in blank:
+            del source.env_vars[name]
+    return source
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="APP_",  # APP_IS_DEBUG、APP_BEARTYPE_ON ...
@@ -127,7 +149,9 @@ class Settings(BaseSettings):
     # notebook / 一键流程(run_folder_pipeline)的输入输出位置,环境变量名不带 APP_ 前缀。
     # 都可缺省且不校验存在性;相对路径相对项目根,~ 展开;空串视为未设置。
     pdf_source_dir: Path | None = Field(default=None, validation_alias="NB_PDF_DIR")
-    questions_path: Path | None = Field(default=None, validation_alias="NB_QUESTIONS_PATH")
+    questions_path: Path | None = Field(
+        default=None, validation_alias=AliasChoices("NB_QUESTIONS_PATH", "DATASET_PATH")
+    )
     report_dir: Path | None = Field(default=None, validation_alias="NB_REPORT_DIR")
 
     # 模型与 SSH 隧道。全部可缺省:import / 构造时不校验,哪一组缺失或不合法,只在真正用到
@@ -241,10 +265,12 @@ class Settings(BaseSettings):
         # 末位的 file_secret_settings 只有在 model_config 设了 secrets_dir 时才读文件;
         # 本模板没设,所以它当前是 no-op —— 留在链尾是为了「要用 Docker secrets
         # 时只需加一行 secrets_dir」,而不是它现在在起作用。
-        dotenv = () if _dotenv_disabled() else (dotenv_settings,)
+        dotenv = (
+            () if _dotenv_disabled() else (_drop_blank_primary_questions_path(dotenv_settings),)
+        )
         return (
             init_settings,
-            env_settings,
+            _drop_blank_primary_questions_path(env_settings),
             *dotenv,
             YamlConfigSettingsSource(settings_cls),
             file_secret_settings,

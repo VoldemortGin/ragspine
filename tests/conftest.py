@@ -45,6 +45,7 @@ def _isolate_ambient_llm_and_notebook_settings(monkeypatch):
         "OPENAI_MODEL",
         "NB_PDF_DIR",
         "NB_QUESTIONS_PATH",
+        "DATASET_PATH",  # questions_path 的回落别名
         "NB_REPORT_DIR",
     ):
         monkeypatch.delenv(name, raising=False)
