@@ -306,7 +306,7 @@ result.ok, result.live_calls, [(d.pdf_path, d.status) for d in result.documents]
 ### 题集的两种格式
 
 1. **`nl-answers-gold-v1`**（`.json` 且 `schema_version` 为此值）：用 `adapters/nl_gold.py` 的 `load_gold` + `judge`，与 `nl_gold_eval.py` 同一判定（共用 `adapters/nl_gold_runner.py`）；只跑 `offline_only=false` 的用例。`document_sha256` 不在本次已发布文档里的用例如实标 `routing_failed` 且不发请求。
-2. **轻量题集**：复用 `ragspine.eval.retrieval_only.load_questions`，支持 `.json` / `.jsonl` / `.csv` / `.txt`，字段 `id` / `question` / `expected` / `pages`（1 起，`"2"`、`"2,4-5"`）/ `doc`。判定为 `answered` / `abstained`；`failures` 记录引用页是否落在 `pages`、`expected` 是否出现在回答里。`doc` 可写文件名、去扩展名的文件名或 ≥12 位 sha 前缀；本次只有一份已发布文档时直接问它；否则不带 `document`，交给服务端的标题 / 年份路由，选不出唯一文档的 422 记 `routing_failed`（不会对每份文档各问一遍）。
+2. **轻量题集**：复用 `ragspine.eval.retrieval_only.load_questions`，支持 `.json` / `.jsonl` / `.csv` / `.txt`，字段 `id` / `question` / `expected` / `pages`（1 起，`"2"`、`"2,4-5"`）/ `doc`。判定为 `answered` / `abstained`；`failures` 记录 `expected` 是否出现在回答里。`doc` 可写文件名、去扩展名的文件名或 ≥12 位 sha 前缀；本次只有一份已发布文档时直接问它；否则不带 `document`，交给服务端的标题 / 年份路由，选不出唯一文档的 422 记 `routing_failed`（不会对每份文档各问一遍）。
 
 两种格式凡有页（金标取 `required_claims` 的页，轻量题集取 `pages`）都按 prompt 成员顺序算名次，`metrics` 是 `retrieval_metrics` 的 recall@k / page_recall@k / MRR（k = 1, 3, 5, 10）。评测只挂载本次跑出的文档（`scan_catalog` 后按 sha 过滤），答案缓存在 `<ingestion_root>/model-cache`，问答审计照常写 `answers-audit.sqlite`。
 

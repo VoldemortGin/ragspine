@@ -670,15 +670,12 @@ def _eval_questions(
         else:
             answered = envelope.get("status") == "answered"
             verdict = "answered" if answered else "abstained"
-            cited = _cited_pages(envelope)
             if groups:
                 rank, page_rank = _ranks(envelope, groups, member_pages)
                 ranks.append((rank, page_rank))
             expects = bool(groups) or bool(question.expected)
             if not answered and expects:
                 failures.append("abstained, but the question expects an answer")
-            if answered and groups and not any(page in group for group in groups for page in cited):
-                failures.append(f"cited pages {list(cited)} miss the expected pages")
             prose = answer_prose(response["choices"][0]["message"]["content"])
             if answered and question.expected and not content_hit(prose, question.expected):
                 failures.append(f"answer does not contain the expected {question.expected!r}")

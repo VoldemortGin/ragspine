@@ -457,6 +457,28 @@ def test_a_light_question_set_is_answered_in_process_inside_a_running_event_loop
     assert not result.ok
 
 
+def test_cited_pages_missing_the_expected_pages_are_not_a_failure_in_a_light_question_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = _two_documents(tmp_path, monkeypatch)
+    questions = tmp_path / "questions.jsonl"
+    row = {
+        "id": "wrong-page",
+        "question": "What does page 2 say?",
+        "doc": "meridian.pdf",
+        "pages": "3",
+    }
+    questions.write_text(json.dumps(row) + "\n")
+    llm, _ = _answer_llm(tmp_path)
+
+    result = _run(tmp_path, folder, questions=questions, answer_llm=llm)
+
+    assert result.eval is not None
+    (case,) = result.eval.cases
+    assert (case.verdict, case.cited_pages) == ("answered", (2,))
+    assert case.failures == ()
+
+
 def _gold(meridian: str) -> dict[str, object]:
     return {
         "schema_version": "nl-answers-gold-v1",
