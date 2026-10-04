@@ -1,6 +1,10 @@
 """The example notebook is valid nbformat 4, ships without outputs and carries no secrets."""
 
+import contextlib
+import errno
+import io
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -278,3 +282,84 @@ def test_evaluation_writes_only_sequential_whole_files_never_appends_or_seeks() 
     summary = cells["eval-summary"]
     assert "to_excel(EVAL_XLSX" not in summary
     assert "io.BytesIO()" in summary and "EVAL_XLSX.write_bytes(" in summary
+
+
+def test_diagnostic_cells_sit_before_the_run_and_the_selfcheck_follows_the_guard() -> None:
+    ids = [cell_id for cell_id, _ in _code_cells()]
+    assert ids.index("diagnose") < ids.index("version-check") < ids.index("config")
+    assert ids.index("write-guard") < ids.index("fs-selfcheck") < ids.index("run")
+    version = _code_cell("version-check")
+    for marker in ("git", "file_placement", "link_new_file", "report.json", "platform.platform()"):
+        assert marker in version
+
+
+def test_selfcheck_writes_only_under_a_cleaned_up_ingestion_subdir_never_the_pdf_dir() -> None:
+    source = _code_cell("fs-selfcheck")
+    assert re.search(r'INGESTION_ROOT\)\.expanduser\(\)\s*/\s*f"_selfcheck_', source)
+    assert "shutil.rmtree(" in source and "link_new_file" in source
+    for line in source.splitlines():
+        if "PDF_DIR" in line:
+            assert not re.search(r"write|mkdir|open\(|replace|link|rmtree|unlink", line), line
+
+
+_SELFCHECK_PDF = b"%PDF-1.4 synthetic"
+
+
+def _conclusion(output: str) -> str:
+    return next(line for line in output.splitlines() if line.startswith("结论"))
+
+
+def _run_selfcheck(root: Path, with_pdf: bool = True) -> tuple[str, list[str], list[str]]:
+    """抽出 fs-selfcheck cell 在 tmp 根下执行; 返回 (输出, PDF 目录树, ingestion 目录树)。"""
+    pdf_dir = root / "pdfs"
+    pdf_dir.mkdir(parents=True)
+    if with_pdf:
+        (pdf_dir / "a.pdf").write_bytes(_SELFCHECK_PDF)
+    ingestion = root / "data" / "ingestion"
+    namespace: dict[str, Any] = {"PDF_DIR": pdf_dir, "INGESTION_ROOT": ingestion}
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        exec(compile(_code_cell("fs-selfcheck"), "fs-selfcheck", "exec"), namespace)
+    if with_pdf:
+        assert (pdf_dir / "a.pdf").read_bytes() == _SELFCHECK_PDF
+    return buffer.getvalue(), _tree(pdf_dir), _tree(ingestion)
+
+
+def test_selfcheck_runs_clean_and_removes_its_temporary_directory(tmp_path: Path) -> None:
+    output, pdf_tree, ingestion_tree = _run_selfcheck(tmp_path)
+    assert pdf_tree == ["a.pdf"]
+    assert ingestion_tree == []
+    assert "[失败]" not in output and "全部可用" in _conclusion(output)
+    assert "link_new_file 放置新文件" in output and "[清理] 已删除" in output
+
+
+def test_selfcheck_survives_hard_links_being_refused_and_still_concludes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        raise PermissionError(errno.EPERM, os.strerror(errno.EPERM))
+
+    monkeypatch.setattr(os, "link", refuse)
+    output, pdf_tree, ingestion_tree = _run_selfcheck(tmp_path)
+    assert pdf_tree == ["a.pdf"] and ingestion_tree == []
+    assert re.search(r"\[失败\] os\.link 硬链接.*\n\s+PermissionError", output)
+    assert f"errno={errno.EPERM}" in output
+    assert "硬链接不可用" in _conclusion(output)
+    assert "入库应能正常进行" in _conclusion(output)
+    # 生产函数走回退: 放置新文件成功, 对已存在目标仍抛 FileExistsError
+    assert "[成功] link_new_file 放置新文件" in output
+    assert "[成功] link_new_file 目标已存在应抛 FileExistsError" in output
+
+
+def test_selfcheck_reports_replace_failure_and_skips_cleanly_without_pdfs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        raise PermissionError(errno.EPERM, os.strerror(errno.EPERM))
+
+    monkeypatch.setattr(os, "replace", refuse)
+    monkeypatch.setattr(os, "link", refuse)
+    output, _, ingestion_tree = _run_selfcheck(tmp_path, with_pdf=False)
+    assert ingestion_tree == []
+    assert "没有可读的 PDF" in output
+    assert "os.replace 也不可用" in _conclusion(output)
