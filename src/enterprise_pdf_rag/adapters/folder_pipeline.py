@@ -171,6 +171,10 @@ class EvalCase(BoundaryModel):
     failures: tuple[str, ...]
     status: str | None = None
     abstain_reason: str | None = None
+    # The question set's expected answer; None when the question set has none (gold sets, unrouted).
+    expected: str | None = None
+    # The assistant's answer prose as the user saw it (citation block removed); None when no answer came back.
+    answer: str | None = None
     claim_count: int = 0
     # 1-based physical pages the verified claims cite, in first-citation order.
     cited_pages: tuple[int, ...] = ()
@@ -529,6 +533,15 @@ def _metrics(ranks: Sequence[tuple[int | None, int | None]]) -> dict[str, Any]:
     return retrieval_metrics(ranks, recall_ks(_METRIC_TOP_K)) if ranks else {}
 
 
+def _answer_text(response: dict[str, Any] | None) -> str | None:
+    """The answer prose of a chat-completion response, or None when it carries no message."""
+    try:
+        content = (response or {})["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError):
+        return None
+    return answer_prose(content) if isinstance(content, str) else None
+
+
 def _eval_gold(
     gold: NlGoldSet,
     *,
@@ -575,6 +588,7 @@ def _eval_gold(
                 failures=outcome.failures,
                 status=envelope.get("status"),
                 abstain_reason=envelope.get("abstain_reason"),
+                answer=_answer_text(outcome.response) if outcome.status_code == 200 else None,
                 claim_count=len(envelope.get("claims", ())),
                 cited_pages=_cited_pages(envelope),
                 page_rank=page_rank,
@@ -644,6 +658,7 @@ def _eval_questions(
                     document_id=None,
                     verdict="routing_failed",
                     failures=(unrouted or "no published document",),
+                    expected=question.expected,
                 )
             )
             if groups:
@@ -662,6 +677,7 @@ def _eval_questions(
         verdict: CaseVerdict
         failures: list[str] = []
         page_rank: int | None = None
+        answer: str | None = None
         if status_code != 200 or not envelope:
             verdict = "routing_failed" if status_code == 422 else "http_error"
             failures.append(f"HTTP {status_code}: {json.dumps(response, ensure_ascii=False)[:200]}")
@@ -677,6 +693,7 @@ def _eval_questions(
             if not answered and expects:
                 failures.append("abstained, but the question expects an answer")
             prose = answer_prose(response["choices"][0]["message"]["content"])
+            answer = prose
             if answered and question.expected and not content_hit(prose, question.expected):
                 failures.append(f"answer does not contain the expected {question.expected!r}")
         cases.append(
@@ -688,6 +705,8 @@ def _eval_questions(
                 failures=tuple(failures),
                 status=envelope.get("status"),
                 abstain_reason=envelope.get("abstain_reason"),
+                expected=question.expected,
+                answer=answer,
                 claim_count=len(envelope.get("claims", ())),
                 cited_pages=_cited_pages(envelope),
                 page_rank=page_rank,

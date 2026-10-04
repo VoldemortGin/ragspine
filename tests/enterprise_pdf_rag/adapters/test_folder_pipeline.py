@@ -16,6 +16,7 @@ from enterprise_pdf_rag import cli
 from enterprise_pdf_rag.adapters import folder_pipeline
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.folder_pipeline import (
+    EvalCase,
     FolderPipelineResult,
     PreflightError,
     discover_pdfs,
@@ -473,12 +474,52 @@ def test_a_light_question_set_is_answered_in_process_inside_a_running_event_loop
     assert "Document selection required" in cases["unroutable"].failures[0]
     assert cases["elsewhere"].verdict == "routing_failed"
     assert "no published document" in cases["elsewhere"].failures[0]
+    # The case record carries the question set's expected answer and the model's own prose.
+    assert cases["routed"].expected == "page 2" and cases["named"].expected is None
+    assert cases["named"].answer is not None and "page 2" in cases["named"].answer
+    assert cases["routed"].answer is not None and "page 2" in cases["routed"].answer
+    assert cases["unroutable"].answer is None and cases["elsewhere"].answer is None
     # Only the two routed questions ever reached the model.
     assert len(prompts) == 2
     assert result.live_calls.answer == 2
     assert result.eval.totals["answered"] == 2 and result.eval.totals["routing_failed"] == 2
     assert result.eval.metrics["judged"] == 1
     assert not result.ok
+
+
+def test_an_abstained_case_keeps_the_text_the_user_saw_and_the_expected_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = _two_documents(tmp_path, monkeypatch)
+    questions = tmp_path / "questions.jsonl"
+    row = {
+        "id": "nothing",
+        "question": "What does page 3 say?",
+        "doc": "meridian.pdf",
+        "expected": "an answer, a, b",
+    }
+    questions.write_text(json.dumps(row) + "\n")
+    llm, _ = scripted_client(tmp_path / "answer-cache", _quote_page("page 3"), max_live_calls=5)
+
+    result = _run(tmp_path, folder, questions=questions, answer_llm=llm)
+
+    assert result.eval is not None
+    (case,) = result.eval.cases
+    assert case.verdict == "abstained" and case.status == "abstained"
+    assert isinstance(case.answer, str) and case.answer.strip()
+    assert case.expected == "an answer, a, b"
+
+
+def test_a_report_written_before_answer_and_expected_existed_still_parses() -> None:
+    legacy = {
+        "case_id": "q1",
+        "question": "Q?",
+        "document_id": None,
+        "verdict": "answered",
+        "failures": [],
+    }
+    case = EvalCase.model_validate_json(json.dumps(legacy))
+    assert case.answer is None and case.expected is None
 
 
 def test_cited_pages_missing_the_expected_pages_are_not_a_failure_in_a_light_question_set(
@@ -560,6 +601,8 @@ def test_a_frozen_gold_set_is_judged_and_a_case_outside_the_run_is_reported(
     assert (passed.case_id, passed.verdict, passed.failures) == ("page-two", "pass", ())
     assert passed.cited_pages == (2,) and passed.page_rank is not None
     assert passed.envelope["status"] == "answered"
+    assert passed.answer is not None and "page 2" in passed.answer and passed.expected is None
+    assert outside.answer is None
     assert (outside.case_id, outside.verdict) == ("other-document", "routing_failed")
     assert "not among this run" in outside.failures[0]
     assert len(prompts) == 1
