@@ -248,7 +248,11 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   only from the document's own vocabulary (no hardcoded company), and a filter that leaves
   fewer candidates than seats is relaxed and reported, never turned into an abstention.
 - **Immutable, content-addressed snapshots** — `publish_draft` switches `current-*` pointers
-  atomically and is idempotent; corrupted evidence is refused, never repaired. A mount verifies
+  atomically and is idempotent; corrupted evidence is refused, never repaired. Objects and
+  stage-cache pointers are created by hard link; where the filesystem cannot hard-link they fall
+  back to check + rename + re-read (`ragspine.common.evidence.file_placement`, [ADR
+  0020](../../docs/enterprise-pdf-rag/adr/0020-storage-without-hard-links.md): same layout and
+  bytes, first-writer-wins no longer atomic under concurrent writers). A mount verifies
   its **whole** pinned release once, when it is mounted — every asset digest, the source it was
   cut from, every member's evidence. Every later request re-reads the one file that names all
   of it, the pinned manifest object whose digest **is** the processing id, and refuses any

@@ -145,6 +145,59 @@ Official references:
 - [Best practices for Databricks Apps](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/best-practices)
 - [Develop apps](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/app-development)
 
+## Data directory on workspace files or a Unity Catalog volume
+
+`notebooks/run_folder.ipynb` writes everything under `ROOT_DIR/data`. Run from a Git folder,
+that is a workspace-files path (`/Workspace/...`); a data root can also be a volume
+(`/Volumes/...`). Both are FUSE mounts, and both refuse some operations a local disk allows.
+
+What the official documentation states (checked 2026-10-03):
+
+- Volumes: "Direct-append or non-sequential (random) writes are not supported. This affects
+  operations like writing Zip and Excel files"; sparse files are not supported
+  ([Work with files in Unity Catalog volumes](https://docs.databricks.com/aws/en/volumes/volume-files)).
+- Workspace files: a file is limited to 500 MB; executors cannot write to workspace files;
+  symlinks may only point under `/Workspace`; access to files under `/Workspace` expires after
+  36 hours for interactive compute and 30 days for jobs
+  ([What are workspace files?](https://docs.databricks.com/aws/en/files/workspace)).
+  Files can be created, edited, renamed and deleted programmatically on Databricks Runtime
+  11.3 LTS and above, the parent directory must already exist, and writes are buffered and
+  flushed asynchronously, so an error can surface after the write call has returned
+  ([Programmatically interact with workspace files](https://docs.databricks.com/aws/en/files/workspace-interact)).
+- Git folders: a working branch is limited to 1 GB, Databricks recommends fewer than 20,000
+  workspace assets and files in total, and temporary files belong in `$TEMPDIR` rather than the
+  workspace filesystem ([Git folder limits](https://docs.databricks.com/aws/en/repos/limits)).
+
+The documentation does not say whether hard links, `O_CREAT | O_EXCL`, rename over an existing
+file, file fsync or directory fsync work on either mount. Observed on one user's Databricks
+data directory (which of the two mounts was not recorded): `os.link` fails with `EPERM`, while
+creating, writing and fsyncing a new file in the same directory succeeds.
+
+How the backend adapts ([ADR 0020](adr/0020-storage-without-hard-links.md)):
+
+- The source / processing stores and the model cache publish a finished temporary file with a
+  hard link. Where that fails with "not supported" (`EPERM`, `ENOTSUP`, `ENOSYS`, `EXDEV`) they
+  check that the name is absent, rename the temporary into place and read it back. Readers still
+  only see complete files. What becomes weaker: first-writer-wins is decided by a check followed
+  by a rename, not atomically, so two processes writing *different* bytes under one name at the
+  same moment are detected on one side only. Run one pipeline per ingestion directory at a time.
+- The directory fsync after a model-call claim is skipped when the mount answers `EINVAL`,
+  `EPERM`, `ENOTSUP` or `ENOSYS`; a claim may then not survive a crash of the node.
+- All writes on the pipeline are sequential, whole-file writes. The notebook's evaluation
+  section rewrites `eval_results.jsonl` in full after every question (through a `.partial`
+  sibling and a rename) instead of appending, and builds `eval.xlsx` in memory before writing it
+  in one pass.
+- The answer journal `answers-audit.sqlite` uses SQLite in WAL mode, which needs random writes
+  and shared-memory locking. Where the mount refuses them the journal is disabled with a logged
+  warning and answering continues; the notebook's evaluation then composes answer text from the
+  verified claims instead of the journal. Neither ingestion nor answering depends on it.
+
+Not validated on Databricks: rename and exclusive creation on these mounts, SQLite behavior,
+the deepeval cache under `data/eval/<set>/.deepeval/`, and performance with the many small
+content-addressed files one PDF produces (hundreds to thousands, which counts against the
+20,000-file recommendation in a Git folder). The fallback was exercised against simulated
+failures and on a local exFAT volume, which also cannot hard-link.
+
 ## Work deferred until the target is known
 
 The following items require the actual Databricks workload type and workspace

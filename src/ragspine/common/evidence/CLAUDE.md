@@ -24,6 +24,10 @@ configs.py    APP_* settings leaf: env (prefix APP_) > <ROOT_DIR>/.env >
               ROOT_DIR / DATA_DIR / LOG_DIR; resource_path(package, relative)
 settings.py   compatibility re-export of configs.py (old import path)
 logging.py    the one logging config + lineage / privacy discipline for AI artifacts
+file_placement.py  link_new_file (create-if-absent by hard link; rename + re-read fallback where
+              the filesystem cannot hard-link, e.g. Databricks FUSE) + fsync_directory (skips
+              "unsupported" errnos); shared by the model cache and enterprise_pdf_rag's stores,
+              docs/enterprise-pdf-rag/adr/0020-storage-without-hard-links.md
 providers/    providers.py (explicit APP_LLM_* / embedding / APP_RERANK_* environment, opt-in
               connectivity smoke), json_completion.py (bounded JSON model calls, strict DTO
               validation, content-addressed immutable cache), local_models.py (embedding /
