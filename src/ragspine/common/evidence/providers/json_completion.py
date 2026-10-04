@@ -15,6 +15,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, ValidationError
 
+from ragspine.common.evidence.file_placement import fsync_directory, link_new_file
 from ragspine.common.evidence.providers.providers import (
     LLMConfig,
     ProviderRequestError,
@@ -147,12 +148,12 @@ def _immutable_write(path: Path, content: bytes) -> None:
         os.fsync(stream.fileno())
     try:
         try:
-            os.link(temporary, path)
+            link_new_file(temporary, path)
         except FileExistsError:
             if path.read_bytes() != content:
                 raise JsonCompletionError("cache_conflict") from None
     finally:
-        temporary.unlink()
+        temporary.unlink(missing_ok=True)
 
 
 def _redacted(value: object) -> object:
@@ -218,11 +219,7 @@ def _claim_request(record_path: Path, fingerprint: str) -> None:
         stream.write(fingerprint.encode("ascii"))
         stream.flush()
         os.fsync(stream.fileno())
-    directory = os.open(record_path.parent, os.O_RDONLY)
-    try:
-        os.fsync(directory)
-    finally:
-        os.close(directory)
+    fsync_directory(record_path.parent)
 
 
 class JsonCompletionClient:

@@ -32,6 +32,10 @@ from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
     PROVIDER_BASE_URL,
     text_partition_sender,
 )
+from tests.enterprise_pdf_rag.adapters.no_hard_link_helpers import (
+    fail_directory_fsync,
+    forbid_hard_links,
+)
 from tests.enterprise_pdf_rag.adapters.page_metadata_helpers import combined_sender
 from tests.enterprise_pdf_rag.adapters.test_chat_metadata_http import _quote_page
 from tests.enterprise_pdf_rag.adapters.test_pdf_ingestion import authored_pdf
@@ -230,6 +234,26 @@ def test_a_second_run_replays_everything_and_reuses_the_published_index(
     assert [
         item.publication.published_processing_id for item in second.documents if item.publication
     ] == [item.publication.published_processing_id for item in first.documents if item.publication]
+
+
+def test_the_folder_runs_and_resumes_on_a_filesystem_without_hard_links(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _model_env(monkeypatch)
+    forbid_hard_links(monkeypatch)
+    fail_directory_fsync(monkeypatch)
+    folder = _folder(tmp_path, ("meridian.pdf", _MERIDIAN))
+
+    first = _run(tmp_path, folder, build_tree=True)
+    second = _run(tmp_path, folder, build_tree=True)
+
+    (document,) = first.documents
+    assert document.status == "published" and document.error is None, document.error
+    assert first.ok and second.ok and second.live_calls.total == 0
+    assert second.documents[0].index_reused
+    assert not [path for path in (tmp_path / "ingestion").rglob("tmp*") if path.is_file()], (
+        "no placement temporary may be left behind"
+    )
 
 
 def test_another_embedder_reindexes_instead_of_reusing(

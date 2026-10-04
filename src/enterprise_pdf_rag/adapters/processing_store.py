@@ -21,6 +21,7 @@ from enterprise_pdf_rag.processing.retrieval import (
     RetrievalPlan,
     retrieval_dependencies,
 )
+from ragspine.common.evidence.file_placement import link_new_file
 from ragspine.extraction.evidence.document.models import AssetRef
 from ragspine.extraction.evidence.metadata.document_metadata import summarize_document
 from ragspine.extraction.evidence.metadata.document_tree import DocumentTree
@@ -295,7 +296,7 @@ class ProcessingStore:
         try:
             if immutable:
                 try:
-                    os.link(temporary, target)
+                    link_new_file(temporary, target)
                 except FileExistsError:
                     if target.read_text().strip() != digest:
                         raise ValueError("Conflicting immutable stage cache entry") from None

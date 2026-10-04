@@ -1,5 +1,6 @@
 """Bounded vision/JSON calls are explicit and never part of ordinary networking."""
 
+import errno
 import hashlib
 import json
 import re
@@ -14,8 +15,14 @@ import ragspine.common.evidence.providers.providers as provider_module
 from ragspine.common.evidence.providers.json_completion import (
     JsonCompletionClient,
     JsonCompletionError,
+    JsonCompletionResult,
+    _immutable_write,
 )
 from ragspine.common.evidence.providers.providers import LLMConfig, ProviderRequestError
+from tests.enterprise_pdf_rag.adapters.no_hard_link_helpers import (
+    fail_directory_fsync,
+    forbid_hard_links,
+)
 
 PNG = b"\x89PNG\r\n\x1a\nfixture-bytes"
 KEY = "test-secret-never-written"
@@ -675,3 +682,68 @@ def test_the_sampling_parameters_are_part_of_the_request_fingerprint(tmp_path: P
     assert fingerprint_for(0, tmp_path / "a") != fingerprint_for(1, tmp_path / "b")
     assert fingerprint_for(None, tmp_path / "c") != fingerprint_for(0, tmp_path / "d")
     assert fingerprint_for(0, tmp_path / "e") == fingerprint_for(0, tmp_path / "f")
+
+
+def test_calls_and_replays_work_where_hard_links_and_directory_fsync_do_not(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    forbid_hard_links(monkeypatch)
+    fail_directory_fsync(monkeypatch, errno.EINVAL)
+    calls: list[bytes] = []
+
+    def sender(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
+        calls.append(payload)
+        return _response()
+
+    def invoke(max_live_calls: int) -> JsonCompletionResult[_Answer]:
+        return JsonCompletionClient(
+            _config(), cache_dir=tmp_path, max_live_calls=max_live_calls, sender=sender
+        ).complete_json(task="no-links", prompt="same", image_png=PNG, response_model=_Answer)
+
+    first = invoke(1)
+    second = invoke(0)
+
+    assert (first.cache_hit, second.cache_hit) == (False, True)
+    assert second.parsed == first.parsed and len(calls) == 1
+    fingerprint = first.request_fingerprint
+    assert sorted(
+        path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*") if path.is_file()
+    ) == sorted(
+        (
+            f"contexts/{fingerprint}.json",
+            f"requests/{fingerprint}.json",
+            f"requests/{fingerprint}.json.claim",
+            f"responses/{hashlib.sha256(_response()).hexdigest()}.json",
+        )
+    )
+
+
+def test_without_hard_links_an_immutable_cache_entry_is_never_overwritten(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    forbid_hard_links(monkeypatch)
+    path = tmp_path / "requests" / "entry.json"
+    _immutable_write(path, b"first")
+    _immutable_write(path, b"first")
+
+    with pytest.raises(JsonCompletionError, match="cache_conflict"):
+        _immutable_write(path, b"second")
+
+    assert path.read_bytes() == b"first"
+    assert [item.name for item in path.parent.iterdir()] == ["entry.json"]
+
+
+def test_a_real_directory_fsync_failure_still_stops_the_claim_before_transport(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fail_directory_fsync(monkeypatch, errno.EIO)
+
+    def forbidden(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
+        raise AssertionError("An unsynced claim must not reach the provider")
+
+    with pytest.raises(OSError) as raised:
+        JsonCompletionClient(
+            _config(), cache_dir=tmp_path, max_live_calls=1, sender=forbidden
+        ).complete_json(task="eio", prompt="same", image_png=PNG, response_model=_Answer)
+
+    assert raised.value.errno == errno.EIO

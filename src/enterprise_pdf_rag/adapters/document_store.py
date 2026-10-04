@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 
 from enterprise_pdf_rag.adapters.http.document_schemas import ManifestEnvelope
+from ragspine.common.evidence.file_placement import link_new_file
 from ragspine.extraction.evidence.document.models import (
     AssetRef,
     DocumentManifest,
@@ -38,11 +39,11 @@ class LocalDocumentStore:
             os.fsync(stream.fileno())
         try:
             try:
-                os.link(temporary, target)
+                link_new_file(temporary, target)
             except FileExistsError:
                 self.get(ref)
         finally:
-            temporary.unlink()
+            temporary.unlink(missing_ok=True)
         return ref
 
     def _read_digest(self, digest: str) -> bytes:

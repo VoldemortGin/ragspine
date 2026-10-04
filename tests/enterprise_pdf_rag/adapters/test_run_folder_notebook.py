@@ -264,3 +264,17 @@ def test_evaluation_checks_its_own_dir_and_the_effective_deepeval_cache_dir() ->
     effective = judge.index('os.getenv("DEEPEVAL_CACHE_FOLDER")')
     assert setdefault < effective < judge.index("from deepeval.metrics import GEval")
     assert "check_write_dir(" in judge
+
+
+def test_evaluation_writes_only_sequential_whole_files_never_appends_or_seeks() -> None:
+    # Databricks Unity Catalog volumes 不支持追加写与随机写(zip / xlsx 的就地写也因此失败):
+    # 结果 jsonl 每题完成后整文件重写到旁边的 .partial 再 os.replace; xlsx 先写进内存再一次性落盘
+    cells = _eval_code_cells()
+    for name, source in cells.items():
+        assert not re.search(r"""\.open\(\s*["']a""", source), name
+        assert not re.search(r"""open\([^)]*["']a\+?["']""", source), name
+    run = cells["eval-run"]
+    assert "os.replace(" in run and ".partial" in run
+    summary = cells["eval-summary"]
+    assert "to_excel(EVAL_XLSX" not in summary
+    assert "io.BytesIO()" in summary and "EVAL_XLSX.write_bytes(" in summary
