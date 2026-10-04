@@ -106,3 +106,43 @@ def test_notebook_ends_with_an_optional_deepeval_evaluation_section() -> None:
     # 四个开关必须先于 deepeval 的 import 出现
     first_import = joined.index("from deepeval.metrics import GEval")
     assert all(joined.index(key) < first_import for key in _DEEPEVAL_ENV_KEYS)
+
+
+def _eval_code_cells() -> dict[str, str]:
+    return {
+        cell["id"]: _source(cell)
+        for cell in _notebook()["cells"]
+        if cell["id"].startswith("eval-") and cell["cell_type"] == "code"
+    }
+
+
+def test_evaluation_outputs_live_under_the_project_data_dir_per_question_set() -> None:
+    config = _eval_code_cells()["eval-config"]
+    assert "from ragspine.common.evidence.configs import ROOT_DIR" in config
+    assert re.search(r'ROOT_DIR\s*/\s*"data"\s*/\s*"eval"\s*/\s*\w+', config)
+    assert "settings.questions_path" in config and ".stem" in config
+    # 评测一律落盘, 不再以"是否设置 NB_REPORT_DIR"为条件, 也不用系统临时目录
+    for name, source in _eval_code_cells().items():
+        assert "tempfile" not in source, name
+        assert "只展示" not in source and "没有落盘" not in source, name
+
+
+def test_evaluation_never_writes_under_report_dir() -> None:
+    cells = _eval_code_cells()
+    for name, source in cells.items():
+        # report_dir 只许出现在只读的 report.json 回退输入和下面的防御判断里
+        for line in source.splitlines():
+            if "report_dir" in line:
+                assert 'report_dir / "report.json"' in line or (
+                    "is_relative_to(settings.report_dir.resolve())" in line
+                ), (name, line)
+    # 防御: 输出目录落在 REPORT_DIR 之内时拒绝落盘
+    config = cells["eval-config"]
+    assert "is_relative_to" in config and ".resolve()" in config
+    assert "拒绝" in config
+
+
+def test_evaluation_markdown_points_outputs_at_data_eval_not_report_dir() -> None:
+    markdown = next(_source(cell) for cell in _notebook()["cells"] if cell["id"] == "eval-md")
+    assert "<NB_REPORT_DIR>/eval" not in markdown
+    assert "data/eval/<题集文件名>" in markdown
