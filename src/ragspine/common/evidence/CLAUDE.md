@@ -18,7 +18,8 @@ Long-form docs: `docs/enterprise-pdf-rag/` (`local-models.md`, `testing-and-inge
 ```
 configs.py    APP_* settings leaf: env (prefix APP_) > <ROOT_DIR>/.env >
               config/enterprise-pdf-rag/settings.yaml; LLM / embedding / rerank / tunnel fields;
-              notebook paths NB_PDF_DIR / NB_QUESTIONS_PATH / NB_REPORT_DIR (no APP_ prefix);
+              notebook paths NB_PDF_DIR / NB_QUESTIONS_PATH / NB_REPORT_DIR (no APP_ prefix; the notebook
+              itself no longer reads NB_REPORT_DIR, it pins reports under data/reports/);
               PDF_INGEST_PASSWORD (no APP_ prefix) for password-protected PDFs;
               ROOT_DIR / DATA_DIR / LOG_DIR; resource_path(package, relative)
 settings.py   compatibility re-export of configs.py (old import path)
@@ -63,6 +64,7 @@ providers/    providers.py (explicit APP_LLM_* / embedding / APP_RERANK_* enviro
   `questions_path` (`NB_QUESTIONS_PATH`, alias `DATASET_PATH` — primary wins, a blank primary falls back), `report_dir` (`NB_REPORT_DIR`): `~` expanded, relative
   to `ROOT_DIR`, no existence check, blank means unset. Callers (`run_folder_pipeline`, the
   `run-folder` CLI) let an explicit argument win and raise only when a folder is needed.
+  `notebooks/run_folder.ipynb` does not read `report_dir` at all (reports go to `data/reports/<stem>/`).
 - **`PDF_INGEST_PASSWORD` is APP_-less and secret** — `pdf_ingest_password` (`SecretStr`, blank means
   unset), the same name as SuperIndex's. Only `enterprise_pdf_rag.adapters.pdf_password.open_pdf` reads it;
   it never enters a message, report, trace or the ingestion directory. `as_environment` cannot answer it

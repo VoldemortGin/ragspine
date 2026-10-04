@@ -2,6 +2,7 @@
 
 import json
 import re
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -130,11 +131,11 @@ def test_evaluation_outputs_live_under_the_project_data_dir_per_question_set() -
 def test_evaluation_never_writes_under_report_dir() -> None:
     cells = _eval_code_cells()
     for name, source in cells.items():
-        # report_dir 只许出现在只读的 report.json 回退输入和下面的防御判断里
+        # REPORT_DIR 只许出现在只读的 report.json 回退输入和下面的防御判断里
         for line in source.splitlines():
-            if "report_dir" in line:
-                assert 'report_dir / "report.json"' in line or (
-                    "is_relative_to(settings.report_dir.resolve())" in line
+            if re.search(r"\bREPORT_DIR\b", line):
+                assert 'REPORT_DIR / "report.json"' in line or (
+                    "is_relative_to(REPORT_DIR.resolve())" in line
                 ), (name, line)
     # 防御: 输出目录落在 REPORT_DIR 之内时拒绝落盘
     config = cells["eval-config"]
@@ -146,3 +147,120 @@ def test_evaluation_markdown_points_outputs_at_data_eval_not_report_dir() -> Non
     markdown = next(_source(cell) for cell in _notebook()["cells"] if cell["id"] == "eval-md")
     assert "<NB_REPORT_DIR>/eval" not in markdown
     assert "data/eval/<题集文件名>" in markdown
+
+
+def _code_cells() -> list[tuple[str, str]]:
+    return [
+        (cell["id"], _source(cell)) for cell in _notebook()["cells"] if cell["cell_type"] == "code"
+    ]
+
+
+def _code_cell(cell_id: str) -> str:
+    return dict(_code_cells())[cell_id]
+
+
+def test_report_dir_is_fixed_under_project_data_and_never_read_from_settings() -> None:
+    config = _code_cell("config")
+    assert re.search(
+        r'^REPORT_DIR\s*=.*ROOT_DIR\s*/\s*"data"\s*/\s*"reports"', config, re.MULTILINE
+    )
+    assert "QUESTIONS.stem" in config and "run-folder" in config
+    # notebook 完全不读 NB_REPORT_DIR / settings.report_dir (该变量只对 CLI / 直接调用管线有效)
+    for name, source in _code_cells():
+        assert "settings.report_dir" not in source, name
+        assert "NB_REPORT_DIR" not in source, name
+    assert "report_dir=REPORT_DIR" in _code_cell("run")
+
+
+def test_write_guard_cell_sits_between_config_and_the_main_run() -> None:
+    ids = [cell_id for cell_id, _ in _code_cells()]
+    assert ids.index("config") < ids.index("write-guard") < ids.index("run")
+    guard = _code_cell("write-guard")
+    for name in (
+        "INGESTION_ROOT",
+        "REPORT_DIR",
+        "PDF_DIR",
+        "is_relative_to",
+        "expanduser",
+        "resolve",
+    ):
+        assert name in guard
+    assert re.search(r'ROOT_DIR\s*/\s*"data"\s*/\s*"eval"', guard)
+    assert "raise" in guard
+
+
+def _run_guard(root: Path, pdf_dir: Path | None, ingestion: Path, questions: Path | None) -> str:
+    """把护栏 cell 抽出来执行(不联网、不碰真实仓库); 返回它打印的内容, 违规时抛异常。"""
+    stem = "run-folder" if questions is None else questions.stem
+    namespace: dict[str, Any] = {
+        "ROOT_DIR": root,
+        "PDF_DIR": pdf_dir,
+        "QUESTIONS": questions,
+        "INGESTION_ROOT": ingestion,
+        "REPORT_DIR": root / "data" / "reports" / stem,
+    }
+    exec(compile(_code_cell("write-guard"), "write-guard", "exec"), namespace)
+    return "ok"
+
+
+def _tree(path: Path) -> list[str]:
+    return sorted(str(p.relative_to(path)) for p in path.rglob("*"))
+
+
+def test_write_guard_accepts_default_layout_and_pdf_dir_inside_data_but_disjoint(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "root"
+    (root / "data" / "pdfs").mkdir(parents=True)
+    questions = root / "data" / "questions" / "q1.jsonl"
+    for pdf_dir in (tmp_path / "ro-pdfs", root / "data" / "pdfs", None):
+        _run_guard(root, pdf_dir, root / "data" / "ingestion", questions)
+    _run_guard(root, tmp_path / "ro-pdfs", root / "data" / "ingestion", None)
+
+
+def test_write_guard_rejects_ingestion_outside_data_before_creating_anything(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "root"
+    (root / "data").mkdir(parents=True)
+    outside = tmp_path / "elsewhere" / "ingestion"
+    before = _tree(tmp_path)
+    with pytest.raises(Exception, match="APP_INGESTION_DIR") as info:
+        _run_guard(root, tmp_path / "pdfs", outside, None)
+    assert str(outside.resolve()) in str(info.value) and "data/" in str(info.value)
+    assert _tree(tmp_path) == before
+
+
+@pytest.mark.parametrize("pdf_relative", ["data", "data/ingestion", "data/reports", "data/eval"])
+def test_write_guard_rejects_pdf_dir_that_contains_or_equals_a_write_dir(
+    tmp_path: Path, pdf_relative: str
+) -> None:
+    root = tmp_path / "root"
+    (root / "data" / "ingestion").mkdir(parents=True)
+    pdf_dir = root / pdf_relative
+    pdf_dir.mkdir(parents=True, exist_ok=True)
+    before = _tree(pdf_dir)
+    questions = root / "data" / "questions" / "q1.jsonl"
+    with pytest.raises(Exception, match="PDF") as info:
+        _run_guard(root, pdf_dir, root / "data" / "ingestion", questions)
+    assert "只读" in str(info.value)
+    assert _tree(pdf_dir) == before
+
+
+def test_write_guard_rejects_ingestion_inside_the_pdf_dir(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    pdf_dir = root / "data" / "pdfs"
+    pdf_dir.mkdir(parents=True)
+    with pytest.raises(Exception, match="APP_INGESTION_DIR"):
+        _run_guard(root, pdf_dir, pdf_dir / "ingestion", None)
+    assert _tree(pdf_dir) == []
+
+
+def test_evaluation_checks_its_own_dir_and_the_effective_deepeval_cache_dir() -> None:
+    config = _code_cell("eval-config")
+    assert "check_write_dir(" in config  # 与护栏同一套规则, 不满足时提示并跳过(不抛异常)
+    judge = _code_cell("eval-judge")
+    setdefault = judge.index('os.environ.setdefault("DEEPEVAL_CACHE_FOLDER"')
+    effective = judge.index('os.getenv("DEEPEVAL_CACHE_FOLDER")')
+    assert setdefault < effective < judge.index("from deepeval.metrics import GEval")
+    assert "check_write_dir(" in judge

@@ -79,7 +79,10 @@ adapters/     every SDK and I/O: pdfspine (every source PDF opens through pdf_pa
               verdict), folder_pipeline.py (`run-folder`: every PDF under a folder through
               ingest → requalify → qualify → index → publish → tree, budgeted and
               resumable, then a question set answered in process; `folder` / questions / report
-              default to NB_PDF_DIR / NB_QUESTIONS_PATH / NB_REPORT_DIR, an argument wins;
+              default to NB_PDF_DIR / NB_QUESTIONS_PATH / NB_REPORT_DIR, an argument wins
+              (`notebooks/run_folder.ipynb` ignores NB_REPORT_DIR: it pins reports to
+              ROOT_DIR/data/reports/<question-set stem> and guards that every write dir is under
+              ROOT_DIR/data and outside the read-only PDF dir; the guard is notebook-only);
               a failed document's `document_done` progress event carries failed_stage / error),
               answer_llm.py (`make_answer_llm()`: the answer `JsonCompletionClient` built from
               settings, what `run_folder_pipeline` and `notebooks/run_folder.ipynb` call)
