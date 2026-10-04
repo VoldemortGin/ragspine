@@ -12,6 +12,16 @@ _NOTEBOOK = ROOT_DIR / "notebooks" / "run_folder.ipynb"
 _SECRET_ASSIGNMENT = re.compile(r"(api_key|secret|token|password)\s*=", re.IGNORECASE)
 # restart 格在 import ragspine 之前执行、拿不到 get_settings(); 只豁免这一个只读的平台探测表达式
 _ALLOWED_ENV_PROBE = 'os.environ.get("DATABRICKS_RUNTIME_VERSION")'
+# 评测一节在 import deepeval 之前设置的四个非密钥第三方库开关(deepeval 只认环境变量); 只放行这四个确切的键名
+_DEEPEVAL_ENV_KEYS = (
+    "DEEPEVAL_TELEMETRY_OPT_OUT",
+    "DEEPEVAL_UPDATE_WARNING_OPT_IN",
+    "DEEPEVAL_DISABLE_DOTENV",
+    "DEEPEVAL_CACHE_FOLDER",
+)
+_ALLOWED_DEEPEVAL_WRITE = re.compile(
+    r"os\.environ\.setdefault\(\"(?:" + "|".join(_DEEPEVAL_ENV_KEYS) + r")\", "
+)
 
 
 def _notebook() -> dict[str, Any]:
@@ -61,7 +71,38 @@ def test_notebook_has_no_secrets_environment_writes_or_absolute_paths(cell_type:
         assert "sk-" not in source
         assert not _SECRET_ASSIGNMENT.search(source)
         if cell_type == "code":
-            env_checked = source.replace(_ALLOWED_ENV_PROBE, "")
+            env_checked = _ALLOWED_DEEPEVAL_WRITE.sub("", source.replace(_ALLOWED_ENV_PROBE, ""))
             assert "os.environ" not in env_checked and "environ[" not in env_checked
             assert "/Users/" not in source and "C:\\" not in source
             assert not re.search(r"""["']/[A-Za-z]""", source)
+
+
+def test_environment_write_allowlist_admits_only_the_four_deepeval_switches() -> None:
+    allowed = 'os.environ.setdefault("DEEPEVAL_TELEMETRY_OPT_OUT", "1")'
+    assert "os.environ" not in _ALLOWED_DEEPEVAL_WRITE.sub("", allowed)
+    for other in (
+        'os.environ.setdefault("OPENAI_API_KEY", "x")',
+        'os.environ.setdefault("DEEPEVAL_API_KEY", "x")',
+        'os.environ["DEEPEVAL_TELEMETRY_OPT_OUT"] = "1"',
+        'os.environ.update({"DEEPEVAL_TELEMETRY_OPT_OUT": "1"})',
+    ):
+        assert "os.environ" in _ALLOWED_DEEPEVAL_WRITE.sub("", other)
+
+
+def test_notebook_ends_with_an_optional_deepeval_evaluation_section() -> None:
+    joined = "\n".join(_source(cell) for cell in _notebook()["cells"])
+    for marker in (
+        "答案评测（deepeval",
+        "load_questions",
+        "FIELD_MAP",
+        "JUDGE_FAKE",
+        "from deepeval.metrics import GEval",
+        "SingleTurnParams",
+        "eval_results.jsonl",
+    ):
+        assert marker in joined
+    # deepeval 是可选的延迟 import: 只能出现在函数体内(缩进行), 不能在模块顶层 import
+    assert not re.search(r"^(?:from|import) deepeval", joined, re.MULTILINE)
+    # 四个开关必须先于 deepeval 的 import 出现
+    first_import = joined.index("from deepeval.metrics import GEval")
+    assert all(joined.index(key) < first_import for key in _DEEPEVAL_ENV_KEYS)
