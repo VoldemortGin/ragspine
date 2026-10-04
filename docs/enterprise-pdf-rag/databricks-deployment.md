@@ -183,17 +183,15 @@ How the backend adapts ([ADR 0020](adr/0020-storage-without-hard-links.md)):
   same moment are detected on one side only. Run one pipeline per ingestion directory at a time.
 - The directory fsync after a model-call claim is skipped when the mount answers `EINVAL`,
   `EPERM`, `ENOTSUP` or `ENOSYS`; a claim may then not survive a crash of the node.
-- All writes on the pipeline are sequential, whole-file writes. The notebook's evaluation
-  section rewrites `eval_results.jsonl` in full after every question (through a `.partial`
-  sibling and a rename) instead of appending, and builds `eval.xlsx` in memory before writing it
-  in one pass.
+- All writes on the pipeline are sequential, whole-file writes. The notebook writes
+  `answers.csv` in one pass through a `.partial` sibling and a rename instead of appending.
 - The answer journal `answers-audit.sqlite` uses SQLite in WAL mode, which needs random writes
   and shared-memory locking. Where the mount refuses them the journal is disabled with a logged
-  warning and answering continues; the notebook's evaluation then composes answer text from the
-  verified claims instead of the journal. Neither ingestion nor answering depends on it.
+  warning and answering continues; the answer text in `answers.csv` comes from the response
+  itself, not from the journal. Neither ingestion nor answering depends on it.
 
 Not validated on Databricks: rename and exclusive creation on these mounts, SQLite behavior,
-the deepeval cache under `data/eval/<set>/.deepeval/`, and performance with the many small
+and performance with the many small
 content-addressed files one PDF produces (hundreds to thousands, which counts against the
 20,000-file recommendation in a Git folder). The fallback was exercised against simulated
 failures and on a local exFAT volume, which also cannot hard-link.

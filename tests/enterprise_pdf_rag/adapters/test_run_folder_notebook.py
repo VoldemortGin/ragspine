@@ -1,6 +1,7 @@
 """The example notebook is valid nbformat 4, ships without outputs and carries no secrets."""
 
 import contextlib
+import csv
 import errno
 import io
 import json
@@ -17,16 +18,6 @@ _NOTEBOOK = ROOT_DIR / "notebooks" / "run_folder.ipynb"
 _SECRET_ASSIGNMENT = re.compile(r"(api_key|secret|token|password)\s*=", re.IGNORECASE)
 # restart 格在 import ragspine 之前执行、拿不到 get_settings(); 只豁免这一个只读的平台探测表达式
 _ALLOWED_ENV_PROBE = 'os.environ.get("DATABRICKS_RUNTIME_VERSION")'
-# 评测一节在 import deepeval 之前设置的四个非密钥第三方库开关(deepeval 只认环境变量); 只放行这四个确切的键名
-_DEEPEVAL_ENV_KEYS = (
-    "DEEPEVAL_TELEMETRY_OPT_OUT",
-    "DEEPEVAL_UPDATE_WARNING_OPT_IN",
-    "DEEPEVAL_DISABLE_DOTENV",
-    "DEEPEVAL_CACHE_FOLDER",
-)
-_ALLOWED_DEEPEVAL_WRITE = re.compile(
-    r"os\.environ\.setdefault\(\"(?:" + "|".join(_DEEPEVAL_ENV_KEYS) + r")\", "
-)
 
 
 def _notebook() -> dict[str, Any]:
@@ -76,81 +67,10 @@ def test_notebook_has_no_secrets_environment_writes_or_absolute_paths(cell_type:
         assert "sk-" not in source
         assert not _SECRET_ASSIGNMENT.search(source)
         if cell_type == "code":
-            env_checked = _ALLOWED_DEEPEVAL_WRITE.sub("", source.replace(_ALLOWED_ENV_PROBE, ""))
+            env_checked = source.replace(_ALLOWED_ENV_PROBE, "")
             assert "os.environ" not in env_checked and "environ[" not in env_checked
             assert "/Users/" not in source and "C:\\" not in source
             assert not re.search(r"""["']/[A-Za-z]""", source)
-
-
-def test_environment_write_allowlist_admits_only_the_four_deepeval_switches() -> None:
-    allowed = 'os.environ.setdefault("DEEPEVAL_TELEMETRY_OPT_OUT", "1")'
-    assert "os.environ" not in _ALLOWED_DEEPEVAL_WRITE.sub("", allowed)
-    for other in (
-        'os.environ.setdefault("OPENAI_API_KEY", "x")',
-        'os.environ.setdefault("DEEPEVAL_API_KEY", "x")',
-        'os.environ["DEEPEVAL_TELEMETRY_OPT_OUT"] = "1"',
-        'os.environ.update({"DEEPEVAL_TELEMETRY_OPT_OUT": "1"})',
-    ):
-        assert "os.environ" in _ALLOWED_DEEPEVAL_WRITE.sub("", other)
-
-
-def test_notebook_ends_with_an_optional_deepeval_evaluation_section() -> None:
-    joined = "\n".join(_source(cell) for cell in _notebook()["cells"])
-    for marker in (
-        "答案评测（deepeval",
-        "load_questions",
-        "FIELD_MAP",
-        "JUDGE_FAKE",
-        "from deepeval.metrics import GEval",
-        "SingleTurnParams",
-        "eval_results.jsonl",
-    ):
-        assert marker in joined
-    # deepeval 是可选的延迟 import: 只能出现在函数体内(缩进行), 不能在模块顶层 import
-    assert not re.search(r"^(?:from|import) deepeval", joined, re.MULTILINE)
-    # 四个开关必须先于 deepeval 的 import 出现
-    first_import = joined.index("from deepeval.metrics import GEval")
-    assert all(joined.index(key) < first_import for key in _DEEPEVAL_ENV_KEYS)
-
-
-def _eval_code_cells() -> dict[str, str]:
-    return {
-        cell["id"]: _source(cell)
-        for cell in _notebook()["cells"]
-        if cell["id"].startswith("eval-") and cell["cell_type"] == "code"
-    }
-
-
-def test_evaluation_outputs_live_under_the_project_data_dir_per_question_set() -> None:
-    config = _eval_code_cells()["eval-config"]
-    assert "from ragspine.common.evidence.configs import ROOT_DIR" in config
-    assert re.search(r'ROOT_DIR\s*/\s*"data"\s*/\s*"eval"\s*/\s*\w+', config)
-    assert "settings.questions_path" in config and ".stem" in config
-    # 评测一律落盘, 不再以"是否设置 NB_REPORT_DIR"为条件, 也不用系统临时目录
-    for name, source in _eval_code_cells().items():
-        assert "tempfile" not in source, name
-        assert "只展示" not in source and "没有落盘" not in source, name
-
-
-def test_evaluation_never_writes_under_report_dir() -> None:
-    cells = _eval_code_cells()
-    for name, source in cells.items():
-        # REPORT_DIR 只许出现在只读的 report.json 回退输入和下面的防御判断里
-        for line in source.splitlines():
-            if re.search(r"\bREPORT_DIR\b", line):
-                assert 'REPORT_DIR / "report.json"' in line or (
-                    "is_relative_to(REPORT_DIR.resolve())" in line
-                ), (name, line)
-    # 防御: 输出目录落在 REPORT_DIR 之内时拒绝落盘
-    config = cells["eval-config"]
-    assert "is_relative_to" in config and ".resolve()" in config
-    assert "拒绝" in config
-
-
-def test_evaluation_markdown_points_outputs_at_data_eval_not_report_dir() -> None:
-    markdown = next(_source(cell) for cell in _notebook()["cells"] if cell["id"] == "eval-md")
-    assert "<NB_REPORT_DIR>/eval" not in markdown
-    assert "data/eval/<题集文件名>" in markdown
 
 
 def _code_cells() -> list[tuple[str, str]]:
@@ -189,7 +109,6 @@ def test_write_guard_cell_sits_between_config_and_the_main_run() -> None:
         "resolve",
     ):
         assert name in guard
-    assert re.search(r'ROOT_DIR\s*/\s*"data"\s*/\s*"eval"', guard)
     assert "raise" in guard
 
 
@@ -235,7 +154,7 @@ def test_write_guard_rejects_ingestion_outside_data_before_creating_anything(
     assert _tree(tmp_path) == before
 
 
-@pytest.mark.parametrize("pdf_relative", ["data", "data/ingestion", "data/reports", "data/eval"])
+@pytest.mark.parametrize("pdf_relative", ["data", "data/ingestion", "data/reports"])
 def test_write_guard_rejects_pdf_dir_that_contains_or_equals_a_write_dir(
     tmp_path: Path, pdf_relative: str
 ) -> None:
@@ -258,30 +177,6 @@ def test_write_guard_rejects_ingestion_inside_the_pdf_dir(tmp_path: Path) -> Non
     with pytest.raises(Exception, match="APP_INGESTION_DIR"):
         _run_guard(root, pdf_dir, pdf_dir / "ingestion", None)
     assert _tree(pdf_dir) == []
-
-
-def test_evaluation_checks_its_own_dir_and_the_effective_deepeval_cache_dir() -> None:
-    config = _code_cell("eval-config")
-    assert "check_write_dir(" in config  # 与护栏同一套规则, 不满足时提示并跳过(不抛异常)
-    judge = _code_cell("eval-judge")
-    setdefault = judge.index('os.environ.setdefault("DEEPEVAL_CACHE_FOLDER"')
-    effective = judge.index('os.getenv("DEEPEVAL_CACHE_FOLDER")')
-    assert setdefault < effective < judge.index("from deepeval.metrics import GEval")
-    assert "check_write_dir(" in judge
-
-
-def test_evaluation_writes_only_sequential_whole_files_never_appends_or_seeks() -> None:
-    # Databricks Unity Catalog volumes 不支持追加写与随机写(zip / xlsx 的就地写也因此失败):
-    # 结果 jsonl 每题完成后整文件重写到旁边的 .partial 再 os.replace; xlsx 先写进内存再一次性落盘
-    cells = _eval_code_cells()
-    for name, source in cells.items():
-        assert not re.search(r"""\.open\(\s*["']a""", source), name
-        assert not re.search(r"""open\([^)]*["']a\+?["']""", source), name
-    run = cells["eval-run"]
-    assert "os.replace(" in run and ".partial" in run
-    summary = cells["eval-summary"]
-    assert "to_excel(EVAL_XLSX" not in summary
-    assert "io.BytesIO()" in summary and "EVAL_XLSX.write_bytes(" in summary
 
 
 def test_diagnostic_cells_sit_before_the_run_and_the_selfcheck_follows_the_guard() -> None:
@@ -363,3 +258,78 @@ def test_selfcheck_reports_replace_failure_and_skips_cleanly_without_pdfs(
     assert ingestion_tree == []
     assert "没有可读的 PDF" in output
     assert "os.replace 也不可用" in _conclusion(output)
+
+
+def test_the_evaluation_section_is_gone() -> None:
+    joined = "\n".join(_source(cell) for cell in _notebook()["cells"]).casefold()
+    assert "deepeval" not in joined and "data/eval" not in joined
+    assert not [cell["id"] for cell in _notebook()["cells"] if cell["id"].startswith("eval-")]
+
+
+def test_answers_cell_follows_the_run_and_writes_three_columns_in_one_whole_file() -> None:
+    ids = [cell_id for cell_id, _ in _code_cells()]
+    assert ids.index("run") < ids.index("answers")
+    source = _code_cell("answers")
+    assert 'REPORT_DIR / "answers.csv"' in source
+    assert '["question", "expected", "answer"]' in source
+    assert "utf-8-sig" in source and "os.replace(" in source and "csv.writer(" in source
+    assert not re.search(r"""open\([^)]*["']a\+?["']""", source)
+
+
+class _Case:
+    def __init__(self, question: str, expected: str | None, answer: str | None) -> None:
+        self.case_id = question[:8]
+        self.question = question
+        self.expected = expected
+        self.answer = answer
+
+
+class _Eval:
+    def __init__(self, cases: list[_Case]) -> None:
+        self.cases = cases
+
+
+class _Result:
+    def __init__(self, eval_summary: _Eval | None) -> None:
+        self.eval = eval_summary
+
+
+def _run_answers(report_dir: Path, result: _Result) -> str:
+    namespace: dict[str, Any] = {"result": result, "REPORT_DIR": report_dir}
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        exec(compile(_code_cell("answers"), "answers", "exec"), namespace)
+    return buffer.getvalue()
+
+
+def test_answers_csv_round_trips_awkward_text_with_a_bom_and_one_row_per_question(
+    tmp_path: Path,
+) -> None:
+    report_dir = tmp_path / "reports" / "set"
+    rows = [
+        ("收入, 是多少?", "18.1亿", '答: "18.1亿"\n第二行'),
+        ("no answer", None, None),
+        ("multi\nline question", "a,b", ""),
+        ("收入, 是多少?", "18.1亿", "duplicate question is kept"),
+    ]
+    cases = [_Case(*row) for row in rows]
+    # A first, longer run must be replaced whole, never appended to.
+    report_dir.mkdir(parents=True)
+    (report_dir / "answers.csv").write_text("stale," * 500, encoding="utf-8")
+
+    _run_answers(report_dir, _Result(_Eval(cases)))
+
+    raw = (report_dir / "answers.csv").read_bytes()
+    assert raw.startswith(b"\xef\xbb\xbf") and b"stale" not in raw
+    with (report_dir / "answers.csv").open(encoding="utf-8-sig", newline="") as handle:
+        table = list(csv.reader(handle))
+    assert table[0] == ["question", "expected", "answer"]
+    assert table[1:] == [[q, e or "", a or ""] for q, e, a in rows]
+    assert sorted(path.name for path in report_dir.iterdir()) == ["answers.csv"]
+
+
+def test_answers_cell_skips_without_a_question_set_and_never_raises(tmp_path: Path) -> None:
+    for empty in (_Result(None), _Result(_Eval([]))):
+        output = _run_answers(tmp_path / "reports", empty)
+        assert "不生成 answers.csv" in output
+    assert not (tmp_path / "reports").exists()

@@ -511,7 +511,7 @@ def test_an_abstained_case_keeps_the_text_the_user_saw_and_the_expected_answer(
 
 
 def test_a_report_written_before_answer_and_expected_existed_still_parses() -> None:
-    legacy = {
+    legacy: dict[str, object] = {
         "case_id": "q1",
         "question": "Q?",
         "document_id": None,
