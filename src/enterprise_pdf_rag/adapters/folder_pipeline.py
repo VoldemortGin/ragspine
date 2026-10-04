@@ -261,6 +261,30 @@ def _check_total(value: int | None) -> None:
         raise ValueError("max_live_calls_total must not be negative")
 
 
+def _check_max_questions(value: int | None) -> None:
+    if value is not None and value < 1:
+        raise ValueError("max_questions must be at least 1 (or None for every question)")
+
+
+def _limit_questions(
+    question_set: NlGoldSet | tuple[BatchQuestion, ...], limit: int | None
+) -> NlGoldSet | tuple[BatchQuestion, ...]:
+    """Keep the first ``limit`` questions in set order (a gold set counts runnable cases only)."""
+    if limit is None:
+        return question_set
+    if not isinstance(question_set, NlGoldSet):
+        return question_set[:limit]
+    kept = 0
+    cases: list[NlGoldCase] = []
+    for case in question_set.cases:
+        if case.offline_only:
+            cases.append(case)
+        elif kept < limit:
+            kept += 1
+            cases.append(case)
+    return question_set.model_copy(update={"cases": tuple(cases)})
+
+
 def _load_questions(path: Path) -> NlGoldSet | tuple[BatchQuestion, ...]:
     """A frozen ``nl-answers-gold-v1`` set, or the light question formats of ``retrieval_only``."""
     if not path.is_file():
@@ -784,6 +808,7 @@ def run_folder_pipeline(
     build_tree: bool = True,
     tree_max_live_calls: int = 50,
     answer_max_live_calls: int | None = None,
+    max_questions: int | None = None,
     continue_on_error: bool = True,
     report_dir: Path | None = None,
     embedder: EmbeddingPort | None = None,
@@ -796,7 +821,8 @@ def run_folder_pipeline(
     ``folder``, ``questions`` and ``report_dir`` default to ``NB_PDF_DIR`` / ``NB_QUESTIONS_PATH`` /
     ``NB_REPORT_DIR`` (``get_settings()``); an argument always wins, and with neither the
     question set is not run and no report is written. Without a folder from either place this
-    raises ``ValueError``.
+    raises ``ValueError``. ``max_questions`` answers only the first N questions of the set in its
+    own order (``None`` = all); it never limits ingestion, which always covers every PDF.
 
     Raises ``ValueError`` for an invalid budget, ``FileNotFoundError`` for a missing folder or
     question set and ``PreflightError`` for a missing or unreachable dependency, all before
@@ -808,6 +834,7 @@ def run_folder_pipeline(
     _check_budget("tree_max_live_calls", tree_max_live_calls)
     _check_budget("answer_max_live_calls", answer_max_live_calls)
     _check_total(max_live_calls_total)
+    _check_max_questions(max_questions)
     settings = get_settings()
     if folder is None:
         folder = settings.pdf_source_dir
@@ -821,6 +848,8 @@ def run_folder_pipeline(
     if not folder.is_dir():
         raise FileNotFoundError(f"folder not found: {folder}")
     question_set = None if questions is None else _load_questions(questions)
+    if question_set is not None:
+        question_set = _limit_questions(question_set, max_questions)
     needs_rerank = isinstance(question_set, NlGoldSet) and any(
         case.request.rerank for case in question_set.cases if not case.offline_only
     )

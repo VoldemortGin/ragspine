@@ -108,6 +108,7 @@ def _run(
     report_dir: Path | None = None,
     embedder: EmbeddingPort | None = _OFFLINE,
     answer_llm: JsonCompletionClient | None = None,
+    max_questions: int | None = None,
 ) -> FolderPipelineResult:
     return run_folder_pipeline(
         folder,
@@ -122,6 +123,7 @@ def _run(
         report_dir=report_dir,
         embedder=embedder,
         answer_llm=answer_llm,
+        max_questions=max_questions,
     )
 
 
@@ -610,6 +612,79 @@ def test_a_frozen_gold_set_is_judged_and_a_case_outside_the_run_is_reported(
     assert result.live_calls == result.live_calls.model_copy(
         update={"ingest": 0, "tree": 0, "answer": 1, "total": 1}
     )
+
+
+def _five_light_questions(tmp_path: Path) -> Path:
+    questions = tmp_path / "five.jsonl"
+    rows = [
+        {"id": f"q{index}", "question": f"What does page 2 say ({index})?", "doc": "meridian.pdf"}
+        for index in range(1, 6)
+    ]
+    questions.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+    return questions
+
+
+def test_max_questions_answers_only_the_first_n_light_questions_in_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = _two_documents(tmp_path, monkeypatch)
+    questions = _five_light_questions(tmp_path)
+    llm, prompts = _answer_llm(tmp_path)
+
+    result = _run(tmp_path, folder, questions=questions, answer_llm=llm, max_questions=2)
+
+    assert result.eval is not None
+    assert [case.case_id for case in result.eval.cases] == ["q1", "q2"]
+    assert result.eval.totals["answered"] == 2
+    assert len(prompts) == 2 and result.live_calls.answer == 2
+    # Ingestion is not limited: both PDFs are still published.
+    assert [item.status for item in result.documents] == ["published", "published"]
+
+
+def test_max_questions_none_or_larger_than_the_set_answers_everything(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = _two_documents(tmp_path, monkeypatch)
+    questions = _five_light_questions(tmp_path)
+    for limit in (None, 5, 99):
+        llm, prompts = scripted_client(
+            tmp_path / f"cache-{limit}", _quote_page("page 2"), max_live_calls=10
+        )
+        result = _run(tmp_path, folder, questions=questions, answer_llm=llm, max_questions=limit)
+        assert result.eval is not None
+        assert [case.case_id for case in result.eval.cases] == ["q1", "q2", "q3", "q4", "q5"]
+        assert len(prompts) == 5
+
+
+@pytest.mark.parametrize("bad", [0, -1])
+def test_max_questions_must_be_positive_and_fails_before_any_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bad: int
+) -> None:
+    _model_env(monkeypatch)
+    folder = _folder(tmp_path, ("meridian.pdf", _MERIDIAN))
+    _forbid(monkeypatch, "ingest_pdf")
+    with pytest.raises(ValueError, match="max_questions"):
+        _run(tmp_path, folder, max_questions=bad)
+
+
+def test_max_questions_limits_a_gold_set_to_its_first_runnable_cases(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = _two_documents(tmp_path, monkeypatch)
+    first = _run(tmp_path, folder)
+    payload = _gold(first.documents[0].sha256)
+    cases = payload["cases"]
+    assert isinstance(cases, list)
+    cases.append({**cases[1], "case_id": "second-outside"})
+    gold = tmp_path / "gold.json"
+    gold.write_text(json.dumps(payload))
+    llm, prompts = _answer_llm(tmp_path)
+
+    result = _run(tmp_path, folder, questions=gold, answer_llm=llm, max_questions=1)
+
+    assert result.eval is not None and result.eval.format == "nl-answers-gold-v1"
+    assert [case.case_id for case in result.eval.cases] == ["page-two"]
+    assert len(prompts) == 1
 
 
 # ---- 9. preflight ------------------------------------------------------------------------

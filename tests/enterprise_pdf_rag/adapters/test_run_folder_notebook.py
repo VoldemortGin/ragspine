@@ -96,6 +96,11 @@ def test_report_dir_is_fixed_under_project_data_and_never_read_from_settings() -
     assert "report_dir=REPORT_DIR" in _code_cell("run")
 
 
+def test_only_the_first_ten_questions_are_answered_by_default_and_the_run_cell_passes_it() -> None:
+    assert re.search(r"^MAX_QUESTIONS\s*=\s*10\b", _code_cell("config"), re.MULTILINE)
+    assert "max_questions=MAX_QUESTIONS" in _code_cell("run")
+
+
 def test_write_guard_cell_sits_between_config_and_the_main_run() -> None:
     ids = [cell_id for cell_id, _ in _code_cells()]
     assert ids.index("config") < ids.index("write-guard") < ids.index("run")

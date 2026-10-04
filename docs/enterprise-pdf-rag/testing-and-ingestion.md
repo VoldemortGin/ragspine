@@ -286,6 +286,8 @@ result = run_folder_pipeline(   # folder / questions / report_dir 取 NB_PDF_DIR
 result.ok, result.live_calls, [(d.pdf_path, d.status) for d in result.documents]
 ```
 
+`run_folder_pipeline(max_questions=N)` 只回答题集的前 N 道题（题集原顺序；gold 集只数可运行用例；`None` = 全部，`< 1` 抛 `ValueError`），**不限制入库**，CLI 不暴露该参数；notebook 的配置 cell 里 `MAX_QUESTIONS = 10`（改成 `None` 跑全量）。
+
 完整示例见 `notebooks/run_folder.ipynb`（版本检查与文件系统自检两个诊断 cell、一个配置 cell、一个写入目录护栏 cell、一个运行 cell、结果表格、`answers.csv` 写出 cell；不含密钥、不带输出、不要在无模型环境里执行）。该 notebook **不使用** `NB_REPORT_DIR`：所有运行产物固定在项目根 `data/` 下（`data/ingestion/`、`data/reports/<题集文件名>/`，没有题集时报告目录名为 `run-folder`；目录不存在自动创建），`report.json` / `report.md` 每次运行都写，有题集时另写 `answers.csv`（`question,expected,answer` 三列、UTF-8 带 BOM、整文件写；回答原文取自 `EvalCase.answer`，标准答案取自 `EvalCase.expected`）；护栏 cell 在任何写入之前检查 ingestion / 报告目录都在 `data/` 之内、且不在 PDF 源目录之内（PDF 目录只读），不满足即抛异常。护栏只在 notebook 层，CLI 与 `run_folder_pipeline` 本身没有这道检查。
 
 - **`NB_*` 路径设置**：`NB_PDF_DIR`（PDF 源目录）、`NB_QUESTIONS_PATH`（题集；别名 `DATASET_PATH`，主名优先，主名留空则回落到别名）、`NB_REPORT_DIR`（报告目录）经 `get_settings()` 读取，名字**不带** `APP_` 前缀；`~` 展开，相对路径相对项目根，不校验是否存在，留空等于未设置。函数参数 / CLI 参数始终优先；`folder` 两处都没有时抛 `ValueError`（CLI 退出码 1，写明"传 folder 或在 .env 设 NB_PDF_DIR"）；题集 / 报告目录两处都没有时保持原行为（不评测 / 不写报告；这是 CLI / 直接调用的行为，notebook 不走这条，见上）。
