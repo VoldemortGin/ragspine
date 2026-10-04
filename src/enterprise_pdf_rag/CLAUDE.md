@@ -1,6 +1,6 @@
 ---
 covers: src/enterprise_pdf_rag/
-verified-against: 6ae3f64
+verified-against: 2c356fc
 ---
 
 # enterprise_pdf_rag — agent contract
@@ -82,7 +82,9 @@ adapters/     every SDK and I/O: pdfspine (every source PDF opens through pdf_pa
               default to NB_PDF_DIR / NB_QUESTIONS_PATH / NB_REPORT_DIR, an argument wins
               (`notebooks/run_folder.ipynb` ignores NB_REPORT_DIR: it pins reports to
               ROOT_DIR/data/reports/<question-set stem> and guards that every write dir is under
-              ROOT_DIR/data and outside the read-only PDF dir; the guard is notebook-only);
+              ROOT_DIR/data and outside the read-only PDF dir; the guard is notebook-only, and it
+              writes <report dir>/answers.csv = question, expected, answer from each `EvalCase`'s
+              `question` / `expected` / `answer`; the answer prose never enters a trace or event);
               a failed document's `document_done` progress event carries failed_stage / error),
               answer_llm.py (`make_answer_llm()`: the answer `JsonCompletionClient` built from
               settings, what `run_folder_pipeline` and `notebooks/run_folder.ipynb` call)
