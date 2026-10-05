@@ -22,6 +22,7 @@ from enterprise_pdf_rag.adapters.figure_reasoning import (
     PreparedFigure,
     prepare_figure,
 )
+from enterprise_pdf_rag.adapters.shared_pdf import source_pdf
 from enterprise_pdf_rag.adapters.source_paint_bar import (
     SourcePaintBarProof,
     build_bar_source_paint_proof,
@@ -194,7 +195,7 @@ def _inputs(
         svg=prepared.svg, raw_json=assets.get(raw_description_json), previous=previous
     )
     return _Inputs(
-        sources.get(snapshot.manifest.source),
+        source_pdf(sources, snapshot),
         page,
         native,
         sources.get(source_page.text),

@@ -149,15 +149,14 @@ class PdfspineFigureParser:
     """Export explicit source observations; arbitrary PDFs remain pending review."""
 
     def extract(self, pdf: bytes, *, page_index: int, bbox: Bounds) -> SvgArtifact:
-        from enterprise_pdf_rag.adapters.pdf_password import open_pdf
+        from enterprise_pdf_rag.adapters.shared_pdf import opened_pdf
 
         if not pdf.startswith(b"%PDF-"):
             raise ValueError("Expected PDF bytes")
         if not all(isfinite(v) for v in bbox) or bbox[0] >= bbox[2] or bbox[1] >= bbox[3]:
             raise ValueError("Expected finite non-empty figure bounds")
         digest = hashlib.sha256(pdf).hexdigest()
-        document = open_pdf(pdf)
-        try:
+        with opened_pdf(pdf) as document:
             if not 0 <= page_index < document.page_count:
                 raise ValueError("Page index out of range")
             page = document.load_page(page_index)
@@ -177,8 +176,6 @@ class PdfspineFigureParser:
                 for value in _ITEMS.validate_python(page.get_cdrawings())
             ]
             original_svg = ElementTree.fromstring(page.get_svg_image())
-        finally:
-            document.close()
         source = SourceAnchor(f"sha256:{digest}", digest, page_index, bbox)
         figure_id = (
             "figure-" + hashlib.sha256(f"{digest}:{page_index}:{bbox}".encode()).hexdigest()[:24]

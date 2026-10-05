@@ -6,7 +6,7 @@ from math import isfinite
 
 import pdfspine
 
-from enterprise_pdf_rag.adapters.pdf_password import open_pdf
+from enterprise_pdf_rag.adapters.shared_pdf import opened_pdf
 from ragspine.extraction.evidence.document.models import Bounds
 from ragspine.extraction.evidence.figures.models import SourceAnchor, content_id
 from ragspine.extraction.evidence.objects.tables.table_grid_proof import (
@@ -201,8 +201,7 @@ class PdfspineTableAdapter:
 
     def extract(self, pdf: bytes, *, page: PageInput, item: LayoutObject) -> TableExtractionResult:
         self._validate_input(pdf, page=page, item=item)
-        document = open_pdf(pdf)
-        try:
+        with opened_pdf(pdf) as document:
             if page.page_index >= document.page_count:
                 raise ValueError("Table source page is absent from the PDF")
             source_page = document.load_page(page.page_index)
@@ -235,8 +234,6 @@ class PdfspineTableAdapter:
                     ),
                 )
             return self._map_table(matches[0], page=page, item=item, source_page=source_page)
-        finally:
-            document.close()
 
     @staticmethod
     def _validate_input(pdf: bytes, *, page: PageInput, item: LayoutObject) -> None:
