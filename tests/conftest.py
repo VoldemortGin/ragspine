@@ -25,9 +25,27 @@ def _isolate_ambient_openai_for_scoped_fixtures():
     """OPENAI_* 是 LLM 首选名,会盖过用例设的 APP_LLM_*;module/session 级 fixture 先于下面的
     函数级清理运行,所以这里在会话级先清一遍。"""
     with pytest.MonkeyPatch.context() as patch:
-        for name in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL", "OPENAI_EMBEDDING_MODEL"):
+        for name in (
+            "OPENAI_API_KEY",
+            "OPENAI_BASE_URL",
+            "OPENAI_MODEL",
+            "OPENAI_EMBEDDING_MODEL",
+            "OPENAI_TEMPERATURE",
+        ):
             patch.delenv(name, raising=False)
         yield
+
+
+@pytest.fixture(autouse=True)
+def _forget_unsupported_sampling_parameters():
+    """JsonCompletionClient 记得端点拒收的采样参数(进程级,ADR 0021);每个用例前后都清空,互不串扰。"""
+    from ragspine.common.evidence.providers.json_completion import (
+        forget_unsupported_sampling_parameters,
+    )
+
+    forget_unsupported_sampling_parameters()
+    yield
+    forget_unsupported_sampling_parameters()
 
 
 @pytest.fixture(autouse=True)
@@ -44,6 +62,7 @@ def _isolate_ambient_llm_and_notebook_settings(monkeypatch):
         "OPENAI_BASE_URL",
         "OPENAI_MODEL",
         "OPENAI_EMBEDDING_MODEL",
+        "OPENAI_TEMPERATURE",
         "NB_PDF_DIR",
         "NB_QUESTIONS_PATH",
         "DATASET_PATH",  # questions_path 的回落别名

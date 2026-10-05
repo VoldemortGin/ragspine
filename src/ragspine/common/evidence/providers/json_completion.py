@@ -6,6 +6,7 @@ import json
 import os
 import re
 import tempfile
+from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,6 +24,53 @@ from ragspine.common.evidence.providers.providers import (
     _send_once,
 )
 
+# Request fields an endpoint may refuse and the client may then drop and resend without
+# (docs/enterprise-pdf-rag/adr/0021-sampling-parameter-fallback.md). Dropping one changes the
+# sampling, never the output contract or the cost; response_format, max_completion_tokens,
+# messages and model are deliberately absent.
+DEGRADABLE_SAMPLING_PARAMETERS: frozenset[str] = frozenset({"temperature", "seed"})
+# ``error.code`` values that say "this endpoint does not take that parameter / value".
+_UNSUPPORTED_CODES = frozenset({"unsupported_value", "unsupported_parameter"})
+# The record a call leaves where it skipped a refused parameter without sending it.
+_SKIPPED_CODE = "sampling_parameter_unsupported"
+
+
+class _UnsupportedSampling:
+    """Process-wide memory: (chat-completions URL, model) → parameters it was seen to refuse."""
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._known: dict[tuple[str, str], frozenset[str]] = {}
+
+    def get(self, key: tuple[str, str]) -> frozenset[str]:
+        with self._lock:
+            return self._known.get(key, frozenset())
+
+    def add(self, key: tuple[str, str], parameter: str) -> None:
+        with self._lock:
+            self._known[key] = self._known.get(key, frozenset()) | {parameter}
+
+    def clear(self) -> None:
+        with self._lock:
+            self._known.clear()
+
+
+_UNSUPPORTED = _UnsupportedSampling()
+
+
+def _endpoint_key(config: LLMConfig) -> tuple[str, str]:
+    return config.chat_completions_url, config.model
+
+
+def unsupported_sampling_parameters(config: LLMConfig) -> tuple[str, ...]:
+    """Sampling parameters this process has seen ``config``'s endpoint and model refuse."""
+    return tuple(sorted(_UNSUPPORTED.get(_endpoint_key(config))))
+
+
+def forget_unsupported_sampling_parameters() -> None:
+    """Drop the in-process memory (tests; a long-lived process after an endpoint upgrade)."""
+    _UNSUPPORTED.clear()
+
 
 class RequestDiagnostics(BaseModel):
     model_config = ConfigDict(strict=True, frozen=True, extra="forbid")
@@ -32,10 +80,24 @@ class RequestDiagnostics(BaseModel):
     elapsed_ms: int
     http_status: int | None
     exception_type: str | None
-    finish_category: Literal["transport_error", "response_rejected", "stop"]
+    finish_category: Literal[
+        "transport_error", "response_rejected", "stop", "parameter_unsupported"
+    ]
     attempt: int = 1
     context_path: str | None = None
     context_warning: str | None = None
+    # A 400's checked ``error.param`` / ``error.code`` (never its message). Written only on a
+    # 400 record, where its presence — even as null — also marks a body that was examined.
+    provider_error_param: str | None = None
+    provider_error_code: str | None = None
+
+
+class _ParameterRefused(Exception):
+    """Internal: resend without ``parameter``; never escapes ``JsonCompletionClient``."""
+
+    def __init__(self, parameter: str) -> None:
+        super().__init__(parameter)
+        self.parameter = parameter
 
 
 class JsonCompletionError(ValueError):
@@ -65,6 +127,8 @@ class JsonCompletionResult[T: BaseModel]:
     input_tokens: int | None
     output_tokens: int | None
     diagnostics: RequestDiagnostics | None = None
+    # Sampling parameters this call went without because the endpoint refuses them.
+    dropped_parameters: tuple[str, ...] = ()
 
 
 class _Message(BaseModel):
@@ -172,17 +236,40 @@ def _redacted(value: object) -> object:
     return result
 
 
-# Greedy decoding. Two identical questions must produce one answer, and a cached answer must
-# stay the answer the release was measured with; a provider default of 0.7 makes neither true.
-# Sent on every completion, so it is part of the request fingerprint and old cache entries miss.
-DETERMINISTIC_TEMPERATURE = 0.0
+def _sampling(temperature: float | None, seed: int | None) -> dict[str, object]:
+    """The sampling half of a request body: the configured temperature (greedy ``0.0`` by
+    default, none when omitted) and a seed when one is configured. Both are inside the
+    request fingerprint, so changing either is a new cache entry."""
+    sampling: dict[str, object] = {}
+    if temperature is not None:
+        sampling["temperature"] = temperature
+    if seed is not None:
+        sampling["seed"] = seed
+    return sampling
 
 
-def _sampling(seed: int | None) -> dict[str, object]:
-    """The sampling half of a request body: greedy always, a seed when one is configured."""
-    if seed is None:
-        return {"temperature": DETERMINISTIC_TEMPERATURE}
-    return {"temperature": DETERMINISTIC_TEMPERATURE, "seed": seed}
+def _refused_parameter(record: _CacheRecord, droppable: frozenset[str]) -> str | None:
+    """The droppable parameter a failure record says the endpoint refuses, else ``None``."""
+    diagnostics = record.diagnostics
+    parameter = None if diagnostics is None else diagnostics.provider_error_param
+    if diagnostics is None or parameter is None or parameter not in droppable:
+        return None
+    if record.failure_code == _SKIPPED_CODE:
+        return parameter
+    if (
+        record.failure_code == "provider_http_400"
+        and diagnostics.provider_error_code in _UNSUPPORTED_CODES
+    ):
+        return parameter
+    return None
+
+
+def _unexamined_400(record: _CacheRecord) -> bool:
+    """A 400 recorded before error.param was read (no ``provider_error_param`` key at all)."""
+    return record.failure_code == "provider_http_400" and (
+        record.diagnostics is None
+        or "provider_error_param" not in record.diagnostics.model_fields_set
+    )
 
 
 def _context_document(
@@ -247,11 +334,17 @@ class JsonCompletionClient:
         self._sender = _send_once if sender is None else sender
         self._retry_failed = retry_failed
         self._lock = Lock()
+        self._dropped: set[str] = set()
 
     @property
     def live_call_count(self) -> int:
         """Transport attempts issued by this client, excluding all cache reads."""
         return self._initial_budget - self._remaining
+
+    @property
+    def dropped_parameters(self) -> tuple[str, ...]:
+        """Sampling parameters at least one call of this client went without (sorted)."""
+        return tuple(sorted(self._dropped))
 
     @property
     def fingerprint(self) -> str:
@@ -315,31 +408,14 @@ class JsonCompletionClient:
             },
             "max_completion_tokens": max_output_tokens,
             "stream": False,
-            **_sampling(self._seed),
+            **_sampling(self._config.temperature, self._seed),
         }
-        payload = json.dumps(request, sort_keys=True, separators=(",", ":")).encode()
-        fingerprint = _digest(
-            json.dumps(
-                {
-                    "contract": "bounded-vision-json-v2",
-                    "task": task,
-                    "endpoint": self._config.chat_completions_url,
-                    "payload": _digest(payload),
-                },
-                sort_keys=True,
-            ).encode()
-        )
         with self._lock:
-            return self._complete(
-                payload,
-                fingerprint,
-                response_model,
-                context=_context_document(
-                    fingerprint,
-                    contract="bounded-vision-json-v2",
-                    task=task,
-                    request=request,
-                ),
+            return self._call(
+                request,
+                contract="bounded-vision-json-v2",
+                task=task,
+                response_model=response_model,
                 cache_only=cache_only,
                 allow_failed_retry=allow_failed_retry,
             )
@@ -383,34 +459,68 @@ class JsonCompletionClient:
             },
             "max_completion_tokens": max_output_tokens,
             "stream": False,
-            **_sampling(self._seed),
+            **_sampling(self._config.temperature, self._seed),
         }
-        payload = json.dumps(request, sort_keys=True, separators=(",", ":")).encode()
-        fingerprint = _digest(
-            json.dumps(
-                {
-                    "contract": "bounded-text-json-v1",
-                    "task": task,
-                    "endpoint": self._config.chat_completions_url,
-                    "payload": _digest(payload),
-                },
-                sort_keys=True,
-            ).encode()
-        )
         with self._lock:
-            return self._complete(
-                payload,
-                fingerprint,
-                response_model,
-                context=_context_document(
-                    fingerprint,
-                    contract="bounded-text-json-v1",
-                    task=task,
-                    request=request,
-                ),
+            return self._call(
+                request,
+                contract="bounded-text-json-v1",
+                task=task,
+                response_model=response_model,
                 cache_only=cache_only,
                 allow_failed_retry=allow_failed_retry,
             )
+
+    def _call[T: BaseModel](
+        self,
+        request: dict[str, object],
+        *,
+        contract: str,
+        task: str,
+        response_model: type[T],
+        cache_only: bool,
+        allow_failed_retry: bool,
+    ) -> JsonCompletionResult[T]:
+        """One logical call; a sampling parameter the endpoint refuses is dropped and the call
+        made again under the fingerprint of the body actually sent (ADR 0021). Each parameter
+        is dropped at most once, so there are at most ``len(DEGRADABLE_SAMPLING_PARAMETERS)``
+        extra rounds."""
+        key = _endpoint_key(self._config)
+        dropped: list[str] = []
+        while True:
+            body = {name: value for name, value in request.items() if name not in dropped}
+            payload = json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
+            fingerprint = _digest(
+                json.dumps(
+                    {
+                        "contract": contract,
+                        "task": task,
+                        "endpoint": self._config.chat_completions_url,
+                        "payload": _digest(payload),
+                    },
+                    sort_keys=True,
+                ).encode()
+            )
+            droppable = DEGRADABLE_SAMPLING_PARAMETERS.intersection(body)
+            try:
+                result = self._complete(
+                    payload,
+                    fingerprint,
+                    response_model,
+                    context=_context_document(
+                        fingerprint, contract=contract, task=task, request=body
+                    ),
+                    cache_only=cache_only,
+                    allow_failed_retry=allow_failed_retry,
+                    droppable=droppable,
+                    known=_UNSUPPORTED.get(key) & droppable,
+                )
+            except _ParameterRefused as refused:
+                dropped.append(refused.parameter)
+                self._dropped.add(refused.parameter)
+                _UNSUPPORTED.add(key, refused.parameter)
+                continue
+            return replace(result, dropped_parameters=tuple(dropped))
 
     def _complete[T: BaseModel](
         self,
@@ -421,7 +531,12 @@ class JsonCompletionClient:
         context: bytes,
         cache_only: bool = False,
         allow_failed_retry: bool = True,
+        droppable: frozenset[str] = frozenset(),
+        known: frozenset[str] = frozenset(),
     ) -> JsonCompletionResult[T]:
+        """Replay or send one exact body. Raises ``_ParameterRefused`` instead of failing when
+        the endpoint refuses (now, or as recorded) a parameter in ``droppable``, and skips the
+        send altogether for a parameter in ``known`` (refused earlier in this process)."""
         original_path = self._cache / "requests" / f"{fingerprint}.json"
         retry_path = self._cache / "requests" / f"{fingerprint}.retry-1.json"
         if retry_path.exists() and not original_path.exists():
@@ -434,7 +549,21 @@ class JsonCompletionClient:
                 raise JsonCompletionError("invalid_cache_record", fingerprint) from None
             if record.request_fingerprint != fingerprint:
                 raise JsonCompletionError("cache_binding_mismatch", fingerprint)
-            if (
+            refused = _refused_parameter(record, droppable)
+            if refused is not None:
+                self._store_context(fingerprint, context)
+                raise _ParameterRefused(refused)
+            if record_path == original_path and droppable and _unexamined_400(record):
+                # Recorded before a 400 body was read: it may be a refused sampling parameter.
+                if known:
+                    parameter = min(known)
+                    self._save_skip(retry_path, fingerprint, payload, parameter, context)
+                    raise _ParameterRefused(parameter)
+                if cache_only:
+                    self._store_context(fingerprint, context)
+                    return self._cached_result(record, fingerprint, response_model)
+                record_path = retry_path  # one live re-probe, recorded beside the old record
+            elif (
                 record.failure_code is not None
                 and self._retry_failed
                 and allow_failed_retry
@@ -445,6 +574,10 @@ class JsonCompletionClient:
             else:
                 self._store_context(fingerprint, context)
                 return self._cached_result(record, fingerprint, response_model)
+        elif known:
+            parameter = min(known)
+            self._save_skip(original_path, fingerprint, payload, parameter, context)
+            raise _ParameterRefused(parameter)
         if cache_only:
             raise JsonCompletionError("cache_miss", fingerprint)
         if self._remaining == 0:
@@ -493,6 +626,12 @@ class JsonCompletionClient:
                 if category in {"timeout", "connection", "response_limit"}
                 else "provider_request_failed"
             )
+            examined: dict[str, str | None] = {}
+            if status == 400:
+                examined = {
+                    "provider_error_param": getattr(error, "param", None),
+                    "provider_error_code": getattr(error, "error_code", None),
+                }
             diagnostic = RequestDiagnostics(
                 endpoint_path="/v1/chat/completions",
                 request_bytes=len(payload),
@@ -504,8 +643,20 @@ class JsonCompletionClient:
                 attempt=2 if record_path == retry_path else 1,
                 context_path=context_path,
                 context_warning=context_warning,
+                **examined,
             )
             self._save_record(record_path, fingerprint, None, code, diagnostic)
+            refused = _refused_parameter(
+                _CacheRecord(
+                    request_fingerprint=fingerprint,
+                    response_digest=None,
+                    failure_code=code,
+                    diagnostics=diagnostic,
+                ),
+                droppable,
+            )
+            if refused is not None:
+                raise _ParameterRefused(refused) from None
             raise JsonCompletionError(code, fingerprint, diagnostics=diagnostic) from None
         diagnostic = RequestDiagnostics(
             endpoint_path="/v1/chat/completions",
@@ -536,6 +687,32 @@ class JsonCompletionClient:
         diagnostic = diagnostic.model_copy(update={"finish_category": "stop"})
         self._save_record(record_path, fingerprint, digest, None, diagnostic)
         return replace(result, diagnostics=diagnostic)
+
+    def _save_skip(
+        self, path: Path, fingerprint: str, payload: bytes, parameter: str, context: bytes
+    ) -> None:
+        """Record that this body was not sent because the endpoint refuses ``parameter``, so a
+        new process follows the drop from disk alone. Nothing is written under a claim another
+        process may still hold, and a record already there (another writer) wins."""
+        if path.with_suffix(path.suffix + ".claim").exists():
+            return
+        context_path, context_warning = self._store_context(fingerprint, context)
+        diagnostic = RequestDiagnostics(
+            endpoint_path="/v1/chat/completions",
+            request_bytes=len(payload),
+            response_bytes=None,
+            elapsed_ms=0,
+            http_status=None,
+            exception_type=None,
+            finish_category="parameter_unsupported",
+            attempt=2 if path.name.endswith(".retry-1.json") else 1,
+            context_path=context_path,
+            context_warning=context_warning,
+            provider_error_param=parameter,
+            provider_error_code=None,
+        )
+        with suppress(JsonCompletionError):
+            self._save_record(path, fingerprint, None, _SKIPPED_CODE, diagnostic)
 
     def _store_context(self, fingerprint: str, context: bytes) -> tuple[str | None, str | None]:
         """Keep the request body beside its record; a failure here never fails the call.
@@ -590,7 +767,9 @@ class JsonCompletionClient:
             failure_code=failure,
             diagnostics=diagnostics,
         )
-        _immutable_write(path, record.model_dump_json().encode())
+        # ``exclude_unset`` keeps a record byte-identical to the pre-ADR-0021 format unless a
+        # 400 body was examined (only then are the provider_error_* fields set).
+        _immutable_write(path, record.model_dump_json(exclude_unset=True).encode())
 
     @staticmethod
     def _parse[T: BaseModel](

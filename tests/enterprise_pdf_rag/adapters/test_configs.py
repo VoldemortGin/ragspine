@@ -602,3 +602,75 @@ def test_pdf_ingest_password_comes_from_dotenv_without_prefix_and_stays_secret(
     monkeypatch.setenv("PDF_INGEST_PASSWORD", "environment-pdf-secret")
     password = Settings().pdf_ingest_password
     assert password is not None and password.get_secret_value() == "environment-pdf-secret"
+
+
+# ---- OPENAI_TEMPERATURE (alias APP_LLM_TEMPERATURE) -----------------------------------------
+
+_LLM_DOTENV = (
+    "OPENAI_API_KEY=dotenv-llm-secret\n"
+    "OPENAI_BASE_URL=https://provider.example/v1\n"
+    "OPENAI_MODEL=dotenv-model\n"
+)
+
+
+@pytest.mark.parametrize("line", ["", "OPENAI_TEMPERATURE=\n", "OPENAI_TEMPERATURE=   \n"])
+def test_an_unset_or_blank_temperature_keeps_greedy_decoding(
+    bare: Callable[[str], None], line: str
+) -> None:
+    bare(_LLM_DOTENV + line)
+    assert load_llm_config().temperature == 0.0
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        ("OPENAI_TEMPERATURE=0.7\n", 0.7),
+        ("OPENAI_TEMPERATURE=1\n", 1.0),
+        ("APP_LLM_TEMPERATURE=0.2\n", 0.2),
+        ("OPENAI_TEMPERATURE=omit\n", None),
+        ("OPENAI_TEMPERATURE= OMIT \n", None),
+        ("APP_LLM_TEMPERATURE=omit\n", None),
+    ],
+)
+def test_a_configured_temperature_is_a_number_or_omit_and_omit_means_none(
+    bare: Callable[[str], None], line: str, expected: float | None
+) -> None:
+    bare(_LLM_DOTENV + line)
+    assert load_llm_config().temperature == expected
+
+
+def test_the_openai_temperature_name_wins_over_its_alias_and_the_environment_over_dotenv(
+    bare: Callable[[str], None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bare(_LLM_DOTENV + "OPENAI_TEMPERATURE=omit\nAPP_LLM_TEMPERATURE=0.5\n")
+    assert load_llm_config().temperature is None
+    monkeypatch.setenv("OPENAI_TEMPERATURE", "0.3")
+    assert load_llm_config().temperature == 0.3
+
+
+@pytest.mark.parametrize("value", ["hot", "none", "default", "-0.1", "2.5", "nan", "inf", "1e9"])
+def test_an_invalid_temperature_fails_when_the_llm_is_loaded_and_names_the_setting(
+    bare: Callable[[str], None], value: str
+) -> None:
+    bare(_LLM_DOTENV + f"OPENAI_TEMPERATURE={value}\n")
+    assert Settings().llm_temperature is not None  # lenient at import, like every model field
+    with pytest.raises(ProviderConfigurationError, match="OPENAI_TEMPERATURE") as raised:
+        load_llm_config()
+    assert "omit" in str(raised.value) and "dotenv-llm-secret" not in str(raised.value)
+
+
+def test_an_injected_mapping_without_a_temperature_keeps_the_default_and_accepts_omit() -> None:
+    base = {
+        "APP_LLM_API_KEY": "injected-secret",
+        "APP_LLM_BASE_URL": "https://provider.example",
+        "APP_LLM_MODEL": "injected-model",
+    }
+    assert load_llm_config(base).temperature == 0.0
+    assert load_llm_config({**base, "APP_LLM_TEMPERATURE": "omit"}).temperature is None
+
+
+def test_the_temperature_reaches_children_under_its_app_name(
+    bare: Callable[[str], None],
+) -> None:
+    bare(_LLM_DOTENV + "OPENAI_TEMPERATURE=omit\n")
+    assert Settings().as_environment(("APP_LLM_TEMPERATURE",)) == {"APP_LLM_TEMPERATURE": "omit"}

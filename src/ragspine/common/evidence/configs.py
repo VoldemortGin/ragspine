@@ -174,6 +174,11 @@ class Settings(BaseSettings):
     llm_model: str | None = Field(
         default=None, validation_alias=AliasChoices("OPENAI_MODEL", "APP_LLM_MODEL")
     )
+    # 采样温度:不设 / 留空 → 0.0(贪心);数值 → 发该值;omit → 请求体不带 temperature。
+    # 与其余模型字段一样原样保存、import 时不校验,由 providers.load_llm_config 校验。
+    llm_temperature: str | None = Field(
+        default=None, validation_alias=AliasChoices("OPENAI_TEMPERATURE", "APP_LLM_TEMPERATURE")
+    )
     # embedding 默认与 LLM 共用 OPENAI_BASE_URL 网关(只需 OPENAI_EMBEDDING_MODEL);
     # 设了 APP_EMBEDDING_BASE_URL 才是独立的 loopback 服务。解析规则见 as_environment。
     embedding_api_key: SecretStr | None = None
@@ -223,6 +228,14 @@ class Settings(BaseSettings):
     @classmethod
     def blank_embedding_is_unset(cls, value: object) -> object:
         # 旧版 .env.example 留了 `APP_EMBEDDING_BASE_URL=` 空行;空串若算"已设",就永远走不到网关回退。
+        return None if isinstance(value, str) and not value.strip() else value
+
+    @field_validator("llm_temperature", mode="before")
+    @classmethod
+    def blank_temperature_is_unset(cls, value: object) -> object:
+        # yaml 里写的数值也收成字符串,统一交给 load_llm_config 解析。
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            return str(value)
         return None if isinstance(value, str) and not value.strip() else value
 
     @field_validator("ingestion_dir", "pdf_source_dir", "report_dir")

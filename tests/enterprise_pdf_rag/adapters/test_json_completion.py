@@ -394,7 +394,11 @@ def test_real_transport_classifies_http_and_timeout_without_response_secrets(
             self.status = status
 
         def read(self, amount: int) -> bytes:
-            raise AssertionError("Error response bodies must not be retained")
+            # ADR 0021: only a 400 body is read, bounded, for error.param / error.code alone.
+            if status != 400:
+                raise AssertionError("Error response bodies must not be retained")
+            assert amount == 4097
+            return json.dumps({"error": {"message": f"echo {KEY}", "code": "bad"}}).encode()
 
     class Connection:
         def __init__(self, host: str, *, timeout: float) -> None:

@@ -41,6 +41,7 @@ _API_SETTINGS = {
         "APP_LLM_API_KEY",
         "APP_LLM_BASE_URL",
         "APP_LLM_MODEL",
+        "APP_LLM_TEMPERATURE",
         "APP_RERANK_BASE_URL",
         "APP_RERANK_MODEL",
         "APP_RERANK_API_KEY",

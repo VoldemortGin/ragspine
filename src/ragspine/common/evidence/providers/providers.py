@@ -8,6 +8,8 @@ separate loopback service; rerank never inherits LLM settings.
 """
 
 import json
+import math
+import re
 from collections.abc import Mapping
 from http.client import HTTPException, HTTPSConnection
 from time import monotonic
@@ -24,7 +26,12 @@ class ProviderConfigurationError(ValueError):
 
 
 class ProviderRequestError(ValueError):
-    """Sanitized provider failure; no response body, headers or key is retained."""
+    """Sanitized provider failure; no headers or key, and of a response body only ``param``.
+
+    ``param`` / ``error_code`` are the OpenAI-style ``error.param`` / ``error.code`` of an
+    HTTP 400 body, each charset- and length-checked; the provider's message and every other
+    byte of the body are discarded unretained. Both are ``None`` for any other failure.
+    """
 
     def __init__(
         self,
@@ -35,11 +42,23 @@ class ProviderRequestError(ValueError):
             "http", "timeout", "connection", "response_limit", "invalid_response"
         ] = "invalid_response",
         exception_type: str | None = None,
+        param: str | None = None,
+        error_code: str | None = None,
     ) -> None:
         super().__init__(message)
         self.status = status
         self.category = category
         self.exception_type = exception_type
+        self.param = param
+        self.error_code = error_code
+
+
+# Greedy decoding. Two identical questions must produce one answer, and a cached answer must
+# stay the answer the release was measured with; a provider default of 0.7 makes neither true.
+# Sent on every completion unless configured otherwise, so it is part of the request fingerprint.
+DETERMINISTIC_TEMPERATURE = 0.0
+# The OPENAI_TEMPERATURE value that sends no temperature at all (the endpoint's own default).
+TEMPERATURE_OMIT = "omit"
 
 
 class LLMConfig(BaseModel):
@@ -47,6 +66,8 @@ class LLMConfig(BaseModel):
     api_key: SecretStr
     base_url: str
     model: str
+    # None sends no temperature field (``OPENAI_TEMPERATURE=omit``).
+    temperature: float | None = DETERMINISTIC_TEMPERATURE
 
     @property
     def chat_completions_url(self) -> str:
@@ -110,8 +131,27 @@ def _loopback_base_url(value: str, *, name: str) -> str:
     return base
 
 
+def _temperature(environment: Mapping[str, str]) -> float | None:
+    """Unset / blank → greedy ``0.0``; ``omit`` → ``None`` (not sent); else a number in [0, 2]."""
+    value = environment.get("APP_LLM_TEMPERATURE", "").strip()
+    if not value:
+        return DETERMINISTIC_TEMPERATURE
+    if value.casefold() == TEMPERATURE_OMIT:
+        return None
+    try:
+        number = float(value)
+    except ValueError:
+        number = math.nan
+    if not 0.0 <= number <= 2.0:  # also rejects nan / inf
+        raise ProviderConfigurationError(
+            "Invalid environment setting: OPENAI_TEMPERATURE (or APP_LLM_TEMPERATURE); "
+            f"use a number within [0, 2], or {TEMPERATURE_OMIT} to send no temperature"
+        )
+    return number
+
+
 def load_llm_config(environment: Mapping[str, str] | None = None) -> LLMConfig:
-    names = ("APP_LLM_API_KEY", "APP_LLM_BASE_URL", "APP_LLM_MODEL")
+    names = ("APP_LLM_API_KEY", "APP_LLM_BASE_URL", "APP_LLM_MODEL", "APP_LLM_TEMPERATURE")
     env = Settings().as_environment(names) if environment is None else environment
     # OPENAI_API_KEY / OPENAI_BASE_URL / OPENAI_MODEL are the preferred names; Settings already
     # folded them in under these APP_LLM_* keys (the child-process allowlist names). An injected
@@ -123,7 +163,9 @@ def load_llm_config(environment: Mapping[str, str] | None = None) -> LLMConfig:
         https_only=True,
     )
     model = _required(env, "APP_LLM_MODEL", fallback="OPENAI_MODEL")
-    return LLMConfig(api_key=SecretStr(key), base_url=base, model=model)
+    return LLMConfig(
+        api_key=SecretStr(key), base_url=base, model=model, temperature=_temperature(env)
+    )
 
 
 _GATEWAY_MODEL_HINT = (
@@ -191,6 +233,39 @@ class SmokeSender(Protocol):
     def __call__(self, url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes: ...
 
 
+ERROR_BODY_LIMIT = 4096
+_ERROR_FIELD = re.compile(r"[A-Za-z0-9_.\[\]-]{1,64}")
+
+
+def _error_field(value: object) -> str | None:
+    return value if isinstance(value, str) and _ERROR_FIELD.fullmatch(value) else None
+
+
+@runtime_checkable
+class _Readable(Protocol):
+    def read(self, amount: int, /) -> bytes: ...
+
+
+def _rejected_field(response: _Readable) -> tuple[str | None, str | None]:
+    """``(error.param, error.code)`` of a bounded 400 body; nothing else is kept.
+
+    The body is read once, at most ``ERROR_BODY_LIMIT`` bytes, and dropped here: an oversized,
+    non-JSON or differently shaped body yields ``(None, None)``, as does a field outside the
+    allowed charset / length. The provider's ``message`` is never looked at.
+    """
+    try:
+        raw = response.read(ERROR_BODY_LIMIT + 1)
+        if len(raw) > ERROR_BODY_LIMIT:
+            return None, None
+        body = json.loads(raw)
+    except (OSError, HTTPException, ValueError, RecursionError):
+        return None, None
+    error = body.get("error") if isinstance(body, dict) else None
+    if not isinstance(error, dict):
+        return None, None
+    return _error_field(error.get("param")), _error_field(error.get("code"))
+
+
 def _send_once(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
     parsed = urlsplit(url)
     connection = HTTPSConnection(parsed.netloc, timeout=timeout)
@@ -206,10 +281,14 @@ def _send_once(url: str, *, api_key: str, payload: bytes, timeout: float) -> byt
         )
         response = connection.getresponse()
         if response.status != 200:
+            # Only a 400 names a request field; every other status stays unread.
+            param, code = _rejected_field(response) if response.status == 400 else (None, None)
             raise ProviderRequestError(
                 f"Provider returned HTTP {response.status}; no retry performed",
                 status=response.status,
                 category="http",
+                param=param,
+                error_code=code,
             )
         body = response.read(1_048_577)
         if len(body) > 1_048_576:
