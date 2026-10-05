@@ -628,6 +628,7 @@ def _run_document(
     embedder: EmbeddingPort,
     continue_on_error: bool,
     progress: Progress | None,
+    unverified_tables_as_rows: bool = False,
 ) -> tuple[DocumentRun, int]:
     """One PDF through every stage; returns the run and its tree's live calls."""
     started = perf_counter()
@@ -683,6 +684,7 @@ def _run_document(
             stage="semantics",
             max_live_calls=limit,
             progress=_page_reporter(progress, pdf, lambda: int(run["live_call_budget"])),
+            unverified_tables_as_rows=unverified_tables_as_rows,
         )
         budget.spend(ingestion.live_call_count)
         run.update(ingestion=ingestion, live_calls=ingestion.live_call_count)
@@ -1163,6 +1165,7 @@ def run_folder_pipeline(
     reranker: ListwiseJudge | None = None,
     answer_llm: JsonCompletionClient | None = None,
     progress: Progress | None = None,
+    unverified_tables_as_rows: bool = False,
 ) -> FolderPipelineResult:
     """Ingest, requalify, qualify, index, publish and tree every PDF in ``folder``, then evaluate.
 
@@ -1196,6 +1199,7 @@ def run_folder_pipeline(
     any ingest or model call. An injected ``embedder`` / ``reranker`` / ``answer_llm`` skips
     its own check. A failing document is recorded and the rest continue unless
     ``continue_on_error`` is false, when its ``ValueError`` / ``OSError`` propagates.
+    ``unverified_tables_as_rows`` is handed to ``ingest_pdf`` (ADR 00NN).
     """
     _check_per_pdf(max_live_calls_per_pdf)
     _check_budget("tree_max_live_calls", tree_max_live_calls)
@@ -1305,6 +1309,7 @@ def run_folder_pipeline(
             embedder=embedder,
             continue_on_error=continue_on_error,
             progress=progress,
+            unverified_tables_as_rows=unverified_tables_as_rows,
         )
         documents.append(run)
         tree_total += tree_calls

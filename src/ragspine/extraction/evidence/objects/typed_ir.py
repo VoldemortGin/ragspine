@@ -16,6 +16,7 @@ from ragspine.extraction.evidence.objects.formulas.formula_models import (
     ScriptPosition,
 )
 from ragspine.extraction.evidence.objects.tables.table_models import TableIR
+from ragspine.extraction.evidence.objects.tables.table_rows import TableRowsIR
 from ragspine.extraction.evidence.page.models import ObjectKind
 
 
@@ -130,7 +131,9 @@ class FormulaIR:
                 raise ValueError("Structure members are existing tokens")
 
 
-type TypedIR = TextIR | ListIR | TableIR | ChartIR | DiagramIR | ImageIR | FormulaIR | GroupIR
+type TypedIR = (
+    TextIR | ListIR | TableIR | TableRowsIR | ChartIR | DiagramIR | ImageIR | FormulaIR | GroupIR
+)
 
 
 @dataclass(frozen=True, slots=True)

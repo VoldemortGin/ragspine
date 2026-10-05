@@ -2188,6 +2188,88 @@
         "title": "TableIR",
         "type": "object"
       },
+      "TableRow": {
+        "description": "One printed line of the region: its spans left to right, their texts verbatim.",
+        "properties": {
+          "bbox": {
+            "maxItems": 4,
+            "minItems": 4,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Bbox",
+            "type": "array"
+          },
+          "row_id": {
+            "title": "Row Id",
+            "type": "string"
+          },
+          "source_span_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Span Ids",
+            "type": "array"
+          },
+          "texts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Texts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "row_id",
+          "bbox",
+          "source_span_ids",
+          "texts"
+        ],
+        "title": "TableRow",
+        "type": "object"
+      },
+      "TableRowsIR": {
+        "description": "A table region transcribed as printed rows; its grid is not claimed at all.",
+        "properties": {
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "producer": {
+            "default": "table-rows-verbatim-v1",
+            "title": "Producer",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/$defs/TableRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "source": {
+            "$ref": "#/$defs/SourceAnchor"
+          }
+        },
+        "required": [
+          "object_id",
+          "source",
+          "rows"
+        ],
+        "title": "TableRowsIR",
+        "type": "object"
+      },
       "TableSlot": {
         "properties": {
           "origin_cell_id": {
@@ -2311,6 +2393,9 @@
           },
           {
             "$ref": "#/$defs/TableIR"
+          },
+          {
+            "$ref": "#/$defs/TableRowsIR"
           },
           {
             "$ref": "#/$defs/ChartIR"
