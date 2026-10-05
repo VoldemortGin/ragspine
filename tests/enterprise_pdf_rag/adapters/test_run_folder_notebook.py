@@ -7,6 +7,7 @@ import io
 import json
 import os
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -338,3 +339,301 @@ def test_answers_cell_skips_without_a_question_set_and_never_raises(tmp_path: Pa
         output = _run_answers(tmp_path / "reports", empty)
         assert "不生成 answers.csv" in output
     assert not (tmp_path / "reports").exists()
+
+
+# ───────────── llm-selfcheck: 入库 / tree / 回答各形态的请求体二分诊断 ─────────────
+
+_FAKE_KEY = "unit-test-fake-key-0123"
+_REPLY_OK = (200, '{"id":"x","choices":[]}')
+_CONSTRAINT_KEYS = ("minLength", "maxLength", "pattern", "minItems", "maxItems")
+
+
+def test_llm_selfcheck_cell_sits_between_the_fs_selfcheck_and_the_run_and_has_a_config_switch() -> (
+    None
+):
+    ids = [cell_id for cell_id, _ in _code_cells()]
+    assert ids.index("fs-selfcheck") < ids.index("llm-selfcheck") < ids.index("run")
+    assert ids.index("config") < ids.index("write-guard") < ids.index("llm-selfcheck")
+    assert re.search(r"^LLM_SELFCHECK\s*=\s*True\b", _code_cell("config"), re.MULTILINE)
+    source = _code_cell("llm-selfcheck")
+    assert "LLM_SELFCHECK" in source and "raise" in source
+    intro = _source(next(cell for cell in _notebook()["cells"] if cell["id"] == "intro"))
+    assert "llm-selfcheck" in intro and "LLM_SELFCHECK" in intro
+
+
+def test_llm_selfcheck_cell_never_prints_the_key_or_authorization_and_writes_no_environment() -> (
+    None
+):
+    source = _code_cell("llm-selfcheck")
+    for line in source.splitlines():
+        if re.search(r"\bprint\(", line):
+            assert not re.search(r"api_key|secret|_auth|Authorization", line, re.IGNORECASE), line
+    assert "os.environ" not in source and "environ[" not in source
+    assert "TemporaryDirectory(" in source and "sender=" in source
+
+
+_Rule = Callable[[dict[str, Any]], tuple[int, str]]
+
+
+class _Net:
+    """http.client.HTTPSConnection 的替身: 不开 socket, 记录请求, 按 rule(body) 脚本化回复。"""
+
+    def __init__(self, rule: _Rule, error: BaseException | None = None) -> None:
+        self.rule = rule
+        self.error = error
+        self.sent: list[dict[str, Any]] = []
+        self.targets: list[tuple[str, str]] = []
+        self.authorizations: list[str] = []
+
+    def connection(self) -> type:
+        net = self
+
+        class _Response:
+            def __init__(self, status: int, text: str) -> None:
+                self.status = status
+                self._text = text.encode()
+
+            def read(self, amount: int = -1) -> bytes:
+                return self._text[:amount] if amount >= 0 else self._text
+
+        class _Connection:
+            def __init__(self, netloc: str, timeout: float | None = None) -> None:
+                assert timeout == 30.0
+                self._netloc = netloc
+                self._body: dict[str, Any] = {}
+
+            def request(self, method: str, path: str, body: bytes, headers: dict[str, str]) -> None:
+                assert method == "POST"
+                if net.error is not None:
+                    raise net.error
+                self._body = json.loads(body)
+                net.sent.append(self._body)
+                net.targets.append((self._netloc, path))
+                net.authorizations.append(headers.get("Authorization", ""))
+
+            def getresponse(self) -> _Response:
+                status, text = net.rule(self._body)
+                return _Response(status, text)
+
+            def close(self) -> None:
+                pass
+
+        return _Connection
+
+
+def _schema_text(body: dict[str, Any]) -> str:
+    return json.dumps(body.get("response_format", {}).get("json_schema", {}).get("schema", {}))
+
+
+def _reject(message: str = "Invalid request") -> tuple[int, str]:
+    return 400, json.dumps({"error": {"message": message}})
+
+
+def _selfcheck(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    rule: _Rule = lambda body: _REPLY_OK,
+    *,
+    switch: bool = True,
+    error: BaseException | None = None,
+    configured: bool = True,
+) -> tuple[str, BaseException | None, _Net]:
+    """抽出 llm-selfcheck cell 执行: 假网络、假配置、系统临时目录与 cwd 都指向 tmp_path。"""
+    import http.client
+    import tempfile
+
+    from ragspine.common.evidence.configs import get_settings
+
+    if configured:
+        monkeypatch.setenv("OPENAI_API_KEY", _FAKE_KEY)
+        monkeypatch.setenv("OPENAI_BASE_URL", "https://llm.example.test/v1")
+        monkeypatch.setenv("OPENAI_MODEL", "model-under-test")
+    get_settings.cache_clear()
+    net = _Net(rule, error)
+    monkeypatch.setattr(http.client, "HTTPSConnection", net.connection())
+    system_tmp = tmp_path / "system-tmp"
+    system_tmp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(system_tmp))
+    monkeypatch.chdir(tmp_path)
+    before = _tree(tmp_path)
+    namespace: dict[str, Any] = {"LLM_SELFCHECK": switch}
+    buffer = io.StringIO()
+    raised: BaseException | None = None
+    with contextlib.redirect_stdout(buffer):
+        try:
+            exec(compile(_code_cell("llm-selfcheck"), "llm-selfcheck", "exec"), namespace)
+        except Exception as exc:  # noqa: BLE001 - 阻断异常是被测行为
+            raised = exc
+    output = buffer.getvalue()
+    assert _tree(tmp_path) == before, "自检不得在磁盘上留下任何文件"
+    assert _FAKE_KEY not in output and "Bearer" not in output
+    assert raised is None or _FAKE_KEY not in str(raised)
+    assert all(auth == f"Bearer {_FAKE_KEY}" for auth in net.authorizations)
+    return output, raised, net
+
+
+def _line(output: str, prefix: str) -> str:
+    return next(line for line in output.splitlines() if line.strip().startswith(prefix))
+
+
+def test_llm_selfcheck_all_forms_accepted_sends_four_baselines_and_does_not_block(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    output, raised, net = _selfcheck(monkeypatch, tmp_path)
+    assert raised is None
+    assert len(net.sent) == 4 <= 5
+    assert output.count("[通过]") == 4 and "[被拒" not in output
+    assert set(net.targets) == {("llm.example.test", "/v1/chat/completions")}
+    assert "https://llm.example.test/v1/chat/completions" in output
+    text, vision, tree, answer = net.sent
+    for body in (text, vision, tree, answer):
+        assert body["model"] == "model-under-test" and body["stream"] is False
+        assert body["response_format"]["type"] == "json_schema"
+        assert body["response_format"]["json_schema"]["strict"] is True
+        assert body["temperature"] == 0.0 and "max_completion_tokens" in body
+    assert "image_url" not in json.dumps(text) and "image_url" in json.dumps(vision)
+    assert "seed" not in text and "seed" not in vision and "seed" not in tree
+    assert answer["seed"] == 0
+    assert "结论" in output and "不是请求体问题" in _conclusion(output)
+
+
+def test_llm_selfcheck_rejected_response_format_points_at_response_format_and_blocks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def rule(body: dict[str, Any]) -> tuple[int, str]:
+        if "response_format" in body:
+            return _reject(f"response_format json_schema is not supported ({_FAKE_KEY})")
+        return _REPLY_OK
+
+    output, raised, _ = _selfcheck(monkeypatch, tmp_path, rule)
+    assert (
+        isinstance(raised, RuntimeError)
+        and "入库" in str(raised)
+        and "nothing_to_index" in str(raised)
+    )
+    assert "[被拒 HTTP 400]" in output and "is not supported" in output
+    assert "response_format" in _line(output, "最先被拒的一项")
+    assert "约束关键字" not in _line(output, "最先被拒的一项")
+    assert "不带 response_format" in _line(output, "最接近原样且仍被接受的形态")
+    assert "response_format json_schema is not supported" in _line(output, "服务端原话")
+    assert len(output.split("最先被拒的一项")) == 2  # 只列一项根因
+    # 全部四种形态各自都有一行基线结果, 没有被二分吞掉
+    for label in ("入库 text", "入库 vision", "tree", "回答"):
+        assert label in output
+
+
+@pytest.mark.parametrize(
+    ("keyword", "klass"),
+    [
+        ("maxLength", "minLength/maxLength"),
+        ("pattern", "pattern"),
+        ("maxItems", "minItems/maxItems"),
+    ],
+)
+def test_llm_selfcheck_narrows_a_rejected_schema_keyword_to_exactly_that_class(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, keyword: str, klass: str
+) -> None:
+    def rule(body: dict[str, Any]) -> tuple[int, str]:
+        if f'"{keyword}"' in _schema_text(body):
+            return _reject(f"'{keyword}' is not permitted")
+        return _REPLY_OK
+
+    output, raised, _ = _selfcheck(monkeypatch, tmp_path, rule)
+    assert isinstance(raised, RuntimeError)
+    culprit = _line(output, "最先被拒的一项")
+    assert klass in culprit
+    assert all(other not in culprit for other in ("temperature", "image_url", "strict"))
+    assert f"'{keyword}' is not permitted" in _line(output, "服务端原话")
+    assert len(output.split("最先被拒的一项")) == 2
+    # 其余被拒的形态只做一次"同样去掉该类"的验证, 不再各自展开二分
+    assert output.count("[被拒") < 20
+
+
+def test_llm_selfcheck_names_temperature_when_only_temperature_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def rule(body: dict[str, Any]) -> tuple[int, str]:
+        return _reject("temperature unsupported") if "temperature" in body else _REPLY_OK
+
+    output, raised, _ = _selfcheck(monkeypatch, tmp_path, rule)
+    assert isinstance(raised, RuntimeError)
+    assert "temperature" in _line(output, "最先被拒的一项")
+    assert "response_format" not in _line(output, "最先被拒的一项")
+
+
+def test_llm_selfcheck_vision_only_rejection_names_the_image_and_blocks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def rule(body: dict[str, Any]) -> tuple[int, str]:
+        return _reject("image_url not supported") if "image_url" in json.dumps(body) else _REPLY_OK
+
+    output, raised, _ = _selfcheck(monkeypatch, tmp_path, rule)
+    assert isinstance(raised, RuntimeError) and "入库" in str(raised)
+    assert "image_url" in _line(output, "最先被拒的一项")
+    assert re.search(r"\[通过\] 入库 text", output) and re.search(
+        r"\[被拒 HTTP 400\] 入库 vision", output
+    )
+    assert re.search(r"\[通过\] tree", output) and re.search(r"\[通过\] 回答", output)
+
+
+def test_llm_selfcheck_seed_only_rejection_warns_but_does_not_block(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def rule(body: dict[str, Any]) -> tuple[int, str]:
+        return _reject("seed unsupported") if "seed" in body else _REPLY_OK
+
+    output, raised, _ = _selfcheck(monkeypatch, tmp_path, rule)
+    assert raised is None
+    assert re.search(r"\[被拒 HTTP 400\] 回答", output)
+    assert "seed" in _line(output, "最先被拒的一项")
+    assert "不阻断" in _conclusion(output)
+
+
+@pytest.mark.parametrize(
+    "error", [ConnectionRefusedError("refused"), TimeoutError("timed out"), OSError("dns failure")]
+)
+def test_llm_selfcheck_connection_failures_are_classified_as_network_and_not_bisected(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, error: BaseException
+) -> None:
+    output, raised, net = _selfcheck(monkeypatch, tmp_path, error=error)
+    assert isinstance(raised, RuntimeError)
+    assert net.sent == []
+    assert "网络 / 代理 / 证书问题\uff0c不是请求体问题" in output
+    assert "[连接失败]" in output and output.count("[连接失败]") == 1
+    assert "最先被拒的一项" not in output
+
+
+def test_llm_selfcheck_auth_failure_is_not_a_body_problem_and_is_not_bisected(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    output, raised, net = _selfcheck(
+        monkeypatch, tmp_path, lambda body: (401, '{"error":"invalid api key"}')
+    )
+    assert isinstance(raised, RuntimeError)
+    assert len(net.sent) == 1
+    assert "[被拒 HTTP 401]" in output and "不是请求体问题" in _conclusion(output)
+
+
+def test_llm_selfcheck_switch_off_sends_nothing_and_does_not_block(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    output, raised, net = _selfcheck(monkeypatch, tmp_path, switch=False)
+    assert raised is None and net.sent == [] and "跳过" in output
+
+
+def test_llm_selfcheck_without_llm_configuration_skips_without_raising(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    output, raised, net = _selfcheck(monkeypatch, tmp_path, configured=False)
+    assert raised is None and net.sent == [] and "跳过" in output
+
+
+def test_llm_selfcheck_own_bug_prints_and_never_blocks_the_main_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def rule(body: dict[str, Any]) -> tuple[int, str]:
+        raise ZeroDivisionError("bug inside the check")
+
+    output, raised, _ = _selfcheck(monkeypatch, tmp_path, rule)
+    assert raised is None
+    assert "自检代码自身出错" in output and "不影响主运行" in output
