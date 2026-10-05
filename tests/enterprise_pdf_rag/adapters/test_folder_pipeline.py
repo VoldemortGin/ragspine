@@ -12,6 +12,7 @@ from typing import Never
 
 import pytest
 
+import ragspine.common.evidence.providers.providers as provider_module
 from enterprise_pdf_rag import cli
 from enterprise_pdf_rag.adapters import folder_pipeline
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
@@ -26,7 +27,10 @@ from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.visual_requalification import RequalificationSummary
 from ragspine.common.evidence.configs import get_settings
-from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
+from ragspine.common.evidence.providers.json_completion import (
+    JsonCompletionClient,
+    forget_unsupported_sampling_parameters,
+)
 from ragspine.common.evidence.providers.providers import LocalModelConfig, ProviderRequestError
 from ragspine.extraction.evidence.figures.ports import EmbeddingPort
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
@@ -47,6 +51,11 @@ from tests.enterprise_pdf_rag.adapters.test_pdf_password import (
     encrypted_pdf,
     set_password,
     source_span_texts,
+)
+from tests.enterprise_pdf_rag.adapters.test_sampling_fallback import (
+    AZURE_TEMPERATURE_400,
+    MARKER,
+    _Endpoint,
 )
 from tests.enterprise_pdf_rag.answers.fake_llm import scripted_client
 
@@ -1090,3 +1099,166 @@ def test_a_wrong_password_fails_the_document_without_writing_the_password(
     assert calls == []
     _assert_never_written(wrong, result, events)
     _assert_never_written(PASSWORD, result, events)
+
+
+# ---- 11. an endpoint that refuses temperature=0.0 (Azure reasoning models, ADR 0021) ------------
+
+
+def _azure_like(
+    monkeypatch: pytest.MonkeyPatch, *, refusal: bytes = AZURE_TEMPERATURE_400
+) -> _Endpoint:
+    """The real ``_send_once`` against an endpoint that 400s any request carrying a temperature
+    with ``refusal`` and otherwise answers layout, page metadata and synthesis offline."""
+    for key, value in _LLM_ENV.items():
+        monkeypatch.setenv(key, value)
+    ingest = combined_sender([], metadata_calls=[])
+    answer = _quote_page("page 2")
+
+    def reply(body: dict[str, object]) -> tuple[int, bytes]:
+        if "temperature" in body:
+            return 400, refusal
+        schema = json.dumps(body["response_format"])
+        if '"claims"' in schema:
+            messages = body["messages"]
+            assert isinstance(messages, list)
+            content = answer(messages[1]["content"])
+            assert not isinstance(content, str)
+            return 200, json.dumps(
+                {
+                    "choices": [
+                        {"message": {"content": content.model_dump_json()}, "finish_reason": "stop"}
+                    ]
+                }
+            ).encode()
+        if '"key_topics"' in schema:  # a tree-node summary
+            note = json.dumps({"summary": "A routing note.", "key_topics": []})
+            return 200, json.dumps(
+                {"choices": [{"message": {"content": note}, "finish_reason": "stop"}]}
+            ).encode()
+        url = f"{PROVIDER_BASE_URL}/v1/chat/completions"
+        return 200, ingest(url, api_key="", payload=json.dumps(body).encode(), timeout=1.0)
+
+    scripted = _Endpoint(reply)
+    monkeypatch.setattr(provider_module, "HTTPSConnection", scripted.connection())
+    return scripted
+
+
+def _light_questions(tmp_path: Path) -> Path:
+    questions = tmp_path / "questions.jsonl"
+    rows = [
+        {"id": "named", "question": "What does page 2 say?", "doc": "meridian.pdf", "pages": "2"},
+        {"id": "routed", "question": "What does Orion say on page 2?", "expected": "page 2"},
+    ]
+    questions.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+    return questions
+
+
+def _run_azure(
+    tmp_path: Path, folder: Path, questions: Path
+) -> tuple[FolderPipelineResult, list[tuple[str, dict[str, object]]]]:
+    events: list[tuple[str, dict[str, object]]] = []
+    result = run_folder_pipeline(
+        folder,
+        questions=questions,
+        ingestion_root=tmp_path / "ingestion",
+        max_live_calls_per_pdf=_PER_PDF + 1,  # room for the one probe
+        build_tree=False,
+        report_dir=tmp_path / "report",
+        embedder=_OFFLINE,
+        progress=lambda event, payload: events.append((event, payload)),
+    )
+    return result, events
+
+
+def _assert_all_answered(result: FolderPipelineResult) -> None:
+    assert [item.status for item in result.documents] == ["published", "published"]
+    assert all(item.error is None for item in result.documents), [i.error for i in result.documents]
+    assert result.eval is not None
+    assert [case.verdict for case in result.eval.cases] == ["answered", "answered"]
+    assert all(case.answer and "page 2" in case.answer for case in result.eval.cases)
+    assert result.ok
+
+
+def test_a_temperature_refusing_endpoint_publishes_and_answers_with_exactly_one_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    endpoint = _azure_like(monkeypatch)
+    folder = _folder(tmp_path, ("meridian.pdf", _MERIDIAN), ("orion.pdf", _ORION))
+    questions = _light_questions(tmp_path)
+
+    result, events = _run_azure(tmp_path, folder, questions)
+
+    _assert_all_answered(result)
+    assert endpoint.with_temperature() == 1
+    assert result.live_calls.total == len(endpoint.sent) == 1 + 2 * _PER_PDF + 2
+    assert result.sampling_parameters_dropped == ("temperature",)
+    assert ("sampling_parameters_dropped", {"parameters": ["temperature"]}) in events
+    assert "temperature" in (tmp_path / "report" / "report.md").read_text()
+    assert MARKER not in "".join(
+        path.read_text(errors="replace") for path in tmp_path.rglob("*") if path.is_file()
+    )
+
+    forget_unsupported_sampling_parameters()  # a new kernel
+    again, _ = _run_azure(tmp_path, folder, questions)
+    _assert_all_answered(again)
+    assert again.live_calls.total == 0 and len(endpoint.sent) == 1 + 2 * _PER_PDF + 2
+    assert again.sampling_parameters_dropped == ("temperature",)
+
+
+def _strip_to_the_old_record_format(root: Path) -> int:
+    """Rewrite every 400 record as the pre-ADR-0021 client wrote it (no provider_error_* keys)."""
+    count = 0
+    for path in root.rglob("requests/*.json"):
+        record = json.loads(path.read_text())
+        diagnostics = record.get("diagnostics") or {}
+        if record.get("failure_code") == "provider_http_400":
+            diagnostics.pop("provider_error_param", None)
+            diagnostics.pop("provider_error_code", None)
+            path.write_text(json.dumps(record, separators=(",", ":")))
+            count += 1
+    return count
+
+
+def test_failure_records_left_by_the_old_client_do_not_block_a_rerun(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = _folder(tmp_path, ("meridian.pdf", _MERIDIAN), ("orion.pdf", _ORION))
+    questions = _light_questions(tmp_path)
+    # The user's first runs: every request 400s and nothing says why.
+    with monkeypatch.context() as old:
+        _azure_like(old, refusal=b'{"error":{"message":"Unsupported value"}}')
+        before, _ = _run_azure(tmp_path, folder, questions)
+    assert all(item.status != "published" for item in before.documents)
+    assert _strip_to_the_old_record_format(tmp_path / "ingestion") >= 2
+    claims = sorted((tmp_path / "ingestion").rglob("requests/*.claim"))
+    assert claims
+
+    forget_unsupported_sampling_parameters()
+    endpoint = _azure_like(monkeypatch)
+    result, _ = _run_azure(tmp_path, folder, questions)
+
+    _assert_all_answered(result)
+    assert endpoint.with_temperature() == 1
+    assert "request_in_progress_or_uncertain" not in result.model_dump_json()
+    assert all(claim.exists() for claim in claims)  # left as they were, never deleted
+
+    forget_unsupported_sampling_parameters()
+    sent = len(endpoint.sent)
+    again, _ = _run_azure(tmp_path, folder, questions)
+    _assert_all_answered(again)
+    assert again.live_calls.total == 0 and len(endpoint.sent) == sent
+
+
+def test_omit_in_the_settings_never_sends_a_temperature_and_never_probes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    endpoint = _azure_like(monkeypatch)
+    monkeypatch.setenv("OPENAI_TEMPERATURE", "omit")
+    folder = _folder(tmp_path, ("meridian.pdf", _MERIDIAN), ("orion.pdf", _ORION))
+
+    result, events = _run_azure(tmp_path, folder, _light_questions(tmp_path))
+
+    _assert_all_answered(result)
+    assert endpoint.with_temperature() == 0 and endpoint.sent
+    assert result.sampling_parameters_dropped == ()
+    assert not [event for event, _ in events if event == "sampling_parameters_dropped"]

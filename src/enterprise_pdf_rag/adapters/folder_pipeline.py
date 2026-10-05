@@ -57,12 +57,19 @@ from enterprise_pdf_rag.adapters.visual_requalification import (
     requalify_visual_objects,
 )
 from ragspine.common.evidence.configs import get_settings
-from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
+from ragspine.common.evidence.providers.json_completion import (
+    JsonCompletionClient,
+    unsupported_sampling_parameters,
+)
 from ragspine.common.evidence.providers.local_models import (
     LocalEmbeddingAdapter,
     LocalRerankAdapter,
 )
-from ragspine.common.evidence.providers.providers import load_llm_config, load_local_model_config
+from ragspine.common.evidence.providers.providers import (
+    ProviderConfigurationError,
+    load_llm_config,
+    load_local_model_config,
+)
 from ragspine.eval.retrieval_only import (
     BatchQuestion,
     content_hit,
@@ -208,6 +215,9 @@ class FolderPipelineResult(BoundaryModel):
     live_calls: LiveCalls
     budget_exhausted: bool
     report_dir: str | None = None
+    # Sampling parameters the LLM endpoint refused, so this run's requests went without them
+    # (ADR 0021); empty when it accepted everything or the settings already omit them.
+    sampling_parameters_dropped: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -763,6 +773,14 @@ def _markdown(result: FolderPipelineResult) -> str:
         f"- ok: **{result.ok}**; budget exhausted: {result.budget_exhausted}",
         f"- live calls: ingest {result.live_calls.ingest}, tree {result.live_calls.tree}, "
         f"answer {result.live_calls.answer}, total {result.live_calls.total}",
+        *(
+            [
+                "- sampling parameters dropped (the endpoint refused them): "
+                + ", ".join(result.sampling_parameters_dropped)
+            ]
+            if result.sampling_parameters_dropped
+            else []
+        ),
         "",
         "| pdf | sha256 | status | stage | eligible | index reused | live calls | s | error |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
@@ -897,6 +915,7 @@ def run_folder_pipeline(
 
     summary: EvalSummary | None = None
     answer_total = 0
+    answer_client: JsonCompletionClient | None = None
     if question_set is not None:
         shas = {item.sha256 for item in documents if item.status == "published"}
         scanned = scan_catalog(root)
@@ -955,8 +974,15 @@ def run_folder_pipeline(
                 progress=progress,
             )
         answer_total = llm.live_call_count - before
+        answer_client = llm
         budget.spend(answer_total)
 
+    try:
+        dropped = set(unsupported_sampling_parameters(load_llm_config()))
+    except ProviderConfigurationError:
+        dropped = set()
+    if answer_client is not None:
+        dropped.update(answer_client.dropped_parameters)
     calls = LiveCalls(
         ingest=ingest_total,
         tree=tree_total,
@@ -972,6 +998,7 @@ def run_folder_pipeline(
         budget_exhausted=budget.exhausted
         or any(item.status == "budget_starved" for item in documents),
         report_dir=None if report_dir is None else str(report_dir.expanduser().resolve()),
+        sampling_parameters_dropped=tuple(sorted(dropped)),
     )
     if report_dir is not None:
         target = report_dir.expanduser().resolve()
@@ -980,5 +1007,11 @@ def run_folder_pipeline(
             result.model_dump_json(indent=2) + "\n", encoding="utf-8"
         )
         (target / "report.md").write_text(_markdown(result), encoding="utf-8")
+    if result.sampling_parameters_dropped:
+        _emit(
+            progress,
+            "sampling_parameters_dropped",
+            parameters=list(result.sampling_parameters_dropped),
+        )
     _emit(progress, "done", ok=result.ok, live_calls=calls.total)
     return result
