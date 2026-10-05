@@ -1,5 +1,6 @@
 """I/O contracts; concrete storage, model and vector SDKs live in adapters."""
 
+from collections.abc import Sequence
 from typing import Protocol, runtime_checkable
 
 from ragspine.extraction.evidence.figures.models import (
@@ -45,6 +46,20 @@ class EmbeddingPort(Protocol):
     def embed_description(self, text: str) -> tuple[float, ...]: ...
 
     def embed_query(self, text: str) -> tuple[float, ...]: ...
+
+
+@runtime_checkable
+class BatchEmbeddingPort(EmbeddingPort, Protocol):
+    """Optional capability: many descriptions per request, each vector exactly its own.
+
+    ``embed_descriptions(texts)[i]`` must equal ``embed_description(texts[i])``; batching is
+    transport only. ``request_count`` counts the requests sent, so callers can report it.
+    """
+
+    @property
+    def request_count(self) -> int: ...
+
+    def embed_descriptions(self, texts: Sequence[str]) -> tuple[tuple[float, ...], ...]: ...
 
 
 @runtime_checkable

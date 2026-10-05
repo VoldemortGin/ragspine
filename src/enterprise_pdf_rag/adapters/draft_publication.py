@@ -88,6 +88,10 @@ class DraftIndex(BoundaryModel):
     member_count: int
     embedding_dimensions: tuple[int, ...]
     embedding_fingerprint: str
+    # Embedding requests this indexing sent and the objects they embedded (stage-cache
+    # misses); a batching embedder sends fewer requests than objects, a rerun sends none.
+    embedding_requests: int = 0
+    embedded_objects: int = 0
     indexed: Literal[True] = True
     activated: Literal[False] = False
     retrieval_status: Literal["indexed; publication pending"] = "indexed; publication pending"
@@ -114,9 +118,8 @@ def index_draft(
     outputs = ProcessingStore(Path(processing_store).resolve())
     manifest = outputs.load(processing_id)
     records = tuple((page.page_index, record) for page in manifest.pages for record in page.objects)
-    publication = ProcessingRetrieval(sources, outputs, embedder).build(
-        manifest.scope, records, outputs.index_contexts(manifest)
-    )
+    retrieval = ProcessingRetrieval(sources, outputs, embedder)
+    publication = retrieval.build(manifest.scope, records, outputs.index_contexts(manifest))
     indexed_id = outputs.save_draft(replace(manifest, retrieval=publication), sources=sources)
     plan, _ = outputs.load_retrieval(publication)
     label = (
@@ -142,6 +145,8 @@ def index_draft(
             sorted({member.embedding_dimensions for member in plan.members})
         ),
         embedding_fingerprint=embedder.fingerprint,
+        embedding_requests=retrieval.embedding_requests,
+        embedded_objects=retrieval.embedded_objects,
         review_path=str(review),
     )
 

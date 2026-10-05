@@ -43,7 +43,7 @@ from ragspine.extraction.evidence.figures.models import (
     FigureQualification,
     TextDescription,
 )
-from ragspine.extraction.evidence.figures.ports import EmbeddingPort
+from ragspine.extraction.evidence.figures.ports import BatchEmbeddingPort, EmbeddingPort
 from ragspine.extraction.evidence.objects.diagrams.diagram_models import DiagramQualification
 from ragspine.extraction.evidence.objects.formulas.formula_models import FormulaQualification
 from ragspine.extraction.evidence.objects.tables.table_models import TableIR
@@ -74,6 +74,9 @@ from ragspine.extraction.evidence.page.models import (
 # keep their ids and stay mountable.
 _POLICY = "source-transcription-and-scoped-chart-qualification-v5"
 _INDEX = "immutable-cosine-index-v1"
+# Uncached index texts handed to a batch embedder at a time; each slice is stored before the
+# next is sent, so a failed run keeps what it already paid for.
+_EMBED_SLICE = 256
 # Snapshots whose vectors embed ``member_index_text``; older ones embedded the description
 # text, and their lexical corpus must keep scoring exactly what they embedded. The
 # displayed-bar admission builds its member through this class, so its v2 policy belongs
@@ -209,6 +212,9 @@ class ProcessingRetrieval:
         self.sources = sources
         self.outputs = outputs
         self.embedder = embedder
+        # What the last ``build`` sent: embedding requests and the objects they embedded.
+        self.embedding_requests = 0
+        self.embedded_objects = 0
 
     @shared_pdfs()
     def build(
@@ -217,9 +223,18 @@ class ProcessingRetrieval:
         records: tuple[tuple[int, ObjectProcessingRecord], ...],
         contexts: Mapping[int, PageIndexContext] | None = None,
     ) -> RetrievalPublication:
-        """Embed every eligible member; ``contexts`` gives each page's index-text header."""
-        members: list[RetrievalMember] = []
-        entries: list[IndexEntry] = []
+        """Embed every eligible member; ``contexts`` gives each page's index-text header.
+
+        Every member is validated first; the index texts not yet in the stage cache are then
+        embedded in batches when the embedder can (``BatchEmbeddingPort``), each vector stored
+        under the same per-object cache entry a single call writes, so the snapshot and the
+        cache are byte-identical either way.
+        """
+        self.embedding_requests = 0
+        self.embedded_objects = 0
+        pending: list[
+            tuple[int, ObjectProcessingRecord, tuple[AssetRef, ...], tuple[AssetRef, ...], str]
+        ] = []
         for page_index, record in records:
             eligible, _ = eligibility(record)
             if not eligible:
@@ -324,6 +339,13 @@ class ProcessingRetrieval:
                 member_index_text(checked_ir, checked_description.text),
                 None if contexts is None else contexts.get(page_index),
             )
+            pending.append(
+                (page_index, record, (ir, description, qualification, svg), lineage, text)
+            )
+        self._embed_uncached([(refs[1], text) for _, _, refs, _, text in pending])
+        members: list[RetrievalMember] = []
+        entries: list[IndexEntry] = []
+        for page_index, record, (ir, description, qualification, svg), lineage, text in pending:
             embedding_ref, embedding = self._embedding(description, text)
             member = RetrievalMember(
                 record.object_id,
@@ -360,8 +382,8 @@ class ProcessingRetrieval:
         self._load(publication)
         return publication
 
-    def _embedding(self, description: AssetRef, text: str) -> tuple[AssetRef, RetrievalEmbedding]:
-        fingerprint = sha256(
+    def _cache_key(self, description: AssetRef, text: str) -> str:
+        return sha256(
             repr(
                 (
                     "index-text-embedding-v1",
@@ -371,6 +393,56 @@ class ProcessingRetrieval:
                 )
             ).encode()
         ).hexdigest()
+
+    def _embed_uncached(self, items: list[tuple[AssetRef, str]]) -> None:
+        """Embed the not-yet-cached texts in batches, storing each under its own entry.
+
+        Slices of ``_EMBED_SLICE`` are stored as they come back, so a failure keeps every
+        earlier slice cached. An embedder without batches is left to ``_embedding``.
+        """
+        embedder = self.embedder
+        if not isinstance(embedder, BatchEmbeddingPort):
+            return
+        uncached: dict[str, tuple[AssetRef, str]] = {}
+        for description, text in items:
+            key = self._cache_key(description, text)
+            if key not in uncached and self.outputs.cached(key) is None:
+                uncached[key] = (description, text)
+        work = list(uncached.items())
+        for start in range(0, len(work), _EMBED_SLICE):
+            chunk = work[start : start + _EMBED_SLICE]
+            sent = embedder.request_count
+            try:
+                vectors = embedder.embed_descriptions([text for _, (_, text) in chunk])
+            finally:
+                self.embedding_requests += embedder.request_count - sent
+            if len(vectors) != len(chunk):
+                raise ValueError("Batch embedder returned a vector count unlike its inputs")
+            for (key, (description, _)), vector in zip(chunk, vectors, strict=True):
+                self._store(key, description, vector)
+            self.embedded_objects += len(chunk)
+
+    def _store(
+        self, key: str, description: AssetRef, vector: tuple[float, ...]
+    ) -> tuple[AssetRef, RetrievalEmbedding]:
+        embedding = RetrievalEmbedding(description.sha256, self.embedder.fingerprint, vector)
+        ref = self.outputs.assets.put(
+            TypeAdapter(RetrievalEmbedding).dump_json(embedding),
+            media_type="application/json",
+        )
+        self.outputs.cache(
+            StageOutcome(
+                "embedding",
+                key,
+                StageState.SUCCEEDED,
+                self.embedder.fingerprint,
+                ref,
+            )
+        )
+        return ref, embedding
+
+    def _embedding(self, description: AssetRef, text: str) -> tuple[AssetRef, RetrievalEmbedding]:
+        fingerprint = self._cache_key(description, text)
         cached = self.outputs.cached(fingerprint)
         if cached is not None:
             assert cached.artifact is not None
@@ -383,25 +455,10 @@ class ProcessingRetrieval:
             ):
                 raise ValueError("Cached embedding belongs to a different description or model")
             return cached.artifact, embedding
-        embedding = RetrievalEmbedding(
-            description.sha256,
-            self.embedder.fingerprint,
-            self.embedder.embed_description(text),
-        )
-        ref = self.outputs.assets.put(
-            TypeAdapter(RetrievalEmbedding).dump_json(embedding),
-            media_type="application/json",
-        )
-        self.outputs.cache(
-            StageOutcome(
-                "embedding",
-                fingerprint,
-                StageState.SUCCEEDED,
-                self.embedder.fingerprint,
-                ref,
-            )
-        )
-        return ref, embedding
+        self.embedding_requests += 1
+        vector = self.embedder.embed_description(text)
+        self.embedded_objects += 1
+        return self._store(fingerprint, description, vector)
 
     def _load(self, publication: RetrievalPublication) -> tuple[RetrievalPlan, RetrievalIndex]:
         return self.outputs.load_retrieval(publication)

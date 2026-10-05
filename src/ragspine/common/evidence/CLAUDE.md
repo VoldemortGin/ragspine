@@ -31,7 +31,9 @@ file_placement.py  link_new_file (create-if-absent by hard link; rename + re-rea
 providers/    providers.py (explicit APP_LLM_* / embedding / APP_RERANK_* environment, opt-in
               connectivity smoke), json_completion.py (bounded JSON model calls, strict DTO
               validation, content-addressed immutable cache), local_models.py (embedding /
-              rerank HTTP adapters), local_model_launcher.py (credential injection into one
+              rerank HTTP adapters; `embed_descriptions` batches index texts, 16 inputs /
+              48 000 chars, halving on failure — enterprise-pdf-rag ADR 00NN-batched-embeddings),
+              local_model_launcher.py (credential injection into one
               allowlisted child), local_model_tunnel.py (loopback-only SSH tunnel)
 ```
 
