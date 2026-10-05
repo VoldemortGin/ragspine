@@ -549,16 +549,43 @@ def test_llm_selfcheck_narrows_a_rejected_schema_keyword_to_exactly_that_class(
     assert output.count("[被拒") < 20
 
 
-def test_llm_selfcheck_names_temperature_when_only_temperature_is_rejected(
+def test_llm_selfcheck_a_rejected_temperature_is_named_and_does_not_block(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    # ADR 0021: the pipeline drops a refused temperature and resends, so Run All goes on.
     def rule(body: dict[str, Any]) -> tuple[int, str]:
         return _reject("temperature unsupported") if "temperature" in body else _REPLY_OK
 
     output, raised, _ = _selfcheck(monkeypatch, tmp_path, rule)
-    assert isinstance(raised, RuntimeError)
+    assert raised is None
     assert "temperature" in _line(output, "最先被拒的一项")
     assert "response_format" not in _line(output, "最先被拒的一项")
+    conclusion = _conclusion(output)
+    assert "端点不接受 temperature" in conclusion and "自动去掉" in conclusion
+    assert "OPENAI_TEMPERATURE=omit" in conclusion and "不阻断" in conclusion
+    assert re.search(r"\[通过\] 入库 text.*原样请求只去掉 temperature", output)
+
+
+def test_llm_selfcheck_uses_the_pipelines_own_allowlist() -> None:
+    source = _code_cell("llm-selfcheck")
+    assert "DEGRADABLE_SAMPLING_PARAMETERS" in source
+    assert "json_completion import" in source
+
+
+def test_llm_selfcheck_still_blocks_when_dropping_temperature_is_not_enough(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def rule(body: dict[str, Any]) -> tuple[int, str]:
+        if "temperature" in body:
+            return _reject("temperature unsupported")
+        if "response_format" in body and "max_completion_tokens" in body:
+            return _reject("this combination is refused")
+        return _REPLY_OK
+
+    output, raised, _ = _selfcheck(monkeypatch, tmp_path, rule)
+    assert isinstance(raised, RuntimeError) and "入库" in str(raised)
+    assert "temperature" in _line(output, "最先被拒的一项")
+    assert "自动去掉" not in _conclusion(output)
 
 
 def test_llm_selfcheck_vision_only_rejection_names_the_image_and_blocks(
