@@ -39,18 +39,38 @@ class ProcessingStore:
 
     ``verify_every_request`` turns that reuse off, so every read re-parses and re-checks the
     whole published index from disk — the auditable behaviour, and what this store did
-    unconditionally before.
+    unconditionally before. It also turns off the assets' verification cache, which
+    ``verify_every_load`` controls on its own (see ``LocalDocumentStore``). A manifest object
+    itself is re-read and re-hashed on every ``load``: it is the one file that names all the
+    rest, and the mount's drift guard falls through to ``load`` to refuse a changed one.
     """
 
-    def __init__(self, root: Path, *, verify_every_request: bool = False) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        verify_every_request: bool = False,
+        verify_every_load: bool | None = None,
+    ) -> None:
         self.root = root
-        self.assets = LocalDocumentStore(root, activate_on_publish=False)
+        self.assets = LocalDocumentStore(
+            root,
+            activate_on_publish=False,
+            verify_every_load=True if verify_every_request else verify_every_load,
+        )
         self._verify_every_request = verify_every_request
+        self._verify_every_load = verify_every_load
         # A publication names its plan and index by content, so one parse stands for those
         # exact bytes for as long as this process lives; a republished snapshot names other
         # objects and misses. Re-reading 200-odd embedding artifacts per request cost more
         # than everything else an answer does.
         self._retrieval: dict[tuple[str, str], tuple[RetrievalPlan, RetrievalIndex]] = {}
+
+    def auditing(self) -> "ProcessingStore":
+        """The same store whose assets are re-verified on every call (no verification cache)."""
+        return ProcessingStore(
+            self.root, verify_every_request=self._verify_every_request, verify_every_load=True
+        )
 
     def _cache_path(self, fingerprint: str) -> Path:
         if re.fullmatch(r"[0-9a-f]{64}", fingerprint) is None:
@@ -72,7 +92,7 @@ class ProcessingStore:
     def cache(self, outcome: StageOutcome) -> None:
         if outcome.state is not StageState.SUCCEEDED or outcome.artifact is None:
             raise ValueError("Only successful stages can be reused as output cache")
-        self.assets.get(outcome.artifact)
+        self.assets.verify(outcome.artifact)
         existing = self.cached(outcome.input_fingerprint)
         if existing is not None:
             if existing != outcome:
@@ -94,7 +114,7 @@ class ProcessingStore:
     def save_draft(self, manifest: ProcessingManifest, *, sources: LocalDocumentStore) -> str:
         """Validate an immutable release without changing active discovery state."""
         for ref in processing_assets(manifest):
-            self.assets.get(ref)
+            self.assets.verify(ref)
         ref = self.assets.put(
             ProcessingEnvelope(manifest=manifest).model_dump_json().encode(),
             media_type="application/json",
@@ -111,7 +131,7 @@ class ProcessingStore:
             self.assets.read_content(snapshot_id)
         ).manifest
         for ref in processing_assets(manifest):
-            self.assets.get(ref)
+            self.assets.verify(ref)
         pages = self.load_page_metadata(manifest)
         if manifest.document_metadata != summarize_document(tuple(pages.values())):
             raise ValueError("Document metadata differs from its page metadata stages")
@@ -177,7 +197,7 @@ class ProcessingStore:
             raise ValueError("Retrieval index readiness does not cover the exact members")
         indexed = {entry.member_id: entry.vector for entry in index.entries}
         for ref in publication.dependencies:
-            self.assets.get(ref)
+            self.assets.verify(ref)
         for member in plan.members:
             embedding = TypeAdapter(RetrievalEmbedding).validate_json(
                 self.assets.get(member.embedding)
@@ -224,7 +244,7 @@ class ProcessingStore:
         if record.processing_id != processing_id:
             raise ValueError("Document tree record is bound to another processing id")
         if record.artifact is not None:
-            self.assets.get(record.artifact)
+            self.assets.verify(record.artifact)
         target = self._document_tree_path(processing_id)
         target.parent.mkdir(parents=True, exist_ok=True)
         # Unlike a stage-cache pointer this record is mutable on purpose: a later run with a
