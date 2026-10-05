@@ -145,6 +145,19 @@ Official references:
 - [Best practices for Databricks Apps](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/best-practices)
 - [Develop apps](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/app-development)
 
+## Ingest mode: calls and files are cost
+
+On Databricks the LLM is billed per call and every file operation on workspace files is a
+network round trip (a Git folder should also stay under ~20 000 files), so
+`notebooks/run_folder.ipynb` ingests with `INGEST_MODE = "lite"` by default
+([ADR 0025](adr/0025-lite-ingest-mode.md)): one layout call per page, one chart-IR call per
+chart and the two diagram calls; page metadata and chart descriptions are derived without a
+model, images and formulas send no call, no tree, no review pages. On the synthetic sample this
+halves both the model calls (24 → 10) and the files written (843 → 406). Set
+`INGEST_MODE = "full"` for the previous behaviour; both modes share one `data/ingestion` (a full
+rerun after lite sends only the calls lite skipped). Review pages for one document on demand:
+`export_document_review(<ingestion root>/<sha256>)` from `enterprise_pdf_rag.adapters.pdf_ingestion`.
+
 ## Data directory on workspace files or a Unity Catalog volume
 
 `notebooks/run_folder.ipynb` writes everything under `ROOT_DIR/data`. Run from a Git folder,
