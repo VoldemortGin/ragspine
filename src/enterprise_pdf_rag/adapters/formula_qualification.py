@@ -14,6 +14,7 @@ from enterprise_pdf_rag.adapters.aia_ingestion import read_text_sidecar
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.pdfspine_formula import observe_formula
 from enterprise_pdf_rag.adapters.pdfspine_svg import crop_native_svg
+from enterprise_pdf_rag.adapters.shared_pdf import source_pdf
 from enterprise_pdf_rag.processing.retrieval import RetrievalMember
 from ragspine.extraction.evidence.figures.models import Confidence, SourceAnchor, Verification
 from ragspine.extraction.evidence.objects.formulas.formula_models import (
@@ -174,7 +175,7 @@ def validate_formula_member(
         "replay",
         Confidence(None, "replay of a pinned formula object"),
     )
-    observation = observe_formula(sources.get(source.manifest.source), page=page, item=item)
+    observation = observe_formula(source_pdf(sources, source), page=page, item=item)
     if observation != TypeAdapter(FormulaSourceObservation).validate_json(
         assets.get(receipt.observation), strict=True
     ):

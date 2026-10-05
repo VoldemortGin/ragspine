@@ -6,9 +6,9 @@ from pydantic import TypeAdapter
 
 from enterprise_pdf_rag.adapters.aia_ingestion import read_text_sidecar
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
-from enterprise_pdf_rag.adapters.pdf_password import open_pdf
 from enterprise_pdf_rag.adapters.pdfspine_svg import crop_native_svg
 from enterprise_pdf_rag.adapters.pdfspine_tables import fill_rectangles, ruling_segments
+from enterprise_pdf_rag.adapters.shared_pdf import opened_pdf, source_pdf
 from enterprise_pdf_rag.processing.retrieval import RetrievalMember
 from ragspine.extraction.evidence.document.models import TextSpan
 from ragspine.extraction.evidence.figures.models import Confidence, Verification
@@ -53,8 +53,7 @@ def _reprove_table_grid(
         return
     if (receipt.grid_scope, receipt.ruling_digest) != (GRID_SCOPE, evidence.ruling_digest):
         raise ValueError("Table grid qualification does not bind the proved rulings")
-    document = open_pdf(pdf)
-    try:
+    with opened_pdf(pdf) as document:
         if page_index >= document.page_count:
             raise ValueError("Qualified table page is absent from the pinned source")
         source_page = document.load_page(page_index)
@@ -64,8 +63,6 @@ def _reprove_table_grid(
             fills=fill_rectangles(source_page),
             spans=spans,
         )
-    finally:
-        document.close()
 
 
 def validate_literal_member(
@@ -164,7 +161,7 @@ def validate_literal_member(
             raise ValueError("Typed table IR does not match the literal qualification")
         check_table_transcription(table, spans, anchor=anchor.bbox)
         _reprove_table_grid(
-            sources.get(source.manifest.source),
+            source_pdf(sources, source),
             table,
             receipt,
             page_index=member.page_index,

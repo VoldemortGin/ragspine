@@ -20,6 +20,7 @@ from enterprise_pdf_rag.adapters.formula_qualification import (
 )
 from enterprise_pdf_rag.adapters.literal_qualification import validate_literal_member
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
+from enterprise_pdf_rag.adapters.shared_pdf import shared_pdfs
 from enterprise_pdf_rag.processing.index_text import (
     PageIndexContext,
     contextual_index_text,
@@ -209,6 +210,7 @@ class ProcessingRetrieval:
         self.outputs = outputs
         self.embedder = embedder
 
+    @shared_pdfs()
     def build(
         self,
         scope: ProcessingScope,

@@ -196,6 +196,23 @@ How the backend adapts ([ADR 0020](adr/0020-storage-without-hard-links.md)):
   warning and answering continues; the answer text in `answers.csv` comes from the response
   itself, not from the journal. Neither ingestion nor answering depends on it.
 
+Performance on Workspace files: every file operation (open, read, write, fsync, rename, stat)
+is a round trip, so the pipeline's cost is roughly its number of file operations times that
+latency, almost independent of how many bytes move. Before [ADR
+00NN](adr/00NN-source-verification-cache.md) the stores re-read and re-hashed the whole source
+snapshot (the PDF plus every page's SVG and text) once per indexable object in several stages,
+so file operations grew with pages × objects. One reported run on a few-hundred-page encrypted
+report was still ingesting after eight hours. Now each store instance verifies a snapshot once,
+and file operations grow linearly. A synthetic local harness (8 text objects a page, no hard
+links) counts about 2 900 file operations per page on a first run and about 860 per page on a
+fully cached rerun, against 6 400 and 3 700 per page at 30 pages before and growing. At an
+assumed 20–50 ms per operation, a 300-page document would take roughly 5–12 hours on a first
+run and 1.5–3.5 hours on a rerun; before the change, those figures were roughly 48–120 and
+29–72 hours. These are extrapolations, not Databricks measurements. Most of what remains on a
+first run is writing the content-addressed objects through the ADR 0020 fallback. Keep the
+ingestion directory on the fastest mount available. A rerun whose model replies are all cached
+still verifies, re-derives and re-exports every object once.
+
 Not validated on Databricks: rename and exclusive creation on these mounts, SQLite behavior,
 and performance with the many small
 content-addressed files one PDF produces (hundreds to thousands, which counts against the

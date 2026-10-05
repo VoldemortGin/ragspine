@@ -12,6 +12,7 @@ from enterprise_pdf_rag.adapters.layout_normalization import (
     normalize_partition,
 )
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
+from enterprise_pdf_rag.adapters.shared_pdf import shared_pdfs
 from ragspine.extraction.evidence.page.models import (
     CanonicalPage,
     LayoutObject,
@@ -52,6 +53,7 @@ class ProcessingPipeline:
         self.activate = activate
         self.producer = producer
 
+    @shared_pdfs()
     def run(
         self,
         source_manifest_id: str,

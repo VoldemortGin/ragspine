@@ -25,6 +25,7 @@ from ragspine.common.evidence.providers.json_completion import (
     JsonCompletionClient,
     JsonCompletionError,
 )
+from ragspine.extraction.evidence.document.models import DocumentSnapshot
 from ragspine.extraction.evidence.metadata.document_metadata import summarize_document
 from ragspine.extraction.evidence.metadata.page_metadata import (
     CandidateValue,
@@ -156,9 +157,11 @@ class PageMetadataSummary(BoundaryModel):
 
 
 def _page_input(
-    sources: LocalDocumentStore, manifest: ProcessingManifest, page_index: int
+    sources: LocalDocumentStore,
+    source: DocumentSnapshot,
+    manifest: ProcessingManifest,
+    page_index: int,
 ) -> PageInput:
-    source = sources.load(manifest.scope.source_manifest_id)
     observed = source.manifest.pages[page_index]
     return PageInput(
         manifest.scope.source_manifest_id,
@@ -240,8 +243,9 @@ def annotate_page_metadata(
     pages: list[PageMetadata] = []
     reports: list[PageMetadataOut] = []
     states: Counter[str] = Counter()
+    source = sources.load(manifest.scope.source_manifest_id)
     for record in manifest.pages:
-        page = _page_input(sources, manifest, record.page_index)
+        page = _page_input(sources, source, manifest, record.page_index)
         outcome, metadata = _page_stage(outputs, extractor, page, record)
         records.append(replace(record, metadata=outcome))
         states[outcome.state.value] += 1

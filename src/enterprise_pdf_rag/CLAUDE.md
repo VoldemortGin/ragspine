@@ -287,8 +287,19 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   drift: size and mtime only skip re-hashing a file nothing touched, a file that moved is
   re-hashed, and a mismatch falls through to the full mount-time verification, which refuses.
   Within one mount a member's evidence is hydrated once and a retrieval plan / index parsed
-  once, both keyed by content. `APP_VERIFY_EVERY_REQUEST=1` puts the full verification back on
-  every request for an audit (an order of magnitude slower on a real document).
+  once, both keyed by content. On the write side, each store **instance** verifies a snapshot
+  once: `LocalDocumentStore` keeps the digests it has itself read back and hashed and the source
+  manifests it has fully verified, so a verification-only sweep (`load`, `verify`, `publish`, a
+  `put` of an object already on disk, `ProcessingStore.save_draft` / `load`'s asset sweep) skips
+  what that instance already checked; bytes a caller consumes (`get`, `read_content`, the
+  processing manifest object on every `ProcessingStore.load`) are always re-read and re-hashed,
+  and every stage, scan and mount opens its own instance, so each re-checks the disk once ([ADR
+  00NN](../../docs/enterprise-pdf-rag/adr/00NN-source-verification-cache.md)). Within a
+  `shared_pdfs()` scope (`validate_processing_source`, `ProcessingRetrieval.build`, the ingest
+  pipeline's `run`, `requalify_visual_objects`) a source PDF is read and opened once and shared by
+  every table / formula / chart proof. `APP_VERIFY_EVERY_REQUEST=1` puts the full verification
+  back on every request **and every store load** for an audit (an order of magnitude slower on a
+  real document); the AIA source-review app always runs that way (`auditing()`).
 - **Extraction: pdfspine as the only parser, garbled spans, same-SVG two branches, the two
   qualification scopes, grid-as-ink, model-free diagram / formula proofs, the one text
   criterion, purity** — moved with `documents/`, `figures/` and the extraction half of

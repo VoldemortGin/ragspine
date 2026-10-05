@@ -68,6 +68,10 @@ def create_aia_app(
     processing: ProcessingStore | None = None,
     embedder: EmbeddingPort | None = None,
 ) -> FastAPI:
+    # Every request re-verifies the live bytes it serves, so neither store keeps the
+    # verification cache an ingestion run uses.
+    store = store.auditing()
+    processing = None if processing is None else processing.auditing()
     snapshot = store.load_current()
     _ensure_source(snapshot, spec)
     read_region_sidecar(store, snapshot)

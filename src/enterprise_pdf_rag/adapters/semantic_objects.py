@@ -34,6 +34,7 @@ from enterprise_pdf_rag.adapters.object_processing import ProcessingObjectAdapte
 from enterprise_pdf_rag.adapters.pdfspine_svg import crop_native_svg
 from enterprise_pdf_rag.adapters.pdfspine_tables import PdfspineTableAdapter
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
+from enterprise_pdf_rag.adapters.shared_pdf import source_pdf
 from enterprise_pdf_rag.adapters.source_objects import source_table_description
 from enterprise_pdf_rag.adapters.visual_semantics import VisualInference, VisualSemanticAdapter
 from ragspine.common.evidence.providers.json_completion import (
@@ -329,7 +330,7 @@ class SemanticObjectAdapter:
     ) -> ObjectProcessingRecord:
         source = self.sources.load(page.source_manifest_id)
         result = PdfspineTableAdapter().extract(
-            self.sources.get(source.manifest.source), page=page, item=item
+            source_pdf(self.sources, source), page=page, item=item
         )
         svg = writer.save("svg", crop, "image/svg+xml")
         stages.extend(
@@ -425,7 +426,7 @@ class SemanticObjectAdapter:
         source = self.sources.load(page.source_manifest_id)
         try:
             result = qualify_formula(
-                self.sources.get(source.manifest.source),
+                source_pdf(self.sources, source),
                 page=page,
                 item=item,
                 model_ir=model_ir,

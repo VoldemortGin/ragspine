@@ -11,6 +11,7 @@ from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.formula_qualification import validate_formula_member
 from enterprise_pdf_rag.adapters.layout_normalization import normalize_partition
 from enterprise_pdf_rag.adapters.literal_qualification import validate_literal_member
+from enterprise_pdf_rag.adapters.shared_pdf import shared_pdfs
 from enterprise_pdf_rag.processing.retrieval import RetrievalPlan
 from ragspine.extraction.evidence.page.models import (
     CanonicalPage,
@@ -23,6 +24,7 @@ from ragspine.extraction.evidence.page.models import (
 from ragspine.extraction.evidence.page.service import canonical_page, validate_partition
 
 
+@shared_pdfs()
 def validate_processing_source(
     *,
     sources: LocalDocumentStore,

@@ -20,6 +20,7 @@ from enterprise_pdf_rag.adapters.figure_reasoning import (
     PreparedFigure,
     prepare_figure,
 )
+from enterprise_pdf_rag.adapters.shared_pdf import source_pdf
 from enterprise_pdf_rag.adapters.source_paint import (
     SourcePaintProof,
     build_source_paint_proof,
@@ -149,7 +150,7 @@ def resolve_chart_member(
         )
         source = sources.load(scope.source_manifest_id)
         proof = verify_source_paint_proof(
-            sources.get(source.manifest.source), prepared=prepared, proof=recorded
+            source_pdf(sources, source), prepared=prepared, proof=recorded
         )
         numeric = DonutQualification(prepared, source_paint=proof).qualify_pair(
             prepared.svg, raw_chart, raw_description
@@ -271,7 +272,7 @@ def promote_numeric_label_member(
         sources, assets, scope, member, receipt
     )
     source = sources.load(scope.source_manifest_id)
-    proof = build_source_paint_proof(sources.get(source.manifest.source), prepared=prepared)
+    proof = build_source_paint_proof(source_pdf(sources, source), prepared=prepared)
     numeric = DonutQualification(prepared, source_paint=proof).qualify_pair(
         prepared.svg, raw_chart, raw_description
     )

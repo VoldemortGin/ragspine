@@ -33,6 +33,7 @@ from enterprise_pdf_rag.adapters.figure_reasoning import (
     prepare_figure,
 )
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
+from enterprise_pdf_rag.adapters.shared_pdf import shared_pdfs
 from ragspine.extraction.evidence.document.models import AssetRef, DocumentSnapshot, TextSpan
 from ragspine.extraction.evidence.figures.models import ChartIR, FigureError, TextDescription
 from ragspine.extraction.evidence.objects.typed_ir import DiagramIR, ObjectDescription
@@ -359,6 +360,7 @@ def _requalify_chart(
     return proven, report("qualified", None, claims)
 
 
+@shared_pdfs()
 def requalify_visual_objects(
     sources: LocalDocumentStore,
     outputs: ProcessingStore,
