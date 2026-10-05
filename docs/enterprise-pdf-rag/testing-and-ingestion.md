@@ -268,10 +268,10 @@ enterprise-pdf-rag metadata --source-store <src> --processing-store <proc> --pro
 enterprise-pdf-rag run-folder [--folder /path/to/pdfs] --max-live-calls-per-pdf 60 \
   [--max-live-calls-total 300] [--questions questions.jsonl] [--pages all] \
   [--output-dir /path/to/ingestion] [--no-requalify] [--no-tree] [--tree-max-live-calls 50] \
-  [--fail-fast] [--report-dir /path/to/report]
+  [--only-question-docs] [--fail-fast] [--report-dir /path/to/report]
 ```
 
-stdout 是一个 `FolderPipelineResult` JSON（每份 PDF 一条 `DocumentRun`：`status` 为 `published` / `duplicate_of` / `nothing_to_index` / `failed` / `budget_starved`，各阶段原样嵌入 `IngestionSummary` / `DraftQualification` / `DraftIndex` / `DraftPublication` / `DocumentTreeSummary`；另有 `eval`、分项 `live_calls` 与 `budget_exhausted`）。`--report-dir` 另写 `report.json` 与 `report.md`。退出码：0 全部正常；2 跑完但有文档失败 / 饿死或评测有 `FAIL` / `http_error` / `routing_failed`；1 参数或前置检查错误（stdout 是 `{"error": …}`）。
+stdout 是一个 `FolderPipelineResult` JSON（每份 PDF 一条 `DocumentRun`：`status` 为 `published` / `duplicate_of` / `nothing_to_index` / `failed` / `budget_starved` / `skipped_not_referenced`，各阶段原样嵌入 `IngestionSummary` / `DraftQualification` / `DraftIndex` / `DraftPublication` / `DocumentTreeSummary`；另有 `eval`、分项 `live_calls` 与 `budget_exhausted`）。`--report-dir` 另写 `report.json` 与 `report.md`。退出码：0 全部正常；2 跑完但有文档失败 / 饿死或评测有 `FAIL` / `http_error` / `routing_failed`；1 参数或前置检查错误（stdout 是 `{"error": …}`）。
 
 Notebook 里直接调同一个函数（已有运行中的 event loop 也可以，评测在独立线程的私有 loop 上走 ASGI，不占端口）。输入输出位置可以只写在项目根 `.env`，调用时一个路径都不用传：
 
@@ -286,7 +286,9 @@ result = run_folder_pipeline(   # folder / questions / report_dir 取 NB_PDF_DIR
 result.ok, result.live_calls, [(d.pdf_path, d.status) for d in result.documents]
 ```
 
-`run_folder_pipeline(max_questions=N)` 只回答题集的前 N 道题（题集原顺序；gold 集只数可运行用例；`None` = 全部，`< 1` 抛 `ValueError`），**不限制入库**，CLI 不暴露该参数；notebook 的配置 cell 里 `MAX_QUESTIONS = 10`（改成 `None` 跑全量）。
+`run_folder_pipeline(max_questions=N)` 只回答 N 道题（gold 集只数可运行用例；`None` = 全部，`< 1` 抛 `ValueError`）；CLI 不暴露该参数。选哪 N 道由 `question_selection` 决定：`"first"`（函数默认）= 题集原顺序的前 N 道；`"first_matched"`（notebook 默认 `QUESTION_SELECTION`）= 按原顺序取前 N 道「`doc` 恰好对上文件夹里一份 PDF」的题，文档缺失 / 歧义 / 没写 `doc` 的题跳过、不占名额，并在 `report.json` 的 `question_docs.selection` 里列出 id 与原因；凑不满 N 道就跑选中的（`short=true`，「题集中只有 K 道题的文档在文件夹里」），一道都没有则入库前抛 `QuestionDocsError`。这只保证题目引用的 PDF 在文件夹里，不保证答得出（[ADR 0022](adr/0022-run-folder-question-docs-budget-and-progress.md)）。
+
+**题目 `doc` → PDF（入库前解析一次，入库筛选与回答路由共用，`adapters/question_docs.py`）**：依次 `alias`（`doc_aliases` 显式别名，键按规范化比较）→ `exact`（文件名，不分大小写）→ `stem` → `sha_prefix`（≥12 位十六进制；只有看起来是十六进制且按名字没对上时才读文件算哈希）→ `normalized`（NFKC 全角半角、casefold、带目录取 basename、去 `.pdf`、空白 / `_` / `-` / `.` 连续段视为一个分隔符）。命中多份内容不同的 PDF 为歧义、不匹配；**差几个字母不自动匹配**，只给出至多 3 个 `difflib` 候选（附相似度）供写进 `doc_aliases`，例如 `doc_aliases={"Meridian 2023 interim": "Meridian Interim Report 2023.pdf"}`；别名值对不上恰好一份 PDF 时入库前报错并点名该条。结果在 `FolderPipelineResult.question_docs` 与 `question_docs_resolved` 进度事件里（引用数、已匹配数、各规则命中数、未匹配清单）；`check_question_docs(folder, questions, max_questions=, question_selection=, doc_aliases=)` 是同一核对的只读版本（notebook 的 `question-docs` 格），`describe()` 打印核对表。`only_question_docs=True`（CLI `--only-question-docs`，notebook `ONLY_QUESTION_DOCS = True`）只入库被选中题目引用的 PDF，其余记 `skipped_not_referenced`（不读字节、不占预算）；此时有未匹配 / 歧义 / 没写 `doc` 的题：`on_unmatched_docs="error"`（默认）在任何写盘与模型调用之前抛带中文说明的 `QuestionDocsError`，`"skip"` 则跳过它们继续、回答时记 `routing_failed` 并写明原因。`only_question_docs=False` 时只记录不抛。
 
 完整示例见 `notebooks/run_folder.ipynb`（版本检查与文件系统自检两个诊断 cell、一个配置 cell、一个写入目录护栏 cell、一个 `llm-selfcheck` LLM 请求自检 cell、一个运行 cell、结果表格、`answers.csv` 写出 cell；不含密钥、不带输出、不要在无模型环境里执行）。该 notebook **不使用** `NB_REPORT_DIR`：所有运行产物固定在项目根 `data/` 下（`data/ingestion/`、`data/reports/<题集文件名>/`，没有题集时报告目录名为 `run-folder`；目录不存在自动创建），`report.json` / `report.md` 每次运行都写，有题集时另写 `answers.csv`（`question,expected,answer` 三列、UTF-8 带 BOM、整文件写；回答原文取自 `EvalCase.answer`，标准答案取自 `EvalCase.expected`）；护栏 cell 在任何写入之前检查 ingestion / 报告目录都在 `data/` 之内、且不在 PDF 源目录之内（PDF 目录只读），不满足即抛异常。护栏只在 notebook 层，CLI 与 `run_folder_pipeline` 本身没有这道检查。
 
@@ -294,7 +296,7 @@ result.ok, result.live_calls, [(d.pdf_path, d.status) for d in result.documents]
 
 - **`NB_*` 路径设置**：`NB_PDF_DIR`（PDF 源目录）、`NB_QUESTIONS_PATH`（题集；别名 `DATASET_PATH`，主名优先，主名留空则回落到别名）、`NB_REPORT_DIR`（报告目录）经 `get_settings()` 读取，名字**不带** `APP_` 前缀；`~` 展开，相对路径相对项目根，不校验是否存在，留空等于未设置。函数参数 / CLI 参数始终优先；`folder` 两处都没有时抛 `ValueError`（CLI 退出码 1，写明"传 folder 或在 .env 设 NB_PDF_DIR"）；题集 / 报告目录两处都没有时保持原行为（不评测 / 不写报告；这是 CLI / 直接调用的行为，notebook 不走这条，见上）。
 - **口令加密 PDF（`PDF_INGEST_PASSWORD`）**：名字**不带** `APP_` 前缀（与 SuperIndex 同名），`SecretStr`，留空等于未设置。凡是打开源 PDF 的地方（ingest、requalify / qualify 的重新证明、`document-catalog` 挂载时的表格网格复核）都经 `enterprise_pdf_rag.adapters.pdf_password.open_pdf`：未加密或只有权限口令的 PDF 照旧打开；需要打开口令时用它认证。未设置 / 不对时该文档 `failed`、`failed_stage="ingest"`，错误信息写明是口令保护的 PDF 并点名该变量——不再静默入库空页（带 object streams 的加密 PDF 未认证时 pdfspine 看到 0 页，旧版报 `PDF has no pages`）。口令不进错误信息 / 进度事件 / 报告 / 入库目录；source store 存的仍是原始加密字节，sha256 口径不变。`webui_preview.py` 的 `document-catalog` API 子进程会收到它。
-- **进度事件**：`document_done` 在文档带失败记录时（`failed`，或已发布但 tree 失败）额外带 `failed_stage` 与 `error`，notebook 的进度输出里直接可见原因；正常完成的 payload 不变（`pdf` / `status`）。
+- **进度事件**：`document_done` 在文档带失败记录时（`failed`，或已发布但 tree 失败）额外带 `failed_stage` 与 `error`，notebook 的进度输出里直接可见原因；入库过的文档另带 `pages`（`"X/Y"`，本轮处理完的页 / 选中的页）、`pages_budget_deferred`、`pages_claim_blocked`（同名字段也在 `IngestionSummary` 里）。`document_progress`：ingest 的 `layout` / `metadata` 两阶段每阶段首页与末页各一次、中间至多每 10 页或每 30 秒一次（`stage` / `pages_done` / `pages_total` / `live_calls` / `budget` / `cache_hits` = 模型缓存回放数；stage cache 回放的页不问模型、不计入），之后每进入 `requalify` / `qualify` / `index` / `publish` / `tree` 发一次（只有 `stage`）。另有 `question_docs_resolved`、`document_skipped`。进度事件只含标识与计数（`doc` 写法与 PDF 文件名是用户自己的元数据），不含题目、答案或页面正文，也不进 trace / 日志。
 - **LLM 的 `OPENAI_*` 首选名**：首选 `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL`，`APP_LLM_API_KEY` / `APP_LLM_BASE_URL` / `APP_LLM_MODEL` 为别名，逐字段读取（另有 `OPENAI_EMBEDDING_MODEL` 是 `APP_EMBEDDING_MODEL` 的首选名；rerank / 隧道没有别名）。同一来源内 `OPENAI_*` 优先；来源之间仍是 真实环境变量 > 项目根 `.env`，且按来源整体比较：shell 里导出的 `APP_LLM_MODEL` 会盖过 `.env` 里的 `OPENAI_MODEL`。校验不放宽（base URL 仍只接受 https）；受控子进程只收到解析后的 `APP_LLM_*`，不会收到 `OPENAI_*`；传入映射给 `load_llm_config` 时只认 `APP_LLM_*` 键。
 - **单独取回答模型客户端**：`enterprise_pdf_rag.adapters.answer_llm.make_answer_llm(cache_dir=None, max_live_calls=None)` 返回 `JsonCompletionClient`，默认缓存 `<ingestion_root>/model-cache`、预算 `APP_ANSWER_MAX_LIVE_CALLS`、超时与种子取自设置；`run_folder_pipeline` 不注入 `answer_llm` 时就是调用它。
 
@@ -302,7 +304,7 @@ result.ok, result.live_calls, [(d.pdf_path, d.status) for d in result.documents]
 
 - **前置检查**：花任何预算、调用任何 ingest 之前，先确认 `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL`（或其 `APP_LLM_*` 别名）已在项目 `.env` 配好，并用 `embed_query("preflight")` 探测一次 embedding（最简单是在 `.env` 设 `OPENAI_EMBEDDING_MODEL`，与 LLM 同网关；或独立 loopback 服务的 `APP_EMBEDDING_*`，证明隧道通）；题集里有 `rerank: true` 的用例时还要求 `APP_RERANK_*`。失败即报错并指向这些变量名和 `scripts/enterprise_pdf_rag/local_model_tunnel.py start`——**它不会自己起隧道**。注入的依赖不检查。
 - **发现与去重**：递归找 `*.pdf`（后缀大小写不敏感），跳过隐藏文件 / 隐藏目录，按相对路径排序。同内容（sha256 相同）只处理第一份，其余标 `duplicate_of`——同 sha 不同文件名会落进同一个 sha 目录、生成两份 manifest 并互相覆盖 `current-*` 指针。
-- **预算**：每份 PDF 的 ingest 预算是 `min(--max-live-calls-per-pdf, 总额剩余)`；tree（每份 `--tree-max-live-calls`）和评测的回答调用（默认 `APP_ANSWER_MAX_LIVE_CALLS`）也从总额里扣，并在 `live_calls` 里分项列出。总额用完后其余 PDF 仍以预算 0 运行：缓存里已有的照常走完；被总额截短且仍有阶段 `deferred` 的标 `budget_starved`、不发布，`budget_exhausted=true`（只要有一次分配被总额截短就为真）。每份只跑一轮，不自动多轮。
+- **预算**：`--max-live-calls-per-pdf` 取 0–10000（`MAX_INGEST_LIVE_CALLS`；原上限 200 只够一轮约 100 页，ADR 0022），是上限不是消耗——每页 1 次版面 + 1 次页元数据 + 每个图表类对象 2 次，按需调用、缓存命中不计；notebook 默认 1000。预算用完时该份仍 `published`，只是 `pages` 显示 `X/Y`，再跑一轮补齐。每份 PDF 的 ingest 预算是 `min(--max-live-calls-per-pdf, 总额剩余)`；tree（每份 `--tree-max-live-calls`）和评测的回答调用（默认 `APP_ANSWER_MAX_LIVE_CALLS`）也从总额里扣，并在 `live_calls` 里分项列出。总额用完后其余 PDF 仍以预算 0 运行：缓存里已有的照常走完；被总额截短且仍有阶段 `deferred` 的标 `budget_starved`、不发布，`budget_exhausted=true`（只要有一次分配被总额截短就为真）。每份只跑一轮，不自动多轮。
 - **续跑**：同一目录再跑一次时全部命中缓存（`live_calls.total == 0`）；已发布的 release 恰是本次 draft 加同一 embedder 的索引时直接复用（`index_reused=true`，不再 embed），`publish` 幂等重放。换 embedder 会重建索引。
 - **失败隔离**：每份 PDF 的 `ValueError` / `OSError` 记进 `failed_stage` + `error`，其余继续；`--fail-fast` 改为直接抛出。已发布但 tree 失败的文档仍是 `published`，带 `failed_stage="tree"`。
 - **requalify 的含义与局限**：通用 ingest 写死 `qualification_policy="none"`，Chart 因此没有 `qualified_ir`，被检索资格排除；`requalify` 用快照里已落盘的分支按 [ADR 0016](adr/0016-verbatim-chart-points.md) 重投影，零模型、零联网。它**只采纳图上逐字印出的点值**，不证明点 ↔ 系列的几何对应（那是 [ADR 0008](adr/0008-traceable-chart-qa.md) 几何 + 源涂证明的范围）；Diagram 在 ingest 时已证明，这一步对它通常是 `unchanged`。没有对象改变时不产出新 draft，后续沿用 ingest 的 id。`--no-requalify` 跳过。
@@ -310,7 +312,7 @@ result.ok, result.live_calls, [(d.pdf_path, d.status) for d in result.documents]
 ### 题集的两种格式
 
 1. **`nl-answers-gold-v1`**（`.json` 且 `schema_version` 为此值）：用 `adapters/nl_gold.py` 的 `load_gold` + `judge`，与 `nl_gold_eval.py` 同一判定（共用 `adapters/nl_gold_runner.py`）；只跑 `offline_only=false` 的用例。`document_sha256` 不在本次已发布文档里的用例如实标 `routing_failed` 且不发请求。
-2. **轻量题集**：复用 `ragspine.eval.retrieval_only.load_questions`，支持 `.json` / `.jsonl` / `.csv` / `.txt`，字段 `id` / `question` / `expected` / `pages`（1 起，`"2"`、`"2,4-5"`）/ `doc`。判定为 `answered` / `abstained`；`failures` 记录 `expected` 是否出现在回答里。`doc` 可写文件名、去扩展名的文件名或 ≥12 位 sha 前缀；本次只有一份已发布文档时直接问它；否则不带 `document`，交给服务端的标题 / 年份路由，选不出唯一文档的 422 记 `routing_failed`（不会对每份文档各问一遍）。
+2. **轻量题集**：复用 `ragspine.eval.retrieval_only.load_questions`，支持 `.json` / `.jsonl` / `.csv` / `.txt`，字段 `id` / `question` / `expected` / `pages`（1 起，`"2"`、`"2,4-5"`）/ `doc`。判定为 `answered` / `abstained`；`failures` 记录 `expected` 是否出现在回答里。`doc` 按上文的解析规则对应到文件夹里的 PDF（文件名、去扩展名的文件名、≥12 位 sha 前缀、规范化名或别名）；本次只有一份已发布文档时直接问它；否则不带 `document`，交给服务端的标题 / 年份路由，选不出唯一文档的 422 记 `routing_failed`（不会对每份文档各问一遍）。
 
 两种格式凡有页（金标取 `required_claims` 的页，轻量题集取 `pages`）都按 prompt 成员顺序算名次，`metrics` 是 `retrieval_metrics` 的 recall@k / page_recall@k / MRR（k = 1, 3, 5, 10）。评测只挂载本次跑出的文档（`scan_catalog` 后按 sha 过滤），答案缓存在 `<ingestion_root>/model-cache`，问答审计照常写 `answers-audit.sqlite`。
 

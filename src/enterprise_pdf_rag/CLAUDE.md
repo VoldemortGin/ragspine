@@ -85,8 +85,21 @@ adapters/     every SDK and I/O: pdfspine (every source PDF opens through pdf_pa
               ROOT_DIR/data and outside the read-only PDF dir; the guard is notebook-only, and it
               writes <report dir>/answers.csv = question, expected, answer from each `EvalCase`'s
               `question` / `expected` / `answer`; the answer prose never enters a trace or event;
-              `max_questions=N` answers only the first N questions (notebook `MAX_QUESTIONS = 10`),
-              never limits ingestion, and the CLI does not expose it);
+              `max_questions=N` answers N questions (notebook `MAX_QUESTIONS = 10`; the CLI does not
+              expose it) — `question_selection="first"` the first N, `"first_matched"` (notebook
+              default) the first N whose `doc` names exactly one PDF of the folder, the rest listed
+              as skipped);
+              question_docs.py (ADR 0022: every `doc` resolved once, before any work, by alias →
+              exact name → stem → sha prefix → NFKC/separator-normalized name; ambiguous or a near
+              miss never matches, near misses are only `candidates`; the same resolution feeds the
+              `only_question_docs` selection (others `skipped_not_referenced`, unread) and the
+              answer routing; `doc_aliases`; `on_unmatched_docs="error"` stops before any write,
+              `"skip"` answers those as `routing_failed`; `check_question_docs` is the read-only
+              check the notebook's `question-docs` cell prints); per-PDF ingest ceiling
+              `MAX_INGEST_LIVE_CALLS` = 10 000 (notebook 1000); `IngestionSummary.pages_complete` /
+              `pages_budget_deferred` / `pages_claim_blocked` and `document_done.pages="X/Y"` show a
+              partly ingested `published` document; `document_progress` reports pages / calls /
+              cache hits, counts only;
               a failed document's `document_done` progress event carries failed_stage / error;
               `FolderPipelineResult.sampling_parameters_dropped`, a `report.md` line and a
               `sampling_parameters_dropped` event name the sampling parameters the LLM endpoint

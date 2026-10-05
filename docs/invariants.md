@@ -72,6 +72,14 @@ number), and the QA ratchet
 ([ADR 0029](adr/0029-narrative-citation-merge.md)) drops `#para…` from that text only; `AgentResult.sources` stays one
 `{doc, locator}` per snippet, same order and content with the switch on or off, and the page numbers stay in the suffix.
 
+**A question's `doc` never names a PDF by guess (evidence chain, [enterprise-pdf-rag ADR 0022](enterprise-pdf-rag/adr/0022-run-folder-question-docs-budget-and-progress.md)).**
+`run_folder_pipeline` resolves each `doc` once, before any work, by alias / exact name / stem / sha prefix /
+normalized name (`enterprise_pdf_rag/adapters/question_docs.py`); a reference hitting several PDFs of different
+content is ambiguous, and a near miss (a few letters apart — reports often differ only in a year or "interim /
+annual") is never a match, only a listed candidate, so an answer is never cited from the wrong report. The same
+resolution decides what is ingested and where the answer is routed. Pinned by
+`tests/enterprise_pdf_rag/adapters/test_question_docs.py` and `test_folder_question_docs.py`.
+
 **DI markdown page locators are PDF pages.** A `.md` chunk's locator is `{doc_id}@page={DiPage.index}#para…`. With
 `<!-- PageBreak -->` pages, `index` is the physical page order in the markdown; with `<!-- page: N -->` markers
 (SuperIndex azure_di output, [ADR 0027](adr/0027-di-markdown-page-markers.md)) it is the true PDF page N, gaps are
