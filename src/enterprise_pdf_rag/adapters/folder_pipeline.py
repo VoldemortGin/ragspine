@@ -31,6 +31,7 @@ from pydantic import Field
 
 from enterprise_pdf_rag.adapters.answer_audit import open_audit_store
 from enterprise_pdf_rag.adapters.answer_llm import make_answer_llm
+from enterprise_pdf_rag.adapters.deterministic_partition import PartitionStrategy
 from enterprise_pdf_rag.adapters.document_catalog import DocumentCatalog, scan_catalog
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.document_tree_extraction import (
@@ -621,6 +622,7 @@ def _run_document(
     root: Path,
     pages: str,
     per_pdf: int | Literal["auto"],
+    partition_strategy: PartitionStrategy,
     budget: _Budget,
     requalify: bool,
     build_tree: bool,
@@ -685,6 +687,7 @@ def _run_document(
             max_live_calls=limit,
             progress=_page_reporter(progress, pdf, lambda: int(run["live_call_budget"])),
             unverified_tables_as_rows=unverified_tables_as_rows,
+            partition_strategy=partition_strategy,
         )
         budget.spend(ingestion.live_call_count)
         run.update(ingestion=ingestion, live_calls=ingestion.live_call_count)
@@ -1150,6 +1153,7 @@ def run_folder_pipeline(
     pages: str = "all",
     max_live_calls_per_pdf: int | Literal["auto"],
     max_live_calls_total: int | None = None,
+    partition_strategy: PartitionStrategy = "model",
     requalify: bool = True,
     build_tree: bool = True,
     tree_max_live_calls: int = 50,
@@ -1188,6 +1192,10 @@ def run_folder_pipeline(
     reference naming no PDF or several, or a light question without ``doc``, is a
     ``QuestionDocsError`` before any work (``on_unmatched_docs="error"``) or is left out of
     the selection and answered as ``routing_failed`` with the reason (``"skip"``).
+
+    ``partition_strategy="deterministic-text-pages"`` hands pages without figures or images
+    to the deterministic partitioner during ingest (zero layout calls for those pages, counted
+    in each ``IngestionSummary``); the default keeps every page on the model layout.
 
     ``max_live_calls_per_pdf="auto"`` gives each PDF ``auto_live_call_budget(selected pages)``
     = pages * ``AUTO_CALLS_PER_PAGE`` + ``AUTO_CALLS_BASE``, capped at ``MAX_INGEST_LIVE_CALLS``,
@@ -1302,6 +1310,7 @@ def run_folder_pipeline(
             root=root,
             pages=pages,
             per_pdf=max_live_calls_per_pdf,
+            partition_strategy=partition_strategy,
             budget=budget,
             requalify=requalify,
             build_tree=build_tree,
