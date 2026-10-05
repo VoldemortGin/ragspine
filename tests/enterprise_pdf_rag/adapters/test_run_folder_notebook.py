@@ -664,3 +664,88 @@ def test_llm_selfcheck_own_bug_prints_and_never_blocks_the_main_run(
     output, raised, _ = _selfcheck(monkeypatch, tmp_path, rule)
     assert raised is None
     assert "自检代码自身出错" in output and "不影响主运行" in output
+
+
+def test_run_folder_defaults_only_ingest_the_pdfs_of_ten_questions_whose_pdf_is_present() -> None:
+    config = _code_cell("config")
+    for pattern in (
+        r'^QUESTION_SELECTION\s*=\s*"first_matched"',
+        r"^ONLY_QUESTION_DOCS\s*=\s*True\b",
+        r"^DOC_ALIASES\s*=\s*\{\}",
+        r'^ON_UNMATCHED_DOCS\s*=\s*"error"',
+        r"^MAX_LIVE_CALLS_PER_PDF\s*=\s*1000\b",
+    ):
+        assert re.search(pattern, config, re.MULTILINE), pattern
+    run = _code_cell("run")
+    for argument in (
+        "question_selection=QUESTION_SELECTION",
+        "only_question_docs=ONLY_QUESTION_DOCS",
+        "doc_aliases=DOC_ALIASES",
+        "on_unmatched_docs=ON_UNMATCHED_DOCS",
+    ):
+        assert argument in run
+    results = _code_cell("results")
+    assert '"pages"' in results and "pages_complete" in results and "claim_blocked" in results
+    intro = _source(next(cell for cell in _notebook()["cells"] if cell["id"] == "intro"))
+    for name in ("ONLY_QUESTION_DOCS", "QUESTION_SELECTION", "DOC_ALIASES", "ON_UNMATCHED_DOCS"):
+        assert name in intro
+
+
+def test_question_docs_cell_sits_after_the_llm_selfcheck_and_before_the_run() -> None:
+    ids = [cell_id for cell_id, _ in _code_cells()]
+    assert ids.index("llm-selfcheck") < ids.index("question-docs") < ids.index("run")
+    source = _code_cell("question-docs")
+    assert "check_question_docs(" in source and "raise QuestionDocsError" in source
+    assert "run_folder_pipeline" not in source
+
+
+def _run_question_docs(tmp_path: Path, **config: object) -> tuple[str, BaseException | None]:
+    pdfs = tmp_path / "pdfs"
+    pdfs.mkdir(parents=True)
+    (pdfs / "Meridian Interim 2024.pdf").write_bytes(b"%PDF-1.7 a")
+    (pdfs / "atlas.pdf").write_bytes(b"%PDF-1.7 b")
+    questions = tmp_path / "questions.jsonl"
+    rows = [
+        {"id": "q1", "question": "Q1?", "doc": "absent report"},
+        {"id": "q2", "question": "Q2?", "doc": "meridian_interim_2024"},
+        {"id": "q3", "question": "Q3?", "doc": "Atlas"},
+    ]
+    questions.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+    namespace: dict[str, Any] = {
+        "PDF_DIR": pdfs,
+        "QUESTIONS": questions,
+        "MAX_QUESTIONS": 10,
+        "QUESTION_SELECTION": "first_matched",
+        "ONLY_QUESTION_DOCS": True,
+        "DOC_ALIASES": {},
+        "ON_UNMATCHED_DOCS": "error",
+        **config,
+    }
+    buffer = io.StringIO()
+    raised: BaseException | None = None
+    with contextlib.redirect_stdout(buffer):
+        try:
+            exec(compile(_code_cell("question-docs"), "question-docs", "exec"), namespace)
+        except ValueError as error:
+            raised = error
+    return buffer.getvalue(), raised
+
+
+def test_question_docs_cell_lists_selected_and_skipped_questions_without_stopping(
+    tmp_path: Path,
+) -> None:
+    printed, raised = _run_question_docs(tmp_path)
+    assert raised is None
+    assert "选中 q2: ['meridian_interim_2024'] → Meridian Interim 2024.pdf  [normalized]" in printed
+    assert "跳过 q1: ['absent report']" in printed
+    assert "不保证答得出" in printed
+
+
+def test_question_docs_cell_stops_on_a_miss_when_every_question_is_asked(tmp_path: Path) -> None:
+    printed, raised = _run_question_docs(tmp_path, QUESTION_SELECTION="first")
+    assert raised is not None and "'absent report': 文件夹里找不到" in str(raised)
+    assert "✗ 'absent report'" in printed
+    _, skipped = _run_question_docs(
+        tmp_path / "skip", QUESTION_SELECTION="first", ON_UNMATCHED_DOCS="skip"
+    )
+    assert skipped is None
