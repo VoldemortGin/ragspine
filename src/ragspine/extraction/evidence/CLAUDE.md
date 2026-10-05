@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/extraction/evidence/
-verified-against: 0016c39
+verified-against: 1f0d569
 ---
 
 # extraction/evidence — agent contract
@@ -23,9 +23,12 @@ document/     pure source model — models.py (spans, regions, assets), ports.py
               diagnosis ok / outlined_text / garbled — detection only)
 page/         selected-page processing records and coverage checks — models.py, service.py,
               ports.py, geometry.py (model region vs canonical geometry, 1e-6 tolerance),
-              column_regions.py
+              column_regions.py, text_lines.py (lines, the headline, running header / footer
+              lines — model-free page geometry, ADR 0025)
 metadata/     zero-model derivations — page_metadata.py / periods.py / document_metadata.py
-              (verbatim page metadata, deterministic period forms, document fold — ADR 0013),
+              (verbatim page metadata, deterministic period forms and `period_labels`,
+              document fold — ADR 0013), deterministic_metadata.py (a page-metadata candidate
+              read off the page's geometry, verified like a model's — ADR 0025),
               document_tree.py (table-of-contents fold: verbatim titles carrying their evidence,
               two cut rules, leaves tiling the document as a type invariant — ADR 0019)
 objects/      typed_ir.py (object payloads); tables/ (table_grid_proof.py, the ruled-grid proof —
@@ -50,7 +53,9 @@ to `extraction/evidence/adapters/`.
   Each `__init__.py` is a docstring (with its `Submodules:` index, half-width punctuation only)
   plus the two `_lazy_submodules` lines.
 - **Same-SVG two branches, snapshot binding, no-summary-fallback** — hard invariants of the
-  figure chain (ADR 0002).
+  figure chain (ADR 0002). Scoped exception: lite ingest derives a chart's description branch
+  from its own IR's printed label fields instead of a second model call (ADR 0025); it binds the
+  same SVG and adds nothing the label scope would not re-project from the IR itself.
 - **Source review ≠ semantic qualification** — only source-qualified facts reach ChartQA
   (ADR 0008 / 0009); values are never derived. A chart carries exactly one of **two named
   scopes**, and its receipt always says which: `explicit-distribution-shares` (native sector

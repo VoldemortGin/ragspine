@@ -6,6 +6,7 @@ Submodules:
     models.py — 不可变处理记录,把源观测与推理分开。
     ports.py — 源绑定推理的 ports;实现在 adapters。
     service.py — 源绑定页处理的纯变换与覆盖检查。
+    text_lines.py — 不用模型读页面文字几何:行,页面标题行与跨页重复的页眉页脚行(ADR 0025)。
 """
 
 from ragspine import _lazy_submodules

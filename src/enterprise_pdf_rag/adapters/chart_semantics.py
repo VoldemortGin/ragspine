@@ -13,6 +13,7 @@ from enterprise_pdf_rag.adapters.chart_semantic_schemas import (
     TextFieldDTO,
 )
 from enterprise_pdf_rag.adapters.description_mapping import map_description
+from enterprise_pdf_rag.adapters.figure_label_qualification import label_fields
 from enterprise_pdf_rag.adapters.figure_reasoning import PreparedFigure
 from ragspine.common.evidence.providers.json_completion import (
     JsonCompletionClient,
@@ -25,6 +26,7 @@ from ragspine.extraction.evidence.figures.models import (
     ChartMark,
     ChartPoint,
     Confidence,
+    DescriptionClaim,
     Evidence,
     ExecutionMode,
     NumericObservation,
@@ -35,6 +37,9 @@ from ragspine.extraction.evidence.figures.models import (
     Verification,
 )
 from ragspine.extraction.evidence.figures.validation import evidence_elements, validate_svg
+
+# Lite ingest (ADR 0025): a chart description read off its own IR, not a second model call.
+CHART_DESCRIPTION_FROM_IR = "chart-description-from-ir-v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -487,3 +492,32 @@ class ModelDescriptionGenerator:
             (*dto.diagnostics, *mapped.diagnostics),
             self._correction_of,
         )
+
+
+def describe_from_ir(chart: ChartIR) -> TextDescription | None:
+    """The label-only description lite ingest derives from a chart's own IR (ADR 0025).
+
+    One claim per printed prose field of the IR — title, period, axis label and unit, each
+    point's category and series, in ``label_fields`` order — with the field's own text and
+    evidence and no numeric part. That is every claim qualification could keep from a model
+    description anyway: ``_project_labels`` drops each numeric claim and projects these same
+    fields itself, so the qualified projection, the only source of a chart's numbers, is
+    unchanged. ``None`` when the IR names no field to describe. Nothing here is a model call.
+    """
+    claims: list[DescriptionClaim] = []
+    seen: set[tuple[str, tuple[str, ...]]] = set()
+    for _path, field in label_fields(chart):
+        key = (field.text, field.evidence.element_ids)
+        if not field.text.strip() or key in seen:
+            continue
+        seen.add(key)
+        claims.append(DescriptionClaim(field.text, field.evidence))
+    if not claims:
+        return None
+    return TextDescription(
+        chart.binding,
+        tuple(claims),
+        f"{CHART_DESCRIPTION_FROM_IR}:{chart.producer}",
+        Verification.PENDING,
+        chart.execution_mode,
+    )

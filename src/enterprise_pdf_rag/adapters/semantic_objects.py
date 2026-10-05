@@ -2,6 +2,7 @@
 
 import json
 import re
+from collections import Counter
 from dataclasses import dataclass
 from hashlib import sha256
 from typing import Literal
@@ -15,6 +16,7 @@ from enterprise_pdf_rag.adapters.chart_semantics import (
     ModelChartExtractor,
     ModelDescriptionGenerator,
     ModelOutputBindingError,
+    describe_from_ir,
 )
 from enterprise_pdf_rag.adapters.diagram_publication import DiagramPublicationReceipt
 from enterprise_pdf_rag.adapters.diagram_qualification import (
@@ -30,6 +32,7 @@ from enterprise_pdf_rag.adapters.formula_qualification import (
     check_model_description,
     qualify_formula,
 )
+from enterprise_pdf_rag.adapters.ingest_mode import SKIPPED_CODE, IngestPlan, ingest_plan
 from enterprise_pdf_rag.adapters.object_processing import ProcessingObjectAdapter
 from enterprise_pdf_rag.adapters.pdfspine_svg import crop_native_svg
 from enterprise_pdf_rag.adapters.pdfspine_tables import PdfspineTableAdapter
@@ -107,7 +110,10 @@ class _Writer:
         self.outputs.cache(outcome)
         return outcome
 
-    def diagnostic(self, stage: str, reason: str, *, failed: bool = False) -> StageOutcome:
+    def diagnostic(
+        self, stage: str, reason: str, *, failed: bool = False, skipped: bool = False
+    ) -> StageOutcome:
+        """An unfinished stage; ``skipped`` marks one the ingest mode chose not to run."""
         fingerprint = sha256(
             repr(
                 (
@@ -122,7 +128,11 @@ class _Writer:
         return StageOutcome(
             stage,
             fingerprint,
-            StageState.FAILED if failed else StageState.UNAVAILABLE,
+            StageState.NOT_APPLICABLE
+            if skipped
+            else StageState.FAILED
+            if failed
+            else StageState.UNAVAILABLE,
             self.producer,
             diagnostic=reason,
         )
@@ -150,15 +160,16 @@ class SemanticObjectAdapter:
         qualification_policy: Literal["none", "source-labels-only", "donut"] = "none",
         description_corrections: tuple[str, ...] = (),
         chart_corrections: tuple[str, ...] = (),
-        unverified_tables_as_rows: bool = False,
+        plan: IngestPlan | None = None,
     ) -> None:
         self.sources = sources
-        # ADR 00NN: a Table whose grid pdfspine cannot detect is indexed as its verbatim
-        # printed rows instead of being left out. Off keeps every stage byte-identical.
-        self.unverified_tables_as_rows = unverified_tables_as_rows
         self.outputs = outputs
         self.client = client
         self.qualification_policy = qualification_policy
+        # ADR 0025: which object calls this ingest sends; ``None`` is full, byte for byte.
+        self.plan = ingest_plan("full") if plan is None else plan
+        # Model calls left unsent by the plan, by ``ingest_mode.SKIPPED_CALL_KINDS`` category.
+        self.skipped_calls: Counter[str] = Counter()
         if (
             len(set(description_corrections)) != len(description_corrections)
             or len(description_corrections) > 2
@@ -183,7 +194,11 @@ class SemanticObjectAdapter:
             self.outputs,
             page,
             item,
-            "semantic-object-v2:" + self.client.fingerprint + ":" + self.qualification_policy,
+            "semantic-object-v2:"
+            + self.client.fingerprint
+            + ":"
+            + self.qualification_policy
+            + ("" if self.plan.object_variant is None else ":" + self.plan.object_variant),
         )
         if self.description_corrections:
             writer = _Writer(
@@ -221,12 +236,22 @@ class SemanticObjectAdapter:
             return self._chart(page, item, native, writer, stages)
         if item.kind is ObjectKind.TABLE:
             return self._table(page, item, writer, stages, crop)
+        if item.kind is ObjectKind.IMAGE and not self.plan.image_semantics:
+            return self._skipped_image(writer, stages)
+        skip = (
+            f"{SKIPPED_CODE}: this ingest mode sends no formula model call; the proof reads "
+            "the PDF itself"
+            if item.kind is ObjectKind.FORMULA and not self.plan.formula_semantics
+            else None
+        )
         try:
             result = VisualSemanticAdapter(self.client).infer(
-                page=page, item=item, native_svg=native
+                page=page, item=item, native_svg=native, skip_model=skip
             )
         except ValueError as error:
             return self._unavailable(writer, stages, _error(error))
+        if skip is not None:
+            self.skipped_calls["formula"] += 2
         stages.extend(
             (
                 writer.save("svg", result.crop_svg, "image/svg+xml"),
@@ -246,11 +271,13 @@ class SemanticObjectAdapter:
         ):
             if raw is not None:
                 stages.append(writer.save(name + "_raw", raw))
+            skipped = diagnostic is not None and diagnostic.startswith(SKIPPED_CODE)
             outcome = (
                 writer.diagnostic(
                     name,
                     diagnostic or "No source-bound result was returned",
-                    failed=True,
+                    failed=not skipped,
+                    skipped=skipped,
                 )
                 if value is None
                 else writer.save(name, TypeAdapter[object](type(value)).dump_json(value))
@@ -275,6 +302,19 @@ class SemanticObjectAdapter:
             )
             return ObjectProcessingRecord(item.object_id, item.kind, tuple(stages))
         return self._diagram(page, item, result, writer, stages, branch)
+
+    def _skipped_image(self, writer: _Writer, stages: list[StageOutcome]) -> ObjectProcessingRecord:
+        """An Image the plan sends no call for: registered with its crop, never retrievable."""
+        self.skipped_calls["image"] += 2
+        reason = (
+            f"{SKIPPED_CODE}: this ingest mode sends no image model call; Image objects are "
+            "not retrievable"
+        )
+        stages.extend(
+            writer.diagnostic(name, reason, skipped=True)
+            for name in ("ir", "description", "qualification")
+        )
+        return ObjectProcessingRecord(writer.item.object_id, writer.item.kind, tuple(stages))
 
     def _diagram(
         self,
@@ -361,7 +401,9 @@ class SemanticObjectAdapter:
                 ),
             )
         )
-        if result.table is None and self.unverified_tables_as_rows:
+        # ADR 0027: a Table whose grid pdfspine cannot detect is indexed as its verbatim
+        # printed rows instead of being left out (``IngestPlan.unverified_tables_as_rows``).
+        if result.table is None and self.plan.unverified_tables_as_rows:
             return self._table_rows(page, item, writer, stages, svg, result)
         if result.table is None:
             stages.extend(
@@ -663,6 +705,50 @@ class SemanticObjectAdapter:
         except ValueError as error:
             self._binding_failure(writer, stages, "ir", error)
             stages.append(writer.diagnostic("ir", _error(error), failed=True))
+        if self.plan.chart_description == "from-ir":
+            description, description_stage = self._derived_description(chart, writer, stages)
+        else:
+            description, description_stage = self._model_description(prepared, writer, stages)
+        qualified_count = 0
+        if self.qualification_policy == "none":
+            stages.append(
+                writer.diagnostic(
+                    "qualification",
+                    "Raw inference run: independent qualification/admission has not run; both branches remain pending.",
+                )
+            )
+        elif (
+            chart is None or description is None or chart_stage is None or description_stage is None
+        ):
+            stages.append(
+                writer.diagnostic(
+                    "qualification",
+                    "Both actual source-bound branches are required; no description-only fallback is admitted.",
+                )
+            )
+        else:
+            try:
+                qualified_count = self._qualify(
+                    prepared,
+                    chart,
+                    description,
+                    writer,
+                    stages,
+                    chart_stage,
+                    description_stage,
+                    svg,
+                    view,
+                )
+            except ValueError as error:
+                stages.append(writer.diagnostic("qualification", _error(error)))
+        return ObjectProcessingRecord(item.object_id, item.kind, tuple(stages), qualified_count)
+
+    def _model_description(
+        self, prepared: PreparedFigure, writer: _Writer, stages: list[StageOutcome]
+    ) -> tuple[TextDescription | None, StageOutcome | None]:
+        """The description branch's own model call, its raw output and its diagnostics."""
+        description: TextDescription | None = None
+        description_stage: StageOutcome | None = None
         try:
             inferred_description = self._description(prepared, writer, stages)
             description = inferred_description.description
@@ -704,39 +790,27 @@ class SemanticObjectAdapter:
         except ValueError as error:
             self._binding_failure(writer, stages, "description", error)
             stages.append(writer.diagnostic("description", _error(error), failed=True))
-        qualified_count = 0
-        if self.qualification_policy == "none":
+        return description, description_stage
+
+    def _derived_description(
+        self, chart: ChartIR | None, writer: _Writer, stages: list[StageOutcome]
+    ) -> tuple[TextDescription | None, StageOutcome | None]:
+        """Lite (ADR 0025): the description read off the chart's own IR, no model call."""
+        self.skipped_calls["chart_description"] += 1
+        description = None if chart is None else describe_from_ir(chart)
+        if description is None:
             stages.append(
                 writer.diagnostic(
-                    "qualification",
-                    "Raw inference run: independent qualification/admission has not run; both branches remain pending.",
+                    "description",
+                    f"{SKIPPED_CODE}: the description derives from the chart IR, which "
+                    + ("is unavailable" if chart is None else "prints no label field")
+                    + "; no model description is requested in this ingest mode.",
                 )
             )
-        elif (
-            chart is None or description is None or chart_stage is None or description_stage is None
-        ):
-            stages.append(
-                writer.diagnostic(
-                    "qualification",
-                    "Both actual source-bound branches are required; no description-only fallback is admitted.",
-                )
-            )
-        else:
-            try:
-                qualified_count = self._qualify(
-                    prepared,
-                    chart,
-                    description,
-                    writer,
-                    stages,
-                    chart_stage,
-                    description_stage,
-                    svg,
-                    view,
-                )
-            except ValueError as error:
-                stages.append(writer.diagnostic("qualification", _error(error)))
-        return ObjectProcessingRecord(item.object_id, item.kind, tuple(stages), qualified_count)
+            return None, None
+        stage = writer.save("description", TypeAdapter(TextDescription).dump_json(description))
+        stages.append(stage)
+        return description, stage
 
     def _description(
         self, prepared: PreparedFigure, writer: _Writer, stages: list[StageOutcome]

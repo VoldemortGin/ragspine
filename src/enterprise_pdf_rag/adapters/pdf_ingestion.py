@@ -18,14 +18,20 @@ from enterprise_pdf_rag.adapters.aia_processing import (
 )
 from enterprise_pdf_rag.adapters.deterministic_partition import (
     EMPTY_PARTITION_COUNTS,
-    PartitionStrategy,
-    make_text_page_partitioner,
     partition_counts,
 )
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.http.schemas import BoundaryModel
-from enterprise_pdf_rag.adapters.page_metadata_extraction import annotate_page_metadata
-from enterprise_pdf_rag.adapters.page_partition import ModelPagePartitioner
+from enterprise_pdf_rag.adapters.ingest_mode import (
+    IngestMode,
+    LayoutPolicy,
+    ingest_plan,
+    make_partitioner,
+)
+from enterprise_pdf_rag.adapters.page_metadata_extraction import (
+    PageMetadataSummary,
+    annotate_page_metadata,
+)
 from enterprise_pdf_rag.adapters.pdf_password import open_pdf
 from enterprise_pdf_rag.adapters.pdfspine_document import PdfspineDocumentAdapter
 from enterprise_pdf_rag.adapters.processing_export import export_processing_review
@@ -46,7 +52,6 @@ from ragspine.extraction.evidence.page.models import (
     StageOutcome,
     StageState,
 )
-from ragspine.extraction.evidence.page.ports import PagePartitioner
 
 type IngestionStage = Literal["source", "layout", "semantics", "metadata"]
 # Stages that add the page metadata stage after the page pipeline (same budget and cache).
@@ -74,7 +79,6 @@ class IngestProgress:
 class _Options(BoundaryModel):
     stage: IngestionStage
     max_live_calls: int = Field(ge=0, le=MAX_INGEST_LIVE_CALLS)
-    partition_strategy: PartitionStrategy = "model"
 
     @model_validator(mode="after")
     def source_has_no_live_budget(self) -> "_Options":
@@ -118,12 +122,17 @@ class IngestionSummary(BoundaryModel):
     # (``request_in_progress_or_uncertain``), and claims of dead attempts taken over and resent.
     calls_claim_blocked: int = 0
     claims_taken_over: int = 0
+    # ADR 0025: the mode this ingest ran in and the model calls it left unsent by mode (by
+    # category, ``ingest_mode.SKIPPED_CALL_KINDS``).
+    ingest_mode: IngestMode = "full"
+    skipped_calls: dict[str, int] = Field(default_factory=dict)
     # Table objects with no detected grid transcribed as verbatim printed rows, and their row
-    # count (ADR 00NN, ``unverified_tables_as_rows``); counts only, never text.
+    # count (ADR 0027, ``IngestPlan.unverified_tables_as_rows``); counts only, never text.
     table_row_transcriptions: int = 0
     table_row_lines: int = 0
-    # "deterministic-text-pages" 策略下: 不调模型即切分的页数、回退到模型版面的页数与
-    # 原因码分布; 默认 "model" 策略保持全零. 从已存产物重导出, 缓存重放时同样成立.
+    # ADR 0028, ``layout="deterministic-text-pages"``: pages partitioned without a model call,
+    # pages that fell back to the model layout and their reason codes; all zero under the
+    # model layout. Re-derived from the saved partitions, so a cache replay reports the same.
     pages_partitioned_deterministically: int = 0
     pages_partition_model_fallback: int = 0
     partition_fallback_reasons: dict[str, int] = Field(default_factory=dict)
@@ -132,7 +141,8 @@ class IngestionSummary(BoundaryModel):
     retrieval_status: Literal[
         "not_ready; qualification, indexing and publication require a separate workflow"
     ] = "not_ready; qualification, indexing and publication require a separate workflow"
-    review_path: str
+    # None when the mode writes no review pages (lite); ``export_document_review`` writes them.
+    review_path: str | None
 
 
 def _selected_pages(pages: str, page_count: int) -> tuple[int, ...]:
@@ -216,7 +226,7 @@ def _page_counts(
 
 
 def _row_tables(outputs: ProcessingStore, manifest: ProcessingManifest) -> tuple[int, ...]:
-    """The row count of every Table qualified as verbatim rows (ADR 00NN)."""
+    """The row count of every Table qualified as verbatim rows (ADR 0027)."""
     counts: list[int] = []
     for page in manifest.pages:
         for item in page.objects:
@@ -241,8 +251,9 @@ def ingest_pdf(
     stage: IngestionStage = "source",
     max_live_calls: int | Callable[[int], int] = 0,
     progress: Callable[[IngestProgress], None] | None = None,
-    unverified_tables_as_rows: bool = False,
-    partition_strategy: PartitionStrategy = "model",
+    ingest_mode: IngestMode = "full",
+    layout_policy: LayoutPolicy | None = None,
+    unverified_tables_as_rows: bool | None = None,
 ) -> IngestionSummary:
     """Save complete PDF sources and selected downstream stages without activation.
 
@@ -252,16 +263,18 @@ def ingest_pdf(
     ``progress`` hears about every finished page of the layout and metadata stages.
     ``max_live_calls`` may instead be a function of the number of selected pages, asked
     once the source stage knows it and before any model call (run-folder's ``"auto"``).
-    ``unverified_tables_as_rows`` indexes a Table with no detected grid as its verbatim
-    printed rows (ADR 00NN); off, every stage is byte-identical to before.
-    ``partition_strategy="deterministic-text-pages"`` partitions pages without figures or
-    images from pdfspine blocks (zero layout calls) and falls back to the model layout
-    per page otherwise; the default keeps every page on the model layout, unchanged.
+    ``ingest_mode`` picks the calls the semantic stages send (ADR 0025, ``ingest_mode.py``);
+    ``layout_policy`` and ``unverified_tables_as_rows`` override that mode's preset for one
+    switch each (ADR 0028, ADR 0027), ``None`` keeps the preset.
     """
+    plan = ingest_plan(
+        ingest_mode,
+        layout_policy=layout_policy,
+        unverified_tables_as_rows=unverified_tables_as_rows,
+    )
     options = _Options(
         stage=stage,
         max_live_calls=max_live_calls if isinstance(max_live_calls, int) else 0,
-        partition_strategy=partition_strategy,
     )
     if not pdf.is_file():
         raise ValueError("--pdf must name an existing PDF file")
@@ -282,7 +295,6 @@ def ingest_pdf(
         options = _Options(
             stage=stage,
             max_live_calls=max_live_calls(len(selected)),
-            partition_strategy=partition_strategy,
         )
     client = (
         None
@@ -294,24 +306,18 @@ def ingest_pdf(
             timeout=180.0,
         )
     )
-    partitioner: PagePartitioner | None = (
-        None if client is None or stage == "metadata" else ModelPagePartitioner(client, sources)
+    objects = (
+        SemanticObjectAdapter(sources, outputs, client, qualification_policy="none", plan=plan)
+        if client is not None and stage == "semantics"
+        else None
     )
-    if partitioner is not None and options.partition_strategy == "deterministic-text-pages":
-        partitioner = make_text_page_partitioner(partitioner, sources, source)
     pipeline = ProcessingPipeline(
         sources,
         outputs,
-        partitioner,
-        SemanticObjectAdapter(
-            sources,
-            outputs,
-            client,
-            qualification_policy="none",
-            unverified_tables_as_rows=unverified_tables_as_rows,
-        )
-        if client is not None and stage == "semantics"
-        else None,
+        None
+        if client is None or stage == "metadata"
+        else make_partitioner(plan, client, sources, source),
+        objects,
         normalize_layout=False,
         activate=False,
         producer="generic-pdf-processing-v1",
@@ -346,12 +352,11 @@ def ingest_pdf(
             processing_id=processing_id,
             client=client,
             on_page=reporter("metadata"),
+            deterministic=plan.page_metadata == "deterministic",
         )
         processing_id = metadata.annotated_processing_id
     partition_tally = (
-        partition_counts(outputs, manifest)
-        if options.partition_strategy != "model"
-        else EMPTY_PARTITION_COUNTS
+        partition_counts(outputs, manifest) if plan.layout != "model" else EMPTY_PARTITION_COUNTS
     )
     complete, deferred, blocked = _page_counts(
         manifest,
@@ -360,13 +365,10 @@ def ingest_pdf(
         else {page.page_index: (page.state, page.diagnostic) for page in metadata.pages},
     )
     row_tables = _row_tables(outputs, manifest)
-    export_review(sources, source)
-    review = export_processing_review(
-        sources,
-        outputs,
-        processing_id,
-        update_current=False,
-        title=f"PDF 处理审阅: {pdf.name}",
+    review = (
+        _export_review(sources, outputs, source, processing_id, title=f"PDF 处理审阅: {pdf.name}")
+        if plan.review_exports
+        else None
     )
     return IngestionSummary(
         source_sha256=source.manifest.source.sha256,
@@ -415,10 +417,61 @@ def ingest_pdf(
         pages_claim_blocked=blocked,
         calls_claim_blocked=0 if client is None else client.claim_blocked_count,
         claims_taken_over=0 if client is None else client.claims_taken_over,
+        ingest_mode=plan.mode,
+        skipped_calls=_skipped_calls(objects, metadata),
         table_row_transcriptions=len(row_tables),
         table_row_lines=sum(row_tables),
         pages_partitioned_deterministically=partition_tally.deterministic_pages,
         pages_partition_model_fallback=partition_tally.model_fallback_pages,
         partition_fallback_reasons=partition_tally.fallback_reasons,
-        review_path=str(review),
+        review_path=None if review is None else str(review),
+    )
+
+
+def _skipped_calls(
+    objects: SemanticObjectAdapter | None, metadata: PageMetadataSummary | None
+) -> dict[str, int]:
+    """Model calls this ingest left unsent by its mode, by category; empty in full mode."""
+    counts = Counter[str]() if objects is None else Counter(objects.skipped_calls)
+    if metadata is not None and metadata.deterministic_pages:
+        counts["page_metadata"] += metadata.deterministic_pages
+    return dict(sorted(counts.items()))
+
+
+def _export_review(
+    sources: LocalDocumentStore,
+    outputs: ProcessingStore,
+    source: DocumentSnapshot,
+    processing_id: str,
+    *,
+    title: str,
+) -> Path:
+    export_review(sources, source)
+    return export_processing_review(
+        sources, outputs, processing_id, update_current=False, title=title
+    )
+
+
+def export_document_review(document_root: Path, processing_id: str | None = None) -> Path:
+    """Write one ingested document's review pages on demand; returns the processing review.
+
+    ``document_root`` is ``<ingestion root>/<source sha256>``. ``processing_id`` defaults to
+    the published snapshot (``current-processing``), else the newest draft is not guessed:
+    a document never published needs an explicit id. No model or network call; the pages
+    are exactly what a full-mode ingest writes on every run.
+    """
+    sources = LocalDocumentStore(document_root / "source", activate_on_publish=False)
+    outputs = ProcessingStore(document_root / "processing")
+    if processing_id is None:
+        if not (outputs.root / "current-processing").is_file():
+            raise ValueError("document has no published snapshot; pass processing_id")
+        processing_id = outputs.load_current()[0]
+    manifest = outputs.load(processing_id)
+    source = sources.load(manifest.scope.source_manifest_id)
+    return _export_review(
+        sources,
+        outputs,
+        source,
+        processing_id,
+        title=f"PDF 处理审阅: {source.manifest.filename}",
     )

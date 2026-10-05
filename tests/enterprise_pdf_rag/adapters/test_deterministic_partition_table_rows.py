@@ -39,7 +39,7 @@ def _ingest(pdf: Path, root: Path) -> IngestionSummary:
         output_dir=root,
         stage="semantics",
         max_live_calls=10,
-        partition_strategy="deterministic-text-pages",
+        layout_policy="deterministic-text-pages",
         unverified_tables_as_rows=True,
     )
 

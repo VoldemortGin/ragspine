@@ -1,6 +1,6 @@
 ---
 covers: src/enterprise_pdf_rag/
-verified-against: 5c61377
+verified-against: 1f0d569
 ---
 
 # enterprise_pdf_rag — agent contract
@@ -26,7 +26,8 @@ the same `pyproject.toml` — import name unchanged, not under `ragspine.*`
    [ADR 0016](../../docs/enterprise-pdf-rag/adr/0016-verbatim-chart-points.md),
    [ADR 0017](../../docs/enterprise-pdf-rag/adr/0017-page-context-window.md),
    [ADR 0018](../../docs/enterprise-pdf-rag/adr/0018-query-classification-and-translation.md),
-   [ADR 0019](../../docs/enterprise-pdf-rag/adr/0019-document-tree-channel.md)
+   [ADR 0019](../../docs/enterprise-pdf-rag/adr/0019-document-tree-channel.md),
+   [ADR 0025](../../docs/enterprise-pdf-rag/adr/0025-lite-ingest-mode.md)
    and [PRD v0.2](../../docs/enterprise-pdf-rag/PRD-v0.2.md) define scope; the full list is
    [`docs/enterprise-pdf-rag/adr/`](../../docs/enterprise-pdf-rag/adr/).
 4. [`testing-and-ingestion.md`](../../docs/enterprise-pdf-rag/testing-and-ingestion.md) — what is
@@ -107,16 +108,26 @@ adapters/     every SDK and I/O: pdfspine (every source PDF opens through pdf_pa
               `FolderPipelineResult.sampling_parameters_dropped`, a `report.md` line and a
               `sampling_parameters_dropped` event name the sampling parameters the LLM endpoint
               refused, ADR 0021),
-              deterministic_partition.py + deterministic_partition_geometry.py (ADR 00NN:
-              `partition_strategy="deterministic-text-pages"` on `ingest_pdf` /
-              `run_folder_pipeline` partitions pages without figures / images straight from
-              pdfspine blocks — zero layout calls, producer
+              ingest_mode.py (ADR 0025: `run_folder_pipeline(ingest_mode="full"|"lite")`,
+              default full = byte-identical; `IngestPlan` holds one field per switch — image /
+              formula calls, chart description from IR, deterministic page metadata, default
+              tree, review exports, `unverified_tables_as_rows` (ADR 0027: lite on, full off)
+              and `layout` (`make_partitioner`: `"model"` in both presets,
+              `"deterministic-text-pages"` only when asked — ADR 0028); `ingest_pdf` /
+              `run_folder_pipeline` take `layout_policy` / `unverified_tables_as_rows` as
+              one-switch overrides of the preset (`None` keeps it); `published_ingest_mode` reads a
+              snapshot's mode back from its page-metadata producer; lite after full sends no call,
+              full after lite only the skipped ones; `export_document_review` in pdf_ingestion.py
+              writes review pages on demand),
+              deterministic_partition.py + deterministic_partition_geometry.py (ADR 0028:
+              `layout_policy="deterministic-text-pages"` partitions pages without figures /
+              images straight from pdfspine blocks — zero layout calls, producer
               `page-layout-deterministic-v1:pdfspine/<version>`, every span owned, ruled
               tables only via `find_tables("lines")` + exact cell-span consistency — and
               falls back per page to the model layout with a machine-readable reason code
               (`IngestionSummary.pages_partitioned_deterministically` /
-              `pages_partition_model_fallback` / `partition_fallback_reasons`); the default
-              `"model"` keeps every page on the model layout, byte for byte),
+              `pages_partition_model_fallback` / `partition_fallback_reasons`); `"model"`
+              keeps every page on the model layout, byte for byte),
               answer_llm.py (`make_answer_llm()`: the answer `JsonCompletionClient` built from
               settings, what `run_folder_pipeline` and `notebooks/run_folder.ipynb` call)
 resources/    packaged prompts / static data
@@ -281,7 +292,9 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   simply absent.
 - **Metadata is verbatim, automatic and never a hard gate** (ADR 0013) — every page-metadata
   value quotes its page spans (dropped otherwise, with a diagnostic); the model runs only at
-  build time, nobody annotates; document metadata is a deterministic fold that is recomputed
+  build time, nobody annotates (lite ingest derives the candidate from text geometry instead —
+  no region, page type `other`, so no cover / agenda exclusion — and verifies it the same way,
+  ADR 0025); document metadata is a deterministic fold that is recomputed
   and refused on drift; only **period (by year) and region** pre-filter retrieval, regions
   only from the document's own vocabulary (no hardcoded company), and a filter that leaves
   fewer candidates than seats is relaxed and reported, never turned into an abstention.

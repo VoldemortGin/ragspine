@@ -5,12 +5,17 @@ for every value, the span it copied it from. ``verify_page_metadata`` keeps only
 values that are verbatim substrings of the cited span; the verified record is saved
 as an immutable, content-addressed processing asset and cached by the canonical
 page's fingerprint like every other stage. No budget → ``deferred``, never skipped.
+
+``deterministic=True`` (lite ingest, ADR 0025) asks no model: each page's candidate is read
+off its own text geometry (``metadata.deterministic_metadata``) against the running lines of
+every selected page, and goes through the same ``verify_page_metadata``.
 """
 
 import json
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import replace
+from hashlib import sha256
 from pathlib import Path
 from typing import Annotated
 
@@ -26,6 +31,7 @@ from ragspine.common.evidence.providers.json_completion import (
     JsonCompletionError,
 )
 from ragspine.extraction.evidence.document.models import DocumentSnapshot
+from ragspine.extraction.evidence.metadata.deterministic_metadata import deterministic_candidate
 from ragspine.extraction.evidence.metadata.document_metadata import summarize_document
 from ragspine.extraction.evidence.metadata.page_metadata import (
     CandidateValue,
@@ -41,8 +47,11 @@ from ragspine.extraction.evidence.page.models import (
     StageOutcome,
     StageState,
 )
+from ragspine.extraction.evidence.page.text_lines import RunningKey, running_lines
 
 PAGE_METADATA_TASK = "page-metadata-v1"
+# The producer of page metadata derived from the page itself (ADR 0025); no model, no cache.
+PAGE_METADATA_DETERMINISTIC = "page-metadata-deterministic-v1"
 PAGE_METADATA_STAGE = "page_metadata"
 _UNCONFIGURED_PRODUCER = "page-metadata-v1:unconfigured"
 _DEFERRED_CODES = frozenset({"call_budget_exhausted", "cache_miss"})
@@ -151,6 +160,8 @@ class PageMetadataSummary(BoundaryModel):
     years: tuple[int, ...]
     regions: tuple[str, ...]
     pages: tuple[PageMetadataOut, ...]
+    # Pages whose metadata was derived from the page itself instead of a model call (ADR 0025).
+    deterministic_pages: int = 0
     indexed: bool = False
     activated: bool = False
     retrieval_status: str = "metadata annotated; qualification, indexing and publication pending"
@@ -221,6 +232,35 @@ def _page_stage(
     return outcome, metadata
 
 
+def _deterministic_stage(
+    outputs: ProcessingStore,
+    page: PageInput,
+    record: PageProcessingRecord,
+    running: frozenset[RunningKey],
+) -> tuple[StageOutcome, PageMetadata]:
+    """One page's metadata read off its own geometry; saved, never stage-cached (cheap)."""
+    digest = sha256(repr(sorted(running)).encode()).hexdigest()
+    fingerprint = stage_fingerprint(
+        PAGE_METADATA_STAGE, PAGE_METADATA_DETERMINISTIC, (record.canonical.artifact, digest)
+    )
+    metadata = verify_page_metadata(
+        deterministic_candidate(page.text.spans, page_height=page.height, running=running),
+        page.text.spans,
+        source_sha256=page.source_sha256,
+        page_index=page.page_index,
+    )
+    artifact = outputs.assets.put(
+        TypeAdapter(PageMetadata).dump_json(metadata), media_type="application/json"
+    )
+    return StageOutcome(
+        PAGE_METADATA_STAGE,
+        fingerprint,
+        StageState.SUCCEEDED,
+        PAGE_METADATA_DETERMINISTIC,
+        artifact,
+    ), metadata
+
+
 def annotate_page_metadata(
     sources: LocalDocumentStore,
     outputs: ProcessingStore,
@@ -228,25 +268,44 @@ def annotate_page_metadata(
     processing_id: str,
     client: JsonCompletionClient | None,
     on_page: Callable[[int, int], None] | None = None,
+    deterministic: bool = False,
 ) -> PageMetadataSummary:
     """Add the page metadata stage to every page of a draft and save a new, un-indexed draft.
 
     Cached outcomes replay without a call; ``client=None`` or an exhausted budget marks
     the page ``deferred`` with a diagnostic. The document summary is recomputed
     deterministically from the succeeded pages. No pointer moves. ``on_page(done, total)``
-    follows each finished page.
+    follows each finished page. ``deterministic`` derives every page's metadata from its own
+    text geometry and the document's running lines instead, with no model call (ADR 0025).
     """
     manifest = outputs.load(processing_id)
-    extractor = None if client is None else PageMetadataExtractor(client)
+    extractor = None if client is None or deterministic else PageMetadataExtractor(client)
     before = 0 if client is None else client.live_call_count
     records: list[PageProcessingRecord] = []
     pages: list[PageMetadata] = []
     reports: list[PageMetadataOut] = []
     states: Counter[str] = Counter()
     source = sources.load(manifest.scope.source_manifest_id)
+    # A running line is a property of the whole selection, so deterministic metadata reads
+    # every page before it derives any; the model path reads one page at a time, as before.
+    inputs = (
+        {
+            record.page_index: _page_input(sources, source, manifest, record.page_index)
+            for record in manifest.pages
+        }
+        if deterministic
+        else {}
+    )
+    running = running_lines([(page.height, page.text.spans) for page in inputs.values()])
     for record in manifest.pages:
-        page = _page_input(sources, source, manifest, record.page_index)
-        outcome, metadata = _page_stage(outputs, extractor, page, record)
+        outcome: StageOutcome
+        metadata: PageMetadata | None
+        if deterministic:
+            page = inputs[record.page_index]
+            outcome, metadata = _deterministic_stage(outputs, page, record, running)
+        else:
+            page = _page_input(sources, source, manifest, record.page_index)
+            outcome, metadata = _page_stage(outputs, extractor, page, record)
         records.append(replace(record, metadata=outcome))
         states[outcome.state.value] += 1
         if metadata is not None:
@@ -288,6 +347,7 @@ def annotate_page_metadata(
         years=() if document is None else document.years,
         regions=() if document is None else tuple(region.text for region in document.regions),
         pages=tuple(reports),
+        deterministic_pages=len(manifest.pages) if deterministic else 0,
     )
 
 

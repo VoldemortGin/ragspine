@@ -298,7 +298,19 @@ class VisualSemanticAdapter:
         self._client = client
         self.fingerprint = "model-visual-semantics-v1:" + client.fingerprint
 
-    def infer(self, *, page: PageInput, item: LayoutObject, native_svg: bytes) -> VisualInference:
+    def infer(
+        self,
+        *,
+        page: PageInput,
+        item: LayoutObject,
+        native_svg: bytes,
+        skip_model: str | None = None,
+    ) -> VisualInference:
+        """Prepare the view and run both branches; ``skip_model`` (a diagnostic) runs neither.
+
+        A skipped object keeps its prepared view and reports ``skip_model`` as both branches'
+        diagnostic, without a model call (lite ingest, ADR 0025).
+        """
         if item.kind not in (
             ObjectKind.IMAGE,
             ObjectKind.DIAGRAM,
@@ -306,10 +318,18 @@ class VisualSemanticAdapter:
         ):
             raise ValueError("Visual semantics only accepts Image, Diagram or Formula")
         prepared = _prepare(page=page, item=item, native_svg=native_svg)
-        ir, ir_raw, ir_diagnostic, confidence = self._infer_ir(prepared=prepared, item=item)
-        description, description_raw, description_diagnostic = self._infer_description(
-            prepared=prepared, item=item
-        )
+        ir: VisualIR | None
+        ir_diagnostic: str | None
+        description: ObjectDescription | None
+        description_diagnostic: str | None
+        if skip_model is not None:
+            ir, ir_raw, ir_diagnostic, confidence = None, None, skip_model, None
+            description, description_raw, description_diagnostic = None, None, skip_model
+        else:
+            ir, ir_raw, ir_diagnostic, confidence = self._infer_ir(prepared=prepared, item=item)
+            description, description_raw, description_diagnostic = self._infer_description(
+                prepared=prepared, item=item
+            )
         return VisualInference(
             item.kind,
             prepared.svg.source,

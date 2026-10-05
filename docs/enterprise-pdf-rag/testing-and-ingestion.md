@@ -269,8 +269,11 @@ enterprise-pdf-rag metadata --source-store <src> --processing-store <proc> --pro
 enterprise-pdf-rag run-folder [--folder /path/to/pdfs] --max-live-calls-per-pdf auto|60 \
   [--max-live-calls-total 300] [--questions questions.jsonl] [--pages all] \
   [--output-dir /path/to/ingestion] [--no-requalify] [--no-tree] [--tree-max-live-calls 50] \
-  [--only-question-docs] [--fail-fast] [--report-dir /path/to/report]
+  [--only-question-docs] [--fail-fast] [--report-dir /path/to/report] \
+  [--ingest-mode full|lite] [--tree]
 ```
+
+**入库模式（[ADR 0025](adr/0025-lite-ingest-mode.md)）**：`run_folder_pipeline(ingest_mode="full")`（函数与 CLI 默认，行为与产物逐字节不变）/ `"lite"`（notebook 默认 `INGEST_MODE`）。lite 只发每页 1 次版面、每个图表 1 次图表 IR、每个示意图 2 次；图像不调模型（`ir` / `description` 为 `not_applicable`，诊断 `skipped_by_ingest_mode`，本来就不可检索）；公式不调模型（证明只读 PDF，与预算耗尽路径等价、合格产物逐字节相同）；图表 description 由 IR 的标签字段确定性生成（producer `chart-description-from-ir-v1`，`qualified_ir` 逐字节相同）；页元数据由页面文字几何确定性生成（`page-metadata-deterministic-v1`：标题 = 上半页最大字号行，章节 = ≥30% 页同位置重复的页眉，期间 = 页面印出的期间标签，地区为空、页类型 `other`，仍经 `verify_page_metadata`）——因此封面 / 目录页不再被排除、地区预过滤不生效；不建 tree（`build_tree=None` 跟随模式，CLI `--tree` / `--no-tree` 强制），不写审阅页面（`review_path` 为 `None`；按需 `pdf_ingestion.export_document_review(<ingestion root>/<sha256>)`）。被跳过的调用不占预算。两种模式共用同一入库目录：版面 / 图表 IR / 示意图缓存共用，lite 后 full 只补发 lite 省掉的调用，full 后 lite 0 次真实调用；`current-processing` 以最近一次成功发布为准，`DocumentRun.published_ingest_mode` 报告其模式。可见性：`FolderPipelineResult.ingest_mode`、`DocumentRun.ingest_mode` / `published_ingest_mode`、`IngestionSummary.skipped_calls`（`image` / `formula` / `chart_description` / `page_metadata` → 次数）、`report.md` 的 mode 行与列、`discovered` / `document_start` 事件的 `ingest_mode`。
 
 stdout 是一个 `FolderPipelineResult` JSON（每份 PDF 一条 `DocumentRun`：`status` 为 `published` / `duplicate_of` / `nothing_to_index` / `failed` / `budget_starved` / `skipped_not_referenced`，各阶段原样嵌入 `IngestionSummary` / `DraftQualification` / `DraftIndex` / `DraftPublication` / `DocumentTreeSummary`；另有 `eval`、分项 `live_calls` 与 `budget_exhausted`）。`--report-dir` 另写 `report.json` 与 `report.md`。退出码：0 全部正常；2 跑完但有文档失败 / 饿死或评测有 `FAIL` / `http_error` / `routing_failed`；1 参数或前置检查错误（stdout 是 `{"error": …}`）。
 

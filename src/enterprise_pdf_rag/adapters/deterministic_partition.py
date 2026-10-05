@@ -13,7 +13,7 @@ from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from math import ceil
-from typing import Any, Literal
+from typing import Any
 
 import pdfspine
 from pydantic import TypeAdapter
@@ -48,9 +48,6 @@ from ragspine.extraction.evidence.page.models import (
 )
 from ragspine.extraction.evidence.page.ports import PagePartitioner
 from ragspine.extraction.evidence.page.service import validate_partition
-
-# 入库切分策略: "model" 是既有行为(每页一次模型版面), 另一值只对可确定性处理的页省掉模型.
-type PartitionStrategy = Literal["model", "deterministic-text-pages"]
 
 # 确定性产物的 producer 前缀; 与模型 producer("page-layout-mapper-v3:…")天然区分.
 DETERMINISTIC_PRODUCER_PREFIX = "page-layout-deterministic-v1"

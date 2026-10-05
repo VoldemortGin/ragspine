@@ -80,13 +80,14 @@ def _ascii_word(character: str) -> bool:
     return character.isascii() and character.isalnum()
 
 
-def find_periods(text: str) -> tuple[str, ...]:
-    """Every period label the rules recognise inside free text, canonical and deduplicated.
+def period_labels(text: str) -> tuple[tuple[str, str], ...]:
+    """Every period label the rules recognise inside free text: (as printed, canonical).
 
-    A label glued to other ASCII letters or digits (``A1H26``, ``2026x``) is not a
-    period mention; CJK neighbours are fine (``2026年上半年的``).
+    In text order, one entry per mention (a repeated label repeats). A label glued to other
+    ASCII letters or digits (``A1H26``, ``2026x``) is not a period mention; CJK neighbours
+    are fine (``2026年上半年的``).
     """
-    found: list[str] = []
+    labels: list[tuple[str, str]] = []
     for match in _SCAN.finditer(text):
         start, end = match.start(), match.end()
         if start and _ascii_word(text[start - 1]):
@@ -96,7 +97,16 @@ def find_periods(text: str) -> tuple[str, ...]:
         groups = match.groupdict()
         index = next(index for index in range(len(_RULES)) if groups.get(f"r{index}") is not None)
         canonical = _canonical(index, _RULES[index][0], groups)
-        if canonical is not None and canonical not in found:
+        if canonical is not None:
+            labels.append((match.group(0), canonical))
+    return tuple(labels)
+
+
+def find_periods(text: str) -> tuple[str, ...]:
+    """Every period label the rules recognise inside free text, canonical and deduplicated."""
+    found: list[str] = []
+    for _label, canonical in period_labels(text):
+        if canonical not in found:
             found.append(canonical)
     return tuple(found)
 

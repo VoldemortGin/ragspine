@@ -1,4 +1,4 @@
-"""`partition_strategy` 接入 ingest_pdf: 版面模型调用数 = 回退页数, 预算与计数可见."""
+"""`layout_policy` 接入 ingest_pdf: 版面模型调用数 = 回退页数, 预算与计数可见."""
 
 import json
 from pathlib import Path
@@ -55,7 +55,7 @@ def test_deterministic_strategy_spends_layout_calls_only_on_fallback_pages(
         output_dir=tmp_path / "output",
         stage="semantics",
         max_live_calls=50,
-        partition_strategy="deterministic-text-pages",
+        layout_policy="deterministic-text-pages",
     )
     assert _layout_calls(calls) == 1  # 只有柱状图页回退到模型版面
     assert len(metadata_calls) == 4  # 页元数据仍然每页一次(不在本改动范围)
@@ -72,7 +72,7 @@ def test_deterministic_strategy_spends_layout_calls_only_on_fallback_pages(
         output_dir=tmp_path / "output",
         stage="semantics",
         max_live_calls=50,
-        partition_strategy="deterministic-text-pages",
+        layout_policy="deterministic-text-pages",
     )
     assert len(calls) == before
     assert replay.live_call_count == 0
@@ -110,7 +110,7 @@ def test_the_two_strategies_coexist_on_one_document_without_new_live_calls(
         output_dir=tmp_path / "output",
         stage="semantics",
         max_live_calls=50,
-        partition_strategy="deterministic-text-pages",
+        layout_policy="deterministic-text-pages",
     )
     assert _layout_calls(calls) == 3  # 没有任何新的版面调用
     assert deterministic_run.live_call_count == 0
@@ -138,7 +138,7 @@ def test_folder_pipeline_publishes_and_text_pages_stay_retrievable(
         max_live_calls_per_pdf=20,
         build_tree=False,
         embedder=OfflineDescriptionEmbedder(),
-        partition_strategy="deterministic-text-pages",
+        layout_policy="deterministic-text-pages",
     )
     (document,) = result.documents
     assert document.status == "published"
@@ -180,7 +180,7 @@ def test_folder_pipeline_publishes_and_text_pages_stay_retrievable(
         max_live_calls_per_pdf=20,
         build_tree=False,
         embedder=OfflineDescriptionEmbedder(),
-        partition_strategy="deterministic-text-pages",
+        layout_policy="deterministic-text-pages",
     )
     assert len(calls) == before
     assert replay.documents[0].live_calls == 0
@@ -192,5 +192,5 @@ def test_an_invalid_strategy_is_rejected_before_any_work(tmp_path: Path) -> None
         ingest_pdf(
             pdf=pdf,
             output_dir=tmp_path / "output",
-            partition_strategy="deterministic",  # type: ignore[arg-type]
+            layout_policy="deterministic",  # type: ignore[arg-type]
         )

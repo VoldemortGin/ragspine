@@ -207,7 +207,23 @@ def _parser() -> argparse.ArgumentParser:
         help="Ingestion root shared by ingest and evaluation; default APP_DATA_DIR/ingestion",
     )
     run_folder.add_argument("--no-requalify", dest="requalify", action="store_false")
-    run_folder.add_argument("--no-tree", dest="build_tree", action="store_false")
+    run_folder.add_argument(
+        "--ingest-mode",
+        choices=["full", "lite"],
+        default="full",
+        help="full: every model call (default); lite: only layout, chart IR and diagram calls, "
+        "deterministic page metadata and chart descriptions, no review pages, no tree unless "
+        "--tree (ADR 0025)",
+    )
+    run_folder.add_argument(
+        "--tree",
+        dest="build_tree",
+        action="store_const",
+        const=True,
+        default=None,
+        help="Build the document tree whatever the mode (full builds it by default, lite not)",
+    )
+    run_folder.add_argument("--no-tree", dest="build_tree", action="store_const", const=False)
     run_folder.add_argument(
         "--only-question-docs",
         action="store_true",
@@ -450,6 +466,7 @@ def main(argv: list[str] | None = None) -> int:
                     max_live_calls_total=arguments.max_live_calls_total,
                     requalify=arguments.requalify,
                     build_tree=arguments.build_tree,
+                    ingest_mode=arguments.ingest_mode,
                     tree_max_live_calls=arguments.tree_max_live_calls,
                     only_question_docs=arguments.only_question_docs,
                     continue_on_error=not arguments.fail_fast,

@@ -1,6 +1,7 @@
 """extraction.evidence.metadata —— 零模型的确定性元数据派生:页,期间,文档与目录树(ADR 0013/0019)。
 
 Submodules:
+    deterministic_metadata.py — 由页面自身文字几何确定性生成页元数据候选,不调模型(ADR 0025)。
     document_metadata.py — 由已校验的页元数据确定性折叠出的文档级元数据。
     document_tree.py — 由页元数据确定性折叠出的文档目录树。
     page_metadata.py — 页级元数据:每个值都逐字取自本页。
