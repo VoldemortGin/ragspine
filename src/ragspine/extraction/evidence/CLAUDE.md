@@ -69,6 +69,10 @@ to `extraction/evidence/adapters/`.
   `col` / `header` citations open only for a verified grid, and `header` only names a header
   *proved* by a thick rule or a fill — never a font or first-row heuristic. An unruled, snapped
   or double-ruled table stays `PENDING`, and stays retrievable and citable by cell text.
+  A table where nothing is detected at all (unruled / frame-only) is left out unless the
+  opt-in `unverified_tables_as_rows` reads it as verbatim printed rows (`tables/table_rows.py`,
+  ADR 00NN): rows are bbox geometry only, re-derived on every resolve, cited as quotes — never
+  cells, columns or headers.
 - **A retrievable diagram or formula is proved without a model** (ADR 0015) — `DIAGRAM` and
   `FORMULA` objects reach the index only through a pure, replayable proof that runs beside (never
   inside) the two model branches: a node label must equal its cited span verbatim and its bbox must
