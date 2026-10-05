@@ -384,7 +384,7 @@ def test_budgets_out_of_range_fail_before_any_work(
     folder = _folder(tmp_path, ("meridian.pdf", _MERIDIAN))
     _forbid(monkeypatch, "ingest_pdf")
     with pytest.raises(ValueError, match="max_live_calls_per_pdf"):
-        _run(tmp_path, folder, max_live_calls_per_pdf=201)
+        _run(tmp_path, folder, max_live_calls_per_pdf=10_001)
     with pytest.raises(ValueError, match="max_live_calls_per_pdf"):
         _run(tmp_path, folder, max_live_calls_per_pdf=-1)
     with pytest.raises(ValueError, match="max_live_calls_total"):
@@ -602,7 +602,7 @@ def test_a_frozen_gold_set_is_judged_and_a_case_outside_the_run_is_reported(
     folder = _two_documents(tmp_path, monkeypatch)
     first = _run(tmp_path, folder)
     gold = tmp_path / "gold.json"
-    gold.write_text(json.dumps(_gold(first.documents[0].sha256)))
+    gold.write_text(json.dumps(_gold(str(first.documents[0].sha256))))
     llm, prompts = _answer_llm(tmp_path)
 
     result = _run(tmp_path, folder, questions=gold, answer_llm=llm)
@@ -681,7 +681,7 @@ def test_max_questions_limits_a_gold_set_to_its_first_runnable_cases(
 ) -> None:
     folder = _two_documents(tmp_path, monkeypatch)
     first = _run(tmp_path, folder)
-    payload = _gold(first.documents[0].sha256)
+    payload = _gold(str(first.documents[0].sha256))
     cases = payload["cases"]
     assert isinstance(cases, list)
     cases.append({**cases[1], "case_id": "second-outside"})
@@ -837,7 +837,7 @@ def test_cli_prints_a_parseable_result_and_rejects_bad_arguments(
     assert [item.status for item in result.documents] == ["published"]
 
     for bad in (
-        [*base, "--max-live-calls-per-pdf", "500"],
+        [*base, "--max-live-calls-per-pdf", "10001"],
         ["run-folder", "--folder", str(tmp_path / "missing"), "--max-live-calls-per-pdf", "0"],
     ):
         code, printed = _cli(bad)
@@ -1068,7 +1068,13 @@ def test_a_password_protected_pdf_fails_clearly_then_publishes_once_the_password
     assert [item.status for item in published.documents] == ["published", "published"]
     for item, done in zip(published.documents, _done(events), strict=True):
         assert item.error is None and item.failed_stage is None
-        assert done == {"pdf": item.pdf_path, "status": "published"}
+        assert done == {
+            "pdf": item.pdf_path,
+            "status": "published",
+            "pages": f"{_PAGES}/{_PAGES}",
+            "pages_budget_deferred": 0,
+            "pages_claim_blocked": 0,
+        }
         assert item.ingestion is not None and item.ingestion.source_page_count == _PAGES
         texts = source_span_texts(
             Path(item.ingestion.source_store), item.ingestion.source_manifest_id

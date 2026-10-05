@@ -17,7 +17,7 @@ import asyncio
 import json
 import re
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from hashlib import sha256
@@ -50,8 +50,26 @@ from enterprise_pdf_rag.adapters.http.schemas import BoundaryModel
 from enterprise_pdf_rag.adapters.hybrid_search import LocalRerankJudge
 from enterprise_pdf_rag.adapters.nl_gold import NlGoldCase, NlGoldSet, answer_prose, load_gold
 from enterprise_pdf_rag.adapters.nl_gold_runner import ENVELOPE_KEY, ChatPost, run_case
-from enterprise_pdf_rag.adapters.pdf_ingestion import IngestionSummary, ingest_pdf
+from enterprise_pdf_rag.adapters.pdf_ingestion import (
+    MAX_INGEST_LIVE_CALLS,
+    IngestionSummary,
+    IngestProgress,
+    ingest_pdf,
+)
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
+from enterprise_pdf_rag.adapters.question_docs import (
+    QuestionDocsCheck,
+    QuestionDocsError,
+    QuestionSelection,
+    QuestionSelectionMode,
+    Resolver,
+    SelectedQuestion,
+    SkippedQuestion,
+    check_references,
+    make_resolver,
+    skip_reason,
+    unresolved_message,
+)
 from enterprise_pdf_rag.adapters.visual_requalification import (
     RequalificationSummary,
     requalify_visual_objects,
@@ -83,7 +101,12 @@ from ragspine.extraction.evidence.page.models import StageState
 from ragspine.retrieval.rerank.listwise_rerank import ListwiseJudge
 
 type DocumentStatus = Literal[
-    "published", "duplicate_of", "nothing_to_index", "failed", "budget_starved"
+    "published",
+    "duplicate_of",
+    "nothing_to_index",
+    "failed",
+    "budget_starved",
+    "skipped_not_referenced",
 ]
 type PipelineStage = Literal["ingest", "requalify", "qualify", "index", "publish", "tree"]
 type CaseVerdict = Literal[
@@ -100,7 +123,12 @@ type Progress = Callable[[str, dict[str, object]], None]
 
 GOLD_FORMAT: Final = "nl-answers-gold-v1"
 _CHAT_PATH = "/v1/chat/completions"
+# Tree and answer budgets keep their old ceiling; the per-PDF ingest one is
+# ``MAX_INGEST_LIVE_CALLS`` (ADR 0022).
 _MAX_LIVE_CALLS = 200
+# ``document_progress``: at most one line per this many pages, or per this many seconds.
+_PROGRESS_PAGES = 10
+_PROGRESS_SECONDS = 30.0
 # The ranks ``ragspine.eval.retrieval_only`` reports at; the prompt seats rarely pass ten.
 _METRIC_TOP_K = 10
 _SHA_PREFIX = re.compile(r"[0-9a-f]{12,64}")
@@ -111,7 +139,9 @@ _GOLD_VERDICTS: dict[str, CaseVerdict] = {
     "known-gap-moved": "known-gap-moved",
 }
 _UNHEALTHY_VERDICTS = frozenset({"FAIL", "http_error", "routing_failed"})
-_HEALTHY_STATUSES = frozenset({"published", "duplicate_of", "nothing_to_index"})
+_HEALTHY_STATUSES = frozenset(
+    {"published", "duplicate_of", "nothing_to_index", "skipped_not_referenced"}
+)
 _LLM_HINT = (
     "set OPENAI_API_KEY, OPENAI_BASE_URL and OPENAI_MODEL (or APP_LLM_API_KEY, "
     "APP_LLM_BASE_URL and APP_LLM_MODEL) in the project .env (see .env.example)"
@@ -151,7 +181,8 @@ class RequalificationCounts(BoundaryModel):
 
 class DocumentRun(BoundaryModel):
     pdf_path: str
-    sha256: str
+    # None only for a PDF skipped as not referenced without its bytes ever being read.
+    sha256: str | None
     status: DocumentStatus
     duplicate_of: str | None = None
     failed_stage: PipelineStage | None = None
@@ -218,6 +249,9 @@ class FolderPipelineResult(BoundaryModel):
     # Sampling parameters the LLM endpoint refused, so this run's requests went without them
     # (ADR 0021); empty when it accepted everything or the settings already omit them.
     sampling_parameters_dropped: tuple[str, ...] = ()
+    # Which PDF each reference of the asked questions names, and which questions were asked
+    # (``question_selection``); None without a question set (ADR 0022).
+    question_docs: QuestionDocsCheck | None = None
 
     @property
     def ok(self) -> bool:
@@ -261,9 +295,9 @@ def discover_pdfs(folder: Path) -> tuple[Path, ...]:
     return tuple(sorted(found, key=lambda path: path.relative_to(folder).as_posix()))
 
 
-def _check_budget(name: str, value: int | None) -> None:
-    if value is not None and not 0 <= value <= _MAX_LIVE_CALLS:
-        raise ValueError(f"{name} must be within 0..{_MAX_LIVE_CALLS}")
+def _check_budget(name: str, value: int | None, ceiling: int = _MAX_LIVE_CALLS) -> None:
+    if value is not None and not 0 <= value <= ceiling:
+        raise ValueError(f"{name} must be within 0..{ceiling}")
 
 
 def _check_total(value: int | None) -> None:
@@ -293,6 +327,156 @@ def _limit_questions(
             kept += 1
             cases.append(case)
     return question_set.model_copy(update={"cases": tuple(cases)})
+
+
+def _question_docs(question: NlGoldCase | BatchQuestion) -> tuple[str, ...]:
+    return (question.document_sha256,) if isinstance(question, NlGoldCase) else question.doc
+
+
+def _question_id(question: NlGoldCase | BatchQuestion) -> str:
+    return question.case_id if isinstance(question, NlGoldCase) else question.id
+
+
+def _select_matched(
+    question_set: NlGoldSet | tuple[BatchQuestion, ...],
+    limit: int,
+    resolve: Resolver,
+) -> tuple[NlGoldSet | tuple[BatchQuestion, ...], QuestionSelection]:
+    """The first ``limit`` questions, in set order, whose references name exactly one PDF.
+
+    A gold set's offline-only cases are kept and never counted, as in ``_limit_questions``.
+    """
+    asked = question_set.cases if isinstance(question_set, NlGoldSet) else question_set
+    kept: list[Any] = []
+    selected: list[SelectedQuestion] = []
+    skipped: list[SkippedQuestion] = []
+    for question in asked:
+        if isinstance(question, NlGoldCase) and question.offline_only:
+            kept.append(question)
+            continue
+        if len(selected) == limit:
+            continue
+        docs = _question_docs(question)
+        reason = skip_reason(docs, resolve)
+        if reason is not None:
+            skipped.append(
+                SkippedQuestion(question_id=_question_id(question), docs=docs, reason=reason)
+            )
+            continue
+        kept.append(question)
+        selected.append(
+            SelectedQuestion(
+                question_id=_question_id(question),
+                docs=docs,
+                pdf=str(resolve(docs[0]).pdf),
+                rules=tuple(dict.fromkeys(rule for doc in docs if (rule := resolve(doc).rule))),
+            )
+        )
+    selection = QuestionSelection(
+        mode="first_matched",
+        max_questions=limit,
+        selected=tuple(selected),
+        skipped=tuple(skipped),
+        short=len(selected) < limit,
+    )
+    if not selected:
+        raise QuestionDocsError(
+            f"题目选取 first_matched: 题集里没有一道题引用的 PDF 在文件夹里, 没有可跑的题"
+            f"(扫描了 {len(skipped)} 道)。前几道的原因: "
+            + "; ".join(f"{item.question_id}: {item.reason}" for item in skipped[:3])
+            + "。可在 DOC_ALIASES 里写明对应关系, 或检查 NB_PDF_DIR / 题集。"
+        )
+    limited: NlGoldSet | tuple[BatchQuestion, ...] = (
+        question_set.model_copy(update={"cases": tuple(kept)})
+        if isinstance(question_set, NlGoldSet)
+        else tuple(kept)
+    )
+    return limited, selection
+
+
+def _plan_questions(
+    question_set: NlGoldSet | tuple[BatchQuestion, ...],
+    pdfs: Sequence[Path],
+    folder: Path,
+    *,
+    max_questions: int | None,
+    selection_mode: QuestionSelectionMode,
+    doc_aliases: Mapping[str, str] | None,
+    digest: Callable[[Path], str],
+) -> tuple[NlGoldSet | tuple[BatchQuestion, ...], QuestionDocsCheck]:
+    """Limit the question set and resolve every reference of what is left — the one
+    resolution both the ``only_question_docs`` selection and the answer routing read.
+
+    PDF bytes are read (through ``digest``) only for a sha reference.
+    """
+    resolve = make_resolver(pdfs, folder, digest, doc_aliases)
+    if selection_mode == "first_matched" and max_questions is not None:
+        limited, selection = _select_matched(question_set, max_questions, resolve)
+    else:
+        limited = _limit_questions(question_set, max_questions)
+        selection = QuestionSelection(mode=selection_mode, max_questions=max_questions)
+    references: dict[str, list[str]] = {}
+    without: list[str] = []
+    asked = limited.cases if isinstance(limited, NlGoldSet) else limited
+    for question in asked:
+        if isinstance(question, NlGoldCase) and question.offline_only:
+            continue
+        docs = _question_docs(question)
+        if not docs:
+            without.append(_question_id(question))
+        for doc in docs:
+            references.setdefault(doc, []).append(_question_id(question))
+    return limited, check_references(
+        references,
+        questions_without_doc=without,
+        pdf_count=len(pdfs),
+        folder=folder,
+        resolve=resolve,
+        selection=selection,
+    )
+
+
+def _hash_file(pdf: Path) -> str:
+    return sha256(pdf.read_bytes()).hexdigest()
+
+
+def check_question_docs(
+    folder: Path | None = None,
+    questions: Path | None = None,
+    *,
+    max_questions: int | None = None,
+    question_selection: QuestionSelectionMode = "first",
+    doc_aliases: Mapping[str, str] | None = None,
+) -> QuestionDocsCheck | None:
+    """The question-set → PDF check ``run_folder_pipeline`` does first, on its own.
+
+    Read-only: lists the folder's PDF names and reads the question set; hashes a PDF only
+    for a sha reference. ``folder`` / ``questions`` default to ``NB_PDF_DIR`` /
+    ``NB_QUESTIONS_PATH``; None without a question set. Never ingests, writes or calls a
+    model. Raises ``QuestionDocsError`` for an invalid alias or a ``first_matched``
+    selection with nothing to run.
+    """
+    _check_max_questions(max_questions)
+    settings = get_settings()
+    folder = folder if folder is not None else settings.pdf_source_dir
+    questions = questions if questions is not None else settings.questions_path
+    if folder is None:
+        raise ValueError("no PDF folder: pass folder or set NB_PDF_DIR in the project .env")
+    if questions is None:
+        return None
+    folder = folder.expanduser().resolve()
+    if not folder.is_dir():
+        raise FileNotFoundError(f"folder not found: {folder}")
+    _, check = _plan_questions(
+        _load_questions(questions),
+        discover_pdfs(folder),
+        folder,
+        max_questions=max_questions,
+        selection_mode=question_selection,
+        doc_aliases=doc_aliases,
+        digest=_hash_file,
+    )
+    return check
 
 
 def _load_questions(path: Path) -> NlGoldSet | tuple[BatchQuestion, ...]:
@@ -378,6 +562,40 @@ def _emit(progress: Progress | None, event: str, **payload: object) -> None:
         progress(event, payload)
 
 
+def _page_reporter(
+    progress: Progress | None, pdf: Path, budget: int
+) -> Callable[[IngestProgress], None] | None:
+    """``document_progress`` for ingest pages: each stage's first and last page, and in
+    between at most one event per ``_PROGRESS_PAGES`` pages or ``_PROGRESS_SECONDS``."""
+    if progress is None:
+        return None
+    last: dict[str, Any] = {"stage": None, "done": 0, "at": 0.0}
+
+    def report(update: IngestProgress) -> None:
+        now = perf_counter()
+        if not (
+            update.stage != last["stage"]
+            or update.pages_done == update.pages_total
+            or update.pages_done - last["done"] >= _PROGRESS_PAGES
+            or now - last["at"] >= _PROGRESS_SECONDS
+        ):
+            return
+        last.update(stage=update.stage, done=update.pages_done, at=now)
+        _emit(
+            progress,
+            "document_progress",
+            pdf=str(pdf),
+            stage=update.stage,
+            pages_done=update.pages_done,
+            pages_total=update.pages_total,
+            live_calls=update.live_calls,
+            budget=budget,
+            cache_hits=update.cache_hits,
+        )
+
+    return report
+
+
 def _run_document(
     pdf: Path,
     digest: str,
@@ -408,14 +626,33 @@ def _run_document(
     def finish(status: DocumentStatus) -> tuple[DocumentRun, int]:
         done = DocumentRun(status=status, elapsed_s=round(perf_counter() - started, 3), **run)
         # A recorded failure travels with the event, so a progress line shows its reason.
-        reason = {key: run[key] for key in ("failed_stage", "error") if key in run}
+        reason: dict[str, object] = {
+            key: run[key] for key in ("failed_stage", "error") if key in run
+        }
+        ingested: IngestionSummary | None = run.get("ingestion")
+        if ingested is not None:
+            # A partly ingested document is still ``published``; these say how partly.
+            reason.update(
+                pages=f"{ingested.pages_complete}/{len(ingested.selected_physical_pages)}",
+                pages_budget_deferred=ingested.pages_budget_deferred,
+                pages_claim_blocked=ingested.pages_claim_blocked,
+            )
         _emit(progress, "document_done", pdf=str(pdf), status=status, **reason)
         return done, tree_calls
+
+    def enter(name: PipelineStage) -> PipelineStage:
+        _emit(progress, "document_progress", pdf=str(pdf), stage=name)
+        return name
 
     _emit(progress, "document_start", pdf=str(pdf), sha256=digest, budget=allotted)
     try:
         ingestion = ingest_pdf(
-            pdf=pdf, pages=pages, output_dir=root, stage="semantics", max_live_calls=allotted
+            pdf=pdf,
+            pages=pages,
+            output_dir=root,
+            stage="semantics",
+            max_live_calls=allotted,
+            progress=_page_reporter(progress, pdf, allotted),
         )
         budget.spend(ingestion.live_call_count)
         run.update(ingestion=ingestion, live_calls=ingestion.live_call_count)
@@ -427,20 +664,20 @@ def _run_document(
             return finish("budget_starved")
         draft_id = ingestion.processing_id
         if requalify:
-            stage = "requalify"
+            stage = enter("requalify")
             summary = requalify_visual_objects(
                 sources, outputs, processing_id=ingestion.processing_id
             )
             run["requalification"] = RequalificationCounts.from_summary(summary)
             draft_id = summary.draft_processing_id or ingestion.processing_id
-        stage = "qualify"
+        stage = enter("qualify")
         qualification = qualify_draft(
             source_store=source_store, processing_store=processing_store, processing_id=draft_id
         )
         run["qualification"] = qualification
         if qualification.eligible_member_count == 0:
             return finish("nothing_to_index")
-        stage = "index"
+        stage = enter("index")
         indexed_id = draft_id
         if _reusable_index(outputs, draft_id, embedder):
             indexed_id = outputs.load_current()[0]
@@ -454,7 +691,7 @@ def _run_document(
             )
             run["index"] = indexed
             indexed_id = indexed.indexed_processing_id
-        stage = "publish"
+        stage = enter("publish")
         publication = publish_draft(
             source_store=source_store,
             processing_store=processing_store,
@@ -463,7 +700,7 @@ def _run_document(
         )
         run["publication"] = publication
         if build_tree:
-            stage = "tree"
+            stage = enter("tree")
             client = JsonCompletionClient(
                 load_llm_config(),
                 cache_dir=processing_store / "model-cache",
@@ -647,15 +884,37 @@ def _eval_gold(
     )
 
 
-def _resolve_reference(reference: str, documents: Sequence[DocumentRun]) -> set[str]:
-    folded = reference.strip().casefold()
-    if _SHA_PREFIX.fullmatch(folded):
-        return {item.sha256 for item in documents if item.sha256.startswith(folded)}
+def _routed_shas(
+    reference: str, check: QuestionDocsCheck | None, documents: Sequence[DocumentRun]
+) -> set[str]:
+    """The document a reference routes to: the run of the PDF its resolution named."""
+    resolution = None if check is None else check.resolution(reference)
+    if resolution is None or resolution.pdf is None:
+        return set()
+    target = Path(check.folder if check is not None else "") / resolution.pdf
     return {
         item.sha256
         for item in documents
-        if folded in {Path(item.pdf_path).name.casefold(), Path(item.pdf_path).stem.casefold()}
+        if item.sha256 is not None and Path(item.pdf_path) == target
     }
+
+
+def _unrouted_reason(question: BatchQuestion, check: QuestionDocsCheck | None) -> str:
+    """Why the folder had no PDF for these references, from the pre-ingest check."""
+    reasons = []
+    for doc in question.doc:
+        resolution = None if check is None else check.resolution(doc)
+        if resolution is None or resolution.status == "matched":
+            continue
+        if resolution.status == "ambiguous":
+            reasons.append(f"{doc!r} names several PDFs {list(resolution.ambiguous_with)}")
+        else:
+            close = [candidate.pdf for candidate in resolution.candidates]
+            reasons.append(
+                f"{doc!r} names no PDF of the folder"
+                + (f" (closest, not used: {close})" if close else "")
+            )
+    return "; ".join(reasons)
 
 
 def _eval_questions(
@@ -666,6 +925,7 @@ def _eval_questions(
     mounted: frozenset[str],
     member_pages: dict[str, tuple[str, int]],
     progress: Progress | None,
+    check: QuestionDocsCheck | None = None,
 ) -> EvalSummary:
     cases: list[EvalCase] = []
     ranks: list[tuple[int | None, int | None]] = []
@@ -675,7 +935,7 @@ def _eval_questions(
         document: str | None = only
         unrouted: str | None = None if mounted else "no document of this run is published"
         if question.doc and unrouted is None:
-            resolved = set().union(*(_resolve_reference(doc, documents) for doc in question.doc))
+            resolved = set().union(*(_routed_shas(doc, check, documents) for doc in question.doc))
             if len(resolved & mounted) == 1:
                 document = next(iter(resolved & mounted))
             else:
@@ -684,6 +944,9 @@ def _eval_questions(
                     f"{'no' if not resolved & mounted else 'more than one'} published document "
                     "of this run"
                 )
+                reason = _unrouted_reason(question, check)
+                if reason:
+                    unrouted += f": {reason}"
         if post is None or unrouted is not None:
             cases.append(
                 EvalCase(
@@ -764,6 +1027,33 @@ def _eval_questions(
     )
 
 
+def _question_docs_lines(check: QuestionDocsCheck | None) -> list[str]:
+    if check is None:
+        return []
+    lines = [
+        f"- question docs: {len(check.resolutions)} referenced, "
+        f"{len(check.resolutions) - len(check.unresolved)} matched {check.rule_counts}"
+        + (
+            f", unresolved {[item.reference for item in check.unresolved]}"
+            if check.unresolved
+            else ""
+        )
+    ]
+    selection = check.selection
+    if selection is not None and selection.mode == "first_matched":
+        lines.append(
+            f"- question selection first_matched (the PDF is in the folder, not that it holds the "
+            f"answer): {len(selection.selected)} of {selection.max_questions} selected, "
+            f"{len(selection.skipped)} skipped"
+            + (
+                " — the set has no more questions whose PDF is in the folder"
+                if selection.short
+                else ""
+            )
+        )
+    return lines
+
+
 def _markdown(result: FolderPipelineResult) -> str:
     lines = [
         "# Folder pipeline report",
@@ -781,17 +1071,23 @@ def _markdown(result: FolderPipelineResult) -> str:
             if result.sampling_parameters_dropped
             else []
         ),
+        *_question_docs_lines(result.question_docs),
         "",
-        "| pdf | sha256 | status | stage | eligible | index reused | live calls | s | error |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| pdf | sha256 | status | stage | pages | eligible | index reused | live calls | s | error |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for item in result.documents:
         eligible = "-" if item.qualification is None else item.qualification.eligible_member_count
         error = (item.error or item.duplicate_of or "-").replace("|", "\\|")[:160]
+        pages = (
+            "-"
+            if item.ingestion is None
+            else f"{item.ingestion.pages_complete}/{len(item.ingestion.selected_physical_pages)}"
+        )
         lines.append(
-            f"| `{Path(item.pdf_path).name}` | `{item.sha256[:12]}` | {item.status} | "
-            f"{item.failed_stage or '-'} | {eligible} | {item.index_reused} | {item.live_calls} | "
-            f"{item.elapsed_s:.1f} | {error} |"
+            f"| `{Path(item.pdf_path).name}` | `{(item.sha256 or '-')[:12]}` | {item.status} | "
+            f"{item.failed_stage or '-'} | {pages} | {eligible} | {item.index_reused} | "
+            f"{item.live_calls} | {item.elapsed_s:.1f} | {error} |"
         )
     if result.eval is not None:
         lines += [
@@ -827,6 +1123,10 @@ def run_folder_pipeline(
     tree_max_live_calls: int = 50,
     answer_max_live_calls: int | None = None,
     max_questions: int | None = None,
+    question_selection: QuestionSelectionMode = "first",
+    only_question_docs: bool = False,
+    doc_aliases: Mapping[str, str] | None = None,
+    on_unmatched_docs: Literal["error", "skip"] = "error",
     continue_on_error: bool = True,
     report_dir: Path | None = None,
     embedder: EmbeddingPort | None = None,
@@ -839,8 +1139,22 @@ def run_folder_pipeline(
     ``folder``, ``questions`` and ``report_dir`` default to ``NB_PDF_DIR`` / ``NB_QUESTIONS_PATH`` /
     ``NB_REPORT_DIR`` (``get_settings()``); an argument always wins, and with neither the
     question set is not run and no report is written. Without a folder from either place this
-    raises ``ValueError``. ``max_questions`` answers only the first N questions of the set in its
-    own order (``None`` = all); it never limits ingestion, which always covers every PDF.
+    raises ``ValueError``. ``max_questions`` answers only N questions (``None`` = all):
+    ``question_selection="first"`` the first N of the set, ``"first_matched"`` the first N, in
+    set order, whose references name exactly one PDF of the folder (the others are skipped
+    and listed; none at all is a ``QuestionDocsError`` before any work).
+
+    Before any ingest, model call or write, every reference the asked questions make is
+    resolved against the folder (``adapters/question_docs.py``: alias, exact name, stem, sha
+    prefix, normalized name; never a near miss) and reported as ``question_docs`` / the
+    ``question_docs_resolved`` event; answers are routed by that same resolution.
+    ``doc_aliases`` maps a reference as the question set writes it to a file name / stem /
+    sha prefix naming exactly one PDF (else ``QuestionDocsError``). ``only_question_docs``
+    (with a question set) ingests only the PDFs those questions name; every other PDF is
+    ``skipped_not_referenced`` and, unless a reference is a sha, never read. With it, a
+    reference naming no PDF or several, or a light question without ``doc``, is a
+    ``QuestionDocsError`` before any work (``on_unmatched_docs="error"``) or is left out of
+    the selection and answered as ``routing_failed`` with the reason (``"skip"``).
 
     Raises ``ValueError`` for an invalid budget, ``FileNotFoundError`` for a missing folder or
     question set and ``PreflightError`` for a missing or unreachable dependency, all before
@@ -848,7 +1162,7 @@ def run_folder_pipeline(
     its own check. A failing document is recorded and the rest continue unless
     ``continue_on_error`` is false, when its ``ValueError`` / ``OSError`` propagates.
     """
-    _check_budget("max_live_calls_per_pdf", max_live_calls_per_pdf)
+    _check_budget("max_live_calls_per_pdf", max_live_calls_per_pdf, MAX_INGEST_LIVE_CALLS)
     _check_budget("tree_max_live_calls", tree_max_live_calls)
     _check_budget("answer_max_live_calls", answer_max_live_calls)
     _check_total(max_live_calls_total)
@@ -866,8 +1180,49 @@ def run_folder_pipeline(
     if not folder.is_dir():
         raise FileNotFoundError(f"folder not found: {folder}")
     question_set = None if questions is None else _load_questions(questions)
+    pdfs = discover_pdfs(folder)
+    digests: dict[Path, str] = {}
+
+    def digest_of(pdf: Path) -> str:
+        if pdf not in digests:
+            digests[pdf] = _hash_file(pdf)
+        return digests[pdf]
+
+    check: QuestionDocsCheck | None = None
     if question_set is not None:
-        question_set = _limit_questions(question_set, max_questions)
+        question_set, check = _plan_questions(
+            question_set,
+            pdfs,
+            folder,
+            max_questions=max_questions,
+            selection_mode=question_selection,
+            doc_aliases=doc_aliases,
+            digest=digest_of,
+        )
+        _emit(
+            progress,
+            "question_docs_resolved",
+            referenced=len(check.resolutions),
+            matched=len(check.resolutions) - len(check.unresolved),
+            rules=check.rule_counts,
+            unmatched=[item.reference for item in check.unresolved],
+            questions_without_doc=len(check.questions_without_doc),
+            selected_questions=None
+            if check.selection is None or check.selection.mode == "first"
+            else len(check.selection.selected),
+            skipped_questions=None
+            if check.selection is None or check.selection.mode == "first"
+            else len(check.selection.skipped),
+        )
+        if only_question_docs and on_unmatched_docs == "error":
+            message = unresolved_message(check)
+            if message is not None:
+                raise QuestionDocsError(message)
+    selected = (
+        {folder / pdf for pdf in check.matched_pdfs()}
+        if only_question_docs and check is not None
+        else None
+    )
     needs_rerank = isinstance(question_set, NlGoldSet) and any(
         case.request.rerank for case in question_set.cases if not case.offline_only
     )
@@ -876,14 +1231,21 @@ def run_folder_pipeline(
     root = root.expanduser().resolve()
     budget = _Budget(max_live_calls_total)
 
-    pdfs = discover_pdfs(folder)
     _emit(progress, "discovered", folder=str(folder), count=len(pdfs))
 
     documents: list[DocumentRun] = []
     first: dict[str, str] = {}
     tree_total = 0
     for pdf in pdfs:
-        digest = sha256(pdf.read_bytes()).hexdigest()
+        if selected is not None and pdf not in selected:
+            documents.append(
+                DocumentRun(
+                    pdf_path=str(pdf), sha256=digests.get(pdf), status="skipped_not_referenced"
+                )
+            )
+            _emit(progress, "document_skipped", pdf=str(pdf), reason="not referenced")
+            continue
+        digest = digest_of(pdf)
         if digest in first:
             documents.append(
                 DocumentRun(
@@ -972,6 +1334,7 @@ def run_folder_pipeline(
                 mounted=mounted,
                 member_pages=member_pages,
                 progress=progress,
+                check=check,
             )
         answer_total = llm.live_call_count - before
         answer_client = llm
@@ -999,6 +1362,7 @@ def run_folder_pipeline(
         or any(item.status == "budget_starved" for item in documents),
         report_dir=None if report_dir is None else str(report_dir.expanduser().resolve()),
         sampling_parameters_dropped=tuple(sorted(dropped)),
+        question_docs=check,
     )
     if report_dir is not None:
         target = report_dir.expanduser().resolve()

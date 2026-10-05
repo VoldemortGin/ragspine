@@ -185,7 +185,7 @@ def _parser() -> argparse.ArgumentParser:
         "--max-live-calls-per-pdf",
         type=int,
         required=True,
-        help="Explicit ingest model-call budget per PDF (0-200); 0 replays the cache only",
+        help="Explicit ingest model-call budget per PDF (0-10000); 0 replays the cache only",
     )
     run_folder.add_argument(
         "--max-live-calls-total",
@@ -202,6 +202,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     run_folder.add_argument("--no-requalify", dest="requalify", action="store_false")
     run_folder.add_argument("--no-tree", dest="build_tree", action="store_false")
+    run_folder.add_argument(
+        "--only-question-docs",
+        action="store_true",
+        help="Ingest only the PDFs the question set names; a question naming no PDF stops the run before any work",
+    )
     run_folder.add_argument("--tree-max-live-calls", type=int, default=50)
     run_folder.add_argument(
         "--fail-fast",
@@ -440,6 +445,7 @@ def main(argv: list[str] | None = None) -> int:
                     requalify=arguments.requalify,
                     build_tree=arguments.build_tree,
                     tree_max_live_calls=arguments.tree_max_live_calls,
+                    only_question_docs=arguments.only_question_docs,
                     continue_on_error=not arguments.fail_fast,
                     report_dir=arguments.report_dir,
                 )
