@@ -16,6 +16,12 @@ from enterprise_pdf_rag.adapters.aia_processing import (
     ProcessingPipeline,
     stage_fingerprint,
 )
+from enterprise_pdf_rag.adapters.deterministic_partition import (
+    EMPTY_PARTITION_COUNTS,
+    PartitionStrategy,
+    make_text_page_partitioner,
+    partition_counts,
+)
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.http.schemas import BoundaryModel
 from enterprise_pdf_rag.adapters.page_metadata_extraction import annotate_page_metadata
@@ -35,6 +41,7 @@ from ragspine.extraction.evidence.page.models import (
     StageOutcome,
     StageState,
 )
+from ragspine.extraction.evidence.page.ports import PagePartitioner
 
 type IngestionStage = Literal["source", "layout", "semantics", "metadata"]
 # Stages that add the page metadata stage after the page pipeline (same budget and cache).
@@ -62,6 +69,7 @@ class IngestProgress:
 class _Options(BoundaryModel):
     stage: IngestionStage
     max_live_calls: int = Field(ge=0, le=MAX_INGEST_LIVE_CALLS)
+    partition_strategy: PartitionStrategy = "model"
 
     @model_validator(mode="after")
     def source_has_no_live_budget(self) -> "_Options":
@@ -105,6 +113,11 @@ class IngestionSummary(BoundaryModel):
     # (``request_in_progress_or_uncertain``), and claims of dead attempts taken over and resent.
     calls_claim_blocked: int = 0
     claims_taken_over: int = 0
+    # "deterministic-text-pages" 策略下: 不调模型即切分的页数、回退到模型版面的页数与
+    # 原因码分布; 默认 "model" 策略保持全零. 从已存产物重导出, 缓存重放时同样成立.
+    pages_partitioned_deterministically: int = 0
+    pages_partition_model_fallback: int = 0
+    partition_fallback_reasons: dict[str, int] = Field(default_factory=dict)
     activated: Literal[False] = False
     indexed: Literal[False] = False
     retrieval_status: Literal[
@@ -201,6 +214,7 @@ def ingest_pdf(
     stage: IngestionStage = "source",
     max_live_calls: int | Callable[[int], int] = 0,
     progress: Callable[[IngestProgress], None] | None = None,
+    partition_strategy: PartitionStrategy = "model",
 ) -> IngestionSummary:
     """Save complete PDF sources and selected downstream stages without activation.
 
@@ -210,9 +224,14 @@ def ingest_pdf(
     ``progress`` hears about every finished page of the layout and metadata stages.
     ``max_live_calls`` may instead be a function of the number of selected pages, asked
     once the source stage knows it and before any model call (run-folder's ``"auto"``).
+    ``partition_strategy="deterministic-text-pages"`` partitions pages without figures or
+    images from pdfspine blocks (zero layout calls) and falls back to the model layout
+    per page otherwise; the default keeps every page on the model layout, unchanged.
     """
     options = _Options(
-        stage=stage, max_live_calls=max_live_calls if isinstance(max_live_calls, int) else 0
+        stage=stage,
+        max_live_calls=max_live_calls if isinstance(max_live_calls, int) else 0,
+        partition_strategy=partition_strategy,
     )
     if not pdf.is_file():
         raise ValueError("--pdf must name an existing PDF file")
@@ -230,7 +249,11 @@ def ingest_pdf(
     config = None if stage == "source" else load_llm_config()
     source, selected, cached = _source(sources, pdf=data, filename=pdf.name, pages=pages)
     if config is not None and not isinstance(max_live_calls, int):
-        options = _Options(stage=stage, max_live_calls=max_live_calls(len(selected)))
+        options = _Options(
+            stage=stage,
+            max_live_calls=max_live_calls(len(selected)),
+            partition_strategy=partition_strategy,
+        )
     client = (
         None
         if config is None
@@ -241,10 +264,15 @@ def ingest_pdf(
             timeout=180.0,
         )
     )
+    partitioner: PagePartitioner | None = (
+        None if client is None or stage == "metadata" else ModelPagePartitioner(client, sources)
+    )
+    if partitioner is not None and options.partition_strategy == "deterministic-text-pages":
+        partitioner = make_text_page_partitioner(partitioner, sources, source)
     pipeline = ProcessingPipeline(
         sources,
         outputs,
-        None if client is None or stage == "metadata" else ModelPagePartitioner(client, sources),
+        partitioner,
         SemanticObjectAdapter(sources, outputs, client, qualification_policy="none")
         if client is not None and stage == "semantics"
         else None,
@@ -284,6 +312,11 @@ def ingest_pdf(
             on_page=reporter("metadata"),
         )
         processing_id = metadata.annotated_processing_id
+    partition_tally = (
+        partition_counts(outputs, manifest)
+        if options.partition_strategy != "model"
+        else EMPTY_PARTITION_COUNTS
+    )
     complete, deferred, blocked = _page_counts(
         manifest,
         {}
@@ -345,5 +378,8 @@ def ingest_pdf(
         pages_claim_blocked=blocked,
         calls_claim_blocked=0 if client is None else client.claim_blocked_count,
         claims_taken_over=0 if client is None else client.claims_taken_over,
+        pages_partitioned_deterministically=partition_tally.deterministic_pages,
+        pages_partition_model_fallback=partition_tally.model_fallback_pages,
+        partition_fallback_reasons=partition_tally.fallback_reasons,
         review_path=str(review),
     )
