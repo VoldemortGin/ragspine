@@ -1,4 +1,4 @@
-"""A folder run interrupted mid-call no longer loses a page silently and for good (ADR 00NN)."""
+"""A folder run interrupted mid-call no longer loses a page silently and for good (ADR 0023)."""
 
 import os
 from collections.abc import Callable

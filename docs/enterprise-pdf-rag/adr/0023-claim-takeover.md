@@ -1,6 +1,6 @@
-# ADR 00NN: A model-call claim left by a dead attempt is taken over, and released once recorded
+# ADR 0023: A model-call claim left by a dead attempt is taken over, and released once recorded
 
-Status: Proposed, 2026-10-05 (number to be assigned at integration). Amends the model-cache
+Status: Accepted, 2026-10-05. Amends the model-cache
 claim of [ADR 0011](0011-document-catalog-and-verified-answer-chain.md) (`retry_failed=False`,
 "uncertain attempts stay claimed"), the claim paragraph of
 [ADR 0020](0020-storage-without-hard-links.md) and the "a `.claim` without a record still

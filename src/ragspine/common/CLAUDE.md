@@ -46,7 +46,7 @@ before. Used by `agent/decompose`, `agent/query_transform` (RAG-Fusion) and `gra
 
 `evidence/` — the evidence chain's APP_* settings (LLM trio prefers OPENAI_*, APP_LLM_* are aliases; embedding shares that gateway via OPENAI_EMBEDDING_MODEL unless APP_EMBEDDING_BASE_URL names a loopback service; plus NB_* notebook paths, `NB_QUESTIONS_PATH` also reading `DATASET_PATH`; `OPENAI_TEMPERATURE` = unset 0.0 / a number / `omit`), lineage logging and model access
 (a 400's `error.param` / `error.code` only, never its message; a refused `temperature` / `seed` is dropped and the call resent,
-enterprise-pdf-rag ADR 0021; a model-call claim whose holder is dead or out of lease is taken over, ADR 00NN)
+enterprise-pdf-rag ADR 0021; a model-call claim whose holder is dead or out of lease is taken over, ADR 0023)
 (ADR 0022); its own contract is [`evidence/CLAUDE.md`](evidence/CLAUDE.md).
 
 ## Invariants

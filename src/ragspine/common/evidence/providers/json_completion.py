@@ -38,7 +38,7 @@ _UNSUPPORTED_CODES = frozenset({"unsupported_value", "unsupported_parameter"})
 _SKIPPED_CODE = "sampling_parameter_unsupported"
 # What a ``.claim`` file holds now: its holder (host, pid, a per-process token) and its lease,
 # so a claim left by a killed process can be told from one still in flight
-# (docs/enterprise-pdf-rag/adr/00NN-claim-takeover.md). A legacy claim holds only the
+# (docs/enterprise-pdf-rag/adr/0023-claim-takeover.md). A legacy claim holds only the
 # fingerprint (or nothing) and is judged by its mtime.
 CLAIM_FORMAT = "json-completion-claim-v2"
 # A legacy claim is presumed abandoned this long after its mtime: longer than the lease of any

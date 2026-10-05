@@ -94,7 +94,7 @@ providers/    providers.py (explicit APP_LLM_* / embedding / APP_RERANK_* enviro
   is > `LEGACY_CLAIM_LEASE_SECONDS` (900) old, is taken over by `O_EXCL` of `<claim>.takeover-<n+1>` —
   never `link_new_file` / rename / replace; one live call, record marked `diagnostics.claim_takeover`.
   `claim_blocked_count` / `claims_taken_over` count both outcomes. Lease clock `_wall_clock` is the test seam.
-  [ADR 00NN](../../../../docs/enterprise-pdf-rag/adr/00NN-claim-takeover.md).
+  [ADR 0023](../../../../docs/enterprise-pdf-rag/adr/0023-claim-takeover.md).
 - **Model / tunnel fields are lenient** — all optional strings / `SecretStr`; nothing is validated
   at import. `load_*_config` / `load_tunnel_config` validate (https, loopback, ports) only when that
   group is used, and still accept an injected mapping.

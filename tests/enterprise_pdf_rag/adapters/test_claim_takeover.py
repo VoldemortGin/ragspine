@@ -1,4 +1,4 @@
-"""A claim left by a dead attempt no longer blocks its request forever (ADR 00NN).
+"""A claim left by a dead attempt no longer blocks its request forever (ADR 0023).
 
 A ``.claim`` still means "this request may be in flight; do not send it twice" for as long as
 its holder may run. Once the holder is certainly over — a process of this host that no longer
