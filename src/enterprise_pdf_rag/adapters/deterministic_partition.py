@@ -21,7 +21,6 @@ from pydantic import TypeAdapter
 from enterprise_pdf_rag.adapters.aia_ingestion import read_text_sidecar
 from enterprise_pdf_rag.adapters.deterministic_partition_geometry import (
     BlockSpec,
-    RunningKey,
     TextLine,
     body_blocks,
     body_font_size,
@@ -35,7 +34,7 @@ from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.pdfspine_tables import LINE_MAX_THICKNESS
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.shared_pdf import opened_pdf, source_pdf
-from ragspine.extraction.evidence.document.models import Bounds, DocumentSnapshot
+from ragspine.extraction.evidence.document.models import Bounds, DocumentSnapshot, TextSpan
 from ragspine.extraction.evidence.figures.models import Confidence, content_id
 from ragspine.extraction.evidence.page.geometry import contains
 from ragspine.extraction.evidence.page.models import (
@@ -48,6 +47,7 @@ from ragspine.extraction.evidence.page.models import (
 )
 from ragspine.extraction.evidence.page.ports import PagePartitioner
 from ragspine.extraction.evidence.page.service import validate_partition
+from ragspine.extraction.evidence.page.text_lines import RunningKey
 
 # 确定性产物的 producer 前缀; 与模型 producer("page-layout-mapper-v3:…")天然区分.
 DETERMINISTIC_PRODUCER_PREFIX = "page-layout-deterministic-v1"
@@ -92,6 +92,15 @@ def _center_inside(inner: Bounds, outer: Bounds) -> bool:
     x = (inner[0] + inner[2]) / 2
     y = (inner[1] + inner[3]) / 2
     return outer[0] <= x <= outer[2] and outer[1] <= y <= outer[3]
+
+
+def _holds_text(region: Bounds, spans: Iterable[TextSpan]) -> bool:
+    """区域内是否有任何 span(按中心点): 跨页重复装饰豁免只给不含文字的图形.
+
+    真实图表几乎总带坐标轴 / 数据标签文字; 带字的重复图形(含字的色块面板、带字 logo)
+    宁可回退模型版面, 也不按装饰忽略.
+    """
+    return any(_center_inside(span.bbox, region) for span in spans)
 
 
 def _overlaps(first: Bounds, second: Bounds) -> bool:
@@ -256,16 +265,20 @@ class TextPageRouterPartitioner:
         for info in source_page.get_image_info():
             x0, y0, x1, y1 = _bounds(info["bbox"])
             share = max(x1 - x0, 0.0) * max(y1 - y0, 0.0) / (page.width * page.height)
-            if image_signature(info) in stats.decoration_images and (
-                share <= IMAGE_DECORATION_MAX_SHARE
+            if (
+                image_signature(info) in stats.decoration_images
+                and share <= IMAGE_DECORATION_MAX_SHARE
+                and not _holds_text((x0, y0, x1, y1), spans)
             ):
                 continue
             return "has_image", None
         detected, emitted = self._tables(source_page, page)
         for drawing in source_page.get_drawings():
-            if drawing_signature(drawing) in stats.decoration_drawings:
-                continue
             rect = _bounds(drawing["rect"])
+            if drawing_signature(drawing) in stats.decoration_drawings and not _holds_text(
+                rect, spans
+            ):
+                continue
             if any(
                 contains(
                     (

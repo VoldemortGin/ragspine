@@ -4,26 +4,32 @@ ADR 00NN(deterministic-text-page-partition)的纯函数半边: 聚行 / 跨页�
 栏式判定 / 标题-段落-列表分块. 原则沿用 ADR 0013 修订 1: 读不懂的版面返回 ``ambiguous``,
 由调用方回退到模型版面, 绝不去猜.
 
-注意: 本模块与主仓库 ``ragspine.extraction.evidence.page.text_lines``(另一分支)的
-``LINE_OVERLAP`` / ``RUNNING_BUCKET`` / ``RUNNING_SHARE`` / ``RunningKey`` / ``TextLine`` /
-``text_lines`` / ``running_lines`` 语义对齐, 集成时去重为 import.
+与 ``ragspine.extraction.evidence.page.text_lines``(ADR 0025)共用 ``LINE_OVERLAP`` /
+``RUNNING_SHARE`` / ``RUNNING_BUCKET`` / ``RunningKey``(从那里 import). ``TextLine`` /
+``text_lines`` / ``running_lines`` 刻意保留本地版本, 行为有三处差别: (1) 纯空白 span 也
+入行(确定性切分要求每个 span 都有归属, 丢掉它会让 ``validate_partition`` 失败);
+(2) span 与"整行已累积的竖直带"重叠即入行(那边要求与行内某个 span 重叠);
+(3) ``text`` 逐 span strip 后以单空格相连(那边再折叠 span 内部空白), 因此跨页重复行的
+键可能不同. 此外本地 ``TextLine`` 多出 ``bottom`` / ``left`` / ``right``.
 """
 
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from math import ceil
 from statistics import median
 from typing import Literal
 
 from ragspine.extraction.evidence.document.models import TextSpan
+from ragspine.extraction.evidence.page.text_lines import (
+    LINE_OVERLAP,
+    RUNNING_BUCKET,
+    RUNNING_SHARE,
+    RunningKey,
+)
 
-# -- 聚行: 两个 span 竖直重叠达到较矮者的一半即视为同一行(与模型版面的行观感一致).
-LINE_OVERLAP = 0.5
-# -- 跨页重复行: 同文本同高度桶出现在 >=30% 且 >=2 页, 视为页眉/页脚/装饰行.
-RUNNING_SHARE = 0.3
+# -- 跨页重复行: 同文本同高度桶(RUNNING_BUCKET)出现在 >=RUNNING_SHARE 且 >=2 页.
 MIN_RUNNING_PAGES = 2
-# -- 高度桶宽(pt): 同一条页眉在不同页的 y 浮动小于半个桶即落入同桶.
-RUNNING_BUCKET = 5.0
 # -- 页眉/页脚带: 页高顶部/底部各 6%(调查: AIA 样本与常见财报页边距均在此内).
 HEADER_BAND_SHARE = 0.06
 FOOTER_BAND_SHARE = 0.06
@@ -43,8 +49,6 @@ PARAGRAPH_GAP_FACTOR = 0.9
 LIST_INDENT_TOLERANCE = 4.0
 # -- 单个项目符号不成列表(拿不准就出 Text).
 MIN_LIST_ITEMS = 2
-
-type RunningKey = tuple[str, int]
 
 # 常见项目符号, 含 en/em dash 与连字符(真连字符列表项以 "- " 开头).
 _BULLET_SYMBOLS = "•◦▪●○‣·–—-*"  # noqa: RUF001
@@ -127,7 +131,7 @@ def running_lines(pages: Sequence[tuple[float, Iterable[TextSpan]]]) -> frozense
     for _page_height, spans in pages:
         for key in {line.key for line in text_lines(spans)}:
             counts[key] = counts.get(key, 0) + 1
-    needed = max(MIN_RUNNING_PAGES, -(-len(pages) * 3 // 10))  # ceil(0.3 * pages)
+    needed = max(MIN_RUNNING_PAGES, ceil(RUNNING_SHARE * len(pages)))
     return frozenset(key for key, count in counts.items() if count >= needed)
 
 

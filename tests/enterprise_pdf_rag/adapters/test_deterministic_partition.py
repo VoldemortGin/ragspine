@@ -111,6 +111,8 @@ def authored_report(
     borderless_page: int | None = None,
     separators: bool = False,
     sidebar: bool = False,
+    text_banner: bool = False,
+    text_logo: bool = False,
     embedded_font: bool = False,
 ) -> Path:
     with pdfspine.open() as document:
@@ -125,6 +127,12 @@ def authored_report(
                         ROOT_DIR / "tests/enterprise_pdf_rag/fixtures/authored-donut-ascii.ttf"
                     ).read_bytes(),
                 )
+            if text_banner:
+                # 每页同位同形的色块, 页眉文字压在它上面.
+                page.draw_rect((50, 18, 300, 36), color=None, fill=(0.9, 0.9, 0.6), width=0)
+            if text_logo:
+                # 每页同位的小图片, 页眉文字压在它上面.
+                page.insert_image((50, 18, 300, 36), stream=TINY_JPEG)
             _margins(page, number, fontname)
             if sidebar:
                 page.draw_rect((0, 0, 14, PAGE_H), color=None, fill=(0.1, 0.3, 0.6), width=0)
@@ -334,6 +342,20 @@ def test_separators_and_repeated_sidebar_do_not_trigger_fallback(tmp_path: Path)
     partition = router.partition(_page_input(sources, snapshot, 0))
     assert stub.pages == []
     assert partition.producer.startswith(DETERMINISTIC_PRODUCER_PREFIX)
+
+
+@pytest.mark.parametrize(
+    ("option", "reason"), [("text_banner", "residual_graphics"), ("text_logo", "has_image")]
+)
+def test_a_repeated_graphic_holding_text_is_never_exempt_as_decoration(
+    tmp_path: Path, option: str, reason: str
+) -> None:
+    pdf = authored_report(tmp_path / "report.pdf", **{option: True})
+    sources, snapshot = _snapshot(tmp_path, pdf)
+    stub, router = _router(sources, snapshot)
+    partition = router.partition(_page_input(sources, snapshot, 0))
+    assert stub.pages == [0]
+    assert _fallback_reason(partition) == reason
 
 
 def test_borderless_rows_stay_text_objects_without_a_table(tmp_path: Path) -> None:
