@@ -73,6 +73,18 @@ providers/    providers.py (explicit APP_LLM_* / embedding / APP_RERANK_* enviro
   unset), the same name as SuperIndex's. Only `enterprise_pdf_rag.adapters.pdf_password.open_pdf` reads it;
   it never enters a message, report, trace or the ingestion directory. `as_environment` cannot answer it
   (not `APP_*`), so `webui_preview` hands it to the `document-catalog` API child by name.
+- **`OPENAI_TEMPERATURE` (alias `APP_LLM_TEMPERATURE`) is validated at load** — `llm_temperature` is a raw
+  string; `load_llm_config` turns unset / blank into `0.0`, a number in [0, 2] into itself and `omit` into
+  `LLMConfig.temperature = None` (no field sent), anything else into `ProviderConfigurationError`.
+- **A provider error body is read only for a 400, and only two fields are kept** — `_send_once` reads ≤ 4096
+  bytes, keeps the checked `error.param` / `error.code` (`^[A-Za-z0-9_.\[\]-]{1,64}$`) and drops the rest
+  unretained; the message never reaches a record, exception, log or trace. Other statuses read nothing.
+  `JsonCompletionClient` drops a refused `temperature` / `seed` (`DEGRADABLE_SAMPLING_PARAMETERS`; code
+  `unsupported_value` / `unsupported_parameter`) and resends under the dropped body's own fingerprint;
+  refusals are remembered per (URL, model) in process and on disk (`provider_error_param` on the 400 record,
+  `sampling_parameter_unsupported` skip records), and a pre-ADR param-less 400 record gets one re-probe at
+  `.retry-1.json`. Records stay byte-identical unless a 400 body was examined (`exclude_unset`).
+  [ADR 0021](../../../../docs/enterprise-pdf-rag/adr/0021-sampling-parameter-fallback.md).
 - **Model / tunnel fields are lenient** — all optional strings / `SecretStr`; nothing is validated
   at import. `load_*_config` / `load_tunnel_config` validate (https, loopback, ports) only when that
   group is used, and still accept an injected mapping.

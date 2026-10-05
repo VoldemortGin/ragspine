@@ -314,3 +314,10 @@ depth limit (8 passes, 9 fails) and the old gate's blindness; `tests/common/test
 constraints. Plus the pre-existing
 `tests/common/test_observability_resilience.py` (R6–R9: exactly-one trace, no sensitive value leaks,
 forbidden-key rejection, byte-identical default paths).
+
+**Provider error bodies (evidence chain, [enterprise-pdf-rag ADR 0021](enterprise-pdf-rag/adr/0021-sampling-parameter-fallback.md)).**
+`common/evidence/providers` reads a provider's error body only on HTTP 400, at most 4096 bytes, and keeps only the
+charset- and length-checked `error.param` / `error.code` (stored as `provider_error_param` / `provider_error_code` in
+the model-cache failure record); the provider's message and every other byte are discarded unretained — never in a
+record, an exception, a log, a trace or a report. Every other status, a timeout and a connection failure read no body.
+Pinned by `tests/enterprise_pdf_rag/adapters/test_sampling_fallback.py` (a marker in the message must appear nowhere).

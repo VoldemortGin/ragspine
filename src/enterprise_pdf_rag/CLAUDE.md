@@ -123,14 +123,19 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   opt-in rerank; a missing group is a 503 on its routes, never a mock. Model cache
   `<ingestion_root>/model-cache` — `requests/<fingerprint>.json` the record, `responses/`
   the bodies, `contexts/<fingerprint>.json` the **full request body as sent** (system rules,
-  every message, schema, token budget, and the pinned sampling — it records
+  every message, schema, token budget, and the sampling — by default it records
   `"temperature": 0.0, "seed": 0`; inline images summarized), written before the call and
   back-filled on replay, first write wins. It quotes the evidence verbatim: local files, never
   shared. Live budget `APP_ANSWER_MAX_LIVE_CALLS` (200), per-call wait
   `APP_ANSWER_TIMEOUT_SECONDS` (45, capped at 180 — a page window makes a "summarise this
-  section" prompt long enough to need more), sampling seed `APP_ANSWER_SEED` (0; `temperature`
-  is always `0.0`, a `seed` is sent only when one is configured — the sampling is inside the
-  request body, so changing it misses every cached completion).
+  section" prompt long enough to need more), sampling seed `APP_ANSWER_SEED` (0; a `seed` is
+  sent only when one is configured), temperature `OPENAI_TEMPERATURE` (alias
+  `APP_LLM_TEMPERATURE`; unset → `0.0`, a number in [0, 2], or `omit` to send none) — the
+  sampling is inside the request body, so changing it misses every cached completion. An
+  endpoint that refuses `temperature` / `seed` (HTTP 400 naming it in `error.param`) gets the
+  call again without it, remembered per (endpoint, model) and on disk; a 400 record written
+  before that body was read gets one re-probe ([ADR
+  0021](../../docs/enterprise-pdf-rag/adr/0021-sampling-parameter-fallback.md)).
 - **Answer journal:** every answer writes one row to `<ingestion_root>/answers-audit.sqlite` — the
   final `prompt_system` / `prompt_user` verbatim (opened *before* the call), the fused ranking with
   each channel's seat, then the raw model output, the verified / rejected claims and the status.
