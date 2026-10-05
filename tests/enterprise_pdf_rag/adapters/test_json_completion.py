@@ -715,8 +715,7 @@ def test_calls_and_replays_work_where_hard_links_and_directory_fsync_do_not(
     ) == sorted(
         (
             f"contexts/{fingerprint}.json",
-            f"requests/{fingerprint}.json",
-            f"requests/{fingerprint}.json.claim",
+            f"requests/{fingerprint}.json",  # its claim is released once recorded
             f"responses/{hashlib.sha256(_response()).hexdigest()}.json",
         )
     )

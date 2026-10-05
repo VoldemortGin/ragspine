@@ -1206,10 +1206,12 @@ def test_a_temperature_refusing_endpoint_publishes_and_answers_with_exactly_one_
 
 
 def _strip_to_the_old_record_format(root: Path) -> int:
-    """Rewrite every 400 record as the pre-ADR-0021 client wrote it (no provider_error_* keys)."""
+    """Rewrite every 400 record as the pre-ADR-0021 client wrote it (no provider_error_* keys),
+    with the fingerprint-only claim that client always left beside a record."""
     count = 0
     for path in root.rglob("requests/*.json"):
         record = json.loads(path.read_text())
+        path.with_name(path.name + ".claim").write_text(record["request_fingerprint"])
         diagnostics = record.get("diagnostics") or {}
         if record.get("failure_code") == "provider_http_400":
             diagnostics.pop("provider_error_param", None)
