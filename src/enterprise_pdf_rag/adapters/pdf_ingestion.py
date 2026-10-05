@@ -71,6 +71,10 @@ class IngestionSummary(BoundaryModel):
     text_layer_page_states: dict[str, int]
     ocr_needed_pages: tuple[int, ...]
     live_call_count: int
+    # Model calls not sent because another, possibly still running, attempt holds their claim
+    # (``request_in_progress_or_uncertain``), and claims of dead attempts taken over and resent.
+    calls_claim_blocked: int = 0
+    claims_taken_over: int = 0
     activated: Literal[False] = False
     indexed: Literal[False] = False
     retrieval_status: Literal[
@@ -240,5 +244,7 @@ def ingest_pdf(
             if page.text_layer is not None and page.text_layer.needs_ocr
         ),
         live_call_count=0 if client is None else client.live_call_count,
+        calls_claim_blocked=0 if client is None else client.claim_blocked_count,
+        claims_taken_over=0 if client is None else client.claims_taken_over,
         review_path=str(review),
     )
