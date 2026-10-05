@@ -85,6 +85,15 @@ providers/    providers.py (explicit APP_LLM_* / embedding / APP_RERANK_* enviro
   `sampling_parameter_unsupported` skip records), and a pre-ADR param-less 400 record gets one re-probe at
   `.retry-1.json`. Records stay byte-identical unless a 400 body was examined (`exclude_unset`).
   [ADR 0021](../../../../docs/enterprise-pdf-rag/adr/0021-sampling-parameter-fallback.md).
+- **A model-call claim blocks only while its holder may run** — `requests/<fp>.json.claim` is created
+  `O_EXCL` before transport and holds `{claim: json-completion-claim-v2, host, pid, process token,
+  created_at, lease_seconds = 4·timeout+120}` (never a body); it is deleted once the record is written, and
+  a caller re-checks the record after acquiring a claim (replay, never a second send). A holder that is a
+  gone pid on this host (POSIX only), or past its lease, or a legacy claim (fingerprint / empty) whose mtime
+  is > `LEGACY_CLAIM_LEASE_SECONDS` (900) old, is taken over by `O_EXCL` of `<claim>.takeover-<n+1>` —
+  never `link_new_file` / rename / replace; one live call, record marked `diagnostics.claim_takeover`.
+  `claim_blocked_count` / `claims_taken_over` count both outcomes. Lease clock `_wall_clock` is the test seam.
+  [ADR 00NN](../../../../docs/enterprise-pdf-rag/adr/00NN-claim-takeover.md).
 - **Model / tunnel fields are lenient** — all optional strings / `SecretStr`; nothing is validated
   at import. `load_*_config` / `load_tunnel_config` validate (https, loopback, ports) only when that
   group is used, and still accept an injected mapping.

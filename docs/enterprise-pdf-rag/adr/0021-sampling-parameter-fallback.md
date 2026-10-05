@@ -130,6 +130,9 @@ own.
 - **A `.claim` without a record** (a kernel killed mid-call) still blocks a live call on that
   fingerprint (`request_in_progress_or_uncertain`), as before; once the memory knows a parameter,
   such a call is redirected to the dropped fingerprint without touching the claim.
+  *Amended by [ADR 00NN](00NN-claim-takeover.md):* it blocks only while its holder may still
+  run; a dead or out-of-lease holder's claim is taken over (one live call), and a claim is
+  released once its record is written.
 
 **Budget.** `live_call_count` counts transport attempts, so the refused probe and the resend
 are **two** live calls against `MAX_LIVE_CALLS_PER_PDF` / the shared total. If the budget runs
