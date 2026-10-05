@@ -47,6 +47,7 @@ from ragspine.extraction.evidence.figures.ports import EmbeddingPort
 from ragspine.extraction.evidence.objects.diagrams.diagram_models import DiagramQualification
 from ragspine.extraction.evidence.objects.formulas.formula_models import FormulaQualification
 from ragspine.extraction.evidence.objects.tables.table_models import TableIR
+from ragspine.extraction.evidence.objects.tables.table_rows import TableRowsIR
 from ragspine.extraction.evidence.objects.typed_ir import (
     DiagramIR,
     FormulaIR,
@@ -450,13 +451,17 @@ class ProcessingRetrieval:
 
     def _literal(
         self, scope: ProcessingScope, member: RetrievalMember
-    ) -> tuple[TextIR | ListIR | GroupIR | TableIR, ObjectDescription, LiteralQualification]:
+    ) -> tuple[
+        TextIR | ListIR | GroupIR | TableIR | TableRowsIR,
+        ObjectDescription,
+        LiteralQualification,
+    ]:
         return validate_literal_member(self.sources, self.outputs.assets, scope, member)
 
     def _qualified(
         self, scope: ProcessingScope, member: RetrievalMember
     ) -> tuple[
-        TextIR | ListIR | GroupIR | TableIR | ChartIR | DiagramIR | FormulaIR,
+        TextIR | ListIR | GroupIR | TableIR | TableRowsIR | ChartIR | DiagramIR | FormulaIR,
         ObjectDescription | TextDescription,
         LiteralQualification | FigureQualification | DiagramQualification | FormulaQualification,
     ]:

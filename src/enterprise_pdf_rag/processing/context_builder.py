@@ -19,6 +19,7 @@ from ragspine.extraction.evidence.objects.tables.table_models import (
     TableCell,
     TableIR,
 )
+from ragspine.extraction.evidence.objects.tables.table_rows import TABLE_ROWS_SCOPE, TableRowsIR
 from ragspine.extraction.evidence.objects.typed_ir import (
     DiagramIR,
     FormulaIR,
@@ -57,6 +58,9 @@ class SpanEvidence:
     page_index: int
     bbox: Bounds
     text: str
+    # A printed table row (ADR 00NN) is one citable line made of several spans: the row id is
+    # ``source_span_id`` and these are the page spans it reads, left to right.
+    row_span_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,6 +164,11 @@ class ContextBlock:
     # (a slide of side-by-side charts under their own headings). Empty on every other block.
     regions: tuple[str, ...] = ()
 
+    @property
+    def row_transcription(self) -> bool:
+        """A table region read as verbatim printed rows: no grid, no cells (ADR 00NN)."""
+        return self.kind is BlockKind.TABLE and self.scope == TABLE_ROWS_SCOPE
+
     def prompt_text(self, alias: str | None = None) -> str:
         """Deterministic rendering; every citable path appears verbatim as a line prefix.
 
@@ -201,6 +210,13 @@ class ContextBlock:
                 f"(role={token.role}, script={token.script}, proof={token.proof or 'none'})"
                 for token in self.formula_tokens
             )
+        elif self.row_transcription:
+            lines.append(
+                f"table rows={len(self.spans)} structure=unverified "
+                "(each line is one printed row, cells tab-separated as printed; "
+                "columns and headers are not verified; cite a row as a quote)"
+            )
+            lines.extend(f"fragments.{span.source_span_id}: {span.text}" for span in self.spans)
         elif self.kind is BlockKind.TABLE:
             lines.append(
                 f"table rows={self.row_count} cols={self.col_count} "
@@ -362,6 +378,28 @@ def build_context_block(context: RetrievalContext) -> ContextBlock:
             row_count=ir.row_count,
             col_count=ir.col_count,
             grid_verification=ir.verification,
+        )
+    if isinstance(ir, TableRowsIR):
+        if member.kind is not ObjectKind.TABLE or context.scope != TABLE_ROWS_SCOPE:
+            raise ValueError("Retrieval member kind does not match its typed IR")
+        return ContextBlock(
+            *common,
+            BlockKind.TABLE,
+            member.page_index,
+            context.scope,
+            context.description.verification,
+            context.description.text,
+            spans=tuple(
+                SpanEvidence(
+                    row.row_id,
+                    member.page_index,
+                    row.bbox,
+                    row.text,
+                    row.source_span_ids,
+                )
+                for row in ir.rows
+            ),
+            row_count=len(ir.rows),
         )
     if isinstance(ir, ChartIR):
         if member.kind is not ObjectKind.CHART:

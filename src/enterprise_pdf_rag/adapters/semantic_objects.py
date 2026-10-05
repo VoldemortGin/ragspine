@@ -42,13 +42,28 @@ from ragspine.common.evidence.providers.json_completion import (
     JsonCompletionError,
 )
 from ragspine.extraction.evidence.document.models import AssetRef, TextSidecar
-from ragspine.extraction.evidence.figures.models import ChartIR, TextDescription, Verification
+from ragspine.extraction.evidence.figures.models import (
+    ChartIR,
+    Confidence,
+    SourceAnchor,
+    TextDescription,
+    Verification,
+)
 from ragspine.extraction.evidence.objects.formulas.formula_models import (
     FormulaQualification,
     FormulaSourceObservation,
 )
 from ragspine.extraction.evidence.objects.tables.table_grid_proof import GRID_SCOPE
 from ragspine.extraction.evidence.objects.tables.table_models import TableExtractionResult, TableIR
+from ragspine.extraction.evidence.objects.tables.table_rows import (
+    TABLE_ROWS_METHOD,
+    TABLE_ROWS_PRODUCER,
+    TABLE_ROWS_SCOPE,
+    TableRowsIR,
+    check_table_rows,
+    rows_text,
+    table_rows,
+)
 from ragspine.extraction.evidence.objects.typed_ir import (
     DiagramIR,
     FormulaIR,
@@ -135,8 +150,12 @@ class SemanticObjectAdapter:
         qualification_policy: Literal["none", "source-labels-only", "donut"] = "none",
         description_corrections: tuple[str, ...] = (),
         chart_corrections: tuple[str, ...] = (),
+        unverified_tables_as_rows: bool = False,
     ) -> None:
         self.sources = sources
+        # ADR 00NN: a Table whose grid pdfspine cannot detect is indexed as its verbatim
+        # printed rows instead of being left out. Off keeps every stage byte-identical.
+        self.unverified_tables_as_rows = unverified_tables_as_rows
         self.outputs = outputs
         self.client = client
         self.qualification_policy = qualification_policy
@@ -342,6 +361,8 @@ class SemanticObjectAdapter:
                 ),
             )
         )
+        if result.table is None and self.unverified_tables_as_rows:
+            return self._table_rows(page, item, writer, stages, svg, result)
         if result.table is None:
             stages.extend(
                 (
@@ -402,6 +423,82 @@ class SemanticObjectAdapter:
             (
                 description,
                 writer.save(
+                    "qualification", TypeAdapter(LiteralQualification).dump_json(qualification)
+                ),
+            )
+        )
+        return ObjectProcessingRecord(item.object_id, item.kind, tuple(stages))
+
+    def _table_rows(
+        self,
+        page: PageInput,
+        item: LayoutObject,
+        writer: _Writer,
+        stages: list[StageOutcome],
+        svg: StageOutcome,
+        result: TableExtractionResult,
+    ) -> ObjectProcessingRecord:
+        """No grid was detected: transcribe the region's printed rows verbatim (ADR 00NN).
+
+        The rows are geometry alone — no column, header or merge is claimed — so they
+        qualify under their own scope and producer, never as a table grid. The three stages
+        carry their own producer, so every other stage keeps its bytes and fingerprint.
+        """
+        rows_writer = _Writer(
+            writer.outputs, page, item, writer.producer + ":" + TABLE_ROWS_PRODUCER
+        )
+        owned = set(item.source_span_ids)
+        anchor = SourceAnchor(page.source_sha256, page.source_sha256, page.page_index, item.bbox)
+        try:
+            ir = table_rows(
+                item.object_id,
+                anchor,
+                tuple(span for span in page.text.spans if span.span_id in owned),
+            )
+            check_table_rows(ir, page.text.spans, anchor=item.bbox)
+        except ValueError as error:
+            stages.extend(
+                (
+                    writer.diagnostic("ir", "; ".join(result.diagnostics)),
+                    writer.diagnostic(
+                        "description", "No verbatim row transcription: " + str(error)
+                    ),
+                    writer.diagnostic(
+                        "qualification",
+                        "No grid was detected and the region's rows did not transcribe: "
+                        + str(error),
+                    ),
+                )
+            )
+            return ObjectProcessingRecord(item.object_id, item.kind, tuple(stages))
+        ir_stage = rows_writer.save("ir", TypeAdapter(TableRowsIR).dump_json(ir))
+        description = ObjectDescription(
+            item.object_id,
+            anchor,
+            ir.source_span_ids,
+            rows_text(ir),
+            TABLE_ROWS_PRODUCER,
+            Confidence(None, TABLE_ROWS_METHOD),
+            Verification.VERIFIED,
+        )
+        description_stage = rows_writer.save(
+            "description", TypeAdapter(ObjectDescription).dump_json(description)
+        )
+        qualification = LiteralQualification(
+            item.object_id,
+            anchor,
+            page.source_manifest_id,
+            ir.source_span_ids,
+            _ref(ir_stage),
+            _ref(description_stage),
+            _ref(svg),
+            scope=TABLE_ROWS_SCOPE,
+        )
+        stages.extend(
+            (
+                ir_stage,
+                description_stage,
+                rows_writer.save(
                     "qualification", TypeAdapter(LiteralQualification).dump_json(qualification)
                 ),
             )

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Literal
 
 import pdfspine
-from pydantic import Field, model_validator
+from pydantic import Field, TypeAdapter, model_validator
 
 from enterprise_pdf_rag.adapters.aia_ingestion import export_review
 from enterprise_pdf_rag.adapters.aia_processing import (
@@ -30,7 +30,12 @@ from ragspine.common.evidence.providers.json_completion import JsonCompletionCli
 from ragspine.common.evidence.providers.providers import load_llm_config
 from ragspine.extraction.evidence.document.models import AssetRef, DocumentSnapshot, DocumentSpec
 from ragspine.extraction.evidence.document.service import ingest_document
+from ragspine.extraction.evidence.objects.tables.table_rows import (
+    TABLE_ROWS_PRODUCER,
+    TableRowsIR,
+)
 from ragspine.extraction.evidence.page.models import (
+    ObjectKind,
     ProcessingManifest,
     StageOutcome,
     StageState,
@@ -105,6 +110,10 @@ class IngestionSummary(BoundaryModel):
     # (``request_in_progress_or_uncertain``), and claims of dead attempts taken over and resent.
     calls_claim_blocked: int = 0
     claims_taken_over: int = 0
+    # Table objects with no detected grid transcribed as verbatim printed rows, and their row
+    # count (ADR 00NN, ``unverified_tables_as_rows``); counts only, never text.
+    table_row_transcriptions: int = 0
+    table_row_lines: int = 0
     activated: Literal[False] = False
     indexed: Literal[False] = False
     retrieval_status: Literal[
@@ -193,6 +202,24 @@ def _page_counts(
     return complete, deferred, blocked
 
 
+def _row_tables(outputs: ProcessingStore, manifest: ProcessingManifest) -> tuple[int, ...]:
+    """The row count of every Table qualified as verbatim rows (ADR 00NN)."""
+    counts: list[int] = []
+    for page in manifest.pages:
+        for item in page.objects:
+            stages = {stage.stage: stage for stage in item.stages}
+            ir = stages.get("ir")
+            if (
+                item.kind is ObjectKind.TABLE
+                and ir is not None
+                and ir.artifact is not None
+                and ir.producer.endswith(":" + TABLE_ROWS_PRODUCER)
+            ):
+                rows = TypeAdapter(TableRowsIR).validate_json(outputs.assets.get(ir.artifact))
+                counts.append(len(rows.rows))
+    return tuple(counts)
+
+
 def ingest_pdf(
     *,
     pdf: Path,
@@ -201,6 +228,7 @@ def ingest_pdf(
     stage: IngestionStage = "source",
     max_live_calls: int | Callable[[int], int] = 0,
     progress: Callable[[IngestProgress], None] | None = None,
+    unverified_tables_as_rows: bool = False,
 ) -> IngestionSummary:
     """Save complete PDF sources and selected downstream stages without activation.
 
@@ -210,6 +238,8 @@ def ingest_pdf(
     ``progress`` hears about every finished page of the layout and metadata stages.
     ``max_live_calls`` may instead be a function of the number of selected pages, asked
     once the source stage knows it and before any model call (run-folder's ``"auto"``).
+    ``unverified_tables_as_rows`` indexes a Table with no detected grid as its verbatim
+    printed rows (ADR 00NN); off, every stage is byte-identical to before.
     """
     options = _Options(
         stage=stage, max_live_calls=max_live_calls if isinstance(max_live_calls, int) else 0
@@ -245,7 +275,13 @@ def ingest_pdf(
         sources,
         outputs,
         None if client is None or stage == "metadata" else ModelPagePartitioner(client, sources),
-        SemanticObjectAdapter(sources, outputs, client, qualification_policy="none")
+        SemanticObjectAdapter(
+            sources,
+            outputs,
+            client,
+            qualification_policy="none",
+            unverified_tables_as_rows=unverified_tables_as_rows,
+        )
         if client is not None and stage == "semantics"
         else None,
         normalize_layout=False,
@@ -290,6 +326,7 @@ def ingest_pdf(
         if metadata is None
         else {page.page_index: (page.state, page.diagnostic) for page in metadata.pages},
     )
+    row_tables = _row_tables(outputs, manifest)
     export_review(sources, source)
     review = export_processing_review(
         sources,
@@ -345,5 +382,7 @@ def ingest_pdf(
         pages_claim_blocked=blocked,
         calls_claim_blocked=0 if client is None else client.claim_blocked_count,
         claims_taken_over=0 if client is None else client.claims_taken_over,
+        table_row_transcriptions=len(row_tables),
+        table_row_lines=sum(row_tables),
         review_path=str(review),
     )

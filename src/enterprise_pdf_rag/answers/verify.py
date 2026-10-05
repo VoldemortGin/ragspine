@@ -225,7 +225,7 @@ def _verify_quote(claim: ModelClaim, block: ContextBlock) -> VerifiedClaim | Rej
                 block.kind,
                 span.page_index,
                 claim.field_path,
-                (span.source_span_id,),
+                (span.source_span_id, *span.row_span_ids),
                 span.bbox,
                 span.text,
             ),
@@ -618,9 +618,11 @@ def verify_claims(
                 _reject(claim, AbstainReason.MODEL_OUTPUT_INVALID, "grid relations need a cell")
             )
             continue
-        if block.kind not in _BLOCK_KINDS[kind] or not claim.field_path.startswith(
-            _PATH_PREFIX[kind]
-        ):
+        # A verbatim row table (ADR 00NN) is quoted like text; a gridded table never is.
+        quotable_rows = kind is ClaimKind.QUOTE and block.row_transcription
+        if (
+            block.kind not in _BLOCK_KINDS[kind] and not quotable_rows
+        ) or not claim.field_path.startswith(_PATH_PREFIX[kind]):
             rejected.append(
                 _reject(claim, AbstainReason.MODEL_OUTPUT_INVALID, "claim kind or path mismatch")
             )

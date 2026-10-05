@@ -17,6 +17,14 @@ from ragspine.extraction.evidence.objects.tables.table_grid_proof import (
     check_grid_evidence,
 )
 from ragspine.extraction.evidence.objects.tables.table_models import TableIR
+from ragspine.extraction.evidence.objects.tables.table_rows import (
+    TABLE_ROWS_METHOD,
+    TABLE_ROWS_PRODUCER,
+    TABLE_ROWS_SCOPE,
+    TableRowsIR,
+    check_table_rows,
+    rows_text,
+)
 from ragspine.extraction.evidence.objects.tables.table_transcription import (
     check_table_transcription,
     table_span_ids,
@@ -70,13 +78,21 @@ def validate_literal_member(
     assets: LocalDocumentStore,
     scope: ProcessingScope,
     member: RetrievalMember,
-) -> tuple[TextIR | ListIR | GroupIR | TableIR, ObjectDescription, LiteralQualification]:
+) -> tuple[
+    TextIR | ListIR | GroupIR | TableIR | TableRowsIR, ObjectDescription, LiteralQualification
+]:
     receipt = TypeAdapter(LiteralQualification).validate_json(assets.get(member.qualification))
     description = TypeAdapter(ObjectDescription).validate_json(assets.get(member.description))
-    if description.producer != "exact-source-transcription-v1":
+    # ADR 00NN: a Table with no detected grid may qualify as verbatim printed rows instead.
+    rows = member.kind is ObjectKind.TABLE and receipt.scope == TABLE_ROWS_SCOPE
+    if description.producer != (TABLE_ROWS_PRODUCER if rows else "exact-source-transcription-v1"):
         raise ValueError("Literal qualification requires the exact transcription producer")
-    if description.confidence != Confidence(
-        None, "deterministic source occurrence transcription; no semantic inference"
+    if description.confidence != (
+        Confidence(None, TABLE_ROWS_METHOD)
+        if rows
+        else Confidence(
+            None, "deterministic source occurrence transcription; no semantic inference"
+        )
     ):
         raise ValueError(
             "Literal projection confidence must not imply semantic or financial verification"
@@ -102,7 +118,7 @@ def validate_literal_member(
         member.ir,
         member.description,
         member.source_svg,
-        LITERAL_SCOPE,
+        TABLE_ROWS_SCOPE if rows else LITERAL_SCOPE,
     ):
         raise ValueError("Literal qualification does not bind the exact object dependencies")
     anchor = receipt.source
@@ -131,7 +147,9 @@ def validate_literal_member(
         or any(span_id not in spans for span_id in receipt.source_span_ids)
     ):
         raise ValueError("Literal qualification references unknown source occurrences")
-    if description.text != "\n".join(spans[span_id].text for span_id in receipt.source_span_ids):
+    if not rows and description.text != "\n".join(
+        spans[span_id].text for span_id in receipt.source_span_ids
+    ):
         raise ValueError("Qualified text is not an exact source transcription")
     for span_id in receipt.source_span_ids:
         if not contains(anchor.bbox, spans[span_id].bbox):
@@ -146,6 +164,20 @@ def validate_literal_member(
     if assets.get(member.source_svg) != expected_crop:
         raise ValueError("Literal SVG crop does not derive from the pinned source page and anchor")
     payload = assets.get(member.ir)
+    if rows:
+        table_rows = TypeAdapter(TableRowsIR).validate_json(payload)
+        if (
+            table_rows.object_id != member.object_id
+            or table_rows.source != anchor
+            or table_rows.source_span_ids != receipt.source_span_ids
+            or receipt.grid_scope is not None
+            or receipt.ruling_digest is not None
+        ):
+            raise ValueError("Table rows IR does not match the row qualification")
+        check_table_rows(table_rows, text.spans, anchor=anchor.bbox)
+        if description.text != rows_text(table_rows):
+            raise ValueError("Qualified rows are not an exact source transcription")
+        return table_rows, description, receipt
     if member.kind is ObjectKind.TABLE:
         table = TypeAdapter(TableIR).validate_json(payload)
         if (
