@@ -335,11 +335,17 @@ class JsonCompletionClient:
         self._retry_failed = retry_failed
         self._lock = Lock()
         self._dropped: set[str] = set()
+        self._cache_hits = 0
 
     @property
     def live_call_count(self) -> int:
         """Transport attempts issued by this client, excluding all cache reads."""
         return self._initial_budget - self._remaining
+
+    @property
+    def cache_hit_count(self) -> int:
+        """Calls of this client answered from the model cache, without transport."""
+        return self._cache_hits
 
     @property
     def dropped_parameters(self) -> tuple[str, ...]:
@@ -520,6 +526,8 @@ class JsonCompletionClient:
                 self._dropped.add(refused.parameter)
                 _UNSUPPORTED.add(key, refused.parameter)
                 continue
+            if result.cache_hit:
+                self._cache_hits += 1
             return replace(result, dropped_parameters=tuple(dropped))
 
     def _complete[T: BaseModel](

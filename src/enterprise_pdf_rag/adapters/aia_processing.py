@@ -1,5 +1,6 @@
 """Selected-page processing uses saved source assets, never the old focus region."""
 
+from collections.abc import Callable
 from hashlib import sha256
 
 from pydantic import TypeAdapter
@@ -52,8 +53,13 @@ class ProcessingPipeline:
         self.producer = producer
 
     def run(
-        self, source_manifest_id: str, *, selected_page_indices: tuple[int, ...]
+        self,
+        source_manifest_id: str,
+        *,
+        selected_page_indices: tuple[int, ...],
+        on_page: Callable[[int, int], None] | None = None,
     ) -> tuple[str, ProcessingManifest]:
+        """Process every selected page; ``on_page(done, total)`` follows each finished page."""
         source = self.sources.load(source_manifest_id)
         scope = ProcessingScope(
             source_manifest_id,
@@ -88,6 +94,8 @@ class ProcessingPipeline:
                     page_index, canonical, partition_stage, records, raw_partition_stage
                 )
             )
+            if on_page is not None:
+                on_page(len(pages), len(scope.selected_page_indices))
         manifest = ProcessingManifest("processing-v1", scope, self.producer, tuple(pages))
         save = self.outputs.publish if self.activate else self.outputs.save_draft
         return save(manifest, sources=self.sources), manifest

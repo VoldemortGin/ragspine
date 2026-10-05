@@ -9,6 +9,7 @@ page's fingerprint like every other stage. No budget → ``deferred``, never ski
 
 import json
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Annotated
@@ -223,12 +224,14 @@ def annotate_page_metadata(
     *,
     processing_id: str,
     client: JsonCompletionClient | None,
+    on_page: Callable[[int, int], None] | None = None,
 ) -> PageMetadataSummary:
     """Add the page metadata stage to every page of a draft and save a new, un-indexed draft.
 
     Cached outcomes replay without a call; ``client=None`` or an exhausted budget marks
     the page ``deferred`` with a diagnostic. The document summary is recomputed
-    deterministically from the succeeded pages. No pointer moves.
+    deterministically from the succeeded pages. No pointer moves. ``on_page(done, total)``
+    follows each finished page.
     """
     manifest = outputs.load(processing_id)
     extractor = None if client is None else PageMetadataExtractor(client)
@@ -261,6 +264,8 @@ def annotate_page_metadata(
                 dropped=() if metadata is None else metadata.diagnostics,
             )
         )
+        if on_page is not None:
+            on_page(len(records), len(manifest.pages))
     document = summarize_document(tuple(pages))
     annotated = replace(manifest, pages=tuple(records), retrieval=None, document_metadata=document)
     annotated_id = outputs.save_draft(annotated, sources=sources)

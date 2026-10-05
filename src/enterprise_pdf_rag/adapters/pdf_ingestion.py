@@ -2,6 +2,8 @@
 
 import re
 from collections import Counter
+from collections.abc import Callable
+from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
 from typing import Literal
@@ -28,16 +30,38 @@ from ragspine.common.evidence.providers.json_completion import JsonCompletionCli
 from ragspine.common.evidence.providers.providers import load_llm_config
 from ragspine.extraction.evidence.document.models import AssetRef, DocumentSnapshot, DocumentSpec
 from ragspine.extraction.evidence.document.service import ingest_document
-from ragspine.extraction.evidence.page.models import StageOutcome, StageState
+from ragspine.extraction.evidence.page.models import (
+    ProcessingManifest,
+    StageOutcome,
+    StageState,
+)
 
 type IngestionStage = Literal["source", "layout", "semantics", "metadata"]
 # Stages that add the page metadata stage after the page pipeline (same budget and cache).
 _METADATA_STAGES = frozenset({"semantics", "metadata"})
+# The per-PDF live-call ceiling. A safety rail against a typo, not a cost model: a page costs
+# one layout call, one metadata call and two per chart-like object, so a several-hundred-page
+# report needs far more than the 200 this used to be (docs/enterprise-pdf-rag/adr/0022).
+MAX_INGEST_LIVE_CALLS = 10_000
+# The model-call outcomes a page can be left with without having been processed.
+_BUDGET_CODE = "call_budget_exhausted"
+_CLAIM_CODE = "request_in_progress_or_uncertain"
+
+
+@dataclass(frozen=True, slots=True)
+class IngestProgress:
+    """One page finished in an ingest stage; counts and identifiers only, never content."""
+
+    stage: Literal["layout", "metadata"]
+    pages_done: int
+    pages_total: int
+    live_calls: int
+    cache_hits: int
 
 
 class _Options(BoundaryModel):
     stage: IngestionStage
-    max_live_calls: int = Field(ge=0, le=200)
+    max_live_calls: int = Field(ge=0, le=MAX_INGEST_LIVE_CALLS)
 
     @model_validator(mode="after")
     def source_has_no_live_budget(self) -> "_Options":
@@ -71,6 +95,12 @@ class IngestionSummary(BoundaryModel):
     text_layer_page_states: dict[str, int]
     ocr_needed_pages: tuple[int, ...]
     live_call_count: int
+    # Selected pages whose layout, page metadata and object stages all finished; pages left
+    # deferred because the call budget ran out; pages whose model call is still claimed by
+    # another (possibly dead) process. Zero in a report written before they existed.
+    pages_complete: int = 0
+    pages_budget_deferred: int = 0
+    pages_claim_blocked: int = 0
     activated: Literal[False] = False
     indexed: Literal[False] = False
     retrieval_status: Literal[
@@ -133,6 +163,32 @@ def _source(
     return sources.load(manifest_id), selected, False
 
 
+def _page_counts(
+    manifest: ProcessingManifest, metadata: dict[int, tuple[StageState, str | None]]
+) -> tuple[int, int, int]:
+    """(complete, budget-deferred, claim-blocked) selected pages of one ingest."""
+    complete = deferred = blocked = 0
+    for page in manifest.pages:
+        outcomes = [
+            (outcome.state, outcome.diagnostic)
+            for outcome in (page.partition, *(s for item in page.objects for s in item.stages))
+        ]
+        if page.page_index in metadata:
+            outcomes.append(metadata[page.page_index])
+        diagnostics = " ".join(diagnostic or "" for _, diagnostic in outcomes)
+        if _CLAIM_CODE in diagnostics:
+            blocked += 1
+        elif _BUDGET_CODE in diagnostics or any(
+            state is StageState.DEFERRED for state, _ in outcomes
+        ):
+            deferred += 1
+        elif page.partition.state is StageState.SUCCEEDED and all(
+            state is not StageState.FAILED for state, _ in outcomes
+        ):
+            complete += 1
+    return complete, deferred, blocked
+
+
 def ingest_pdf(
     *,
     pdf: Path,
@@ -140,12 +196,14 @@ def ingest_pdf(
     output_dir: Path | None = None,
     stage: IngestionStage = "source",
     max_live_calls: int = 0,
+    progress: Callable[[IngestProgress], None] | None = None,
 ) -> IngestionSummary:
     """Save complete PDF sources and selected downstream stages without activation.
 
     Model stages require explicit provider configuration. Their one shared budget
     covers layout, both semantic branches and page metadata; zero permits existing
     cache only. ``metadata`` runs page metadata over the source stage alone.
+    ``progress`` hears about every finished page of the layout and metadata stages.
     """
     options = _Options(stage=stage, max_live_calls=max_live_calls)
     if not pdf.is_file():
@@ -183,13 +241,44 @@ def ingest_pdf(
         activate=False,
         producer="generic-pdf-processing-v1",
     )
-    processing_id, manifest = pipeline.run(source.manifest_id, selected_page_indices=selected)
+
+    def reporter(name: Literal["layout", "metadata"]) -> Callable[[int, int], None] | None:
+        if progress is None:
+            return None
+
+        def report(done: int, total: int) -> None:
+            assert progress is not None
+            progress(
+                IngestProgress(
+                    name,
+                    done,
+                    total,
+                    0 if client is None else client.live_call_count,
+                    0 if client is None else client.cache_hit_count,
+                )
+            )
+
+        return report
+
+    processing_id, manifest = pipeline.run(
+        source.manifest_id, selected_page_indices=selected, on_page=reporter("layout")
+    )
     metadata = None
     if stage in _METADATA_STAGES:
         metadata = annotate_page_metadata(
-            sources, outputs, processing_id=processing_id, client=client
+            sources,
+            outputs,
+            processing_id=processing_id,
+            client=client,
+            on_page=reporter("metadata"),
         )
         processing_id = metadata.annotated_processing_id
+    complete, deferred, blocked = _page_counts(
+        manifest,
+        {}
+        if metadata is None
+        else {page.page_index: (page.state, page.diagnostic) for page in metadata.pages},
+    )
     export_review(sources, source)
     review = export_processing_review(
         sources,
@@ -240,5 +329,8 @@ def ingest_pdf(
             if page.text_layer is not None and page.text_layer.needs_ocr
         ),
         live_call_count=0 if client is None else client.live_call_count,
+        pages_complete=complete,
+        pages_budget_deferred=deferred,
+        pages_claim_blocked=blocked,
         review_path=str(review),
     )
