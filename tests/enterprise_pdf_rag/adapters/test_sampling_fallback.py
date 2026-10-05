@@ -144,7 +144,7 @@ def _client(
     cache: Path, *, budget: int = 10, seed: int | None = None, **config: object
 ) -> JsonCompletionClient:
     return JsonCompletionClient(
-        _config(**config), cache_dir=cache, max_live_calls=budget, seed=seed
+        _config().model_copy(update=config), cache_dir=cache, max_live_calls=budget, seed=seed
     )
 
 
