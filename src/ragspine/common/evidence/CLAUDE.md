@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/common/evidence/
-verified-against: 2a5a780
+verified-against: c236a62
 ---
 
 # common/evidence — agent contract
@@ -83,7 +83,8 @@ providers/    providers.py (explicit APP_LLM_* / embedding / APP_RERANK_* enviro
   `unsupported_value` / `unsupported_parameter`) and resends under the dropped body's own fingerprint;
   refusals are remembered per (URL, model) in process and on disk (`provider_error_param` on the 400 record,
   `sampling_parameter_unsupported` skip records), and a pre-ADR param-less 400 record gets one re-probe at
-  `.retry-1.json`. Records stay byte-identical unless a 400 body was examined (`exclude_unset`).
+  `.retry-1.json`. `cache_hit_count` counts the calls a client answered from the model cache (the
+  run-folder `document_progress` event reports it; enterprise-pdf-rag ADR 0022). Records stay byte-identical unless a 400 body was examined (`exclude_unset`).
   [ADR 0021](../../../../docs/enterprise-pdf-rag/adr/0021-sampling-parameter-fallback.md).
 - **Model / tunnel fields are lenient** — all optional strings / `SecretStr`; nothing is validated
   at import. `load_*_config` / `load_tunnel_config` validate (https, loopback, ports) only when that
