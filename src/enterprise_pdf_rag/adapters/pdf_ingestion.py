@@ -195,7 +195,7 @@ def ingest_pdf(
     pages: str = "all",
     output_dir: Path | None = None,
     stage: IngestionStage = "source",
-    max_live_calls: int = 0,
+    max_live_calls: int | Callable[[int], int] = 0,
     progress: Callable[[IngestProgress], None] | None = None,
 ) -> IngestionSummary:
     """Save complete PDF sources and selected downstream stages without activation.
@@ -204,8 +204,12 @@ def ingest_pdf(
     covers layout, both semantic branches and page metadata; zero permits existing
     cache only. ``metadata`` runs page metadata over the source stage alone.
     ``progress`` hears about every finished page of the layout and metadata stages.
+    ``max_live_calls`` may instead be a function of the number of selected pages, asked
+    once the source stage knows it and before any model call (run-folder's ``"auto"``).
     """
-    options = _Options(stage=stage, max_live_calls=max_live_calls)
+    options = _Options(
+        stage=stage, max_live_calls=max_live_calls if isinstance(max_live_calls, int) else 0
+    )
     if not pdf.is_file():
         raise ValueError("--pdf must name an existing PDF file")
     data = pdf.read_bytes()
@@ -219,17 +223,20 @@ def ingest_pdf(
     document_root = parent / sha256(data).hexdigest()
     sources = LocalDocumentStore(document_root / "source", activate_on_publish=False)
     outputs = ProcessingStore(document_root / "processing")
+    config = None if stage == "source" else load_llm_config()
+    source, selected, cached = _source(sources, pdf=data, filename=pdf.name, pages=pages)
+    if config is not None and not isinstance(max_live_calls, int):
+        options = _Options(stage=stage, max_live_calls=max_live_calls(len(selected)))
     client = (
         None
-        if stage == "source"
+        if config is None
         else JsonCompletionClient(
-            load_llm_config(),
+            config,
             cache_dir=outputs.root / "model-cache",
             max_live_calls=options.max_live_calls,
             timeout=180.0,
         )
     )
-    source, selected, cached = _source(sources, pdf=data, filename=pdf.name, pages=pages)
     pipeline = ProcessingPipeline(
         sources,
         outputs,

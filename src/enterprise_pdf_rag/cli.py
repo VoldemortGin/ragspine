@@ -75,6 +75,11 @@ class _ServerOptions(BaseModel):
     port: int = Field(ge=1, le=65535)
 
 
+def _per_pdf_budget(value: str) -> int | str:
+    """``run-folder --max-live-calls-per-pdf``: an integer, or ``auto`` (ADR 0022)."""
+    return value if value == "auto" else int(value)
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="enterprise-pdf-rag")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -183,9 +188,10 @@ def _parser() -> argparse.ArgumentParser:
     )
     run_folder.add_argument(
         "--max-live-calls-per-pdf",
-        type=int,
+        type=_per_pdf_budget,
         required=True,
-        help="Explicit ingest model-call budget per PDF (0-10000); 0 replays the cache only",
+        help="Explicit ingest model-call budget per PDF (0-10000; 0 replays the cache only), or "
+        "auto: pages x 4 + 50 per PDF, capped at 10000",
     )
     run_folder.add_argument(
         "--max-live-calls-total",

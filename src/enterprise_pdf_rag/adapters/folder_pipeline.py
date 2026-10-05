@@ -126,6 +126,11 @@ _CHAT_PATH = "/v1/chat/completions"
 # Tree and answer budgets keep their old ceiling; the per-PDF ingest one is
 # ``MAX_INGEST_LIVE_CALLS`` (ADR 0022).
 _MAX_LIVE_CALLS = 200
+# ``max_live_calls_per_pdf="auto"``: pages * per page + base, capped at the ceiling. A page costs
+# one layout and one page-metadata call and every chart / image / diagram / formula object two
+# more, so 4 per page leaves room for one chart-like object per page on average (ADR 0022).
+AUTO_CALLS_PER_PAGE: Final = 4
+AUTO_CALLS_BASE: Final = 50
 # ``document_progress``: at most one line per this many pages, or per this many seconds.
 _PROGRESS_PAGES = 10
 _PROGRESS_SECONDS = 30.0
@@ -298,6 +303,19 @@ def discover_pdfs(folder: Path) -> tuple[Path, ...]:
 def _check_budget(name: str, value: int | None, ceiling: int = _MAX_LIVE_CALLS) -> None:
     if value is not None and not 0 <= value <= ceiling:
         raise ValueError(f"{name} must be within 0..{ceiling}")
+
+
+def auto_live_call_budget(pages: int) -> int:
+    """The ``"auto"`` per-PDF ingest ceiling for this many selected pages."""
+    return min(MAX_INGEST_LIVE_CALLS, pages * AUTO_CALLS_PER_PAGE + AUTO_CALLS_BASE)
+
+
+def _check_per_pdf(value: int | str) -> None:
+    if isinstance(value, str):
+        if value != "auto":
+            raise ValueError('max_live_calls_per_pdf must be an integer or "auto"')
+        return
+    _check_budget("max_live_calls_per_pdf", value, MAX_INGEST_LIVE_CALLS)
 
 
 def _check_total(value: int | None) -> None:
@@ -563,7 +581,7 @@ def _emit(progress: Progress | None, event: str, **payload: object) -> None:
 
 
 def _page_reporter(
-    progress: Progress | None, pdf: Path, budget: int
+    progress: Progress | None, pdf: Path, budget: Callable[[], int]
 ) -> Callable[[IngestProgress], None] | None:
     """``document_progress`` for ingest pages: each stage's first and last page, and in
     between at most one event per ``_PROGRESS_PAGES`` pages or ``_PROGRESS_SECONDS``."""
@@ -589,7 +607,7 @@ def _page_reporter(
             pages_done=update.pages_done,
             pages_total=update.pages_total,
             live_calls=update.live_calls,
-            budget=budget,
+            budget=budget(),
             cache_hits=update.cache_hits,
         )
 
@@ -602,7 +620,7 @@ def _run_document(
     *,
     root: Path,
     pages: str,
-    per_pdf: int,
+    per_pdf: int | Literal["auto"],
     budget: _Budget,
     requalify: bool,
     build_tree: bool,
@@ -613,17 +631,23 @@ def _run_document(
 ) -> tuple[DocumentRun, int]:
     """One PDF through every stage; returns the run and its tree's live calls."""
     started = perf_counter()
-    allotted = budget.allot(per_pdf)
-    cut = allotted < per_pdf
-    run: dict[str, Any] = {
-        "pdf_path": str(pdf),
-        "sha256": digest,
-        "live_call_budget": allotted,
-    }
+    run: dict[str, Any] = {"pdf_path": str(pdf), "sha256": digest, "live_call_budget": 0}
+    allotment: dict[str, Any] = {"started": False, "cut": False}
     tree_calls = 0
     stage: PipelineStage = "ingest"
 
+    def allot(wanted: int) -> int:
+        """Grant this document's ingest budget from the shared total and announce it."""
+        granted = budget.allot(wanted)
+        allotment.update(started=True, cut=granted < wanted)
+        run["live_call_budget"] = granted
+        _emit(progress, "document_start", pdf=str(pdf), sha256=digest, budget=granted)
+        return granted
+
     def finish(status: DocumentStatus) -> tuple[DocumentRun, int]:
+        if not allotment["started"]:
+            # "auto" fails before the page count is known: no budget was ever granted.
+            _emit(progress, "document_start", pdf=str(pdf), sha256=digest, budget=0)
         done = DocumentRun(status=status, elapsed_s=round(perf_counter() - started, 3), **run)
         # A recorded failure travels with the event, so a progress line shows its reason.
         reason: dict[str, object] = {
@@ -644,15 +668,21 @@ def _run_document(
         _emit(progress, "document_progress", pdf=str(pdf), stage=name)
         return name
 
-    _emit(progress, "document_start", pdf=str(pdf), sha256=digest, budget=allotted)
+    # "auto": granted once the source stage knows how many pages are selected, before any
+    # model call; an integer is granted up front, as before.
+    limit: int | Callable[[int], int] = (
+        (lambda selected: allot(auto_live_call_budget(selected)))
+        if per_pdf == "auto"
+        else allot(per_pdf)
+    )
     try:
         ingestion = ingest_pdf(
             pdf=pdf,
             pages=pages,
             output_dir=root,
             stage="semantics",
-            max_live_calls=allotted,
-            progress=_page_reporter(progress, pdf, allotted),
+            max_live_calls=limit,
+            progress=_page_reporter(progress, pdf, lambda: int(run["live_call_budget"])),
         )
         budget.spend(ingestion.live_call_count)
         run.update(ingestion=ingestion, live_calls=ingestion.live_call_count)
@@ -660,7 +690,7 @@ def _run_document(
         processing_store = Path(ingestion.processing_store)
         sources = LocalDocumentStore(source_store, activate_on_publish=False)
         outputs = ProcessingStore(processing_store)
-        if cut and _starved(outputs, ingestion.processing_id):
+        if allotment["cut"] and _starved(outputs, ingestion.processing_id):
             return finish("budget_starved")
         draft_id = ingestion.processing_id
         if requalify:
@@ -1116,7 +1146,7 @@ def run_folder_pipeline(
     questions: Path | None = None,
     ingestion_root: Path | None = None,
     pages: str = "all",
-    max_live_calls_per_pdf: int,
+    max_live_calls_per_pdf: int | Literal["auto"],
     max_live_calls_total: int | None = None,
     requalify: bool = True,
     build_tree: bool = True,
@@ -1156,13 +1186,18 @@ def run_folder_pipeline(
     ``QuestionDocsError`` before any work (``on_unmatched_docs="error"``) or is left out of
     the selection and answered as ``routing_failed`` with the reason (``"skip"``).
 
+    ``max_live_calls_per_pdf="auto"`` gives each PDF ``auto_live_call_budget(selected pages)``
+    = pages * ``AUTO_CALLS_PER_PAGE`` + ``AUTO_CALLS_BASE``, capped at ``MAX_INGEST_LIVE_CALLS``,
+    computed from the page count the source stage reads anyway (no extra open) and still
+    bounded by ``max_live_calls_total``.
+
     Raises ``ValueError`` for an invalid budget, ``FileNotFoundError`` for a missing folder or
     question set and ``PreflightError`` for a missing or unreachable dependency, all before
     any ingest or model call. An injected ``embedder`` / ``reranker`` / ``answer_llm`` skips
     its own check. A failing document is recorded and the rest continue unless
     ``continue_on_error`` is false, when its ``ValueError`` / ``OSError`` propagates.
     """
-    _check_budget("max_live_calls_per_pdf", max_live_calls_per_pdf, MAX_INGEST_LIVE_CALLS)
+    _check_per_pdf(max_live_calls_per_pdf)
     _check_budget("tree_max_live_calls", tree_max_live_calls)
     _check_budget("answer_max_live_calls", answer_max_live_calls)
     _check_total(max_live_calls_total)
