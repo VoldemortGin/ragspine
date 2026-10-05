@@ -642,6 +642,10 @@ What was the Group's ROE in 1H26?
 
 `APP_VERIFY_EVERY_REQUEST=1`（`Settings.verify_every_request`）关掉上述全部复用，回到"每个请求重做挂载期全量校验"，供审计核对；真实文档上会慢一个数量级。`chart_context` / `displayed_context` 不在复用范围内：它们每次都重建 native/cropped SVG、原始分支与证明，这是有意为之。离线用例在 `tests/enterprise_pdf_rag/adapters/test_document_catalog.py`（热挂载第二次请求零资产读、审计开关每次重读、清单被改写下一次请求即拒并让已缓存证据失效、同字节重写照常挂载、同一 publication 每进程只解析一次）。
 
+### 入库期：每个存储实例只全量校验一次
+
+入库链路同理（[ADR 00NN](adr/00NN-source-verification-cache.md)）：`LocalDocumentStore` 记住本实例自己读回并核过摘要的对象与已完整校验的源清单，只为校验而做的遍历（`load` / `verify` / `publish` / 对已存在对象的 `put` / `ProcessingStore.save_draft` 与 `load` 的资产遍历）跳过本实例已核过的；真正被读取使用的字节（`get` / `read_content`、每次 `ProcessingStore.load` 的清单对象）每次都重读重算。每个阶段、每次 scan、每次 mount 都新建实例，所以"确认磁盘此刻的字节"每阶段保留一次，而不是每对象一次；表格 / 公式 / 图表证明在 `shared_pdfs()` 作用域内共用一次读取、一次打开（解密）的源 PDF。读文件次数从 O(页数 × 对象数) 降到 O(页数 + 对象数)，产物字节、指纹与内容 id 不变。`APP_VERIFY_EVERY_REQUEST=1` 同时关掉这层缓存（`verify_every_load`）。离线用例在 `tests/enterprise_pdf_rag/adapters/test_source_verification_cache.py`（同一实例第二次 load 零读、新实例拒绝被改动的对象、关闭开关逐次校验、发布与挂载各自拒绝运行中被改动的页面、页 1 的读取次数与总页数无关、公式证明每次发布只打开一次 PDF、内容 id 与改动前一致）。
+
 ### 离线可测 vs 需真实模型
 
 离线（默认门，零网络）：`tests/enterprise_pdf_rag/adapters/test_document_catalog.py`、`test_documents_http.py`、`test_hybrid_search.py`、`test_chat_http.py`、`test_page_metadata_extraction.py`、`test_chat_metadata_http.py`（页级元数据阶段、v4 索引头、过滤与路由；脚本化的文本模型回复来自 prompt 自己的 span）、`test_answer_audit.py`（问答审计库：建表 / 前置写入 / 完成更新 / 抛错路径回填 / 写库坏掉不改变回答 / 开关关闭不建文件），`tests/enterprise_pdf_rag/answers/`（store 桥 `store_mounted_document.py` + 脚本化 LLM `fake_llm.py`，`test_query_filters.py` / `test_member_filter.py`），`processing/test_periods.py`、`processing/test_page_metadata.py`，`processing/test_context_builder.py`、`processing/test_table_transcription.py`，以及 e2e / draft publication / pdf ingestion 里新增的程序化表格页用例。它们用程序化 PDF、`OfflineDescriptionEmbedder` 和脚本化模型输出，证明契约、状态码、恰好一次模型调用、逐字段校验与拒答策略。

@@ -321,3 +321,14 @@ charset- and length-checked `error.param` / `error.code` (stored as `provider_er
 the model-cache failure record); the provider's message and every other byte are discarded unretained — never in a
 record, an exception, a log, a trace or a report. Every other status, a timeout and a connection failure read no body.
 Pinned by `tests/enterprise_pdf_rag/adapters/test_sampling_fallback.py` (a marker in the message must appear nowhere).
+
+**Tampered evidence is refused (evidence chain, [enterprise-pdf-rag ADR 00NN](enterprise-pdf-rag/adr/00NN-source-verification-cache.md)).**
+Content-addressed objects are verified by digest, but no longer on *every* call: a
+`LocalDocumentStore` instance skips re-verifying a digest it has itself read back and hashed, and
+returns a source snapshot it has fully verified without touching the disk. Bytes a caller consumes
+(`get`, `read_content`, the processing manifest object on every `ProcessingStore.load`) are always
+re-read and re-hashed, and every pipeline stage, catalog scan entry and mount opens a new instance,
+so each re-checks the disk once; `APP_VERIFY_EVERY_REQUEST=1` (or `verify_every_load=True`)
+restores verify-on-every-call. A byte changed after an instance verified it, and that the instance
+only re-verifies without consuming, is caught by the next consuming read or the next stage, not by
+that instance. Pinned by `tests/enterprise_pdf_rag/adapters/test_source_verification_cache.py`.
