@@ -336,6 +336,7 @@ def test_index_uses_document_label_for_review_title(tmp_path: Path) -> None:
         embedder=RecordingEmbedding(),
         document_label="Quarterly Filing",
     )
+    assert result.review_path is not None
     review = Path(result.review_path)
     assert review.is_file()
     assert "Quarterly Filing" in review.read_text(encoding="utf-8")
@@ -630,6 +631,7 @@ def test_relative_stores_resolve_to_absolute_paths(
         processing_id=processing_id,
         embedder=RecordingEmbedding(),
     )
+    assert indexed.review_path is not None
     review = Path(indexed.review_path)
     assert review.is_absolute()
     assert review == (

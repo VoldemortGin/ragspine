@@ -18,8 +18,11 @@ from enterprise_pdf_rag.adapters.aia_processing import (
 )
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.http.schemas import BoundaryModel
-from enterprise_pdf_rag.adapters.page_metadata_extraction import annotate_page_metadata
-from enterprise_pdf_rag.adapters.page_partition import ModelPagePartitioner
+from enterprise_pdf_rag.adapters.ingest_mode import IngestMode, ingest_plan, make_partitioner
+from enterprise_pdf_rag.adapters.page_metadata_extraction import (
+    PageMetadataSummary,
+    annotate_page_metadata,
+)
 from enterprise_pdf_rag.adapters.pdf_password import open_pdf
 from enterprise_pdf_rag.adapters.pdfspine_document import PdfspineDocumentAdapter
 from enterprise_pdf_rag.adapters.processing_export import export_processing_review
@@ -105,12 +108,17 @@ class IngestionSummary(BoundaryModel):
     # (``request_in_progress_or_uncertain``), and claims of dead attempts taken over and resent.
     calls_claim_blocked: int = 0
     claims_taken_over: int = 0
+    # ADR 0025: the mode this ingest ran in and the model calls it left unsent by mode (by
+    # category, ``ingest_mode.SKIPPED_CALL_KINDS``).
+    ingest_mode: IngestMode = "full"
+    skipped_calls: dict[str, int] = Field(default_factory=dict)
     activated: Literal[False] = False
     indexed: Literal[False] = False
     retrieval_status: Literal[
         "not_ready; qualification, indexing and publication require a separate workflow"
     ] = "not_ready; qualification, indexing and publication require a separate workflow"
-    review_path: str
+    # None when the mode writes no review pages (lite); ``export_document_review`` writes them.
+    review_path: str | None
 
 
 def _selected_pages(pages: str, page_count: int) -> tuple[int, ...]:
@@ -201,6 +209,7 @@ def ingest_pdf(
     stage: IngestionStage = "source",
     max_live_calls: int | Callable[[int], int] = 0,
     progress: Callable[[IngestProgress], None] | None = None,
+    ingest_mode: IngestMode = "full",
 ) -> IngestionSummary:
     """Save complete PDF sources and selected downstream stages without activation.
 
@@ -210,7 +219,9 @@ def ingest_pdf(
     ``progress`` hears about every finished page of the layout and metadata stages.
     ``max_live_calls`` may instead be a function of the number of selected pages, asked
     once the source stage knows it and before any model call (run-folder's ``"auto"``).
+    ``ingest_mode`` picks the calls the semantic stages send (ADR 0025, ``ingest_mode.py``).
     """
+    plan = ingest_plan(ingest_mode)
     options = _Options(
         stage=stage, max_live_calls=max_live_calls if isinstance(max_live_calls, int) else 0
     )
@@ -241,13 +252,16 @@ def ingest_pdf(
             timeout=180.0,
         )
     )
+    objects = (
+        SemanticObjectAdapter(sources, outputs, client, qualification_policy="none", plan=plan)
+        if client is not None and stage == "semantics"
+        else None
+    )
     pipeline = ProcessingPipeline(
         sources,
         outputs,
-        None if client is None or stage == "metadata" else ModelPagePartitioner(client, sources),
-        SemanticObjectAdapter(sources, outputs, client, qualification_policy="none")
-        if client is not None and stage == "semantics"
-        else None,
+        None if client is None or stage == "metadata" else make_partitioner(plan, client, sources),
+        objects,
         normalize_layout=False,
         activate=False,
         producer="generic-pdf-processing-v1",
@@ -282,6 +296,7 @@ def ingest_pdf(
             processing_id=processing_id,
             client=client,
             on_page=reporter("metadata"),
+            deterministic=plan.page_metadata == "deterministic",
         )
         processing_id = metadata.annotated_processing_id
     complete, deferred, blocked = _page_counts(
@@ -290,13 +305,10 @@ def ingest_pdf(
         if metadata is None
         else {page.page_index: (page.state, page.diagnostic) for page in metadata.pages},
     )
-    export_review(sources, source)
-    review = export_processing_review(
-        sources,
-        outputs,
-        processing_id,
-        update_current=False,
-        title=f"PDF 处理审阅: {pdf.name}",
+    review = (
+        _export_review(sources, outputs, source, processing_id, title=f"PDF 处理审阅: {pdf.name}")
+        if plan.review_exports
+        else None
     )
     return IngestionSummary(
         source_sha256=source.manifest.source.sha256,
@@ -345,5 +357,56 @@ def ingest_pdf(
         pages_claim_blocked=blocked,
         calls_claim_blocked=0 if client is None else client.claim_blocked_count,
         claims_taken_over=0 if client is None else client.claims_taken_over,
-        review_path=str(review),
+        ingest_mode=plan.mode,
+        skipped_calls=_skipped_calls(objects, metadata),
+        review_path=None if review is None else str(review),
+    )
+
+
+def _skipped_calls(
+    objects: SemanticObjectAdapter | None, metadata: PageMetadataSummary | None
+) -> dict[str, int]:
+    """Model calls this ingest left unsent by its mode, by category; empty in full mode."""
+    counts = Counter[str]() if objects is None else Counter(objects.skipped_calls)
+    if metadata is not None and metadata.deterministic_pages:
+        counts["page_metadata"] += metadata.deterministic_pages
+    return dict(sorted(counts.items()))
+
+
+def _export_review(
+    sources: LocalDocumentStore,
+    outputs: ProcessingStore,
+    source: DocumentSnapshot,
+    processing_id: str,
+    *,
+    title: str,
+) -> Path:
+    export_review(sources, source)
+    return export_processing_review(
+        sources, outputs, processing_id, update_current=False, title=title
+    )
+
+
+def export_document_review(document_root: Path, processing_id: str | None = None) -> Path:
+    """Write one ingested document's review pages on demand; returns the processing review.
+
+    ``document_root`` is ``<ingestion root>/<source sha256>``. ``processing_id`` defaults to
+    the published snapshot (``current-processing``), else the newest draft is not guessed:
+    a document never published needs an explicit id. No model or network call; the pages
+    are exactly what a full-mode ingest writes on every run.
+    """
+    sources = LocalDocumentStore(document_root / "source", activate_on_publish=False)
+    outputs = ProcessingStore(document_root / "processing")
+    if processing_id is None:
+        if not (outputs.root / "current-processing").is_file():
+            raise ValueError("document has no published snapshot; pass processing_id")
+        processing_id = outputs.load_current()[0]
+    manifest = outputs.load(processing_id)
+    source = sources.load(manifest.scope.source_manifest_id)
+    return _export_review(
+        sources,
+        outputs,
+        source,
+        processing_id,
+        title=f"PDF 处理审阅: {source.manifest.filename}",
     )

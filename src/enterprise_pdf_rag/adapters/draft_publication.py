@@ -91,7 +91,8 @@ class DraftIndex(BoundaryModel):
     indexed: Literal[True] = True
     activated: Literal[False] = False
     retrieval_status: Literal["indexed; publication pending"] = "indexed; publication pending"
-    review_path: str
+    # None when the caller asked for no review page (lite ingest mode, ADR 0025).
+    review_path: str | None
 
 
 def index_draft(
@@ -101,6 +102,7 @@ def index_draft(
     processing_id: str,
     embedder: EmbeddingPort,
     document_label: str | None = None,
+    review: bool = True,
 ) -> DraftIndex:
     """Embed a saved draft's eligible index texts into a new immutable snapshot.
 
@@ -108,7 +110,7 @@ def index_draft(
     contextual header plus the description or chart projection) ever reaches it. A
     fresh snapshot is saved without moving any discovery pointer, so the draft stays
     unactivated. Missing artifacts or mixed dimensions raise
-    ValueError from the shared build, failing closed.
+    ValueError from the shared build, failing closed. ``review=False`` writes no review page.
     """
     sources = LocalDocumentStore(Path(source_store).resolve())
     outputs = ProcessingStore(Path(processing_store).resolve())
@@ -119,18 +121,20 @@ def index_draft(
     )
     indexed_id = outputs.save_draft(replace(manifest, retrieval=publication), sources=sources)
     plan, _ = outputs.load_retrieval(publication)
-    label = (
-        document_label
-        if document_label is not None
-        else sources.load(manifest.scope.source_manifest_id).manifest.filename
-    )
-    review = export_processing_review(
-        sources,
-        outputs,
-        indexed_id,
-        update_current=False,
-        title=f"{label} · 检索索引审阅",
-    )
+    written: Path | None = None
+    if review:
+        label = (
+            document_label
+            if document_label is not None
+            else sources.load(manifest.scope.source_manifest_id).manifest.filename
+        )
+        written = export_processing_review(
+            sources,
+            outputs,
+            indexed_id,
+            update_current=False,
+            title=f"{label} · 检索索引审阅",
+        )
     return DraftIndex(
         source_sha256=manifest.scope.source_sha256,
         source_manifest_id=manifest.scope.source_manifest_id,
@@ -142,7 +146,7 @@ def index_draft(
             sorted({member.embedding_dimensions for member in plan.members})
         ),
         embedding_fingerprint=embedder.fingerprint,
-        review_path=str(review),
+        review_path=None if written is None else str(written),
     )
 
 

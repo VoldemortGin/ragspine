@@ -298,7 +298,7 @@ def _blank(window: Sequence[SvgElement]) -> TextField:
     return TextField("", Evidence(_ids(window), Verification.VERIFIED, _CONFIDENCE_POINTS))
 
 
-def _label_fields(chart: ChartIR) -> Iterator[tuple[str, TextField]]:
+def label_fields(chart: ChartIR) -> Iterator[tuple[str, TextField]]:
     """Every ChartIR field that is printed prose, in a fixed order. Never a value or a unit."""
     if chart.title is not None:
         yield "title", chart.title
@@ -342,7 +342,7 @@ def _match_label_fields(
 ) -> tuple[dict[str, tuple[SvgElement, ...]], list[str]]:
     matched: dict[str, tuple[SvgElement, ...]] = {}
     excluded: list[str] = []
-    for path, field in _label_fields(chart):
+    for path, field in label_fields(chart):
         try:
             matched[path] = _verbatim(svg, field.text, field.evidence)
         except FigureError as error:
@@ -483,7 +483,7 @@ def _project_labels(
             continue
         if not project(origin, window):
             from_claims.append(f"{origin}:duplicate_label_occurrence")
-    for path, _ in _label_fields(chart):
+    for path, _ in label_fields(chart):
         printed = matched.get(path)
         if printed is not None and not project(path, printed):
             from_fields.append(f"{path}:duplicate_label_occurrence")

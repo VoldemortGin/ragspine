@@ -301,6 +301,7 @@ def test_public_api_accepts_pages_beyond_twenty_and_saves_full_source(
     assert canonical.text[0].text == "Operations page 22"
     assert not (sources.root / "current-manifest").exists()
     assert not (outputs.root / "current-processing").exists()
+    assert result.review_path is not None
     review = Path(result.review_path).read_text()
     assert "operations.pdf" in review
     assert "前 20 页" not in review

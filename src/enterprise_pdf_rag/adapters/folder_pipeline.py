@@ -48,6 +48,12 @@ from enterprise_pdf_rag.adapters.draft_publication import (
 from enterprise_pdf_rag.adapters.http.documents import create_documents_app
 from enterprise_pdf_rag.adapters.http.schemas import BoundaryModel
 from enterprise_pdf_rag.adapters.hybrid_search import LocalRerankJudge
+from enterprise_pdf_rag.adapters.ingest_mode import (
+    IngestMode,
+    IngestPlan,
+    ingest_plan,
+    published_ingest_mode,
+)
 from enterprise_pdf_rag.adapters.nl_gold import NlGoldCase, NlGoldSet, answer_prose, load_gold
 from enterprise_pdf_rag.adapters.nl_gold_runner import ENVELOPE_KEY, ChatPost, run_case
 from enterprise_pdf_rag.adapters.pdf_ingestion import (
@@ -204,6 +210,11 @@ class DocumentRun(BoundaryModel):
     live_call_budget: int = 0
     live_calls: int = 0
     elapsed_s: float = 0.0
+    # ADR 0025: the mode this run ingested in, and the mode of the snapshot the document's
+    # ``current-processing`` names once the run is over (a failed run leaves the previous
+    # release, possibly of the other mode, published; None when nothing is published).
+    ingest_mode: IngestMode = "full"
+    published_ingest_mode: IngestMode | None = None
 
 
 class EvalCase(BoundaryModel):
@@ -257,6 +268,8 @@ class FolderPipelineResult(BoundaryModel):
     # Which PDF each reference of the asked questions names, and which questions were asked
     # (``question_selection``); None without a question set (ADR 0022).
     question_docs: QuestionDocsCheck | None = None
+    # The ingest mode of this run (ADR 0025).
+    ingest_mode: IngestMode = "full"
 
     @property
     def ok(self) -> bool:
@@ -614,11 +627,20 @@ def _page_reporter(
     return report
 
 
+def _current_mode(processing_store: Path) -> IngestMode | None:
+    """The ingest mode of the snapshot ``current-processing`` names, or None without one."""
+    outputs = ProcessingStore(processing_store)
+    if not (outputs.root / "current-processing").is_file():
+        return None
+    return published_ingest_mode(outputs.load_current()[1])
+
+
 def _run_document(
     pdf: Path,
     digest: str,
     *,
     root: Path,
+    plan: IngestPlan,
     pages: str,
     per_pdf: int | Literal["auto"],
     budget: _Budget,
@@ -631,7 +653,12 @@ def _run_document(
 ) -> tuple[DocumentRun, int]:
     """One PDF through every stage; returns the run and its tree's live calls."""
     started = perf_counter()
-    run: dict[str, Any] = {"pdf_path": str(pdf), "sha256": digest, "live_call_budget": 0}
+    run: dict[str, Any] = {
+        "pdf_path": str(pdf),
+        "sha256": digest,
+        "live_call_budget": 0,
+        "ingest_mode": plan.mode,
+    }
     allotment: dict[str, Any] = {"started": False, "cut": False}
     tree_calls = 0
     stage: PipelineStage = "ingest"
@@ -641,19 +668,35 @@ def _run_document(
         granted = budget.allot(wanted)
         allotment.update(started=True, cut=granted < wanted)
         run["live_call_budget"] = granted
-        _emit(progress, "document_start", pdf=str(pdf), sha256=digest, budget=granted)
+        _emit(
+            progress,
+            "document_start",
+            pdf=str(pdf),
+            sha256=digest,
+            budget=granted,
+            ingest_mode=plan.mode,
+        )
         return granted
 
     def finish(status: DocumentStatus) -> tuple[DocumentRun, int]:
         if not allotment["started"]:
             # "auto" fails before the page count is known: no budget was ever granted.
-            _emit(progress, "document_start", pdf=str(pdf), sha256=digest, budget=0)
+            _emit(
+                progress,
+                "document_start",
+                pdf=str(pdf),
+                sha256=digest,
+                budget=0,
+                ingest_mode=plan.mode,
+            )
+        ingested: IngestionSummary | None = run.get("ingestion")
+        if ingested is not None:
+            run["published_ingest_mode"] = _current_mode(Path(ingested.processing_store))
         done = DocumentRun(status=status, elapsed_s=round(perf_counter() - started, 3), **run)
         # A recorded failure travels with the event, so a progress line shows its reason.
         reason: dict[str, object] = {
             key: run[key] for key in ("failed_stage", "error") if key in run
         }
-        ingested: IngestionSummary | None = run.get("ingestion")
         if ingested is not None:
             # A partly ingested document is still ``published``; these say how partly.
             reason.update(
@@ -683,6 +726,7 @@ def _run_document(
             stage="semantics",
             max_live_calls=limit,
             progress=_page_reporter(progress, pdf, lambda: int(run["live_call_budget"])),
+            ingest_mode=plan.mode,
         )
         budget.spend(ingestion.live_call_count)
         run.update(ingestion=ingestion, live_calls=ingestion.live_call_count)
@@ -718,6 +762,7 @@ def _run_document(
                 processing_store=processing_store,
                 processing_id=draft_id,
                 embedder=embedder,
+                review=plan.review_exports,
             )
             run["index"] = indexed
             indexed_id = indexed.indexed_processing_id
@@ -1091,6 +1136,7 @@ def _markdown(result: FolderPipelineResult) -> str:
         f"- folder: `{result.folder}`",
         f"- ingestion root: `{result.ingestion_root}`",
         f"- ok: **{result.ok}**; budget exhausted: {result.budget_exhausted}",
+        f"- ingest mode: **{result.ingest_mode}**",
         f"- live calls: ingest {result.live_calls.ingest}, tree {result.live_calls.tree}, "
         f"answer {result.live_calls.answer}, total {result.live_calls.total}",
         *(
@@ -1103,8 +1149,9 @@ def _markdown(result: FolderPipelineResult) -> str:
         ),
         *_question_docs_lines(result.question_docs),
         "",
-        "| pdf | sha256 | status | stage | pages | eligible | index reused | live calls | s | error |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| pdf | sha256 | status | stage | pages | eligible | index reused | live calls | s "
+        "| mode | published mode | error |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for item in result.documents:
         eligible = "-" if item.qualification is None else item.qualification.eligible_member_count
@@ -1117,8 +1164,26 @@ def _markdown(result: FolderPipelineResult) -> str:
         lines.append(
             f"| `{Path(item.pdf_path).name}` | `{(item.sha256 or '-')[:12]}` | {item.status} | "
             f"{item.failed_stage or '-'} | {pages} | {eligible} | {item.index_reused} | "
-            f"{item.live_calls} | {item.elapsed_s:.1f} | {error} |"
+            f"{item.live_calls} | {item.elapsed_s:.1f} | {item.ingest_mode} | "
+            f"{item.published_ingest_mode or '-'} | {error} |"
         )
+    skipped = [
+        (Path(item.pdf_path).name, item.ingestion)
+        for item in result.documents
+        if item.ingestion is not None and item.ingestion.skipped_calls
+    ]
+    if skipped:
+        lines += ["", "Model calls left unsent by the ingest mode (ADR 0025):", ""]
+        lines += [
+            f"- `{name}`: "
+            + (
+                ", ".join(
+                    f"{kind} {count}" for kind, count in sorted(ingested.skipped_calls.items())
+                )
+                or "none"
+            )
+            for name, ingested in skipped
+        ]
     if result.eval is not None:
         lines += [
             "",
@@ -1149,9 +1214,10 @@ def run_folder_pipeline(
     max_live_calls_per_pdf: int | Literal["auto"],
     max_live_calls_total: int | None = None,
     requalify: bool = True,
-    build_tree: bool = True,
+    build_tree: bool | None = None,
     tree_max_live_calls: int = 50,
     answer_max_live_calls: int | None = None,
+    ingest_mode: IngestMode = "full",
     max_questions: int | None = None,
     question_selection: QuestionSelectionMode = "first",
     only_question_docs: bool = False,
@@ -1191,6 +1257,12 @@ def run_folder_pipeline(
     computed from the page count the source stage reads anyway (no extra open) and still
     bounded by ``max_live_calls_total``.
 
+    ``ingest_mode`` (ADR 0025): ``"full"`` sends every model call, exactly as before;
+    ``"lite"`` sends only the page layout, a chart's IR and a diagram's two branches, derives
+    page metadata and chart descriptions deterministically and writes no review pages
+    (``ingest_mode.IngestPlan``). ``build_tree=None``
+    follows the mode (full builds the tree, lite does not); an explicit bool wins.
+
     Raises ``ValueError`` for an invalid budget, ``FileNotFoundError`` for a missing folder or
     question set and ``PreflightError`` for a missing or unreachable dependency, all before
     any ingest or model call. An injected ``embedder`` / ``reranker`` / ``answer_llm`` skips
@@ -1202,6 +1274,8 @@ def run_folder_pipeline(
     _check_budget("answer_max_live_calls", answer_max_live_calls)
     _check_total(max_live_calls_total)
     _check_max_questions(max_questions)
+    plan = ingest_plan(ingest_mode)
+    tree = plan.build_tree if build_tree is None else build_tree
     settings = get_settings()
     if folder is None:
         folder = settings.pdf_source_dir
@@ -1266,7 +1340,7 @@ def run_folder_pipeline(
     root = root.expanduser().resolve()
     budget = _Budget(max_live_calls_total)
 
-    _emit(progress, "discovered", folder=str(folder), count=len(pdfs))
+    _emit(progress, "discovered", folder=str(folder), count=len(pdfs), ingest_mode=plan.mode)
 
     documents: list[DocumentRun] = []
     first: dict[str, str] = {}
@@ -1296,11 +1370,12 @@ def run_folder_pipeline(
             pdf,
             digest,
             root=root,
+            plan=plan,
             pages=pages,
             per_pdf=max_live_calls_per_pdf,
             budget=budget,
             requalify=requalify,
-            build_tree=build_tree,
+            build_tree=tree,
             tree_max_live_calls=tree_max_live_calls,
             embedder=embedder,
             continue_on_error=continue_on_error,
@@ -1398,6 +1473,7 @@ def run_folder_pipeline(
         report_dir=None if report_dir is None else str(report_dir.expanduser().resolve()),
         sampling_parameters_dropped=tuple(sorted(dropped)),
         question_docs=check,
+        ingest_mode=plan.mode,
     )
     if report_dir is not None:
         target = report_dir.expanduser().resolve()
