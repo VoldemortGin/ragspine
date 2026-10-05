@@ -1,6 +1,6 @@
 ---
 covers: src/enterprise_pdf_rag/
-verified-against: 62f430f
+verified-against: ffadc5d
 ---
 
 # enterprise_pdf_rag — agent contract
@@ -99,7 +99,8 @@ adapters/     every SDK and I/O: pdfspine (every source PDF opens through pdf_pa
               `MAX_INGEST_LIVE_CALLS` = 10 000, or `max_live_calls_per_pdf="auto"` (notebook default):
               min(ceiling, selected pages × 4 + 50) from the page count the source stage reads,
               no extra PDF open, still bounded by the shared total; `IngestionSummary.pages_complete` /
-              `pages_budget_deferred` / `pages_claim_blocked` and `document_done.pages="X/Y"` show a
+              `pages_budget_deferred` / `pages_claim_blocked` (and the call-level `calls_claim_blocked` /
+              `claims_taken_over`, ADR 0023) and `document_done.pages="X/Y"` show a
               partly ingested `published` document; `document_progress` reports pages / calls /
               cache hits, counts only;
               a failed document's `document_done` progress event carries failed_stage / error;
