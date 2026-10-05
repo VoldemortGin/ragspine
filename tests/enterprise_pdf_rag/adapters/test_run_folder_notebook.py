@@ -765,3 +765,17 @@ def test_question_docs_cell_stops_on_a_miss_when_every_question_is_asked(tmp_pat
         tmp_path / "skip", QUESTION_SELECTION="first", ON_UNMATCHED_DOCS="skip"
     )
     assert skipped is None
+
+
+def test_the_notebook_ingests_in_lite_mode_by_default_and_the_mode_chooses_the_tree() -> None:
+    config = _code_cell("config")
+    assert re.search(r'^INGEST_MODE\s*=\s*"lite"', config, re.MULTILINE)
+    assert re.search(r"^BUILD_TREE\s*=\s*None\b", config, re.MULTILINE)
+    assert '"full"' in config  # the comment says how to switch back
+    run = _code_cell("run")
+    assert "ingest_mode=INGEST_MODE" in run and "build_tree=BUILD_TREE" in run
+    results = _code_cell("results")
+    for shown in ('"mode"', "published_ingest_mode", '"skipped_calls"', "skipped_calls"):
+        assert shown in results
+    intro = _source(next(cell for cell in _notebook()["cells"] if cell["id"] == "intro"))
+    assert "INGEST_MODE" in intro and "export_document_review" in intro
