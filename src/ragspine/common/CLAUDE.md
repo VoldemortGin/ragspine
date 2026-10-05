@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/common/
-verified-against: 6ae3f64
+verified-against: 2a5a780
 ---
 
 # common — agent contract
@@ -44,7 +44,9 @@ fence. Call sites use `parse_llm_json`: the original `json.loads(text.strip())` 
 `NaN` / `Infinity` included), and `extract_json` only on failure — replies that parsed before behave exactly as
 before. Used by `agent/decompose`, `agent/query_transform` (RAG-Fusion) and `graph/extractor`.
 
-`evidence/` — the evidence chain's APP_* settings (LLM trio prefers OPENAI_*, APP_LLM_* are aliases; embedding shares that gateway via OPENAI_EMBEDDING_MODEL unless APP_EMBEDDING_BASE_URL names a loopback service; plus NB_* notebook paths, `NB_QUESTIONS_PATH` also reading `DATASET_PATH`), lineage logging and model access
+`evidence/` — the evidence chain's APP_* settings (LLM trio prefers OPENAI_*, APP_LLM_* are aliases; embedding shares that gateway via OPENAI_EMBEDDING_MODEL unless APP_EMBEDDING_BASE_URL names a loopback service; plus NB_* notebook paths, `NB_QUESTIONS_PATH` also reading `DATASET_PATH`; `OPENAI_TEMPERATURE` = unset 0.0 / a number / `omit`), lineage logging and model access
+(a 400's `error.param` / `error.code` only, never its message; a refused `temperature` / `seed` is dropped and the call resent,
+enterprise-pdf-rag ADR 0021)
 (ADR 0022); its own contract is [`evidence/CLAUDE.md`](evidence/CLAUDE.md).
 
 ## Invariants

@@ -1,6 +1,6 @@
 ---
 covers: src/enterprise_pdf_rag/
-verified-against: 13000f8
+verified-against: c8cf14c
 ---
 
 # enterprise_pdf_rag — agent contract
@@ -87,7 +87,10 @@ adapters/     every SDK and I/O: pdfspine (every source PDF opens through pdf_pa
               `question` / `expected` / `answer`; the answer prose never enters a trace or event;
               `max_questions=N` answers only the first N questions (notebook `MAX_QUESTIONS = 10`),
               never limits ingestion, and the CLI does not expose it);
-              a failed document's `document_done` progress event carries failed_stage / error),
+              a failed document's `document_done` progress event carries failed_stage / error;
+              `FolderPipelineResult.sampling_parameters_dropped`, a `report.md` line and a
+              `sampling_parameters_dropped` event name the sampling parameters the LLM endpoint
+              refused, ADR 0021),
               answer_llm.py (`make_answer_llm()`: the answer `JsonCompletionClient` built from
               settings, what `run_folder_pipeline` and `notebooks/run_folder.ipynb` call)
 resources/    packaged prompts / static data
