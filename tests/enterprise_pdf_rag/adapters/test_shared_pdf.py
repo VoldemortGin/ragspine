@@ -1,6 +1,6 @@
 """Within a ``shared_pdfs()`` scope a source PDF is read and opened once for every proof.
 
-ADR 00NN (source verification cache): table, formula and chart proofs each re-observe the pinned
+ADR 0024 (source verification cache): table, formula and chart proofs each re-observe the pinned
 PDF; inside a scope they share one verified read and one opened (decrypted) document, closed when
 the scope ends. Outside a scope every proof opens and closes its own, exactly as before.
 """

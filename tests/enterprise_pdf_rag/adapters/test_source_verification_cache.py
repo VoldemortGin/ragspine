@@ -1,6 +1,6 @@
 """A store verifies a content-addressed snapshot once per instance; tampering is still refused.
 
-ADR 00NN (source verification cache): verification-only sweeps skip what the same store
+ADR 0024 (source verification cache): verification-only sweeps skip what the same store
 instance already read back and hashed, so the reads of one ingestion run grow with pages plus
 objects instead of pages times objects. Bytes a caller consumes are always re-read and hashed,
 a new instance (every stage, scan and mount opens its own) verifies everything again, and

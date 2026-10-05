@@ -199,7 +199,7 @@ How the backend adapts ([ADR 0020](adr/0020-storage-without-hard-links.md)):
 Performance on Workspace files: every file operation (open, read, write, fsync, rename, stat)
 is a round trip, so the pipeline's cost is roughly its number of file operations times that
 latency, almost independent of how many bytes move. Before [ADR
-00NN](adr/00NN-source-verification-cache.md) the stores re-read and re-hashed the whole source
+0024](adr/0024-source-verification-cache.md) the stores re-read and re-hashed the whole source
 snapshot (the PDF plus every page's SVG and text) once per indexable object in several stages,
 so file operations grew with pages × objects. One reported run on a few-hundred-page encrypted
 report was still ingesting after eight hours. Now each store instance verifies a snapshot once,

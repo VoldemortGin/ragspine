@@ -330,7 +330,7 @@ the model-cache failure record); the provider's message and every other byte are
 record, an exception, a log, a trace or a report. Every other status, a timeout and a connection failure read no body.
 Pinned by `tests/enterprise_pdf_rag/adapters/test_sampling_fallback.py` (a marker in the message must appear nowhere).
 
-**Tampered evidence is refused (evidence chain, [enterprise-pdf-rag ADR 00NN](enterprise-pdf-rag/adr/00NN-source-verification-cache.md)).**
+**Tampered evidence is refused (evidence chain, [enterprise-pdf-rag ADR 0024](enterprise-pdf-rag/adr/0024-source-verification-cache.md)).**
 Content-addressed objects are verified by digest, but no longer on *every* call: a
 `LocalDocumentStore` instance skips re-verifying a digest it has itself read back and hashed, and
 returns a source snapshot it has fully verified without touching the disk. Bytes a caller consumes

@@ -1,8 +1,6 @@
-# ADR 00NN: A store instance verifies a content-addressed snapshot once
+# ADR 0024: A store instance verifies a content-addressed snapshot once
 
-Status: Proposed (draft), 2026-10-05. The number is a placeholder: the next free number was
-0022 when this was written, and a parallel branch may take it; the file name and every
-"ADR 00NN" reference are renamed together at integration. Amends the read path of the local
+Status: Accepted, 2026-10-05. Amends the read path of the local
 stores behind [ADR 0001](0001-architecture.md) (content-addressed immutable snapshots) and
 [ADR 0010](0010-generic-pdf-ingestion-entry.md) (the ingestion directory), and complements
 [ADR 0020](0020-storage-without-hard-links.md) (stores without hard links). It changes **no

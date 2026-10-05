@@ -1,6 +1,6 @@
 """Local content-addressed assets and immutable manifests; not a production CAS release service.
 
-Verification cache (ADR 00NN, source verification cache): a store instance remembers which
+Verification cache (ADR 0024, source verification cache): a store instance remembers which
 digests it has itself read back and hashed, and which source manifests it has fully verified.
 A sweep whose only purpose is to verify (``verify``, ``load``, ``publish``, ``put`` of an object
 already on disk) skips what this instance already verified; bytes a caller consumes (``get``,

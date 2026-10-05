@@ -649,7 +649,7 @@ What was the Group's ROE in 1H26?
 
 ### 入库期：每个存储实例只全量校验一次
 
-入库链路同理（[ADR 00NN](adr/00NN-source-verification-cache.md)）：`LocalDocumentStore` 记住本实例自己读回并核过摘要的对象与已完整校验的源清单，只为校验而做的遍历（`load` / `verify` / `publish` / 对已存在对象的 `put` / `ProcessingStore.save_draft` 与 `load` 的资产遍历）跳过本实例已核过的；真正被读取使用的字节（`get` / `read_content`、每次 `ProcessingStore.load` 的清单对象）每次都重读重算。每个阶段、每次 scan、每次 mount 都新建实例，所以"确认磁盘此刻的字节"每阶段保留一次，而不是每对象一次；表格 / 公式 / 图表证明在 `shared_pdfs()` 作用域内共用一次读取、一次打开（解密）的源 PDF。读文件次数从 O(页数 × 对象数) 降到 O(页数 + 对象数)，产物字节、指纹与内容 id 不变。`APP_VERIFY_EVERY_REQUEST=1` 同时关掉这层缓存（`verify_every_load`）。离线用例在 `tests/enterprise_pdf_rag/adapters/test_source_verification_cache.py`（同一实例第二次 load 零读、新实例拒绝被改动的对象、关闭开关逐次校验、发布与挂载各自拒绝运行中被改动的页面、页 1 的读取次数与总页数无关、公式证明每次发布只打开一次 PDF、内容 id 与改动前一致）。
+入库链路同理（[ADR 0024](adr/0024-source-verification-cache.md)）：`LocalDocumentStore` 记住本实例自己读回并核过摘要的对象与已完整校验的源清单，只为校验而做的遍历（`load` / `verify` / `publish` / 对已存在对象的 `put` / `ProcessingStore.save_draft` 与 `load` 的资产遍历）跳过本实例已核过的；真正被读取使用的字节（`get` / `read_content`、每次 `ProcessingStore.load` 的清单对象）每次都重读重算。每个阶段、每次 scan、每次 mount 都新建实例，所以"确认磁盘此刻的字节"每阶段保留一次，而不是每对象一次；表格 / 公式 / 图表证明在 `shared_pdfs()` 作用域内共用一次读取、一次打开（解密）的源 PDF。读文件次数从 O(页数 × 对象数) 降到 O(页数 + 对象数)，产物字节、指纹与内容 id 不变。`APP_VERIFY_EVERY_REQUEST=1` 同时关掉这层缓存（`verify_every_load`）。离线用例在 `tests/enterprise_pdf_rag/adapters/test_source_verification_cache.py`（同一实例第二次 load 零读、新实例拒绝被改动的对象、关闭开关逐次校验、发布与挂载各自拒绝运行中被改动的页面、页 1 的读取次数与总页数无关、公式证明每次发布只打开一次 PDF、内容 id 与改动前一致）。
 
 ### 离线可测 vs 需真实模型
 
