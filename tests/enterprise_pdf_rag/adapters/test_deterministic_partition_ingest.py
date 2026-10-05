@@ -194,3 +194,29 @@ def test_an_invalid_strategy_is_rejected_before_any_work(tmp_path: Path) -> None
             output_dir=tmp_path / "output",
             layout_policy="deterministic",  # type: ignore[arg-type]
         )
+
+
+def test_the_report_names_the_layout_and_each_pdfs_partition_counts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _model_env(monkeypatch)
+    folder = tmp_path / "pdfs"
+    folder.mkdir()
+    authored_report(folder / "mixed.pdf", page_count=4, bars_page=2, embedded_font=True)
+    result = run_folder_pipeline(
+        folder,
+        ingestion_root=tmp_path / "ingestion",
+        max_live_calls_per_pdf=20,
+        build_tree=False,
+        embedder=OfflineDescriptionEmbedder(),
+        ingest_mode="lite",
+        layout_policy="deterministic-text-pages",
+        report_dir=tmp_path / "report",
+    )
+    assert result.layout_policy == "deterministic-text-pages"
+    report = (tmp_path / "report" / "report.md").read_text(encoding="utf-8")
+    assert "- layout: **deterministic-text-pages**" in report
+    assert "- `mixed.pdf`: deterministic 3, model fallback 1 (residual_graphics 1)" in report
+    (document,) = result.documents
+    assert document.index is not None
+    assert f"embedding requests {document.index.embedding_requests}" in report

@@ -154,8 +154,16 @@ network round trip (a Git folder should also stay under ~20 000 files), so
 chart and the two diagram calls; page metadata and chart descriptions are derived without a
 model, images and formulas send no call, no tree, no review pages. On the synthetic sample this
 halves both the model calls (24 → 10) and the files written (843 → 406). Set
-`INGEST_MODE = "full"` for the previous behaviour; both modes share one `data/ingestion` (a full
-rerun after lite sends only the calls lite skipped). Review pages for one document on demand:
+Lite also indexes a table with no detected grid as its verbatim printed rows
+([ADR 0027](adr/0027-unverified-tables-as-verbatim-rows.md)), so unruled statements are answerable.
+In lite the notebook's `LAYOUT_POLICY = "deterministic-text-pages"` (default) partitions pages
+without figures or images from the PDF's own text blocks with no layout call, falling back to
+the model per page ([ADR 0028](adr/0028-deterministic-text-page-partition.md); **not yet validated
+on long financial reports** — the line under the status table shows, per PDF, the pages done
+without a model, the fallback pages and their reason codes; set `"model"` to go back). Index
+embeddings are sent in batches ([ADR 0026](adr/0026-batched-embeddings.md)). Set
+`INGEST_MODE = "full"` for the previous behaviour (it ignores `LAYOUT_POLICY`); both modes share
+one `data/ingestion` (a full rerun after lite sends only the calls lite skipped). Review pages for one document on demand:
 `export_document_review(<ingestion root>/<sha256>)` from `enterprise_pdf_rag.adapters.pdf_ingestion`.
 
 ## Data directory on workspace files or a Unity Catalog volume

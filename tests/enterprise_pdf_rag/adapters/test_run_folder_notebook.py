@@ -779,3 +779,37 @@ def test_the_notebook_ingests_in_lite_mode_by_default_and_the_mode_chooses_the_t
         assert shown in results
     intro = _source(next(cell for cell in _notebook()["cells"] if cell["id"] == "intro"))
     assert "INGEST_MODE" in intro and "export_document_review" in intro
+
+
+def test_the_layout_policy_is_one_line_deterministic_by_default_and_full_keeps_the_model() -> None:
+    config = _code_cell("config")
+    assert re.search(r'^LAYOUT_POLICY\s*=\s*"deterministic-text-pages"', config, re.MULTILINE)
+    # The comment says what it does, that long reports are unverified and how to go back.
+    assert '"model"' in config and "尚未在长篇财报上验证" in config
+    # Full ignores it (full stays byte for byte) and says so instead of ignoring it silently.
+    assert re.search(
+        r'^EFFECTIVE_LAYOUT\s*=\s*LAYOUT_POLICY if INGEST_MODE == "lite" else "model"',
+        config,
+        re.MULTILINE,
+    )
+    assert "忽略 LAYOUT_POLICY" in config
+    run = _code_cell("run")
+    assert "layout_policy=EFFECTIVE_LAYOUT" in run
+    intro = _source(next(cell for cell in _notebook()["cells"] if cell["id"] == "intro"))
+    assert "LAYOUT_POLICY" in intro and "尚未在长篇财报上验证" in intro
+
+
+def test_the_status_shows_partition_row_table_and_embedding_counts_per_pdf() -> None:
+    results = _code_cell("results")
+    for shown in (
+        "pages_partitioned_deterministically",
+        "pages_partition_model_fallback",
+        "partition_fallback_reasons",
+        "table_row_transcriptions",
+        "table_row_lines",
+        "embedding_requests",
+        "embedded_objects",
+    ):
+        assert shown in results, shown
+    assert "确定性处理" in results and "回退模型" in results
+    assert "按行收录" in results and "embedding 请求" in results

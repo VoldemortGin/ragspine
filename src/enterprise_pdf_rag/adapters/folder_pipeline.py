@@ -269,8 +269,9 @@ class FolderPipelineResult(BoundaryModel):
     # Which PDF each reference of the asked questions names, and which questions were asked
     # (``question_selection``); None without a question set (ADR 0022).
     question_docs: QuestionDocsCheck | None = None
-    # The ingest mode of this run (ADR 0025).
+    # The ingest mode of this run (ADR 0025) and the page layout it used (ADR 0028).
     ingest_mode: IngestMode = "full"
+    layout_policy: LayoutPolicy = "model"
 
     @property
     def ok(self) -> bool:
@@ -1132,6 +1133,47 @@ def _question_docs_lines(check: QuestionDocsCheck | None) -> list[str]:
     return lines
 
 
+def _ingest_count_lines(result: FolderPipelineResult) -> list[str]:
+    """Per PDF: deterministic / fallback layout pages (ADR 0028), row tables (ADR 0027), embeds."""
+    partition: list[str] = []
+    rows: list[str] = []
+    embeds: list[str] = []
+    for item in result.documents:
+        name = Path(item.pdf_path).name
+        ingested = item.ingestion
+        if ingested is not None and (
+            ingested.pages_partitioned_deterministically or ingested.pages_partition_model_fallback
+        ):
+            reasons = ", ".join(
+                f"{code} {count}"
+                for code, count in sorted(ingested.partition_fallback_reasons.items())
+            )
+            partition.append(
+                f"- `{name}`: deterministic {ingested.pages_partitioned_deterministically}, "
+                f"model fallback {ingested.pages_partition_model_fallback}"
+                + (f" ({reasons})" if reasons else "")
+            )
+        if ingested is not None and ingested.table_row_transcriptions:
+            rows.append(
+                f"- `{name}`: {ingested.table_row_transcriptions} tables, "
+                f"{ingested.table_row_lines} rows"
+            )
+        if item.index is not None:
+            embeds.append(
+                f"- `{name}`: embedding requests {item.index.embedding_requests}, "
+                f"objects embedded {item.index.embedded_objects}"
+            )
+    out: list[str] = []
+    for title, block in (
+        ("Page layout without a model call (ADR 0028):", partition),
+        ("Tables indexed as verbatim rows (ADR 0027):", rows),
+        ("Index embeddings (ADR 0026):", embeds),
+    ):
+        if block:
+            out += ["", title, "", *block]
+    return out
+
+
 def _markdown(result: FolderPipelineResult) -> str:
     lines = [
         "# Folder pipeline report",
@@ -1140,6 +1182,7 @@ def _markdown(result: FolderPipelineResult) -> str:
         f"- ingestion root: `{result.ingestion_root}`",
         f"- ok: **{result.ok}**; budget exhausted: {result.budget_exhausted}",
         f"- ingest mode: **{result.ingest_mode}**",
+        f"- layout: **{result.layout_policy}**",
         f"- live calls: ingest {result.live_calls.ingest}, tree {result.live_calls.tree}, "
         f"answer {result.live_calls.answer}, total {result.live_calls.total}",
         *(
@@ -1187,6 +1230,7 @@ def _markdown(result: FolderPipelineResult) -> str:
             )
             for name, ingested in skipped
         ]
+    lines += _ingest_count_lines(result)
     if result.eval is not None:
         lines += [
             "",
@@ -1488,6 +1532,7 @@ def run_folder_pipeline(
         sampling_parameters_dropped=tuple(sorted(dropped)),
         question_docs=check,
         ingest_mode=plan.mode,
+        layout_policy=plan.layout,
     )
     if report_dir is not None:
         target = report_dir.expanduser().resolve()
