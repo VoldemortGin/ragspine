@@ -101,6 +101,10 @@ class IngestionSummary(BoundaryModel):
     pages_complete: int = 0
     pages_budget_deferred: int = 0
     pages_claim_blocked: int = 0
+    # Model calls not sent because another, possibly still running, attempt holds their claim
+    # (``request_in_progress_or_uncertain``), and claims of dead attempts taken over and resent.
+    calls_claim_blocked: int = 0
+    claims_taken_over: int = 0
     activated: Literal[False] = False
     indexed: Literal[False] = False
     retrieval_status: Literal[
@@ -339,5 +343,7 @@ def ingest_pdf(
         pages_complete=complete,
         pages_budget_deferred=deferred,
         pages_claim_blocked=blocked,
+        calls_claim_blocked=0 if client is None else client.claim_blocked_count,
+        claims_taken_over=0 if client is None else client.claims_taken_over,
         review_path=str(review),
     )

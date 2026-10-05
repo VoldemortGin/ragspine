@@ -3,16 +3,19 @@
 import base64
 import hashlib
 import json
+import math
 import os
 import re
+import socket
 import tempfile
+import uuid
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
-from time import monotonic
-from typing import Literal
+from time import monotonic, time
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, ValidationError
 
@@ -33,6 +36,18 @@ DEGRADABLE_SAMPLING_PARAMETERS: frozenset[str] = frozenset({"temperature", "seed
 _UNSUPPORTED_CODES = frozenset({"unsupported_value", "unsupported_parameter"})
 # The record a call leaves where it skipped a refused parameter without sending it.
 _SKIPPED_CODE = "sampling_parameter_unsupported"
+# What a ``.claim`` file holds now: its holder (host, pid, a per-process token) and its lease,
+# so a claim left by a killed process can be told from one still in flight
+# (docs/enterprise-pdf-rag/adr/00NN-claim-takeover.md). A legacy claim holds only the
+# fingerprint (or nothing) and is judged by its mtime.
+CLAIM_FORMAT = "json-completion-claim-v2"
+# A legacy claim is presumed abandoned this long after its mtime: longer than the lease of any
+# call (``_claim_lease(180)`` = 840 s), since nothing says how long its holder may run.
+LEGACY_CLAIM_LEASE_SECONDS = 900
+# Unique to this process: a pid alone can be reused by a later process.
+_PROCESS_TOKEN = uuid.uuid4().hex
+# Wall clock of claim leases (seconds since the epoch); a seam for tests.
+_wall_clock = time
 
 
 class _UnsupportedSampling:
@@ -90,6 +105,9 @@ class RequestDiagnostics(BaseModel):
     # 400 record, where its presence — even as null — also marks a body that was examined.
     provider_error_param: str | None = None
     provider_error_code: str | None = None
+    # Set only on a record written after taking over a claim whose holder was dead or out of
+    # lease: the takeover generation (1, 2, ...). Absent everywhere else.
+    claim_takeover: int | None = None
 
 
 class _ParameterRefused(Exception):
@@ -290,23 +308,135 @@ def _context_document(
     ).encode()
 
 
-def _claim_request(record_path: Path, fingerprint: str) -> None:
-    """Claim before transport across local processes; uncertain attempts stay claimed.
+def _claim_lease(timeout: float) -> int:
+    """Seconds after which a claim's holder is presumed dead. ``timeout`` bounds each blocking
+    socket operation (connect, send, wait, read), not the whole call, hence four of them plus
+    room for the cache writes around the transport."""
+    return math.ceil(4 * timeout) + 120
 
-    Completed records are checked first, so a retained claim does not prevent cache
-    replay. Claims are never expired or deleted automatically after a crash.
-    """
-    record_path.parent.mkdir(parents=True, exist_ok=True)
-    claim_path = record_path.with_suffix(record_path.suffix + ".claim")
+
+def _claim_owner(fingerprint: str, lease_seconds: int) -> bytes:
+    """What a claim records about the attempt that made it: never a prompt, key or body."""
+    return json.dumps(
+        {
+            "claim": CLAIM_FORMAT,
+            "request_fingerprint": fingerprint,
+            "host": socket.gethostname(),
+            "pid": os.getpid(),
+            "process": _PROCESS_TOKEN,
+            "created_at": round(_wall_clock(), 3),
+            "lease_seconds": lease_seconds,
+        },
+        sort_keys=True,
+    ).encode()
+
+
+def _pid_alive(pid: int) -> bool:
+    """Is ``pid`` a running process on this host? Unknown counts as alive."""
+    if os.name != "posix" or pid <= 0:
+        # On Windows os.kill(pid, 0) would signal the process; never probe there.
+        return True
     try:
-        descriptor = os.open(claim_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
+def _expired(content: bytes, modified: float) -> bool:
+    """Is the attempt behind this claim certainly over (its holder dead or out of lease)?
+
+    A claim in the current format names its holder: a process of this host whose pid no longer
+    runs is dead at once; any holder (this process included) is presumed dead once
+    ``created_at + lease_seconds`` has passed. Anything else — a legacy claim holding only the
+    fingerprint, an empty or unreadable one — has only its mtime, and the fixed
+    ``LEGACY_CLAIM_LEASE_SECONDS``.
+    """
+    now = _wall_clock()
+    try:
+        owner = json.loads(content)
+    except (ValueError, UnicodeDecodeError):
+        owner = None
+    if not isinstance(owner, dict) or owner.get("claim") != CLAIM_FORMAT:
+        return now - modified > LEGACY_CLAIM_LEASE_SECONDS
+    pid, created, lease = owner.get("pid"), owner.get("created_at"), owner.get("lease_seconds")
+    if (
+        owner.get("process") != _PROCESS_TOKEN
+        and owner.get("host") == socket.gethostname()
+        and type(pid) is int
+        and not _pid_alive(pid)
+    ):
+        return True
+    if not isinstance(created, int | float) or type(lease) is not int or lease <= 0:
+        return now - modified > LEGACY_CLAIM_LEASE_SECONDS
+    return now - created > lease
+
+
+def _write_claim(path: Path, content: bytes) -> bool:
+    """Create ``path`` exclusively with ``content``, durably; False if it already exists."""
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:
-        raise JsonCompletionError("request_in_progress_or_uncertain", fingerprint) from None
+        return False
     with os.fdopen(descriptor, "wb") as stream:
-        stream.write(fingerprint.encode("ascii"))
+        stream.write(content)
         stream.flush()
         os.fsync(stream.fileno())
-    fsync_directory(record_path.parent)
+    fsync_directory(path.parent)
+    return True
+
+
+def _claim_path(record_path: Path, generation: int = 0) -> Path:
+    """``<record>.claim`` for the first holder, ``<record>.claim.takeover-<n>`` for the n-th
+    process that took the request over."""
+    claim = record_path.with_suffix(record_path.suffix + ".claim")
+    return claim if generation == 0 else claim.with_name(f"{claim.name}.takeover-{generation}")
+
+
+def _latest_takeover(record_path: Path) -> int:
+    """The highest takeover generation present (0 = never taken over)."""
+    generation = 0
+    while _claim_path(record_path, generation + 1).exists():
+        generation += 1
+    return generation
+
+
+def _claim_request(record_path: Path, fingerprint: str, lease_seconds: int) -> int:
+    """Claim before transport across processes; returns the takeover generation (0 = fresh).
+
+    Completed records are checked first, so a claim never prevents cache replay. The current
+    holder is named by the highest generation file. When it is certainly over (``_expired``)
+    the request is taken over by exclusively creating the next generation file, so of several
+    processes taking over the same holder exactly one wins; every other caller, and every
+    caller while the holder may still run, gets ``request_in_progress_or_uncertain``. A
+    takeover resends a request the dead holder may already have sent (and been billed for).
+    """
+    record_path.parent.mkdir(parents=True, exist_ok=True)
+    content = _claim_owner(fingerprint, lease_seconds)
+    if _write_claim(_claim_path(record_path), content):
+        return 0
+    generation = _latest_takeover(record_path)
+    holder = _claim_path(record_path, generation)
+    try:
+        held = holder.read_bytes()
+        modified = holder.stat().st_mtime
+    except FileNotFoundError:  # released meanwhile: the caller looks for the record again
+        raise JsonCompletionError("request_in_progress_or_uncertain", fingerprint) from None
+    if not _expired(held, modified) or not _write_claim(
+        _claim_path(record_path, generation + 1), content
+    ):
+        raise JsonCompletionError("request_in_progress_or_uncertain", fingerprint)
+    return generation + 1
+
+
+def _release_claims(record_path: Path) -> None:
+    """Remove a request's claim files once its record exists (the record alone answers from
+    then on), newest takeover first; one left behind is harmless next to its record."""
+    for generation in range(_latest_takeover(record_path), -1, -1):
+        with suppress(OSError):
+            _claim_path(record_path, generation).unlink(missing_ok=True)
 
 
 class JsonCompletionClient:
@@ -336,6 +466,8 @@ class JsonCompletionClient:
         self._lock = Lock()
         self._dropped: set[str] = set()
         self._cache_hits = 0
+        self._taken_over = 0
+        self._claim_blocked = 0
 
     @property
     def live_call_count(self) -> int:
@@ -346,6 +478,17 @@ class JsonCompletionClient:
     def cache_hit_count(self) -> int:
         """Calls of this client answered from the model cache, without transport."""
         return self._cache_hits
+
+    @property
+    def claims_taken_over(self) -> int:
+        """Claims of dead or out-of-lease holders this client took over and resent."""
+        return self._taken_over
+
+    @property
+    def claim_blocked_count(self) -> int:
+        """Calls of this client that ended ``request_in_progress_or_uncertain``: another,
+        possibly still running, attempt holds their claim, so they were not sent."""
+        return self._claim_blocked
 
     @property
     def dropped_parameters(self) -> tuple[str, ...]:
@@ -590,7 +733,34 @@ class JsonCompletionClient:
             raise JsonCompletionError("cache_miss", fingerprint)
         if self._remaining == 0:
             raise JsonCompletionError("call_budget_exhausted", fingerprint)
-        _claim_request(record_path, fingerprint)
+        try:
+            generation: int | None = _claim_request(
+                record_path, fingerprint, _claim_lease(self._timeout)
+            )
+        except JsonCompletionError:
+            if not record_path.exists():
+                self._claim_blocked += 1
+                raise
+            generation = None
+        else:
+            if record_path.exists():
+                _release_claims(record_path)
+                generation = None
+        if generation is None:  # another attempt recorded it after our first look: replay
+            return self._complete(
+                payload,
+                fingerprint,
+                response_model,
+                context=context,
+                cache_only=cache_only,
+                allow_failed_retry=allow_failed_retry,
+                droppable=droppable,
+                known=known,
+            )
+        takeover: dict[str, Any] = {}
+        if generation:
+            self._taken_over += 1
+            takeover = {"claim_takeover": generation}
         context_path, context_warning = self._store_context(fingerprint, context)
         self._remaining -= 1
         started = monotonic()
@@ -634,7 +804,7 @@ class JsonCompletionClient:
                 if category in {"timeout", "connection", "response_limit"}
                 else "provider_request_failed"
             )
-            examined: dict[str, str | None] = {}
+            examined: dict[str, Any] = {}
             if status == 400:
                 examined = {
                     "provider_error_param": getattr(error, "param", None),
@@ -652,8 +822,10 @@ class JsonCompletionClient:
                 context_path=context_path,
                 context_warning=context_warning,
                 **examined,
+                **takeover,
             )
             self._save_record(record_path, fingerprint, None, code, diagnostic)
+            _release_claims(record_path)
             refused = _refused_parameter(
                 _CacheRecord(
                     request_fingerprint=fingerprint,
@@ -677,11 +849,13 @@ class JsonCompletionClient:
             attempt=2 if record_path == retry_path else 1,
             context_path=context_path,
             context_warning=context_warning,
+            **takeover,
         )
         if len(raw) > 1_048_576:
             self._save_record(
                 record_path, fingerprint, None, "response_budget_exceeded", diagnostic
             )
+            _release_claims(record_path)
             raise JsonCompletionError(
                 "response_budget_exceeded", fingerprint, diagnostics=diagnostic
             )
@@ -691,9 +865,11 @@ class JsonCompletionClient:
             result = self._parse(raw, fingerprint, response_model, cache_hit=False)
         except JsonCompletionError as error:
             self._save_record(record_path, fingerprint, digest, error.code, diagnostic)
+            _release_claims(record_path)
             raise JsonCompletionError(error.code, fingerprint, diagnostics=diagnostic) from None
         diagnostic = diagnostic.model_copy(update={"finish_category": "stop"})
         self._save_record(record_path, fingerprint, digest, None, diagnostic)
+        _release_claims(record_path)
         return replace(result, diagnostics=diagnostic)
 
     def _save_skip(

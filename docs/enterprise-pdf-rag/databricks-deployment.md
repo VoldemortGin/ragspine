@@ -183,6 +183,12 @@ How the backend adapts ([ADR 0020](adr/0020-storage-without-hard-links.md)):
   same moment are detected on one side only. Run one pipeline per ingestion directory at a time.
 - The directory fsync after a model-call claim is skipped when the mount answers `EINVAL`,
   `EPERM`, `ENOTSUP` or `ENOSYS`; a claim may then not survive a crash of the node.
+- A claim left by an interrupted or killed kernel no longer blocks its call forever
+  ([ADR 00NN](adr/00NN-claim-takeover.md)): it is taken over at once when its process on the
+  same host is gone, otherwise after its lease (840 s for the 180 s ingestion / tree clients);
+  a claim written by the previous code (no holder recorded) after 15 minutes by its mtime. The
+  takeover is an `O_EXCL` create (no hard link, no rename). Claims are deleted once their record
+  is written.
 - All writes on the pipeline are sequential, whole-file writes. The notebook writes
   `answers.csv` in one pass through a `.partial` sibling and a rename instead of appending.
 - The answer journal `answers-audit.sqlite` uses SQLite in WAL mode, which needs random writes

@@ -162,6 +162,7 @@ print(result.model_dump_json(indent=2))
 | `source_manifest_id` / `processing_id` | 不可变 draft 身份；不能冒充当前服务已加载的身份 |
 | `source_page_count` / `selected_physical_pages` | 全源页数与下游实际选页 |
 | `source_cached` / `live_call_count` | 是否复用已有来源缓存、实际新模型请求数 |
+| `calls_claim_blocked` / `claims_taken_over` | 因另一次可能仍在进行的调用持有 claim 而未发送的调用数（对应页失败、诊断 `request_in_progress_or_uncertain`）；接管已死 / 过租约 claim 并重发的次数（[ADR 00NN](adr/00NN-claim-takeover.md)） |
 | `failed_stage_count` / `semantic_status` / `review_path` | 查看部分失败、deferred 或 unavailable 的具体结果；CLI 返回 JSON 不代表全部阶段成功 |
 | `text_layer_page_states` / `ocr_needed_pages` | 全部来源页（不只选中页）的文本层状态计数（`ok` / `outlined_text` / `garbled`，旧来源缓存为 `unassessed`），以及需要 OCR 的 1-based 物理页；只报告，不补救，见下文“文本层质量诊断” |
 | `metadata_status` / `metadata_page_states` / `display_title` | 页级元数据阶段是否运行、各页 `succeeded/deferred/failed` 计数、封面标题（抽不到为 `null`，不猜） |
@@ -560,6 +561,8 @@ n0017 p16-20 FINANCIAL PERFORMANCE
 ### 缓存与重试
 
 `JsonCompletionClient` 以请求指纹（盐 `bounded-text-json-v1`）缓存到 `<ingestion_root>/model-cache/`；同一文档、同一问题、同一上下文的重复请求回放缓存（`llm_live_calls=0`、`cache_hit=true`）。客户端以 `retry_failed=False` 构造：真实调用失败也会被缓存并原样回放；要重试须删除 `<ingestion_root>/model-cache/requests/<fingerprint>.json`。这是有意为之，没有自动重试。唯一的例外是端点明确拒绝采样参数（[ADR 0021](adr/0021-sampling-parameter-fallback.md)）：HTTP 400 且 `error.param` 为 `temperature` / `seed`、`error.code` 为 `unsupported_value` / `unsupported_parameter` 时，去掉该参数用同一请求再发一次（按实际发送的请求体另算指纹，正常缓存），并在进程内按 (URL, 模型) 记住，同一运行后续调用直接不带它；被拒的原指纹记录（带 `diagnostics.provider_error_param`）与「跳过」记录（`sampling_parameter_unsupported`）让新进程不联网就能转到降级后的缓存。本 ADR 之前写下、不带 `provider_error_param` 的 `provider_http_400` 旧记录在进程内最多重探 1 次（记在 `<fingerprint>.retry-1.json`），之后直接跳过；无需手工清理。探测与重发各计 1 次真实调用。温度可用 `OPENAI_TEMPERATURE`（别名 `APP_LLM_TEMPERATURE`；不设 = `0.0`，数值 0~2，`omit` = 不发送）配置。
+
+每次真实调用前先以 `O_EXCL` 建 `requests/<fingerprint>.json.claim`（记录持有者 host / pid / 进程 token / `created_at` / `lease_seconds`，不含正文），记录写成后删除。有 claim 无记录时报 `request_in_progress_or_uncertain`、不联网——但只在持有者可能还活着时（[ADR 00NN](adr/00NN-claim-takeover.md)）：同主机且 pid 已不存在（POSIX）立即、否则过了租约（`4 × 超时 + 120` 秒，180 秒超时即 840 秒）后，下一个调用以 `O_EXCL` 建 `.claim.takeover-<n>` 接管并真实重发 1 次（计 1 次真实调用，可能重复计费；记录带 `diagnostics.claim_takeover`）；旧版写的 claim（只有指纹或为空）按 mtime 满 15 分钟接管。无需手工删除。入库结果的 `calls_claim_blocked` / `claims_taken_over` 计数这两种情况。
 
 `contexts/<fingerprint>.json` 另存**发给模型的最终完整请求体**，用于回溯：信封是 `request_fingerprint` / `created_at`（UTC）/ `endpoint_path` / `contract`（指纹盐）/ `task`（任务名，如 `page-metadata-v1`）+ `payload`，`payload` 即原样的 JSON 请求体（`model`、全部 `messages` 含 system 规则与证据块 / 页上下文 / 问题、`response_format` 的 schema、`max_completion_tokens` 等）；带图片的调用把 `image_url` 换成 `{"omitted": true, "sha256", "bytes"}`，其余字段一字不改。真实调用前写入，命中缓存回放时缺失则补写，同指纹**先写者胜**（不覆盖），写入失败只在该次记录的 `diagnostics.context_warning` 留码、绝不影响调用；记录里另有 `diagnostics.context_path` 指回它（相对 `model-cache/`）。**隐私**：这些文件逐字包含证据原文（报告内容），属本机排障产物，不要外传、不要随快照分发。
 
