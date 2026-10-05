@@ -1,6 +1,6 @@
 ---
 covers: src/enterprise_pdf_rag/
-verified-against: 85ffdf8
+verified-against: 5c61377
 ---
 
 # enterprise_pdf_rag — agent contract
@@ -107,6 +107,16 @@ adapters/     every SDK and I/O: pdfspine (every source PDF opens through pdf_pa
               `FolderPipelineResult.sampling_parameters_dropped`, a `report.md` line and a
               `sampling_parameters_dropped` event name the sampling parameters the LLM endpoint
               refused, ADR 0021),
+              deterministic_partition.py + deterministic_partition_geometry.py (ADR 00NN:
+              `partition_strategy="deterministic-text-pages"` on `ingest_pdf` /
+              `run_folder_pipeline` partitions pages without figures / images straight from
+              pdfspine blocks — zero layout calls, producer
+              `page-layout-deterministic-v1:pdfspine/<version>`, every span owned, ruled
+              tables only via `find_tables("lines")` + exact cell-span consistency — and
+              falls back per page to the model layout with a machine-readable reason code
+              (`IngestionSummary.pages_partitioned_deterministically` /
+              `pages_partition_model_fallback` / `partition_fallback_reasons`); the default
+              `"model"` keeps every page on the model layout, byte for byte),
               answer_llm.py (`make_answer_llm()`: the answer `JsonCompletionClient` built from
               settings, what `run_folder_pipeline` and `notebooks/run_folder.ipynb` call)
 resources/    packaged prompts / static data
