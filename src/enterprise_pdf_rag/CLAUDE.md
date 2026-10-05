@@ -1,6 +1,6 @@
 ---
 covers: src/enterprise_pdf_rag/
-verified-against: ffadc5d
+verified-against: 85ffdf8
 ---
 
 # enterprise_pdf_rag — agent contract
