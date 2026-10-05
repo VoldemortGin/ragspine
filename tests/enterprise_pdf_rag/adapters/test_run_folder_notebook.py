@@ -673,11 +673,12 @@ def test_run_folder_defaults_only_ingest_the_pdfs_of_ten_questions_whose_pdf_is_
         r"^ONLY_QUESTION_DOCS\s*=\s*True\b",
         r"^DOC_ALIASES\s*=\s*\{\}",
         r'^ON_UNMATCHED_DOCS\s*=\s*"error"',
-        r"^MAX_LIVE_CALLS_PER_PDF\s*=\s*1000\b",
+        r'^MAX_LIVE_CALLS_PER_PDF\s*=\s*"auto"',
     ):
         assert re.search(pattern, config, re.MULTILINE), pattern
     run = _code_cell("run")
     for argument in (
+        "max_live_calls_per_pdf=MAX_LIVE_CALLS_PER_PDF",
         "question_selection=QUESTION_SELECTION",
         "only_question_docs=ONLY_QUESTION_DOCS",
         "doc_aliases=DOC_ALIASES",
