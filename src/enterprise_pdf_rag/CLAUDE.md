@@ -96,7 +96,9 @@ adapters/     every SDK and I/O: pdfspine (every source PDF opens through pdf_pa
               answer routing; `doc_aliases`; `on_unmatched_docs="error"` stops before any write,
               `"skip"` answers those as `routing_failed`; `check_question_docs` is the read-only
               check the notebook's `question-docs` cell prints); per-PDF ingest ceiling
-              `MAX_INGEST_LIVE_CALLS` = 10 000 (notebook 1000); `IngestionSummary.pages_complete` /
+              `MAX_INGEST_LIVE_CALLS` = 10 000, or `max_live_calls_per_pdf="auto"` (notebook default):
+              min(ceiling, selected pages × 4 + 50) from the page count the source stage reads,
+              no extra PDF open, still bounded by the shared total; `IngestionSummary.pages_complete` /
               `pages_budget_deferred` / `pages_claim_blocked` and `document_done.pages="X/Y"` show a
               partly ingested `published` document; `document_progress` reports pages / calls /
               cache hits, counts only;

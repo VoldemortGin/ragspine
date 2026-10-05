@@ -265,7 +265,7 @@ enterprise-pdf-rag metadata --source-store <src> --processing-store <proc> --pro
 `ingest --stage semantics` → `requalify_visual_objects` → `qualify` → `index` → `publish`（`activate_source`）→ `tree`（作用在**已发布**的 processing id 上）→ 可选评测。
 
 ```sh
-enterprise-pdf-rag run-folder [--folder /path/to/pdfs] --max-live-calls-per-pdf 60 \
+enterprise-pdf-rag run-folder [--folder /path/to/pdfs] --max-live-calls-per-pdf auto|60 \
   [--max-live-calls-total 300] [--questions questions.jsonl] [--pages all] \
   [--output-dir /path/to/ingestion] [--no-requalify] [--no-tree] [--tree-max-live-calls 50] \
   [--only-question-docs] [--fail-fast] [--report-dir /path/to/report]
@@ -304,7 +304,7 @@ result.ok, result.live_calls, [(d.pdf_path, d.status) for d in result.documents]
 
 - **前置检查**：花任何预算、调用任何 ingest 之前，先确认 `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL`（或其 `APP_LLM_*` 别名）已在项目 `.env` 配好，并用 `embed_query("preflight")` 探测一次 embedding（最简单是在 `.env` 设 `OPENAI_EMBEDDING_MODEL`，与 LLM 同网关；或独立 loopback 服务的 `APP_EMBEDDING_*`，证明隧道通）；题集里有 `rerank: true` 的用例时还要求 `APP_RERANK_*`。失败即报错并指向这些变量名和 `scripts/enterprise_pdf_rag/local_model_tunnel.py start`——**它不会自己起隧道**。注入的依赖不检查。
 - **发现与去重**：递归找 `*.pdf`（后缀大小写不敏感），跳过隐藏文件 / 隐藏目录，按相对路径排序。同内容（sha256 相同）只处理第一份，其余标 `duplicate_of`——同 sha 不同文件名会落进同一个 sha 目录、生成两份 manifest 并互相覆盖 `current-*` 指针。
-- **预算**：`--max-live-calls-per-pdf` 取 0–10000（`MAX_INGEST_LIVE_CALLS`；原上限 200 只够一轮约 100 页，ADR 0022），是上限不是消耗——每页 1 次版面 + 1 次页元数据 + 每个图表类对象 2 次，按需调用、缓存命中不计；notebook 默认 1000。预算用完时该份仍 `published`，只是 `pages` 显示 `X/Y`，再跑一轮补齐。每份 PDF 的 ingest 预算是 `min(--max-live-calls-per-pdf, 总额剩余)`；tree（每份 `--tree-max-live-calls`）和评测的回答调用（默认 `APP_ANSWER_MAX_LIVE_CALLS`）也从总额里扣，并在 `live_calls` 里分项列出。总额用完后其余 PDF 仍以预算 0 运行：缓存里已有的照常走完；被总额截短且仍有阶段 `deferred` 的标 `budget_starved`、不发布，`budget_exhausted=true`（只要有一次分配被总额截短就为真）。每份只跑一轮，不自动多轮。
+- **预算**：`--max-live-calls-per-pdf` 取 0–10000（`MAX_INGEST_LIVE_CALLS`；原上限 200 只够一轮约 100 页，ADR 0022）或 `auto`（notebook 默认）：每份按要处理的页数算 `min(10000, 页数 × 4 + 50)`（`AUTO_CALLS_PER_PAGE` / `AUTO_CALLS_BASE`；3 页 62、300 页 1250），页数取 source 阶段本来就读到的值（不多开一次 PDF；`--pages` 时只数选中的页），`document_start` / `DocumentRun.live_call_budget` 报的是算出的值。都是上限不是消耗——每页 1 次版面 + 1 次页元数据 + 每个图表类对象 2 次，按需调用、缓存命中不计。预算用完时该份仍 `published`，只是 `pages` 显示 `X/Y`，再跑一轮补齐。每份 PDF 的 ingest 预算是 `min(--max-live-calls-per-pdf, 总额剩余)`；tree（每份 `--tree-max-live-calls`）和评测的回答调用（默认 `APP_ANSWER_MAX_LIVE_CALLS`）也从总额里扣，并在 `live_calls` 里分项列出。总额用完后其余 PDF 仍以预算 0 运行：缓存里已有的照常走完；被总额截短且仍有阶段 `deferred` 的标 `budget_starved`、不发布，`budget_exhausted=true`（只要有一次分配被总额截短就为真）。每份只跑一轮，不自动多轮。
 - **续跑**：同一目录再跑一次时全部命中缓存（`live_calls.total == 0`）；已发布的 release 恰是本次 draft 加同一 embedder 的索引时直接复用（`index_reused=true`，不再 embed），`publish` 幂等重放。换 embedder 会重建索引。
 - **失败隔离**：每份 PDF 的 `ValueError` / `OSError` 记进 `failed_stage` + `error`，其余继续；`--fail-fast` 改为直接抛出。已发布但 tree 失败的文档仍是 `published`，带 `failed_stage="tree"`。
 - **requalify 的含义与局限**：通用 ingest 写死 `qualification_policy="none"`，Chart 因此没有 `qualified_ir`，被检索资格排除；`requalify` 用快照里已落盘的分支按 [ADR 0016](adr/0016-verbatim-chart-points.md) 重投影，零模型、零联网。它**只采纳图上逐字印出的点值**，不证明点 ↔ 系列的几何对应（那是 [ADR 0008](adr/0008-traceable-chart-qa.md) 几何 + 源涂证明的范围）；Diagram 在 ingest 时已证明，这一步对它通常是 `unchanged`。没有对象改变时不产出新 draft，后续沿用 ingest 的 id。`--no-requalify` 跳过。

@@ -84,7 +84,7 @@ present, not that the answer is in it. `"first"` (the default of the function) i
 behavior; `max_questions=None` ignores the mode. The notebook defaults to `"first_matched"`
 and `ONLY_QUESTION_DOCS = True`.
 
-### 4. The per-PDF ceiling is 10 000; the notebook asks for 1 000
+### 4. The per-PDF ceiling is 10 000, and `"auto"` follows the page count
 
 The 200 ceiling came with the 20-page sample (ADR 0010) and was a typo guard, not a cost
 model; nothing else depends on it. `MAX_INGEST_LIVE_CALLS = 10_000` (`pdf_ingestion.py`,
@@ -92,6 +92,20 @@ also enforced by `run_folder_pipeline` and the CLI); negative or larger values a
 refused before any work. Tree and answer budgets keep 200. The notebook's
 `MAX_LIVE_CALLS_PER_PDF = 1000` covers ≈ 2 × pages + 2 × charts for a ~400-page report in one
 round; it is a ceiling, calls are made only as needed and cache replays cost nothing.
+
+`max_live_calls_per_pdf="auto"` (the notebook default, CLI `--max-live-calls-per-pdf auto`)
+gives each PDF `min(MAX_INGEST_LIVE_CALLS, selected pages × AUTO_CALLS_PER_PAGE (4) +
+AUTO_CALLS_BASE (50))` — 3 pages 62, 300 pages 1 250, capped from 2 488 pages on. Four per page
+is one layout and one page-metadata call plus room for one chart-like object (two calls) per
+page on average. The page count is the one the source stage already reads (`pages=` counts the
+selected pages only), so no PDF is opened an extra time: `ingest_pdf` takes the budget as a
+function of the selected page count and builds its model client after the source stage (the
+LLM configuration is still loaded first, so a missing one fails as early as before). The
+computed value is still taken from `max_live_calls_total`, and it is what `document_start`,
+`document_progress` and `DocumentRun.live_call_budget` report; `document_start` is emitted
+when it is known, before any model call. The tree budget (50 per document) stays fixed: the tree
+summarizes branches of the outline, not pages, and its calls are bounded by the outline's size,
+not the page count.
 
 ### 5. A partial ingest is visible
 
