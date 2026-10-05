@@ -1,4 +1,4 @@
-"""Verbatim row transcription of a table region whose grid was never proved (ADR 00NN).
+"""Verbatim row transcription of a table region whose grid was never proved (ADR 0027).
 
 A region the layout calls a table but whose rulings prove no grid (no frame, a frame
 only, or a grid pdfspine cannot see) is still printed text. Its occurrences are grouped

@@ -480,7 +480,7 @@ class SemanticObjectAdapter:
         svg: StageOutcome,
         result: TableExtractionResult,
     ) -> ObjectProcessingRecord:
-        """No grid was detected: transcribe the region's printed rows verbatim (ADR 00NN).
+        """No grid was detected: transcribe the region's printed rows verbatim (ADR 0027).
 
         The rows are geometry alone — no column, header or merge is claimed — so they
         qualify under their own scope and producer, never as a table grid. The three stages

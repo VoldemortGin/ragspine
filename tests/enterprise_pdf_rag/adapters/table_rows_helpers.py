@@ -1,4 +1,4 @@
-"""Authored table pages the ruling proof cannot see a grid in (ADR 00NN): synthetic only."""
+"""Authored table pages the ruling proof cannot see a grid in (ADR 0027): synthetic only."""
 
 import json
 from collections.abc import Callable

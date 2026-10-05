@@ -1,4 +1,4 @@
-"""A table whose grid no ruling proves is indexed as its verbatim printed rows (ADR 00NN).
+"""A table whose grid no ruling proves is indexed as its verbatim printed rows (ADR 0027).
 
 Off by default: the region stays out of the index exactly as before. On, its rows are a
 retrievable, citable member whose every character is the page's own text.

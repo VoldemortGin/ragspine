@@ -1,11 +1,14 @@
-# ADR 00NN: 无图文本页的确定性版面切分（编号集成时定）
+# ADR 0028: 无图文本页的确定性版面切分
 
-Status: Draft, 2026-10-05. Amends the layout stage of
+Status: Accepted, 2026-10-05, as an **explicit choice only**: no library preset selects it
+(both `ingest_mode` presets keep `IngestPlan.layout="model"`), because it has been measured on
+a 20-page slide deck and **not on a long financial report**. The run-folder notebook selects it
+by default (`LAYOUT_POLICY = "deterministic-text-pages"`, see Integration below). Amends the layout stage of
 [ADR 0005](0005-first-twenty-pages-processing.md)（选中页处理：每页一次模型版面）and
 [ADR 0010](0010-generic-pdf-ingestion-entry.md)（通用入库入口与调用预算）; follows the
 principle of [ADR 0013](0013-page-metadata-and-prefilters.md) Amendment 1（读不懂的版面必须
 零代价，而不是去猜）。It changes **no schema, no fingerprint of the model layout, no default
-behavior**: `partition_strategy="model"`（默认）逐字节保持既有产物与调用。
+behavior**: `layout_policy="model"`（两个库预设）逐字节保持既有产物与调用。
 
 ## Context
 
@@ -23,8 +26,9 @@ behavior**: `partition_strategy="model"`（默认）逐字节保持既有产物�
 
 新增一个实现 `PagePartitioner` 端口的组合切分器（`adapters/deterministic_partition.py`，
 纯几何在 `adapters/deterministic_partition_geometry.py`），由
-`ingest_pdf(..., partition_strategy)` / `run_folder_pipeline(..., partition_strategy)` 选择，
-值为 `"model"`（默认，完全不变）或 `"deterministic-text-pages"`：
+`IngestPlan.layout`（ADR 0025 的 `LayoutPolicy`，经 `make_partitioner` 这一处选择）决定，
+`ingest_pdf(..., layout_policy=...)` / `run_folder_pipeline(..., layout_policy=...)` 可覆盖
+模式预设；值为 `"model"`（两个预设，完全不变）或 `"deterministic-text-pages"`：
 
 1. **页面分诊（拿不准就回退，不猜）**。对每个选中页判定"可确定性处理"或"回退模型版面"，
    原因码机器可读：`no_text_layer` / `rotated_text` / `span_outside_page` /
@@ -34,7 +38,9 @@ behavior**: `partition_strategy="model"`（默认）逐字节保持既有产物�
    跨页重复行键（同文本同 5pt 高度桶、≥30% 且 ≥2 页）、跨页重复绘制键（同形同位）、跨页
    重复小图片键。页内图形逐一豁免：表格区域内的绘制、细线类（≤3pt，与
    `pdfspine_tables.LINE_MAX_THICKNESS` 同值）、跨页重复装饰、整页背景填充、面积 ≤5% 的
-   跨页重复图片（logo）；**任何剩余图形或图片一律回退**。
+   跨页重复图片（logo）——跨页重复豁免**只给区域内不含任何文字 span（按中心点）的图形**，
+   带字的重复色块 / logo 一律回退（真实图表几乎总带坐标轴或数据标签文字）；**任何剩余图形
+   或图片一律回退**。
 2. **确定性切分**（保守版）。span 按竖直重叠 ≥ 较矮者一半聚行；顶 / 底 6% 带内的跨页重复行
    与页码单独成 Text 对象（不丢弃）；`find_tables(strategy="lines")` 命中、≥2 行 ≥2 列、
    bbox 内每个 span 都落在原生单元格且每个 present 单元格都有 span 时才出 Table 对象
@@ -86,3 +92,23 @@ behavior**: `partition_strategy="model"`（默认）逐字节保持既有产物�
 - 旋转文字、无文本层（扫描页）、span 越过页面边界的页。
 - 含任何非装饰图形 / 图片的页（含矢量图表、单元格底纹之外的色块面板）。
 - 无框线表格区域按行出 Text，不出 Table；跨页重复页眉每页各成一个对象（未去重索引）。
+
+## Integration（2026-10-05）
+
+- 接入点：`ingest_mode.LayoutPolicy = Literal["model", "deterministic-text-pages"]`，
+  `make_partitioner(plan, client, sources, snapshot)` 在后者时把模型切分器包进
+  `make_text_page_partitioner`。原先的 `partition_strategy` 参数并入 `layout_policy`。
+- **库预设不启用、notebook 默认启用**：`ingest_plan("full")` 与 `ingest_plan("lite")` 都是
+  `layout="model"`；`notebooks/run_folder.ipynb` 的 `LAYOUT_POLICY` 默认
+  `"deterministic-text-pages"`，只在 `INGEST_MODE="lite"` 时传给 `run_folder_pipeline`；
+  `INGEST_MODE="full"` 时 notebook 恒用 `"model"`（full 逐字节不变）并打印一行说明忽略了它。
+  依据：失败方向是保守的——拿不准就回退模型；即便漏判，后果是该页图表的数字不可答，页面
+  文字仍逐字收录，不会产生捏造的数字。
+- 可见性：每份 PDF 的确定性页数 / 回退页数 / 回退原因分布在 notebook 状态表后的提示行与
+  `report.md` 里，作为在真实长财报上判断是否漏判、调阈值的依据。
+- 与 `text_lines.py`（ADR 0025）的几何去重：常量与 `RunningKey` 改为 import；`TextLine` /
+  `text_lines` / `running_lines` 因行为差别保留本地版本（见模块 docstring）。
+- 与按行收录（ADR 0027）的叠加：确定性页只出 Text / List 与划线 Table；不规整的无框线表格
+  使 `column_layout` 判 `ambiguous`，整页回退模型，其 Table 照常按行收录；规整的无框线表格
+  按行读成一个 Text 对象，每行科目与数值同在一行、同一检索单元
+  （`test_deterministic_partition_table_rows.py`）。

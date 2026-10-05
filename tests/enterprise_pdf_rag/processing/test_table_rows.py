@@ -1,4 +1,4 @@
-"""Verbatim row transcription of an unproved table region (ADR 00NN): pure geometry only."""
+"""Verbatim row transcription of an unproved table region (ADR 0027): pure geometry only."""
 
 from dataclasses import replace
 

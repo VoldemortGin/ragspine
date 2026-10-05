@@ -1,6 +1,7 @@
-# ADR 00NN: A table with no detected grid is indexed as its verbatim printed rows
+# ADR 0027: A table with no detected grid is indexed as its verbatim printed rows
 
-Status: Proposed, 2026-10-05 (number assigned at integration). Opt-in: off by default. Builds on
+Status: Accepted, 2026-10-05. On in the lite ingest preset
+([ADR 0025](0025-lite-ingest-mode.md)), off in full. Builds on
 [ADR 0011](0011-document-catalog-and-verified-answer-chain.md) Decision 7 and
 [ADR 0014](0014-ruled-table-grid-proof.md); changes neither.
 
@@ -49,11 +50,13 @@ member, verbatim), and the block says so in words (`structure=unverified`).
 
 ## Decision
 
-1. **Opt-in switch, one boolean.** `SemanticObjectAdapter(..., unverified_tables_as_rows=False)`
-   is the only thing the Table branch reads. `ingest_pdf(..., unverified_tables_as_rows=False)`
-   and `run_folder_pipeline(..., unverified_tables_as_rows=False)` pass it through (one line
-   each; the lite-mode plan will own it at integration). Off, every stage, fingerprint, cache key
-   and processing id is byte-identical to before (pinned by tests).
+1. **One boolean on the ingest plan.** `IngestPlan.unverified_tables_as_rows`
+   (`adapters/ingest_mode.py`, ADR 0025) is the only thing the Table branch reads, through
+   `SemanticObjectAdapter(plan=...)`. The lite preset turns it on, the full preset leaves it
+   off; `ingest_pdf(..., unverified_tables_as_rows=...)` and
+   `run_folder_pipeline(..., unverified_tables_as_rows=...)` override the preset for this one
+   switch (`None` keeps it). Off, every stage, fingerprint, cache key and processing id is
+   byte-identical to before (pinned by tests, including full mode's whole-snapshot digest).
 
 2. **Only the no-grid case.** The branch fires only when `table_detection` found no exact region
    match (`result.table is None`). A detected grid — verified or pending — keeps its ADR 0011 /

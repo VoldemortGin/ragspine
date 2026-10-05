@@ -1,6 +1,6 @@
 """无图文本页的确定性版面切分: pdfspine 块信息直接产出 ``page-layout-v2`` 同构对象划分.
 
-ADR 00NN(deterministic-text-page-partition). 组合切分器按页分诊: "可确定性处理"的页
+ADR 0028(deterministic-text-page-partition). 组合切分器按页分诊: "可确定性处理"的页
 (无图片 / 无剩余图形 / 无旋转文字 / 栏式可读)由本模块从 span 几何直接切分, 不调用模型;
 拿不准的页带着机器可读的原因码回退到被包装的模型切分器(ADR 0013 修订 1 的原则:
 读不懂的版面必须零代价回退, 而不是去猜). 两种产物 producer 不同, 缓存与审计互不混淆.

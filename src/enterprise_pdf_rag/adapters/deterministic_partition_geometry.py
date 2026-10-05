@@ -1,6 +1,6 @@
 """确定性版面切分的纯几何工具: 只依赖 stdlib 与 ``TextSpan``, 不做任何 I/O.
 
-ADR 00NN(deterministic-text-page-partition)的纯函数半边: 聚行 / 跨页重复行 / 页眉页脚带 /
+ADR 0028(deterministic-text-page-partition)的纯函数半边: 聚行 / 跨页重复行 / 页眉页脚带 /
 栏式判定 / 标题-段落-列表分块. 原则沿用 ADR 0013 修订 1: 读不懂的版面返回 ``ambiguous``,
 由调用方回退到模型版面, 绝不去猜.
 

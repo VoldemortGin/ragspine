@@ -58,7 +58,7 @@ class SpanEvidence:
     page_index: int
     bbox: Bounds
     text: str
-    # A printed table row (ADR 00NN) is one citable line made of several spans: the row id is
+    # A printed table row (ADR 0027) is one citable line made of several spans: the row id is
     # ``source_span_id`` and these are the page spans it reads, left to right.
     row_span_ids: tuple[str, ...] = ()
 
@@ -166,7 +166,7 @@ class ContextBlock:
 
     @property
     def row_transcription(self) -> bool:
-        """A table region read as verbatim printed rows: no grid, no cells (ADR 00NN)."""
+        """A table region read as verbatim printed rows: no grid, no cells (ADR 0027)."""
         return self.kind is BlockKind.TABLE and self.scope == TABLE_ROWS_SCOPE
 
     def prompt_text(self, alias: str | None = None) -> str:

@@ -83,7 +83,7 @@ def validate_literal_member(
 ]:
     receipt = TypeAdapter(LiteralQualification).validate_json(assets.get(member.qualification))
     description = TypeAdapter(ObjectDescription).validate_json(assets.get(member.description))
-    # ADR 00NN: a Table with no detected grid may qualify as verbatim printed rows instead.
+    # ADR 0027: a Table with no detected grid may qualify as verbatim printed rows instead.
     rows = member.kind is ObjectKind.TABLE and receipt.scope == TABLE_ROWS_SCOPE
     if description.producer != (TABLE_ROWS_PRODUCER if rows else "exact-source-transcription-v1"):
         raise ValueError("Literal qualification requires the exact transcription producer")

@@ -32,7 +32,7 @@ providers/    providers.py (explicit APP_LLM_* / embedding / APP_RERANK_* enviro
               connectivity smoke), json_completion.py (bounded JSON model calls, strict DTO
               validation, content-addressed immutable cache), local_models.py (embedding /
               rerank HTTP adapters; `embed_descriptions` batches index texts, 16 inputs /
-              48 000 chars, halving on failure — enterprise-pdf-rag ADR 00NN-batched-embeddings),
+              48 000 chars, halving on failure — enterprise-pdf-rag ADR 0026),
               local_model_launcher.py (credential injection into one
               allowlisted child), local_model_tunnel.py (loopback-only SSH tunnel)
 ```

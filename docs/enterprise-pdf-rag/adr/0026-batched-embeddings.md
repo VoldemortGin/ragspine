@@ -1,6 +1,6 @@
-# ADR 00NN: Description embeddings are sent in batches, cached one object at a time
+# ADR 0026: Description embeddings are sent in batches, cached one object at a time
 
-Status: Proposed, 2026-10-05 (number assigned at integration). Changes only the transport of
+Status: Accepted, 2026-10-05. Changes only the transport of
 the index-build embeddings behind [ADR 0012](0012-chart-index-text-and-retrieval-seats.md)'s
 `index-text-embedding-v1` stage cache. It changes **no cache key, no cache entry, no vector,
 no snapshot id and no single-text request**: an ingestion directory indexed before this ADR is

@@ -618,7 +618,7 @@ def verify_claims(
                 _reject(claim, AbstainReason.MODEL_OUTPUT_INVALID, "grid relations need a cell")
             )
             continue
-        # A verbatim row table (ADR 00NN) is quoted like text; a gridded table never is.
+        # A verbatim row table (ADR 0027) is quoted like text; a gridded table never is.
         quotable_rows = kind is ClaimKind.QUOTE and block.row_transcription
         if (
             block.kind not in _BLOCK_KINDS[kind] and not quotable_rows
