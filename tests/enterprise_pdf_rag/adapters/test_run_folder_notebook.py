@@ -696,9 +696,12 @@ def test_status_table_shows_claim_takeover_and_explains_blocked_calls() -> None:
     results = _code_cell("results")
     assert '"claims_taken_over"' in results and "ingestion.claims_taken_over" in results
     assert "calls_claim_blocked" in results
-    assert "次模型调用被未完成的调用占用（可能是上次被中断的运行），对应页本次未完成" in results
-    assert "约 15 分钟后重跑会自动补上，无需删除文件" in results
-    assert "接管并重发了" in results and "次被中断的调用（可能重复计费）" in results
+    assert (
+        "次模型调用被未完成的调用占用\uff08可能是上次被中断的运行\uff09\uff0c对应页本次未完成"
+        in results
+    )
+    assert "约 15 分钟后重跑会自动补上\uff0c无需删除文件" in results
+    assert "接管并重发了" in results and "次被中断的调用\uff08可能重复计费\uff09" in results
     assert "手工删除" not in results
     intro = _source(next(cell for cell in _notebook()["cells"] if cell["id"] == "intro"))
     assert "自动接管" in intro and "无需手工删除" in intro
