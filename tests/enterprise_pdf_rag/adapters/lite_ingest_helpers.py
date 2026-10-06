@@ -414,6 +414,10 @@ def lite_env(monkeypatch: pytest.MonkeyPatch) -> Counter[str]:
     monkeypatch.setattr(
         "ragspine.common.evidence.providers.json_completion._send_once", mixed_sender(tasks)
     )
+    # Each model-cache record stores the call's wall time (``diagnostics.elapsed_ms``, rounded);
+    # the offline sender answers in well under a millisecond, but a loaded machine can round it
+    # to 1 and change the pinned store digest. A fixed clock keeps every record byte stable.
+    monkeypatch.setattr("ragspine.common.evidence.providers.json_completion.monotonic", lambda: 0.0)
     return tasks
 
 
