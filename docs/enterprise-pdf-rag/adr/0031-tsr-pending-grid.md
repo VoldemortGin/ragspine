@@ -1,6 +1,8 @@
 # ADR 0031: A table with no ruled grid may get a model-inferred grid, kept PENDING
 
-Status: Accepted, 2026-10-06. Off in both ingest presets (the run-folder notebook's `"auto"` turns it on in lite only when the SLANet-plus weights and onnxruntime are present; see Integration).
+Status: Accepted, 2026-10-06. Off in both ingest presets; the run-folder notebook's
+`UNVERIFIED_TABLE_STRUCTURE = "auto"` turns it on in lite only when the SLANet-plus weights
+and onnxruntime are present (see Integration).
 Builds on [ADR 0014](0014-ruled-table-grid-proof.md) and
 [ADR 0027](0027-unverified-tables-as-verbatim-rows.md); changes neither.
 
@@ -165,11 +167,30 @@ explicit: an inferred structure has no ink to cite and must not be presented as 
 - **Not measured:** the 249-question encrypted report (not available offline), answer accuracy
   rows vs TSR with a real answer model, and the production (LLM) layout's table regions.
 
+## Integration
+
+- **Weights, one place.** `pdfspine_tsr` looks for `slanet-plus.onnx` beside the ONNX layout
+  weights first: `APP_ONNX_LAYOUT_MODEL` ([ADR 0030](0030-onnx-layout-partitioner.md)) names the
+  layout file or its directory, and that directory is searched; then `PDFSPINE_ONNX_MODELS`. One
+  directory and one setting serve both local models. `pyproject` extra `pdf-onnx`
+  (`pdfspine[onnx]`) is the one runtime declaration for both.
+- **Notebook.** `UNVERIFIED_TABLE_STRUCTURE = "auto"` (default) is resolved by
+  `ingest_mode.choose_unverified_table_structure`: lite -> `"tsr"` when
+  `pdfspine_tsr.table_structure_unavailable()` (the ingest's own preflight, without hashing or
+  loading the model) is `None`, else `"rows"` with the reason; explicit values as written; full
+  always `"rows"`. The status line prints inferred grids / fallbacks to rows with reason codes.
+- **Index units.** With `table_row_index_units` on (lite), a pending inferred grid is split like a
+  verbatim-rows table ([ADR 0027](0027-unverified-tables-as-verbatim-rows.md) Amendment 1): one
+  unit per figure row, its inferred header rows repeated, a row's text its cells' own text. As
+  one unit, a 32-row statement on a 13-page report lost its seat to the narrative pages and the
+  label question abstained. A proved grid keeps one unit; the index version is unchanged (no
+  TSR snapshot existed before this integration).
+- **Overlay.** An `"onnx-layout"` Table with no ruled grid takes this branch like any other
+  (`tests/enterprise_pdf_rag/adapters/test_feature_overlay.py`); a refused grid falls back to
+  rows and row units; the retrieval test bench maps the TSR member to its page.
+
 ## Not done
 
-- `report.md` / notebook wiring of the new counts (integration step) and the notebook default.
-- A `pyproject` extra for `pdfspine[onnx]` (left to integration to avoid churning `uv.lock`
-  alongside the parallel onnx-layout change).
 - Real-model acceptance on the 249-question set; a comparison of answer accuracy between the two
   policies.
 - Splitting very long statements; rotated tables; tables spanning pages.
@@ -186,8 +207,9 @@ explicit: an inferred structure has no ink to cite and must not be presented as 
   (a Mac build mounted on Databricks x86) may see float differences in the model's boxes; the IR
   is immune unless a span centre sits on a box edge, but that is not proved. Build and serve on
   the same platform, or re-run semantics where the snapshot is served.
-- **Weights placement.** Databricks needs `slanet-plus.onnx` on a Volume / DBFS path and
-  `PDFSPINE_ONNX_MODELS` set before ingest *and* before serving (resolve re-runs the model).
+- **Weights placement.** Databricks needs `slanet-plus.onnx` on a Volume path, next to the ONNX
+  layout weights that `APP_ONNX_LAYOUT_MODEL` names (or under `PDFSPINE_ONNX_MODELS`), before
+  ingest *and* before serving (resolve re-runs the model).
 - **Precision.** The header rule is a heuristic for rendering; a section title printed before the
   first amount row is shown as a header. The self-check refuses inconsistent grids but cannot
   catch a consistent wrong one (e.g. two columns merged by the model with both values in one

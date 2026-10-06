@@ -150,7 +150,11 @@ adapters/     every SDK and I/O: pdfspine (every source PDF opens through pdf_pa
               `onnx_layout_unavailable(...)` is that preflight without a model load, and
               `ingest_mode.choose_layout_policy` resolves the notebook's default
               `LAYOUT_POLICY = "auto"`: lite -> "onnx-layout" when available, else
-              "deterministic-text-pages"; full -> "model"),
+              "deterministic-text-pages"; full -> "model"; likewise
+              `choose_unverified_table_structure` for `UNVERIFIED_TABLE_STRUCTURE = "auto"`:
+              lite -> "tsr" when `pdfspine_tsr.table_structure_unavailable()` is `None`, else
+              "rows"; full -> "rows"; with row units on, a pending TSR grid is split into row
+              units like a verbatim-rows table — `index_text.inferred_table_row_units`),
               answer_llm.py (`make_answer_llm()`: the answer `JsonCompletionClient` built from
               settings, what `run_folder_pipeline` and `notebooks/run_folder.ipynb` call)
 resources/    packaged prompts / static data

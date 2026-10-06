@@ -174,33 +174,42 @@ where the mount disables it, the cell says so and skips). Set
 one `data/ingestion` (a full rerun after lite sends only the calls lite skipped). Review pages for one document on demand:
 `export_document_review(<ingestion root>/<sha256>)` from `enterprise_pdf_rag.adapters.pdf_ingestion`.
 
-### Optional: local ONNX layout for the remaining pages (ADR 0030, opt-in)
+### Optional: local ONNX models — layout (ADR 0030) and table structure (ADR 0031), opt-in
 
 `layout_policy="onnx-layout"` additionally partitions the pages the deterministic triage
 declines (figures, residual graphics) with pdfspine's bundled local PP-DocLayoutV3 model —
 in-process ONNX inference, zero LLM calls — and only the pages ONNX itself declines fall back
 to the model layout, each with a machine-readable reason code
 ([ADR 0030](adr/0030-onnx-layout-partitioner.md); chart IR still comes from the model only).
-No library preset selects it; the notebook's `"auto"` does once the two steps below are done
-(write `"deterministic-text-pages"` to opt out). On Databricks:
+The second local model, SLANet-plus, gives an unruled table a model-inferred grid kept PENDING
+(`unverified_table_structure="tsr"`, [ADR 0031](adr/0031-tsr-pending-grid.md)): cell text comes
+from the text layer only, citations stay exact cell matches, and a grid failing its self-check
+falls back to the verbatim rows. No library preset selects either; the notebook's two `"auto"`
+constants (`LAYOUT_POLICY`, `UNVERIFIED_TABLE_STRUCTURE`) do once the steps below are done (write
+`"deterministic-text-pages"` / `"rows"` to opt out). Both use the same runtime and the same weights
+directory. On Databricks:
 
-- **Weights on a Unity Catalog volume** (they are not in any wheel and must not enter a Git
-  folder): upload `pp_doc_layoutv3.onnx` (ModelScope, RapidAI export; pdfspine documents the
-  URL) to e.g. `/Volumes/<catalog>/<schema>/models/pdfspine-onnx/`, and set
-  `APP_ONNX_LAYOUT_MODEL` to that absolute file (or directory) path. The weights file is read
-  once per process (sha256 into the partition producer, then one cached onnxruntime session);
-  per-page inference does not re-read the volume.
-- **Install the runtime**: `%pip install 'pdfspine[onnx]'` (onnxruntime CPU, numpy, Pillow),
-  then restart Python. With `"auto"`, a missing runtime or weights file only keeps the
-  deterministic layout and the config cell names what is missing; with an explicit
-  `"onnx-layout"` it stops the ingest before any page with an error naming
-  `APP_ONNX_LAYOUT_MODEL` — never a silent per-page fallback that would look like saved calls.
+- **Weights on a Unity Catalog volume, one directory** (they are not in any wheel and must not
+  enter a Git folder): upload `pp_doc_layoutv3.onnx` (layout) and `slanet-plus.onnx` (table
+  structure; ModelScope, RapidAI exports, URLs in pdfspine's docs and in the error text) to e.g.
+  `/Volumes/<catalog>/<schema>/models/pdfspine-onnx/`, and set `APP_ONNX_LAYOUT_MODEL` in `.env`
+  to that directory (or to the layout file in it); `PDFSPINE_ONNX_MODELS` pointing at the same
+  directory also works. Each weights file is read once per process (sha256 into the producer,
+  then one cached onnxruntime session); per-page / per-table inference does not re-read the volume.
+  Resolve re-runs the structure model, so the serving process needs the same setting.
+- **Install the runtime**: `%pip install 'pdfspine[onnx]'` (or the project extra `pdf-onnx`:
+  onnxruntime CPU, numpy, Pillow), then restart Python. With `"auto"`, a missing runtime or
+  weights file only keeps the deterministic layout / the verbatim rows and the config cell names
+  what is missing; with an explicit `"onnx-layout"` / `"tsr"` it stops the run before any page
+  with an error naming the setting — never a silent fallback that would look like saved calls.
 - **Files**: an ONNX page writes the same partition artifacts as a model page and no model-cache
   files, so it never adds to the per-folder counts below; switching policies on one ingestion
   directory sends no call (each layout's artifacts stay side by side in the sharded store).
 - **Not yet validated on Databricks or on long financial reports** (FUSE weight loading and
   per-page render memory untested; the measured comparison is a 20-page deck). The status line
-  reports, per PDF, deterministic / onnx / model-fallback page counts with reason codes.
+  reports, per PDF, deterministic / onnx / model-fallback page counts with reason codes, and
+  inferred grids / fallbacks to rows with reason codes. Build and serve on the same CPU
+  architecture (ADR 0031 risks: model box floats).
 
 ## Data directory on workspace files or a Unity Catalog volume
 
@@ -266,7 +275,8 @@ How the backend adapts ([ADR 0020](adr/0020-storage-without-hard-links.md)):
 - All writes on the pipeline are sequential, whole-file writes. The notebook writes
   `answers.csv` (and the test bench's `testbench.csv` / `testbench.json`) in one pass through a
   temporary sibling and a rename instead of appending.
-- **ONNX layout weights** (ADR 0030, `pp_doc_layoutv3.onnx`, ≈ 130 MB): keep them on a volume,
+- **ONNX weights** (ADR 0030 `pp_doc_layoutv3.onnx` ≈ 130 MB, ADR 0031 `slanet-plus.onnx`
+  ≈ 8 MB): keep them on a volume,
   not in the Git folder (they would count against its 1 GB / 20 000-file limits and must not be
   committed) and not under the ingestion directory. They are only read — once per process, to
   hash them and open one onnxruntime session; nothing is written next to them. Reading them over
