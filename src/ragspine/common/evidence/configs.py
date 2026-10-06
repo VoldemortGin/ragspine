@@ -124,6 +124,10 @@ class Settings(BaseSettings):
 
     # 通用入库/文档目录根;None → data_dir / "ingestion"(与 ingest 默认输出一致)
     ingestion_dir: Path | None = None
+    # "onnx-layout" 版面策略(ADR 00NN)的 PP-DocLayoutV3 模型文件路径,也可以填模型所在目录
+    # (按默认文件名 pp_doc_layoutv3.onnx 拼接)。未设或空串 → 退回环境变量 PDFSPINE_ONNX_MODELS。
+    # 权重不随任何 wheel 分发;Databricks 上放 Volume 并填绝对路径。
+    onnx_layout_model: str | None = None
     # 兼容根:每项是一个 processing store 根,其父目录即 source store 根;默认空
     legacy_document_roots: tuple[Path, ...] = ()
     # document-catalog 聊天端点整个进程的模型真实调用预算(缓存回放不计;用尽即 503)

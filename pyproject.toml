@@ -327,6 +327,7 @@ markers = [
     "gpu: 需要 Ubuntu+NVIDIA GPU 与真实 OCR 模型，本地默认跳过",
     "docling: 走 docling 重模型抽取的测试；ci.sh 放独立进程跑，避免全套并跑时的第三方不确定性",
     "network: 需联网首次下载模型权重（如 fastembed/HF，'首拉后离线'）；make ci 默认 `-m \"not network\"` 跳过",
+    "onnx: 需要本地 PP-DocLayoutV3 权重与 onnxruntime 的真模型版面测试；CI 默认 `-m \"not onnx\"` 跳过",
 ]
 # 零警告门：把警告升级为错误（我们的代码必须零警告），仅放行已知的第三方 deprecation。
 filterwarnings = [

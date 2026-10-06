@@ -11,10 +11,13 @@ Every switch is one field of ``IngestPlan`` so each can be tested and moved on i
 mode name only picks a preset. ``layout`` is the selection point for the page partitioner
 (``make_partitioner``): both presets use the model layout; ``"deterministic-text-pages"``
 (ADR 0028) partitions pages without figures or images from pdfspine blocks and is chosen
-explicitly until it is validated on long reports. ``unverified_tables_as_rows`` (ADR 0027)
-indexes a Table with no detected grid as its verbatim printed rows; lite turns it on.
-``table_row_index_units`` / ``drop_running_lines_from_index`` lay out the index text (row
-units for a long row table, nothing for a running header / footer); lite turns both on.
+explicitly until it is validated on long reports; ``"onnx-layout"`` (ADR 00NN) additionally
+partitions the remaining pages with pdfspine's local PP-DocLayoutV3 model (deterministic text
+pages -> onnx -> per-page model fallback), also chosen explicitly only.
+``unverified_tables_as_rows`` (ADR 0027) indexes a Table with no detected grid as its verbatim
+printed rows; lite turns it on. ``table_row_index_units`` / ``drop_running_lines_from_index``
+lay out the index text (row units for a long row table, nothing for a running header /
+footer); lite turns both on.
 """
 
 from dataclasses import dataclass, replace
@@ -22,6 +25,7 @@ from typing import Final, Literal, get_args
 
 from enterprise_pdf_rag.adapters.deterministic_partition import make_text_page_partitioner
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
+from enterprise_pdf_rag.adapters.onnx_partition import make_onnx_page_partitioner
 from enterprise_pdf_rag.adapters.page_metadata_extraction import PAGE_METADATA_DETERMINISTIC
 from enterprise_pdf_rag.adapters.page_partition import ModelPagePartitioner
 from enterprise_pdf_rag.processing.index_text import IndexTextOptions
@@ -31,9 +35,10 @@ from ragspine.extraction.evidence.page.models import ProcessingManifest
 from ragspine.extraction.evidence.page.ports import PagePartitioner
 
 type IngestMode = Literal["full", "lite"]
-# Which partitioner proposes a page's objects: the model on every page, or pdfspine blocks on
-# pages without figures or images with a per-page model fallback (ADR 0028).
-type LayoutPolicy = Literal["model", "deterministic-text-pages"]
+# Which partitioner proposes a page's objects: the model on every page; pdfspine blocks on
+# pages without figures or images with a per-page model fallback (ADR 0028); or those two plus
+# pdfspine's local ONNX layout model (PP-DocLayoutV3) on the remaining pages (ADR 00NN).
+type LayoutPolicy = Literal["model", "deterministic-text-pages", "onnx-layout"]
 INGEST_MODES: Final[tuple[str, ...]] = get_args(IngestMode.__value__)
 LAYOUT_POLICIES: Final[tuple[str, ...]] = get_args(LayoutPolicy.__value__)
 # The call categories a mode may leave unsent, as ``IngestionSummary.skipped_calls`` keys.
@@ -124,6 +129,8 @@ def check_layout_policy(value: str) -> LayoutPolicy:
         return "model"
     if value == "deterministic-text-pages":
         return "deterministic-text-pages"
+    if value == "onnx-layout":
+        return "onnx-layout"
     raise ValueError(f"layout_policy must be one of {list(LAYOUT_POLICIES)}, not {value!r}")
 
 
@@ -160,6 +167,10 @@ def make_partitioner(
         return model
     if plan.layout == "deterministic-text-pages":
         return make_text_page_partitioner(model, sources, snapshot)
+    if plan.layout == "onnx-layout":
+        # 组合顺序: 纯文字页确定性(零调用、零推理) -> 其余页本地 ONNX 版面 -> 回退页模型版面.
+        onnx = make_onnx_page_partitioner(model, sources, snapshot)
+        return make_text_page_partitioner(onnx, sources, snapshot)
     raise ValueError(f"unknown layout policy {plan.layout!r}")
 
 
