@@ -14,6 +14,7 @@ from enterprise_pdf_rag.adapters.processing_retrieval import (
 )
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.source_publication import validate_processing_source
+from enterprise_pdf_rag.processing.index_text import ONE_UNIT_EACH, IndexTextOptions
 from ragspine.extraction.evidence.figures.ports import EmbeddingPort
 from ragspine.extraction.evidence.page.models import ObjectKind
 
@@ -92,6 +93,11 @@ class DraftIndex(BoundaryModel):
     # misses); a batching embedder sends fewer requests than objects, a rerun sends none.
     embedding_requests: int = 0
     embedded_objects: int = 0
+    # How the index text was laid out (``IndexTextOptions``): tables scored as row units and
+    # their units, and running headers / footers left unscored. ``0`` with both switches off.
+    row_unit_tables: int = 0
+    row_units: int = 0
+    unscored_running_members: int = 0
     indexed: Literal[True] = True
     activated: Literal[False] = False
     retrieval_status: Literal["indexed; publication pending"] = "indexed; publication pending"
@@ -107,6 +113,7 @@ def index_draft(
     embedder: EmbeddingPort,
     document_label: str | None = None,
     review: bool = True,
+    index_options: IndexTextOptions = ONE_UNIT_EACH,
 ) -> DraftIndex:
     """Embed a saved draft's eligible index texts into a new immutable snapshot.
 
@@ -115,13 +122,18 @@ def index_draft(
     fresh snapshot is saved without moving any discovery pointer, so the draft stays
     unactivated. Missing artifacts or mixed dimensions raise
     ValueError from the shared build, failing closed. ``review=False`` writes no review page.
+    ``index_options`` lays the index text out into scoring units (row units for a long
+    verbatim-rows table, none for a running header / footer); the default is one unit per
+    member, byte for byte as before.
     """
     sources = LocalDocumentStore(Path(source_store).resolve())
     outputs = ProcessingStore(Path(processing_store).resolve())
     manifest = outputs.load(processing_id)
     records = tuple((page.page_index, record) for page in manifest.pages for record in page.objects)
     retrieval = ProcessingRetrieval(sources, outputs, embedder)
-    publication = retrieval.build(manifest.scope, records, outputs.index_contexts(manifest))
+    publication = retrieval.build(
+        manifest.scope, records, outputs.index_contexts(manifest), index_options
+    )
     indexed_id = outputs.save_draft(replace(manifest, retrieval=publication), sources=sources)
     plan, _ = outputs.load_retrieval(publication)
     written: Path | None = None
@@ -151,6 +163,9 @@ def index_draft(
         embedding_fingerprint=embedder.fingerprint,
         embedding_requests=retrieval.embedding_requests,
         embedded_objects=retrieval.embedded_objects,
+        row_unit_tables=retrieval.row_unit_tables,
+        row_units=retrieval.row_units,
+        unscored_running_members=retrieval.unscored_running,
         review_path=None if written is None else str(written),
     )
 

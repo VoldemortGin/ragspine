@@ -81,6 +81,7 @@ from enterprise_pdf_rag.adapters.visual_requalification import (
     RequalificationSummary,
     requalify_visual_objects,
 )
+from enterprise_pdf_rag.processing.index_text import ONE_UNIT_EACH, IndexTextOptions
 from ragspine.common.evidence.configs import get_settings
 from ragspine.common.evidence.file_placement import recording_repairs
 from ragspine.common.evidence.providers.json_completion import (
@@ -579,12 +580,18 @@ def _starved(outputs: ProcessingStore, processing_id: str) -> bool:
     )
 
 
-def _reusable_index(outputs: ProcessingStore, draft_id: str, embedder: EmbeddingPort) -> bool:
-    """Is the published release exactly this draft indexed by this embedder?
+def _reusable_index(
+    outputs: ProcessingStore,
+    draft_id: str,
+    embedder: EmbeddingPort,
+    index_options: IndexTextOptions = ONE_UNIT_EACH,
+) -> bool:
+    """Is the published release exactly this draft indexed by this embedder and layout?
 
     ``index_draft`` saves ``replace(draft, retrieval=publication)``, so a release whose
-    manifest minus its retrieval equals the draft, and whose every member carries the
-    embedder's fingerprint, is what indexing the draft again would rebuild.
+    manifest minus its retrieval equals the draft, whose index layout is ``index_options``
+    and whose every member carries the embedder's fingerprint, is what indexing the draft
+    again would rebuild.
     """
     current_id = outputs.current_id()
     if current_id is None:
@@ -596,6 +603,8 @@ def _reusable_index(outputs: ProcessingStore, draft_id: str, embedder: Embedding
     if current.retrieval is None or replace(current, retrieval=None) != outputs.load(draft_id):
         return False
     plan, _ = outputs.load_retrieval(current.retrieval)
+    if plan.index_version != index_options.index_version:
+        return False
     return {member.embedding_fingerprint for member in plan.members} == {embedder.fingerprint}
 
 
@@ -775,7 +784,7 @@ def _run_document(
             return finish("nothing_to_index")
         stage = enter("index")
         indexed_id = draft_id
-        if _reusable_index(outputs, draft_id, embedder):
+        if _reusable_index(outputs, draft_id, embedder, plan.index_options):
             indexed_id = outputs.load_current()[0]
             run["index_reused"] = True
         else:
@@ -785,6 +794,7 @@ def _run_document(
                 processing_id=draft_id,
                 embedder=embedder,
                 review=plan.review_exports,
+                index_options=plan.index_options,
             )
             run["index"] = indexed
             indexed_id = indexed.indexed_processing_id
@@ -1156,6 +1166,7 @@ def _ingest_count_lines(result: FolderPipelineResult) -> list[str]:
     partition: list[str] = []
     rows: list[str] = []
     embeds: list[str] = []
+    layout: list[str] = []
     for item in result.documents:
         name = Path(item.pdf_path).name
         ingested = item.ingestion
@@ -1181,11 +1192,19 @@ def _ingest_count_lines(result: FolderPipelineResult) -> list[str]:
                 f"- `{name}`: embedding requests {item.index.embedding_requests}, "
                 f"objects embedded {item.index.embedded_objects}"
             )
+            if item.index.row_unit_tables or item.index.unscored_running_members:
+                layout.append(
+                    f"- `{name}`: {item.index.row_unit_tables} tables as "
+                    f"{item.index.row_units} row units, "
+                    f"{item.index.unscored_running_members} running header / footer "
+                    "objects unscored"
+                )
     out: list[str] = []
     for title, block in (
         ("Page layout without a model call (ADR 0028):", partition),
         ("Tables indexed as verbatim rows (ADR 0027):", rows),
         ("Index embeddings (ADR 0026):", embeds),
+        ("Index text layout (ADR 0027 / 0028 amendments):", layout),
     ):
         if block:
             out += ["", title, "", *block]
@@ -1285,6 +1304,8 @@ def run_folder_pipeline(
     ingest_mode: IngestMode = "full",
     layout_policy: LayoutPolicy | None = None,
     unverified_tables_as_rows: bool | None = None,
+    table_row_index_units: bool | None = None,
+    drop_running_lines_from_index: bool | None = None,
     max_questions: int | None = None,
     question_selection: QuestionSelectionMode = "first",
     only_question_docs: bool = False,
@@ -1334,6 +1355,9 @@ def run_folder_pipeline(
     pdfspine blocks with no layout call and falls back to the model per page (ADR 0028, counted
     in each ``IngestionSummary``); ``unverified_tables_as_rows`` indexes a Table with no
     detected grid as its verbatim printed rows (ADR 0027; on in lite, off in full).
+    ``table_row_index_units`` / ``drop_running_lines_from_index`` override the index-text
+    layout the same way (on in lite, off in full): a long row table scores as one unit per
+    figure row with its header repeated, and a running header / footer scores as nothing.
 
     Raises ``ValueError`` for an invalid budget, ``FileNotFoundError`` for a missing folder or
     question set and ``PreflightError`` for a missing or unreachable dependency, all before
@@ -1350,6 +1374,8 @@ def run_folder_pipeline(
         ingest_mode,
         layout_policy=layout_policy,
         unverified_tables_as_rows=unverified_tables_as_rows,
+        table_row_index_units=table_row_index_units,
+        drop_running_lines_from_index=drop_running_lines_from_index,
     )
     tree = plan.build_tree if build_tree is None else build_tree
     settings = get_settings()
