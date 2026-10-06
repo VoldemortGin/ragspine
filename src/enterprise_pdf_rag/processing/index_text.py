@@ -8,17 +8,78 @@ single explicit value keeps its description text, so a pending or label-only fig
 never climbs the ranking on words it cannot cite. A proven diagram is projected the same
 way: its node labels in reading order plus one ``<from> -> <to>`` pair per drawn edge.
 Nothing here reads a store.
+
+Two index-layout switches (``IndexTextOptions``) change *how many* units a member scores
+as, never what a unit says: a long verbatim-rows table (ADR 0027) becomes one unit per
+figure row with its header rows repeated, and a running header / footer scores as no unit
+at all. Every character of a unit is still printed by the table or by the page context.
 """
 
+import re
 from dataclasses import dataclass
 from decimal import Decimal
+from math import ceil
 
 from ragspine.extraction.evidence.figures.models import ChartIR, ChartPoint, ValueKind
 from ragspine.extraction.evidence.objects.diagrams.diagram_description import (
     EDGE_ARROW,
     reading_order,
 )
+from ragspine.extraction.evidence.objects.tables.table_rows import TableRow, TableRowsIR
 from ragspine.extraction.evidence.objects.typed_ir import DiagramIR, FormulaIR, TypedIR
+
+# The index layout every snapshot had before the switches: one unit, one vector per member.
+INDEX_VERSION = "immutable-cosine-index-v1"
+# A unit index may hold several vectors per member (its units) or none (an unscored member).
+UNIT_INDEX_VERSION = "immutable-cosine-unit-index-v1"
+_ROW_UNITS = "table-row-units-v1"
+_RUNNING = "running-lines-unscored-v1"
+# Header rows are the rows above the first figure row; deeper than this is not a header we
+# can trust, so only the first row is repeated.
+MAX_HEADER_ROWS = 4
+# A table never scores as more units than this; a longer one puts consecutive figure rows
+# together. 64 keeps a 200-row note at about 3 rows a unit and bounds its vectors.
+MAX_UNITS_PER_TABLE = 64
+# A printed figure: digits with separators, an accounting negative, a sign, a currency
+# prefix or a percent. A bare four-digit year (``2024``) heads a column, it is not a figure.
+_FIGURE = re.compile(r"[(\-−–]?[$€£¥]?\d[\d,.]*%?\)?")  # noqa: RUF001
+_YEAR = re.compile(r"(?:19|20)\d{2}")
+
+
+@dataclass(frozen=True, slots=True)
+class IndexTextOptions:
+    """How a snapshot's index text is laid out into scoring units; both off = one unit each."""
+
+    # A verbatim-rows table scores as one unit per figure row, its header rows repeated.
+    table_row_units: bool = False
+    # A Text member every line of which is a running header / footer scores as no unit.
+    drop_running_lines: bool = False
+
+    @property
+    def index_version(self) -> str:
+        features = [
+            name
+            for name, on in (
+                (_ROW_UNITS, self.table_row_units),
+                (_RUNNING, self.drop_running_lines),
+            )
+            if on
+        ]
+        return f"{UNIT_INDEX_VERSION}:{'+'.join(features)}" if features else INDEX_VERSION
+
+    @classmethod
+    def from_index_version(cls, version: str) -> "IndexTextOptions":
+        """The switches a snapshot was indexed with; any non-unit version had none."""
+        if not version.startswith(UNIT_INDEX_VERSION + ":"):
+            return cls()
+        features = set(version.removeprefix(UNIT_INDEX_VERSION + ":").split("+"))
+        if not features or not features <= {_ROW_UNITS, _RUNNING}:
+            raise ValueError(f"unknown index version {version!r}")
+        return cls(_ROW_UNITS in features, _RUNNING in features)
+
+
+# Both switches off: the layout every snapshot had before them.
+ONE_UNIT_EACH = IndexTextOptions()
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +185,56 @@ def formula_index_text(formula: FormulaIR, *, fallback: str) -> str:
     parts = [formula.readable, formula.linear, "formula"]
     parts.extend(dict.fromkeys(token.text for token in formula.tokens))
     return " ".join(part.strip() for part in parts if part.strip())
+
+
+def _figure_row(row: TableRow) -> bool:
+    """A row printing at least one figure cell that is not a bare year."""
+    return any(
+        _FIGURE.fullmatch(text.strip()) and not _YEAR.fullmatch(text.strip()) for text in row.texts
+    )
+
+
+def table_header_rows(ir: TableRowsIR) -> int:
+    """How many leading rows every unit repeats: those above the first figure row.
+
+    Conservative: a table opening on a figure row, or whose header would be deeper than
+    ``MAX_HEADER_ROWS``, repeats its first row only.
+    """
+    first = next((index for index, row in enumerate(ir.rows) if _figure_row(row)), None)
+    if first is None or first == 0 or first > MAX_HEADER_ROWS:
+        return 1
+    return first
+
+
+def table_row_units(ir: TableRowsIR, context: PageIndexContext | None) -> tuple[str, ...] | None:
+    """The scoring units of a verbatim-rows table, or ``None`` when it stays one unit.
+
+    Each unit is the page context header, the table's header rows and one figure row with
+    the label-only rows printed just above it (a wrapped label, a sub-heading); rows after
+    the last figure row join the last unit. Rows are the IR's own row text, so no character
+    is added. A table with fewer than two figure rows below its header is not split, and a
+    table longer than ``MAX_UNITS_PER_TABLE`` units puts consecutive groups together.
+    """
+    depth = table_header_rows(ir)
+    head = tuple(row.text for row in ir.rows[:depth])
+    groups: list[list[str]] = []
+    pending: list[str] = []
+    for row in ir.rows[depth:]:
+        pending.append(row.text)
+        if _figure_row(row):
+            groups.append(pending)
+            pending = []
+    if len(groups) < 2:
+        return None
+    groups[-1].extend(pending)
+    size = ceil(len(groups) / MAX_UNITS_PER_TABLE)
+    return tuple(
+        contextual_index_text(
+            "\n".join((*head, *(text for group in groups[start : start + size] for text in group))),
+            context,
+        )
+        for start in range(0, len(groups), size)
+    )
 
 
 def member_index_text(ir: TypedIR, description_text: str) -> str:

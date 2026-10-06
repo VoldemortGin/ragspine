@@ -14,11 +14,16 @@ from enterprise_pdf_rag.adapters.http.processing_schemas import (
     StageEnvelope,
 )
 from enterprise_pdf_rag.adapters.source_publication import validate_processing_source
-from enterprise_pdf_rag.processing.index_text import PageIndexContext
+from enterprise_pdf_rag.processing.index_text import (
+    UNIT_INDEX_VERSION,
+    IndexTextOptions,
+    PageIndexContext,
+)
 from enterprise_pdf_rag.processing.retrieval import (
     RetrievalEmbedding,
     RetrievalIndex,
     RetrievalPlan,
+    RetrievalUnitEmbeddings,
     retrieval_dependencies,
 )
 from ragspine.common.evidence.file_placement import (
@@ -226,6 +231,11 @@ class ProcessingStore:
             or publication.dependencies != retrieval_dependencies(plan)
         ):
             raise ValueError("Retrieval publication has a different dependency closure")
+        if plan.index_version.startswith(UNIT_INDEX_VERSION + ":"):
+            for ref in publication.dependencies:
+                self.assets.verify(ref)
+            self._check_unit_index(plan, index)
+            return plan, index
         if tuple(entry.member_id for entry in index.entries) != tuple(
             sorted(member.member_id for member in plan.members)
         ):
@@ -250,6 +260,39 @@ class ProcessingStore:
             ):
                 raise ValueError("Index vector does not match its actual embedding artifact")
         return plan, index
+
+    def _check_unit_index(self, plan: RetrievalPlan, index: RetrievalIndex) -> None:
+        """A unit index repeats each member's artifact vectors in order, and nothing else.
+
+        A member's embedding artifact is either one ``RetrievalEmbedding`` (one vector) or a
+        ``RetrievalUnitEmbeddings`` (its row units, or none for an unscored running member,
+        which only a snapshot indexed with ``drop_running_lines`` may hold).
+        """
+        options = IndexTextOptions.from_index_version(plan.index_version)
+        ids = [entry.member_id for entry in index.entries]
+        if ids != sorted(ids) or not set(ids) <= {member.member_id for member in plan.members}:
+            raise ValueError("Retrieval index readiness does not cover the exact members")
+        indexed: dict[str, list[tuple[float, ...]]] = {}
+        for entry in index.entries:
+            indexed.setdefault(entry.member_id, []).append(entry.vector)
+        for member in plan.members:
+            payload = self.assets.get(member.embedding)
+            units: RetrievalUnitEmbeddings | RetrievalEmbedding = TypeAdapter(
+                RetrievalUnitEmbeddings | RetrievalEmbedding
+            ).validate_json(payload)
+            vectors = (
+                list(units.vectors)
+                if isinstance(units, RetrievalUnitEmbeddings)
+                else [units.vector]
+            )
+            if (
+                units.description_sha256 != member.description.sha256
+                or units.fingerprint != member.embedding_fingerprint
+                or vectors != indexed.get(member.member_id, [])
+                or any(len(vector) != member.embedding_dimensions for vector in vectors)
+                or (not vectors and not options.drop_running_lines)
+            ):
+                raise ValueError("Index vector does not match its actual embedding artifact")
 
     def load_page_metadata(self, manifest: ProcessingManifest) -> dict[int, PageMetadata]:
         """Every succeeded page metadata stage, parsed and bound to its page; no I/O elsewhere."""

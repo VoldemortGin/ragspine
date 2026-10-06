@@ -1,6 +1,6 @@
 ---
 covers: src/enterprise_pdf_rag/
-verified-against: 9540dbd
+verified-against: c5644ac
 ---
 
 # enterprise_pdf_rag — agent contract
@@ -111,7 +111,10 @@ adapters/     every SDK and I/O: pdfspine (every source PDF opens through pdf_pa
               ingest_mode.py (ADR 0025: `run_folder_pipeline(ingest_mode="full"|"lite")`,
               default full = byte-identical; `IngestPlan` holds one field per switch — image /
               formula calls, chart description from IR, deterministic page metadata, default
-              tree, review exports, `unverified_tables_as_rows` (ADR 0027: lite on, full off)
+              tree, review exports, `unverified_tables_as_rows` (ADR 0027: lite on, full off),
+              `table_row_index_units` / `drop_running_lines_from_index` (index-text layout:
+              ADR 0027 / 0028 Amendment 1, lite on, full off — `IngestPlan.index_options`
+              → `index_draft(index_options=...)`, `run_folder_pipeline` overrides each)
               and `layout` (`make_partitioner`: `"model"` in both presets,
               `"deterministic-text-pages"` only when asked — ADR 0028); `ingest_pdf` /
               `run_folder_pipeline` take `layout_policy` / `unverified_tables_as_rows` as
@@ -268,7 +271,13 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   chart has no citable value (ADR 0012); a proved diagram projects its node labels in reading order
   plus one `<from> -> <to>` per drawn edge, and a proved formula its readable and linear forms plus
   every token text (policy v5, ADR 0015). Both retrieval channels score that same string; the raw
-  branch is never embedded; description assets are never rewritten.
+  branch is never embedded; description assets are never rewritten. Under a unit index
+  (`IndexTextOptions`, named by `RetrievalPlan.index_version`; lite only) a member may score as
+  several units — a long verbatim-rows table as header rows + one figure row each, verbatim, its
+  best unit counting (ADR 0027 Amendment 1) — or as none: a Text member printing only running
+  header / footer / margin page-number lines, recomputed from the page spans whatever the layout
+  source (`adapters/running_lines.py`), stays a citable member in its page window but scores in
+  neither channel (ADR 0028 Amendment 1).
 - **Page context informs, it never cites** (ADR 0017) — beside each hit the prompt prints the
   rest of that hit's page, one line per member in reading order, with no field path and no
   member id; it is generation context only. A claim naming it is an `unknown member` and is
