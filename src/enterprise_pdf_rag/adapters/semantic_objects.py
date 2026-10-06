@@ -9,6 +9,7 @@ from typing import Literal
 
 from pydantic import TypeAdapter
 
+from enterprise_pdf_rag.adapters import pdfspine_tsr
 from enterprise_pdf_rag.adapters.chart_publication import ChartPublicationReceipt
 from enterprise_pdf_rag.adapters.chart_semantics import (
     ChartInference,
@@ -37,7 +38,7 @@ from enterprise_pdf_rag.adapters.object_processing import ProcessingObjectAdapte
 from enterprise_pdf_rag.adapters.pdfspine_svg import crop_native_svg
 from enterprise_pdf_rag.adapters.pdfspine_tables import PdfspineTableAdapter
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.adapters.shared_pdf import source_pdf
+from enterprise_pdf_rag.adapters.shared_pdf import opened_pdf, source_pdf
 from enterprise_pdf_rag.adapters.source_objects import source_table_description
 from enterprise_pdf_rag.adapters.visual_semantics import VisualInference, VisualSemanticAdapter
 from ragspine.common.evidence.providers.json_completion import (
@@ -57,6 +58,11 @@ from ragspine.extraction.evidence.objects.formulas.formula_models import (
     FormulaSourceObservation,
 )
 from ragspine.extraction.evidence.objects.tables.table_grid_proof import GRID_SCOPE
+from ragspine.extraction.evidence.objects.tables.table_inferred_grid import (
+    TSR_FALLBACK,
+    TSR_SCOPE,
+    InferredGridRejection,
+)
 from ragspine.extraction.evidence.objects.tables.table_models import TableExtractionResult, TableIR
 from ragspine.extraction.evidence.objects.tables.table_rows import (
     TABLE_ROWS_METHOD,
@@ -168,6 +174,13 @@ class SemanticObjectAdapter:
         self.qualification_policy = qualification_policy
         # ADR 0025: which object calls this ingest sends; ``None`` is full, byte for byte.
         self.plan = ingest_plan("full") if plan is None else plan
+        # ADR 00NN: resolved up front, so a missing model or runtime stops the ingest with an
+        # explicit message instead of every unruled table silently falling back to rows.
+        self.table_structure = (
+            pdfspine_tsr.table_structure_recognizer()
+            if self.plan.unverified_table_structure == "tsr"
+            else None
+        )
         # Model calls left unsent by the plan, by ``ingest_mode.SKIPPED_CALL_KINDS`` category.
         self.skipped_calls: Counter[str] = Counter()
         if (
@@ -401,6 +414,11 @@ class SemanticObjectAdapter:
                 ),
             )
         )
+        # ADR 00NN: a model-inferred (pending) grid first, when the plan asks for one.
+        if result.table is None and self.table_structure is not None:
+            return self._table_inferred(
+                page, item, writer, stages, svg, result, source_pdf(self.sources, source)
+            )
         # ADR 0027: a Table whose grid pdfspine cannot detect is indexed as its verbatim
         # printed rows instead of being left out (``IngestPlan.unverified_tables_as_rows``).
         if result.table is None and self.plan.unverified_tables_as_rows:
@@ -465,6 +483,81 @@ class SemanticObjectAdapter:
             (
                 description,
                 writer.save(
+                    "qualification", TypeAdapter(LiteralQualification).dump_json(qualification)
+                ),
+            )
+        )
+        return ObjectProcessingRecord(item.object_id, item.kind, tuple(stages))
+
+    def _table_inferred(
+        self,
+        page: PageInput,
+        item: LayoutObject,
+        writer: _Writer,
+        stages: list[StageOutcome],
+        svg: StageOutcome,
+        result: TableExtractionResult,
+        pdf: bytes,
+    ) -> ObjectProcessingRecord:
+        """No grid was detected: let the structure model propose one, kept PENDING (ADR 00NN).
+
+        Every cell is the region's own spans; the grid qualifies under its own scope and its
+        stages carry the model's producer. A grid failing its self-check (or a transcription
+        that does not hold) falls back to ADR 0027's verbatim rows, with the reason recorded.
+        """
+        recognizer = self.table_structure
+        if recognizer is None:
+            raise ValueError("No table structure model is configured")
+        tsr_writer = _Writer(
+            writer.outputs, page, item, writer.producer + ":" + recognizer.producer
+        )
+        owned = set(item.source_span_ids)
+        anchor = SourceAnchor(page.source_sha256, page.source_sha256, page.page_index, item.bbox)
+        with opened_pdf(pdf) as document:
+            inferred: TableIR | InferredGridRejection = pdfspine_tsr.infer_table_grid(
+                document.load_page(page.page_index),
+                object_id=item.object_id,
+                anchor=anchor,
+                spans=tuple(span for span in page.text.spans if span.span_id in owned),
+                recognizer=recognizer,
+            )
+        transcription: ObjectDescription | None = None
+        if isinstance(inferred, TableIR):
+            try:
+                transcription = source_table_description(page, item, inferred)
+            except ValueError as error:
+                inferred = InferredGridRejection("transcription", str(error))
+        if isinstance(inferred, InferredGridRejection) or transcription is None:
+            reason = (
+                inferred
+                if isinstance(inferred, InferredGridRejection)
+                else InferredGridRejection("transcription", "no transcription")
+            )
+            stages.append(
+                tsr_writer.diagnostic(
+                    "table_structure", f"{TSR_FALLBACK}:{reason.reason}: {reason.detail}"
+                )
+            )
+            return self._table_rows(page, item, writer, stages, svg, result)
+        ir = tsr_writer.save("ir", TypeAdapter(TableIR).dump_json(inferred))
+        description = tsr_writer.save(
+            "description", TypeAdapter(ObjectDescription).dump_json(transcription)
+        )
+        qualification = LiteralQualification(
+            item.object_id,
+            transcription.source,
+            page.source_manifest_id,
+            transcription.source_span_ids,
+            _ref(ir),
+            _ref(description),
+            _ref(svg),
+            scope=TSR_SCOPE,
+        )
+        stages.extend(
+            (
+                ir,
+                description,
+                tsr_writer.save(
                     "qualification", TypeAdapter(LiteralQualification).dump_json(qualification)
                 ),
             )

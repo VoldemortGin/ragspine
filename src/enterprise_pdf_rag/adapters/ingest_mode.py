@@ -13,6 +13,8 @@ mode name only picks a preset. ``layout`` is the selection point for the page pa
 (ADR 0028) partitions pages without figures or images from pdfspine blocks and is chosen
 explicitly until it is validated on long reports. ``unverified_tables_as_rows`` (ADR 0027)
 indexes a Table with no detected grid as its verbatim printed rows; lite turns it on.
+``unverified_table_structure="tsr"`` (ADR 00NN) first asks a local table-structure model for
+that table's grid, kept pending, and falls back to the rows; both presets keep ``"rows"``.
 """
 
 from dataclasses import dataclass, replace
@@ -31,8 +33,12 @@ type IngestMode = Literal["full", "lite"]
 # Which partitioner proposes a page's objects: the model on every page, or pdfspine blocks on
 # pages without figures or images with a per-page model fallback (ADR 0028).
 type LayoutPolicy = Literal["model", "deterministic-text-pages"]
+# How a Table with no detected grid is structured when it is indexed: ADR 0027's verbatim
+# printed rows, or a grid a local SLANet-plus model infers (kept pending, rows on fallback).
+type UnverifiedTableStructure = Literal["rows", "tsr"]
 INGEST_MODES: Final[tuple[str, ...]] = get_args(IngestMode.__value__)
 LAYOUT_POLICIES: Final[tuple[str, ...]] = get_args(LayoutPolicy.__value__)
+UNVERIFIED_TABLE_STRUCTURES: Final[tuple[str, ...]] = get_args(UnverifiedTableStructure.__value__)
 # The call categories a mode may leave unsent, as ``IngestionSummary.skipped_calls`` keys.
 SKIPPED_CALL_KINDS: Final = ("image", "formula", "chart_description", "page_metadata")
 # What a stage a mode chose not to run says, so it reads apart from a failure or a budget.
@@ -60,6 +66,10 @@ class IngestPlan:
     # Index a Table with no detected grid as its verbatim printed rows (ADR 0027); its rows
     # carry their own producer, so every other stage keeps its bytes either way.
     unverified_tables_as_rows: bool = False
+    # ADR 00NN: ``"tsr"`` gives such a table a model-inferred grid (PENDING, cell citations only)
+    # and falls back to the rows when the model's grid fails its self-check; it indexes the
+    # table even when ``unverified_tables_as_rows`` is off. ``"rows"`` changes nothing.
+    unverified_table_structure: UnverifiedTableStructure = "rows"
 
     @property
     def object_variant(self) -> str | None:
@@ -108,11 +118,24 @@ def check_layout_policy(value: str) -> LayoutPolicy:
     raise ValueError(f"layout_policy must be one of {list(LAYOUT_POLICIES)}, not {value!r}")
 
 
+def check_unverified_table_structure(value: str) -> UnverifiedTableStructure:
+    """``value`` as an ``UnverifiedTableStructure``, or a ``ValueError`` naming the choices."""
+    if value == "rows":
+        return "rows"
+    if value == "tsr":
+        return "tsr"
+    raise ValueError(
+        f"unverified_table_structure must be one of {list(UNVERIFIED_TABLE_STRUCTURES)}, "
+        f"not {value!r}"
+    )
+
+
 def ingest_plan(
     mode: IngestMode,
     *,
     layout_policy: LayoutPolicy | None = None,
     unverified_tables_as_rows: bool | None = None,
+    unverified_table_structure: UnverifiedTableStructure | None = None,
 ) -> IngestPlan:
     """The switches one mode sets; a non-``None`` override replaces that one switch."""
     plan = _PLANS[check_ingest_mode(mode)]
@@ -120,6 +143,11 @@ def ingest_plan(
         plan = replace(plan, layout=check_layout_policy(layout_policy))
     if unverified_tables_as_rows is not None:
         plan = replace(plan, unverified_tables_as_rows=unverified_tables_as_rows)
+    if unverified_table_structure is not None:
+        plan = replace(
+            plan,
+            unverified_table_structure=check_unverified_table_structure(unverified_table_structure),
+        )
     return plan
 
 
