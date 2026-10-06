@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/extraction/evidence/
-verified-against: 1f0d569
+verified-against: 428b5a0
 ---
 
 # extraction/evidence — agent contract
@@ -32,12 +32,14 @@ metadata/     zero-model derivations — page_metadata.py / periods.py / documen
               document_tree.py (table-of-contents fold: verbatim titles carrying their evidence,
               two cut rules, leaves tiling the document as a type invariant — ADR 0019)
 objects/      typed_ir.py (object payloads); tables/ (table_grid_proof.py, the ruled-grid proof —
-              ADR 0014; table_transcription.py, the literal transcription rule); diagrams/ and
+              ADR 0014; table_transcription.py, the literal transcription rule; table_rows.py, verbatim
+              printed rows of a region with no detected grid — ADR 0027); diagrams/ and
               formulas/ (the model-free proofs and their deterministic projections — ADR 0015)
 figures/      pure figure / chart pipeline — same-SVG two branches, snapshot binding,
               source_label_match.py (the ADR 0016 window rule: one to three adjacent source
               occurrences, folded and concatenated, must equal the string being kept);
-              chart_qa/ (typed ChartQA: lookup and ordered percentage-point difference only)
+              chart_qa/ (typed ChartQA: lookup and ordered percentage-point difference only);
+              ports.py also declares the optional `BatchEmbeddingPort` (ADR 0026)
 ```
 
 The I/O side of this domain (pdfspine bindings, source paint, shapes, qualification, model
