@@ -134,9 +134,12 @@ class IngestionSummary(BoundaryModel):
     # ADR 0028, ``layout="deterministic-text-pages"``: pages partitioned without a model call,
     # pages that fell back to the model layout and their reason codes; all zero under the
     # model layout. Re-derived from the saved partitions, so a cache replay reports the same.
+    # ADR 00NN, ``layout="onnx-layout"``: pages partitioned by the local ONNX layout model
+    # (zero LLM calls) are counted apart in ``pages_partitioned_onnx``.
     pages_partitioned_deterministically: int = 0
     pages_partition_model_fallback: int = 0
     partition_fallback_reasons: dict[str, int] = Field(default_factory=dict)
+    pages_partitioned_onnx: int = 0
     activated: Literal[False] = False
     indexed: Literal[False] = False
     retrieval_status: Literal[
@@ -432,6 +435,7 @@ def ingest_pdf(
         pages_partitioned_deterministically=partition_tally.deterministic_pages,
         pages_partition_model_fallback=partition_tally.model_fallback_pages,
         partition_fallback_reasons=partition_tally.fallback_reasons,
+        pages_partitioned_onnx=partition_tally.onnx_pages,
         review_path=None if review is None else str(review),
     )
 

@@ -31,6 +31,7 @@ from enterprise_pdf_rag.adapters.deterministic_partition_geometry import (
     text_lines,
 )
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
+from enterprise_pdf_rag.adapters.onnx_partition import ONNX_FALLBACK_MARK, ONNX_PRODUCER_PREFIX
 from enterprise_pdf_rag.adapters.pdfspine_tables import LINE_MAX_THICKNESS
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.shared_pdf import opened_pdf, source_pdf
@@ -181,11 +182,13 @@ class _EmittedTable:
 
 @dataclass(frozen=True, slots=True)
 class PartitionCounts:
-    """确定性处理的页数 / 回退页数与原因码分布(从已存产物重导出, 重跑也稳定)."""
+    """确定性 / ONNX 处理的页数, 回退页数与原因码分布(从已存产物重导出, 重跑也稳定)."""
 
     deterministic_pages: int
     model_fallback_pages: int
     fallback_reasons: dict[str, int]
+    # ADR 00NN: 本地 ONNX 版面模型(零 LLM 调用)切分的页数; "onnx-layout" 之外恒为 0.
+    onnx_pages: int = 0
 
 
 EMPTY_PARTITION_COUNTS = PartitionCounts(0, 0, {})
@@ -484,8 +487,14 @@ def make_text_page_partitioner(
 
 
 def partition_counts(outputs: ProcessingStore, manifest: ProcessingManifest) -> PartitionCounts:
-    """从已存版面产物统计确定性页 / 回退页与原因码分布(缓存重放下同样成立)."""
+    """从已存版面产物统计确定性 / ONNX 页, 回退页与原因码分布(缓存重放下同样成立).
+
+    回退到模型版面的页取**最内层路由**的原因码: "onnx-layout" 策略下页先经确定性分诊再经
+    ONNX 切分, 到模型手里说明 ONNX 也放弃了, 它的 ``onnx_*`` 码才说明为什么要花这次调用;
+    "deterministic-text-pages" 策略下只有确定性分诊的码, 统计与 ADR 0028 逐字节一致.
+    """
     deterministic = 0
+    onnx = 0
     reasons: Counter[str] = Counter()
     for record in manifest.pages:
         outcome = record.partition
@@ -495,8 +504,20 @@ def partition_counts(outputs: ProcessingStore, manifest: ProcessingManifest) -> 
         if partition.producer.startswith(DETERMINISTIC_PRODUCER_PREFIX):
             deterministic += 1
             continue
+        if partition.producer.startswith(ONNX_PRODUCER_PREFIX):
+            onnx += 1
+            continue
+        reason = None
         for diagnostic in partition.diagnostics:
-            if diagnostic.startswith(_FALLBACK_MARK) and diagnostic.endswith(")"):
-                reasons[diagnostic[len(_FALLBACK_MARK) : -1]] += 1
+            if diagnostic.startswith(ONNX_FALLBACK_MARK) and diagnostic.endswith(")"):
+                reason = diagnostic[len(ONNX_FALLBACK_MARK) : -1]
                 break
-    return PartitionCounts(deterministic, sum(reasons.values()), dict(reasons))
+            if (
+                reason is None
+                and diagnostic.startswith(_FALLBACK_MARK)
+                and diagnostic.endswith(")")
+            ):
+                reason = diagnostic[len(_FALLBACK_MARK) : -1]
+        if reason is not None:
+            reasons[reason] += 1
+    return PartitionCounts(deterministic, sum(reasons.values()), dict(reasons), onnx)

@@ -1160,15 +1160,23 @@ def _ingest_count_lines(result: FolderPipelineResult) -> list[str]:
         name = Path(item.pdf_path).name
         ingested = item.ingestion
         if ingested is not None and (
-            ingested.pages_partitioned_deterministically or ingested.pages_partition_model_fallback
+            ingested.pages_partitioned_deterministically
+            or ingested.pages_partitioned_onnx
+            or ingested.pages_partition_model_fallback
         ):
             reasons = ", ".join(
                 f"{code} {count}"
                 for code, count in sorted(ingested.partition_fallback_reasons.items())
             )
+            # ADR 00NN: 只有 "onnx-layout" 策略会产生 onnx 页; 为 0 时行文与 ADR 0028 逐字节一致.
+            onnx_part = (
+                f"onnx {ingested.pages_partitioned_onnx}, "
+                if ingested.pages_partitioned_onnx
+                else ""
+            )
             partition.append(
                 f"- `{name}`: deterministic {ingested.pages_partitioned_deterministically}, "
-                f"model fallback {ingested.pages_partition_model_fallback}"
+                f"{onnx_part}model fallback {ingested.pages_partition_model_fallback}"
                 + (f" ({reasons})" if reasons else "")
             )
         if ingested is not None and ingested.table_row_transcriptions:
