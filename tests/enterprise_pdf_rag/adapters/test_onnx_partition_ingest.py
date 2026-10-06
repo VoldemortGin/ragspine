@@ -66,6 +66,8 @@ def _onnx_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (models / ONNX_LAYOUT_MODEL_FILE).write_bytes(b"stub-weights")
     monkeypatch.setenv(ONNX_MODELS_ENV, str(models))
     monkeypatch.setattr(onnx_partition, "layout_blocks", _stub_blocks)
+    # The layout and structure models are stubbed: only the dependency probes are replaced.
+    monkeypatch.setattr(onnx_partition, "_find_spec", lambda _name: object())
 
 
 def test_onnx_layout_spends_no_layout_calls_and_keeps_chart_ir_on_the_model(

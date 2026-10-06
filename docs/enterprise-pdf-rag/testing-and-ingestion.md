@@ -326,6 +326,7 @@ result.ok, result.live_calls, [(d.pdf_path, d.status) for d in result.documents]
   （ADR 0029 分层）入库目录共存，切换零新增调用。权重路径 `APP_ONNX_LAYOUT_MODEL`（文件或其目录，`Settings.onnx_layout_model`；
   其次 `PDFSPINE_ONNX_MODELS` 目录），依赖 `pip install 'pdfspine[onnx]'`；缺任何一样时构造切分器即报中文错误（入库开始前，绝不静默逐页回退）。
   `IngestionSummary.pages_partitioned_onnx` / `PartitionCounts.onnx_pages`、`report.md` 按 PDF 的 `onnx N` 与 notebook 的「ONNX 处理 N 页」可见。
+  测试：用桩模型的用例经 `onnx_runtime_present` fixture 只替换依赖探测（不导入 onnxruntime），缺依赖环境照常运行；需要真权重的用例标 `@pytest.mark.onnx`（`scripts/ci.sh` 排除），缺 onnxruntime 或权重时自动跳过并给出原因。
   ONNX 切出的 Table / 页眉页脚 Text 与其他来源一样走 ADR 0027 按行收录与行单元、ADR 0028 Amendment 1 的不打分（`test_feature_overlay.py`）。
   真模型用例打 `@pytest.mark.onnx`（需本机权重与 onnxruntime），CI 两处 `-m` 都 `not onnx`。**未过权重许可门、未在长篇财报与 Databricks 上实测**。
 - **notebook 的 `LAYOUT_POLICY`**：`"auto"`（默认）由 `ingest_mode.choose_layout_policy(LAYOUT_POLICY, ingest_mode=INGEST_MODE,

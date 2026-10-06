@@ -852,6 +852,7 @@ def test_auto_without_onnx_weights_uses_deterministic_text_pages_and_says_how_to
     assert "slanet-plus.onnx" in output
 
 
+@pytest.mark.usefixtures("onnx_runtime_present")
 def test_auto_with_onnx_weights_uses_the_onnx_layout(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

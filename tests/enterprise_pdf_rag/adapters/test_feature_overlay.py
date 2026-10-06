@@ -130,6 +130,9 @@ def _onnx_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (models / ONNX_LAYOUT_MODEL_FILE).write_bytes(b"stub-weights")
     monkeypatch.setenv(ONNX_MODELS_ENV, str(models))
     monkeypatch.setattr(onnx_partition, "layout_blocks", _stub_blocks)
+    # The layout and structure models are stubbed: only the dependency probes are replaced.
+    monkeypatch.setattr(onnx_partition, "_find_spec", lambda _name: object())
+    monkeypatch.setattr(pdfspine_tsr, "find_spec", lambda _name: object())
 
 
 def _layout_counts(result: FolderPipelineResult) -> tuple[int, int, int]:

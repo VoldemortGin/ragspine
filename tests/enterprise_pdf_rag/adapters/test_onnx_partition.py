@@ -310,6 +310,7 @@ def test_an_unconfigured_model_path_names_both_settings(
     assert ONNX_MODELS_ENV in str(excinfo.value)
 
 
+@pytest.mark.usefixtures("onnx_runtime_present")
 def test_the_producer_carries_the_model_digest(tmp_path: Path) -> None:
     _sources, snapshot, _page = _report_page(tmp_path)
     model = tmp_path / ONNX_LAYOUT_MODEL_FILE
@@ -326,6 +327,7 @@ def test_the_producer_carries_the_model_digest(tmp_path: Path) -> None:
     assert StubModelPartitioner.fingerprint in partitioner.fingerprint
 
 
+@pytest.mark.usefixtures("onnx_runtime_present")
 def test_the_model_path_is_read_from_settings_when_not_passed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -346,7 +348,10 @@ _REAL_WEIGHTS = Path.home() / "models" / "pdfspine-onnx" / ONNX_LAYOUT_MODEL_FIL
 
 
 @pytest.mark.onnx
-@pytest.mark.skipif(not _REAL_WEIGHTS.is_file(), reason="需要本地 PP-DocLayoutV3 权重")
+@pytest.mark.skipif(
+    onnx_layout_unavailable(str(_REAL_WEIGHTS)) is not None,
+    reason="需要 onnxruntime 与 pdfspine ONNX 权重",
+)
 def test_the_real_model_partitions_an_authored_text_page(tmp_path: Path) -> None:
     """真模型集成: 钉住 pdfspine ``find_layout`` 的调用方式(参数名传错曾被桩测试盖住)."""
     pdf = authored_report(tmp_path / "report.pdf")
@@ -393,6 +398,7 @@ def test_a_missing_onnxruntime_is_a_clear_error_before_any_page(
 # ---- notebook 的 LAYOUT_POLICY = "auto": 预检与选择(只查文件与可导入性, 不加载模型) ----
 
 
+@pytest.mark.usefixtures("onnx_runtime_present")
 def test_the_preflight_is_none_when_weights_and_runtime_are_present(tmp_path: Path) -> None:
     model = tmp_path / ONNX_LAYOUT_MODEL_FILE
     model.write_bytes(b"fake-weights")
@@ -419,6 +425,7 @@ def test_the_preflight_names_the_extra_when_onnxruntime_is_missing(
     assert problem is not None and "pdfspine[onnx]" in problem and "onnxruntime" in problem
 
 
+@pytest.mark.usefixtures("onnx_runtime_present")
 def test_auto_picks_onnx_in_lite_when_it_is_available(tmp_path: Path) -> None:
     model = tmp_path / ONNX_LAYOUT_MODEL_FILE
     model.write_bytes(b"fake-weights")

@@ -236,6 +236,7 @@ def test_tsr_without_its_model_refuses_to_start_and_says_what_to_install(
 
 
 @pytest.mark.parametrize("point_at", ["file", "directory"])
+@pytest.mark.usefixtures("onnx_runtime_present")
 def test_the_onnx_layout_setting_also_locates_the_structure_model(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, point_at: str
 ) -> None:
@@ -251,6 +252,7 @@ def test_the_onnx_layout_setting_also_locates_the_structure_model(
     assert recognizer.model_path == models / pdfspine_tsr.MODEL_FILE
 
 
+@pytest.mark.usefixtures("onnx_runtime_present")
 def test_the_onnx_layout_setting_wins_over_the_pdfspine_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -592,6 +594,7 @@ def _weights(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, present: bool) 
         monkeypatch.setenv("APP_ONNX_LAYOUT_MODEL", str(tmp_path))
 
 
+@pytest.mark.usefixtures("onnx_runtime_present")
 def test_auto_structure_picks_tsr_in_lite_when_the_model_is_there(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
