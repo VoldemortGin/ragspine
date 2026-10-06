@@ -92,6 +92,14 @@ behavior**: `layout_policy="model"`（两个库预设）逐字节保持既有产
 - 旋转文字、无文本层（扫描页）、span 越过页面边界的页。
 - 含任何非装饰图形 / 图片的页（含矢量图表、单元格底纹之外的色块面板）。
 - 无框线表格区域按行出 Text，不出 Table；跨页重复页眉每页各成一个对象（未去重索引）。
+- **不产出 Formula 对象**：不含图形的公式页被判为纯文字页时，公式按普通文本逐字收录——
+  上下标结构丢失（`x^{2}` 读作 `x 2`），以 formula 类型引用的题弃答（文字仍可按 quote 引用，
+  不会捏造）；合成混合文档上已用测试钉住
+  （`test_lite_answers.py::test_lite_with_the_deterministic_layout_answers_all_but_the_formula_question`）。
+  **不加"上下标 span 即回退"的 formula_like 规则**：脚注标记（¹ ² ³）、注释编号、货币 /
+  百分比的上标说明在财报里几乎每页都有，按它回退会把大量纯文字页白白交给模型，抵消本策略
+  的目的；财报里真正的数学公式极少。需要公式时把 notebook 的 `LAYOUT_POLICY` 改为
+  `"model"`（重跑只补发那些页的版面调用）。
 
 ## Integration（2026-10-05）
 
