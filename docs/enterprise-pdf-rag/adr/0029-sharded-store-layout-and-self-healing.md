@@ -26,11 +26,14 @@ Two facts follow.
    a store lived flat in `objects/sha256/<digest>` and every stage-cache pointer flat in
    `stage-cache/<fingerprint>`. Measured on the lite folder run (7-page synthetic report, 14
    objects, 10 model calls; linear at 35 pages): one cached stage costs **two** files — the
-   pointer and the `StageEnvelope` object it names — plus its output. A lite ingest writes about
-   2P + 7.6M stage-cache pointers (P pages, M objects: ~6.6 stages per object plus one embedding
-   per indexed member) and about twice that many processing objects. For 300 pages and 3 000
-   objects that is ≈ 23 400 pointers and ≈ 47 000 objects: the flat directories overflow at
-   roughly a fifth of the document.
+   pointer and the `StageEnvelope` object it names — plus its output. A lite ingest writes
+   S ≈ 2P + Σ k·M_kind + E stage-cache pointers (P pages: canonical + partition; per object of
+   each kind k = Text 5, Table 7, Chart 12, Diagram 12, Formula 10, Image 2; E = one embedding
+   per indexed member) and ≈ 2S + P processing objects (envelope + output per entry, page
+   metadata). Measured: 119 pointers against 122 predicted (identical inputs dedupe), 248
+   objects. For 300 pages and 3 000 objects (≈ 6.5 entries per object on a text-heavy report,
+   6.6 on the synthetic mix) that is ≈ 20 000–23 000 pointers and ≈ 40 000–47 000 objects: the
+   flat directories overflow at roughly a fifth of the document.
 2. **Writes are flushed asynchronously** (already recorded in `databricks-deployment.md`): an
    error can surface after `write` / `close` / `rename` returned, so the last files written before
    the failure may be missing, empty or truncated although the writer saw success — and the
@@ -142,6 +145,14 @@ once-per-stage verification (ADR 0024) is kept as it is.
 - damaging every ninth file (49 objects / pointers cut in half, 2 responses deleted) and rerunning:
   2 live calls (one per lost response), `storage_repairs = {object: 33, stage_cache: 31,
   model_cache: 2}`, the same published id; a third run 0 calls and 0 repairs.
+
+Across versions (scratchpad harness, lite folder run with question answering, once with hard
+links and once with `os.link` refusing `EPERM`): a store written by the previous release
+(`b8243bc`, flat layout) reruns under this code with 0 model calls, no file added, the same
+published id and every question answered; a second PDF then writes only sharded files
+(223 files, 0 in flat directories); with the four flat directories refusing every write and 52 of
+their files emptied or truncated, the next run repairs `{object: 42, stage_cache: 37, source: 1}`
+into the sharded layout with 0 model calls, the same published id, and answers again.
 
 The full-mode byte-for-byte regression (`FULL_STORE_DIGEST`, 815 files) still matches when each
 sharded path is mapped back to its logical flat name — same names, same bytes — and the layout
