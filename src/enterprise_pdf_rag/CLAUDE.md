@@ -1,6 +1,6 @@
 ---
 covers: src/enterprise_pdf_rag/
-verified-against: 428b5a0
+verified-against: f1b30c0
 ---
 
 # enterprise_pdf_rag — agent contract
@@ -299,11 +299,20 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   only from the document's own vocabulary (no hardcoded company), and a filter that leaves
   fewer candidates than seats is relaxed and reported, never turned into an abstention.
 - **Immutable, content-addressed snapshots** — `publish_draft` switches `current-*` pointers
-  atomically and is idempotent; corrupted evidence is refused, never repaired. Objects and
-  stage-cache pointers are created by hard link; where the filesystem cannot hard-link they fall
+  atomically and is idempotent; corrupted evidence is refused on every **read**, never served.
+  Only a **write** that brings the bytes a digest names repairs it: `put` rewrites a missing /
+  empty / truncated / other-digest object, a damaged stage-cache entry is a miss (recomputed,
+  model calls replayed), a damaged source snapshot is re-extracted from its PDF, a lost model
+  response is called once more; counts land in `DocumentRun.storage_repairs` ([ADR
+  0029](../../docs/enterprise-pdf-rag/adr/0029-sharded-store-layout-and-self-healing.md)).
+  Objects and stage-cache pointers live in `objects/sha256-sharded/<ab>/<digest>` and
+  `stage-cache-sharded/<ab>/<fingerprint>`; the legacy flat `objects/sha256/` and
+  `stage-cache/` are read (after the sharded place) and never written, so a full one (Workspace
+  files: 10 000 children per folder) never blocks a write. They are created by hard link; where
+  the filesystem cannot hard-link they fall
   back to check + rename + re-read (`ragspine.common.evidence.file_placement`, [ADR
-  0020](../../docs/enterprise-pdf-rag/adr/0020-storage-without-hard-links.md): same layout and
-  bytes, first-writer-wins no longer atomic under concurrent writers). A mount verifies
+  0020](../../docs/enterprise-pdf-rag/adr/0020-storage-without-hard-links.md): same bytes,
+  first-writer-wins no longer atomic under concurrent writers). A mount verifies
   its **whole** pinned release once, when it is mounted — every asset digest, the source it was
   cut from, every member's evidence. Every later request re-reads the one file that names all
   of it, the pinned manifest object whose digest **is** the processing id, and refuses any

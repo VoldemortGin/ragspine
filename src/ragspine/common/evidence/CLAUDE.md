@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/common/evidence/
-verified-against: 428b5a0
+verified-against: f1b30c0
 ---
 
 # common/evidence — agent contract
@@ -27,7 +27,10 @@ logging.py    the one logging config + lineage / privacy discipline for AI artif
 file_placement.py  link_new_file (create-if-absent by hard link; rename + re-read fallback where
               the filesystem cannot hard-link, e.g. Databricks FUSE) + fsync_directory (skips
               "unsupported" errnos); shared by the model cache and enterprise_pdf_rag's stores,
-              docs/enterprise-pdf-rag/adr/0020-storage-without-hard-links.md
+              docs/enterprise-pdf-rag/adr/0020-storage-without-hard-links.md; plus the ADR 0029
+              sharded layout (`sharded_path` = `<dir>-sharded/<ab>/<name>`, `stored_path` /
+              `read_stored` sharded first then flat, `stored_names` both) and the repair ledger
+              (`recording_repairs` / `note_repair`, a context variable, counts only)
 providers/    providers.py (explicit APP_LLM_* / embedding / APP_RERANK_* environment, opt-in
               connectivity smoke), json_completion.py (bounded JSON model calls, strict DTO
               validation, content-addressed immutable cache), local_models.py (embedding /
@@ -97,6 +100,13 @@ providers/    providers.py (explicit APP_LLM_* / embedding / APP_RERANK_* enviro
   never `link_new_file` / rename / replace; one live call, record marked `diagnostics.claim_takeover`.
   `claim_blocked_count` / `claims_taken_over` count both outcomes. Lease clock `_wall_clock` is the test seam.
   [ADR 0023](../../../../docs/enterprise-pdf-rag/adr/0023-claim-takeover.md).
+- **A damaged model-cache entry is called again once, never stuck** — a record that does not
+  parse, or a success record whose response is missing / not its digest, is re-sent under a
+  claim (budgeted; `cache_only` still raises `invalid_cache_record` / `missing_cached_response`)
+  and repaired: the response by replace, the record only when the new response differs. A failed
+  repair writes no failure record. `repaired_count`; a record bound to another fingerprint is still
+  `cache_binding_mismatch`. The model cache itself stays flat (see ADR 0029 for the counts).
+  [ADR 0029](../../../../docs/enterprise-pdf-rag/adr/0029-sharded-store-layout-and-self-healing.md).
 - **Model / tunnel fields are lenient** — all optional strings / `SecretStr`; nothing is validated
   at import. `load_*_config` / `load_tunnel_config` validate (https, loopback, ports) only when that
   group is used, and still accept an injected mapping.

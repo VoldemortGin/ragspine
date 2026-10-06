@@ -210,6 +210,21 @@ How the backend adapts ([ADR 0020](adr/0020-storage-without-hard-links.md)):
   a claim written by the previous code (no holder recorded) after 15 minutes by its mtime. The
   takeover is an `O_EXCL` create (no hard link, no rename). Claims are deleted once their record
   is written.
+- **A Workspace-files folder holds at most 10 000 children** (observed in the field:
+  `MAX_CHILD_NODE_SIZE_EXCEEDED ... Current size: 10000 Limit: 10000`, reported through
+  `AsyncFlushFailedException`). One cached stage costs two files (pointer + envelope) plus its
+  output, so a lite ingest writes about 2P + 7.6M stage-cache pointers and twice as many
+  processing objects (P pages, M objects): for 300 pages and 3 000 objects ≈ 23 400 pointers,
+  ≈ 47 000 objects, ≈ 600 source objects and 3 files per model call — about 73 000 files.
+  Since [ADR 0029](adr/0029-sharded-store-layout-and-self-healing.md) objects and stage-cache
+  pointers are written to `objects/sha256-sharded/<ab>/` and `stage-cache-sharded/<ab>/` (256
+  shards, ≈ 185 / 90 files each at that size); the old flat directories are only read, so a full
+  one needs no cleanup and no migration.
+- **Asynchronous flush**: a write that returned can still be lost, leaving a file missing, empty
+  or truncated. The next run repairs it (ADR 0029): an object is rewritten by the stage that
+  produces it, a damaged stage-cache entry is recomputed from the model cache, a damaged source
+  snapshot re-extracted, a lost model response called once more. Reads never accept such a file.
+  `storage_repairs` in the notebook's status table counts what was repaired.
 - All writes on the pipeline are sequential, whole-file writes. The notebook writes
   `answers.csv` in one pass through a `.partial` sibling and a rename instead of appending.
 - The answer journal `answers-audit.sqlite` uses SQLite in WAL mode, which needs random writes

@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/common/
-verified-against: 428b5a0
+verified-against: f1b30c0
 ---
 
 # common — agent contract
@@ -46,7 +46,8 @@ before. Used by `agent/decompose`, `agent/query_transform` (RAG-Fusion) and `gra
 
 `evidence/` — the evidence chain's APP_* settings (LLM trio prefers OPENAI_*, APP_LLM_* are aliases; embedding shares that gateway via OPENAI_EMBEDDING_MODEL unless APP_EMBEDDING_BASE_URL names a loopback service; plus NB_* notebook paths, `NB_QUESTIONS_PATH` also reading `DATASET_PATH`; `OPENAI_TEMPERATURE` = unset 0.0 / a number / `omit`), lineage logging and model access
 (a 400's `error.param` / `error.code` only, never its message; a refused `temperature` / `seed` is dropped and the call resent,
-enterprise-pdf-rag ADR 0021; a model-call claim whose holder is dead or out of lease is taken over, ADR 0023)
+enterprise-pdf-rag ADR 0021; a model-call claim whose holder is dead or out of lease is taken over, ADR 0023;
+`file_placement` also shards hash-named store files and counts repairs of entries lost on disk, ADR 0029)
 (ADR 0022); its own contract is [`evidence/CLAUDE.md`](evidence/CLAUDE.md).
 
 ## Invariants
