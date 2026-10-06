@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+from enterprise_pdf_rag.adapters import pdfspine_tsr
 from enterprise_pdf_rag.adapters.answer_audit import AnswerAuditStore
 from enterprise_pdf_rag.adapters.folder_pipeline import (
     EvalCase,
@@ -829,6 +830,7 @@ def _run_config(
         answer_audit_path=None,
     )
     monkeypatch.setattr(configs, "get_settings", lambda: stub)
+    monkeypatch.setattr(pdfspine_tsr, "get_settings", lambda: stub)
     namespace: dict[str, Any] = {}
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
@@ -843,6 +845,10 @@ def test_auto_without_onnx_weights_uses_deterministic_text_pages_and_says_how_to
     assert namespace["LAYOUT_POLICY"] == "auto"
     assert namespace["EFFECTIVE_LAYOUT"] == "deterministic-text-pages"
     assert "APP_ONNX_LAYOUT_MODEL" in output and "pdfspine[onnx]" in output
+    # The table structure follows the same weights: none configured keeps the verbatim rows.
+    assert namespace["UNVERIFIED_TABLE_STRUCTURE"] == "auto"
+    assert namespace["EFFECTIVE_TABLE_STRUCTURE"] == "rows"
+    assert "slanet-plus.onnx" in output
 
 
 def test_auto_with_onnx_weights_uses_the_onnx_layout(
@@ -853,6 +859,32 @@ def test_auto_with_onnx_weights_uses_the_onnx_layout(
     namespace, output = _run_config(monkeypatch, tmp_path, str(weights))
     assert namespace["EFFECTIVE_LAYOUT"] == "onnx-layout"
     assert "onnx-layout" in output and "auto" in output
+    # Layout weights alone: the structure model is missing from that directory, rows stay.
+    assert namespace["EFFECTIVE_TABLE_STRUCTURE"] == "rows"
+    (tmp_path / pdfspine_tsr.MODEL_FILE).write_bytes(b"fake-structure-weights")
+    namespace, output = _run_config(monkeypatch, tmp_path, str(weights))
+    assert namespace["EFFECTIVE_TABLE_STRUCTURE"] == "tsr" and "tsr" in output
+
+
+def test_the_table_structure_is_auto_by_default_and_full_keeps_the_rows() -> None:
+    config = _code_cell("config")
+    assert re.search(r'^UNVERIFIED_TABLE_STRUCTURE\s*=\s*"auto"', config, re.MULTILINE)
+    assert '"rows"' in config and '"tsr"' in config
+    assert re.search(
+        r"^EFFECTIVE_TABLE_STRUCTURE, TABLE_STRUCTURE_REASON = choose_unverified_table_structure\(",
+        config,
+        re.MULTILINE,
+    )
+    assert "ingest_mode=INGEST_MODE" in config.split("choose_unverified_table_structure(", 1)[1]
+    assert "TABLE_STRUCTURE_REASON" in config.split("choose_unverified_table_structure(", 1)[1]
+    assert "忽略 UNVERIFIED_TABLE_STRUCTURE" in config
+    assert "unverified_table_structure=EFFECTIVE_TABLE_STRUCTURE" in _code_cell("run")
+    results = _code_cell("results")
+    for shown in ("table_tsr_grids", "table_tsr_fallbacks", "table_tsr_fallback_reasons"):
+        assert shown in results, shown
+    assert "推断网格" in results and "回落" in results
+    intro = _source(next(cell for cell in _notebook()["cells"] if cell["id"] == "intro"))
+    assert "UNVERIFIED_TABLE_STRUCTURE" in intro and "待核验" in intro and "精确匹配" in intro
 
 
 def test_the_status_shows_partition_row_table_and_embedding_counts_per_pdf() -> None:

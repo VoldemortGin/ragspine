@@ -3384,6 +3384,13 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/a2/cb/bb71918c812a2bdd459525b82c80e553d88cad29d071a16a81da189806cb/pdfspine-0.11.0-cp311-abi3-win_amd64.whl", hash = "sha256:39c4dce3d5221c634f47dccb508cfff4f5244fd0b8a99861cc594887862577b1", size = 12606292, upload-time = "2026-09-19T22:40:23.932Z" },
 ]
 
+[package.optional-dependencies]
+onnx = [
+    { name = "numpy" },
+    { name = "onnxruntime" },
+    { name = "pillow" },
+]
+
 [[package]]
 name = "pdoc"
 version = "16.0.0"
@@ -4339,6 +4346,9 @@ pdf = [
 pdf-docling = [
     { name = "docling" },
 ]
+pdf-onnx = [
+    { name = "pdfspine", extra = ["onnx"] },
+]
 ppt = [
     { name = "pptspine" },
 ]
@@ -4401,6 +4411,7 @@ requires-dist = [
     { name = "pandas", marker = "extra == 'graphrag-compat'", specifier = ">=2.0" },
     { name = "pdfspine", specifier = ">=0.11.0" },
     { name = "pdfspine", marker = "extra == 'pdf'", specifier = ">=0.11.0" },
+    { name = "pdfspine", extras = ["onnx"], marker = "extra == 'pdf-onnx'", specifier = ">=0.11.0" },
     { name = "pdoc", marker = "extra == 'dev'", specifier = ">=14" },
     { name = "pg8000", marker = "extra == 'vector'", specifier = ">=1.30" },
     { name = "pillow", marker = "extra == 'tsr'", specifier = ">=10.0" },
@@ -4431,7 +4442,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.27" },
     { name = "uvicorn", marker = "extra == 'service'", specifier = ">=0.27" },
 ]
-provides-extras = ["dev", "pdf", "pdf-docling", "ocr", "doc", "ppt", "llm", "litellm", "embed", "embed-onnx", "rerank", "colbert", "splade", "colpali", "vector", "graph", "tsr", "graphrag-compat", "otel", "dify", "connectors", "service", "all"]
+provides-extras = ["dev", "pdf", "pdf-onnx", "pdf-docling", "ocr", "doc", "ppt", "llm", "litellm", "embed", "embed-onnx", "rerank", "colbert", "splade", "colpali", "vector", "graph", "tsr", "graphrag-compat", "otel", "dify", "connectors", "service", "all"]
 
 [[package]]
 name = "rapidocr"

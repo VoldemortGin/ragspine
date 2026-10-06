@@ -23,7 +23,12 @@ from enterprise_pdf_rag.adapters.draft_publication import (
     qualify_draft,
 )
 from enterprise_pdf_rag.adapters.folder_pipeline import PreflightError, run_folder_pipeline
-from enterprise_pdf_rag.adapters.ingest_mode import check_unverified_table_structure, ingest_plan
+from enterprise_pdf_rag.adapters.ingest_mode import (
+    AUTO_TABLE_STRUCTURE,
+    check_unverified_table_structure,
+    choose_unverified_table_structure,
+    ingest_plan,
+)
 from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
 from enterprise_pdf_rag.adapters.pdf_ingestion import IngestionSummary, ingest_pdf
 from enterprise_pdf_rag.adapters.processing_retrieval import ProcessingRetrieval, eligibility
@@ -228,6 +233,43 @@ def test_tsr_without_its_model_refuses_to_start_and_says_what_to_install(
             embedder=OfflineDescriptionEmbedder(),
             unverified_table_structure="tsr",
         )
+
+
+@pytest.mark.parametrize("point_at", ["file", "directory"])
+def test_the_onnx_layout_setting_also_locates_the_structure_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, point_at: str
+) -> None:
+    """One weights directory serves both ONNX models (ADR 0030 layout, ADR 0031 structure)."""
+    models = tmp_path / "models"
+    models.mkdir()
+    (models / "pp_doc_layoutv3.onnx").write_bytes(b"layout-weights")
+    (models / pdfspine_tsr.MODEL_FILE).write_bytes(b"structure-weights")
+    monkeypatch.delenv("PDFSPINE_ONNX_MODELS", raising=False)
+    target = models / "pp_doc_layoutv3.onnx" if point_at == "file" else models
+    monkeypatch.setenv("APP_ONNX_LAYOUT_MODEL", str(target))
+    recognizer = pdfspine_tsr.table_structure_recognizer()
+    assert recognizer.model_path == models / pdfspine_tsr.MODEL_FILE
+
+
+def test_the_onnx_layout_setting_wins_over_the_pdfspine_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for name in ("first", "second"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / pdfspine_tsr.MODEL_FILE).write_bytes(name.encode())
+    monkeypatch.setenv("APP_ONNX_LAYOUT_MODEL", str(tmp_path / "first"))
+    monkeypatch.setenv("PDFSPINE_ONNX_MODELS", str(tmp_path / "second"))
+    recognizer = pdfspine_tsr.table_structure_recognizer()
+    assert recognizer.model_path == tmp_path / "first" / pdfspine_tsr.MODEL_FILE
+
+
+def test_without_any_setting_the_error_names_both(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PDFSPINE_ONNX_MODELS", raising=False)
+    monkeypatch.delenv("APP_ONNX_LAYOUT_MODEL", raising=False)
+    with pytest.raises(pdfspine_tsr.TableStructureUnavailable) as error:
+        pdfspine_tsr.table_structure_recognizer()
+    assert "APP_ONNX_LAYOUT_MODEL" in str(error.value)
+    assert "PDFSPINE_ONNX_MODELS" in str(error.value)
 
 
 def test_a_fully_ruled_table_keeps_its_proved_grid_whatever_the_policy(
@@ -537,3 +579,67 @@ def test_a_tsr_receipt_cannot_be_relabelled_as_a_plain_literal_table(
         validate_literal_member(
             sources, published_outputs.assets, plan.scope, replace(member, qualification=relabelled)
         )
+
+
+# ---- notebook ``UNVERIFIED_TABLE_STRUCTURE = "auto"``: same preflight, no model load ----
+
+
+def _weights(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, present: bool) -> None:
+    monkeypatch.delenv("PDFSPINE_ONNX_MODELS", raising=False)
+    monkeypatch.delenv("APP_ONNX_LAYOUT_MODEL", raising=False)
+    if present:
+        (tmp_path / pdfspine_tsr.MODEL_FILE).write_bytes(b"structure-weights")
+        monkeypatch.setenv("APP_ONNX_LAYOUT_MODEL", str(tmp_path))
+
+
+def test_auto_structure_picks_tsr_in_lite_when_the_model_is_there(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _weights(tmp_path, monkeypatch, present=True)
+    assert pdfspine_tsr.table_structure_unavailable() is None
+    structure, reason = choose_unverified_table_structure(AUTO_TABLE_STRUCTURE, ingest_mode="lite")
+    assert structure == "tsr" and "auto" in reason
+
+
+def test_auto_structure_keeps_rows_without_the_model_and_says_how_to_enable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _weights(tmp_path, monkeypatch, present=False)
+    problem = pdfspine_tsr.table_structure_unavailable()
+    assert problem is not None and "APP_ONNX_LAYOUT_MODEL" in problem
+    structure, reason = choose_unverified_table_structure(AUTO_TABLE_STRUCTURE, ingest_mode="lite")
+    assert structure == "rows" and "APP_ONNX_LAYOUT_MODEL" in reason
+
+
+def test_auto_structure_without_onnxruntime_keeps_rows_and_names_the_extra(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _weights(tmp_path, monkeypatch, present=True)
+    monkeypatch.setattr(
+        pdfspine_tsr, "find_spec", lambda name: None if name == "onnxruntime" else object()
+    )
+    structure, reason = choose_unverified_table_structure(AUTO_TABLE_STRUCTURE, ingest_mode="lite")
+    assert structure == "rows" and "pdfspine[onnx]" in reason
+
+
+@pytest.mark.parametrize("explicit", ["rows", "tsr"])
+def test_an_explicit_structure_is_used_as_written(
+    explicit: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _weights(tmp_path, monkeypatch, present=False)
+    structure, _ = choose_unverified_table_structure(explicit, ingest_mode="lite")
+    assert structure == explicit
+
+
+@pytest.mark.parametrize("requested", [AUTO_TABLE_STRUCTURE, "tsr"])
+def test_full_always_keeps_the_rows(
+    requested: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _weights(tmp_path, monkeypatch, present=True)
+    structure, reason = choose_unverified_table_structure(requested, ingest_mode="full")
+    assert structure == "rows" and "忽略 UNVERIFIED_TABLE_STRUCTURE" in reason
+
+
+def test_an_unknown_structure_is_refused() -> None:
+    with pytest.raises(ValueError, match="auto"):
+        choose_unverified_table_structure("grid", ingest_mode="lite")

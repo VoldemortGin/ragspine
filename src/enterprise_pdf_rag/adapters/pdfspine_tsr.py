@@ -27,6 +27,7 @@ from typing import Protocol, runtime_checkable
 
 import pdfspine
 
+from ragspine.common.evidence.configs import get_settings
 from ragspine.extraction.evidence.document.models import Bounds, TextSpan
 from ragspine.extraction.evidence.figures.models import SourceAnchor
 from ragspine.extraction.evidence.objects.tables.table_inferred_grid import (
@@ -64,15 +65,23 @@ def _pil() -> ModuleType:
 
 
 def _model_path(explicit: Path | None) -> Path:
+    """Explicit path, else beside the ONNX layout weights (``APP_ONNX_LAYOUT_MODEL``, a file or
+    its directory: one weights directory serves ADR 0030 and this), else ``PDFSPINE_ONNX_MODELS``.
+    """
     if explicit is not None:
         return explicit.expanduser()
+    layout = (get_settings().onnx_layout_model or "").strip()
+    if layout:
+        configured = Path(layout).expanduser()
+        return (configured if configured.is_dir() else configured.parent) / MODEL_FILE
     root = os.environ.get(MODELS_ENV)
     if not root:
         raise TableStructureUnavailable(
             f"表格结构识别 (unverified_table_structure='tsr') 需要本地 SLANet-plus 模型, 但未设置 "
-            f"{MODELS_ENV}。请从 {MODEL_URL} 下载 {MODEL_FILE} (Apache-2.0) , 放到一个目录"
-            f" (Databricks 上放到 Volume / DBFS 路径) , 再把环境变量 {MODELS_ENV} 设为该目录; "
-            "或把 unverified_table_structure 改回 'rows'。"
+            f"APP_ONNX_LAYOUT_MODEL 或 {MODELS_ENV}。请从 {MODEL_URL} 下载 {MODEL_FILE}"
+            " (Apache-2.0) , 与 ONNX 版面权重放在同一个目录 (Databricks 上放到 Volume 路径) ,"
+            f" 再把 APP_ONNX_LAYOUT_MODEL 指向该目录 (或其中的版面权重文件) , 或把环境变量"
+            f" {MODELS_ENV} 设为该目录; 或把 unverified_table_structure 改回 'rows'。"
         )
     return Path(root).expanduser() / MODEL_FILE
 
@@ -155,13 +164,14 @@ def _digest(path: Path, size: int, mtime_ns: int) -> str:
     return digest.hexdigest()
 
 
-def table_structure_recognizer(model_path: Path | None = None) -> SlanetPlusRecognizer:
-    """The configured recognizer, or ``TableStructureUnavailable`` saying what to install."""
+def _available_model(model_path: Path | None) -> Path:
+    """The weights file, after the file and runtime checks; ``TableStructureUnavailable`` else."""
     path = _model_path(model_path)
     if not path.is_file():
         raise TableStructureUnavailable(
             f"表格结构识别模型缺失: {path} 不存在。请从 {MODEL_URL} 下载 {MODEL_FILE} 放到该位置"
-            f" (或把 {MODELS_ENV} 指向存放它的目录) ; 或把 unverified_table_structure 改回 'rows'。"
+            f" (与 ONNX 版面权重同一目录, 或把 {MODELS_ENV} 指向存放它的目录) ;"
+            " 或把 unverified_table_structure 改回 'rows'。"
         )
     missing = [name for name in ("onnxruntime", "numpy", "PIL") if find_spec(name) is None]
     if missing:
@@ -170,6 +180,22 @@ def table_structure_recognizer(model_path: Path | None = None) -> SlanetPlusReco
             f" (onnxruntime、numpy、Pillow) ; 当前缺少 {', '.join(missing)}。"
             "或把 unverified_table_structure 改回 'rows'。"
         )
+    return path
+
+
+def table_structure_unavailable() -> str | None:
+    """``None`` when ``"tsr"`` can run now, else the reason; the same checks as the ingest's
+    preflight, without hashing the weights or loading the model (the notebook's ``"auto"``)."""
+    try:
+        _available_model(None)
+    except TableStructureUnavailable as error:
+        return str(error)
+    return None
+
+
+def table_structure_recognizer(model_path: Path | None = None) -> SlanetPlusRecognizer:
+    """The configured recognizer, or ``TableStructureUnavailable`` saying what to install."""
+    path = _available_model(model_path)
     stat = path.stat()
     return SlanetPlusRecognizer(path, _digest(path.resolve(), stat.st_size, stat.st_mtime_ns))
 

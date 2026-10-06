@@ -103,6 +103,12 @@ dev = [
 pdf = [
     "pdfspine>=0.11.0",
 ]
+# enterprise_pdf_rag 的两个本地 ONNX 模型共用一个运行时（pdfspine[onnx] = onnxruntime CPU + numpy +
+# Pillow）：版面切分 "onnx-layout"（PP-DocLayoutV3，ADR 0030）与无网格表格结构 "tsr"（SLANet-plus，
+# ADR 0031）。权重不进任何 wheel，放同一目录，由 APP_ONNX_LAYOUT_MODEL（或 PDFSPINE_ONNX_MODELS）指向。
+pdf-onnx = [
+    "pdfspine[onnx]>=0.11.0",
+]
 # 可选 docling 兜底引擎（历史默认，现降级）。仅当需要 docling 的版面/表格模型（重依赖
 # torch/transformers，~600M）时安装，注入 DoclingGridExtractor 即走旧路径。
 # 历史上曾为 darwin 加 transformers<5.9.0 上界（rt_detr_v2 layout 模型在 Apple MPS 用 float64 报错）；

@@ -33,6 +33,7 @@ from enterprise_pdf_rag.adapters.onnx_partition import (
 )
 from enterprise_pdf_rag.adapters.page_metadata_extraction import PAGE_METADATA_DETERMINISTIC
 from enterprise_pdf_rag.adapters.page_partition import ModelPagePartitioner
+from enterprise_pdf_rag.adapters.pdfspine_tsr import table_structure_unavailable
 from enterprise_pdf_rag.processing.index_text import IndexTextOptions
 from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
 from ragspine.extraction.evidence.document.models import DocumentSnapshot
@@ -53,6 +54,9 @@ UNVERIFIED_TABLE_STRUCTURES: Final[tuple[str, ...]] = get_args(UnverifiedTableSt
 # The notebook's ``LAYOUT_POLICY = "auto"``: in lite, the local ONNX layout when its weights and
 # runtime are present, else the deterministic text pages (ADR 0030); never a library preset.
 AUTO_LAYOUT: Final = "auto"
+# The notebook's ``UNVERIFIED_TABLE_STRUCTURE = "auto"``: in lite, "tsr" when the SLANet-plus
+# weights and runtime are present, else "rows" (ADR 0031); never a library preset.
+AUTO_TABLE_STRUCTURE: Final = "auto"
 # The call categories a mode may leave unsent, as ``IngestionSummary.skipped_calls`` keys.
 SKIPPED_CALL_KINDS: Final = ("image", "formula", "chart_description", "page_metadata")
 # What a stage a mode chose not to run says, so it reads apart from a failure or a budget.
@@ -193,6 +197,41 @@ def check_unverified_table_structure(value: str) -> UnverifiedTableStructure:
     raise ValueError(
         f"unverified_table_structure must be one of {list(UNVERIFIED_TABLE_STRUCTURES)}, "
         f"not {value!r}"
+    )
+
+
+def choose_unverified_table_structure(
+    requested: str, *, ingest_mode: str
+) -> tuple[UnverifiedTableStructure, str]:
+    """The table structure a run uses for ``requested`` (a choice or ``"auto"``), and a reason.
+
+    Full always keeps ``"rows"`` (its bytes never change). In lite an explicit choice is used as
+    written; ``"auto"`` picks ``"tsr"`` when ``table_structure_unavailable`` finds the weights
+    and the runtime, else ``"rows"`` naming what is missing. Nothing is hashed or loaded.
+    """
+    if requested != AUTO_TABLE_STRUCTURE and requested not in UNVERIFIED_TABLE_STRUCTURES:
+        raise ValueError(
+            f"unverified_table_structure must be {AUTO_TABLE_STRUCTURE!r} or one of "
+            f"{list(UNVERIFIED_TABLE_STRUCTURES)}, not {requested!r}"
+        )
+    if check_ingest_mode(ingest_mode) != "lite":
+        return "rows", (
+            f'INGEST_MODE = "full" 时忽略 UNVERIFIED_TABLE_STRUCTURE = {requested!r}, '
+            "无网格表格保持原样(full 保持原样)"
+        )
+    if requested != AUTO_TABLE_STRUCTURE:
+        structure = check_unverified_table_structure(requested)
+        problem = table_structure_unavailable() if structure == "tsr" else None
+        return structure, "显式指定" + (
+            "" if problem is None else f"; 注意, 入库前会报错: {problem}"
+        )
+    problem = table_structure_unavailable()
+    if problem is None:
+        return "tsr", "auto: 已配置本地 SLANet-plus 表格结构权重且 onnxruntime 可用"
+    return "rows", (
+        f"auto: 表格结构模型不可用, 无网格表格按印刷行逐字收录。{problem} 启用方法: "
+        "把 slanet-plus.onnx 放到 APP_ONNX_LAYOUT_MODEL 所在目录(与版面权重同一目录), "
+        "并 pip install 'pdfspine[onnx]'"
     )
 
 
