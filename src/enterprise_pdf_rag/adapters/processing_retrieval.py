@@ -28,6 +28,7 @@ from enterprise_pdf_rag.processing.index_text import (
     IndexTextOptions,
     PageIndexContext,
     contextual_index_text,
+    inferred_table_row_units,
     member_index_text,
     table_row_units,
 )
@@ -162,12 +163,15 @@ def member_units(
     if not options.table_row_units or member.kind is not ObjectKind.TABLE:
         return None
     description = TypeAdapter(ObjectDescription).validate_json(assets.get(member.description))
-    if description.producer != TABLE_ROWS_PRODUCER:
-        return None
-    rows = TypeAdapter(TableRowsIR).validate_json(assets.get(member.ir))
-    units = table_row_units(
-        rows, context if plan.qualification_policy in CONTEXTUAL_POLICIES else None
-    )
+    scoped = context if plan.qualification_policy in CONTEXTUAL_POLICIES else None
+    if description.producer == TABLE_ROWS_PRODUCER:
+        rows = TypeAdapter(TableRowsIR).validate_json(assets.get(member.ir))
+        units = table_row_units(rows, scoped)
+    else:
+        # ADR 0031: a pending inferred grid is split the same way; a proved grid is not.
+        units = inferred_table_row_units(
+            TypeAdapter(TableIR).validate_json(assets.get(member.ir)), scoped
+        )
     if len(units or ("",)) != vectors:
         raise ValueError("Row units differ from the vectors their snapshot indexed")
     return units
@@ -406,6 +410,8 @@ class ProcessingRetrieval:
             units: tuple[str, ...] | None = None
             if options.table_row_units and isinstance(checked_ir, TableRowsIR):
                 units = table_row_units(checked_ir, context)
+            elif options.table_row_units and isinstance(checked_ir, TableIR):
+                units = inferred_table_row_units(checked_ir, context)
             if (
                 running is not None
                 and record.kind is ObjectKind.TEXT

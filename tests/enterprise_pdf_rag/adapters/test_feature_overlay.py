@@ -11,6 +11,8 @@ the rest as ``plain text``, the graphic as an ``image``. Offline, no real model.
 import json
 import sqlite3
 from contextlib import closing
+from dataclasses import dataclass, field
+from itertools import pairwise
 from pathlib import Path
 
 import pdfspine
@@ -18,8 +20,9 @@ import pytest
 from pdfspine.geometry import Rect
 
 import enterprise_pdf_rag.adapters.onnx_partition as onnx_partition
+from enterprise_pdf_rag.adapters import pdfspine_tsr
 from enterprise_pdf_rag.adapters.document_catalog import mount_document, scan_catalog
-from enterprise_pdf_rag.adapters.folder_pipeline import FolderPipelineResult
+from enterprise_pdf_rag.adapters.folder_pipeline import FolderPipelineResult, run_folder_pipeline
 from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
 from enterprise_pdf_rag.adapters.onnx_partition import (
     ONNX_LAYOUT_MODEL_FILE,
@@ -28,7 +31,10 @@ from enterprise_pdf_rag.adapters.onnx_partition import (
 )
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.retrieval_testbench import run_retrieval_testbench
+from enterprise_pdf_rag.answers.prompt import ModelAnswer, ModelClaim
+from ragspine.extraction.evidence.objects.tables.table_inferred_grid import TSR_PRODUCER
 from ragspine.extraction.evidence.page.models import ObjectKind, PageInput
+from ragspine.extraction.tables.structure import CellBox, TableRegion, TableStructure
 from tests.enterprise_pdf_rag.adapters.index_layout_helpers import (
     ANSWER,
     FOOTER_LIMIT,
@@ -41,8 +47,10 @@ from tests.enterprise_pdf_rag.adapters.index_layout_helpers import (
     report_env,
     report_pdf,
     run_report,
+    write_question,
 )
 from tests.enterprise_pdf_rag.adapters.lite_ingest_helpers import sharded_layout_only
+from tests.enterprise_pdf_rag.answers.fake_llm import answered, declined, scripted_client
 
 
 def _graphic(page_index: int) -> tuple[float, float, float, float]:
@@ -269,3 +277,154 @@ def test_the_bench_reads_unit_scored_members_with_their_pages_and_diagnoses_lite
     assert off.eval is not None and off.eval.cases[0].verdict == "abstained"
     result = bench(off)
     assert result["ranking"] == "full" and result["diagnosis"] == "retrieved_not_in_prompt"
+
+
+# ---- ADR 0031 (TSR pending grid) on top: ONNX tables, row units, the bench -----------------
+
+# Column boundaries the stub structure model draws through the statement: the stub column
+# (row labels and ``US$m``), then the 2024 and 2023 figure columns.
+_FIRST_FIGURE_COLUMN = 290.0
+_SECOND_FIGURE_COLUMN = 350.0
+
+
+@dataclass
+class _WordGridModel:
+    """A deterministic stand-in for SLANet-plus: one row per printed line, three columns; the
+    first line (the period caption) spans both figure columns. ``None`` when ``refuse``."""
+
+    refuse: bool = False
+    name: str = "stub"
+    producer: str = f"{TSR_PRODUCER}:pdfspine/{pdfspine.__version__}:stub00000000"
+    regions: list[TableRegion] = field(default_factory=list)
+
+    def recognize(self, region: TableRegion) -> TableStructure | None:
+        self.regions.append(region)
+        if self.refuse:
+            return None
+        lines = sorted({round(word.center[1]) for word in region.words})
+        edges = [region.bbox[1]]
+        edges.extend((upper + lower) / 2 for upper, lower in pairwise(lines))
+        edges.append(region.bbox[3])
+        xs = (region.bbox[0], _FIRST_FIGURE_COLUMN, _SECOND_FIGURE_COLUMN, region.bbox[2])
+        cells = [
+            CellBox(0, 0, 1, 1, (xs[0], edges[0], xs[1], edges[1])),
+            CellBox(0, 1, 1, 2, (xs[1], edges[0], xs[3], edges[1])),
+        ]
+        cells.extend(
+            CellBox(row, col, 1, 1, (xs[col], edges[row], xs[col + 1], edges[row + 1]))
+            for row in range(1, len(lines))
+            for col in range(3)
+        )
+        return TableStructure(n_rows=len(lines), n_cols=3, cells=tuple(cells))
+
+
+def _cell_script(prompt: str) -> ModelAnswer:
+    """Answer only from an inferred cell on the asked row under the 2024 column."""
+    for block in prompt.split("| member ")[1:]:
+        for line in block.splitlines()[1:]:
+            if (
+                line.startswith("cells.")
+                and 'inferred_row="Insurance revenue"' in line
+                and "2024" in line.split("inferred_col=", 1)[-1]
+            ):
+                path, text = line.split(" ", 1)[0], line.split(": ", 1)[1].split(" inferred_")[0]
+                claim = ModelClaim(
+                    claim_id="c1", member_id=block[:64], kind="cell", field_path=path, text=text
+                )
+                return answered(text, claim)
+    return declined()
+
+
+def _tsr_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model: _WordGridModel, answers: str
+) -> tuple[FolderPipelineResult, list[str]]:
+    monkeypatch.setattr(pdfspine_tsr, "table_structure_recognizer", lambda *_: model)
+    llm, prompts = scripted_client(tmp_path / answers, _cell_script, max_live_calls=5)
+    result = run_folder_pipeline(
+        tmp_path / "pdfs",
+        questions=write_question(tmp_path),
+        ingestion_root=tmp_path / "ingestion",
+        max_live_calls_per_pdf=200,
+        embedder=OfflineDescriptionEmbedder(),
+        answer_llm=llm,
+        build_tree=False,
+        ingest_mode="lite",
+        layout_policy="onnx-layout",
+        unverified_table_structure="tsr",
+    )
+    return result, prompts
+
+
+def test_an_onnx_table_gets_a_pending_tsr_grid_and_is_answered_from_a_cell(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks = report_env(monkeypatch)
+    _onnx_env(tmp_path, monkeypatch)
+    _graphic_report(tmp_path / "pdfs" / "report.pdf")
+    model = _WordGridModel()
+
+    result, prompts = _tsr_run(tmp_path, monkeypatch, model, "answers-tsr")
+
+    (document,) = result.documents
+    assert document.status == "published" and document.ingestion is not None
+    assert _layout_counts(result) == (0, PAGES, 0) and tasks["page-layout"] == 0
+    # The ONNX-proposed Table had no ruled grid: the structure model ran on it, and its grid
+    # passed the self-check, so it is not indexed as verbatim rows.
+    assert model.regions
+    ingested = document.ingestion
+    assert (ingested.table_tsr_grids, ingested.table_tsr_fallbacks) == (1, 0)
+    assert ingested.table_row_transcriptions == 0
+    assert document.index is not None
+    # ADR 0027 Amendment 1 now splits the pending grid too (one unit per figure row, its
+    # inferred header rows repeated); as one unit it lost its seat to the narrative pages.
+    assert (document.index.row_unit_tables, document.index.row_units) == (1, len(STATEMENT_ROWS))
+    assert document.index.unscored_running_members == _RUNNING_OBJECTS
+    (entry,) = scan_catalog(tmp_path / "ingestion").documents
+    members = mount_document(entry, embedder=OfflineDescriptionEmbedder()).member_texts()
+    (table,) = (member for member in members if member.kind is ObjectKind.TABLE)
+    assert table.units is not None and len(table.units) == len(STATEMENT_ROWS)
+    revenue = next(unit for unit in table.units if "Insurance revenue" in unit)
+    assert revenue.endswith(
+        "For the six months ended 30 June\nUS$m\t2024\t2023\nInsurance revenue\t12,345\t9,016"
+    )
+    assert result.eval is not None
+    (case,) = result.eval.cases
+    assert (case.verdict, case.answer, case.cited_pages) == ("answered", ANSWER, (PAGES,))
+    assert "grid=inferred" in prompts[-1]
+
+    # The bench maps the TSR member to its page in the journalled ranking.
+    audit = tmp_path / "ingestion" / "answers-audit.sqlite"
+    seats = [entry for entry in _ranked(audit) if entry["member_id"] == table.member_id]
+    assert len(seats) == 1 and seats[0]["page_index"] == PAGES - 1
+    questions = tmp_path / "bench.jsonl"
+    record = {
+        "id": "q1",
+        "question": QUESTION,
+        "doc": "report.pdf",
+        "pages": PAGES,
+        "expected": ANSWER,
+    }
+    questions.write_text(json.dumps(record) + "\n", encoding="utf-8")
+    (row,) = run_retrieval_testbench(
+        audit, questions, report=result, ingestion_root=tmp_path / "ingestion"
+    ).rows
+    assert (row.ranking, row.in_prompt, row.diagnosis) == ("full", True, "correct")
+
+
+def test_an_onnx_table_whose_tsr_grid_is_refused_falls_back_to_row_units(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    report_env(monkeypatch)
+    _onnx_env(tmp_path, monkeypatch)
+    _graphic_report(tmp_path / "pdfs" / "report.pdf")
+
+    result, _ = _tsr_run(tmp_path, monkeypatch, _WordGridModel(refuse=True), "answers-refused")
+
+    (document,) = result.documents
+    assert document.status == "published" and document.ingestion is not None
+    ingested = document.ingestion
+    assert (ingested.table_tsr_grids, ingested.table_tsr_fallbacks) == (0, 1)
+    assert ingested.table_tsr_fallback_reasons == {"no_structure": 1}
+    assert ingested.table_row_transcriptions == 1
+    assert document.index is not None
+    assert (document.index.row_unit_tables, document.index.row_units) == (1, len(STATEMENT_ROWS))

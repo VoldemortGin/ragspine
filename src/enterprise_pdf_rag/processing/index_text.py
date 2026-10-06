@@ -10,8 +10,8 @@ way: its node labels in reading order plus one ``<from> -> <to>`` pair per drawn
 Nothing here reads a store.
 
 Two index-layout switches (``IndexTextOptions``) change *how many* units a member scores
-as, never what a unit says: a long verbatim-rows table (ADR 0027) becomes one unit per
-figure row with its header rows repeated, and a running header / footer scores as no unit
+as, never what a unit says: a long verbatim-rows table (ADR 0027) or pending inferred grid
+(ADR 0031) becomes one unit per figure row with its header rows repeated, and a running header / footer scores as no unit
 at all. Every character of a unit is still printed by the table or by the page context.
 """
 
@@ -25,6 +25,11 @@ from ragspine.extraction.evidence.objects.diagrams.diagram_description import (
     EDGE_ARROW,
     reading_order,
 )
+from ragspine.extraction.evidence.objects.tables.table_inferred_grid import (
+    inferred_header_rows,
+    structure_producer,
+)
+from ragspine.extraction.evidence.objects.tables.table_models import TableIR
 from ragspine.extraction.evidence.objects.tables.table_rows import TableRow, TableRowsIR
 from ragspine.extraction.evidence.objects.typed_ir import DiagramIR, FormulaIR, TypedIR
 
@@ -215,13 +220,48 @@ def table_row_units(ir: TableRowsIR, context: PageIndexContext | None) -> tuple[
     is added. A table with fewer than two figure rows below its header is not split, and a
     table longer than ``MAX_UNITS_PER_TABLE`` units puts consecutive groups together.
     """
-    depth = table_header_rows(ir)
-    head = tuple(row.text for row in ir.rows[:depth])
+    rows = tuple((row.text, _figure_row(row)) for row in ir.rows)
+    return _row_units(rows, table_header_rows(ir), context)
+
+
+def inferred_table_row_units(
+    ir: TableIR, context: PageIndexContext | None
+) -> tuple[str, ...] | None:
+    """The scoring units of an ADR 0031 pending grid, laid out like ``table_row_units``.
+
+    A row's text is its cells' own text left to right, tab separated (a spanning cell once,
+    a blank slot not at all); the repeated header is the grid's inferred header rows, capped
+    like a verbatim-rows header. ``None`` for any other grid: a proved grid keeps one unit.
+    """
+    if structure_producer(ir) is None:
+        return None
+    rows: list[tuple[str, bool]] = []
+    for row in range(ir.row_count):
+        cells = sorted((cell for cell in ir.cells if cell.row == row), key=lambda cell: cell.col)
+        texts = [cell.text for cell in cells if cell.text]
+        figure = any(
+            cell.col >= 1
+            and cell.text is not None
+            and _FIGURE.fullmatch(cell.text.strip()) is not None
+            and _YEAR.fullmatch(cell.text.strip()) is None
+            for cell in cells
+        )
+        rows.append(("\t".join(texts), figure))
+    depth = inferred_header_rows(ir)
+    if depth == 0 or depth > MAX_HEADER_ROWS:
+        depth = 1
+    return _row_units(tuple(rows), depth, context)
+
+
+def _row_units(
+    rows: tuple[tuple[str, bool], ...], depth: int, context: PageIndexContext | None
+) -> tuple[str, ...] | None:
+    head = tuple(text for text, _ in rows[:depth])
     groups: list[list[str]] = []
     pending: list[str] = []
-    for row in ir.rows[depth:]:
-        pending.append(row.text)
-        if _figure_row(row):
+    for text, figure in rows[depth:]:
+        pending.append(text)
+        if figure:
             groups.append(pending)
             pending = []
     if len(groups) < 2:
