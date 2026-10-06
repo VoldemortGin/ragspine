@@ -405,6 +405,8 @@ class AnswerService:
                 applied,
                 relaxed,
                 None if translation is None else translation.english,
+                outcome.hits,
+                {member.member_id: member.page_index for member in members},
             )
         )
         try:

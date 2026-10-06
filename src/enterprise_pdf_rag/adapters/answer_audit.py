@@ -4,7 +4,10 @@ One row per question, written twice. The first write lands *before* the model is
 and holds the final prompt verbatim — system rules and user message, the two strings the
 transport is about to send — plus everything retrieval had already decided: the filters,
 the fused ranking with each channel's seat and score, the members that reached the prompt
-and the page windows printed beside them. The second write closes that same row with the
+and the page windows printed beside them — plus ``ranked``, the whole fused ranking before
+the seats were chosen with every member's page and its BM25 / vector / tree seat (a column
+an older journal gains when it is next opened; its earlier rows keep it NULL). The second
+write closes that same row with the
 model's raw output, the verified claims, the rejections and the answer the caller got.
 
 A journal write never changes an answer: every failure is a warning and the chain
@@ -17,7 +20,7 @@ never served, shipped or sent anywhere.
 import json
 import logging
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -67,7 +70,8 @@ CREATE TABLE IF NOT EXISTS answers (
     claims_rejected TEXT,
     answer_text TEXT,
     elapsed_ms INTEGER,
-    error TEXT
+    error TEXT,
+    ranked TEXT
 );
 CREATE INDEX IF NOT EXISTS answers_request_fingerprint ON answers (request_fingerprint);
 CREATE INDEX IF NOT EXISTS answers_started_at ON answers (started_at);
@@ -78,9 +82,11 @@ _INSERT: Final = """
 INSERT INTO answers (
     started_at, question, translated_question, document_sha256, processing_id, snapshot_id,
     filters_applied, filters_relaxed, fusion_mode, page_windows, member_ids, fused,
-    prompt_system, prompt_user, prompt_chars
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    prompt_system, prompt_user, prompt_chars, ranked
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
+# Columns added after the first release, with their type: an older journal gains them on open.
+_ADDED_COLUMNS: Final = (("ranked", "TEXT"),)
 
 _UPDATE: Final = """
 UPDATE answers SET
@@ -118,6 +124,10 @@ class AnswerAuditContext:
     filters_applied: MemberFilters | None = None
     filters_relaxed: bool = False
     translated_question: str | None = None
+    # The whole fused ranking before the prompt seats were chosen, and each member's 0-based
+    # page, so a reader can tell "no channel found the page" from "found, but not seated".
+    ranked: tuple[FusedHit, ...] = ()
+    member_pages: Mapping[str, int] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,6 +182,10 @@ class AnswerAuditStore:
             connection.execute("PRAGMA journal_mode=WAL")
             with connection:
                 connection.executescript(_SCHEMA)
+                present = {row[1] for row in connection.execute("PRAGMA table_info(answers)")}
+                for name, kind in _ADDED_COLUMNS:
+                    if name not in present:
+                        connection.execute(f"ALTER TABLE answers ADD COLUMN {name} {kind}")
 
     @property
     def path(self) -> Path:
@@ -199,6 +213,7 @@ class AnswerAuditStore:
                         context.prompt_system,
                         context.prompt_user,
                         len(context.prompt_user),
+                        _ranked(context.ranked, context.member_pages or {}),
                     ),
                 )
                 row_id = cursor.lastrowid
@@ -426,6 +441,22 @@ def _fused(hits: Sequence[FusedHit]) -> str:
                 "lexical_rank": hit.lexical_rank,
                 "vector_score": hit.vector_score,
                 "bm25_score": hit.bm25_score,
+            }
+            for hit in hits
+        ]
+    )
+
+
+def _ranked(hits: Sequence[FusedHit], pages: Mapping[str, int]) -> str:
+    return _dumps(
+        [
+            {
+                "member_id": hit.member_id,
+                "page_index": pages.get(hit.member_id),
+                "fused_score": hit.fused_score,
+                "vector_rank": hit.vector_rank,
+                "lexical_rank": hit.lexical_rank,
+                "tree_rank": hit.tree_rank,
             }
             for hit in hits
         ]
