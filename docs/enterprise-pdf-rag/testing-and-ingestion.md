@@ -602,6 +602,7 @@ export APP_ANSWER_AUDIT_PATH=/abs/path/answers-audit.sqlite   # 可省略；默�
 | `status` / `abstain_reason` / `abstain_detail` / `answer_text` | 最终结果；`answer_text` 只在 `answered` 时有值 |
 | `claims_verified` / `claims_rejected` | 通过校验的 claim 及其全部引用（成员、页号、页标题、字段路径、证据 id、逐字引文、行/列/表头）（JSON）；被丢弃的 claim 及原因（JSON） |
 | `error` | 抛错路径的错误码；正常路径为 NULL |
+| `ranked` | 选席**之前**的整条融合排名（JSON）：每条 `member_id`、0 起的 `page_index`、`fused_score` 与 BM25（`lexical_rank`）/ 向量 / 树三个通道各自的名次。后加的列：旧库在下次打开时 `ALTER TABLE` 补上，旧行保持 NULL（检索测试台据此标 `n/a`） |
 
 索引：`request_fingerprint`、`started_at`、`document_sha256`。
 
@@ -651,6 +652,73 @@ What was the Group's ROE in 1H26?
 
 **隐私**：与 `contexts/` 同一级别——`prompt_user` 逐字含证据原文与页上下文，`answer_text` 含答案正文。这是本机回溯产物，不外传、不随快照分发。`ragspine` 主包 `common/observability` 那条"只记码、不记正文"的约束管的是那边的 trace，不是这个本地库。
 
+### 检索测试台（`audit --testbench`）
+
+`answers.csv` 只说"答对没有"，测试台说"**错在哪一环**"：把题集与审计库（再加上本次运行的 `report.json`）逐题对齐，每题一行，零模型调用、零网络、不改审计库。实现在 `adapters/retrieval_testbench.py`，页名次与指标复用 `ragspine.eval.retrieval_only`（`gold_rank` / `retrieval_metrics` / `content_hit`），口径与 `run-folder` 报告一致。
+
+```sh
+# 打印表格（默认 --format table；json / csv 打到 stdout）
+enterprise-pdf-rag audit --testbench --question-set <题集> [--db <answers-audit.sqlite>] \
+    [--report <report.json>] [--max-questions N] [--question-id ID ...] [--ingestion-root <dir>]
+# 另写 testbench.csv（UTF-8 带 BOM）/ testbench.json 到 ROOT_DIR/data/reports/<题集 stem>/（与 answers.csv 同目录）
+enterprise-pdf-rag audit --testbench --question-set <题集> --write
+# --out <dir> 改写到别处，但必须在 ROOT_DIR/data 之下，否则拒绝、什么都不写
+```
+
+`--report` 省略时取 `ROOT_DIR/data/reports/<题集 stem>/report.json`（存在才用）。notebook / Python 里用同一个纯函数：
+
+```python
+from enterprise_pdf_rag.adapters.retrieval_testbench import (
+    format_table, run_retrieval_testbench, write_testbench,
+)
+bench = run_retrieval_testbench(
+    INGESTION_ROOT / "answers-audit.sqlite", QUESTIONS,
+    report=result,                 # 本次 run_folder_pipeline 的结果对象，或 report.json 路径
+    max_questions=MAX_QUESTIONS,   # 或 question_ids=[...]；选题规则同 run_folder_pipeline
+    folder=PDF_DIR, doc_aliases=DOC_ALIASES,  # 只在没有 report 时用来判路由；只读
+)
+print(format_table(bench)); write_testbench(bench, REPORT_DIR)
+```
+
+**关联**：审计库不存题目 id，按**问题原文**关联，有 `report.json` 时再收窄到该题被路由到的文档；同一题多次运行取**最新**一行（`audit_id` 列给出是哪一行）。
+
+**各列**（`n/a` = 记录里没有、无从判断；`∞` = 找过、整条排名里都没有）：
+
+| 列 | 含义 |
+| --- | --- |
+| `question_id` / `doc` / `expected_pages` / `expected` / `question` | 题集原样；`expected_pages` 1 起，多组用 `\|` 分隔 |
+| `document_sha256` / `audit_id` / `link` | 关联到的审计行；`link` = `text+document` / `text` / `n/a` |
+| `routing_failed` / `routing_detail` | 题目的 `doc` 有没有路由到本次发布的文档（来自 `report.json`，或 `folder` + `doc_aliases` 的只读解析） |
+| `fusion_mode` / `translated` / `filters` / `filters_relaxed` | 实际跑的通道（ADR 0018）、是否走过查询翻译、期间 / 地区预过滤、是否因候选少于席位被放宽（"饿死放宽"） |
+| `ranking` | `full` = 有 `ranked` 列的整条融合排名；`head` = 旧行，只有进席的前 k 条（需 `--ingestion-root` 才知道成员在哪页）；`n/a` = 连页号都没有 |
+| `bm25_rank` / `vector_rank` / `tree_rank` | 该通道**自己的**名次里，期望页成员的最佳名次（多组取最差组）；通道没跑为 `n/a` |
+| `fused_rank` / `fused_page_rank` | 融合排名里期望页的块名次 / 不同页名次（`gold_rank`） |
+| `prompt_rank` / `prompt_page_rank` | 进 prompt 的成员里的名次——与 `report.json` 的 `page_rank` 同口径 |
+| `in_prompt` / `page_window_hit` | 期望页是否进了 prompt（进席成员或其页窗口）；没给 `pages` 而给了 `expected` 时，改为查 prompt 正文（去掉问题本身）是否含 `expected` |
+| `status` / `abstain_reason` / `answer` | 最终状态（`answered` / `abstained` / `error` / `open`）、原因码、回答原文 |
+| `content_hit` / `cited_pages` / `cited_page_hit` | 回答是否含 `expected`（`content_hit`，规范化同 nl_gold）；通过校验的 claim 引用的页；引用页是否命中期望页 |
+| `diagnosis` / `diagnosis_text` | 诊断类别与一句中文说明 |
+
+**诊断类别**（按排错顺序判定，先中先停）：
+
+| 类别 | 判定 | 去查哪里 |
+| --- | --- | --- |
+| `routing_failed` | 题目 `doc` 没对上本次发布的文档，根本没检索 | doc 写法 / `DOC_ALIASES` / 该 PDF 是否 published |
+| `correct` | 答了且含 `expected`（没有 `expected` 时：引用页命中期望页） | — |
+| `unjudged` | 题目既无 `pages` 也无 `expected` | 补题目标注 |
+| `in_prompt_abstained` | 期望页进了 prompt，但弃答 | 核验 / 生成：claim 被拒原因见 `audit --show <audit_id>` |
+| `in_prompt_wrong` | 期望页进了 prompt，答了但不含 `expected` | 生成 / 题目口径（单位、期间） |
+| `retrieved_not_in_prompt` | 某个通道排到了期望页，但没进前 k 席 / 页窗口 | 融合（RRF / 通道选择）、视觉保底席位、页窗口预算 |
+| `not_retrieved` | 整条排名里没有任何期望页成员（或回答因 `no_relevant_member` 没写审计行） | 解析 / 分块 / 索引文本（parsing → chunk → metadata） |
+| `not_in_prompt` | 没进 prompt，但记录不足以区分上两类（旧行 / 题目没给 `pages`） | 用新代码重跑这几题，或给题目补 `pages` |
+| `no_record` | 审计库里没有这道题 | 没问到（`MAX_QUESTIONS`）/ 请求失败 / 换过审计库 |
+
+**汇总**（JSON 的 `summary`，表格下方同样打印）：各类别计数；`metrics.prompt` = 进 prompt 成员上的 recall@k / page_recall@k / MRR（k = 1, 3, 5, 10；路由失败与无记录的有页题记为未命中，与 `report.json` 的 `eval.metrics` 相等）；`metrics.fused` = 整条融合排名上的同一组指标（只算 `ranking=full` 的有页题）；`channels` = 各通道命中率（有页且 `ranking=full`、该通道跑过的题里，排到期望页的比例与前 10 内的比例）；`by_doc` = 按 `doc` 的类别分布；`n/a` = 各类缺失的计数（`pages` / `expected` 题目没给，`audit_record` 没有审计行，`ranked` 旧行无整条排名，`member_pages` 旧行且无法映射页号）。
+
+**排错顺序**：先看 `routing_failed`（零成本可修）→ `not_retrieved`（解析 / 分块 / 索引，`audit --show` 看不到它，要回到 processing 产物）→ `retrieved_not_in_prompt`（看 `bm25_rank` / `vector_rank` 谁排到了、`fused_rank` 掉到第几）→ `in_prompt_abstained` / `in_prompt_wrong`（`audit --show <audit_id>` 看 prompt 原文、模型原始输出与被拒 claim）。
+
+**隐私**：问题、`expected`、回答原文只进返回的行与 `testbench.csv` / `testbench.json`（与 `answers.csv` 同级的本机运行产物），测试台不写日志、不发 trace / 进度事件。
+
 ### 挂载期校验与每请求漂移检查
 
 完整校验只在挂载时做一次：`mount_document` 逐个核对该发布引用的全部内容寻址资产摘要，并用 `validate_processing_source` 把每一页、每个成员的证据重证一遍（AIA 发布约 5000 个资产 / 2.7 GB，scan + mount 合计约 22s）。之后每个请求只重读**钉死清单对象**那一个文件——它是内容寻址的，文件名就是它的摘要，任何改写都改掉摘要：先比 size + mtime_ns 跳过重算，文件动过就重算摘要，摘要对不上就落回挂载期那条完整校验并拒绝。同一挂载内，一个 publication 的 plan / index 按 `(plan.sha256, index.sha256)` 只解析校验一次，一个 `member_id` 的证据只完整证一次（表格重开 PDF 重证网格、图表重建 SVG 分支都在首次做完）。效果是缓存命中的一次问答从 8.8s 降到 0.7s（10 条金标均值 9.00s → 0.81s），逐条状态不变；分项前后对照见 [交接文档](CLAUDE_HANDOFF.md) 顶部一节。
@@ -663,7 +731,7 @@ What was the Group's ROE in 1H26?
 
 ### 离线可测 vs 需真实模型
 
-离线（默认门，零网络）：`tests/enterprise_pdf_rag/adapters/test_document_catalog.py`、`test_documents_http.py`、`test_hybrid_search.py`、`test_chat_http.py`、`test_page_metadata_extraction.py`、`test_chat_metadata_http.py`（页级元数据阶段、v4 索引头、过滤与路由；脚本化的文本模型回复来自 prompt 自己的 span）、`test_answer_audit.py`（问答审计库：建表 / 前置写入 / 完成更新 / 抛错路径回填 / 写库坏掉不改变回答 / 开关关闭不建文件），`tests/enterprise_pdf_rag/answers/`（store 桥 `store_mounted_document.py` + 脚本化 LLM `fake_llm.py`，`test_query_filters.py` / `test_member_filter.py`），`processing/test_periods.py`、`processing/test_page_metadata.py`，`processing/test_context_builder.py`、`processing/test_table_transcription.py`，以及 e2e / draft publication / pdf ingestion 里新增的程序化表格页用例。它们用程序化 PDF、`OfflineDescriptionEmbedder` 和脚本化模型输出，证明契约、状态码、恰好一次模型调用、逐字段校验与拒答策略。
+离线（默认门，零网络）：`tests/enterprise_pdf_rag/adapters/test_document_catalog.py`、`test_documents_http.py`、`test_hybrid_search.py`、`test_chat_http.py`、`test_page_metadata_extraction.py`、`test_chat_metadata_http.py`（页级元数据阶段、v4 索引头、过滤与路由；脚本化的文本模型回复来自 prompt 自己的 span）、`test_answer_audit.py`（问答审计库：建表 / 前置写入 / 完成更新 / 抛错路径回填 / 写库坏掉不改变回答 / 开关关闭不建文件 / `ranked` 列与旧库补列）、`test_retrieval_testbench.py`（检索测试台：离线 lite 入库 + 脚本化回答跑出每种诊断类别，核对各通道名次、与 `report.json` 相等的指标、CSV / JSON 列、旧库标 `n/a`、CLI），`tests/enterprise_pdf_rag/answers/`（store 桥 `store_mounted_document.py` + 脚本化 LLM `fake_llm.py`，`test_query_filters.py` / `test_member_filter.py`），`processing/test_periods.py`、`processing/test_page_metadata.py`，`processing/test_context_builder.py`、`processing/test_table_transcription.py`，以及 e2e / draft publication / pdf ingestion 里新增的程序化表格页用例。它们用程序化 PDF、`OfflineDescriptionEmbedder` 和脚本化模型输出，证明契约、状态码、恰好一次模型调用、逐字段校验与拒答策略。
 
 需真实模型：真实本地 embedder 的 `index` 与在线 search（隧道）、真实答案模型的合成与校验、`APP_LEGACY_DOCUMENT_ROOTS` 挂载真实 AIA 发布后的检索 / 引用 / 拒答验收。2026-09-20 已做一轮（18 用例，无证据外数字进入 answered 回答；散文门年份 ISSUE-3 已于 0.14.0 解决），结论只以 [交接文档](CLAUDE_HANDOFF.md) 为准，本文不作宣称；它是一轮验收，不是冻结金标集 —— 冻结金标集见下节“NL 金标集与评测”。图表召回 ISSUE-2 已由 [ADR 0012](adr/0012-chart-index-text-and-retrieval-seats.md) 解决（索引投影 policy v3 + 查询默认 10/50 + reranker 读证据块 + 图表保底席位），真实重建与复测见交接文档。
 

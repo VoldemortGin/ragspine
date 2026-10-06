@@ -1,6 +1,6 @@
 ---
 covers: src/enterprise_pdf_rag/
-verified-against: f1b30c0
+verified-against: 9540dbd
 ---
 
 # enterprise_pdf_rag — agent contract
@@ -182,6 +182,15 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   `APP_ANSWER_AUDIT_ENABLED=false` writes nothing; `APP_ANSWER_AUDIT_PATH` moves the file. Read it
   back with `enterprise-pdf-rag audit --db <path> [--last N] [--fingerprint X] [--question-like …]
   [--show ID]` (no service, no model). It quotes the evidence verbatim: local file, never shared.
+  Its `ranked` column (added later; older rows NULL) is the whole fused ranking with each member's
+  page and BM25 / vector / tree seat. **Retrieval test bench** (`adapters/retrieval_testbench.py`,
+  `audit --testbench --question-set <path> [--report …] [--format table|json|csv] [--write]`, or
+  `run_retrieval_testbench(...)` in a notebook): one row per question — routing, pre-filters, each
+  channel's seat for the expected page, in prompt or not, status, `content_hit` — and a diagnosis
+  (`routing_failed` / `not_retrieved` / `retrieved_not_in_prompt` / `in_prompt_abstained` /
+  `in_prompt_wrong` / `correct`, plus `not_in_prompt` / `unjudged` / `no_record` where the record
+  cannot tell); questions link to their latest row by text. Read-only, no model; writes
+  `testbench.csv` / `.json` only under `ROOT_DIR/data`, and logs nothing.
 - **Deploy:** `deploy/enterprise-pdf-rag/open-webui/` — `backend.Dockerfile` is not re-verified
   since the merge (local `../corespine` uv source; see ADR 0021 follow-ups).
 - **Benchmarks / gold:** `data/benchmarks/enterprise-pdf-rag/aia-2026-interim/` (its `manifest.json`
