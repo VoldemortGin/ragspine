@@ -11,7 +11,7 @@ Every switch is one field of ``IngestPlan`` so each can be tested and moved on i
 mode name only picks a preset. ``layout`` is the selection point for the page partitioner
 (``make_partitioner``): both presets use the model layout; ``"deterministic-text-pages"``
 (ADR 0028) partitions pages without figures or images from pdfspine blocks and is chosen
-explicitly until it is validated on long reports; ``"onnx-layout"`` (ADR 00NN) additionally
+explicitly until it is validated on long reports; ``"onnx-layout"`` (ADR 0030) additionally
 partitions the remaining pages with pdfspine's local PP-DocLayoutV3 model (deterministic text
 pages -> onnx -> per-page model fallback), also chosen explicitly only.
 ``unverified_tables_as_rows`` (ADR 0027) indexes a Table with no detected grid as its verbatim
@@ -25,7 +25,10 @@ from typing import Final, Literal, get_args
 
 from enterprise_pdf_rag.adapters.deterministic_partition import make_text_page_partitioner
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
-from enterprise_pdf_rag.adapters.onnx_partition import make_onnx_page_partitioner
+from enterprise_pdf_rag.adapters.onnx_partition import (
+    make_onnx_page_partitioner,
+    onnx_layout_unavailable,
+)
 from enterprise_pdf_rag.adapters.page_metadata_extraction import PAGE_METADATA_DETERMINISTIC
 from enterprise_pdf_rag.adapters.page_partition import ModelPagePartitioner
 from enterprise_pdf_rag.processing.index_text import IndexTextOptions
@@ -37,10 +40,13 @@ from ragspine.extraction.evidence.page.ports import PagePartitioner
 type IngestMode = Literal["full", "lite"]
 # Which partitioner proposes a page's objects: the model on every page; pdfspine blocks on
 # pages without figures or images with a per-page model fallback (ADR 0028); or those two plus
-# pdfspine's local ONNX layout model (PP-DocLayoutV3) on the remaining pages (ADR 00NN).
+# pdfspine's local ONNX layout model (PP-DocLayoutV3) on the remaining pages (ADR 0030).
 type LayoutPolicy = Literal["model", "deterministic-text-pages", "onnx-layout"]
 INGEST_MODES: Final[tuple[str, ...]] = get_args(IngestMode.__value__)
 LAYOUT_POLICIES: Final[tuple[str, ...]] = get_args(LayoutPolicy.__value__)
+# The notebook's ``LAYOUT_POLICY = "auto"``: in lite, the local ONNX layout when its weights and
+# runtime are present, else the deterministic text pages (ADR 0030); never a library preset.
+AUTO_LAYOUT: Final = "auto"
 # The call categories a mode may leave unsent, as ``IngestionSummary.skipped_calls`` keys.
 SKIPPED_CALL_KINDS: Final = ("image", "formula", "chart_description", "page_metadata")
 # What a stage a mode chose not to run says, so it reads apart from a failure or a budget.
@@ -132,6 +138,40 @@ def check_layout_policy(value: str) -> LayoutPolicy:
     if value == "onnx-layout":
         return "onnx-layout"
     raise ValueError(f"layout_policy must be one of {list(LAYOUT_POLICIES)}, not {value!r}")
+
+
+def choose_layout_policy(
+    requested: str, *, ingest_mode: str, onnx_layout_model: str | None
+) -> tuple[LayoutPolicy, str]:
+    """The layout a run uses for ``requested`` (a policy or ``"auto"``), and a one-line reason.
+
+    Full always keeps the model layout (its bytes never change). In lite an explicit policy is
+    used as written; ``"auto"`` picks ``"onnx-layout"`` when ``onnx_layout_unavailable`` finds
+    the weights and the runtime, else ``"deterministic-text-pages"`` naming what is missing.
+    Only files and importability are checked; no weights are read and no model is loaded.
+    """
+    if requested != AUTO_LAYOUT and requested not in LAYOUT_POLICIES:
+        raise ValueError(
+            f"layout_policy must be {AUTO_LAYOUT!r} or one of {list(LAYOUT_POLICIES)}, "
+            f"not {requested!r}"
+        )
+    if check_ingest_mode(ingest_mode) != "lite":
+        return "model", (
+            f'INGEST_MODE = "full" 时忽略 LAYOUT_POLICY = {requested!r}, '
+            "版面每页都用模型(full 保持原样)"
+        )
+    if requested != AUTO_LAYOUT:
+        policy = check_layout_policy(requested)
+        problem = onnx_layout_unavailable(onnx_layout_model) if policy == "onnx-layout" else None
+        return policy, "显式指定" + ("" if problem is None else f"; 注意, 入库前会报错: {problem}")
+    problem = onnx_layout_unavailable(onnx_layout_model)
+    if problem is None:
+        return "onnx-layout", "auto: 已配置本地 ONNX 版面权重且 onnxruntime 可用"
+    return "deterministic-text-pages", (
+        "auto: 本地 ONNX 版面不可用, 改用确定性文本页(含图页回退模型版面)。"
+        f"{problem} 启用方法: .env 设 APP_ONNX_LAYOUT_MODEL 指向 pp_doc_layoutv3.onnx, "
+        "并 pip install 'pdfspine[onnx]'"
+    )
 
 
 def ingest_plan(

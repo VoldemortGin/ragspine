@@ -10,6 +10,7 @@ from pdfspine.geometry import Rect
 
 import enterprise_pdf_rag.adapters.onnx_partition as onnx_partition
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
+from enterprise_pdf_rag.adapters.ingest_mode import AUTO_LAYOUT, choose_layout_policy
 from enterprise_pdf_rag.adapters.onnx_partition import (
     ONNX_LAYOUT_MODEL_FILE,
     ONNX_MARK,
@@ -17,6 +18,7 @@ from enterprise_pdf_rag.adapters.onnx_partition import (
     ONNX_PRODUCER_PREFIX,
     OnnxPagePartitioner,
     make_onnx_page_partitioner,
+    onnx_layout_unavailable,
     resolve_onnx_layout_model,
 )
 from ragspine.extraction.evidence.document.models import DocumentSnapshot
@@ -386,3 +388,88 @@ def test_a_missing_onnxruntime_is_a_clear_error_before_any_page(
             snapshot,
             layout_model=str(model),
         )
+
+
+# ---- notebook 的 LAYOUT_POLICY = "auto": 预检与选择(只查文件与可导入性, 不加载模型) ----
+
+
+def test_the_preflight_is_none_when_weights_and_runtime_are_present(tmp_path: Path) -> None:
+    model = tmp_path / ONNX_LAYOUT_MODEL_FILE
+    model.write_bytes(b"fake-weights")
+    assert onnx_layout_unavailable(str(model)) is None
+
+
+def test_the_preflight_names_the_setting_when_no_weights_are_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(ONNX_MODELS_ENV, raising=False)
+    problem = onnx_layout_unavailable(None)
+    assert problem is not None and "APP_ONNX_LAYOUT_MODEL" in problem
+
+
+def test_the_preflight_names_the_extra_when_onnxruntime_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model = tmp_path / ONNX_LAYOUT_MODEL_FILE
+    model.write_bytes(b"fake-weights")
+    monkeypatch.setattr(
+        onnx_partition, "_find_spec", lambda name: None if name == "onnxruntime" else object()
+    )
+    problem = onnx_layout_unavailable(str(model))
+    assert problem is not None and "pdfspine[onnx]" in problem and "onnxruntime" in problem
+
+
+def test_auto_picks_onnx_in_lite_when_it_is_available(tmp_path: Path) -> None:
+    model = tmp_path / ONNX_LAYOUT_MODEL_FILE
+    model.write_bytes(b"fake-weights")
+    policy, reason = choose_layout_policy(
+        AUTO_LAYOUT, ingest_mode="lite", onnx_layout_model=str(model)
+    )
+    assert policy == "onnx-layout" and "auto" in reason
+
+
+def test_auto_falls_back_to_deterministic_text_pages_and_says_why(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(ONNX_MODELS_ENV, raising=False)
+    policy, reason = choose_layout_policy(AUTO_LAYOUT, ingest_mode="lite", onnx_layout_model=None)
+    assert policy == "deterministic-text-pages"
+    assert "APP_ONNX_LAYOUT_MODEL" in reason and "pdfspine[onnx]" in reason
+
+
+def test_auto_without_onnxruntime_falls_back_and_names_the_extra(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model = tmp_path / ONNX_LAYOUT_MODEL_FILE
+    model.write_bytes(b"fake-weights")
+    monkeypatch.setattr(
+        onnx_partition, "_find_spec", lambda name: None if name == "onnxruntime" else object()
+    )
+    policy, reason = choose_layout_policy(
+        AUTO_LAYOUT, ingest_mode="lite", onnx_layout_model=str(model)
+    )
+    assert policy == "deterministic-text-pages" and "pdfspine[onnx]" in reason
+
+
+@pytest.mark.parametrize("explicit", ["model", "deterministic-text-pages", "onnx-layout"])
+def test_an_explicit_policy_is_used_as_written_in_lite(
+    explicit: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(ONNX_MODELS_ENV, raising=False)
+    policy, _reason = choose_layout_policy(explicit, ingest_mode="lite", onnx_layout_model=None)
+    assert policy == explicit
+
+
+@pytest.mark.parametrize("requested", [AUTO_LAYOUT, "deterministic-text-pages", "onnx-layout"])
+def test_full_always_keeps_the_model_layout(requested: str, tmp_path: Path) -> None:
+    model = tmp_path / ONNX_LAYOUT_MODEL_FILE
+    model.write_bytes(b"fake-weights")
+    policy, reason = choose_layout_policy(
+        requested, ingest_mode="full", onnx_layout_model=str(model)
+    )
+    assert policy == "model" and "忽略 LAYOUT_POLICY" in reason
+
+
+def test_an_unknown_policy_is_refused() -> None:
+    with pytest.raises(ValueError, match="auto"):
+        choose_layout_policy("onnx", ingest_mode="lite", onnx_layout_model=None)

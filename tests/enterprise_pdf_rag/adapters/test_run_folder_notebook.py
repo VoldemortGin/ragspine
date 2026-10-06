@@ -9,10 +9,20 @@ import os
 import re
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from enterprise_pdf_rag.adapters.answer_audit import AnswerAuditStore
+from enterprise_pdf_rag.adapters.folder_pipeline import (
+    EvalCase,
+    EvalSummary,
+    FolderPipelineResult,
+    LiveCalls,
+)
+from enterprise_pdf_rag.adapters.onnx_partition import ONNX_LAYOUT_MODEL_FILE, ONNX_MODELS_ENV
+from ragspine.common.evidence import configs
 from ragspine.common.evidence.configs import ROOT_DIR
 
 _NOTEBOOK = ROOT_DIR / "notebooks" / "run_folder.ipynb"
@@ -781,22 +791,68 @@ def test_the_notebook_ingests_in_lite_mode_by_default_and_the_mode_chooses_the_t
     assert "INGEST_MODE" in intro and "export_document_review" in intro
 
 
-def test_the_layout_policy_is_one_line_deterministic_by_default_and_full_keeps_the_model() -> None:
+def test_the_layout_policy_is_auto_by_default_and_full_keeps_the_model() -> None:
     config = _code_cell("config")
-    assert re.search(r'^LAYOUT_POLICY\s*=\s*"deterministic-text-pages"', config, re.MULTILINE)
-    # The comment says what it does, that long reports are unverified and how to go back.
-    assert '"model"' in config and "尚未在长篇财报上验证" in config
-    # Full ignores it (full stays byte for byte) and says so instead of ignoring it silently.
+    assert re.search(r'^LAYOUT_POLICY\s*=\s*"auto"', config, re.MULTILINE)
+    # The comment names every explicit value, says long reports are unverified, how to go back.
+    for value in ('"model"', '"deterministic-text-pages"', '"onnx-layout"'):
+        assert value in config, value
+    assert "尚未在长篇财报上验证" in config
+    # The choice is the library's (it calls ADR 0030's own preflight), never a local import.
     assert re.search(
-        r'^EFFECTIVE_LAYOUT\s*=\s*LAYOUT_POLICY if INGEST_MODE == "lite" else "model"',
-        config,
-        re.MULTILINE,
+        r"^EFFECTIVE_LAYOUT, LAYOUT_REASON = choose_layout_policy\(", config, re.MULTILINE
     )
+    assert "ingest_mode=INGEST_MODE" in config
+    assert "onnx_layout_model=settings.onnx_layout_model" in config
+    assert "LAYOUT_REASON" in config.split("choose_layout_policy(", 1)[1]
+    # Full ignores it (full stays byte for byte) and says so instead of ignoring it silently.
     assert "忽略 LAYOUT_POLICY" in config
+    for name, source in _code_cells():
+        assert "import onnxruntime" not in source, name
     run = _code_cell("run")
     assert "layout_policy=EFFECTIVE_LAYOUT" in run
     intro = _source(next(cell for cell in _notebook()["cells"] if cell["id"] == "intro"))
     assert "LAYOUT_POLICY" in intro and "尚未在长篇财报上验证" in intro
+    for shown in ('"auto"', '"onnx-layout"', "APP_ONNX_LAYOUT_MODEL", "pdfspine[onnx]"):
+        assert shown in intro, shown
+
+
+def _run_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, onnx_layout_model: str | None
+) -> tuple[dict[str, Any], str]:
+    monkeypatch.delenv(ONNX_MODELS_ENV, raising=False)
+    stub = SimpleNamespace(
+        pdf_source_dir=tmp_path / "pdfs",
+        questions_path=None,
+        ingestion_root=tmp_path / "ingestion",
+        onnx_layout_model=onnx_layout_model,
+        answer_audit_path=None,
+    )
+    monkeypatch.setattr(configs, "get_settings", lambda: stub)
+    namespace: dict[str, Any] = {}
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        exec(compile(_code_cell("config"), "config", "exec"), namespace)
+    return namespace, buffer.getvalue()
+
+
+def test_auto_without_onnx_weights_uses_deterministic_text_pages_and_says_how_to_enable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    namespace, output = _run_config(monkeypatch, tmp_path, None)
+    assert namespace["LAYOUT_POLICY"] == "auto"
+    assert namespace["EFFECTIVE_LAYOUT"] == "deterministic-text-pages"
+    assert "APP_ONNX_LAYOUT_MODEL" in output and "pdfspine[onnx]" in output
+
+
+def test_auto_with_onnx_weights_uses_the_onnx_layout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    weights = tmp_path / ONNX_LAYOUT_MODEL_FILE
+    weights.write_bytes(b"fake-weights")
+    namespace, output = _run_config(monkeypatch, tmp_path, str(weights))
+    assert namespace["EFFECTIVE_LAYOUT"] == "onnx-layout"
+    assert "onnx-layout" in output and "auto" in output
 
 
 def test_the_status_shows_partition_row_table_and_embedding_counts_per_pdf() -> None:
@@ -813,3 +869,112 @@ def test_the_status_shows_partition_row_table_and_embedding_counts_per_pdf() -> 
         assert shown in results, shown
     assert "确定性处理" in results and "回退模型" in results
     assert "按行收录" in results and "embedding 请求" in results
+
+
+def test_the_status_shows_onnx_pages_and_the_index_text_layout_per_pdf() -> None:
+    results = _code_cell("results")
+    for shown in (
+        "pages_partitioned_onnx",
+        "row_unit_tables",
+        "row_units",
+        "unscored_running_members",
+    ):
+        assert shown in results, shown
+    assert "ONNX" in results and "行单元" in results and "页眉页脚" in results
+
+
+# ───────────── testbench: 答题之后的检索测试台(零模型调用, 只读审计库) ─────────────
+
+
+def test_the_testbench_cell_follows_the_answers_and_writes_beside_them() -> None:
+    ids = [cell_id for cell_id, _ in _code_cells()]
+    assert ids.index("answers") + 1 == ids.index("testbench")
+    source = _code_cell("testbench")
+    assert 'settings.answer_audit_path or (INGESTION_ROOT / "answers-audit.sqlite")' in source
+    assert "run_retrieval_testbench(" in source
+    for argument in (
+        "report=result",
+        "max_questions=MAX_QUESTIONS",
+        "question_selection=QUESTION_SELECTION",
+        "folder=PDF_DIR",
+        "doc_aliases=DOC_ALIASES",
+        "ingestion_root=INGESTION_ROOT",
+    ):
+        assert argument in source, argument
+    assert "print(format_table(bench))" in source
+    assert "write_testbench(bench, REPORT_DIR)" in source
+    intro = _source(next(cell for cell in _notebook()["cells"] if cell["id"] == "intro"))
+    assert "testbench.csv" in intro and "重跑一次答题即可补齐" in intro
+
+
+def _pipeline_result(tmp_path: Path, *, answered: bool) -> FolderPipelineResult:
+    """A real (beartype-checked) run result: one unrouted case, or no question set."""
+    case = EvalCase(
+        case_id="q1",
+        question="Revenue?",
+        document_id=None,
+        verdict="FAIL",
+        failures=("routing_failed",),
+    )
+    summary = EvalSummary(format="questions", totals={}, metrics={}, cases=(case,))
+    return FolderPipelineResult(
+        folder=str(tmp_path / "pdfs"),
+        ingestion_root=str(tmp_path / "ingestion"),
+        documents=(),
+        eval=summary if answered else None,
+        live_calls=LiveCalls(),
+        budget_exhausted=False,
+    )
+
+
+def _run_testbench(
+    tmp_path: Path, result: FolderPipelineResult, audit: Path, questions: Path | None
+) -> str:
+    namespace: dict[str, Any] = {
+        "result": result,
+        "settings": SimpleNamespace(answer_audit_path=audit),
+        "INGESTION_ROOT": tmp_path / "ingestion",
+        "QUESTIONS": questions,
+        "MAX_QUESTIONS": None,
+        "QUESTION_SELECTION": "first",
+        "PDF_DIR": tmp_path / "pdfs",
+        "DOC_ALIASES": {},
+        "REPORT_DIR": tmp_path / "reports",
+    }
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        exec(compile(_code_cell("testbench"), "testbench", "exec"), namespace)
+    return buffer.getvalue()
+
+
+def _one_question(tmp_path: Path) -> Path:
+    questions = tmp_path / "set.jsonl"
+    questions.write_text('{"id": "q1", "question": "Revenue?", "doc": "a.pdf"}\n', encoding="utf-8")
+    return questions
+
+
+def test_the_testbench_skips_without_questions_or_a_readable_journal(tmp_path: Path) -> None:
+    questions = _one_question(tmp_path)
+    answered = _pipeline_result(tmp_path, answered=True)
+    unanswered = _pipeline_result(tmp_path, answered=False)
+    assert "跳过检索测试台" in _run_testbench(tmp_path, unanswered, tmp_path / "a.db", None)
+    missing = _run_testbench(tmp_path, answered, tmp_path / "missing.sqlite", questions)
+    assert "跳过检索测试台" in missing
+    corrupt = tmp_path / "corrupt.sqlite"
+    corrupt.write_bytes(b"not a database" * 100)
+    assert "跳过检索测试台" in _run_testbench(tmp_path, answered, corrupt, questions)
+    assert not (tmp_path / "reports").exists()
+
+
+def test_the_testbench_prints_and_writes_its_table_from_an_empty_journal(
+    tmp_path: Path,
+) -> None:
+    audit = tmp_path / "answers-audit.sqlite"
+    AnswerAuditStore(audit)
+    answered = _pipeline_result(tmp_path, answered=True)
+    output = _run_testbench(tmp_path, answered, audit, _one_question(tmp_path))
+    assert "routing_failed" in output
+    assert sorted(path.name for path in (tmp_path / "reports").iterdir()) == [
+        "testbench.csv",
+        "testbench.json",
+    ]

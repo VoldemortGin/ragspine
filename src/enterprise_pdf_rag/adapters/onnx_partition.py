@@ -1,13 +1,13 @@
 """含图页的本地 ONNX 版面切分: pdfspine ``find_layout()``(PP-DocLayoutV3)替代每页一次的模型版面调用.
 
-ADR 00NN(onnx-layout-partitioner). ``"onnx-layout"`` 策略下组合顺序为: 纯文字页由 ADR 0028 的
+ADR 0030(onnx-layout-partitioner). ``"onnx-layout"`` 策略下组合顺序为: 纯文字页由 ADR 0028 的
 确定性切分器零调用处理 → 其余页由本模块用 pdfspine 内置的本地 ONNX 版面模型(PP-DocLayoutV3,
 进程内推理, 零 LLM 调用)产出与 ``page-layout-v2`` 同 schema 的对象划分 → 拿不准的页带机器
 可读的原因码回退被包装的模型切分器(ADR 0013 修订 1 的原则: 读不懂的版面零代价回退, 不猜).
 
 producer 含模型文件 sha256 前 12 位(``page-layout-onnx-v1:pdfspine/<ver>:<sha12>``), 模型换了
 缓存自然隔离; onnxruntime 版本**不进**指纹——权重摘要已唯一标识所算的函数, ort 升级带来的数值
-抖动远小于阈值粒度, 进指纹只会让每次 ort 升级作废全部已存产物(见 ADR 00NN).
+抖动远小于阈值粒度, 进指纹只会让每次 ort 升级作废全部已存产物(见 ADR 0030).
 
 不变量: 对象里的文字全部来自 span 的逐字内容(本模块只分组, 从不改写), 每个 span 都有归属,
 产物通过 ``validate_partition``; 诊断只记原因码与计数, 不记正文. Chart IR 仍只由模型分支生成
@@ -83,6 +83,32 @@ def _runtime_missing() -> str | None:
         if _find_spec(module) is None:
             return module
     return None
+
+
+def _runtime_problem() -> str | None:
+    """缺推理依赖时的中文报错文本; 依赖齐全为 ``None``."""
+    missing = _runtime_missing()
+    if missing is None:
+        return None
+    return (
+        f'"onnx-layout" 版面策略需要可导入的推理依赖, 当前缺少 {missing}。请安装 '
+        "`pip install 'pdfspine[onnx]'`(即 onnxruntime / numpy / Pillow)。缺依赖时不做"
+        "静默的逐页回退, 以免看起来省了模型版面调用、实际上一页都没省。"
+    )
+
+
+def onnx_layout_unavailable(configured: str | None) -> str | None:
+    """``"onnx-layout"`` 此刻能否启用: 能为 ``None``, 否则给中文原因(权重未配置 / 不存在 / 缺依赖).
+
+    与 ``make_onnx_page_partitioner`` 的入库前预检是同一判断(同一解析顺序、同一报错文本),
+    只查文件存在与依赖可导入, 不读权重、不导入 onnxruntime、不加载模型; 供 notebook 的
+    ``LAYOUT_POLICY = "auto"`` 选择策略.
+    """
+    try:
+        resolve_onnx_layout_model(configured)
+    except ValueError as error:
+        return str(error)
+    return _runtime_problem()
 
 
 def resolve_onnx_layout_model(configured: str | None) -> Path:
@@ -457,13 +483,9 @@ def make_onnx_page_partitioner(
     """
     configured = layout_model if layout_model is not None else get_settings().onnx_layout_model
     path = resolve_onnx_layout_model(configured)
-    missing = _runtime_missing()
-    if missing is not None:
-        raise ValueError(
-            f'"onnx-layout" 版面策略需要可导入的推理依赖, 当前缺少 {missing}。请安装 '
-            "`pip install 'pdfspine[onnx]'`(即 onnxruntime / numpy / Pillow)。缺依赖时不做"
-            "静默的逐页回退, 以免看起来省了模型版面调用、实际上一页都没省。"
-        )
+    problem = _runtime_problem()
+    if problem is not None:
+        raise ValueError(problem)
     digest = sha256(path.read_bytes()).hexdigest()[:12]
     producer = f"{ONNX_PRODUCER_PREFIX}:pdfspine/{pdfspine.__version__}:{digest}"
     options: dict[str, object] = {
