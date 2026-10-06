@@ -47,12 +47,20 @@ ONNX_LAYOUT_MODEL_FILE = "pp_doc_layoutv3.onnx"
 # pdfspine 自己的模型目录环境变量(ragspine 设置 APP_ONNX_LAYOUT_MODEL 优先, 此变量兜底).
 ONNX_MODELS_ENV = "PDFSPINE_ONNX_MODELS"
 
-# block 置信度下限, 透传给 pdfspine 的 ``layout_threshold``: 低于它的框不进划分.
+# block 置信度下限: 达到它的框才进划分.
 ONNX_MIN_BLOCK_SCORE = 0.5
+# 可疑视觉框下限(透传给 pdfspine 的 ``layout_threshold``): [此值, ONNX_MIN_BLOCK_SCORE) 的
+# 图表 / 表格 / 公式框不进划分, 但若没有任何已接受的视觉区覆盖它, 说明这页可能有图被漏掉,
+# 整页回退模型而不是静默丢图. 依据: AIA 真实对照里 p18 右半页的柱状图只有 0.389 分, 单阈值
+# 0.5 会把该页"干净地"切完、图表数字静默不可答——这是最坏的失败方向.
+ONNX_SUSPECT_VISUAL_SCORE = 0.3
 # 未归属 span(中心点不在任何 block 内)占比超过此值, 判定版面没读懂, 整页回退.
 ONNX_MAX_UNASSIGNED_SPAN_SHARE = 0.2
 # 推理渲染 DPI(pdfspine 默认同值; 显式写出, 它决定送入模型的页面图像).
 ONNX_RENDER_DPI = 144
+
+# pdfspine 归一化标签里的视觉类(可疑框守卫只看它们; 文本永不静默丢失, 由 span 覆盖规则兜底).
+_VISUAL_LABELS = frozenset({"figure", "table", "isolate_formula"})
 
 # 回退原因码(机器可读; 诊断里只出现这些码, 绝不出现正文).
 ONNX_FALLBACK_REASONS = (
@@ -320,11 +328,15 @@ class OnnxPagePartitioner:
         regions = [
             region
             for block in blocks
-            if (region := _region_from_block(block, width=page.width, height=page.height))
+            if float(block.score) >= ONNX_MIN_BLOCK_SCORE
+            and (region := _region_from_block(block, width=page.width, height=page.height))
             is not None
         ]
         if not regions:
             # 模型在这一页没给出任何达到阈值的框: 版面没读懂, 交回模型版面.
+            return "onnx_low_confidence", None
+        if self._unexplained_suspect(page, blocks, regions):
+            # 低分视觉框没有任何已接受的视觉区覆盖: 这页可能有图被漏掉, 回退而不是静默丢图.
             return "onnx_low_confidence", None
         reason, assignment = _assign_spans(page, regions)
         if assignment is None:
@@ -354,6 +366,48 @@ class OnnxPagePartitioner:
             # 产出不满足覆盖/几何约束说明这页我们没读懂: 零代价回退, 不猜.
             return "onnx_partition_invalid", None
         return "ok", partition
+
+    def _unexplained_suspect(
+        self,
+        page: PageInput,
+        blocks: tuple[pdfspine.LayoutBlock, ...],
+        regions: list[_Region],
+    ) -> bool:
+        """是否存在没被任何已接受视觉区覆盖的可疑视觉框([0.3, 0.5) 的图 / 表 / 公式).
+
+        "覆盖"按中心点互指: 可疑框中心落在某个已接受视觉区内(重复检测), 或某个已接受视觉区
+        中心落在可疑框内(同一图的松框). 两者都不成立的可疑框指向一张可能被漏掉的图.
+        """
+        visuals = [
+            region
+            for region in regions
+            if region.kind in (ObjectKind.TABLE, ObjectKind.CHART, ObjectKind.IMAGE, ObjectKind.FORMULA)
+        ]
+        for block in blocks:
+            score = float(block.score)
+            if not ONNX_SUSPECT_VISUAL_SCORE <= score < ONNX_MIN_BLOCK_SCORE:
+                continue
+            if str(block.label) not in _VISUAL_LABELS:
+                continue
+            suspect = _clamp(
+                (
+                    float(block.bbox.x0),
+                    float(block.bbox.y0),
+                    float(block.bbox.x1),
+                    float(block.bbox.y1),
+                ),
+                width=page.width,
+                height=page.height,
+            )
+            if suspect[2] - suspect[0] <= 0 or suspect[3] - suspect[1] <= 0:
+                continue
+            explained = any(
+                _center_inside(suspect, visual.bbox) or _center_inside(visual.bbox, suspect)
+                for visual in visuals
+            )
+            if not explained:
+                return True
+        return False
 
     def _object(self, page: PageInput, region: _Region, spans: tuple[TextSpan, ...]) -> LayoutObject:
         span_ids = tuple(span.span_id for span in spans)
@@ -409,7 +463,8 @@ def make_onnx_page_partitioner(
     producer = f"{ONNX_PRODUCER_PREFIX}:pdfspine/{pdfspine.__version__}:{digest}"
     options: dict[str, object] = {
         "layout_model": os.fspath(path),
-        "layout_threshold": ONNX_MIN_BLOCK_SCORE,
+        # 按可疑下限请求检测: [0.3, 0.5) 的视觉框只做漏图守卫, >=0.5 的才进划分.
+        "layout_threshold": ONNX_SUSPECT_VISUAL_SCORE,
         "dpi": ONNX_RENDER_DPI,
     }
 

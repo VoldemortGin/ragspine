@@ -35,8 +35,10 @@ from tests.enterprise_pdf_rag.adapters.test_deterministic_partition import (
 PRODUCER = f"{ONNX_PRODUCER_PREFIX}:pdfspine/{pdfspine.__version__}:000000000000"
 
 
-def _block(bbox: tuple[float, float, float, float], label: str, raw: str = "") -> object:
-    return pdfspine.LayoutBlock(Rect(*bbox), label, 0.9, raw or label)
+def _block(
+    bbox: tuple[float, float, float, float], label: str, raw: str = "", score: float = 0.9
+) -> object:
+    return pdfspine.LayoutBlock(Rect(*bbox), label, score, raw or label)
 
 
 def _partitioner(
@@ -195,6 +197,41 @@ def test_stray_spans_with_no_text_block_fall_back(tmp_path: Path) -> None:
     partition = partitioner.partition(page)
     assert stub.pages == [0]
     assert _fallback_reason(partition) == "onnx_unassigned_spans"
+
+
+def test_a_suspect_visual_block_nobody_explains_falls_back(tmp_path: Path) -> None:
+    """[0.3, 0.5) 的图表框不进划分, 但它的存在说明这页可能有图被漏掉: 回退模型, 不静默丢图.
+
+    真实对照里钉住的失败形态(AIA p18): 右半页的柱状图只有 0.389 分, 阈值 0.5 下整页被
+    "干净地"切完, 图表数字静默不可答; 这个守卫把它变成一次模型版面调用.
+    """
+    _sources, snapshot, page = _report_page(tmp_path)
+    suspect = _block((450.0, 300.0, 560.0, 400.0), "figure", "chart", score=0.4)
+    stub, partitioner = _partitioner(snapshot, [*BANDS, suspect])
+    partition = partitioner.partition(page)
+    assert stub.pages == [0]
+    assert _fallback_reason(partition) == "onnx_low_confidence"
+
+
+def test_a_suspect_visual_block_inside_an_accepted_one_is_explained(tmp_path: Path) -> None:
+    _sources, snapshot, page = _report_page(tmp_path)
+    accepted = _block((300.0, 300.0, 500.0, 450.0), "figure", "chart", score=0.7)
+    duplicate = _block((320.0, 310.0, 480.0, 440.0), "figure", "chart", score=0.4)
+    _stub, partitioner = _partitioner(snapshot, [*BANDS, accepted, duplicate])
+    partition = partitioner.partition(page)
+    assert partition.producer == PRODUCER
+    assert ObjectKind.CHART in {item.kind for item in partition.objects}
+    assert sum(item.kind is ObjectKind.CHART for item in partition.objects) == 1
+
+
+def test_a_low_score_text_block_is_simply_ignored(tmp_path: Path) -> None:
+    # 低分文本框不是守卫对象: 文本永不静默丢失(span 覆盖规则兜底), 回退只为视觉对象设.
+    _sources, snapshot, page = _report_page(tmp_path)
+    weak_text = _block((300.0, 300.0, 400.0, 350.0), "plain text", "text", score=0.4)
+    _stub, partitioner = _partitioner(snapshot, [*BANDS, weak_text])
+    partition = partitioner.partition(page)
+    assert partition.producer == PRODUCER
+    assert len(partition.objects) == 3
 
 
 def test_an_empty_detection_falls_back_as_low_confidence(tmp_path: Path) -> None:
