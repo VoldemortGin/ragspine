@@ -91,7 +91,8 @@ behavior**: `layout_policy="model"`（两个库预设）逐字节保持既有产
 - 三栏及以上、带整页宽标题的双栏、基线对齐的双栏叙事（`ambiguous_columns`）。
 - 旋转文字、无文本层（扫描页）、span 越过页面边界的页。
 - 含任何非装饰图形 / 图片的页（含矢量图表、单元格底纹之外的色块面板）。
-- 无框线表格区域按行出 Text，不出 Table；跨页重复页眉每页各成一个对象（未去重索引）。
+- 无框线表格区域按行出 Text，不出 Table；跨页重复页眉每页各成一个对象（索引打分见 Amendment 1：
+  lite 下不参与 BM25 / 向量）。
 - **不产出 Formula 对象**：不含图形的公式页被判为纯文字页时，公式按普通文本逐字收录——
   上下标结构丢失（`x^{2}` 读作 `x 2`），以 formula 类型引用的题弃答（文字仍可按 quote 引用，
   不会捏造）；合成混合文档上已用测试钉住
@@ -120,3 +121,29 @@ behavior**: `layout_policy="model"`（两个库预设）逐字节保持既有产
   使 `column_layout` 判 `ambiguous`，整页回退模型，其 Table 照常按行收录；规整的无框线表格
   按行读成一个 Text 对象，每行科目与数值同在一行、同一检索单元
   （`test_deterministic_partition_table_rows.py`）。
+
+## Amendment 1（2026-10-06）：跨页页眉 / 页脚不参与检索打分
+
+"未覆盖的版式"里记下的"跨页重复页眉每页各成一个对象（未去重索引）"在长财报上是 BM25 污染：每页的
+`公司名 报告名 2024` 都命中期间类短问题。**决定**：`IngestPlan.drop_running_lines_from_index`
+（lite 开、full 关；`run_folder_pipeline(drop_running_lines_from_index=...)` 覆盖预设）。
+
+1. **在索引阶段统一重算，不读版面标记**。模型版面、本 ADR 的确定性版面、以后的 ONNX 版面产出的
+   对象都没有统一的角色标记，所以 `adapters/running_lines.py` 在 `ProcessingRetrieval.build` 里
+   对整份文档的选中页 span sidecar 重算一次：`text_lines.running_lines`（同文本、同 5pt 高度桶、
+   ≥30% 且 ≥2 页）命中的行，或位于顶 / 底 6% 带内的页码形状行（`is_page_number`，带外的孤立数字
+   不算），其 span 记为 running。
+2. **保守**：只有 **Text** 成员、且它的每个非空白 span 都在 running 行上，才不参与打分；带了任何
+   其它文字的对象不动；整份文档若全是 running 成员则一律照常打分（没有别的成员给出向量维度）。
+3. **不参与打分 ≠ 删除**：成员仍在检索计划里，可 resolve、可被 `quote` 引用核验、仍出现在页窗口
+   （ADR 0017）与树通道的页成员里；只是 BM25 语料不含它（`MemberText.units == ()`），向量索引里
+   没有它的向量（embedding 产物是空的 `RetrievalUnitEmbeddings`，不发 embedding 请求、不写缓存
+   指针）。快照的 `index_version` 带 `running-lines-unscored-v1`。
+4. **期间预过滤（ADR 0013）不受影响**：它读页元数据阶段的 `normalized_periods`（`MemberText.periods`），
+   不读索引文本；确定性页元数据的标题本来就排除 running 行。
+
+可见性：`DraftIndex.unscored_running_members` 与 `report.md` 一行。合成长报告（13 页，每页页眉
++ 页码）：26 个对象不再打分，打分成员 40 → 14；三种版面来源（模型 / 确定性 / 桩出的 ONNX 样式
+产物）计数一致。单开此项不能把长表救进前 10（RRF 27 → 14），与 ADR 0027 Amendment 1 叠加后为第 1。
+测试：`tests/enterprise_pdf_rag/adapters/test_running_lines.py`、
+`tests/enterprise_pdf_rag/adapters/test_index_rows_and_running_lines.py`。
