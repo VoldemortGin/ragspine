@@ -82,6 +82,7 @@ from enterprise_pdf_rag.adapters.visual_requalification import (
     requalify_visual_objects,
 )
 from ragspine.common.evidence.configs import get_settings
+from ragspine.common.evidence.file_placement import recording_repairs
 from ragspine.common.evidence.providers.json_completion import (
     JsonCompletionClient,
     unsupported_sampling_parameters,
@@ -216,6 +217,10 @@ class DocumentRun(BoundaryModel):
     # release, possibly of the other mode, published; None when nothing is published).
     ingest_mode: IngestMode = "full"
     published_ingest_mode: IngestMode | None = None
+    # ADR 0029: stored entries this run found damaged (missing / empty / truncated / not their
+    # digest, e.g. lost by an asynchronous flush) and repaired or recomputed, by kind
+    # (object, stage_cache, model_cache, source); counts only.
+    storage_repairs: dict[str, int] = Field(default_factory=dict)
 
 
 class EvalCase(BoundaryModel):
@@ -581,9 +586,13 @@ def _reusable_index(outputs: ProcessingStore, draft_id: str, embedder: Embedding
     manifest minus its retrieval equals the draft, and whose every member carries the
     embedder's fingerprint, is what indexing the draft again would rebuild.
     """
-    if not (outputs.root / "current-processing").is_file():
+    current_id = outputs.current_id()
+    if current_id is None:
         return False
-    _, current = outputs.load_current()
+    try:
+        current = outputs.load(current_id)
+    except (OSError, ValueError):  # a damaged release is rebuilt, never reused (ADR 0029)
+        return False
     if current.retrieval is None or replace(current, retrieval=None) != outputs.load(draft_id):
         return False
     plan, _ = outputs.load_retrieval(current.retrieval)
@@ -632,9 +641,13 @@ def _page_reporter(
 def _current_mode(processing_store: Path) -> IngestMode | None:
     """The ingest mode of the snapshot ``current-processing`` names, or None without one."""
     outputs = ProcessingStore(processing_store)
-    if not (outputs.root / "current-processing").is_file():
+    current_id = outputs.current_id()
+    if current_id is None:
         return None
-    return published_ingest_mode(outputs.load_current()[1])
+    try:
+        return published_ingest_mode(outputs.load(current_id))
+    except (OSError, ValueError):
+        return None
 
 
 def _run_document(
@@ -652,6 +665,7 @@ def _run_document(
     embedder: EmbeddingPort,
     continue_on_error: bool,
     progress: Progress | None,
+    repairs: Counter[str] | None = None,
 ) -> tuple[DocumentRun, int]:
     """One PDF through every stage; returns the run and its tree's live calls."""
     started = perf_counter()
@@ -694,6 +708,8 @@ def _run_document(
         ingested: IngestionSummary | None = run.get("ingestion")
         if ingested is not None:
             run["published_ingest_mode"] = _current_mode(Path(ingested.processing_store))
+        if repairs:
+            run["storage_repairs"] = dict(sorted(repairs.items()))
         done = DocumentRun(status=status, elapsed_s=round(perf_counter() - started, 3), **run)
         # A recorded failure travels with the event, so a progress line shows its reason.
         reason: dict[str, object] = {
@@ -706,6 +722,8 @@ def _run_document(
                 pages_budget_deferred=ingested.pages_budget_deferred,
                 pages_claim_blocked=ingested.pages_claim_blocked,
             )
+        if repairs:
+            reason["storage_repairs"] = sum(repairs.values())
         _emit(progress, "document_done", pdf=str(pdf), status=status, **reason)
         return done, tree_calls
 
@@ -1424,21 +1442,23 @@ def run_folder_pipeline(
             )
             continue
         first[digest] = str(pdf)
-        run, tree_calls = _run_document(
-            pdf,
-            digest,
-            root=root,
-            plan=plan,
-            pages=pages,
-            per_pdf=max_live_calls_per_pdf,
-            budget=budget,
-            requalify=requalify,
-            build_tree=tree,
-            tree_max_live_calls=tree_max_live_calls,
-            embedder=embedder,
-            continue_on_error=continue_on_error,
-            progress=progress,
-        )
+        with recording_repairs() as repairs:
+            run, tree_calls = _run_document(
+                pdf,
+                digest,
+                root=root,
+                plan=plan,
+                pages=pages,
+                per_pdf=max_live_calls_per_pdf,
+                budget=budget,
+                requalify=requalify,
+                build_tree=tree,
+                tree_max_live_calls=tree_max_live_calls,
+                embedder=embedder,
+                continue_on_error=continue_on_error,
+                progress=progress,
+                repairs=repairs,
+            )
         documents.append(run)
         tree_total += tree_calls
     ingest_total = sum(item.live_calls for item in documents)

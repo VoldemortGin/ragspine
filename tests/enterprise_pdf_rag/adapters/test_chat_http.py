@@ -19,6 +19,7 @@ from enterprise_pdf_rag.adapters.document_catalog import (
     MountedCatalog,
     scan_catalog,
 )
+from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.draft_publication import DraftPublication
 from enterprise_pdf_rag.adapters.http import app as app_module
 from enterprise_pdf_rag.adapters.http.chat import create_chat_router, model_id, render_message
@@ -677,13 +678,8 @@ def test_tampered_pinned_evidence_is_409(published: Published, tmp_path: Path) -
     copy = tmp_path / "ingestion"
     shutil.copytree(root, copy)
     app, prompts = _app(copy, tmp_path / "llm")
-    pinned = (
-        copy
-        / meridian.source_sha256
-        / "processing"
-        / "objects"
-        / "sha256"
-        / meridian.current_processing_id
+    pinned = LocalDocumentStore(copy / meridian.source_sha256 / "processing").content_path(
+        meridian.current_processing_id
     )
     assert pinned.is_file()
     pinned.write_bytes(b"tampered after mount")

@@ -23,6 +23,7 @@ from tests.enterprise_pdf_rag.adapters.lite_ingest_helpers import (
     lite_env,
     mixed_folder,
     run_mode,
+    sharded_layout_only,
     store_digest,
 )
 from tests.enterprise_pdf_rag.answers.fake_llm import scripted_client
@@ -51,6 +52,7 @@ def test_full_mode_writes_byte_for_byte_what_the_release_before_lite_wrote(
         FULL_STORE_FILES,
         FULL_REQUESTS_DIGEST,
     )
+    assert sharded_layout_only(tmp_path / "ingestion")
     assert isinstance(result, FolderPipelineResult)
 
 

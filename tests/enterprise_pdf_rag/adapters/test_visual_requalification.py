@@ -13,6 +13,7 @@ from enterprise_pdf_rag.adapters.visual_requalification import (
     ObjectRequalification,
     requalify_visual_objects,
 )
+from ragspine.common.evidence.file_placement import stored_names
 from ragspine.extraction.evidence.page.models import (
     ObjectKind,
     ObjectProcessingRecord,
@@ -156,8 +157,8 @@ def test_aia_release_dry_run_proves_one_diagram_and_withholds_the_other() -> Non
     before = (
         (_AIA_SOURCES / "current-manifest").read_bytes(),
         (_AIA_PROCESSING / "current-processing").read_bytes(),
-        sum(1 for _ in (_AIA_SOURCES / "objects" / "sha256").iterdir()),
-        sum(1 for _ in (_AIA_PROCESSING / "objects" / "sha256").iterdir()),
+        len(stored_names(_AIA_SOURCES / "objects" / "sha256")),
+        len(stored_names(_AIA_PROCESSING / "objects" / "sha256")),
     )
     sources = LocalDocumentStore(_AIA_SOURCES, activate_on_publish=False)
     outputs = ProcessingStore(_AIA_PROCESSING)
@@ -190,6 +191,6 @@ def test_aia_release_dry_run_proves_one_diagram_and_withholds_the_other() -> Non
     assert (
         (_AIA_SOURCES / "current-manifest").read_bytes(),
         (_AIA_PROCESSING / "current-processing").read_bytes(),
-        sum(1 for _ in (_AIA_SOURCES / "objects" / "sha256").iterdir()),
-        sum(1 for _ in (_AIA_PROCESSING / "objects" / "sha256").iterdir()),
+        len(stored_names(_AIA_SOURCES / "objects" / "sha256")),
+        len(stored_names(_AIA_PROCESSING / "objects" / "sha256")),
     ) == before

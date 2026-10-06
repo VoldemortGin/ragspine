@@ -19,7 +19,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, ValidationError
 
-from ragspine.common.evidence.file_placement import fsync_directory, link_new_file
+from ragspine.common.evidence.file_placement import (
+    fsync_directory,
+    link_new_file,
+    note_repair,
+    replace_file,
+)
 from ragspine.common.evidence.providers.providers import (
     LLMConfig,
     ProviderRequestError,
@@ -44,6 +49,9 @@ CLAIM_FORMAT = "json-completion-claim-v2"
 # A legacy claim is presumed abandoned this long after its mtime: longer than the lease of any
 # call (``_claim_lease(180)`` = 840 s), since nothing says how long its holder may run.
 LEGACY_CLAIM_LEASE_SECONDS = 900
+# Replay failures that mean "this entry was lost or damaged on disk" (an asynchronous flush that
+# failed after the write returned): the call is made again once, never stuck (ADR 0029).
+_DAMAGED_CODES = frozenset({"missing_cached_response", "cached_response_digest_mismatch"})
 # Unique to this process: a pid alone can be reused by a later process.
 _PROCESS_TOKEN = uuid.uuid4().hex
 # Wall clock of claim leases (seconds since the epoch); a seam for tests.
@@ -221,7 +229,10 @@ def _response_schema(response_model: type[BaseModel], bound_svg_digest: str | No
     return _schema_arrays(TypeAdapter(JsonValue).validate_python(schema))
 
 
-def _immutable_write(path: Path, content: bytes) -> None:
+def _immutable_write(path: Path, content: bytes, *, replace_damaged: bool = False) -> None:
+    """First writer wins; equal bytes are a no-op, other bytes ``cache_conflict`` — unless
+    ``replace_damaged``: the existing file is known to be damaged (a response that is not its
+    digest, a record being repaired), so it is replaced (ADR 0029)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as stream:
         temporary = Path(stream.name)
@@ -233,7 +244,9 @@ def _immutable_write(path: Path, content: bytes) -> None:
             link_new_file(temporary, path)
         except FileExistsError:
             if path.read_bytes() != content:
-                raise JsonCompletionError("cache_conflict") from None
+                if not replace_damaged:
+                    raise JsonCompletionError("cache_conflict") from None
+                replace_file(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -468,6 +481,7 @@ class JsonCompletionClient:
         self._cache_hits = 0
         self._taken_over = 0
         self._claim_blocked = 0
+        self._repaired = 0
 
     @property
     def live_call_count(self) -> int:
@@ -489,6 +503,12 @@ class JsonCompletionClient:
         """Calls of this client that ended ``request_in_progress_or_uncertain``: another,
         possibly still running, attempt holds their claim, so they were not sent."""
         return self._claim_blocked
+
+    @property
+    def repaired_count(self) -> int:
+        """Damaged cache entries (unreadable record, lost or truncated response) this client
+        called again and repaired (ADR 0029)."""
+        return self._repaired
 
     @property
     def dropped_parameters(self) -> tuple[str, ...]:
@@ -693,11 +713,18 @@ class JsonCompletionClient:
         if retry_path.exists() and not original_path.exists():
             raise JsonCompletionError("orphan_retry_record", fingerprint)
         record_path = retry_path if retry_path.exists() else original_path
+        # The record already there when it is damaged (or names a lost response): it is
+        # called again and replaced, ADR 0029. None = an ordinary first call or retry.
+        damaged: _CacheRecord | Literal["unreadable"] | None = None
+        record: _CacheRecord | None = None
         if record_path.exists():
             try:
                 record = _CacheRecord.model_validate_json(record_path.read_bytes())
             except (ValueError, OSError):
-                raise JsonCompletionError("invalid_cache_record", fingerprint) from None
+                if cache_only:
+                    raise JsonCompletionError("invalid_cache_record", fingerprint) from None
+                damaged = "unreadable"
+        if record is not None:
             if record.request_fingerprint != fingerprint:
                 raise JsonCompletionError("cache_binding_mismatch", fingerprint)
             refused = _refused_parameter(record, droppable)
@@ -724,8 +751,13 @@ class JsonCompletionClient:
                 record_path = retry_path
             else:
                 self._store_context(fingerprint, context)
-                return self._cached_result(record, fingerprint, response_model)
-        elif known:
+                try:
+                    return self._cached_result(record, fingerprint, response_model)
+                except JsonCompletionError as error:
+                    if error.code not in _DAMAGED_CODES or cache_only:
+                        raise
+                    damaged = record
+        elif damaged is None and known:
             parameter = min(known)
             self._save_skip(original_path, fingerprint, payload, parameter, context)
             raise _ParameterRefused(parameter)
@@ -738,12 +770,14 @@ class JsonCompletionClient:
                 record_path, fingerprint, _claim_lease(self._timeout)
             )
         except JsonCompletionError:
-            if not record_path.exists():
+            if damaged is not None or not record_path.exists():
                 self._claim_blocked += 1
                 raise
             generation = None
         else:
-            if record_path.exists():
+            if record_path.exists() and (
+                damaged is None or self._intact(record_path, fingerprint, response_model)
+            ):
                 _release_claims(record_path)
                 generation = None
         if generation is None:  # another attempt recorded it after our first look: replay
@@ -824,7 +858,8 @@ class JsonCompletionClient:
                 **examined,
                 **takeover,
             )
-            self._save_record(record_path, fingerprint, None, code, diagnostic)
+            if damaged is None:  # a failed repair leaves the damaged entry to try again
+                self._save_record(record_path, fingerprint, None, code, diagnostic)
             _release_claims(record_path)
             refused = _refused_parameter(
                 _CacheRecord(
@@ -852,25 +887,52 @@ class JsonCompletionClient:
             **takeover,
         )
         if len(raw) > 1_048_576:
-            self._save_record(
-                record_path, fingerprint, None, "response_budget_exceeded", diagnostic
-            )
+            if damaged is None:
+                self._save_record(
+                    record_path, fingerprint, None, "response_budget_exceeded", diagnostic
+                )
             _release_claims(record_path)
             raise JsonCompletionError(
                 "response_budget_exceeded", fingerprint, diagnostics=diagnostic
             )
         digest = _digest(raw)
-        _immutable_write(self._cache / "responses" / f"{digest}.json", raw)
+        # Content-addressed: a file of that name with other bytes is damaged, never a rival.
+        _immutable_write(self._cache / "responses" / f"{digest}.json", raw, replace_damaged=True)
         try:
             result = self._parse(raw, fingerprint, response_model, cache_hit=False)
         except JsonCompletionError as error:
-            self._save_record(record_path, fingerprint, digest, error.code, diagnostic)
+            if damaged is None:
+                self._save_record(record_path, fingerprint, digest, error.code, diagnostic)
             _release_claims(record_path)
             raise JsonCompletionError(error.code, fingerprint, diagnostics=diagnostic) from None
         diagnostic = diagnostic.model_copy(update={"finish_category": "stop"})
-        self._save_record(record_path, fingerprint, digest, None, diagnostic)
+        if damaged is None:
+            self._save_record(record_path, fingerprint, digest, None, diagnostic)
+        else:
+            self._repaired += 1
+            note_repair("model_cache")
+            # The same response reproduced: the record still names it and stays as written.
+            if not (
+                isinstance(damaged, _CacheRecord)
+                and damaged.response_digest == digest
+                and damaged.failure_code is None
+            ):
+                self._save_record(
+                    record_path, fingerprint, digest, None, diagnostic, replace_damaged=True
+                )
         _release_claims(record_path)
         return replace(result, diagnostics=diagnostic)
+
+    def _intact[T: BaseModel](
+        self, record_path: Path, fingerprint: str, response_model: type[T]
+    ) -> bool:
+        """Did another attempt repair this entry while we waited for its claim?"""
+        try:
+            record = _CacheRecord.model_validate_json(record_path.read_bytes())
+            self._cached_result(record, fingerprint, response_model)
+        except (ValueError, OSError):
+            return False
+        return True
 
     def _save_skip(
         self, path: Path, fingerprint: str, payload: bytes, parameter: str, context: bytes
@@ -944,6 +1006,8 @@ class JsonCompletionClient:
         digest: str | None,
         failure: str | None,
         diagnostics: RequestDiagnostics | None = None,
+        *,
+        replace_damaged: bool = False,
     ) -> None:
         record = _CacheRecord(
             request_fingerprint=fingerprint,
@@ -953,7 +1017,11 @@ class JsonCompletionClient:
         )
         # ``exclude_unset`` keeps a record byte-identical to the pre-ADR-0021 format unless a
         # 400 body was examined (only then are the provider_error_* fields set).
-        _immutable_write(path, record.model_dump_json(exclude_unset=True).encode())
+        _immutable_write(
+            path,
+            record.model_dump_json(exclude_unset=True).encode(),
+            replace_damaged=replace_damaged,
+        )
 
     @staticmethod
     def _parse[T: BaseModel](

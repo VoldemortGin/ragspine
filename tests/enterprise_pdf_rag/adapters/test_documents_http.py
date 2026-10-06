@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from httpx2 import ASGITransport, AsyncClient
 
 from enterprise_pdf_rag.adapters.document_catalog import mount_document, scan_catalog
+from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.draft_publication import DraftPublication
 from enterprise_pdf_rag.adapters.http import app as app_module
 from enterprise_pdf_rag.adapters.http.documents import create_documents_app
@@ -409,7 +410,9 @@ def test_tampered_pinned_manifest_is_refused_with_409(published: Published) -> N
         hits.append(await _first_hit(client, document_id, "Meridian revenue"))
 
     _run(app, collect)
-    pinned = Path(meridian.processing_store) / "objects" / "sha256" / meridian.current_processing_id
+    pinned = LocalDocumentStore(Path(meridian.processing_store)).content_path(
+        meridian.current_processing_id
+    )
     assert pinned.is_file()
     pinned.write_bytes(b"tampered after mount")
 

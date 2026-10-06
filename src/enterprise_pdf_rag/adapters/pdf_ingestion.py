@@ -38,6 +38,7 @@ from enterprise_pdf_rag.adapters.processing_export import export_processing_revi
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.semantic_objects import SemanticObjectAdapter
 from ragspine.common.evidence.configs import get_settings
+from ragspine.common.evidence.file_placement import note_repair
 from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
 from ragspine.common.evidence.providers.providers import load_llm_config
 from ragspine.extraction.evidence.document.models import AssetRef, DocumentSnapshot, DocumentSpec
@@ -172,7 +173,14 @@ def _source(
     cached = cache.cached(fingerprint)
     if cached is not None:
         assert cached.artifact is not None
-        snapshot = sources.load(cached.artifact.sha256)
+        try:
+            snapshot = sources.load(cached.artifact.sha256)
+        except (OSError, ValueError):
+            # A page or text object lost on disk (ADR 0029): extract again from the PDF; the
+            # same bytes are put back under the same digests, so the manifest id is unchanged.
+            note_repair("source")
+            cached = None
+    if cached is not None:
         if (
             snapshot.manifest.source.sha256,
             snapshot.manifest.filename,

@@ -10,6 +10,7 @@ from pydantic import TypeAdapter
 
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
+from ragspine.common.evidence.file_placement import sharded_path, stored_names
 from ragspine.extraction.evidence.document.models import (
     AssetRef,
     DocumentManifest,
@@ -101,8 +102,8 @@ def test_stage_cache_is_bound_to_input_and_validates_its_actual_output(
     assert store.cached("e" * 64) == stage
     assert store.cached("f" * 64) is None
     store.assets.asset_path(ref).unlink()
-    with pytest.raises(FileNotFoundError):
-        store.cached("e" * 64)
+    # ADR 0029: an entry whose output is lost is a miss (the stage is recomputed), not an error.
+    assert ProcessingStore(tmp_path).cached("e" * 64) is None
 
 
 def test_content_addressed_put_works_and_stays_idempotent_without_hard_links(
@@ -115,10 +116,10 @@ def test_content_addressed_put_works_and_stays_idempotent_without_hard_links(
     again = store.put(b"source", media_type="application/pdf")
 
     assert again == first and store.get(first) == b"source"
-    assert [path.name for path in (tmp_path / "objects" / "sha256").iterdir()] == [first.sha256]
+    assert stored_names(tmp_path / "objects" / "sha256") == [first.sha256]
 
 
-def test_without_hard_links_a_corrupted_object_is_still_refused_not_overwritten(
+def test_without_hard_links_a_corrupted_object_is_refused_on_read_and_repaired_by_put(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store = LocalDocumentStore(tmp_path)
@@ -127,10 +128,12 @@ def test_without_hard_links_a_corrupted_object_is_still_refused_not_overwritten(
     forbid_hard_links(monkeypatch)
 
     with pytest.raises(ValueError, match="digest mismatch"):
-        store.put(b"source", media_type="application/pdf")
+        LocalDocumentStore(tmp_path).get(ref)
+    # ADR 0029: the caller holds the bytes the digest names, so they replace the damaged copy.
+    assert LocalDocumentStore(tmp_path).put(b"source", media_type="application/pdf") == ref
 
-    assert store.asset_path(ref).read_bytes() == b"tampered"
-    assert [path.name for path in (tmp_path / "objects" / "sha256").iterdir()] == [ref.sha256]
+    assert store.asset_path(ref).read_bytes() == b"source"
+    assert stored_names(tmp_path / "objects" / "sha256") == [ref.sha256]
 
 
 def test_a_real_link_failure_still_fails_the_put_and_leaves_no_temporary(
@@ -142,7 +145,7 @@ def test_a_real_link_failure_still_fails_the_put_and_leaves_no_temporary(
     with pytest.raises(PermissionError):
         store.put(b"source", media_type="application/pdf")
 
-    assert list((tmp_path / "objects" / "sha256").iterdir()) == []
+    assert stored_names(tmp_path / "objects" / "sha256") == []
 
 
 def test_stage_cache_stays_first_writer_wins_without_hard_links(
@@ -155,7 +158,7 @@ def test_stage_cache_stays_first_writer_wins_without_hard_links(
     store.cache(stage)
     store.cache(stage)
     assert store.cached("e" * 64) == stage
-    pointer = tmp_path / "stage-cache" / ("e" * 64)
+    pointer = sharded_path(tmp_path / "stage-cache", "e" * 64)
     written = pointer.read_bytes()
 
     with pytest.raises(ValueError, match="Conflicting immutable stage cache entry"):

@@ -90,9 +90,10 @@ def test_corrupt_or_missing_object_is_never_reused(tmp_path: object) -> None:
     ref = store.put(b"original", media_type="application/pdf")
     store.asset_path(ref).write_bytes(b"tampered")
     with pytest.raises(ValueError, match="digest mismatch"):
-        store.put(b"original", media_type="application/pdf")
-    with pytest.raises(ValueError, match="digest mismatch"):
         store.get(ref)
+    # ADR 0029: never reused, but a put bringing the bytes the digest names repairs it.
+    assert store.put(b"original", media_type="application/pdf") == ref
+    assert store.get(ref) == b"original"
     store.asset_path(ref).unlink()
     with pytest.raises(FileNotFoundError):
         store.get(ref)

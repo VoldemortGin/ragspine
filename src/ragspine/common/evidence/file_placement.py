@@ -6,7 +6,91 @@
 
 import errno
 import os
+import re
+from collections import Counter
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
+
+# ADR 0029: a flat directory of hash-named files (``objects/sha256``, ``stage-cache``) is
+# superseded by a sibling ``<name>-sharded/<first two hex>/<name>``. New files are written only
+# there, so a legacy flat directory that is already full (Databricks Workspace files: 10 000
+# children per folder) is never written again; reads look in the sharded place, then the flat one.
+SHARDED_SUFFIX = "-sharded"
+_SHARD = re.compile(r"[0-9a-f]{2}")
+
+
+def sharded_directory(flat: Path) -> Path:
+    return flat.with_name(flat.name + SHARDED_SUFFIX)
+
+
+def sharded_path(flat: Path, name: str) -> Path:
+    """Where a file named ``name`` of the flat directory ``flat`` is written now."""
+    if _SHARD.fullmatch(name[:2]) is None:
+        raise ValueError("A sharded file name starts with two lowercase hex digits")
+    return sharded_directory(flat) / name[:2] / name
+
+
+def stored_path(flat: Path, name: str) -> Path | None:
+    """The existing file of that name, sharded place first, then the legacy flat place."""
+    for path in (sharded_path(flat, name), flat / name):
+        if path.is_file():
+            return path
+    return None
+
+
+def read_stored(flat: Path, name: str) -> tuple[Path, bytes]:
+    """Read the file of that name (sharded first, then flat); ``FileNotFoundError`` if neither."""
+    try:
+        path = sharded_path(flat, name)
+        return path, path.read_bytes()
+    except FileNotFoundError:
+        path = flat / name
+        return path, path.read_bytes()
+
+
+def stored_names(flat: Path) -> list[str]:
+    """Every file name in either layout, sorted and without duplicates."""
+    names = {path.name for path in flat.iterdir() if path.is_file()} if flat.is_dir() else set()
+    sharded = sharded_directory(flat)
+    if sharded.is_dir():
+        names.update(
+            path.name
+            for shard in sharded.iterdir()
+            if shard.is_dir()
+            for path in shard.iterdir()
+            if path.is_file()
+        )
+    return sorted(names)
+
+
+_REPAIRS: ContextVar[tuple[Counter[str], ...]] = ContextVar("storage_repairs", default=())
+
+
+@contextmanager
+def recording_repairs() -> Iterator[Counter[str]]:
+    """Count, by kind, the damaged stored entries repaired or recomputed inside this scope."""
+    counter: Counter[str] = Counter()
+    token = _REPAIRS.set((*_REPAIRS.get(), counter))
+    try:
+        yield counter
+    finally:
+        _REPAIRS.reset(token)
+
+
+def note_repair(kind: str) -> None:
+    """One damaged entry (missing, empty, truncated or not its digest) was repaired / recomputed."""
+    for counter in _REPAIRS.get():
+        counter[kind] += 1
+
+
+def replace_file(temporary: Path, target: Path) -> None:
+    """Put the fsynced ``temporary`` in place of a damaged ``target``, then read it back."""
+    content = temporary.read_bytes()
+    os.replace(temporary, target)
+    if target.read_bytes() != content:
+        raise OSError(errno.EIO, "Replaced file does not read back as written", str(target))
 
 
 def _codes(*names: str) -> frozenset[int]:

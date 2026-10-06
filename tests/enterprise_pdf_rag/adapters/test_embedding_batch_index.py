@@ -14,6 +14,7 @@ from enterprise_pdf_rag.adapters.draft_publication import (
 from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
 from enterprise_pdf_rag.adapters.processing_retrieval import ProcessingRetrieval
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
+from ragspine.common.evidence.file_placement import stored_names, stored_path
 from ragspine.common.evidence.providers.local_models import LocalEmbeddingAdapter
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
     ingest_generic_semantics,
@@ -63,10 +64,14 @@ def _index(draft: tuple[Path, Path, str], embedder: object) -> DraftIndex:
 
 
 def _stage_cache(processing_store: Path) -> dict[str, bytes]:
-    return {
-        path.name: path.read_bytes()
-        for path in sorted((processing_store / "stage-cache").iterdir())
-    }
+    flat = processing_store / "stage-cache"
+    return {name: _pointer(flat, name).read_bytes() for name in stored_names(flat)}
+
+
+def _pointer(flat: Path, name: str) -> Path:
+    path = stored_path(flat, name)
+    assert path is not None
+    return path
 
 
 def _cached_artifacts(processing_store: Path, names: set[str]) -> dict[str, bytes]:
@@ -149,7 +154,7 @@ def test_only_uncached_index_texts_are_sent(
     first = _index(draft, _adapter(_Endpoint()))
     embedded = sorted(set(_stage_cache(draft[1])) - before)
     for name in embedded[:2]:
-        (draft[1] / "stage-cache" / name).unlink()
+        _pointer(draft[1] / "stage-cache", name).unlink()
 
     endpoint = _Endpoint()
     again = _index(draft, _adapter(endpoint))

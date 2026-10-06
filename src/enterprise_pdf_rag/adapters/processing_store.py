@@ -21,7 +21,12 @@ from enterprise_pdf_rag.processing.retrieval import (
     RetrievalPlan,
     retrieval_dependencies,
 )
-from ragspine.common.evidence.file_placement import link_new_file
+from ragspine.common.evidence.file_placement import (
+    link_new_file,
+    note_repair,
+    sharded_path,
+    stored_path,
+)
 from ragspine.extraction.evidence.document.models import AssetRef
 from ragspine.extraction.evidence.metadata.document_metadata import summarize_document
 from ragspine.extraction.evidence.metadata.document_tree import DocumentTree
@@ -65,6 +70,8 @@ class ProcessingStore:
         # objects and misses. Re-reading 200-odd embedding artifacts per request cost more
         # than everything else an answer does.
         self._retrieval: dict[tuple[str, str], tuple[RetrievalPlan, RetrievalIndex]] = {}
+        # Stage-cache pointers this instance found damaged, so each is counted once.
+        self._damaged_seen: set[Path] = set()
 
     def auditing(self) -> "ProcessingStore":
         """The same store whose assets are re-verified on every call (no verification cache)."""
@@ -73,27 +80,54 @@ class ProcessingStore:
         )
 
     def _cache_path(self, fingerprint: str) -> Path:
+        """Where a stage-cache pointer is written: the sharded layout (ADR 0029)."""
         if re.fullmatch(r"[0-9a-f]{64}", fingerprint) is None:
             raise ValueError("Stage cache requires a SHA-256 input fingerprint")
-        return self.root / "stage-cache" / fingerprint
+        return sharded_path(self.root / "stage-cache", fingerprint)
 
-    def cached(self, fingerprint: str) -> StageOutcome | None:
-        path = self._cache_path(fingerprint)
-        if not path.exists():
-            return None
-        outcome = StageEnvelope.model_validate_json(
-            self.assets.read_content(path.read_text().strip())
-        ).outcome
+    def _lookup(self, fingerprint: str) -> tuple[StageOutcome | None, bool]:
+        """(the cached outcome, whether an entry exists but is damaged).
+
+        Damaged = the pointer is unreadable or not a digest, or the envelope or the output it
+        names is missing or not its digest (an asynchronous flush that failed after the write
+        returned). Such an entry is a miss: the stage is recomputed (its model calls replay from
+        the model cache) and ``cache`` replaces the pointer (ADR 0029).
+        """
+        target = self._cache_path(fingerprint)
+        path = stored_path(self.root / "stage-cache", fingerprint)
+        if path is None:
+            return None, False
+        try:
+            digest = path.read_text().strip()
+            if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+                raise ValueError("damaged pointer")
+            payload = self.assets.read_content(digest)
+        except (OSError, ValueError):
+            return None, self._damaged(target)
+        outcome = StageEnvelope.model_validate_json(payload).outcome
         if outcome.input_fingerprint != fingerprint or outcome.artifact is None:
             raise ValueError("Cached stage binding does not match its input")
-        self.assets.get(outcome.artifact)
-        return outcome
+        try:
+            self.assets.get(outcome.artifact)
+        except (OSError, ValueError):
+            return None, self._damaged(target)
+        return outcome, False
+
+    def _damaged(self, target: Path) -> bool:
+        if target not in self._damaged_seen:
+            self._damaged_seen.add(target)
+            note_repair("stage_cache")
+        return True
+
+    def cached(self, fingerprint: str) -> StageOutcome | None:
+        """The verified cached outcome; None when absent or damaged (then recomputed)."""
+        return self._lookup(fingerprint)[0]
 
     def cache(self, outcome: StageOutcome) -> None:
         if outcome.state is not StageState.SUCCEEDED or outcome.artifact is None:
             raise ValueError("Only successful stages can be reused as output cache")
         self.assets.verify(outcome.artifact)
-        existing = self.cached(outcome.input_fingerprint)
+        existing, damaged = self._lookup(outcome.input_fingerprint)
         if existing is not None:
             if existing != outcome:
                 raise ValueError("Stage fingerprint already names another actual output")
@@ -104,7 +138,8 @@ class ProcessingStore:
         )
         target = self._cache_path(outcome.input_fingerprint)
         target.parent.mkdir(parents=True, exist_ok=True)
-        self._write_pointer(target, ref.sha256, immutable=True)
+        # A damaged entry names nothing usable, so it is replaced rather than conflicted with.
+        self._write_pointer(target, ref.sha256, immutable=not damaged)
 
     def publish(self, manifest: ProcessingManifest, *, sources: LocalDocumentStore) -> str:
         digest = self.save_draft(manifest, sources=sources)
@@ -301,6 +336,15 @@ class ProcessingStore:
             )
             for page_index, metadata in self.load_page_metadata(manifest).items()
         }
+
+    def current_id(self) -> str | None:
+        """The snapshot ``current-processing`` names; None when absent or unreadable (a pointer
+        lost by an asynchronous flush, ADR 0029 — the next publish rewrites it)."""
+        try:
+            snapshot_id = (self.root / "current-processing").read_text().strip()
+        except OSError:
+            return None
+        return snapshot_id if re.fullmatch(r"[0-9a-f]{64}", snapshot_id) else None
 
     def load_current(self) -> tuple[str, ProcessingManifest]:
         snapshot_id = (self.root / "current-processing").read_text().strip()

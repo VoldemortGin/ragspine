@@ -16,12 +16,22 @@ from pathlib import Path
 
 from enterprise_pdf_rag.adapters.http.document_schemas import ManifestEnvelope
 from ragspine.common.evidence.configs import get_settings
-from ragspine.common.evidence.file_placement import link_new_file
+from ragspine.common.evidence.file_placement import (
+    link_new_file,
+    note_repair,
+    read_stored,
+    replace_file,
+    sharded_path,
+    stored_names,
+    stored_path,
+)
 from ragspine.extraction.evidence.document.models import (
     AssetRef,
     DocumentManifest,
     DocumentSnapshot,
 )
+
+_DIGEST = re.compile(r"[0-9a-f]{64}")
 
 
 class LocalDocumentStore:
@@ -49,21 +59,32 @@ class LocalDocumentStore:
         )
 
     def asset_path(self, ref: AssetRef) -> Path:
-        return self._object_path(ref.sha256)
+        return self.content_path(ref.sha256)
+
+    def _flat(self) -> Path:
+        return self.root / "objects" / "sha256"
 
     def _object_path(self, digest: str) -> Path:
-        if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        """Where an object is written: the sharded layout (ADR 0029)."""
+        if _DIGEST.fullmatch(digest) is None:
             raise ValueError("Invalid content-addressed artifact identifier")
-        return self.root / "objects" / "sha256" / digest
+        return sharded_path(self._flat(), digest)
+
+    def digests(self) -> list[str]:
+        """Every stored object's digest, in either layout (sorted)."""
+        return [name for name in stored_names(self._flat()) if _DIGEST.fullmatch(name)]
 
     def put(self, data: bytes, *, media_type: str) -> AssetRef:
+        """Store ``data`` under its digest. An object already there is read back and verified;
+        a damaged one (missing, empty, truncated or other bytes — e.g. lost by an asynchronous
+        flush) is rewritten with these bytes, which are by construction the bytes the name
+        means (ADR 0029). Never writes into the legacy flat directory."""
         ref = AssetRef(hashlib.sha256(data).hexdigest(), media_type, len(data))
-        target = self.asset_path(ref)
         if self._is_verified(ref):
             return ref
-        if target.exists():
-            # Exactly what a refused link leads to below, without writing a temporary first.
-            self.get(ref)
+        target = self._object_path(ref.sha256)
+        existing = stored_path(self._flat(), ref.sha256)
+        if existing is not None and self._intact(existing, ref):
             return ref
         target.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as stream:
@@ -75,13 +96,29 @@ class LocalDocumentStore:
             try:
                 link_new_file(temporary, target)
             except FileExistsError:
-                self.get(ref)
+                if self._intact(target, ref):
+                    return ref
+                replace_file(temporary, target)
         finally:
             temporary.unlink(missing_ok=True)
+        if existing is not None:
+            note_repair("object")
         return ref
 
+    def _intact(self, path: Path, ref: AssetRef) -> bool:
+        """Does ``path`` hold exactly ``ref``'s bytes? Records the digest as verified if so."""
+        try:
+            data = path.read_bytes()
+        except FileNotFoundError:
+            return False
+        if len(data) != ref.byte_length or hashlib.sha256(data).hexdigest() != ref.sha256:
+            return False
+        self._verified[ref.sha256] = len(data)
+        return True
+
     def _read_digest(self, digest: str) -> bytes:
-        data = self._object_path(digest).read_bytes()
+        self._object_path(digest)
+        _, data = read_stored(self._flat(), digest)
         if hashlib.sha256(data).hexdigest() != digest:
             raise ValueError("Stored artifact digest mismatch; source review is unavailable")
         self._verified[digest] = len(data)
@@ -106,8 +143,10 @@ class LocalDocumentStore:
         return self._read_digest(digest)
 
     def content_path(self, digest: str) -> Path:
-        """Where such an object lives, so a caller can watch that one file for drift."""
-        return self._object_path(digest)
+        """Where such an object lives (either layout), so a caller can watch that one file for
+        drift; where it would be written when it is in neither."""
+        target = self._object_path(digest)
+        return stored_path(self._flat(), digest) or target
 
     def publish(self, manifest: DocumentManifest) -> str:
         for ref in manifest_assets(manifest):

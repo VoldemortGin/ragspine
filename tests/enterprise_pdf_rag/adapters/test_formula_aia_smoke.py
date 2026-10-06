@@ -7,6 +7,7 @@ import sys
 import pytest
 
 from enterprise_pdf_rag.adapters.processing_runtime import PROCESSING_OUTPUT
+from ragspine.common.evidence.file_placement import stored_names
 from ragspine.common.evidence.settings import ROOT_DIR
 
 _SCRIPT = ROOT_DIR / "scripts" / "enterprise_pdf_rag" / "formula_smoke.py"
@@ -20,8 +21,8 @@ def _state() -> tuple[bytes, bytes, int, int]:
     return (
         (source_root / "current-manifest").read_bytes(),
         (PROCESSING_OUTPUT / "current-processing").read_bytes(),
-        sum(1 for _ in (source_root / "objects" / "sha256").iterdir()),
-        sum(1 for _ in (PROCESSING_OUTPUT / "objects" / "sha256").iterdir()),
+        len(stored_names(source_root / "objects" / "sha256")),
+        len(stored_names(PROCESSING_OUTPUT / "objects" / "sha256")),
     )
 
 

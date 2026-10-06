@@ -13,6 +13,7 @@ from pathlib import Path
 import pdfspine
 import pytest
 
+from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.draft_publication import (
     index_draft,
     publish_draft,
@@ -274,7 +275,9 @@ def test_ingestion_summary_names_the_pages_that_need_ocr(tmp_path: Path) -> None
 
 def test_manifest_written_before_text_layer_diagnostics_still_loads(tmp_path: Path) -> None:
     summary = ingest_pdf(pdf=_authored(tmp_path, "text"), output_dir=tmp_path / "out")
-    manifest_path = Path(summary.source_store) / "objects" / "sha256" / summary.source_manifest_id
+    manifest_path = LocalDocumentStore(Path(summary.source_store)).content_path(
+        summary.source_manifest_id
+    )
     payload = json.loads(manifest_path.read_bytes())
     for page in payload["manifest"]["pages"]:
         assert page.pop("text_layer")["status"] == "ok"

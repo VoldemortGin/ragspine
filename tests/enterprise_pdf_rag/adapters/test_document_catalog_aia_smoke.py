@@ -8,6 +8,7 @@ from enterprise_pdf_rag.adapters.document_catalog import mount_document, scan_ca
 from enterprise_pdf_rag.adapters.processing_retrieval import PROJECTED_CHART_POLICIES
 from enterprise_pdf_rag.adapters.processing_runtime import PROCESSING_OUTPUT
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
+from ragspine.common.evidence.file_placement import stored_names
 from ragspine.extraction.evidence.page.models import ObjectKind
 from tests.enterprise_pdf_rag.processing.test_persistent_retrieval import RecordingEmbedding
 
@@ -23,8 +24,8 @@ def _state() -> tuple[bytes, bytes, int, int]:
     return (
         (source_root / "current-manifest").read_bytes(),
         (_AIA_PROCESSING / "current-processing").read_bytes(),
-        sum(1 for _ in (source_root / "objects" / "sha256").iterdir()),
-        sum(1 for _ in (_AIA_PROCESSING / "objects" / "sha256").iterdir()),
+        len(stored_names(source_root / "objects" / "sha256")),
+        len(stored_names(_AIA_PROCESSING / "objects" / "sha256")),
     )
 
 

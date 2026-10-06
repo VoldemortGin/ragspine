@@ -10,6 +10,7 @@ by task so a test can see exactly which calls a mode sends.
 
 import hashlib
 import json
+import re
 from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
@@ -421,13 +422,28 @@ def mixed_folder(tmp_path: Path) -> Path:
     return tmp_path / "pdfs"
 
 
+# ADR 0029 moved hash-named files from ``<dir>/<name>`` to ``<dir>-sharded/<name[:2]>/<name>``.
+# The pinned digest is over each file's logical (flat) name, so it still proves that full mode
+# writes the very same files with the very same bytes; ``sharded_layout_only`` pins the move.
+_SHARDED = re.compile(r"(?P<dir>[^/]+)-sharded/[0-9a-f]{2}/(?P<name>[^/]+)$")
+
+
+def _logical(relative: str) -> str:
+    return _SHARDED.sub(lambda match: f"{match['dir']}/{match['name']}", relative)
+
+
+def sharded_layout_only(root: Path) -> bool:
+    """No file sits in a legacy flat ``objects/sha256`` or ``stage-cache`` directory."""
+    return not any(root.glob("*/*/objects/sha256")) and not any(root.glob("*/*/stage-cache"))
+
+
 def store_digest(root: Path) -> tuple[str, int, str]:
     files: dict[str, str] = {}
     requests: list[str] = []
     for path in sorted(root.rglob("*")):
         if not path.is_file():
             continue
-        relative = path.relative_to(root).as_posix()
+        relative = _logical(path.relative_to(root).as_posix())
         if "/model-cache/requests/" in relative:
             requests.append(path.name.removesuffix(".json"))
         files[relative] = (

@@ -104,7 +104,8 @@ def test_page_progress_reports_counts_only_and_marks_every_stage(
 
     # A finished page replays from the stage cache without asking the model at all; with the
     # stage cache gone it is the model cache that answers, and that is what cache_hits counts.
-    (stage_cache,) = (tmp_path / "ingestion").glob("*/processing/stage-cache")
+    (stage_cache,) = (tmp_path / "ingestion").glob("*/processing/stage-cache-sharded")
+    assert not stage_cache.with_name("stage-cache").exists()
     shutil.rmtree(stage_cache)
     _, replay = _run(tmp_path, folder, _PER_PDF)
     last = [payload for event, payload in replay if event == "document_progress"][1]

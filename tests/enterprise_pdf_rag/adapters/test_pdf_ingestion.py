@@ -350,9 +350,21 @@ def test_script_and_api_isolate_documents_and_resume_without_source_extraction(
     assert resumed.live_call_count == 0
     source_store = LocalDocumentStore(Path(resumed.source_store))
     source = source_store.load(resumed.source_manifest_id)
-    source_store.asset_path(source.manifest.pages[0].svg).write_bytes(b"corrupt")
+    page = source_store.asset_path(source.manifest.pages[0].svg)
+    original = page.read_bytes()
+    page.write_bytes(b"corrupt")
     with pytest.raises(ValueError, match="digest mismatch"):
-        ingest_pdf(pdf=first, output_dir=tmp_path / "data" / "ingestion")
+        LocalDocumentStore(Path(resumed.source_store)).load(resumed.source_manifest_id)
+    # ADR 0029: a damaged source object is re-extracted from the PDF and repaired in place,
+    # under the same digests and so the same manifest id, without a model call.
+    monkeypatch.undo()
+    repaired = ingest_pdf(pdf=first, output_dir=tmp_path / "data" / "ingestion")
+    assert (repaired.source_manifest_id, repaired.processing_id) == (
+        result.source_manifest_id,
+        result.processing_id,
+    )
+    assert repaired.live_call_count == 0
+    assert page.read_bytes() == original
 
 
 @pytest.mark.parametrize("pages", ["0", "3", "2-1", "1,1", "1-3", "all,1", "", "one"])

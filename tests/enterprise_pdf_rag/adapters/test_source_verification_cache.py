@@ -27,6 +27,7 @@ from enterprise_pdf_rag.adapters.draft_publication import (
 from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from ragspine.common.evidence.configs import get_settings
+from ragspine.common.evidence.file_placement import stored_names
 from ragspine.extraction.evidence.document.models import (
     DocumentManifest,
     PageRecord,
@@ -54,8 +55,13 @@ class _Reads:
         monkeypatch.setattr(Path, "read_bytes", read_bytes)
 
     def objects(self, store: LocalDocumentStore) -> int:
-        folder = store.root / "objects" / "sha256"
-        return sum(count for path, count in self.paths.items() if path.parent == folder)
+        # Either layout (ADR 0029): the flat directory or one shard of its sharded sibling.
+        objects = store.root / "objects"
+        return sum(
+            count
+            for path, count in self.paths.items()
+            if path.parent == objects / "sha256" or path.parent.parent == objects / "sha256-sharded"
+        )
 
     def clear(self) -> None:
         self.paths.clear()
@@ -188,10 +194,10 @@ def test_put_of_an_object_already_on_disk_reads_it_once_and_writes_nothing(
     assert (reads.objects(store), syncs) == (1, [])
     store.put(b"stage output", media_type="application/json")
     assert (reads.objects(store), syncs) == (1, [])
-    assert [path.name for path in (tmp_path / "objects" / "sha256").iterdir()] == [ref.sha256]
+    assert stored_names(tmp_path / "objects" / "sha256") == [ref.sha256]
 
 
-def test_put_still_refuses_a_corrupted_object_a_new_instance_finds_on_disk(
+def test_a_corrupted_object_a_new_instance_finds_is_refused_on_read_and_repaired_by_put(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     forbid_hard_links(monkeypatch)
@@ -200,10 +206,10 @@ def test_put_still_refuses_a_corrupted_object_a_new_instance_finds_on_disk(
     store.asset_path(ref).write_bytes(b"tampered")
 
     with pytest.raises(ValueError, match="digest mismatch"):
-        store.put(b"stage output", media_type="application/json")
-    with pytest.raises(ValueError, match="digest mismatch"):
-        LocalDocumentStore(tmp_path).put(b"stage output", media_type="application/json")
-    assert store.asset_path(ref).read_bytes() == b"tampered"
+        LocalDocumentStore(tmp_path).get(ref)
+    # ADR 0029: a put brings the very bytes the digest names, so it replaces the damaged copy.
+    assert LocalDocumentStore(tmp_path).put(b"stage output", media_type="application/json") == ref
+    assert store.asset_path(ref).read_bytes() == b"stage output"
 
 
 def _published(
