@@ -168,6 +168,10 @@ def create_documents_app(
             reranker=reranker,
             trees=catalog_trees(mounted),
             audit=audit,
+            labels={
+                document_id: document.entry.display_name
+                for document_id, document in mounted.documents.items()
+            },
         )
     )
     app.include_router(create_chat_router(mounted, service))

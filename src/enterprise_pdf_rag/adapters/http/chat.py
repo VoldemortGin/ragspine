@@ -69,24 +69,26 @@ def render_message(result: AnswerResult) -> str:
         if not claim.citations:
             continue
         citation = claim.citations[0]
-        page = citation.page_index + 1
+        page = f"p.{citation.page_index + 1}"
+        # Across documents a page number alone is ambiguous, so it names its document (ADR 0032).
+        if result.searched_documents and citation.document_sha256:
+            page = f"{citation.document_sha256[:12]} {page}"
         if claim.kind is ClaimKind.CHART_VALUE:
             elements = ", ".join(f"#{element}" for element in citation.evidence_ids)
-            lines.append(
-                f"[{number}] p.{page} {citation.field_path} = {claim.text} (svg {elements})"
-            )
+            lines.append(f"[{number}] {page} {citation.field_path} = {claim.text} (svg {elements})")
         else:
-            lines.append(f"[{number}] p.{page} {citation.field_path}: “{citation.quote}”")
+            lines.append(f"[{number}] {page} {citation.field_path}: “{citation.quote}”")
     return "\n".join(lines)
 
 
-def _route(mounted: MountedCatalog, question: str) -> str:
+def _route(mounted: MountedCatalog, question: str) -> str | None:
     """Pick one mounted document from the question's title words and years (ADR 0013).
 
     A document is a title candidate when the question names a word of its verified cover
     title that no other mounted title shares, and a year candidate when a year in the
     question is one it prints. Both signals present: their intersection. Exactly one
-    survivor is selected; anything else is a 422 that lists the candidates by display name.
+    survivor is selected; anything else — none or several — is ``None``: the question is
+    then answered across every mounted document (ADR 0032), where it used to be a 422.
     """
     entries = [
         entry for entry in mounted.catalog.documents if entry.document_id in mounted.documents
@@ -102,20 +104,20 @@ def _route(mounted: MountedCatalog, question: str) -> str:
         candidates = [entry for entry in by_title if entry in by_year]
     else:
         candidates = by_title or by_year
-    if len(candidates) == 1:
-        return candidates[0].document_id
-    names = "; ".join(f"{entry.display_name} ({entry.document_id[:12]})" for entry in entries)
-    raise HTTPException(
-        422,
-        "Document selection required: several documents are mounted and the question "
-        f"names {'none' if not candidates else 'more than one'} of them; name one with "
-        f"`document` or a model id from /v1/models. Candidates: {names}",
-    )
+    return candidates[0].document_id if len(candidates) == 1 else None
 
 
 def _select(mounted: MountedCatalog, body: RagChatRequest) -> str | None:
-    """Resolve the target document id; ``None`` leaves the choice to catalog uniqueness."""
+    """Resolve the target document id; ``None`` leaves the choice to the service.
+
+    ``None`` is the sole mounted document, or — with several mounted — every one of them as
+    one corpus (``cross_document``, or a question whose title words select no single one).
+    """
     reference = body.document
+    if body.cross_document:
+        if reference is not None or _MODEL_REFERENCE.match(body.model) is not None:
+            raise HTTPException(422, "cross_document searches every document; do not also name one")
+        return None
     if reference is None:
         match = _MODEL_REFERENCE.match(body.model)
         if match is None:
@@ -180,7 +182,8 @@ def _events(response: RagCompletionResponse) -> Iterator[str]:
 
 
 def create_chat_router(mounted: MountedCatalog, service: AnswerService | None) -> APIRouter:
-    """``/v1/models`` lists the mounted documents; ``/v1/chat/completions`` answers over one.
+    """``/v1/models`` lists the mounted documents; ``/v1/chat/completions`` answers over one,
+    or across all of them when none is selected (ADR 0032).
 
     ``service`` is ``None`` when no answer model is configured: chat is 503, nothing else.
     """
@@ -220,6 +223,7 @@ def create_chat_router(mounted: MountedCatalog, service: AnswerService | None) -
                 history=history,
                 filters=None if body.filters is None else body.filters.to_domain(),
                 page_window=body.page_window,
+                cross_document=document_id is None and len(mounted.documents) > 1,
             )
         except ValueError as error:
             raise HTTPException(422, str(error)) from None

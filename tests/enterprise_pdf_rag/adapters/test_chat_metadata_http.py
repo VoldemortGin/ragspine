@@ -101,7 +101,7 @@ def test_unnamed_document_is_routed_by_title_words_and_years(
     published: Published, tmp_path: Path
 ) -> None:
     root, meridian, orion = published
-    app, prompts = _app(root, tmp_path / "llm", max_live_calls=3)
+    app, prompts = _app(root, tmp_path / "llm", max_live_calls=5)
 
     async def scenario(client: AsyncClient) -> None:
         by_title = await client.post(_URL, json=_body("gpt-4", "What does Orion say on page 2?"))
@@ -110,15 +110,15 @@ def test_unnamed_document_is_routed_by_title_words_and_years(
         by_year = await client.post(_URL, json=_body("gpt-4", "What did page 2 say in 2026?"))
         assert by_year.status_code == 200, by_year.text
         assert by_year.json()["enterprise_pdf_rag"]["document_sha256"] == meridian.source_sha256
+        # Title words that select no single document no longer refuse the question: it is
+        # answered across every mounted document (ADR 0032), and the envelope says so.
+        both_documents = sorted((meridian.source_sha256, orion.source_sha256))
         both = await client.post(_URL, json=_body("gpt-4", "Meridian FY2024 page 2"))
-        assert both.status_code == 422, both.text  # title says Meridian, year says Orion
-        detail = both.json()["detail"]
-        assert (
-            "Meridian 1H26 Hong Kong page 1" in detail and "Orion FY2024 Thailand page 1" in detail
-        )
+        assert both.status_code == 200, both.text  # title says Meridian, year says Orion
+        assert both.json()["enterprise_pdf_rag"]["searched_documents"] == both_documents
         none = await client.post(_URL, json=_body("gpt-4", "What does page 2 say?"))
-        assert none.status_code == 422, none.text
-        assert "names none" in none.json()["detail"]
+        assert none.status_code == 200, none.text
+        assert none.json()["enterprise_pdf_rag"]["searched_documents"] == both_documents
         explicit = await client.post(
             _URL,
             json=_body("gpt-4", "What does Orion say on page 2?", document=meridian.source_sha256),
@@ -127,7 +127,7 @@ def test_unnamed_document_is_routed_by_title_words_and_years(
         assert explicit.json()["enterprise_pdf_rag"]["document_sha256"] == meridian.source_sha256
 
     _run(app, scenario)
-    assert len(prompts) == 3
+    assert len(prompts) == 5
 
 
 def test_filters_are_derived_reported_and_relaxed_and_citations_name_the_page(

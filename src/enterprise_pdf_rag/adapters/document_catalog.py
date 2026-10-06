@@ -1,11 +1,12 @@
 """Read-only catalog of published documents and pinned read-only mounts; no model calls."""
 
 import re
-from collections import Counter
+from collections import Counter, OrderedDict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
+from threading import Lock
 from typing import Literal
 
 from enterprise_pdf_rag.adapters.aia_ingestion import read_text_sidecar
@@ -645,6 +646,41 @@ def mount_document(
     )
 
 
+class SharedQueryEmbedding:
+    """One embedder shared by a catalog's mounts that embeds a recent query only once.
+
+    A cross-document answer (ADR 0032) asks every mounted document's vector channel for the
+    same question; each would otherwise embed it again. The vector is the embedder's own,
+    returned unchanged, keyed by the query text; at most ``size`` recent queries are kept.
+    """
+
+    def __init__(self, embedder: EmbeddingPort, *, size: int = 64) -> None:
+        self._embedder = embedder
+        self._size = size
+        self._queries: OrderedDict[str, tuple[float, ...]] = OrderedDict()
+        self._lock = Lock()
+
+    @property
+    def fingerprint(self) -> str:
+        return self._embedder.fingerprint
+
+    def embed_description(self, text: str) -> tuple[float, ...]:
+        return self._embedder.embed_description(text)
+
+    def embed_query(self, text: str) -> tuple[float, ...]:
+        with self._lock:
+            vector = self._queries.get(text)
+            if vector is not None:
+                self._queries.move_to_end(text)
+                return vector
+        vector = self._embedder.embed_query(text)
+        with self._lock:
+            self._queries[text] = vector
+            while len(self._queries) > self._size:
+                self._queries.popitem(last=False)
+        return vector
+
+
 @dataclass(frozen=True, slots=True)
 class MountedCatalog:
     catalog: DocumentCatalog
@@ -659,16 +695,21 @@ def mount_catalog(
     embedder: EmbeddingPort | None,
     verify_every_request: bool = False,
 ) -> MountedCatalog:
-    """Mount every ready entry; refusals are recorded per document, never hidden or raised."""
+    """Mount every ready entry; refusals are recorded per document, never hidden or raised.
+
+    The mounts share one ``SharedQueryEmbedding`` around ``embedder``, so a question searched
+    in several documents is embedded once.
+    """
     documents: dict[str, MountedDocument] = {}
     failures: dict[str, str] = {}
+    shared = None if embedder is None else SharedQueryEmbedding(embedder)
     for entry in catalog.documents:
         if entry.retrieval_status != "ready":
             failures[entry.document_id] = entry.reason or entry.retrieval_status
             continue
         try:
             documents[entry.document_id] = mount_document(
-                entry, embedder=embedder, verify_every_request=verify_every_request
+                entry, embedder=shared, verify_every_request=verify_every_request
             )
         except (ValueError, OSError) as error:
             failures[entry.document_id] = str(error) or type(error).__name__

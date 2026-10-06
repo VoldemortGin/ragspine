@@ -70,6 +70,10 @@ class RagChatRequest(BoundaryModel):
     filters: MemberFiltersIn | None = None
     # Print the rest of each hit's page beside it (ADR 0017); omitted, the server default wins.
     page_window: bool | None = None
+    # Search every mounted document as one corpus (ADR 0032); excludes ``document`` and a
+    # document model id. Omitted, a request naming no document is still answered across
+    # every document when its title words do not select exactly one.
+    cross_document: bool = False
 
 
 class ClaimCitationOut(BoundaryModel):
@@ -88,6 +92,8 @@ class ClaimCitationOut(BoundaryModel):
     col: int | None = None
     header: str | None = None
     header_cell_id: str | None = None
+    # The document the cited member was read from (ADR 0032; added after rag-chat-v1 shipped).
+    document_sha256: str | None = None
 
     @classmethod
     def from_domain(cls, citation: ClaimCitation) -> "ClaimCitationOut":
@@ -105,6 +111,7 @@ class ClaimCitationOut(BoundaryModel):
             col=citation.col,
             header=citation.header,
             header_cell_id=citation.header_cell_id,
+            document_sha256=citation.document_sha256,
         )
 
 
@@ -160,9 +167,11 @@ class MemberRankOut(BoundaryModel):
     # The tree channel's rank, when this question was routed over the outline (ADR 0019).
     # It carries no score of its own: the router chose a page set, not a similarity.
     tree_rank: int | None = None
+    # The member's document (ADR 0032; added after rag-chat-v1 shipped).
+    document_sha256: str | None = None
 
     @classmethod
-    def from_domain(cls, hit: FusedHit) -> "MemberRankOut":
+    def from_domain(cls, hit: FusedHit, document_sha256: str | None = None) -> "MemberRankOut":
         return cls(
             member_id=hit.member_id,
             fused_score=hit.fused_score,
@@ -171,6 +180,7 @@ class MemberRankOut(BoundaryModel):
             vector_score=hit.vector_score,
             bm25_score=hit.bm25_score,
             tree_rank=hit.tree_rank,
+            document_sha256=hit.document_sha256 or document_sha256,
         )
 
 
@@ -181,6 +191,8 @@ class PageWindowOut(BoundaryModel):
     member_count: int
     chars: int
     truncated: bool
+    # The page's document, when the answer searched several (ADR 0032).
+    document_sha256: str | None = None
 
     @classmethod
     def from_domain(cls, window: PageWindowStat) -> "PageWindowOut":
@@ -189,6 +201,7 @@ class PageWindowOut(BoundaryModel):
             member_count=window.member_count,
             chars=window.chars,
             truncated=window.truncated,
+            document_sha256=window.document_sha256,
         )
 
 
@@ -266,6 +279,10 @@ class AnswerEnvelope(BoundaryModel):
     query_translation: QueryTranslationOut | None = None
     # The pages the document-tree router chose for this question, when it ran (ADR 0019).
     tree_route: TreeRouteOut | None = None
+    # Every document a cross-document answer searched (ADR 0032); empty for one document,
+    # whose id ``document_sha256`` is. Across documents ``document_sha256`` names the first
+    # prompt member's document and each citation / member rank names its own.
+    searched_documents: tuple[str, ...] = ()
 
     @classmethod
     def from_domain(cls, result: AnswerResult) -> "AnswerEnvelope":
@@ -283,7 +300,7 @@ class AnswerEnvelope(BoundaryModel):
             llm_live_calls=result.llm_live_calls,
             cache_hit=result.cache_hit,
             member_ranks=tuple(
-                MemberRankOut.from_domain(by_member[member_id])
+                MemberRankOut.from_domain(by_member[member_id], result.document_sha256)
                 for member_id in result.member_ids
                 if member_id in by_member
             ),
@@ -299,6 +316,7 @@ class AnswerEnvelope(BoundaryModel):
             tree_route=None
             if result.tree_route is None
             else TreeRouteOut.from_domain(result.tree_route),
+            searched_documents=result.searched_documents,
         )
 
 

@@ -9,6 +9,9 @@ the seats were chosen with every member's page and its BM25 / vector / tree seat
 an older journal gains when it is next opened; its earlier rows keep it NULL). The second
 write closes that same row with the
 model's raw output, the verified claims, the rejections and the answer the caller got.
+An answer that searched several documents as one corpus (ADR 0032) also lists them in
+``searched_documents`` (NULL for a one-document answer), and every ranked hit, page window and
+citation it journals names its own ``document_sha256``.
 
 A journal write never changes an answer: every failure is a warning and the chain
 continues. Unlike ``ragspine``'s privacy-aware traces (codes, counts and timings only)
@@ -71,7 +74,8 @@ CREATE TABLE IF NOT EXISTS answers (
     answer_text TEXT,
     elapsed_ms INTEGER,
     error TEXT,
-    ranked TEXT
+    ranked TEXT,
+    searched_documents TEXT
 );
 CREATE INDEX IF NOT EXISTS answers_request_fingerprint ON answers (request_fingerprint);
 CREATE INDEX IF NOT EXISTS answers_started_at ON answers (started_at);
@@ -82,11 +86,11 @@ _INSERT: Final = """
 INSERT INTO answers (
     started_at, question, translated_question, document_sha256, processing_id, snapshot_id,
     filters_applied, filters_relaxed, fusion_mode, page_windows, member_ids, fused,
-    prompt_system, prompt_user, prompt_chars, ranked
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    prompt_system, prompt_user, prompt_chars, ranked, searched_documents
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 # Columns added after the first release, with their type: an older journal gains them on open.
-_ADDED_COLUMNS: Final = (("ranked", "TEXT"),)
+_ADDED_COLUMNS: Final = (("ranked", "TEXT"), ("searched_documents", "TEXT"))
 
 _UPDATE: Final = """
 UPDATE answers SET
@@ -128,6 +132,8 @@ class AnswerAuditContext:
     # page, so a reader can tell "no channel found the page" from "found, but not seated".
     ranked: tuple[FusedHit, ...] = ()
     member_pages: Mapping[str, int] | None = None
+    # Every document a cross-document answer searched (ADR 0032); empty for one document.
+    searched_documents: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,13 +213,18 @@ class AnswerAuditStore:
                         _filters(context.filters_applied),
                         int(context.filters_relaxed),
                         context.fusion_mode,
-                        _page_windows(context.page_windows),
+                        _page_windows(context.page_windows, context.document_sha256),
                         _dumps(list(context.member_ids)),
-                        _fused(context.fused),
+                        _fused(context.fused, context.document_sha256),
                         context.prompt_system,
                         context.prompt_user,
                         len(context.prompt_user),
-                        _ranked(context.ranked, context.member_pages or {}),
+                        _ranked(
+                            context.ranked, context.member_pages or {}, context.document_sha256
+                        ),
+                        _dumps(list(context.searched_documents))
+                        if context.searched_documents
+                        else None,
                     ),
                 )
                 row_id = cursor.lastrowid
@@ -417,7 +428,7 @@ def _filters(filters: MemberFilters | None) -> str | None:
     return _dumps({"periods": list(filters.periods), "regions": list(filters.regions)})
 
 
-def _page_windows(windows: Sequence[PageWindowStat]) -> str:
+def _page_windows(windows: Sequence[PageWindowStat], document: str) -> str:
     return _dumps(
         [
             {
@@ -425,17 +436,19 @@ def _page_windows(windows: Sequence[PageWindowStat]) -> str:
                 "member_count": window.member_count,
                 "chars": window.chars,
                 "truncated": window.truncated,
+                "document_sha256": window.document_sha256 or document,
             }
             for window in windows
         ]
     )
 
 
-def _fused(hits: Sequence[FusedHit]) -> str:
+def _fused(hits: Sequence[FusedHit], document: str) -> str:
     return _dumps(
         [
             {
                 "member_id": hit.member_id,
+                "document_sha256": hit.document_sha256 or document,
                 "fused_score": hit.fused_score,
                 "vector_rank": hit.vector_rank,
                 "lexical_rank": hit.lexical_rank,
@@ -447,11 +460,12 @@ def _fused(hits: Sequence[FusedHit]) -> str:
     )
 
 
-def _ranked(hits: Sequence[FusedHit], pages: Mapping[str, int]) -> str:
+def _ranked(hits: Sequence[FusedHit], pages: Mapping[str, int], document: str) -> str:
     return _dumps(
         [
             {
                 "member_id": hit.member_id,
+                "document_sha256": hit.document_sha256 or document,
                 "page_index": pages.get(hit.member_id),
                 "fused_score": hit.fused_score,
                 "vector_rank": hit.vector_rank,
@@ -475,6 +489,7 @@ def _verified(claims: Sequence[VerifiedClaim]) -> str:
                 "citations": [
                     {
                         "member_id": citation.member_id,
+                        "document_sha256": citation.document_sha256,
                         "kind": citation.kind.value,
                         "page_index": citation.page_index,
                         "page_title": citation.page_title,

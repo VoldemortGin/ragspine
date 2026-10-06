@@ -173,6 +173,9 @@ class ContextBlock:
     # The part of the page this block belongs to, when the page's own layout binds it to one
     # (a slide of side-by-side charts under their own headings). Empty on every other block.
     regions: tuple[str, ...] = ()
+    # The document this block was read from, printed when the prompt spans several documents
+    # (ADR 0032); ``None`` prints nothing, exactly as a one-document prompt always did.
+    document: str | None = None
 
     @property
     def row_transcription(self) -> bool:
@@ -199,6 +202,8 @@ class ContextBlock:
         )
         if self.regions:
             first += " regions=" + "; ".join(self.regions)
+        if self.document is not None:
+            first += f" document={self.document}"
         lines = [first]
         if self.kind is BlockKind.CHART:
             lines.append(f"chart grammar={self.grammar}")
@@ -534,6 +539,8 @@ class PageContextBlock:
     section: str | None
     members: tuple[PageContextMember, ...]
     truncated: bool = False
+    # The page's document when the prompt spans several (ADR 0032); ``None`` prints nothing.
+    document: str | None = None
 
     @property
     def chars(self) -> int:
@@ -541,6 +548,8 @@ class PageContextBlock:
 
     def prompt_text(self) -> str:
         head = f"[page_context page_index={self.page_index}]"
+        if self.document is not None:
+            head += f" document={self.document}"
         if self.page_title is not None:
             head += f" title={self.page_title}"
         if self.section is not None:
@@ -562,6 +571,7 @@ def build_page_context_block(
     page_title: str | None = None,
     section: str | None = None,
     max_chars: int,
+    document: str | None = None,
 ) -> PageContextBlock | None:
     """Render one page's neighbours in the order given, truncated whole members at the budget.
 
@@ -587,7 +597,7 @@ def build_page_context_block(
         return None
     truncated = False
     while True:
-        block = PageContextBlock(page_index, page_title, section, tuple(kept), truncated)
+        block = PageContextBlock(page_index, page_title, section, tuple(kept), truncated, document)
         if block.chars <= max_chars or not kept:
             return block
         kept.pop()

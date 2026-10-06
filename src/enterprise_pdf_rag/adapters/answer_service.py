@@ -8,12 +8,13 @@ skipped entirely when unavailable). Retrieval, hydration and claim verification 
 deterministic reads of the pinned snapshot.
 """
 
-from collections.abc import Mapping, MutableMapping, Sequence
+from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Final
 
 from enterprise_pdf_rag.adapters.answer_audit import AnswerAuditContext, AnswerAuditStore
-from enterprise_pdf_rag.adapters.hybrid_search import HybridSearch, LexicalIndex
+from enterprise_pdf_rag.adapters.cross_document import CrossDocument
+from enterprise_pdf_rag.adapters.hybrid_search import HybridSearch, LexicalIndex, lexical_rank
 from enterprise_pdf_rag.adapters.query_translation import is_foreign_script, translate_query
 from enterprise_pdf_rag.adapters.tree_retrieval import route_tree
 from enterprise_pdf_rag.answers.member_filter import candidate_members, region_vocabulary
@@ -217,6 +218,7 @@ class AnswerService:
         index_cache: MutableMapping[str, LexicalIndex] | None = None,
         trees: Mapping[str, DocumentTree] | None = None,
         audit: AnswerAuditStore | None = None,
+        labels: Mapping[str, str] | None = None,
     ) -> None:
         self._documents = documents
         self._llm = llm
@@ -229,6 +231,10 @@ class AnswerService:
         self._trees: Mapping[str, DocumentTree] = {} if trees is None else trees
         # Optional local journal (``adapters/answer_audit``): ``None`` writes nothing.
         self._audit = audit
+        # A readable name per document id, printed beside each block of a cross-document
+        # prompt (ADR 0032); the short sha256 stands in for a document without one.
+        self._labels: Mapping[str, str] = {} if labels is None else labels
+        self._cross: CrossDocument | None = None
 
     def _select(self, document_sha256: str | None) -> MountedDocument:
         if document_sha256 is not None:
@@ -306,8 +312,47 @@ class AnswerService:
             routed = request.tree_route
         return route_tree(question, tree, self._llm) if routed else None
 
+    def _corpus(self) -> CrossDocument:
+        """Every mounted document as one corpus, built once per service (ADR 0032)."""
+        if self._cross is None:
+            self._cross = CrossDocument(tuple(self._documents.values()))
+        return self._cross
+
+    def _label(self, document: MountedDocument) -> str:
+        """How a cross-document prompt names a document: its name and short sha256."""
+        sha = document.source_sha256
+        name = self._labels.get(sha)
+        return sha[:12] if not name else f"{name} ({sha[:12]})"
+
+    def _leading(
+        self,
+        search: HybridSearch,
+        plan: "_QueryPlan",
+        allowed: frozenset[str] | None,
+        corpus: CrossDocument,
+    ) -> MountedDocument | None:
+        """The document whose tree a cross-document question is routed over, if any.
+
+        One routing call per question, as for one document: the outline routed is the one of
+        the document owning the corpus's best BM25 member. A question the lexical channel
+        cannot score is not routed at all (ADR 0032).
+        """
+        if plan.mode == "vector_only":
+            return None
+        best = lexical_rank(
+            search.index, plan.lexical_query or plan.query, limit=1, allowed=allowed
+        )
+        return corpus.owner(best[0].member_id) if best else None
+
     def answer(self, request: AnswerRequest) -> AnswerResult:
-        document = self._select(request.document_sha256)
+        if request.cross_document and len(self._documents) > 1:
+            corpus = self._corpus()
+            return self._answer(request, corpus, corpus)
+        return self._answer(request, self._select(request.document_sha256), None)
+
+    def _answer(
+        self, request: AnswerRequest, document: MountedDocument, corpus: CrossDocument | None
+    ) -> AnswerResult:
         # Spans the whole request: a translated question costs one call before synthesis.
         before = self._llm.live_call_count
         reranker = None
@@ -339,7 +384,14 @@ class AnswerService:
         if translation is not None and request.filters is None:
             filters = _union(filters, derive_filters(translation.english, vocabulary))
             applied, allowed, relaxed = _narrow(members, filters, request.top_k)
-        route = self._route(request, plan, document)
+        tree_members: frozenset[str] | None = None
+        if corpus is None:
+            route = self._route(request, plan, document)
+        else:
+            leading = self._leading(search, plan, allowed, corpus)
+            route = None if leading is None else self._route(request, plan, leading)
+            if route is not None and leading is not None:
+                tree_members = corpus.members_of(leading)
         # The whole fused ranking, not just its head: a hit's own channel ranks decide the
         # guaranteed visual seats below, and fusion can bury such a hit anywhere (ADR 0012).
         # Both channels together rank at most ``2 * channel_limit`` members.
@@ -350,22 +402,51 @@ class AnswerService:
             mode=plan.mode,
             lexical_query=plan.lexical_query,
             tree_pages=() if route is None else route.pages,
+            tree_members=tree_members,
         )
-        fused, selected = select_context(document, outcome.hits, request.top_k, members)
+        # Across documents every hit is pinned back to its own document's snapshot here, so
+        # everything downstream reads, cites and journals the real document (ADR 0032).
+        ranked = outcome.hits if corpus is None else corpus.repin(outcome.hits)
+        fused, selected = select_context(document, ranked, request.top_k, members)
         selected = _with_member_regions(selected, members)
+        owners: Mapping[str, str] | None = None
+        if corpus is not None:
+            labels = {item.source_sha256: self._label(item) for item in corpus.documents}
+            owners = {
+                member.member_id: labels[corpus.owner(member.member_id).source_sha256]
+                for member in members
+            }
+            selected = tuple(replace(block, document=owners[block.member_id]) for block in selected)
         hits = {hit.member_id: hit.as_hit() for hit in fused}
         enabled = self._settings.page_window if request.page_window is None else request.page_window
         windowed: tuple[PromptBlock, ...] = (
-            with_page_context(selected, members, max_chars=self._settings.page_window_budget_chars)
+            with_page_context(
+                selected,
+                members,
+                max_chars=self._settings.page_window_budget_chars,
+                documents=owners,
+            )
             if enabled
             else tuple(selected)
         )
         blocks = budget_blocks(windowed, max_chars=self._settings.prompt_budget_chars)
         member_blocks = tuple(block for block in blocks if isinstance(block, ContextBlock))
         page_blocks = tuple(block for block in blocks if isinstance(block, PageContextBlock))
+        # The document a result names: the one document, or across documents the document of
+        # the first prompt member (else of the best fused hit). Claims and hits name their own.
+        primary = document
+        searched: tuple[str, ...] = ()
+        if corpus is not None:
+            searched = corpus.document_ids
+            head = (
+                member_blocks[0].member_id
+                if member_blocks
+                else (fused[0].member_id if fused else None)
+            )
+            primary = corpus.documents[0] if head is None else corpus.owner(head)
         if not member_blocks:
             return self._abstained(
-                document,
+                primary,
                 fused,
                 (),
                 AbstainReason.NO_RELEVANT_MEMBER,
@@ -378,14 +459,27 @@ class AnswerService:
                 fusion_mode=outcome.mode,
                 query_translation=translation,
                 tree_route=route,
+                searched_documents=searched,
             )
         member_ids = tuple(block.member_id for block in member_blocks)
         # Minted after the budget pass, from the blocks that really reach the prompt.
         aliases = member_aliases(blocks)
         prompt = build_prompt(request.question, blocks, request.history, aliases)
+
+        def document_of(member_id: str) -> str:
+            return (
+                document.source_sha256 if corpus is None else corpus.owner(member_id).source_sha256
+            )
+
         page_windows = tuple(
             PageWindowStat(
-                block.page_index, len(block.members), len(block.prompt_text()), block.truncated
+                block.page_index,
+                len(block.members),
+                len(block.prompt_text()),
+                block.truncated,
+                None
+                if corpus is None or not block.members
+                else document_of(block.members[0].member_id),
             )
             for block in page_blocks
         )
@@ -393,9 +487,9 @@ class AnswerService:
         journal = self._begin_audit(
             AnswerAuditContext(
                 request.question,
-                document.source_sha256,
-                document.processing_id,
-                document.retrieval_snapshot_id,
+                primary.source_sha256,
+                primary.processing_id,
+                primary.retrieval_snapshot_id,
                 SYSTEM_RULES,
                 prompt,
                 member_ids,
@@ -405,8 +499,9 @@ class AnswerService:
                 applied,
                 relaxed,
                 None if translation is None else translation.english,
-                outcome.hits,
+                ranked,
                 {member.member_id: member.page_index for member in members},
+                searched,
             )
         )
         try:
@@ -420,7 +515,7 @@ class AnswerService:
         except JsonCompletionError as error:
             if error.code in _MODEL_OUTPUT_FAILURES:
                 invalid = self._abstained(
-                    document,
+                    primary,
                     fused,
                     member_ids,
                     AbstainReason.MODEL_OUTPUT_INVALID,
@@ -432,6 +527,7 @@ class AnswerService:
                     fusion_mode=outcome.mode,
                     query_translation=translation,
                     tree_route=route,
+                    searched_documents=searched,
                 )
                 self._close_audit(journal, invalid, error=error.code)
                 return invalid
@@ -461,13 +557,13 @@ class AnswerService:
         result = AnswerResult(
             status,
             model.answer if status is AnswerStatus.ANSWERED else None,
-            _with_page_titles(verification.verified, members),
+            _with_documents(_with_page_titles(verification.verified, members), document_of),
             verification.rejected,
             reason,
             detail,
-            document.source_sha256,
-            document.processing_id,
-            document.retrieval_snapshot_id,
+            primary.source_sha256,
+            primary.processing_id,
+            primary.retrieval_snapshot_id,
             member_ids,
             fused,
             completion.request_fingerprint,
@@ -479,6 +575,7 @@ class AnswerService:
             outcome.mode,
             translation,
             route,
+            searched,
         )
         self._close_audit(journal, result, model_output_raw=completion.json_text)
         return result
@@ -512,6 +609,7 @@ class AnswerService:
         fusion_mode: QueryMode = "rrf",
         query_translation: TranslatedQuery | None = None,
         tree_route: TreeRoute | None = None,
+        searched_documents: tuple[str, ...] = (),
     ) -> AnswerResult:
         return AnswerResult(
             AnswerStatus.ABSTAINED,
@@ -533,6 +631,7 @@ class AnswerService:
             fusion_mode=fusion_mode,
             query_translation=query_translation,
             tree_route=tree_route,
+            searched_documents=searched_documents,
         )
 
 
@@ -590,6 +689,22 @@ def _with_page_titles(
             claim,
             citations=tuple(
                 replace(citation, page_title=titles.get(citation.member_id))
+                for citation in claim.citations
+            ),
+        )
+        for claim in claims
+    )
+
+
+def _with_documents(
+    claims: tuple[VerifiedClaim, ...], document_of: Callable[[str], str]
+) -> tuple[VerifiedClaim, ...]:
+    """Name on each citation the document its member was read from (ADR 0032)."""
+    return tuple(
+        replace(
+            claim,
+            citations=tuple(
+                replace(citation, document_sha256=document_of(citation.member_id))
                 for citation in claim.citations
             ),
         )

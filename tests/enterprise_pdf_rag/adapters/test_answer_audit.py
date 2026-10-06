@@ -133,11 +133,18 @@ def test_a_row_is_opened_before_the_call_and_closed_with_the_result(tmp_path: Pa
     }
     assert json.loads(record.member_ids) == ["m" * 64]
     assert json.loads(record.page_windows) == [
-        {"page_index": 4, "member_count": 3, "chars": 512, "truncated": False}
+        {
+            "page_index": 4,
+            "member_count": 3,
+            "chars": 512,
+            "truncated": False,
+            "document_sha256": "a" * 64,
+        }
     ]
     (fused,) = json.loads(record.fused)
     assert fused == {
         "member_id": "m" * 64,
+        "document_sha256": "a" * 64,
         "fused_score": 0.5,
         "vector_rank": 1,
         "lexical_rank": 2,
@@ -367,6 +374,7 @@ def test_the_service_journals_the_whole_fused_ranking_with_each_members_page(
     for entry in ranked:
         assert set(entry) == {
             "member_id",
+            "document_sha256",
             "page_index",
             "fused_score",
             "vector_rank",
@@ -374,6 +382,7 @@ def test_the_service_journals_the_whole_fused_ranking_with_each_members_page(
             "tree_rank",
         }
         assert entry["page_index"] == pages[entry["member_id"]]
+        assert entry["document_sha256"] == document.source_sha256
 
 
 def test_a_journal_written_before_the_ranking_column_is_upgraded_in_place(

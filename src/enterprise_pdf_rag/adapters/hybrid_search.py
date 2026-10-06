@@ -291,19 +291,26 @@ class HybridSearch:
         )[: self._channel_limit]
 
     def _tree_rank(
-        self, tree_pages: Sequence[int], allowed: frozenset[str] | None
+        self,
+        tree_pages: Sequence[int],
+        allowed: frozenset[str] | None,
+        tree_members: frozenset[str] | None = None,
     ) -> tuple[PinnedRetrievalHit, ...]:
         """The members of the routed pages, page by page in the router's order (ADR 0019).
 
         Within a page the members are read in ``answers.page_window.reading_key`` order, the
         same order the page context block prints them in. The score is synthetic and strictly
         descending: the tree channel ranks pages, not similarities, so only the order is real.
+        ``tree_members`` keeps the pages to the routed document's own members when the corpus
+        spans several documents, whose page numbers repeat (ADR 0032).
         """
         if not tree_pages:
             return ()
         wanted = set(tree_pages)
         by_page: dict[int, list[MemberText]] = {page: [] for page in wanted}
         for member in self._index.members:
+            if tree_members is not None and member.member_id not in tree_members:
+                continue
             if member.page_index in wanted:
                 by_page[member.page_index].append(member)
         hits: list[PinnedRetrievalHit] = []
@@ -333,6 +340,7 @@ class HybridSearch:
         mode: FusionMode = "auto",
         lexical_query: str | None = None,
         tree_pages: Sequence[int] = (),
+        tree_members: frozenset[str] | None = None,
     ) -> SearchOutcome:
         """Rank over the channels ``mode`` selects; ``auto`` classifies the query (ADR 0018).
 
@@ -353,7 +361,8 @@ class HybridSearch:
         ranking whatever ``QueryMode`` resolves, since it is the caller that decides whether
         to route at all, and are fused at ``tree_rrf_k`` so they add recall underneath the
         scored seats instead of taking them. Empty — the default — leaves every ranking
-        exactly as it was.
+        exactly as it was. ``tree_members`` narrows those pages to one document's members
+        when the index spans several (ADR 0032).
         """
         if top_k < 1:
             raise ValueError("top_k must be at least one")
@@ -372,7 +381,7 @@ class HybridSearch:
         fused = fuse(
             vector,
             () if resolved == "vector_only" else lexical,
-            self._tree_rank(tree_pages, allowed),
+            self._tree_rank(tree_pages, allowed, tree_members),
             k=self._rrf_k,
             tree_k=self._tree_rrf_k,
         )

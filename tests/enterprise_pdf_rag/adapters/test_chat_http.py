@@ -346,7 +346,14 @@ def test_the_envelope_reports_the_page_context_that_reached_the_prompt(
         envelope = response.json()["enterprise_pdf_rag"]
         assert envelope["status"] == "answered"
         (window,) = envelope["page_windows"]
-        assert set(window) == {"page_index", "member_count", "chars", "truncated"}
+        assert set(window) == {
+            "page_index",
+            "member_count",
+            "chars",
+            "truncated",
+            "document_sha256",
+        }
+        assert window["document_sha256"] is None  # one document: the envelope names it once
         assert (window["page_index"], window["member_count"], window["truncated"]) == (
             11,
             1,
@@ -444,7 +451,7 @@ def test_document_is_selected_by_field_then_model_name_then_uniqueness(
     published: Published, tmp_path: Path
 ) -> None:
     root, meridian, orion = published
-    app, prompts = _app(root, tmp_path / "llm", max_live_calls=2)
+    app, prompts = _app(root, tmp_path / "llm", max_live_calls=3)
 
     async def scenario(client: AsyncClient) -> None:
         prefix = await client.post(_URL, json=_body("gpt-4", document=meridian.source_sha256[:12]))
@@ -462,9 +469,19 @@ def test_document_is_selected_by_field_then_model_name_then_uniqueness(
         )
         assert both.status_code == 200, both.text
         assert both.json()["enterprise_pdf_rag"]["document_sha256"] == meridian.source_sha256
+        # Nothing names a document and several are mounted: answered across all of them
+        # (ADR 0032), where this used to be a 422.
         unselected = await client.post(_URL, json=_body("gpt-4"))
-        assert unselected.status_code == 422, unselected.text
-        assert "document" in unselected.json()["detail"]
+        assert unselected.status_code == 200, unselected.text
+        assert unselected.json()["enterprise_pdf_rag"]["searched_documents"] == sorted(
+            (meridian.source_sha256, orion.source_sha256)
+        )
+        for named in (
+            _body("gpt-4", document=meridian.source_sha256),
+            _body(model_id(orion.source_sha256)),
+        ):
+            refused = await client.post(_URL, json={**named, "cross_document": True})
+            assert refused.status_code == 422, refused.text
         for missing in (
             _body("gpt-4", document="f" * 64),
             _body("enterprise-pdf-rag/" + "f" * 12),
@@ -474,7 +491,7 @@ def test_document_is_selected_by_field_then_model_name_then_uniqueness(
         assert (await client.post(_URL, json=_body("gpt-4", document="abc"))).status_code == 422
 
     _run(app, scenario)
-    assert len(prompts) == 2
+    assert len(prompts) == 3
 
     catalog = scan_catalog(root)
     entry = catalog.entry(orion.source_sha256)

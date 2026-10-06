@@ -5,7 +5,7 @@ in reading order so the model can read the hit in its context. Page context carr
 citable path, so it can only inform an answer — never be the target of a claim.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from enterprise_pdf_rag.answers.ports import MemberText
 from enterprise_pdf_rag.processing.context_builder import (
@@ -31,7 +31,11 @@ def reading_key(member: MemberText) -> tuple[int, int, float, str]:
 
 
 def with_page_context(
-    blocks: Sequence[ContextBlock], members: Sequence[MemberText], *, max_chars: int
+    blocks: Sequence[ContextBlock],
+    members: Sequence[MemberText],
+    *,
+    max_chars: int,
+    documents: Mapping[str, str] | None = None,
 ) -> tuple[PromptBlock, ...]:
     """Insert one page context block after the first hit of each page, hits excluded.
 
@@ -40,34 +44,46 @@ def with_page_context(
     block kind (an ``IMAGE``) is skipped. The page heading is the verified metadata of the
     page's first member (it is shared page-wide, ADR 0013), and a page with nothing left to
     say gets no block.
+
+    ``documents`` maps every member id to its document's label when the blocks span several
+    documents (ADR 0032): a page is then a (document, page) pair, so page 3 of one report is
+    never read beside page 3 of another, and each page block names its document. ``None``
+    (one document) weaves exactly as before.
     """
+
+    def key(member_id: str, page_index: int) -> tuple[str | None, int]:
+        return (None if documents is None else documents[member_id], page_index)
+
     seated = {block.member_id for block in blocks}
-    pages = {block.page_index for block in blocks}
-    neighbours: dict[int, list[MemberText]] = {page: [] for page in pages}
-    heading: dict[int, MemberText] = {}
+    pages = {key(block.member_id, block.page_index) for block in blocks}
+    neighbours: dict[tuple[str | None, int], list[MemberText]] = {page: [] for page in pages}
+    heading: dict[tuple[str | None, int], MemberText] = {}
     for member in members:
-        if member.page_index not in pages:
+        member_page = key(member.member_id, member.page_index)
+        if member_page not in pages:
             continue
-        heading.setdefault(member.page_index, member)
+        heading.setdefault(member_page, member)
         if member.member_id not in seated and member.kind.name in BlockKind.__members__:
-            neighbours[member.page_index].append(member)
+            neighbours[member_page].append(member)
     woven: list[PromptBlock] = []
-    seen: set[int] = set()
+    seen: set[tuple[str | None, int]] = set()
     for block in blocks:
         woven.append(block)
-        if block.page_index in seen:
+        page_key = key(block.member_id, block.page_index)
+        if page_key in seen:
             continue
-        seen.add(block.page_index)
-        first = heading.get(block.page_index)
+        seen.add(page_key)
+        first = heading.get(page_key)
         page = build_page_context_block(
             tuple(
                 PageContextMember(member.member_id, BlockKind[member.kind.name], member.body)
-                for member in sorted(neighbours[block.page_index], key=reading_key)
+                for member in sorted(neighbours[page_key], key=reading_key)
             ),
             page_index=block.page_index,
             page_title=None if first is None else first.page_title,
             section=None if first is None else first.section,
             max_chars=max_chars,
+            document=page_key[0],
         )
         if page is not None:
             woven.append(page)

@@ -66,6 +66,9 @@ class FusedHit:
     # The tree channel contributes a rank but no score of its own: it is a page set the
     # router chose, not a similarity, so there is nothing to record beside the rank.
     tree_rank: int | None = None
+    # The document this member belongs to, set when one ranking spans several documents
+    # (ADR 0032); ``None`` within a single document, which the result names once.
+    document_sha256: str | None = None
 
     def as_hit(self) -> PinnedRetrievalHit:
         return PinnedRetrievalHit(self.snapshot_id, self.member_id, self.fused_score)
@@ -134,6 +137,8 @@ class PageWindowStat:
     member_count: int
     chars: int
     truncated: bool
+    # The page's document, when the prompt spans several (ADR 0032).
+    document_sha256: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,10 +163,15 @@ class AnswerRequest:
     # Whether this question is routed over the document tree first (ADR 0019). ``None`` lets
     # ADR 0019's rule decide; ``True`` / ``False`` pin the third channel for this request.
     tree_route: bool | None = None
+    # Search every mounted document as one corpus instead of one document (ADR 0032); with a
+    # single document mounted it is that document's ordinary answer.
+    cross_document: bool = False
 
     def __post_init__(self) -> None:
         if not self.question.strip():
             raise ValueError("A nonempty question is required")
+        if self.cross_document and self.document_sha256 is not None:
+            raise ValueError("cross_document searches every document; do not name one")
         if self.top_k < 1:
             raise ValueError("top_k must be at least one")
         if self.channel_limit < 1:
@@ -184,6 +194,8 @@ class ClaimCitation:
     col: int | None = None
     header: str | None = None
     header_cell_id: str | None = None
+    # The document the cited evidence was read from (ADR 0032): the member's own document.
+    document_sha256: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,3 +243,7 @@ class AnswerResult:
     query_translation: TranslatedQuery | None = None
     # The pages the tree channel chose, when this answer was routed over the tree (ADR 0019).
     tree_route: TreeRoute | None = None
+    # Every document this answer searched, when it searched several as one corpus (ADR 0032);
+    # empty for a one-document answer. ``document_sha256`` then names the document of the
+    # first prompt member, and each citation and fused hit names its own.
+    searched_documents: tuple[str, ...] = ()
