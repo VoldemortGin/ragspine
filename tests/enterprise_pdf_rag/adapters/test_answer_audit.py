@@ -342,3 +342,58 @@ def test_a_service_without_a_journal_writes_nothing(tmp_path: Path) -> None:
 
     assert service.answer(AnswerRequest(_QUESTION)).status is AnswerStatus.ANSWERED
     assert list(tmp_path.rglob("*.sqlite")) == []
+
+
+def test_the_service_journals_the_whole_fused_ranking_with_each_members_page(
+    tmp_path: Path,
+) -> None:
+    """The retrieval test bench reads where every channel placed every member, by page."""
+    document, _ = bar_document(tmp_path)
+    client, _ = scripted_client(tmp_path / "llm", _chart_script)
+    store = AnswerAuditStore(tmp_path / "answers-audit.sqlite")
+    service = AnswerService({document.source_sha256: document}, client, audit=store)
+
+    result = service.answer(AnswerRequest(_QUESTION))
+
+    (row,) = list_answers(store.path)
+    with closing(sqlite3.connect(store.path)) as connection:
+        (ranked_json,) = connection.execute(
+            "SELECT ranked FROM answers WHERE id = ?", (row.id,)
+        ).fetchone()
+    ranked = json.loads(ranked_json)
+    pages = {member.member_id: member.page_index for member in document.member_texts()}
+    assert {hit.member_id for hit in result.fused} <= {entry["member_id"] for entry in ranked}
+    assert len(ranked) >= len(result.fused)
+    for entry in ranked:
+        assert set(entry) == {
+            "member_id",
+            "page_index",
+            "fused_score",
+            "vector_rank",
+            "lexical_rank",
+            "tree_rank",
+        }
+        assert entry["page_index"] == pages[entry["member_id"]]
+
+
+def test_a_journal_written_before_the_ranking_column_is_upgraded_in_place(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "answers-audit.sqlite"
+    store = AnswerAuditStore(path)
+    row_id = store.begin(_context())
+    assert row_id is not None
+    with closing(sqlite3.connect(path)) as connection, connection:
+        connection.execute("ALTER TABLE answers DROP COLUMN ranked")
+
+    reopened = AnswerAuditStore(path)
+    assert reopened.begin(_context(question="after the upgrade")) is not None
+
+    with closing(sqlite3.connect(path)) as connection:
+        rows = connection.execute("SELECT question, ranked FROM answers ORDER BY id").fetchall()
+    assert rows[0] == (_QUESTION, None)
+    assert rows[1][0] == "after the upgrade" and json.loads(rows[1][1]) == []
+    assert [summary.question for summary in list_answers(path)] == [
+        _QUESTION,
+        "after the upgrade",
+    ]

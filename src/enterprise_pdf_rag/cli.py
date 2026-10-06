@@ -51,6 +51,15 @@ from enterprise_pdf_rag.adapters.processing_runtime import (
     process_aia_semantics,
 )
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
+from enterprise_pdf_rag.adapters.retrieval_testbench import (
+    data_dir,
+    default_report_dir,
+    format_csv,
+    format_json,
+    format_table,
+    run_retrieval_testbench,
+    write_testbench,
+)
 from enterprise_pdf_rag.adapters.review import write_review
 from enterprise_pdf_rag.adapters.runtime import create_runtime
 from ragspine.common.evidence.configs import get_settings
@@ -271,6 +280,38 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="Print one answer in full by id: the prompt as sent and the model's raw output",
     )
+    audit.add_argument(
+        "--testbench",
+        action="store_true",
+        help="Retrieval test bench: one diagnosis per question of --question-set (no model)",
+    )
+    audit.add_argument("--question-set", type=Path, default=None, help="Question set to bench")
+    audit.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="The run's report.json (routing per question); default "
+        "ROOT_DIR/data/reports/<question-set stem>/report.json when it exists",
+    )
+    audit.add_argument(
+        "--ingestion-root",
+        type=Path,
+        default=None,
+        help="Map member pages from this catalog for journal rows written before `ranked`",
+    )
+    audit.add_argument("--max-questions", type=int, default=None, help="Bench the first N only")
+    audit.add_argument(
+        "--question-id", action="append", default=None, help="Bench only this id (repeatable)"
+    )
+    audit.add_argument("--format", choices=("table", "json", "csv"), default="table")
+    audit.add_argument(
+        "--write",
+        action="store_true",
+        help="Also write testbench.csv / testbench.json to ROOT_DIR/data/reports/<stem>",
+    )
+    audit.add_argument(
+        "--out", type=Path, default=None, help="Write them here instead (must be under data/)"
+    )
     chart_qa = commands.add_parser(
         "chart-qa",
         help="Answer a pinned structured chart query from qualified saved evidence; no models",
@@ -364,6 +405,50 @@ def _parser() -> argparse.ArgumentParser:
     )
     extract.add_argument("--output", type=Path, required=True)
     return parser
+
+
+def _error(message: str) -> int:
+    sys.stdout.write(json.dumps({"error": message}, ensure_ascii=False, indent=2) + "\n")
+    return 1
+
+
+def _testbench(arguments: argparse.Namespace, database: Path) -> int:
+    """``audit --testbench``: print the bench, and write it under data/ when asked."""
+    questions: Path | None = arguments.question_set
+    if questions is None:
+        return _error("--testbench needs --question-set <path>")
+    target: Path | None = None
+    if arguments.out is not None or arguments.write:
+        target = (
+            (arguments.out if arguments.out is not None else default_report_dir(questions))
+            .expanduser()
+            .resolve()
+        )
+        data = data_dir()
+        if not target.is_relative_to(data):
+            return _error(f"--out {target} is not under {data}: the bench writes only in data/")
+    report: Path | None = arguments.report
+    if report is None:
+        candidate = default_report_dir(questions) / "report.json"
+        report = candidate if candidate.is_file() else None
+    try:
+        bench = run_retrieval_testbench(
+            database,
+            questions,
+            report=report,
+            max_questions=arguments.max_questions,
+            question_ids=arguments.question_id,
+            ingestion_root=arguments.ingestion_root,
+        )
+    except (ValueError, FileNotFoundError) as error:
+        return _error(str(error))
+    printed = {"table": format_table, "json": format_json, "csv": format_csv}[arguments.format]
+    sys.stdout.write(printed(bench).rstrip("\n") + "\n")
+    if target is not None:
+        written = write_testbench(bench, target)
+        if arguments.format == "table":
+            sys.stdout.write("\n".join(f"wrote {path}" for path in written) + "\n")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -486,6 +571,8 @@ def main(argv: list[str] | None = None) -> int:
                     json.dumps({"error": f"no journal at {database}"}, indent=2) + "\n"
                 )
                 return 1
+            if arguments.testbench:
+                return _testbench(arguments, database)
             if arguments.show is not None:
                 record = read_answer(database, arguments.show)
                 if record is None:
