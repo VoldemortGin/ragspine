@@ -29,6 +29,7 @@ import httpx
 from fastapi import FastAPI
 from pydantic import Field
 
+from enterprise_pdf_rag.adapters import pdfspine_tsr
 from enterprise_pdf_rag.adapters.answer_audit import open_audit_store
 from enterprise_pdf_rag.adapters.answer_llm import make_answer_llm
 from enterprise_pdf_rag.adapters.document_catalog import DocumentCatalog, scan_catalog
@@ -52,6 +53,7 @@ from enterprise_pdf_rag.adapters.ingest_mode import (
     IngestMode,
     IngestPlan,
     LayoutPolicy,
+    UnverifiedTableStructure,
     ingest_plan,
     published_ingest_mode,
 )
@@ -758,6 +760,7 @@ def _run_document(
             ingest_mode=plan.mode,
             layout_policy=plan.layout,
             unverified_tables_as_rows=plan.unverified_tables_as_rows,
+            unverified_table_structure=plan.unverified_table_structure,
         )
         budget.spend(ingestion.live_call_count)
         run.update(ingestion=ingestion, live_calls=ingestion.live_call_count)
@@ -1314,6 +1317,7 @@ def run_folder_pipeline(
     unverified_tables_as_rows: bool | None = None,
     table_row_index_units: bool | None = None,
     drop_running_lines_from_index: bool | None = None,
+    unverified_table_structure: UnverifiedTableStructure | None = None,
     max_questions: int | None = None,
     question_selection: QuestionSelectionMode = "first",
     only_question_docs: bool = False,
@@ -1362,7 +1366,9 @@ def run_folder_pipeline(
     keeps it): ``"deterministic-text-pages"`` partitions pages without figures or images from
     pdfspine blocks with no layout call and falls back to the model per page (ADR 0028, counted
     in each ``IngestionSummary``); ``unverified_tables_as_rows`` indexes a Table with no
-    detected grid as its verbatim printed rows (ADR 0027; on in lite, off in full).
+    detected grid as its verbatim printed rows (ADR 0027; on in lite, off in full);
+    ``unverified_table_structure="tsr"`` first gives such a table a grid inferred by the local
+    SLANet-plus model, kept pending (ADR 0031), and needs its weights before any work.
     ``table_row_index_units`` / ``drop_running_lines_from_index`` override the index-text
     layout the same way (on in lite, off in full): a long row table scores as one unit per
     figure row with its header repeated, and a running header / footer scores as nothing.
@@ -1384,6 +1390,7 @@ def run_folder_pipeline(
         unverified_tables_as_rows=unverified_tables_as_rows,
         table_row_index_units=table_row_index_units,
         drop_running_lines_from_index=drop_running_lines_from_index,
+        unverified_table_structure=unverified_table_structure,
     )
     tree = plan.build_tree if build_tree is None else build_tree
     settings = get_settings()
@@ -1446,6 +1453,11 @@ def run_folder_pipeline(
         case.request.rerank for case in question_set.cases if not case.offline_only
     )
     embedder, reranker = _preflight(embedder=embedder, reranker=reranker, needs_rerank=needs_rerank)
+    if plan.unverified_table_structure == "tsr":
+        try:
+            pdfspine_tsr.table_structure_recognizer()
+        except pdfspine_tsr.TableStructureUnavailable as error:
+            raise PreflightError(str(error)) from error
     root = ingestion_root if ingestion_root is not None else settings.ingestion_root
     root = root.expanduser().resolve()
     budget = _Budget(max_live_calls_total)

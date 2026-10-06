@@ -18,6 +18,8 @@ pages -> onnx -> per-page model fallback), also chosen explicitly only.
 printed rows; lite turns it on. ``table_row_index_units`` / ``drop_running_lines_from_index``
 lay out the index text (row units for a long row table, nothing for a running header /
 footer); lite turns both on.
+``unverified_table_structure="tsr"`` (ADR 0031) first asks a local table-structure model for
+that table's grid, kept pending, and falls back to the rows; both presets keep ``"rows"``.
 """
 
 from dataclasses import dataclass, replace
@@ -42,8 +44,12 @@ type IngestMode = Literal["full", "lite"]
 # pages without figures or images with a per-page model fallback (ADR 0028); or those two plus
 # pdfspine's local ONNX layout model (PP-DocLayoutV3) on the remaining pages (ADR 0030).
 type LayoutPolicy = Literal["model", "deterministic-text-pages", "onnx-layout"]
+# How a Table with no detected grid is structured when it is indexed: ADR 0027's verbatim
+# printed rows, or a grid a local SLANet-plus model infers (kept pending, rows on fallback).
+type UnverifiedTableStructure = Literal["rows", "tsr"]
 INGEST_MODES: Final[tuple[str, ...]] = get_args(IngestMode.__value__)
 LAYOUT_POLICIES: Final[tuple[str, ...]] = get_args(LayoutPolicy.__value__)
+UNVERIFIED_TABLE_STRUCTURES: Final[tuple[str, ...]] = get_args(UnverifiedTableStructure.__value__)
 # The notebook's ``LAYOUT_POLICY = "auto"``: in lite, the local ONNX layout when its weights and
 # runtime are present, else the deterministic text pages (ADR 0030); never a library preset.
 AUTO_LAYOUT: Final = "auto"
@@ -74,6 +80,10 @@ class IngestPlan:
     # Index a Table with no detected grid as its verbatim printed rows (ADR 0027); its rows
     # carry their own producer, so every other stage keeps its bytes either way.
     unverified_tables_as_rows: bool = False
+    # ADR 0031: ``"tsr"`` gives such a table a model-inferred grid (PENDING, cell citations only)
+    # and falls back to the rows when the model's grid fails its self-check; it indexes the
+    # table even when ``unverified_tables_as_rows`` is off. ``"rows"`` changes nothing.
+    unverified_table_structure: UnverifiedTableStructure = "rows"
     # Index a long verbatim-rows table as one scoring unit per figure row, its header rows
     # repeated, instead of one unit for the whole table (ADR 0027 Amendment 1).
     table_row_index_units: bool = False
@@ -174,6 +184,18 @@ def choose_layout_policy(
     )
 
 
+def check_unverified_table_structure(value: str) -> UnverifiedTableStructure:
+    """``value`` as an ``UnverifiedTableStructure``, or a ``ValueError`` naming the choices."""
+    if value == "rows":
+        return "rows"
+    if value == "tsr":
+        return "tsr"
+    raise ValueError(
+        f"unverified_table_structure must be one of {list(UNVERIFIED_TABLE_STRUCTURES)}, "
+        f"not {value!r}"
+    )
+
+
 def ingest_plan(
     mode: IngestMode,
     *,
@@ -181,6 +203,7 @@ def ingest_plan(
     unverified_tables_as_rows: bool | None = None,
     table_row_index_units: bool | None = None,
     drop_running_lines_from_index: bool | None = None,
+    unverified_table_structure: UnverifiedTableStructure | None = None,
 ) -> IngestPlan:
     """The switches one mode sets; a non-``None`` override replaces that one switch."""
     plan = _PLANS[check_ingest_mode(mode)]
@@ -192,6 +215,11 @@ def ingest_plan(
         plan = replace(plan, layout=check_layout_policy(layout_policy))
     if unverified_tables_as_rows is not None:
         plan = replace(plan, unverified_tables_as_rows=unverified_tables_as_rows)
+    if unverified_table_structure is not None:
+        plan = replace(
+            plan,
+            unverified_table_structure=check_unverified_table_structure(unverified_table_structure),
+        )
     return plan
 
 

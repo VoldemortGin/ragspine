@@ -25,6 +25,7 @@ from enterprise_pdf_rag.adapters.http.schemas import BoundaryModel
 from enterprise_pdf_rag.adapters.ingest_mode import (
     IngestMode,
     LayoutPolicy,
+    UnverifiedTableStructure,
     ingest_plan,
     make_partitioner,
 )
@@ -43,6 +44,10 @@ from ragspine.common.evidence.providers.json_completion import JsonCompletionCli
 from ragspine.common.evidence.providers.providers import load_llm_config
 from ragspine.extraction.evidence.document.models import AssetRef, DocumentSnapshot, DocumentSpec
 from ragspine.extraction.evidence.document.service import ingest_document
+from ragspine.extraction.evidence.objects.tables.table_inferred_grid import (
+    TSR_FALLBACK,
+    TSR_PRODUCER,
+)
 from ragspine.extraction.evidence.objects.tables.table_rows import (
     TABLE_ROWS_PRODUCER,
     TableRowsIR,
@@ -131,6 +136,12 @@ class IngestionSummary(BoundaryModel):
     # count (ADR 0027, ``IngestPlan.unverified_tables_as_rows``); counts only, never text.
     table_row_transcriptions: int = 0
     table_row_lines: int = 0
+    # ADR 0031, ``unverified_table_structure="tsr"``: such tables given a model-inferred
+    # (pending) grid, those that fell back to verbatim rows (also counted just above) and the
+    # fallback reason codes. Counts only; all zero under ``"rows"``.
+    table_tsr_grids: int = 0
+    table_tsr_fallbacks: int = 0
+    table_tsr_fallback_reasons: dict[str, int] = Field(default_factory=dict)
     # ADR 0028, ``layout="deterministic-text-pages"``: pages partitioned without a model call,
     # pages that fell back to the model layout and their reason codes; all zero under the
     # model layout. Re-derived from the saved partitions, so a cache replay reports the same.
@@ -254,6 +265,28 @@ def _row_tables(outputs: ProcessingStore, manifest: ProcessingManifest) -> tuple
     return tuple(counts)
 
 
+def _tsr_tables(manifest: ProcessingManifest) -> tuple[int, Counter[str]]:
+    """Tables given an inferred grid, and the fallback reasons of those that were not (ADR 0031)."""
+    grids = 0
+    fallbacks: Counter[str] = Counter()
+    for page in manifest.pages:
+        for item in page.objects:
+            if item.kind is not ObjectKind.TABLE:
+                continue
+            stages = {stage.stage: stage for stage in item.stages}
+            ir = stages.get("ir")
+            structure = stages.get("table_structure")
+            if (
+                ir is not None
+                and ir.state is StageState.SUCCEEDED
+                and f":{TSR_PRODUCER}:" in ir.producer
+            ):
+                grids += 1
+            elif structure is not None and (structure.diagnostic or "").startswith(TSR_FALLBACK):
+                fallbacks[(structure.diagnostic or "").split(":")[1]] += 1
+    return grids, fallbacks
+
+
 def ingest_pdf(
     *,
     pdf: Path,
@@ -265,6 +298,7 @@ def ingest_pdf(
     ingest_mode: IngestMode = "full",
     layout_policy: LayoutPolicy | None = None,
     unverified_tables_as_rows: bool | None = None,
+    unverified_table_structure: UnverifiedTableStructure | None = None,
 ) -> IngestionSummary:
     """Save complete PDF sources and selected downstream stages without activation.
 
@@ -276,12 +310,15 @@ def ingest_pdf(
     once the source stage knows it and before any model call (run-folder's ``"auto"``).
     ``ingest_mode`` picks the calls the semantic stages send (ADR 0025, ``ingest_mode.py``);
     ``layout_policy`` and ``unverified_tables_as_rows`` override that mode's preset for one
-    switch each (ADR 0028, ADR 0027), ``None`` keeps the preset.
+    switch each (ADR 0028, ADR 0027), ``None`` keeps the preset; so does
+    ``unverified_table_structure`` (ADR 0031: ``"tsr"`` needs the SLANet-plus weights and
+    ``pdfspine[onnx]``, and refuses to start without them).
     """
     plan = ingest_plan(
         ingest_mode,
         layout_policy=layout_policy,
         unverified_tables_as_rows=unverified_tables_as_rows,
+        unverified_table_structure=unverified_table_structure,
     )
     options = _Options(
         stage=stage,
@@ -376,6 +413,7 @@ def ingest_pdf(
         else {page.page_index: (page.state, page.diagnostic) for page in metadata.pages},
     )
     row_tables = _row_tables(outputs, manifest)
+    tsr_grids, tsr_fallbacks = _tsr_tables(manifest)
     review = (
         _export_review(sources, outputs, source, processing_id, title=f"PDF 处理审阅: {pdf.name}")
         if plan.review_exports
@@ -432,6 +470,9 @@ def ingest_pdf(
         skipped_calls=_skipped_calls(objects, metadata),
         table_row_transcriptions=len(row_tables),
         table_row_lines=sum(row_tables),
+        table_tsr_grids=tsr_grids,
+        table_tsr_fallbacks=sum(tsr_fallbacks.values()),
+        table_tsr_fallback_reasons=dict(sorted(tsr_fallbacks.items())),
         pages_partitioned_deterministically=partition_tally.deterministic_pages,
         pages_partition_model_fallback=partition_tally.model_fallback_pages,
         partition_fallback_reasons=partition_tally.fallback_reasons,

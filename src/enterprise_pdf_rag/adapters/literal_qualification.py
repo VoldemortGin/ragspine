@@ -4,6 +4,7 @@ from collections.abc import Sequence
 
 from pydantic import TypeAdapter
 
+from enterprise_pdf_rag.adapters import pdfspine_tsr
 from enterprise_pdf_rag.adapters.aia_ingestion import read_text_sidecar
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.pdfspine_svg import crop_native_svg
@@ -15,6 +16,10 @@ from ragspine.extraction.evidence.figures.models import Confidence, Verification
 from ragspine.extraction.evidence.objects.tables.table_grid_proof import (
     GRID_SCOPE,
     check_grid_evidence,
+)
+from ragspine.extraction.evidence.objects.tables.table_inferred_grid import (
+    TSR_SCOPE,
+    structure_producer,
 )
 from ragspine.extraction.evidence.objects.tables.table_models import TableIR
 from ragspine.extraction.evidence.objects.tables.table_rows import (
@@ -85,6 +90,8 @@ def validate_literal_member(
     description = TypeAdapter(ObjectDescription).validate_json(assets.get(member.description))
     # ADR 0027: a Table with no detected grid may qualify as verbatim printed rows instead.
     rows = member.kind is ObjectKind.TABLE and receipt.scope == TABLE_ROWS_SCOPE
+    # ADR 0031: or as a grid a structure model inferred, transcribed like any other table.
+    inferred = member.kind is ObjectKind.TABLE and receipt.scope == TSR_SCOPE
     if description.producer != (TABLE_ROWS_PRODUCER if rows else "exact-source-transcription-v1"):
         raise ValueError("Literal qualification requires the exact transcription producer")
     if description.confidence != (
@@ -118,7 +125,7 @@ def validate_literal_member(
         member.ir,
         member.description,
         member.source_svg,
-        TABLE_ROWS_SCOPE if rows else LITERAL_SCOPE,
+        TABLE_ROWS_SCOPE if rows else TSR_SCOPE if inferred else LITERAL_SCOPE,
     ):
         raise ValueError("Literal qualification does not bind the exact object dependencies")
     anchor = receipt.source
@@ -192,13 +199,19 @@ def validate_literal_member(
         ):
             raise ValueError("Typed table IR does not match the literal qualification")
         check_table_transcription(table, spans, anchor=anchor.bbox)
-        _reprove_table_grid(
-            source_pdf(sources, source),
-            table,
-            receipt,
-            page_index=member.page_index,
-            spans=text.spans,
-        )
+        pdf = source_pdf(sources, source)
+        _reprove_table_grid(pdf, table, receipt, page_index=member.page_index, spans=text.spans)
+        if (structure_producer(table) is not None) != inferred or (
+            inferred and (table.verification is not Verification.PENDING or table.source != anchor)
+        ):
+            raise ValueError("Inferred table grid does not match its qualification scope")
+        if inferred:
+            with opened_pdf(pdf) as document:
+                if member.page_index >= document.page_count:
+                    raise ValueError("Qualified table page is absent from the pinned source")
+                pdfspine_tsr.recheck_inferred_table(
+                    document.load_page(member.page_index), table, text.spans
+                )
         return table, description, receipt
     ir: TextIR | ListIR | GroupIR
     if member.kind is ObjectKind.TEXT:

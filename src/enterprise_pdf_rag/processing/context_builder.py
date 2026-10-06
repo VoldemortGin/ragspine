@@ -14,6 +14,11 @@ from enterprise_pdf_rag.processing.retrieval import RetrievalContext
 from ragspine.extraction.evidence.document.models import Bounds
 from ragspine.extraction.evidence.figures.models import ChartIR, TextField, ValueKind, Verification
 from ragspine.extraction.evidence.objects.diagrams.diagram_description import EDGE_ARROW
+from ragspine.extraction.evidence.objects.tables.table_inferred_grid import (
+    TSR_SCOPE,
+    column_headers,
+    row_label,
+)
 from ragspine.extraction.evidence.objects.tables.table_models import (
     CellContentState,
     TableCell,
@@ -85,6 +90,11 @@ class CellEvidence:
     source_span_ids: tuple[str, ...]
     verification: Verification = Verification.PENDING
     headers: tuple[HeaderRef, ...] = ()
+    # ADR 0031: on a model-inferred grid only, the header texts above the cell and the stub
+    # text beside it, as the model's grid places them. Printed to align a value with its
+    # labels; never citable, never a ``HeaderRef``.
+    inferred_headers: tuple[str, ...] = ()
+    inferred_row: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,6 +179,11 @@ class ContextBlock:
         """A table region read as verbatim printed rows: no grid, no cells (ADR 0027)."""
         return self.kind is BlockKind.TABLE and self.scope == TABLE_ROWS_SCOPE
 
+    @property
+    def inferred_grid(self) -> bool:
+        """A table whose grid a structure model inferred: cells cite, relations do not (ADR 0031)."""
+        return self.kind is BlockKind.TABLE and self.scope == TSR_SCOPE
+
     def prompt_text(self, alias: str | None = None) -> str:
         """Deterministic rendering; every citable path appears verbatim as a line prefix.
 
@@ -219,7 +234,12 @@ class ContextBlock:
             lines.extend(f"fragments.{span.source_span_id}: {span.text}" for span in self.spans)
         elif self.kind is BlockKind.TABLE:
             lines.append(
-                f"table rows={self.row_count} cols={self.col_count} "
+                f"table rows={self.row_count} cols={self.col_count} grid=inferred "
+                "(rows, columns and headers were inferred by a table-structure model and are "
+                "not verified; cite a value as its cell with the cell's exact text, never as a "
+                "row, column or header)"
+                if self.inferred_grid
+                else f"table rows={self.row_count} cols={self.col_count} "
                 f"grid={self.grid_verification.value}"
             )
             for cell in self.cells:
@@ -231,6 +251,14 @@ class ContextBlock:
                 if self.grid_verification is Verification.VERIFIED:
                     header = " | ".join(f'"{ref.text}"' for ref in cell.headers) or "<NONE>"
                     line += f" row={cell.row} col={cell.col} header={header}"
+                elif self.inferred_grid:
+                    if cell.inferred_headers:
+                        shown_headers = " / ".join(
+                            _one_line(text) for text in cell.inferred_headers
+                        )
+                        line += f' inferred_col="{shown_headers}"'
+                    if cell.inferred_row is not None:
+                        line += f' inferred_row="{_one_line(cell.inferred_row)}"'
                 lines.append(line)
         elif self.kind is BlockKind.DIAGRAM:
             lines.append(f"diagram nodes={len(self.nodes)} edges={len(self.edges)}")
@@ -242,6 +270,10 @@ class ContextBlock:
                 f"items.{index}: {', '.join(item)}" for index, item in enumerate(self.list_items)
             )
         return "\n".join(lines)
+
+
+def _one_line(text: str) -> str:
+    return " ".join(text.split())
 
 
 def _spans(fragments: tuple[ObservedText, ...]) -> tuple[SpanEvidence, ...]:
@@ -352,6 +384,7 @@ def build_context_block(context: RetrievalContext) -> ContextBlock:
         # Transcription verification (description) and grid verification (ir) are
         # separate facts.
         headers = _header_cells(ir)
+        inferred = context.scope == TSR_SCOPE
         return ContextBlock(
             *common,
             BlockKind.TABLE,
@@ -372,6 +405,8 @@ def build_context_block(context: RetrievalContext) -> ContextBlock:
                     cell.source_span_ids,
                     cell.verification,
                     _headers_for(cell, headers),
+                    column_headers(ir, cell) if inferred else (),
+                    row_label(ir, cell) if inferred else None,
                 )
                 for cell in ir.cells
             ),

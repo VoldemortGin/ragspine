@@ -114,11 +114,17 @@ adapters/     every SDK and I/O: pdfspine (every source PDF opens through pdf_pa
               tree, review exports, `unverified_tables_as_rows` (ADR 0027: lite on, full off),
               `table_row_index_units` / `drop_running_lines_from_index` (index-text layout:
               ADR 0027 / 0028 Amendment 1, lite on, full off — `IngestPlan.index_options`
-              → `index_draft(index_options=...)`, `run_folder_pipeline` overrides each)
+              → `index_draft(index_options=...)`, `run_folder_pipeline` overrides each),
+              `unverified_table_structure` (ADR 0031: `"rows"` in both presets; `"tsr"` gives a
+              no-grid Table a SLANet-plus grid — pdfspine_tsr.py, local ONNX, weights found like
+              the ONNX layout's (`APP_ONNX_LAYOUT_MODEL`'s directory, else
+              `PDFSPINE_ONNX_MODELS`), refused up front without them — kept PENDING, scope
+              `tsr-inferred-grid-v1`, re-run and compared on every resolve, rows on fallback)
               and `layout` (`make_partitioner`: `"model"` in both presets,
               `"deterministic-text-pages"` and `"onnx-layout"` only when asked — ADR 0028 /
               ADR 0030); `ingest_pdf` /
-              `run_folder_pipeline` take `layout_policy` / `unverified_tables_as_rows` as
+              `run_folder_pipeline` take `layout_policy` / `unverified_tables_as_rows` /
+              `unverified_table_structure` as
               one-switch overrides of the preset (`None` keeps it); `published_ingest_mode` reads a
               snapshot's mode back from its page-metadata producer; lite after full sends no call,
               full after lite only the skipped ones; `export_document_review` in pdf_ingestion.py
