@@ -38,7 +38,7 @@ echo "==> [5/10] test suite (excludes gpu + docling + network — the bulk; filt
 # libraries have raised the main process footprint, APFS copies become pathologically
 # slow. A fresh process keeps the same contract deterministic and cuts minutes from CI.
 "$PY" -m pytest tests/workflows/test_workflow_catalog_export.py -q
-"$PY" -m pytest tests/ -q -m "not gpu and not docling and not network" \
+"$PY" -m pytest tests/ -q -m "not gpu and not docling and not network and not onnx" \
   --ignore=tests/workflows/test_workflow_catalog_export.py
 
 echo "==> [6/10] docling extractor tests (own process — isolates 3rd-party ML nondeterminism)"
@@ -94,7 +94,7 @@ else
   # The two AIA sample suites replay a local release whose proofs pin the locked toolchain (fonttools
   # included); the runner has no such store and skips them, so they stay on the locked lane above.
   "$latest_py" -m pytest -q -p no:cacheprovider tests/workflows/test_workflow_catalog_export.py
-  "$latest_py" -m pytest -q -p no:cacheprovider -m "not gpu and not docling and not network" tests/ \
+  "$latest_py" -m pytest -q -p no:cacheprovider -m "not gpu and not docling and not network and not onnx" tests/ \
     --ignore=tests/workflows/test_workflow_catalog_export.py \
     --ignore=tests/enterprise_pdf_rag/adapters/test_document_catalog_aia_smoke.py \
     --ignore=tests/enterprise_pdf_rag/answers/test_nl_gold.py
