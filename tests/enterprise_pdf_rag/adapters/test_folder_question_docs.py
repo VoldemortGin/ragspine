@@ -1,8 +1,8 @@
 """run-folder: which PDFs the questions name, checked before any work (ADR 0022).
 
-One resolution (``adapters/question_docs.py``) decides both what ``only_question_docs``
-ingests and where each answer is routed, so a question whose PDF was ingested is exactly a
-question that routes to it.
+One resolution (``adapters/question_docs.py``) decides what ``only_question_docs`` ingests
+and labels each answer's evaluation (``expected_doc``); the answer itself searches every
+published document of the run (ADR 0032).
 """
 
 import json
@@ -179,11 +179,14 @@ def test_skip_ingests_what_matched_and_marks_the_unmatched_question(
     }
     assert result.eval is not None
     cases = {case.case_id: case for case in result.eval.cases}
-    assert cases["q1"].verdict == "routing_failed"
-    assert "'Meridian Interim 2023' names no PDF of the folder" in cases["q1"].failures[0]
-    assert "Meridian Interim 2024.pdf" in cases["q1"].failures[0]
+    orion = next(item.sha256 for item in result.documents if item.status == "published")
+    # The unmatched reference still answers, from what was ingested (ADR 0032); it has no
+    # expected document, so whether the citation landed there is not judged.
+    assert (cases["q1"].verdict, cases["q1"].routing) == ("answered", "cross_document")
+    assert (cases["q1"].expected_doc, cases["q1"].cited_doc_hit) == (None, None)
     assert cases["q2"].verdict == "answered"
-    # No doc and a single published document: the existing routing still answers it there.
+    assert (cases["q2"].expected_doc, cases["q2"].cited_doc_hit) == (orion, True)
+    # No doc and a single published document: answered there.
     assert cases["q3"].verdict == "answered"
     assert result.question_docs is not None
     assert result.question_docs.questions_without_doc == ("q3",)
@@ -227,7 +230,11 @@ def test_without_only_question_docs_misses_are_recorded_not_raised(
     (resolved,) = [payload for event, payload in events if event == "question_docs_resolved"]
     assert resolved["unmatched"] == ["Meridian Interim 2023"]
     assert result.eval is not None
-    assert [case.verdict for case in result.eval.cases] == ["routing_failed", "answered"]
+    # Recorded, never a routing failure: both questions are answered across all three PDFs.
+    assert [case.verdict for case in result.eval.cases] == ["answered", "answered"]
+    assert [case.searched_documents for case in result.eval.cases] == [3, 3]
+    assert result.eval.cases[0].expected_doc is None
+    assert result.eval.cases[1].expected_doc is not None
 
 
 def test_first_matched_skips_questions_whose_pdf_is_missing_and_keeps_set_order(

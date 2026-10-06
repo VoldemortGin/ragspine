@@ -1,9 +1,10 @@
-"""Which PDF of a folder a question set's ``doc`` names — one rule for ingest and for answers.
+"""Which PDF of a folder a question set's ``doc`` names — for ingest and for evaluation.
 
 ``run_folder_pipeline`` resolves every reference once, before any ingest, model call or
-write, and both the ``only_question_docs`` selection and the answer routing read that one
-resolution, so a question whose PDF was ingested is exactly a question that routes to it
-(docs/enterprise-pdf-rag/adr/0022-run-folder-question-docs-budget-and-progress.md).
+write; the ``only_question_docs`` selection and the evaluation labels (``expected_doc``)
+read that one resolution
+(docs/enterprise-pdf-rag/adr/0022-run-folder-question-docs-budget-and-progress.md). Since
+ADR 0032 it no longer routes the answer, which searches every published document of the run.
 
 Rules, first hit wins: ``alias`` (an explicit ``doc_aliases`` entry), ``exact`` (file name,
 any case), ``stem`` (file name without extension, any case), ``sha_prefix`` (≥ 12 hex
@@ -21,7 +22,7 @@ import re
 import unicodedata
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Literal
+from typing import Final, Literal
 
 from enterprise_pdf_rag.adapters.http.schemas import BoundaryModel
 
@@ -301,23 +302,33 @@ def check_references(
     )
 
 
+# ADR 0032: the resolution selects what is ingested and labels the evaluation; it never
+# narrows retrieval, which always searches every published document of the run.
+_PURPOSE: Final = (
+    "用途: 入库筛选(ONLY_QUESTION_DOCS / first_matched)与评估标注(expected_doc / "
+    "cited_doc_hit); 检索本身在所有已入库 PDF 中进行"
+)
+_STILL_ANSWERED: Final = "将改为在所有已入库 PDF 中跨文档检索作答(只是没有期望文档可标注)"
+
+
 def describe(check: QuestionDocsCheck) -> str:
     """The check as a short table a notebook prints: reference → PDF (rule), misses marked."""
     lines = [
         f"题目文档核对: 引用 {len(check.resolutions)} 份, 已匹配 "
         f"{len(check.resolutions) - len(check.unresolved)} 份, 未匹配 / 歧义 "
         f"{len(check.unresolved)} 份; 文件夹里共 {check.pdf_count} 份 PDF; 规则命中 "
-        f"{check.rule_counts}"
+        f"{check.rule_counts}",
+        _PURPOSE,
     ]
     for item in check.resolutions:
         if item.status == "matched":
             lines.append(f"  ✓ {item.reference!r} → {item.pdf}  [{item.rule}]")
         else:
-            lines.append(f"  ✗ {_problem(item)}")
+            lines.append(f"  ✗ {_problem(item)}; {_STILL_ANSWERED}")
     if check.questions_without_doc:
         lines.append(
             f"  ! {len(check.questions_without_doc)} 道题没有写 doc: "
-            f"{', '.join(check.questions_without_doc[:_QUESTION_IDS_SHOWN])}"
+            f"{', '.join(check.questions_without_doc[:_QUESTION_IDS_SHOWN])}; {_STILL_ANSWERED}"
         )
     selection = check.selection
     if selection is not None and selection.mode == "first_matched":
@@ -374,6 +385,6 @@ def unresolved_message(check: QuestionDocsCheck) -> str | None:
         "  1. 在 DOC_ALIASES(doc_aliases)里写明对应关系, 例如 {'题集里的写法': '实际文件名.pdf'};",
         "  2. 把 ONLY_QUESTION_DOCS 设为 False, 入库整个文件夹;",
         '  3. 把 ON_UNMATCHED_DOCS 设为 "skip"(on_unmatched_docs="skip"), 只入库已匹配的 PDF, '
-        "未匹配的题目在结果里记为 routing_failed 并写明原因。",
+        "未匹配的题目照常在已入库的 PDF 中跨文档检索作答(ADR 0032)。",
     ]
     return "\n".join(lines)

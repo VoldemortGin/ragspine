@@ -77,7 +77,7 @@ def test_every_question_gets_the_diagnosis_its_failure_calls_for(bench: Bench) -
         "abstained": "in_prompt_abstained",
         "buried": "retrieved_not_in_prompt",
         "missed": "not_retrieved",
-        "unrouted": "routing_failed",
+        "unmatched_doc": "in_prompt_abstained",
         "no_pages": "correct",
         "bare": "unjudged",
     }
@@ -132,9 +132,15 @@ def test_each_channel_seat_is_read_from_the_journalled_ranking(bench: Bench) -> 
         NA,
     )
 
-    unrouted = rows["unrouted"]
-    assert unrouted.routing_failed is True and "missing.pdf" in unrouted.routing_detail
-    assert (unrouted.audit_id, unrouted.status, unrouted.fused_rank) == (NA, NA, NA)
+    # A ``doc`` naming no PDF no longer stops the question (ADR 0032): it was asked, and the
+    # label it would have given — the expected document — is simply absent.
+    unmatched = rows["unmatched_doc"]
+    assert (unmatched.expected_doc, unmatched.routing_detail) == (NA, "")
+    assert unmatched.audit_id != NA and unmatched.status == "abstained"
+    assert unmatched.cross_document is False  # one published document: nothing to cross
+    (document,) = bench.result.documents
+    assert (correct.expected_doc, correct.cited_doc_hit) == (document.sha256, True)
+    assert correct.cross_document is False
 
 
 def test_the_metrics_follow_the_retrieval_only_definitions(bench: Bench) -> None:
@@ -146,12 +152,10 @@ def test_the_metrics_follow_the_retrieval_only_definitions(bench: Bench) -> None
 
     ks = recall_ks(10)
     expected: list[tuple[int | None, int | None]] = []
-    for case_id, fields in BENCH_QUESTIONS.items():
+    for fields in BENCH_QUESTIONS.values():
         if "pages" not in fields:
             continue
         groups = (frozenset({int(str(fields["pages"]))}),)
-        if case_id == "unrouted":  # never retrieved: a routing miss, not a ranking miss
-            continue
         hits = [
             ("doc", int(str(entry["page_index"])) + 1)
             for entry in _ranked(bench.db, str(fields["question"]))
@@ -162,9 +166,9 @@ def test_the_metrics_follow_the_retrieval_only_definitions(bench: Bench) -> None
     channels = result.summary["channels"]
     assert set(channels) == {"bm25", "vector", "tree", "fused"}
     assert channels["tree"]["judged"] == 0
-    assert channels["bm25"]["judged"] == 5 and channels["bm25"]["hit"] == 0.8
+    assert channels["bm25"]["judged"] == 6 and channels["bm25"]["hit"] == 0.8333
     assert result.summary["by_doc"]["bench.pdf"]["correct"] == 2
-    assert result.summary["by_doc"]["missing.pdf"] == {"routing_failed": 1}
+    assert result.summary["by_doc"]["missing.pdf"] == {"in_prompt_abstained": 1}
     assert result.summary["n/a"] == {"expected": 2, "pages": 2}
 
 
@@ -198,13 +202,12 @@ def test_a_journal_without_the_ranking_column_reads_as_not_available(
     result = run_retrieval_testbench(legacy, bench.questions, report=bench.report)
     rows = {row.question_id: row for row in result.rows}
     for row in result.rows:
-        if row.question_id != "unrouted":
-            assert (row.ranking, row.bm25_rank, row.fused_rank) == (NA, NA, NA)
+        assert (row.ranking, row.bm25_rank, row.fused_rank) == (NA, NA, NA)
     # Without pages per member only a page window can still prove the page reached the prompt.
     assert rows["buried"].diagnosis == "not_in_prompt"
     assert rows["correct"].diagnosis == "correct"
-    assert result.summary["n/a"]["ranked"] == 7
-    assert result.summary["n/a"]["member_pages"] == 7
+    assert result.summary["n/a"]["ranked"] == 8
+    assert result.summary["n/a"]["member_pages"] == 8
     assert result.summary["metrics"]["fused"] == {}
 
     mapped = run_retrieval_testbench(
@@ -220,8 +223,9 @@ def test_a_journal_without_the_ranking_column_reads_as_not_available(
     # Prompt seats are known again once member pages are, and match run-folder's report.
     assert bench.result.eval is not None
     assert mapped.summary["metrics"]["prompt"] == bench.result.eval.metrics
-    assert result.summary["metrics"]["prompt"]["judged"] == 1  # only the unrouted question
-    assert mapped.summary["n/a"]["ranked"] == 7 and "member_pages" not in mapped.summary["n/a"]
+    # Without member pages no prompt seat is knowable, and every question was asked.
+    assert result.summary["metrics"]["prompt"] == {}
+    assert mapped.summary["n/a"]["ranked"] == 8 and "member_pages" not in mapped.summary["n/a"]
 
 
 def test_the_latest_journal_row_of_a_question_wins(bench: Bench, tmp_path: Path) -> None:
@@ -253,23 +257,63 @@ def test_selection_and_routing_without_a_report(bench: Bench) -> None:
     first = run_retrieval_testbench(bench.db, bench.questions, max_questions=3)
     assert [row.question_id for row in first.rows] == ["correct", "wrong", "abstained"]
 
-    chosen = run_retrieval_testbench(bench.db, bench.questions, question_ids=["unrouted", "missed"])
-    assert [row.question_id for row in chosen.rows] == ["missed", "unrouted"]
-    rows = {row.question_id: row for row in chosen.rows}
-    # Without a report or a folder nothing says the question went unrouted: no record, n/a.
-    assert (rows["unrouted"].diagnosis, rows["unrouted"].routing_failed) == ("no_record", NA)
-    assert rows["missed"].link == "text" and rows["missed"].diagnosis == "not_retrieved"
-
-    routed = run_retrieval_testbench(
-        bench.db, bench.questions, folder=bench.root / "pdfs", question_ids=["unrouted"]
+    chosen = run_retrieval_testbench(
+        bench.db, bench.questions, question_ids=["unmatched_doc", "missed"]
     )
-    (row,) = routed.rows
-    assert row.diagnosis == "routing_failed" and "missing.pdf" in row.routing_detail
+    assert [row.question_id for row in chosen.rows] == ["missed", "unmatched_doc"]
+    rows = {row.question_id: row for row in chosen.rows}
+    # Without a report the journal row is linked by text alone; nothing names a document.
+    assert (rows["unmatched_doc"].diagnosis, rows["unmatched_doc"].expected_doc) == (
+        "in_prompt_abstained",
+        NA,
+    )
+    assert rows["missed"].link == "text" and rows["missed"].diagnosis == "not_retrieved"
+    assert rows["missed"].expected_doc == NA
+
+    # A folder re-runs the doc resolution: the expected document is labelled again.
+    resolved = run_retrieval_testbench(
+        bench.db,
+        bench.questions,
+        folder=bench.root / "pdfs",
+        question_ids=["missed", "unmatched_doc"],
+    )
+    by_id = {row.question_id: row for row in resolved.rows}
+    (document,) = bench.result.documents
+    assert by_id["missed"].expected_doc == document.sha256
+    assert by_id["unmatched_doc"].expected_doc == NA
 
     with pytest.raises(ValueError, match="nope"):
         run_retrieval_testbench(bench.db, bench.questions, question_ids=["nope"])
     with pytest.raises(FileNotFoundError):
         run_retrieval_testbench(bench.root / "absent.sqlite", bench.questions)
+
+
+def test_routing_failed_is_left_for_a_question_that_was_never_asked(bench: Bench) -> None:
+    assert bench.result.eval is not None
+    cases = tuple(
+        case.model_copy(
+            update={
+                "verdict": "routing_failed",
+                "routing": "failed",
+                "failures": ("doc ['missing.pdf'] names no published document of this run",),
+            }
+        )
+        if case.case_id == "unmatched_doc"
+        else case
+        for case in bench.result.eval.cases
+    )
+    report = bench.result.model_copy(
+        update={"eval": bench.result.eval.model_copy(update={"cases": cases})}
+    )
+
+    rows = {
+        row.question_id: row
+        for row in run_retrieval_testbench(bench.db, bench.questions, report=report).rows
+    }
+
+    row = rows["unmatched_doc"]
+    assert row.diagnosis == "routing_failed" and "missing.pdf" in row.routing_detail
+    assert (row.audit_id, row.status, row.cross_document) == (NA, NA, NA)
 
 
 def test_the_bench_logs_nothing(bench: Bench, caplog: pytest.LogCaptureFixture) -> None:

@@ -456,12 +456,13 @@ def _answer_llm(tmp_path: Path) -> tuple[JsonCompletionClient, list[str]]:
 def test_a_light_question_set_is_answered_in_process_inside_a_running_event_loop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Every question searches every published document (ADR 0032); ``doc`` only labels."""
     folder = _two_documents(tmp_path, monkeypatch)
     questions = tmp_path / "questions.jsonl"
     rows: list[dict[str, object]] = [
         {"id": "named", "question": "What does page 2 say?", "doc": "meridian.pdf", "pages": "2"},
         {"id": "routed", "question": "What does Orion say on page 2?", "expected": "page 2"},
-        {"id": "unroutable", "question": "What does page 2 say?"},
+        {"id": "unnamed", "question": "What does page 2 say?"},
         {"id": "elsewhere", "question": "What does page 2 say?", "doc": "absent.pdf"},
     ]
     questions.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
@@ -474,27 +475,75 @@ def test_a_light_question_set_is_answered_in_process_inside_a_running_event_loop
     result = asyncio.run(notebook_cell())
 
     assert result.eval is not None and result.eval.format == "questions"
+    assert result.retrieval_scope == "all_documents"
     cases = {case.case_id: case for case in result.eval.cases}
     meridian, orion = (item.sha256 for item in result.documents)
-    assert (cases["named"].verdict, cases["named"].document_id) == ("answered", meridian)
-    assert cases["named"].cited_pages == (2,) and cases["named"].failures == ()
-    assert cases["named"].page_rank is not None
-    assert (cases["routed"].verdict, cases["routed"].document_id) == ("answered", orion)
-    assert cases["routed"].failures == ()
-    assert cases["unroutable"].verdict == "routing_failed"
-    assert "Document selection required" in cases["unroutable"].failures[0]
-    assert cases["elsewhere"].verdict == "routing_failed"
-    assert "no published document" in cases["elsewhere"].failures[0]
-    # The case record carries the question set's expected answer and the model's own prose.
+    # Nothing is left unrouted: every question reached the model over both documents.
+    assert [case.verdict for case in cases.values()] == ["answered"] * 4
+    assert {case.routing for case in cases.values()} == {"cross_document"}
+    assert {case.searched_documents for case in cases.values()} == {2}
+    assert all(case.answer and "page 2" in case.answer for case in cases.values())
+    assert all(case.cited_pages == (2,) for case in cases.values())
+    for case in cases.values():
+        envelope_documents = {
+            citation["document_sha256"]
+            for claim in case.envelope["claims"]
+            for citation in claim["citations"]
+        }
+        assert set(case.cited_documents) == envelope_documents <= {meridian, orion}
+    # ``doc`` is an evaluation label: resolved, it says whether the citation landed there.
+    assert cases["named"].expected_doc == meridian
+    assert cases["named"].cited_doc_hit is (meridian in cases["named"].cited_documents)
+    for unlabelled in ("routed", "unnamed", "elsewhere"):
+        assert cases[unlabelled].expected_doc is None
+        assert cases[unlabelled].cited_doc_hit is None
+    assert cases["routed"].cited_documents == (orion,) and cases["routed"].failures == ()
     assert cases["routed"].expected == "page 2" and cases["named"].expected is None
-    assert cases["named"].answer is not None and "page 2" in cases["named"].answer
-    assert cases["routed"].answer is not None and "page 2" in cases["routed"].answer
-    assert cases["unroutable"].answer is None and cases["elsewhere"].answer is None
-    # Only the two routed questions ever reached the model.
+    # One synthesis call per distinct prompt: the three identical questions replay one.
+    assert len(prompts) == 2 and result.live_calls.answer == 2
+    assert all(case.llm_live_calls <= 1 for case in cases.values())
+    assert result.eval.totals["routing_failed"] == 0
+    assert result.eval.totals["cross_document"] == 4
+    assert result.ok
+
+
+def test_restrict_to_question_doc_keeps_the_adr_0022_routing_for_comparison(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = _two_documents(tmp_path, monkeypatch)
+    questions = tmp_path / "questions.jsonl"
+    rows: list[dict[str, object]] = [
+        {"id": "named", "question": "What does page 2 say?", "doc": "meridian.pdf", "pages": "2"},
+        {"id": "unnamed", "question": "What does page 2 say?"},
+        {"id": "elsewhere", "question": "What does page 2 say?", "doc": "absent.pdf"},
+    ]
+    questions.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+    llm, prompts = _answer_llm(tmp_path)
+
+    result = run_folder_pipeline(
+        folder,
+        questions=questions,
+        ingestion_root=tmp_path / "ingestion",
+        max_live_calls_per_pdf=_PER_PDF,
+        build_tree=False,
+        embedder=_OFFLINE,
+        answer_llm=llm,
+        restrict_to_question_doc=True,
+    )
+
+    assert result.eval is not None and result.retrieval_scope == "question_doc"
+    cases = {case.case_id: case for case in result.eval.cases}
+    meridian, _ = (item.sha256 for item in result.documents)
+    assert (cases["named"].verdict, cases["named"].document_id) == ("answered", meridian)
+    assert (cases["named"].routing, cases["named"].searched_documents) == ("doc", 1)
+    assert cases["named"].page_rank is not None
+    # A question without ``doc`` cannot be restricted: it is answered across documents.
+    assert (cases["unnamed"].verdict, cases["unnamed"].routing) == ("answered", "cross_document")
+    assert cases["elsewhere"].verdict == "routing_failed"
+    assert cases["elsewhere"].routing == "failed"
+    assert "no published document" in cases["elsewhere"].failures[0]
+    assert cases["elsewhere"].answer is None
     assert len(prompts) == 2
-    assert result.live_calls.answer == 2
-    assert result.eval.totals["answered"] == 2 and result.eval.totals["routing_failed"] == 2
-    assert result.eval.metrics["judged"] == 1
     assert not result.ok
 
 

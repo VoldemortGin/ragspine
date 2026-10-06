@@ -2,11 +2,17 @@
 
 Read-only and model-free. It joins a question set to the answer journal
 (``answers-audit.sqlite``, ``adapters/answer_audit``) — and, when given, the run's
-``report.json`` — and reads off, per question: whether it was routed to a document, the
-pre-filters, where each retrieval channel (BM25 / vector / tree) and the fused ranking placed
-the expected page, whether that page reached the prompt (a seated member or its page window),
-how the answer came out, and one diagnosis in the order a RAG failure is debugged: routing →
-retrieval → prompt seats → verification / generation.
+``report.json`` — and reads off, per question: whether it searched every published document
+(ADR 0032) and which document its ``doc`` expects, the pre-filters, where each retrieval
+channel (BM25 / vector / tree) and the fused ranking placed the expected page, whether that
+page reached the prompt (a seated member or its page window), how the answer came out and
+whether its citations landed in the expected document, and one diagnosis in the order a RAG
+failure is debugged: routing → retrieval → prompt seats → verification / generation.
+
+Across several documents a page number names no page by itself: the expected pages are then
+looked for inside the expected document only, and a question whose ``doc`` resolves to no
+published document gets no page rank (``n/a``, counted) — the answer is still judged on
+``expected``. ``routing_failed`` is left for a question that was never asked at all.
 
 Linking: a journal row has no question id, so a question is matched to the **latest** row with
 its exact text, narrowed to the document the run report says it was routed to when there is
@@ -40,7 +46,6 @@ from enterprise_pdf_rag.adapters.folder_pipeline import (
     _hash_file,
     _member_pages,
     _plan_questions,
-    _unrouted_reason,
     discover_pdfs,
 )
 from enterprise_pdf_rag.adapters.question_docs import QuestionDocsCheck, QuestionSelectionMode
@@ -75,7 +80,7 @@ Diagnosis = Literal[
 # Debugging order: routing → retrieval → prompt seats → verification / generation.
 DIAGNOSES: Final[dict[Diagnosis, str]] = {
     "correct": "答对: 回答包含期望答案 (没有 expected 时: 引用页命中期望页)",
-    "routing_failed": "路由失败: 题目的 doc 没对上本次发布的文档, 根本没检索 → 查 doc 写法 / DOC_ALIASES",
+    "routing_failed": "没有检索: 这道题根本没问 (没有已发布文档 / 限定题目 doc 时 doc 对不上) → 查入库 / doc 写法",
     "not_retrieved": "没召回: 没有任何通道排到期望页 → 查解析 / 分块 / 索引文本",
     "retrieved_not_in_prompt": (
         "召回了但没进 prompt: 通道排到了期望页, 融合 / 选席后没进前 k 席或页窗口 → 查融合 / 页窗口"
@@ -98,13 +103,16 @@ class BenchRow:
 
     question_id: str
     doc: str
+    # The published document the question's ``doc`` resolves to: an evaluation label only.
+    expected_doc: str
     document_sha256: str
     expected_pages: str
     expected: str
     question: str
     audit_id: int | str
     link: str
-    routing_failed: Flag
+    # Searched every published document of the run as one corpus (ADR 0032).
+    cross_document: Flag
     routing_detail: str
     fusion_mode: str
     translated: Flag
@@ -126,6 +134,8 @@ class BenchRow:
     content_hit: Flag
     cited_pages: str
     cited_page_hit: Flag
+    # A verified citation landed in ``expected_doc``.
+    cited_doc_hit: Flag
     diagnosis: Diagnosis
     diagnosis_text: str
 
@@ -159,6 +169,7 @@ class _Journal:
     answer_text: str | None
     claims_verified: list[dict[str, Any]] | None
     prompt_user: str
+    searched_documents: list[str] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,6 +178,8 @@ class _Case:
     document_id: str | None
     failures: tuple[str, ...]
     abstain_reason: str | None
+    expected_doc: str | None = None
+    routing: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,6 +187,7 @@ class _Entry:
     member_id: str
     page: int | None
     ranks: dict[str, int | None]
+    document: str = ""
 
 
 _COLUMNS_READ: Final = (
@@ -193,6 +207,7 @@ _COLUMNS_READ: Final = (
     "answer_text",
     "claims_verified",
     "prompt_user",
+    "searched_documents",
 )
 
 
@@ -213,8 +228,9 @@ def run_retrieval_testbench(
     ``questions`` is a ``retrieval_only.load_questions`` set. The selection mirrors
     ``run_folder_pipeline``: ``question_ids`` wins, else ``max_questions`` (``"first"`` N, or
     ``"first_matched"`` given ``folder``). ``report`` (the run's ``report.json`` or its
-    ``FolderPipelineResult``) says which questions went unrouted and which document each was
-    sent to; without it, ``folder`` + ``doc_aliases`` re-run the read-only doc resolution.
+    ``FolderPipelineResult``) says which questions went unasked, which document each answer
+    named and which document each ``doc`` expects; without it, ``folder`` + ``doc_aliases``
+    re-run the read-only doc resolution for the expected document.
     ``ingestion_root`` maps member ids to pages for journal rows written before the ``ranked``
     column (it scans the published catalog; no model). The returned rows carry question,
     expected and answer text: write them only to the run's own report directory, never to a
@@ -237,9 +253,15 @@ def run_retrieval_testbench(
     rows: list[BenchRow] = []
     tallies: Counter[str] = Counter()
     ranks: dict[str, list[tuple[int | None, int | None]]] = {"prompt": [], "fused": []}
+    expected = _expected_docs(selected, cases, check)
     for question in selected:
         row, prompt_ranks, fused_ranks = _row(
-            question, cases.get(question.id), journal, check, legacy_pages, tallies
+            question,
+            cases.get(question.id),
+            journal,
+            expected.get(question.id),
+            legacy_pages,
+            tallies,
         )
         rows.append(row)
         if prompt_ranks is not None:
@@ -375,9 +397,46 @@ def _report_cases(report: Path | FolderPipelineResult | None) -> dict[str, _Case
     if result.eval is None:
         return {}
     return {
-        case.case_id: _Case(case.verdict, case.document_id, case.failures, case.abstain_reason)
+        case.case_id: _Case(
+            case.verdict,
+            case.document_id,
+            case.failures,
+            case.abstain_reason,
+            case.expected_doc,
+            case.routing,
+        )
         for case in result.eval.cases
     }
+
+
+def _expected_docs(
+    questions: Sequence[BatchQuestion],
+    cases: Mapping[str, _Case],
+    check: QuestionDocsCheck | None,
+) -> dict[str, str]:
+    """question id → the document sha256 its ``doc`` names exactly one of; labels only."""
+    expected: dict[str, str] = {}
+    digests: dict[Path, str] = {}
+    for question in questions:
+        case = cases.get(question.id)
+        if case is not None:
+            if case.expected_doc:
+                expected[question.id] = case.expected_doc
+            continue
+        if check is None or not question.doc:
+            continue
+        named: set[str] = set()
+        for doc in question.doc:
+            resolution = check.resolution(doc)
+            if resolution is None or resolution.pdf is None:
+                continue
+            pdf = Path(check.folder) / resolution.pdf
+            if pdf not in digests:
+                digests[pdf] = _hash_file(pdf)
+            named.add(digests[pdf])
+        if len(named) == 1:
+            expected[question.id] = named.pop()
+    return expected
 
 
 def _read_journal(path: Path, questions: set[str]) -> dict[str, list[_Journal]]:
@@ -428,6 +487,7 @@ def _journal(row: Sequence[object]) -> _Journal:
         answer_text=_text(values["answer_text"]),
         claims_verified=claims,
         prompt_user=str(values["prompt_user"] or ""),
+        searched_documents=_json_list(values["searched_documents"]),
     )
 
 
@@ -452,22 +512,21 @@ def _row(
     question: BatchQuestion,
     case: _Case | None,
     journal: Mapping[str, list[_Journal]],
-    check: QuestionDocsCheck | None,
+    expected_doc: str | None,
     legacy_pages: Mapping[str, int],
     tallies: Counter[str],
 ) -> tuple[BenchRow, tuple[int | None, int | None] | None, tuple[int | None, int | None] | None]:
-    groups = question.page_groups
     expected = question.expected
-    if not groups:
+    if not question.page_groups:
         tallies["pages"] += 1
     if not expected:
         tallies["expected"] += 1
-    unrouted = _unrouted(question, case, check)
+    unrouted = _unrouted(case)
     record, link = (None, NA) if unrouted is not None else _link(question, case, journal)
     if record is None:
         if unrouted is None:
             tallies["audit_record"] += 1
-        missed = (None, None) if groups else None
+        missed = (None, None) if question.page_groups else None
         if unrouted is not None:
             diagnosis: Diagnosis = "routing_failed"
         elif case is not None and case.abstain_reason == "no_relevant_member":
@@ -477,31 +536,51 @@ def _row(
         # The prompt metrics count every unanswered question as a miss, as run-folder's report
         # does; the ranking metrics only a ranking that is known to have come back empty.
         empty = missed if diagnosis == "not_retrieved" else None
-        return _empty_row(question, case, unrouted, diagnosis), missed, empty
-    entries, scope = _entries(record, legacy_pages)
-    if scope != "full":
+        return _empty_row(question, case, unrouted, diagnosis, expected_doc), missed, empty
+    cross = bool(record.searched_documents)
+    # Across documents the expected pages exist only inside the expected document; without
+    # one they name no page at all (ADR 0032).
+    scope: tuple[str, ...] = (expected_doc,) if cross and expected_doc else ()
+    groups = question.page_groups if not cross or expected_doc else ()
+    if question.page_groups and not groups:
+        tallies["expected_doc"] += 1
+    entries, ranking = _entries(record, legacy_pages)
+    if ranking != "full":
         tallies["ranked"] += 1
-        if scope == NA:
+        if ranking == NA:
             tallies["member_pages"] += 1
-    by_member = {entry.member_id: entry.page for entry in entries}
-    prompt_pages = [by_member.get(member, legacy_pages.get(member)) for member in record.member_ids]
-    prompt_known = all(page is not None for page in prompt_pages)
-    window_pages = {int(window["page_index"]) + 1 for window in record.page_windows}
-    complete = scope == "full"
+    by_member = {entry.member_id: entry for entry in entries}
+    prompt_hits = [
+        (
+            by_member[member].document if member in by_member else record.document_sha256,
+            by_member[member].page if member in by_member else legacy_pages.get(member),
+        )
+        for member in record.member_ids
+    ]
+    prompt_known = all(page is not None for _, page in prompt_hits)
+    window_pages = {
+        int(window["page_index"]) + 1
+        for window in record.page_windows
+        if not scope or window.get("document_sha256", record.document_sha256) in scope
+    }
+    complete = ranking == "full"
 
     channel: dict[str, Rank] = {
-        name: _channel_rank(entries, key, groups, complete) for name, key in _CHANNEL_KEYS.items()
+        name: _channel_rank(entries, key, groups, complete, scope)
+        for name, key in _CHANNEL_KEYS.items()
     }
-    paged = [(record.document_sha256, entry.page) for entry in entries if entry.page is not None]
-    fused = _ranks(paged, groups, complete)
-    prompt_hits = [(record.document_sha256, page) for page in prompt_pages if page is not None]
-    prompt = _ranks(prompt_hits, groups, prompt_known)
+    paged = [(entry.document, entry.page) for entry in entries if entry.page is not None]
+    fused = _ranks(paged, groups, complete, scope)
+    known = [(document, page) for document, page in prompt_hits if page is not None]
+    prompt = _ranks(known, groups, prompt_known, scope)
 
     in_prompt: Flag
     window_hit: Flag = NA
     if groups:
-        seen = {page for page in prompt_pages if page is not None} | window_pages
-        in_prompt = True if _covers(seen, groups) else (False if prompt_known else NA)
+        seen = {page for document, page in known if not scope or document in scope}
+        in_prompt = (
+            True if _covers(seen | window_pages, groups) else (False if prompt_known else NA)
+        )
         if window_pages:
             window_hit = _covers(window_pages, groups)
     elif expected:
@@ -513,8 +592,17 @@ def _row(
     answer = record.answer_text or ""
     answered = record.status == "answered"
     hit: Flag = NA if not expected else (answered and content_hit(answer, expected))
-    cited = _cited(record.claims_verified)
-    cited_hit: Flag = NA if not groups or cited is None else _covers(set(cited), groups)
+    cited = _cited(record.claims_verified, record.document_sha256)
+    cited_hit: Flag = (
+        NA
+        if not groups or cited is None
+        else _covers({page for document, page in cited if not scope or document in scope}, groups)
+    )
+    cited_doc_hit: Flag = (
+        NA
+        if not expected_doc or not cited
+        else any(document == expected_doc for document, _ in cited)
+    )
     correct: Flag = NA
     if answered:
         correct = hit if expected else cited_hit
@@ -530,19 +618,20 @@ def _row(
     row = BenchRow(
         question_id=question.id,
         doc=_doc(question),
+        expected_doc=expected_doc or NA,
         document_sha256=record.document_sha256 or NA,
-        expected_pages=_pages(groups),
+        expected_pages=_pages(question.page_groups),
         expected=expected or NA,
         question=question.question,
         audit_id=record.id,
         link=link,
-        routing_failed=False,
+        cross_document=cross,
         routing_detail="",
         fusion_mode=record.fusion_mode or NA,
         translated=record.translated_question is not None,
         filters=_filters(record.filters_applied),
         filters_relaxed=record.filters_relaxed,
-        ranking=scope,
+        ranking=ranking,
         bm25_rank=channel["bm25"],
         vector_rank=channel["vector"],
         tree_rank=channel["tree"],
@@ -556,8 +645,9 @@ def _row(
         abstain_reason=record.abstain_reason or record.error or "",
         answer=answer,
         content_hit=hit,
-        cited_pages=NA if cited is None else ",".join(str(page) for page in cited),
+        cited_pages=NA if cited is None else ",".join(_unique_pages(cited)),
         cited_page_hit=cited_hit,
+        cited_doc_hit=cited_doc_hit,
         diagnosis=diagnosis,
         diagnosis_text=DIAGNOSES[diagnosis],
     )
@@ -591,39 +681,36 @@ def _diagnose(
     return "not_in_prompt"
 
 
-def _unrouted(
-    question: BatchQuestion, case: _Case | None, check: QuestionDocsCheck | None
-) -> str | None:
-    """Why this question was never routed to a document, or ``None`` when it was / unknown."""
-    if case is not None:
-        if case.verdict != "routing_failed":
-            return None
-        return case.failures[0] if case.failures else "routing_failed"
-    if check is None or not question.doc:
+def _unrouted(case: _Case | None) -> str | None:
+    """Why this question was never asked (the run report says so), or ``None``."""
+    if case is None or case.verdict != "routing_failed":
         return None
-    for doc in question.doc:
-        resolution = check.resolution(doc)
-        if resolution is None or resolution.status != "matched":
-            return _unrouted_reason(question, check) or "routing_failed"
-    return None
+    return case.failures[0] if case.failures else "routing_failed"
 
 
 def _empty_row(
-    question: BatchQuestion, case: _Case | None, unrouted: str | None, diagnosis: Diagnosis
+    question: BatchQuestion,
+    case: _Case | None,
+    unrouted: str | None,
+    diagnosis: Diagnosis,
+    expected_doc: str | None,
 ) -> BenchRow:
-    """A question with no journal row: unrouted, retrieved nothing, or never asked."""
+    """A question with no journal row: never asked, retrieved nothing, or no record."""
     missed: Rank = INF if question.page_groups else NA
     asked = diagnosis == "not_retrieved"
     return BenchRow(
         question_id=question.id,
         doc=_doc(question),
+        expected_doc=expected_doc or NA,
         document_sha256=NA,
         expected_pages=_pages(question.page_groups),
         expected=question.expected or NA,
         question=question.question,
         audit_id=NA,
         link=NA,
-        routing_failed=True if unrouted is not None else (False if case is not None else NA),
+        cross_document=NA
+        if case is None or unrouted is not None
+        else case.routing == "cross_document",
         routing_detail=unrouted or "",
         fusion_mode=NA,
         translated=NA,
@@ -645,6 +732,7 @@ def _empty_row(
         content_hit=NA if not question.expected or diagnosis == "no_record" else False,
         cited_pages=NA,
         cited_page_hit=NA,
+        cited_doc_hit=NA,
         diagnosis=diagnosis,
         diagnosis_text=DIAGNOSES[diagnosis],
     )
@@ -662,16 +750,31 @@ def _entries(record: _Journal, legacy_pages: Mapping[str, int]) -> tuple[list[_E
         index = item.get("page_index")
         page = int(index) + 1 if isinstance(index, int) else legacy_pages.get(member)
         ranks = {key: _optional_int(item.get(key)) for key in _CHANNEL_KEYS.values()}
-        entries.append(_Entry(member, page, ranks))
+        document = item.get("document_sha256")
+        entries.append(
+            _Entry(
+                member,
+                page,
+                ranks,
+                document if isinstance(document, str) else record.document_sha256,
+            )
+        )
     if scope == "head" and not any(entry.page is not None for entry in entries):
         scope = NA
     return entries, scope
 
 
 def _channel_rank(
-    entries: Sequence[_Entry], key: str, groups: Sequence[frozenset[int]], complete: bool
+    entries: Sequence[_Entry],
+    key: str,
+    groups: Sequence[frozenset[int]],
+    complete: bool,
+    docs: Sequence[str] = (),
 ) -> Rank:
-    """The channel's own seat for the expected pages: per page group the best seat, worst group."""
+    """The channel's own seat for the expected pages: per page group the best seat, worst group.
+
+    ``docs`` keeps the expected document's pages when the ranking spans several documents.
+    """
     if not groups or not any(entry.ranks[key] is not None for entry in entries):
         return NA
     worst = 0
@@ -679,7 +782,9 @@ def _channel_rank(
         seats = [
             seat
             for entry in entries
-            if entry.page in group and (seat := entry.ranks[key]) is not None
+            if entry.page in group
+            and (not docs or entry.document in docs)
+            and (seat := entry.ranks[key]) is not None
         ]
         if not seats:
             return INF if complete else NA
@@ -688,13 +793,16 @@ def _channel_rank(
 
 
 def _ranks(
-    hits: Sequence[tuple[str, int]], groups: Sequence[frozenset[int]], complete: bool
+    hits: Sequence[tuple[str, int]],
+    groups: Sequence[frozenset[int]],
+    complete: bool,
+    docs: Sequence[str] = (),
 ) -> tuple[Rank, Rank]:
     if not groups:
         return NA, NA
     miss = INF if complete else NA
-    rank = gold_rank(hits, groups)
-    page_rank = gold_rank(hits, groups, distinct=True)
+    rank = gold_rank(hits, groups, docs=docs)
+    page_rank = gold_rank(hits, groups, docs=docs, distinct=True)
     return (miss if rank is None else rank), (miss if page_rank is None else page_rank)
 
 
@@ -702,16 +810,30 @@ def _covers(pages: set[int], groups: Sequence[frozenset[int]]) -> bool:
     return all(pages & group for group in groups)
 
 
-def _cited(claims: list[dict[str, Any]] | None) -> list[int] | None:
+def _cited(claims: list[dict[str, Any]] | None, document: str) -> list[tuple[str, int]] | None:
+    """(document, 1-based page) of every verified citation, in first-citation order."""
     if claims is None:
         return None
-    cited: list[int] = []
+    cited: list[tuple[str, int]] = []
     for claim in claims:
         for citation in claim.get("citations", ()):
             page = citation.get("page_index")
-            if isinstance(page, int) and page + 1 not in cited:
-                cited.append(page + 1)
+            owner = citation.get("document_sha256")
+            key = (
+                owner if isinstance(owner, str) else document,
+                page + 1 if isinstance(page, int) else 0,
+            )
+            if isinstance(page, int) and key not in cited:
+                cited.append(key)
     return cited
+
+
+def _unique_pages(cited: Sequence[tuple[str, int]]) -> list[str]:
+    pages: list[str] = []
+    for _, page in cited:
+        if str(page) not in pages:
+            pages.append(str(page))
+    return pages
 
 
 def _without_question(prompt: str, question: str) -> str:

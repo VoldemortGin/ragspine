@@ -188,6 +188,9 @@ def test_the_check_lists_matches_misses_and_questions_without_doc_with_the_ways_
     table = describe(check)
     assert "'meridian_2024' → Meridian 2024.pdf  [normalized]" in table
     assert "'Meridian 2023': 文件夹里找不到" in table and "Meridian 2024.pdf (0." in table
+    # A miss is only a missing label (ADR 0032): the question is still answered across PDFs.
+    assert "检索本身在所有已入库 PDF 中进行" in table
+    assert "将改为在所有已入库 PDF 中跨文档检索作答" in table
     message = unresolved_message(check)
     assert message is not None
     for part in ("DOC_ALIASES", "ONLY_QUESTION_DOCS", "ON_UNMATCHED_DOCS", "q4", "q2"):

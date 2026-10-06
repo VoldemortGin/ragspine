@@ -39,7 +39,7 @@ BENCH_QUESTIONS: dict[str, dict[str, object]] = {
     "abstained": {"question": "What was Net profit in 1H26?", "pages": 3, "expected": "567"},
     "buried": {"question": "dividend payout", "pages": DIVIDEND_PAGE, "expected": "35 cents"},
     "missed": {"question": "Sales 2024", "pages": 1, "expected": "999"},
-    "unrouted": {"question": "What was revenue?", "pages": 1, "doc": "missing.pdf"},
+    "unmatched_doc": {"question": "What was revenue?", "pages": 1, "doc": "missing.pdf"},
     "no_pages": {"question": "What was the net margin in 1H26?", "expected": "12%"},
     "bare": {"question": "How is ROE defined?"},
 }

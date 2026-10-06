@@ -131,6 +131,10 @@ type CaseVerdict = Literal[
     "http_error",
 ]
 type Progress = Callable[[str, dict[str, object]], None]
+# Where a question was searched (ADR 0032): every published document of the run, the one
+# document its ``doc`` names (``restrict_to_question_doc``), or nowhere (not asked).
+type CaseRouting = Literal["cross_document", "doc", "failed"]
+type RetrievalScope = Literal["all_documents", "question_doc"]
 
 GOLD_FORMAT: Final = "nl-answers-gold-v1"
 _CHAT_PATH = "/v1/chat/completions"
@@ -246,6 +250,17 @@ class EvalCase(BoundaryModel):
     llm_live_calls: int = 0
     elapsed_ms: float = 0.0
     envelope: dict[str, Any] = Field(default_factory=dict)
+    # ADR 0032: where the question was searched, and how many published documents that was.
+    routing: CaseRouting = "doc"
+    searched_documents: int = 0
+    # The documents the verified citations were read from, in first-citation order.
+    cited_documents: tuple[str, ...] = ()
+    # Evaluation labels only — they never steer retrieval: the published document the
+    # question's ``doc`` resolves to (None when it names none, several or nothing), and
+    # whether a verified citation landed in it (None when there is no such document or no
+    # citation). ``page_rank`` is judged inside that document whenever several were searched.
+    expected_doc: str | None = None
+    cited_doc_hit: bool | None = None
 
 
 class EvalSummary(BoundaryModel):
@@ -280,6 +295,9 @@ class FolderPipelineResult(BoundaryModel):
     # The ingest mode of this run (ADR 0025) and the page layout it used (ADR 0028).
     ingest_mode: IngestMode = "full"
     layout_policy: LayoutPolicy = "model"
+    # What a light question set's answers searched (ADR 0032): every published document of
+    # the run (the default), or only the document each question's ``doc`` names.
+    retrieval_scope: RetrievalScope = "all_documents"
 
     @property
     def ok(self) -> bool:
@@ -894,13 +912,15 @@ def _ranks(
     envelope: dict[str, Any],
     groups: Sequence[frozenset[int]],
     member_pages: dict[str, tuple[str, int]],
+    docs: Sequence[str] = (),
 ) -> tuple[int | None, int | None]:
+    """Rank of the expected pages among the prompt members; ``docs`` keeps one document's pages."""
     hits = [
         member_pages[member_id]
         for member_id in envelope.get("member_ids", ())
         if member_id in member_pages
     ]
-    return gold_rank(hits, groups), gold_rank(hits, groups, distinct=True)
+    return gold_rank(hits, groups, docs=docs), gold_rank(hits, groups, docs=docs, distinct=True)
 
 
 def _gold_groups(case: NlGoldCase) -> tuple[frozenset[int], ...]:
@@ -1027,6 +1047,16 @@ def _unrouted_reason(question: BatchQuestion, check: QuestionDocsCheck | None) -
     return "; ".join(reasons)
 
 
+def _cited_documents(envelope: dict[str, Any]) -> tuple[str, ...]:
+    cited: list[str] = []
+    for claim in envelope.get("claims", ()):
+        for citation in claim.get("citations", ()):
+            document = citation.get("document_sha256")
+            if isinstance(document, str) and document not in cited:
+                cited.append(document)
+    return tuple(cited)
+
+
 def _eval_questions(
     questions: Sequence[BatchQuestion],
     *,
@@ -1036,22 +1066,35 @@ def _eval_questions(
     member_pages: dict[str, tuple[str, int]],
     progress: Progress | None,
     check: QuestionDocsCheck | None = None,
+    restrict_to_question_doc: bool = False,
 ) -> EvalSummary:
+    """Ask every question; by default across every published document of the run (ADR 0032).
+
+    A question's ``doc`` then only labels the evaluation (``expected_doc``, ``cited_doc_hit``,
+    the page rank judged inside it). ``restrict_to_question_doc`` restores the routing of ADR
+    0022 for comparison: a question is asked of the one document its ``doc`` names, and one
+    naming none or several is ``routing_failed``.
+    """
     cases: list[EvalCase] = []
     ranks: list[tuple[int | None, int | None]] = []
     only = next(iter(mounted)) if len(mounted) == 1 else None
     for question in questions:
         groups = question.page_groups
+        named: set[str] = (
+            set().union(*(_routed_shas(doc, check, documents) for doc in question.doc)) & mounted
+            if question.doc
+            else set()
+        )
+        expected_doc = next(iter(named)) if len(named) == 1 else None
         document: str | None = only
         unrouted: str | None = None if mounted else "no document of this run is published"
-        if question.doc and unrouted is None:
-            resolved = set().union(*(_routed_shas(doc, check, documents) for doc in question.doc))
-            if len(resolved & mounted) == 1:
-                document = next(iter(resolved & mounted))
+        if restrict_to_question_doc and question.doc and unrouted is None:
+            if expected_doc is not None:
+                document = expected_doc
             else:
                 unrouted = (
                     f"doc {list(question.doc)} names "
-                    f"{'no' if not resolved & mounted else 'more than one'} published document "
+                    f"{'no' if not named else 'more than one'} published document "
                     "of this run"
                 )
                 reason = _unrouted_reason(question, check)
@@ -1066,6 +1109,8 @@ def _eval_questions(
                     verdict="routing_failed",
                     failures=(unrouted or "no published document",),
                     expected=question.expected,
+                    routing="failed",
+                    expected_doc=expected_doc,
                 )
             )
             if groups:
@@ -1075,7 +1120,10 @@ def _eval_questions(
             "model": "enterprise-pdf-rag",
             "messages": [{"role": "user", "content": question.question}],
         }
-        if document is not None:
+        across = not restrict_to_question_doc and len(mounted) > 1
+        if across:
+            body["cross_document"] = True
+        elif document is not None:
             body["document"] = document
         started = perf_counter()
         status_code, response = post(body)
@@ -1085,16 +1133,20 @@ def _eval_questions(
         failures: list[str] = []
         page_rank: int | None = None
         answer: str | None = None
+        # Across several documents a page number alone names no page: it is judged inside the
+        # expected document, and not at all when the question names none (ADR 0032).
+        judged = bool(groups) and (not across or expected_doc is not None)
         if status_code != 200 or not envelope:
             verdict = "routing_failed" if status_code == 422 else "http_error"
             failures.append(f"HTTP {status_code}: {json.dumps(response, ensure_ascii=False)[:200]}")
-            if groups:
+            if judged:
                 ranks.append((None, None))
         else:
             answered = envelope.get("status") == "answered"
             verdict = "answered" if answered else "abstained"
-            if groups:
-                rank, page_rank = _ranks(envelope, groups, member_pages)
+            if judged:
+                scope = (expected_doc,) if across and expected_doc is not None else ()
+                rank, page_rank = _ranks(envelope, groups, member_pages, scope)
                 ranks.append((rank, page_rank))
             expects = bool(groups) or bool(question.expected)
             if not answered and expects:
@@ -1103,6 +1155,13 @@ def _eval_questions(
             answer = prose
             if answered and question.expected and not content_hit(prose, question.expected):
                 failures.append(f"answer does not contain the expected {question.expected!r}")
+        cited = _cited_documents(envelope)
+        # A question without ``doc`` is answered across documents even when restricted.
+        routing: CaseRouting = (
+            "cross_document"
+            if not restrict_to_question_doc or envelope.get("searched_documents")
+            else "doc"
+        )
         cases.append(
             EvalCase(
                 case_id=question.id,
@@ -1120,6 +1179,12 @@ def _eval_questions(
                 llm_live_calls=int(envelope.get("llm_live_calls") or 0),
                 elapsed_ms=elapsed_ms,
                 envelope=envelope,
+                routing=routing,
+                searched_documents=len(envelope.get("searched_documents") or ())
+                or (1 if envelope else 0),
+                cited_documents=cited,
+                expected_doc=expected_doc,
+                cited_doc_hit=None if expected_doc is None or not cited else expected_doc in cited,
             )
         )
         _emit(progress, "eval_case", case_id=question.id, verdict=verdict)
@@ -1131,6 +1196,7 @@ def _eval_questions(
             for name in ("answered", "abstained", "routing_failed", "http_error")
         },
         "with_failures": sum(bool(case.failures) for case in cases),
+        "cross_document": sum(case.routing == "cross_document" for case in cases),
     }
     return EvalSummary(
         format="questions", totals=totals, metrics=_metrics(ranks), cases=tuple(cases)
@@ -1280,10 +1346,17 @@ def _markdown(result: FolderPipelineResult) -> str:
         ]
     lines += _ingest_count_lines(result)
     if result.eval is not None:
+        scope = (
+            "every published document of this run; a question's `doc` only labels the "
+            "evaluation (expected_doc / cited_doc_hit)"
+            if result.retrieval_scope == "all_documents"
+            else "the one published document each question's `doc` names"
+        )
         lines += [
             "",
             f"## Evaluation ({result.eval.format})",
             "",
+            *([f"- retrieval scope: {scope}"] if result.eval.format == "questions" else []),
             f"- totals: `{json.dumps(result.eval.totals)}`",
             f"- metrics: `{json.dumps(result.eval.metrics)}`",
             "",
@@ -1323,6 +1396,7 @@ def run_folder_pipeline(
     only_question_docs: bool = False,
     doc_aliases: Mapping[str, str] | None = None,
     on_unmatched_docs: Literal["error", "skip"] = "error",
+    restrict_to_question_doc: bool = False,
     continue_on_error: bool = True,
     report_dir: Path | None = None,
     embedder: EmbeddingPort | None = None,
@@ -1343,14 +1417,18 @@ def run_folder_pipeline(
     Before any ingest, model call or write, every reference the asked questions make is
     resolved against the folder (``adapters/question_docs.py``: alias, exact name, stem, sha
     prefix, normalized name; never a near miss) and reported as ``question_docs`` / the
-    ``question_docs_resolved`` event; answers are routed by that same resolution.
+    ``question_docs_resolved`` event. That resolution decides what ``only_question_docs``
+    ingests and labels the evaluation (``EvalCase.expected_doc`` / ``cited_doc_hit``); it does
+    not steer the answer: every light question is asked across every published document of
+    the run (ADR 0032). ``restrict_to_question_doc=True`` routes each question to the one
+    document its ``doc`` names instead (ADR 0022), for comparison.
     ``doc_aliases`` maps a reference as the question set writes it to a file name / stem /
     sha prefix naming exactly one PDF (else ``QuestionDocsError``). ``only_question_docs``
     (with a question set) ingests only the PDFs those questions name; every other PDF is
     ``skipped_not_referenced`` and, unless a reference is a sha, never read. With it, a
     reference naming no PDF or several, or a light question without ``doc``, is a
-    ``QuestionDocsError`` before any work (``on_unmatched_docs="error"``) or is left out of
-    the selection and answered as ``routing_failed`` with the reason (``"skip"``).
+    ``QuestionDocsError`` before any work (``on_unmatched_docs="error"``) or is let through
+    (``"skip"``) and answered across the documents that were ingested.
 
     ``max_live_calls_per_pdf="auto"`` gives each PDF ``auto_live_call_budget(selected pages)``
     = pages * ``AUTO_CALLS_PER_PAGE`` + ``AUTO_CALLS_BASE``, capped at ``MAX_INGEST_LIVE_CALLS``,
@@ -1569,6 +1647,7 @@ def run_folder_pipeline(
                 member_pages=member_pages,
                 progress=progress,
                 check=check,
+                restrict_to_question_doc=restrict_to_question_doc,
             )
         answer_total = llm.live_call_count - before
         answer_client = llm
@@ -1599,6 +1678,7 @@ def run_folder_pipeline(
         question_docs=check,
         ingest_mode=plan.mode,
         layout_policy=plan.layout,
+        retrieval_scope="question_doc" if restrict_to_question_doc else "all_documents",
     )
     if report_dir is not None:
         target = report_dir.expanduser().resolve()
