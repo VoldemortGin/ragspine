@@ -4,6 +4,7 @@
 
 Submodules:
     table_grid_proof.py — 由页面划线证明原生表格网格;未证明的一律保持 pending。
+    table_inferred_grid.py — 无划线网格的表格由结构模型推断网格,格子文字取自文本层,网格保持 pending(ADR 00NN)。
     table_models.py — 不可变表格网格,把结构不确定与空单元格区分开。
     table_rows.py — 网格未证明的表格区域按印刷行逐字转写(ADR 0027),不声称任何结构。
     table_transcription.py — 逐字表格转写:每个单元格必须逐字复现其源出现。
