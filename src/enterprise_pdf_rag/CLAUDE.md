@@ -111,10 +111,15 @@ adapters/     every SDK and I/O: pdfspine (every source PDF opens through pdf_pa
               ingest_mode.py (ADR 0025: `run_folder_pipeline(ingest_mode="full"|"lite")`,
               default full = byte-identical; `IngestPlan` holds one field per switch — image /
               formula calls, chart description from IR, deterministic page metadata, default
-              tree, review exports, `unverified_tables_as_rows` (ADR 0027: lite on, full off)
+              tree, review exports, `unverified_tables_as_rows` (ADR 0027: lite on, full off),
+              `unverified_table_structure` (ADR 00NN: `"rows"` in both presets; `"tsr"` gives a
+              no-grid Table a SLANet-plus grid — pdfspine_tsr.py, local ONNX, weights under
+              `PDFSPINE_ONNX_MODELS`, refused up front without them — kept PENDING, scope
+              `tsr-inferred-grid-v1`, re-run and compared on every resolve, rows on fallback)
               and `layout` (`make_partitioner`: `"model"` in both presets,
               `"deterministic-text-pages"` only when asked — ADR 0028); `ingest_pdf` /
-              `run_folder_pipeline` take `layout_policy` / `unverified_tables_as_rows` as
+              `run_folder_pipeline` take `layout_policy` / `unverified_tables_as_rows` /
+              `unverified_table_structure` as
               one-switch overrides of the preset (`None` keeps it); `published_ingest_mode` reads a
               snapshot's mode back from its page-metadata producer; lite after full sends no call,
               full after lite only the skipped ones; `export_document_review` in pdf_ingestion.py

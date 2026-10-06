@@ -33,7 +33,8 @@ metadata/     zero-model derivations — page_metadata.py / periods.py / documen
               two cut rules, leaves tiling the document as a type invariant — ADR 0019)
 objects/      typed_ir.py (object payloads); tables/ (table_grid_proof.py, the ruled-grid proof —
               ADR 0014; table_transcription.py, the literal transcription rule; table_rows.py, verbatim
-              printed rows of a region with no detected grid — ADR 0027); diagrams/ and
+              printed rows of a region with no detected grid — ADR 0027; table_inferred_grid.py,
+              a model-inferred grid filled from the text layer and kept pending — ADR 00NN); diagrams/ and
               formulas/ (the model-free proofs and their deterministic projections — ADR 0015)
 figures/      pure figure / chart pipeline — same-SVG two branches, snapshot binding,
               source_label_match.py (the ADR 0016 window rule: one to three adjacent source
@@ -79,7 +80,11 @@ to `extraction/evidence/adapters/`.
   A table where nothing is detected at all (unruled / frame-only) is left out unless the
   ingest plan's `unverified_tables_as_rows` (on in lite, off in full) reads it as verbatim printed rows (`tables/table_rows.py`,
   ADR 0027): rows are bbox geometry only, re-derived on every resolve, cited as quotes — never
-  cells, columns or headers.
+  cells, columns or headers. With `unverified_table_structure="tsr"` (ADR 00NN) such a table
+  first gets a grid from a structure model (`tables/table_inferred_grid.py`): the model gives only
+  slots and spans, every cell text and coordinate comes from the text layer, the `TableIR` stays
+  `PENDING` (scope `tsr-inferred-grid-v1`), the model is re-run and the IR compared on every
+  resolve, and only exact `cell` claims cite it; a self-check failure falls back to the rows.
 - **A retrievable diagram or formula is proved without a model** (ADR 0015) — `DIAGRAM` and
   `FORMULA` objects reach the index only through a pure, replayable proof that runs beside (never
   inside) the two model branches: a node label must equal its cited span verbatim and its bbox must
