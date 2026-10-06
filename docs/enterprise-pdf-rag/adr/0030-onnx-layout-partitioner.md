@@ -1,9 +1,10 @@
-# ADR 00NN: 本地 ONNX 版面切分器（pdfspine PP-DocLayoutV3）
+# ADR 0030: 本地 ONNX 版面切分器（pdfspine PP-DocLayoutV3）
 
-Status: Draft（分支 `feat/onnx-layout-partitioner`；编号 00NN 为占位，集成时定号）, 2026-10-06,
-as an **explicit choice only**: no library preset selects it（两个 `ingest_mode` 预设仍是
-`IngestPlan.layout="model"`）。在 ADR 0028（确定性文本页切分）之上再加一层：确定性分诊
-回退的"含图页"不再直接花一次带 PNG 的 LLM 版面调用，而是先用 pdfspine 0.11.0 内置的本地
+Status: Accepted, 2026-10-06, as an **explicit choice only**: no library preset selects it
+（两个 `ingest_mode` 预设仍是 `IngestPlan.layout="model"`；权重许可门与长财报精度门未过，见
+下文「许可门与进默认路径的条件」）。run-folder notebook 的 `LAYOUT_POLICY = "auto"` 只在用户
+自己配置了权重（`APP_ONNX_LAYOUT_MODEL`）且装了 onnxruntime 时选它（见 Integration）。
+在 ADR 0028（确定性文本页切分）之上再加一层：确定性分诊回退的"含图页"不再直接花一次带 PNG 的 LLM 版面调用，而是先用 pdfspine 0.11.0 内置的本地
 ONNX 版面模型（PP-DocLayoutV3，进程内推理、零网络、零 LLM 调用）切分，只有 ONNX 也拿不准
 的页才回退模型版面。Amends [ADR 0025](0025-lite-ingest-mode.md) 的 `LayoutPolicy` 与
 [ADR 0028](0028-deterministic-text-page-partition.md) 的组合切分器；chart IR 仍只由模型
@@ -106,8 +107,8 @@ deterministic-text-pages（纯文字页, 零调用零推理, ADR 0028 原样）
   权重不进 wheel、不进仓库，只按部署文档放置。
 - 精度门：进任何预设前须在**真实长篇财报**（几百页、文字表格为主）上重跑本对照（漏图
   逐例、回退率、省调用比例）；AIA 20 页 deck 不构成长财报证据。
-- 在那之前：两个库预设保持 `layout="model"`；notebook 由集成步骤决定是否默认（建议见
-  集成备注）。
+- 在那之前：两个库预设保持 `layout="model"`；notebook 的 `"auto"` 只在用户自己配好权重与
+  onnxruntime 时选它（见 Integration）。
 
 ## Databricks 部署
 
@@ -117,14 +118,22 @@ pp_doc_layoutv3.onnx`），`APP_ONNX_LAYOUT_MODEL` 填该绝对路径（或其�
 （本分支同步了相应小节）。**未在真实 Databricks 环境实测**（FUSE 上 onnxruntime 读
 Volume 权重、每页渲染的内存占用），列为集成后续。
 
-## Integration（待集成步骤确认）
+## Integration
 
 - 接入点：`ingest_mode.LayoutPolicy += "onnx-layout"`；`make_partitioner` 在该值时
   `make_text_page_partitioner(make_onnx_page_partitioner(model, …), …)`。
-- notebook 建议（本分支不改 `notebooks/run_folder.ipynb`）：`LAYOUT_POLICY` 常量在权重就位
-  后可改 `"onnx-layout"`（仅 lite 时传入，与 ADR 0028 相同的门）；提示行建议在既有
-  deterministic / fallback 行基础上加 onnx 页数（`pages_partitioned_onnx`），并在权重缺失
-  报错时原样展示中文指引。
+- 预检：`onnx_partition.onnx_layout_unavailable(configured)` 与 `make_onnx_page_partitioner`
+  入库前的预检同一判断（权重解析顺序与报错文本相同），只查文件存在与依赖可导入，不读权重、
+  不导入 onnxruntime；可用为 `None`，否则返回中文原因。
+- notebook（`notebooks/run_folder.ipynb`）：`LAYOUT_POLICY = "auto"` 为默认，由
+  `ingest_mode.choose_layout_policy(LAYOUT_POLICY, ingest_mode=…, onnx_layout_model=…)` 解析：
+  lite 下预检通过 → `"onnx-layout"`，否则 `"deterministic-text-pages"` 并打印缺的是权重还是
+  onnxruntime 及启用方法；显式值照用（显式 `"onnx-layout"` 而不可用时提示入库前会报错）；
+  full 恒为 `"model"`。库预设不变，所以"auto"只在用户自己配置了权重时才启用 ONNX。状态行在
+  确定性 / 回退页之间加 `ONNX 处理 N 页`（`pages_partitioned_onnx`）。
+- 与 ADR 0027 / 0028 Amendment 1 叠加：ONNX 切出的 Table 对象同样按行收录、长表拆行单元；
+  ONNX 归为页眉 / 页脚的文本对象（`abandon` 带）同样被移出打分。与 ADR 0029 分层布局叠加：
+  不同 producer 的版面产物在同一分层目录共存，切换策略 0 次新增调用。
 - 测试：`tests/enterprise_pdf_rag/adapters/test_onnx_partition.py`（桩 + `@pytest.mark.onnx`
   真模型集成用例，CI `-m "not onnx"` 跳过）、`test_onnx_partition_ingest.py`（端到端：
   版面调用数 = 回退页数、chart IR 仍走模型、切换策略零新增调用、缺权重入库前报错）。

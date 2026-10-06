@@ -273,7 +273,7 @@ enterprise-pdf-rag run-folder [--folder /path/to/pdfs] --max-live-calls-per-pdf 
   [--ingest-mode full|lite] [--tree]
 ```
 
-**入库模式（[ADR 0025](adr/0025-lite-ingest-mode.md)）**：`run_folder_pipeline(ingest_mode="full")`（函数与 CLI 默认，行为与产物逐字节不变）/ `"lite"`（notebook 默认 `INGEST_MODE`）。lite 只发每页 1 次版面、每个图表 1 次图表 IR、每个示意图 2 次；图像不调模型（`ir` / `description` 为 `not_applicable`，诊断 `skipped_by_ingest_mode`，本来就不可检索）；公式不调模型（证明只读 PDF，与预算耗尽路径等价、合格产物逐字节相同）；图表 description 由 IR 的标签字段确定性生成（producer `chart-description-from-ir-v1`，`qualified_ir` 逐字节相同）；页元数据由页面文字几何确定性生成（`page-metadata-deterministic-v1`：标题 = 上半页最大字号行，章节 = ≥30% 页同位置重复的页眉，期间 = 页面印出的期间标签，地区为空、页类型 `other`，仍经 `verify_page_metadata`）——因此封面 / 目录页不再被排除、地区预过滤不生效；不建 tree（`build_tree=None` 跟随模式，CLI `--tree` / `--no-tree` 强制），不写审阅页面（`review_path` 为 `None`；按需 `pdf_ingestion.export_document_review(<ingestion root>/<sha256>)`）。被跳过的调用不占预算。两种模式共用同一入库目录：版面 / 图表 IR / 示意图缓存共用，lite 后 full 只补发 lite 省掉的调用，full 后 lite 0 次真实调用；`current-processing` 以最近一次成功发布为准，`DocumentRun.published_ingest_mode` 报告其模式。lite 预设还开启无网格表格的按行逐字收录（ADR 0027），以及两项索引文本布局（`IngestPlan.table_row_index_units`：长的按行表按「表头行 + 一个数值行」拆成多个检索单元，BM25 / 向量都按单元打分、取最高折回成员，引用仍是 `fragments.row-N`——ADR 0027 Amendment 1；`drop_running_lines_from_index`：全部行都是跨页页眉 / 页脚 / 页边页码的 Text 成员不参与 BM25 与向量打分，但仍可引用、仍在页窗口——ADR 0028 Amendment 1；full 两项皆关、逐字节不变，`run_folder_pipeline` 同名参数可单独覆盖，`DraftIndex.row_unit_tables` / `row_units` / `unscored_running_members` 与 `report.md` 的 Index text layout 段可见）；`layout` 两个预设都是 `"model"`，确定性版面只在显式 `layout_policy="deterministic-text-pages"` 时启用（notebook lite 默认如此）。建索引的 embedding 批量发送（[ADR 0026](adr/0026-batched-embeddings.md)，两种模式都开、缓存键与条目逐字节不变；`DraftIndex.embedding_requests` / `embedded_objects`）。可见性：`FolderPipelineResult.ingest_mode` / `layout_policy`、`report.md` 的 layout 行与按 PDF 的确定性页 / 回退页（原因码）、按行收录表格数 / 行数、embedding 请求数 / 对象数、`DocumentRun.ingest_mode` / `published_ingest_mode`、`IngestionSummary.skipped_calls`（`image` / `formula` / `chart_description` / `page_metadata` → 次数）、`report.md` 的 mode 行与列、`discovered` / `document_start` 事件的 `ingest_mode`。
+**入库模式（[ADR 0025](adr/0025-lite-ingest-mode.md)）**：`run_folder_pipeline(ingest_mode="full")`（函数与 CLI 默认，行为与产物逐字节不变）/ `"lite"`（notebook 默认 `INGEST_MODE`）。lite 只发每页 1 次版面、每个图表 1 次图表 IR、每个示意图 2 次；图像不调模型（`ir` / `description` 为 `not_applicable`，诊断 `skipped_by_ingest_mode`，本来就不可检索）；公式不调模型（证明只读 PDF，与预算耗尽路径等价、合格产物逐字节相同）；图表 description 由 IR 的标签字段确定性生成（producer `chart-description-from-ir-v1`，`qualified_ir` 逐字节相同）；页元数据由页面文字几何确定性生成（`page-metadata-deterministic-v1`：标题 = 上半页最大字号行，章节 = ≥30% 页同位置重复的页眉，期间 = 页面印出的期间标签，地区为空、页类型 `other`，仍经 `verify_page_metadata`）——因此封面 / 目录页不再被排除、地区预过滤不生效；不建 tree（`build_tree=None` 跟随模式，CLI `--tree` / `--no-tree` 强制），不写审阅页面（`review_path` 为 `None`；按需 `pdf_ingestion.export_document_review(<ingestion root>/<sha256>)`）。被跳过的调用不占预算。两种模式共用同一入库目录：版面 / 图表 IR / 示意图缓存共用，lite 后 full 只补发 lite 省掉的调用，full 后 lite 0 次真实调用；`current-processing` 以最近一次成功发布为准，`DocumentRun.published_ingest_mode` 报告其模式。lite 预设还开启无网格表格的按行逐字收录（ADR 0027），以及两项索引文本布局（`IngestPlan.table_row_index_units`：长的按行表按「表头行 + 一个数值行」拆成多个检索单元，BM25 / 向量都按单元打分、取最高折回成员，引用仍是 `fragments.row-N`——ADR 0027 Amendment 1；`drop_running_lines_from_index`：全部行都是跨页页眉 / 页脚 / 页边页码的 Text 成员不参与 BM25 与向量打分，但仍可引用、仍在页窗口——ADR 0028 Amendment 1；full 两项皆关、逐字节不变，`run_folder_pipeline` 同名参数可单独覆盖，`DraftIndex.row_unit_tables` / `row_units` / `unscored_running_members` 与 `report.md` 的 Index text layout 段可见）；`layout` 两个预设都是 `"model"`，确定性版面 / ONNX 版面只在显式 `layout_policy="deterministic-text-pages"` / `"onnx-layout"` 时启用（notebook lite 的 `LAYOUT_POLICY = "auto"` 二选一，见下文）。建索引的 embedding 批量发送（[ADR 0026](adr/0026-batched-embeddings.md)，两种模式都开、缓存键与条目逐字节不变；`DraftIndex.embedding_requests` / `embedded_objects`）。可见性：`FolderPipelineResult.ingest_mode` / `layout_policy`、`report.md` 的 layout 行与按 PDF 的确定性页 / 回退页（原因码）、按行收录表格数 / 行数、embedding 请求数 / 对象数、`DocumentRun.ingest_mode` / `published_ingest_mode`、`IngestionSummary.skipped_calls`（`image` / `formula` / `chart_description` / `page_metadata` → 次数）、`report.md` 的 mode 行与列、`discovered` / `document_start` 事件的 `ingest_mode`。
 
 stdout 是一个 `FolderPipelineResult` JSON（每份 PDF 一条 `DocumentRun`：`status` 为 `published` / `duplicate_of` / `nothing_to_index` / `failed` / `budget_starved` / `skipped_not_referenced`，各阶段原样嵌入 `IngestionSummary` / `DraftQualification` / `DraftIndex` / `DraftPublication` / `DocumentTreeSummary`；另有 `eval`、分项 `live_calls` 与 `budget_exhausted`）。`--report-dir` 另写 `report.json` 与 `report.md`。退出码：0 全部正常；2 跑完但有文档失败 / 饿死或评测有 `FAIL` / `http_error` / `routing_failed`；1 参数或前置检查错误（stdout 是 `{"error": …}`）。
 
@@ -316,6 +316,20 @@ result.ok, result.live_calls, [(d.pdf_path, d.status) for d in result.documents]
   拿不准的页带原因码回退模型版面；`IngestionSummary.pages_partitioned_deterministically` /
   `pages_partition_model_fallback` / `partition_fallback_reasons` 报计数。跨页重复装饰的豁免只给不含文字 span 的图形。`"model"`（两个库预设）逐字节
   不变；两种策略的 stage 缓存按 producer 区分、同库共存，切换策略零新增 live call（模型缓存命中）。
+- **本地 ONNX 版面（[ADR 0030](adr/0030-onnx-layout-partitioner.md)，库预设不启用）**：`layout_policy="onnx-layout"`
+  组合顺序为确定性文本页（ADR 0028 原样）→ 其余页用 pdfspine 内置的本地 PP-DocLayoutV3（`find_layout()`，进程内 ONNX 推理、零 LLM 调用）
+  切分 → ONNX 也拿不准的页带原因码（`onnx_low_confidence` / `onnx_overlapping_blocks` / `onnx_unassigned_spans` /
+  `onnx_partition_invalid` / `onnx_unavailable`，以及 [0.3, 0.5) 分的可疑视觉框没被任何已接受视觉区解释时整页回退）回退模型版面；
+  图表 IR 仍只由模型生成。producer `page-layout-onnx-v1:pdfspine/<ver>:<权重 sha256 前 12 位>`，换权重缓存自然隔离；三种策略的产物在同一
+  （ADR 0029 分层）入库目录共存，切换零新增调用。权重路径 `APP_ONNX_LAYOUT_MODEL`（文件或其目录，`Settings.onnx_layout_model`；
+  其次 `PDFSPINE_ONNX_MODELS` 目录），依赖 `pip install 'pdfspine[onnx]'`；缺任何一样时构造切分器即报中文错误（入库开始前，绝不静默逐页回退）。
+  `IngestionSummary.pages_partitioned_onnx` / `PartitionCounts.onnx_pages`、`report.md` 按 PDF 的 `onnx N` 与 notebook 的「ONNX 处理 N 页」可见。
+  ONNX 切出的 Table / 页眉页脚 Text 与其他来源一样走 ADR 0027 按行收录与行单元、ADR 0028 Amendment 1 的不打分（`test_feature_overlay.py`）。
+  真模型用例打 `@pytest.mark.onnx`（需本机权重与 onnxruntime），CI 两处 `-m` 都 `not onnx`。**未过权重许可门、未在长篇财报与 Databricks 上实测**。
+- **notebook 的 `LAYOUT_POLICY`**：`"auto"`（默认）由 `ingest_mode.choose_layout_policy(LAYOUT_POLICY, ingest_mode=INGEST_MODE,
+  onnx_layout_model=settings.onnx_layout_model)` 解析——lite 下 `onnx_partition.onnx_layout_unavailable(...)`（与切分器入库前预检同一判断，
+  只查权重文件存在与依赖可导入，不加载模型）为 `None` 时用 `"onnx-layout"`，否则 `"deterministic-text-pages"` 并打印缺的是权重还是
+  onnxruntime、怎么补；显式写 `"model"` / `"deterministic-text-pages"` / `"onnx-layout"` 照用；`INGEST_MODE = "full"` 恒为 `"model"`。
 - **续跑**：同一目录再跑一次时全部命中缓存（`live_calls.total == 0`）；已发布的 release 恰是本次 draft 加同一 embedder 的索引时直接复用（`index_reused=true`，不再 embed），`publish` 幂等重放。换 embedder 会重建索引。
 - **失败隔离**：每份 PDF 的 `ValueError` / `OSError` 记进 `failed_stage` + `error`，其余继续；`--fail-fast` 改为直接抛出。已发布但 tree 失败的文档仍是 `published`，带 `failed_stage="tree"`。
 - **requalify 的含义与局限**：通用 ingest 写死 `qualification_policy="none"`，Chart 因此没有 `qualified_ir`，被检索资格排除；`requalify` 用快照里已落盘的分支按 [ADR 0016](adr/0016-verbatim-chart-points.md) 重投影，零模型、零联网。它**只采纳图上逐字印出的点值**，不证明点 ↔ 系列的几何对应（那是 [ADR 0008](adr/0008-traceable-chart-qa.md) 几何 + 源涂证明的范围）；Diagram 在 ingest 时已证明，这一步对它通常是 `unchanged`。没有对象改变时不产出新 draft，后续沿用 ingest 的 id。`--no-requalify` 跳过。
@@ -679,6 +693,8 @@ bench = run_retrieval_testbench(
 )
 print(format_table(bench)); write_testbench(bench, REPORT_DIR)
 ```
+
+`notebooks/run_folder.ipynb` 在 `answers` 格之后的 `testbench` 格就是这段代码：审计库取 `settings.answer_audit_path or (INGESTION_ROOT / "answers-audit.sqlite")`；没有题集 / 用例、审计库不存在或打不开时打印提示并跳过，不抛。
 
 **关联**：审计库不存题目 id，按**问题原文**关联，有 `report.json` 时再收窄到该题被路由到的文档；同一题多次运行取**最新**一行（`audit_id` 列给出是哪一行）。
 

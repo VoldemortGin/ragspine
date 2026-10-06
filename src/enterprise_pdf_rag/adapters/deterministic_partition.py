@@ -187,7 +187,7 @@ class PartitionCounts:
     deterministic_pages: int
     model_fallback_pages: int
     fallback_reasons: dict[str, int]
-    # ADR 00NN: 本地 ONNX 版面模型(零 LLM 调用)切分的页数; "onnx-layout" 之外恒为 0.
+    # ADR 0030: 本地 ONNX 版面模型(零 LLM 调用)切分的页数; "onnx-layout" 之外恒为 0.
     onnx_pages: int = 0
 
 

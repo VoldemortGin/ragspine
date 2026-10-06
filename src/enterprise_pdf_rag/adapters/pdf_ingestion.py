@@ -134,7 +134,7 @@ class IngestionSummary(BoundaryModel):
     # ADR 0028, ``layout="deterministic-text-pages"``: pages partitioned without a model call,
     # pages that fell back to the model layout and their reason codes; all zero under the
     # model layout. Re-derived from the saved partitions, so a cache replay reports the same.
-    # ADR 00NN, ``layout="onnx-layout"``: pages partitioned by the local ONNX layout model
+    # ADR 0030, ``layout="onnx-layout"``: pages partitioned by the local ONNX layout model
     # (zero LLM calls) are counted apart in ``pages_partitioned_onnx``.
     pages_partitioned_deterministically: int = 0
     pages_partition_model_fallback: int = 0

@@ -155,25 +155,34 @@ chart and the two diagram calls; page metadata and chart descriptions are derive
 model, images and formulas send no call, no tree, no review pages. On the synthetic sample this
 halves both the model calls (24 → 10) and the files written (843 → 406). Set
 Lite also indexes a table with no detected grid as its verbatim printed rows
-([ADR 0027](adr/0027-unverified-tables-as-verbatim-rows.md)), so unruled statements are answerable.
-In lite the notebook's `LAYOUT_POLICY = "deterministic-text-pages"` (default) partitions pages
+([ADR 0027](adr/0027-unverified-tables-as-verbatim-rows.md)), so unruled statements are answerable;
+a long one is scored as one index unit per row with its header rows repeated, and Text objects
+that print only running headers, footers or page numbers are left out of both retrieval channels
+(still citable; ADR 0027 / ADR 0028 Amendment 1).
+In lite the notebook's `LAYOUT_POLICY = "auto"` (default) uses `"onnx-layout"` (below) when its
+weights and onnxruntime are present, else `"deterministic-text-pages"`, and prints which and why.
+`"deterministic-text-pages"` partitions pages
 without figures or images from the PDF's own text blocks with no layout call, falling back to
 the model per page ([ADR 0028](adr/0028-deterministic-text-page-partition.md); **not yet validated
 on long financial reports** — the line under the status table shows, per PDF, the pages done
-without a model, the fallback pages and their reason codes; set `"model"` to go back). Index
-embeddings are sent in batches ([ADR 0026](adr/0026-batched-embeddings.md)). Set
+without a model, by ONNX, the fallback pages and their reason codes; set `"model"` to go back). Index
+embeddings are sent in batches ([ADR 0026](adr/0026-batched-embeddings.md)). After the answers,
+the notebook's `testbench` cell diagnoses each question offline from the answer journal and
+writes `testbench.csv` / `testbench.json` next to `answers.csv` (it needs the SQLite journal;
+where the mount disables it, the cell says so and skips). Set
 `INGEST_MODE = "full"` for the previous behaviour (it ignores `LAYOUT_POLICY`); both modes share
 one `data/ingestion` (a full rerun after lite sends only the calls lite skipped). Review pages for one document on demand:
 `export_document_review(<ingestion root>/<sha256>)` from `enterprise_pdf_rag.adapters.pdf_ingestion`.
 
-### Optional: local ONNX layout for the remaining pages (ADR 00NN, explicit only)
+### Optional: local ONNX layout for the remaining pages (ADR 0030, opt-in)
 
 `layout_policy="onnx-layout"` additionally partitions the pages the deterministic triage
 declines (figures, residual graphics) with pdfspine's bundled local PP-DocLayoutV3 model —
 in-process ONNX inference, zero LLM calls — and only the pages ONNX itself declines fall back
 to the model layout, each with a machine-readable reason code
-([ADR 00NN](adr/00NN-onnx-layout-partitioner.md); chart IR still comes from the model only).
-On Databricks:
+([ADR 0030](adr/0030-onnx-layout-partitioner.md); chart IR still comes from the model only).
+No library preset selects it; the notebook's `"auto"` does once the two steps below are done
+(write `"deterministic-text-pages"` to opt out). On Databricks:
 
 - **Weights on a Unity Catalog volume** (they are not in any wheel and must not enter a Git
   folder): upload `pp_doc_layoutv3.onnx` (ModelScope, RapidAI export; pdfspine documents the
@@ -181,9 +190,14 @@ On Databricks:
   `APP_ONNX_LAYOUT_MODEL` to that absolute file (or directory) path. The weights file is read
   once per process (sha256 into the partition producer, then one cached onnxruntime session);
   per-page inference does not re-read the volume.
-- **Install the runtime**: `%pip install 'pdfspine[onnx]'` (onnxruntime CPU, numpy, Pillow).
-  A missing runtime or weights file stops the ingest before any page with an error naming
+- **Install the runtime**: `%pip install 'pdfspine[onnx]'` (onnxruntime CPU, numpy, Pillow),
+  then restart Python. With `"auto"`, a missing runtime or weights file only keeps the
+  deterministic layout and the config cell names what is missing; with an explicit
+  `"onnx-layout"` it stops the ingest before any page with an error naming
   `APP_ONNX_LAYOUT_MODEL` — never a silent per-page fallback that would look like saved calls.
+- **Files**: an ONNX page writes the same partition artifacts as a model page and no model-cache
+  files, so it never adds to the per-folder counts below; switching policies on one ingestion
+  directory sends no call (each layout's artifacts stay side by side in the sharded store).
 - **Not yet validated on Databricks or on long financial reports** (FUSE weight loading and
   per-page render memory untested; the measured comparison is a 20-page deck). The status line
   reports, per PDF, deterministic / onnx / model-fallback page counts with reason codes.
@@ -250,7 +264,13 @@ How the backend adapts ([ADR 0020](adr/0020-storage-without-hard-links.md)):
   snapshot re-extracted, a lost model response called once more. Reads never accept such a file.
   `storage_repairs` in the notebook's status table counts what was repaired.
 - All writes on the pipeline are sequential, whole-file writes. The notebook writes
-  `answers.csv` in one pass through a `.partial` sibling and a rename instead of appending.
+  `answers.csv` (and the test bench's `testbench.csv` / `testbench.json`) in one pass through a
+  temporary sibling and a rename instead of appending.
+- **ONNX layout weights** (ADR 0030, `pp_doc_layoutv3.onnx`, ≈ 130 MB): keep them on a volume,
+  not in the Git folder (they would count against its 1 GB / 20 000-file limits and must not be
+  committed) and not under the ingestion directory. They are only read — once per process, to
+  hash them and open one onnxruntime session; nothing is written next to them. Reading them over
+  the FUSE mount is not yet validated.
 - The answer journal `answers-audit.sqlite` uses SQLite in WAL mode, which needs random writes
   and shared-memory locking. Where the mount refuses them the journal is disabled with a logged
   warning and answering continues; the answer text in `answers.csv` comes from the response

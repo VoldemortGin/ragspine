@@ -1179,7 +1179,7 @@ def _ingest_count_lines(result: FolderPipelineResult) -> list[str]:
                 f"{code} {count}"
                 for code, count in sorted(ingested.partition_fallback_reasons.items())
             )
-            # ADR 00NN: 只有 "onnx-layout" 策略会产生 onnx 页; 为 0 时行文与 ADR 0028 逐字节一致.
+            # ADR 0030: 只有 "onnx-layout" 策略会产生 onnx 页; 为 0 时行文与 ADR 0028 逐字节一致.
             onnx_part = (
                 f"onnx {ingested.pages_partitioned_onnx}, "
                 if ingested.pages_partitioned_onnx
