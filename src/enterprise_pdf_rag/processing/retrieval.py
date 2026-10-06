@@ -130,6 +130,28 @@ class RetrievalEmbedding:
 
 
 @dataclass(frozen=True, slots=True)
+class RetrievalUnitEmbeddings:
+    """One member's unit vectors in a unit index, in unit order (``IndexTextOptions``).
+
+    A long verbatim-rows table holds one vector per row unit; a running header / footer
+    holds none, which is what keeps it out of the vector channel. The index repeats exactly
+    these vectors under the member's id.
+    """
+
+    description_sha256: str
+    fingerprint: str
+    vectors: tuple[tuple[float, ...], ...]
+
+    def __post_init__(self) -> None:
+        if any(
+            not vector or not all(isfinite(value) for value in vector) for vector in self.vectors
+        ):
+            raise ValueError("Retrieval unit embeddings require finite nonempty vectors")
+        if len({len(vector) for vector in self.vectors}) > 1:
+            raise ValueError("A member's unit vectors share one dimension")
+
+
+@dataclass(frozen=True, slots=True)
 class IndexEntry:
     member_id: str
     vector: tuple[float, ...]

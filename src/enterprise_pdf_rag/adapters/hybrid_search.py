@@ -58,9 +58,18 @@ class LexicalIndex:
     # The corpus units themselves (same order as ``member_ids``), so metadata filters and
     # seat selection read them from the cache instead of a second ``member_texts()`` call.
     members: tuple[MemberText, ...] = ()
+    # Which member each token list scores for, when members have units (``MemberText.units``):
+    # a member then scores as its best unit, and one with no unit is not in the corpus at all.
+    # Empty means one token list per member, aligned with ``member_ids``.
+    owners: tuple[int, ...] = ()
 
     def __post_init__(self) -> None:
-        if len(self.member_ids) != len(self.docs_tokens):
+        if self.owners:
+            if len(self.owners) != len(self.docs_tokens) or not all(
+                0 <= owner < len(self.member_ids) for owner in self.owners
+            ):
+                raise ValueError("Lexical index units must each name one member")
+        elif len(self.member_ids) != len(self.docs_tokens):
             raise ValueError("Lexical index members and token lists must align")
         if len(set(self.member_ids)) != len(self.member_ids):
             raise ValueError("Lexical index members must be unique")
@@ -75,15 +84,35 @@ class LexicalIndex:
 def build_lexical_index(
     document: MountedDocument, *, k1: float = 1.5, b: float = 0.75
 ) -> LexicalIndex:
-    """Tokenize every member's index text; empty members stay in the corpus at score 0."""
+    """Tokenize every member's index text; empty members stay in the corpus at score 0.
+
+    A member with ``units`` contributes one token list per unit instead (none for ``()``),
+    so the corpus statistics are those of the units actually scored.
+    """
     members = sorted(document.member_texts(), key=lambda item: item.member_id)
+    ids = tuple(member.member_id for member in members)
+    if all(member.units is None for member in members):
+        return LexicalIndex(
+            document.retrieval_snapshot_id,
+            ids,
+            tuple(tuple(tokenize(member.text)) for member in members),
+            k1,
+            b,
+            tuple(members),
+        )
+    units = [
+        (owner, unit)
+        for owner, member in enumerate(members)
+        for unit in ((member.text,) if member.units is None else member.units)
+    ]
     return LexicalIndex(
         document.retrieval_snapshot_id,
-        tuple(member.member_id for member in members),
-        tuple(tuple(tokenize(member.text)) for member in members),
+        ids,
+        tuple(tuple(tokenize(unit)) for _, unit in units),
         k1,
         b,
         tuple(members),
+        tuple(owner for owner, _ in units),
     )
 
 
@@ -106,6 +135,11 @@ def lexical_rank(
     scores = bm25_scores(
         tokenize(query), [list(tokens) for tokens in index.docs_tokens], k1=index.k1, b=index.b
     )
+    if index.owners:
+        best = [0.0] * len(index.member_ids)
+        for owner, score in zip(index.owners, scores, strict=True):
+            best[owner] = max(best[owner], score)
+        scores = best
     hits = [
         PinnedRetrievalHit(index.snapshot_id, member_id, score)
         for member_id, score in zip(index.member_ids, scores, strict=True)

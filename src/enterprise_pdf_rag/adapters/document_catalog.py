@@ -1,6 +1,7 @@
 """Read-only catalog of published documents and pinned read-only mounts; no model calls."""
 
 import re
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
@@ -17,6 +18,7 @@ from enterprise_pdf_rag.adapters.processing_retrieval import (
     ProcessingRetrieval,
     member_anchor,
     member_text,
+    member_units,
     resolve_processing_context,
 )
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
@@ -443,14 +445,16 @@ class MountedDocument:
     def member_texts(self) -> tuple[MemberText, ...]:
         """Every pinned member's embedded index text, ordered by member id."""
         self.manifest()
-        plan, _ = self._outputs.load_retrieval(self._publication)
+        plan, index = self._outputs.load_retrieval(self._publication)
         columns = self._column_bindings(plan)
+        vectors = Counter(entry.member_id for entry in index.entries)
         texts = [
             self._member_text(
                 plan,
                 member,
                 self._page_metadata.get(member.page_index),
                 columns.get(member.page_index, EMPTY),
+                vectors[member.member_id],
             )
             for member in plan.members
         ]
@@ -511,9 +515,11 @@ class MountedDocument:
         member: RetrievalMember,
         metadata: PageMetadata | None,
         binding: ColumnBinding,
+        vectors: int,
     ) -> MemberText:
         context = self._contexts.get(member.page_index)
         text = member_text(self._outputs.assets, plan, member, context)
+        units = member_units(self._outputs.assets, plan, member, context, vectors)
         # Reported only when the policy actually prefixed it, so ``body`` stays exact.
         header = (
             context.header()
@@ -537,6 +543,7 @@ class MountedDocument:
                 text,
                 header=header,
                 bbox=bbox,
+                units=units,
             )
         return MemberText(
             member.member_id,
@@ -551,6 +558,7 @@ class MountedDocument:
             member_regions=binding.regions_for(member.member_id),
             header=header,
             bbox=bbox,
+            units=units,
         )
 
     def _pin(self, hit: PinnedRetrievalHit) -> QueryPin:

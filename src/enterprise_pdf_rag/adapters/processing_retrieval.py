@@ -1,5 +1,6 @@
 """Persist real description vectors and hydrate source-qualified typed artifacts."""
 
+import json
 from collections.abc import Mapping
 from hashlib import sha256
 from math import sqrt
@@ -20,11 +21,15 @@ from enterprise_pdf_rag.adapters.formula_qualification import (
 )
 from enterprise_pdf_rag.adapters.literal_qualification import validate_literal_member
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
+from enterprise_pdf_rag.adapters.running_lines import read_running_spans
 from enterprise_pdf_rag.adapters.shared_pdf import shared_pdfs
 from enterprise_pdf_rag.processing.index_text import (
+    ONE_UNIT_EACH,
+    IndexTextOptions,
     PageIndexContext,
     contextual_index_text,
     member_index_text,
+    table_row_units,
 )
 from enterprise_pdf_rag.processing.retrieval import (
     IndexEntry,
@@ -34,6 +39,7 @@ from enterprise_pdf_rag.processing.retrieval import (
     RetrievalIndex,
     RetrievalMember,
     RetrievalPlan,
+    RetrievalUnitEmbeddings,
     resolve_member,
     retrieval_dependencies,
 )
@@ -47,7 +53,10 @@ from ragspine.extraction.evidence.figures.ports import BatchEmbeddingPort, Embed
 from ragspine.extraction.evidence.objects.diagrams.diagram_models import DiagramQualification
 from ragspine.extraction.evidence.objects.formulas.formula_models import FormulaQualification
 from ragspine.extraction.evidence.objects.tables.table_models import TableIR
-from ragspine.extraction.evidence.objects.tables.table_rows import TableRowsIR
+from ragspine.extraction.evidence.objects.tables.table_rows import (
+    TABLE_ROWS_PRODUCER,
+    TableRowsIR,
+)
 from ragspine.extraction.evidence.objects.typed_ir import (
     DiagramIR,
     FormulaIR,
@@ -74,7 +83,6 @@ from ragspine.extraction.evidence.page.models import (
 # both admitted by ADR 0015. The string is part of the snapshot id, so older snapshots
 # keep their ids and stay mountable.
 _POLICY = "source-transcription-and-scoped-chart-qualification-v5"
-_INDEX = "immutable-cosine-index-v1"
 # Uncached index texts handed to a batch embedder at a time; each slice is stored before the
 # next is sent, so a failed run keeps what it already paid for.
 _EMBED_SLICE = 256
@@ -132,6 +140,37 @@ def member_text(
     if plan.qualification_policy not in CONTEXTUAL_POLICIES:
         return body
     return contextual_index_text(body, context)
+
+
+def member_units(
+    assets: LocalDocumentStore,
+    plan: RetrievalPlan,
+    member: RetrievalMember,
+    context: PageIndexContext | None,
+    vectors: int,
+) -> tuple[str, ...] | None:
+    """The units a unit index scored this member as (``MemberText.units``); no validation.
+
+    ``vectors`` is how many index vectors the snapshot holds for the member: none marks a
+    running header / footer, and a row-units table must hold exactly one per unit. ``None``
+    means the member scores its ``member_text`` as one unit, which every member of a
+    snapshot indexed without the switches does.
+    """
+    options = IndexTextOptions.from_index_version(plan.index_version)
+    if options.drop_running_lines and vectors == 0:
+        return ()
+    if not options.table_row_units or member.kind is not ObjectKind.TABLE:
+        return None
+    description = TypeAdapter(ObjectDescription).validate_json(assets.get(member.description))
+    if description.producer != TABLE_ROWS_PRODUCER:
+        return None
+    rows = TypeAdapter(TableRowsIR).validate_json(assets.get(member.ir))
+    units = table_row_units(
+        rows, context if plan.qualification_policy in CONTEXTUAL_POLICIES else None
+    )
+    if len(units or ("",)) != vectors:
+        raise ValueError("Row units differ from the vectors their snapshot indexed")
+    return units
 
 
 def member_anchor(assets: LocalDocumentStore, member: RetrievalMember) -> Bounds | None:
@@ -213,9 +252,14 @@ class ProcessingRetrieval:
         self.sources = sources
         self.outputs = outputs
         self.embedder = embedder
-        # What the last ``build`` sent: embedding requests and the objects they embedded.
+        # What the last ``build`` sent: embedding requests and the texts they embedded.
         self.embedding_requests = 0
         self.embedded_objects = 0
+        # What the last ``build`` laid out (``IndexTextOptions``): tables split into row
+        # units, their units, and running headers / footers left unscored.
+        self.row_unit_tables = 0
+        self.row_units = 0
+        self.unscored_running = 0
 
     @shared_pdfs()
     def build(
@@ -223,6 +267,7 @@ class ProcessingRetrieval:
         scope: ProcessingScope,
         records: tuple[tuple[int, ObjectProcessingRecord], ...],
         contexts: Mapping[int, PageIndexContext] | None = None,
+        options: IndexTextOptions = ONE_UNIT_EACH,
     ) -> RetrievalPublication:
         """Embed every eligible member; ``contexts`` gives each page's index-text header.
 
@@ -230,11 +275,29 @@ class ProcessingRetrieval:
         embedded in batches when the embedder can (``BatchEmbeddingPort``), each vector stored
         under the same per-object cache entry a single call writes, so the snapshot and the
         cache are byte-identical either way.
+
+        ``options`` lays the index out into scoring units; off (the default) every member is
+        one unit and one vector, byte for byte as before. ``table_row_units`` embeds a long
+        verbatim-rows table as one vector per row unit (all its units under one cache entry);
+        ``drop_running_lines`` embeds a Text member that prints only running header / footer
+        lines not at all, so neither channel scores it - it stays a member, resolvable,
+        quotable and in its page window. The snapshot's ``index_version`` names the switches.
         """
         self.embedding_requests = 0
         self.embedded_objects = 0
+        self.row_unit_tables = 0
+        self.row_units = 0
+        self.unscored_running = 0
+        running = read_running_spans(self.sources, scope) if options.drop_running_lines else None
         pending: list[
-            tuple[int, ObjectProcessingRecord, tuple[AssetRef, ...], tuple[AssetRef, ...], str]
+            tuple[
+                int,
+                ObjectProcessingRecord,
+                tuple[AssetRef, AssetRef, AssetRef, AssetRef],
+                tuple[AssetRef, ...],
+                str,
+                tuple[str, ...] | None,
+            ]
         ] = []
         for page_index, record in records:
             eligible, _ = eligibility(record)
@@ -336,18 +399,55 @@ class ProcessingRetrieval:
                 lineage,
             )
             checked_ir, checked_description, _ = self._qualified(scope, provisional)
+            context = None if contexts is None else contexts.get(page_index)
             text = contextual_index_text(
-                member_index_text(checked_ir, checked_description.text),
-                None if contexts is None else contexts.get(page_index),
+                member_index_text(checked_ir, checked_description.text), context
             )
+            units: tuple[str, ...] | None = None
+            if options.table_row_units and isinstance(checked_ir, TableRowsIR):
+                units = table_row_units(checked_ir, context)
+            if (
+                running is not None
+                and record.kind is ObjectKind.TEXT
+                and isinstance(checked_description, ObjectDescription)
+                and running.covers(page_index, checked_description.source_span_ids)
+            ):
+                units = ()
             pending.append(
-                (page_index, record, (ir, description, qualification, svg), lineage, text)
+                (page_index, record, (ir, description, qualification, svg), lineage, text, units)
             )
-        self._embed_uncached([(refs[1], text) for _, _, refs, _, text in pending])
+        if pending and all(item[5] == () for item in pending):
+            # Nothing else would give the snapshot a vector dimension; score them after all.
+            pending = [(*item[:5], None) for item in pending]
+        self._embed_uncached(
+            [
+                (refs[1], (text,) if units is None else units, units is not None)
+                for _, _, refs, _, text, units in pending
+                if units != ()
+            ]
+        )
+        vectors: dict[int, tuple[AssetRef, tuple[tuple[float, ...], ...]]] = {}
+        for position, (_, _, refs, _, text, units) in enumerate(pending):
+            if units is None:
+                ref, embedding = self._embedding(refs[1], text)
+                vectors[position] = (ref, (embedding.vector,))
+            elif units:
+                ref, unit_embeddings = self._unit_embeddings(refs[1], units)
+                vectors[position] = (ref, unit_embeddings.vectors)
+                self.row_unit_tables += 1
+                self.row_units += len(units)
+        dimensions = {len(vector) for _, scored in vectors.values() for vector in scored}
+        if len(dimensions) > 1:
+            raise ValueError("One retrieval snapshot cannot mix embedding dimensions")
         members: list[RetrievalMember] = []
         entries: list[IndexEntry] = []
-        for page_index, record, (ir, description, qualification, svg), lineage, text in pending:
-            embedding_ref, embedding = self._embedding(description, text)
+        for position, (page_index, record, refs, lineage, _, _) in enumerate(pending):
+            ir, description, qualification, svg = refs
+            if position in vectors:
+                embedding_ref, scored = vectors[position]
+            else:
+                embedding_ref, scored = self._unscored(description), ()
+                self.unscored_running += 1
             member = RetrievalMember(
                 record.object_id,
                 record.kind,
@@ -358,17 +458,16 @@ class ProcessingRetrieval:
                 embedding_ref,
                 svg,
                 self.embedder.fingerprint,
-                len(embedding.vector),
+                len(scored[0]) if scored else next(iter(dimensions)),
                 lineage,
             )
             members.append(member)
-            entries.append(IndexEntry(member.member_id, embedding.vector))
-        if len({member.embedding_dimensions for member in members}) > 1:
-            raise ValueError("One retrieval snapshot cannot mix embedding dimensions")
-        plan = RetrievalPlan(scope, tuple(members), _POLICY, _INDEX)
+            entries.extend(IndexEntry(member.member_id, vector) for vector in scored)
+        plan = RetrievalPlan(scope, tuple(members), _POLICY, options.index_version)
         index = RetrievalIndex(
             plan.snapshot_id,
-            _INDEX,
+            options.index_version,
+            # Stable: a member's unit vectors keep their unit order.
             tuple(sorted(entries, key=lambda entry: entry.member_id)),
         )
         plan_ref = self.outputs.assets.put(
@@ -395,32 +494,61 @@ class ProcessingRetrieval:
             ).encode()
         ).hexdigest()
 
-    def _embed_uncached(self, items: list[tuple[AssetRef, str]]) -> None:
+    def _units_cache_key(self, description: AssetRef, units: tuple[str, ...]) -> str:
+        """One cache entry for all of a member's units: two files per table, not per row."""
+        return sha256(
+            repr(
+                (
+                    "index-text-unit-embeddings-v1",
+                    description,
+                    sha256(json.dumps(units, ensure_ascii=False).encode()).hexdigest(),
+                    self.embedder.fingerprint,
+                )
+            ).encode()
+        ).hexdigest()
+
+    def _embed_uncached(self, items: list[tuple[AssetRef, tuple[str, ...], bool]]) -> None:
         """Embed the not-yet-cached texts in batches, storing each under its own entry.
 
-        Slices of ``_EMBED_SLICE`` are stored as they come back, so a failure keeps every
-        earlier slice cached. An embedder without batches is left to ``_embedding``.
+        ``items`` are ``(description, texts, units)``: one text under its single-vector entry,
+        or a member's row units under one unit entry, stored once its last unit is back.
+        Slices of ``_EMBED_SLICE`` texts are stored as they come back, so a failure keeps
+        every earlier entry cached. An embedder without batches is left to ``_embedding`` /
+        ``_unit_embeddings``.
         """
         embedder = self.embedder
         if not isinstance(embedder, BatchEmbeddingPort):
             return
-        uncached: dict[str, tuple[AssetRef, str]] = {}
-        for description, text in items:
-            key = self._cache_key(description, text)
+        uncached: dict[str, tuple[AssetRef, tuple[str, ...], bool]] = {}
+        for description, texts, units in items:
+            key = (
+                self._units_cache_key(description, texts)
+                if units
+                else self._cache_key(description, texts[0])
+            )
             if key not in uncached and self.outputs.cached(key) is None:
-                uncached[key] = (description, text)
-        work = list(uncached.items())
+                uncached[key] = (description, texts, units)
+        jobs = list(uncached.items())
+        work = [(job, text) for job, (_, (_, texts, _)) in enumerate(jobs) for text in texts]
+        done: dict[int, list[tuple[float, ...]]] = {}
         for start in range(0, len(work), _EMBED_SLICE):
             chunk = work[start : start + _EMBED_SLICE]
             sent = embedder.request_count
             try:
-                vectors = embedder.embed_descriptions([text for _, (_, text) in chunk])
+                vectors = embedder.embed_descriptions([text for _, text in chunk])
             finally:
                 self.embedding_requests += embedder.request_count - sent
             if len(vectors) != len(chunk):
                 raise ValueError("Batch embedder returned a vector count unlike its inputs")
-            for (key, (description, _)), vector in zip(chunk, vectors, strict=True):
-                self._store(key, description, vector)
+            for (job, _), vector in zip(chunk, vectors, strict=True):
+                done.setdefault(job, []).append(vector)
+                key, (description, texts, units) = jobs[job]
+                if len(done[job]) < len(texts):
+                    continue
+                if units:
+                    self._store_units(key, description, tuple(done.pop(job)))
+                else:
+                    self._store(key, description, done.pop(job)[0])
             self.embedded_objects += len(chunk)
 
     def _store(
@@ -442,6 +570,28 @@ class ProcessingRetrieval:
         )
         return ref, embedding
 
+    def _store_units(
+        self, key: str, description: AssetRef, vectors: tuple[tuple[float, ...], ...]
+    ) -> tuple[AssetRef, RetrievalUnitEmbeddings]:
+        embeddings = RetrievalUnitEmbeddings(description.sha256, self.embedder.fingerprint, vectors)
+        ref = self.outputs.assets.put(
+            TypeAdapter(RetrievalUnitEmbeddings).dump_json(embeddings),
+            media_type="application/json",
+        )
+        self.outputs.cache(
+            StageOutcome("embedding", key, StageState.SUCCEEDED, self.embedder.fingerprint, ref)
+        )
+        return ref, embeddings
+
+    def _unscored(self, description: AssetRef) -> AssetRef:
+        """A running member's embedding artifact: no vector at all, so no channel scores it."""
+        return self.outputs.assets.put(
+            TypeAdapter(RetrievalUnitEmbeddings).dump_json(
+                RetrievalUnitEmbeddings(description.sha256, self.embedder.fingerprint, ())
+            ),
+            media_type="application/json",
+        )
+
     def _embedding(self, description: AssetRef, text: str) -> tuple[AssetRef, RetrievalEmbedding]:
         fingerprint = self._cache_key(description, text)
         cached = self.outputs.cached(fingerprint)
@@ -460,6 +610,30 @@ class ProcessingRetrieval:
         vector = self.embedder.embed_description(text)
         self.embedded_objects += 1
         return self._store(fingerprint, description, vector)
+
+    def _unit_embeddings(
+        self, description: AssetRef, units: tuple[str, ...]
+    ) -> tuple[AssetRef, RetrievalUnitEmbeddings]:
+        key = self._units_cache_key(description, units)
+        cached = self.outputs.cached(key)
+        if cached is not None:
+            assert cached.artifact is not None
+            embeddings = TypeAdapter(RetrievalUnitEmbeddings).validate_json(
+                self.outputs.assets.get(cached.artifact)
+            )
+            if (
+                embeddings.description_sha256 != description.sha256
+                or embeddings.fingerprint != self.embedder.fingerprint
+                or len(embeddings.vectors) != len(units)
+            ):
+                raise ValueError("Cached unit embeddings belong to other units or another model")
+            return cached.artifact, embeddings
+        vectors: list[tuple[float, ...]] = []
+        for unit in units:
+            self.embedding_requests += 1
+            vectors.append(self.embedder.embed_description(unit))
+            self.embedded_objects += 1
+        return self._store_units(key, description, tuple(vectors))
 
     def _load(self, publication: RetrievalPublication) -> tuple[RetrievalPlan, RetrievalIndex]:
         return self.outputs.load_retrieval(publication)
@@ -480,7 +654,7 @@ class ProcessingRetrieval:
             raise ValueError("Query embedding provider differs from the pinned index")
         query_vector = self.embedder.embed_query(query)
         RetrievalEmbedding("query", self.embedder.fingerprint, query_vector)
-        hits: list[PinnedRetrievalHit] = []
+        best: dict[str, float] = {}
         # The snapshot id is the content address of the whole plan, so asking the plan for
         # it once per member re-derived it over every member again; it is the same string
         # for every hit in this ranking.
@@ -498,7 +672,12 @@ class ProcessingRetrieval:
                 if divisor
                 else 0.0
             )
-            hits.append(PinnedRetrievalHit(snapshot_id, entry.member_id, score))
+            # A unit index may hold several vectors per member: it scores as its best one.
+            if entry.member_id not in best or score > best[entry.member_id]:
+                best[entry.member_id] = score
+        hits = [
+            PinnedRetrievalHit(snapshot_id, member_id, score) for member_id, score in best.items()
+        ]
         return tuple(sorted(hits, key=lambda hit: (-hit.score, hit.member_id))[:limit])
 
     def resolve(

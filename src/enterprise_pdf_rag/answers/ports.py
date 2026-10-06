@@ -36,6 +36,10 @@ class MemberText:
     # The member's page rectangle, for reading order within a page; absent on snapshots
     # whose stored evidence carries no anchor for this kind.
     bbox: tuple[float, float, float, float] | None = None
+    # What the retrieval channels score, when that is not ``text`` itself: a long
+    # verbatim-rows table's row units, or ``()`` for a running header / footer that scores
+    # nothing. ``None`` scores ``text`` as one unit. ``text`` stays the page-window line.
+    units: tuple[str, ...] | None = None
 
     @property
     def body(self) -> str:
