@@ -87,8 +87,8 @@ adapters/     every SDK and I/O: pdfspine (every source PDF opens through pdf_pa
               writes <report dir>/answers.csv = question, expected, answer from each `EvalCase`'s
               `question` / `expected` / `answer`; the answer prose never enters a trace or event;
               `max_questions=N` answers N questions (notebook `MAX_QUESTIONS = 10`; the CLI does not
-              expose it) — `question_selection="first"` the first N, `"first_matched"` (notebook
-              default) the first N whose `doc` names exactly one PDF of the folder, the rest listed
+              expose it) — `question_selection="first"` the first N, `"first_matched"` (not the
+              notebook default, which is `"first"`) the first N whose `doc` names exactly one PDF of the folder, the rest listed
               as skipped);
               question_docs.py (ADR 0022: every `doc` resolved once, before any work, by alias →
               exact name → stem → sha prefix → NFKC/separator-normalized name; ambiguous or a near

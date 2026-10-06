@@ -669,10 +669,10 @@ def test_llm_selfcheck_own_bug_prints_and_never_blocks_the_main_run(
 def test_run_folder_defaults_only_ingest_the_pdfs_of_ten_questions_whose_pdf_is_present() -> None:
     config = _code_cell("config")
     for pattern in (
-        r'^QUESTION_SELECTION\s*=\s*"first_matched"',
-        r"^ONLY_QUESTION_DOCS\s*=\s*True\b",
+        r'^QUESTION_SELECTION\s*=\s*"first"',
+        r"^ONLY_QUESTION_DOCS\s*=\s*False\b",
         r"^DOC_ALIASES\s*=\s*\{\}",
-        r'^ON_UNMATCHED_DOCS\s*=\s*"error"',
+        r'^ON_UNMATCHED_DOCS\s*=\s*"skip"',
         r'^MAX_LIVE_CALLS_PER_PDF\s*=\s*"auto"',
     ):
         assert re.search(pattern, config, re.MULTILINE), pattern

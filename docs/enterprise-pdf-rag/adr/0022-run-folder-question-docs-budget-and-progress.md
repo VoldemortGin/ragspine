@@ -84,6 +84,12 @@ present, not that the answer is in it. `"first"` (the default of the function) i
 behavior; `max_questions=None` ignores the mode. The notebook defaults to `"first_matched"`
 and `ONLY_QUESTION_DOCS = True`.
 
+> Update 2026-10-05: the notebook defaults are now `QUESTION_SELECTION = "first"`,
+> `ONLY_QUESTION_DOCS = False`, `ON_UNMATCHED_DOCS = "skip"` (ingest the whole folder, take the
+> first N questions, skip unresolved ones) because the question set's `doc` names do not yet
+> map to the PDF file names and the whole folder is wanted anyway. Set `"first_matched"` /
+> `True` / `"error"` to restore the behavior above. The library defaults are unchanged.
+
 ### 4. The per-PDF ceiling is 10 000, and `"auto"` follows the page count
 
 The 200 ceiling came with the 20-page sample (ADR 0010) and was a typo guard, not a cost
