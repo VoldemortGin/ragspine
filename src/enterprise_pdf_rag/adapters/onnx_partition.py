@@ -129,7 +129,9 @@ class _Region:
     interpretation: str
 
 
-def _region_from_block(block: pdfspine.LayoutBlock, *, width: float, height: float) -> _Region | None:
+def _region_from_block(
+    block: pdfspine.LayoutBlock, *, width: float, height: float
+) -> _Region | None:
     """PP-DocLayoutV3 标签 -> 现有 ``LayoutObject`` 类型; 越界裁剪, 零面积丢弃.
 
     判定规则(pdfspine 已把模型类归一化为 ``label``, 原始类保留在 ``raw_label``):
@@ -381,7 +383,8 @@ class OnnxPagePartitioner:
         visuals = [
             region
             for region in regions
-            if region.kind in (ObjectKind.TABLE, ObjectKind.CHART, ObjectKind.IMAGE, ObjectKind.FORMULA)
+            if region.kind
+            in (ObjectKind.TABLE, ObjectKind.CHART, ObjectKind.IMAGE, ObjectKind.FORMULA)
         ]
         for block in blocks:
             score = float(block.score)
@@ -409,7 +412,9 @@ class OnnxPagePartitioner:
                 return True
         return False
 
-    def _object(self, page: PageInput, region: _Region, spans: tuple[TextSpan, ...]) -> LayoutObject:
+    def _object(
+        self, page: PageInput, region: _Region, spans: tuple[TextSpan, ...]
+    ) -> LayoutObject:
         span_ids = tuple(span.span_id for span in spans)
         return LayoutObject(
             content_id(

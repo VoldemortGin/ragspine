@@ -155,8 +155,7 @@ def test_an_onnx_fallback_page_spends_exactly_one_layout_call(
     report = (tmp_path / "report" / "report.md").read_text(encoding="utf-8")
     assert "- layout: **onnx-layout**" in report
     assert (
-        "- `mixed.pdf`: deterministic 4, onnx 2, model fallback 1 (onnx_low_confidence 1)"
-        in report
+        "- `mixed.pdf`: deterministic 4, onnx 2, model fallback 1 (onnx_low_confidence 1)" in report
     )
 
 

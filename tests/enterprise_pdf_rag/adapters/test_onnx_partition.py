@@ -37,16 +37,16 @@ PRODUCER = f"{ONNX_PRODUCER_PREFIX}:pdfspine/{pdfspine.__version__}:000000000000
 
 def _block(
     bbox: tuple[float, float, float, float], label: str, raw: str = "", score: float = 0.9
-) -> object:
+) -> pdfspine.LayoutBlock:
     return pdfspine.LayoutBlock(Rect(*bbox), label, score, raw or label)
 
 
 def _partitioner(
-    snapshot: DocumentSnapshot, blocks: list[object] | Exception
+    snapshot: DocumentSnapshot, blocks: list[pdfspine.LayoutBlock] | Exception
 ) -> tuple[StubModelPartitioner, OnnxPagePartitioner]:
     stub = StubModelPartitioner()
 
-    def blocks_for(page: PageInput) -> list[object]:
+    def blocks_for(page: PageInput) -> list[pdfspine.LayoutBlock]:
         if isinstance(blocks, Exception):
             raise blocks
         return blocks
@@ -133,9 +133,7 @@ def test_a_span_inside_nested_blocks_goes_to_the_innermost(tmp_path: Path) -> No
         heading.bbox[2] + 5.0,
         heading.bbox[3] + 5.0,
     )
-    _stub, partitioner = _partitioner(
-        snapshot, [*BANDS, _block(inner, "title", "paragraph_title")]
-    )
+    _stub, partitioner = _partitioner(snapshot, [*BANDS, _block(inner, "title", "paragraph_title")])
     partition = partitioner.partition(page)
     validate_partition(page, partition)
     title = partition.objects[3]
@@ -355,7 +353,14 @@ def test_the_real_model_partitions_an_authored_text_page(tmp_path: Path) -> None
     partitioner = make_onnx_page_partitioner(
         StubModelPartitioner(), sources, snapshot, layout_model=str(_REAL_WEIGHTS)
     )
-    partition = partitioner.partition(page)
+    try:
+        partition = partitioner.partition(page)
+    finally:
+        # onnxruntime 会话留到解释器关停阶段析构会在 macOS 上触发
+        # "recursive_mutex lock failed" 崩溃; 测完立刻清掉 pdfspine 的会话缓存.
+        from pdfspine._onnx import clear_model_cache
+
+        clear_model_cache()
     # 推理路径必须机械可用: 绝不允许 onnx_unavailable(那是调用方式坏了, 不是版面难).
     assert _fallback_reason(partition) != "onnx_unavailable"
     if partition.producer.startswith(ONNX_PRODUCER_PREFIX):
@@ -376,6 +381,8 @@ def test_a_missing_onnxruntime_is_a_clear_error_before_any_page(
     )
     with pytest.raises(ValueError, match=r"pdfspine\[onnx\]"):
         make_onnx_page_partitioner(
-            StubModelPartitioner(), LocalDocumentStore(tmp_path / "unused"), snapshot,
+            StubModelPartitioner(),
+            LocalDocumentStore(tmp_path / "unused"),
+            snapshot,
             layout_model=str(model),
         )
