@@ -292,7 +292,9 @@ result.ok, result.live_calls, [(d.pdf_path, d.status) for d in result.documents]
 
 `run_folder_pipeline(max_questions=N)` 只回答 N 道题（gold 集只数可运行用例；`None` = 全部，`< 1` 抛 `ValueError`）；CLI 不暴露该参数。选哪 N 道由 `question_selection` 决定：`"first"`（函数默认，notebook 默认 `QUESTION_SELECTION`）= 题集原顺序的前 N 道；`"first_matched"` = 按原顺序取前 N 道「`doc` 恰好对上文件夹里一份 PDF」的题，文档缺失 / 歧义 / 没写 `doc` 的题跳过、不占名额，并在 `report.json` 的 `question_docs.selection` 里列出 id 与原因；凑不满 N 道就跑选中的（`short=true`，「题集中只有 K 道题的文档在文件夹里」），一道都没有则入库前抛 `QuestionDocsError`。这只保证题目引用的 PDF 在文件夹里，不保证答得出（[ADR 0022](adr/0022-run-folder-question-docs-budget-and-progress.md)）。
 
-**题目 `doc` → PDF（入库前解析一次，入库筛选与回答路由共用，`adapters/question_docs.py`）**：依次 `alias`（`doc_aliases` 显式别名，键按规范化比较）→ `exact`（文件名，不分大小写）→ `stem` → `sha_prefix`（≥12 位十六进制；只有看起来是十六进制且按名字没对上时才读文件算哈希）→ `normalized`（NFKC 全角半角、casefold、带目录取 basename、去 `.pdf`、空白 / `_` / `-` / `.` 连续段视为一个分隔符）。命中多份内容不同的 PDF 为歧义、不匹配；**差几个字母不自动匹配**，只给出至多 3 个 `difflib` 候选（附相似度）供写进 `doc_aliases`，例如 `doc_aliases={"Meridian 2023 interim": "Meridian Interim Report 2023.pdf"}`；别名值对不上恰好一份 PDF 时入库前报错并点名该条。结果在 `FolderPipelineResult.question_docs` 与 `question_docs_resolved` 进度事件里（引用数、已匹配数、各规则命中数、未匹配清单）；`check_question_docs(folder, questions, max_questions=, question_selection=, doc_aliases=)` 是同一核对的只读版本（notebook 的 `question-docs` 格），`describe()` 打印核对表。`only_question_docs=True`（CLI `--only-question-docs`，notebook `ONLY_QUESTION_DOCS`，notebook 默认 `False`）只入库被选中题目引用的 PDF，其余记 `skipped_not_referenced`（不读字节、不占预算）；此时有未匹配 / 歧义 / 没写 `doc` 的题：`on_unmatched_docs="error"`（函数默认；notebook 默认 `ON_UNMATCHED_DOCS = "skip"`）在任何写盘与模型调用之前抛带中文说明的 `QuestionDocsError`，`"skip"` 则跳过它们继续、回答时记 `routing_failed` 并写明原因。`only_question_docs=False` 时只记录不抛。
+**题目 `doc` → PDF（入库前解析一次，用于入库筛选与评估标注，`adapters/question_docs.py`；不再限定检索范围，见下文「回答范围」）**：依次 `alias`（`doc_aliases` 显式别名，键按规范化比较）→ `exact`（文件名，不分大小写）→ `stem` → `sha_prefix`（≥12 位十六进制；只有看起来是十六进制且按名字没对上时才读文件算哈希）→ `normalized`（NFKC 全角半角、casefold、带目录取 basename、去 `.pdf`、空白 / `_` / `-` / `.` 连续段视为一个分隔符）。命中多份内容不同的 PDF 为歧义、不匹配；**差几个字母不自动匹配**，只给出至多 3 个 `difflib` 候选（附相似度）供写进 `doc_aliases`，例如 `doc_aliases={"Meridian 2023 interim": "Meridian Interim Report 2023.pdf"}`；别名值对不上恰好一份 PDF 时入库前报错并点名该条。结果在 `FolderPipelineResult.question_docs` 与 `question_docs_resolved` 进度事件里（引用数、已匹配数、各规则命中数、未匹配清单）；`check_question_docs(folder, questions, max_questions=, question_selection=, doc_aliases=)` 是同一核对的只读版本（notebook 的 `question-docs` 格），`describe()` 打印核对表。`only_question_docs=True`（CLI `--only-question-docs`，notebook `ONLY_QUESTION_DOCS`，notebook 默认 `False`）只入库被选中题目引用的 PDF，其余记 `skipped_not_referenced`（不读字节、不占预算）；此时有未匹配 / 歧义 / 没写 `doc` 的题：`on_unmatched_docs="error"`（函数默认；notebook 默认 `ON_UNMATCHED_DOCS = "skip"`）在任何写盘与模型调用之前抛带中文说明的 `QuestionDocsError`，`"skip"` 则放行继续、这些题照常在已入库的 PDF 中跨文档检索作答。`only_question_docs=False` 时只记录不抛。
+
+**回答范围（[ADR 0032](adr/0032-cross-document-answers.md)）**：轻量题集的每道题都在本次运行**全部已发布文档**里跨文档检索作答（只发布了一份时就问它，与从前逐字节一致）；`doc` 不再路由回答，只用于评估标注——`EvalCase.expected_doc`（`doc` 恰好解析到一份已发布文档时为其 sha256，否则 `None`）、`cited_doc_hit`（通过校验的引用是否落在它；没有期望文档或没有引用时为 `None`）、`cited_documents`（引用所在文档，按首次引用顺序）、`searched_documents`（检索了几份）、`routing`（`cross_document` / `doc` / `failed`）；跨文档时 `page_rank` 只在 `expected_doc` 内找期望页，没有期望文档则不评（不计入 `metrics`）。`eval.totals.cross_document` 计数，`report.md` 写一行检索范围。`routing_failed` 只剩「根本没问」：没有已发布文档，或显式 `restrict_to_question_doc=True`（函数参数，默认关闭，恢复 ADR 0022 的按 `doc` 路由，供对比实验；notebook 不暴露）。
 
 完整示例见 `notebooks/run_folder.ipynb`（版本检查与文件系统自检两个诊断 cell、一个配置 cell、一个写入目录护栏 cell、一个 `llm-selfcheck` LLM 请求自检 cell、一个运行 cell、结果表格、`answers.csv` 写出 cell；不含密钥、不带输出、不要在无模型环境里执行）。该 notebook **不使用** `NB_REPORT_DIR`：所有运行产物固定在项目根 `data/` 下（`data/ingestion/`、`data/reports/<题集文件名>/`，没有题集时报告目录名为 `run-folder`；目录不存在自动创建），`report.json` / `report.md` 每次运行都写，有题集时另写 `answers.csv`（`question,expected,answer` 三列、UTF-8 带 BOM、整文件写；回答原文取自 `EvalCase.answer`，标准答案取自 `EvalCase.expected`）；护栏 cell 在任何写入之前检查 ingestion / 报告目录都在 `data/` 之内、且不在 PDF 源目录之内（PDF 目录只读），不满足即抛异常。护栏只在 notebook 层，CLI 与 `run_folder_pipeline` 本身没有这道检查。
 
@@ -341,7 +343,7 @@ result.ok, result.live_calls, [(d.pdf_path, d.status) for d in result.documents]
 ### 题集的两种格式
 
 1. **`nl-answers-gold-v1`**（`.json` 且 `schema_version` 为此值）：用 `adapters/nl_gold.py` 的 `load_gold` + `judge`，与 `nl_gold_eval.py` 同一判定（共用 `adapters/nl_gold_runner.py`）；只跑 `offline_only=false` 的用例。`document_sha256` 不在本次已发布文档里的用例如实标 `routing_failed` 且不发请求。
-2. **轻量题集**：复用 `ragspine.eval.retrieval_only.load_questions`，支持 `.json` / `.jsonl` / `.csv` / `.txt`，字段 `id` / `question` / `expected` / `pages`（1 起，`"2"`、`"2,4-5"`）/ `doc`。判定为 `answered` / `abstained`；`failures` 记录 `expected` 是否出现在回答里。`doc` 按上文的解析规则对应到文件夹里的 PDF（文件名、去扩展名的文件名、≥12 位 sha 前缀、规范化名或别名）；本次只有一份已发布文档时直接问它；否则不带 `document`，交给服务端的标题 / 年份路由，选不出唯一文档的 422 记 `routing_failed`（不会对每份文档各问一遍）。
+2. **轻量题集**：复用 `ragspine.eval.retrieval_only.load_questions`，支持 `.json` / `.jsonl` / `.csv` / `.txt`，字段 `id` / `question` / `expected` / `pages`（1 起，`"2"`、`"2,4-5"`）/ `doc`。判定为 `answered` / `abstained`；`failures` 记录 `expected` 是否出现在回答里。`doc` 按上文的解析规则对应到文件夹里的 PDF（文件名、去扩展名的文件名、≥12 位 sha 前缀、规范化名或别名），只作评估标注；本次只有一份已发布文档时直接问它，否则带 `cross_document: true` 在全部已发布文档里一次检索作答（每题仍只有 1 次合成调用，不会对每份文档各问一遍）。
 
 两种格式凡有页（金标取 `required_claims` 的页，轻量题集取 `pages`）都按 prompt 成员顺序算名次，`metrics` 是 `retrieval_metrics` 的 recall@k / page_recall@k / MRR（k = 1, 3, 5, 10）。评测只挂载本次跑出的文档（`scan_catalog` 后按 sha 过滤），答案缓存在 `<ingestion_root>/model-cache`，问答审计照常写 `answers-audit.sqlite`。
 
@@ -420,7 +422,9 @@ curl --fail-with-body http://127.0.0.1:8766/v1/chat/completions \
   }'
 ```
 
-文档选择优先级：`document`（完整 sha256 或 ≥12 位十六进制前缀）> `model` 形如 `enterprise-pdf-rag/<sha12>` > 目录里唯一一个已挂载文档 > 多文档时按问题路由（ADR 0013：问题里出现某文档封面标题独有的词、且/或问题里的年份是该文档打印过的年份，恰好一个命中即选中）；仍歧义 → 422，文案列出各候选的 display name。
+文档选择优先级：`document`（完整 sha256 或 ≥12 位十六进制前缀）> `model` 形如 `enterprise-pdf-rag/<sha12>` > 目录里唯一一个已挂载文档 > 多文档时按问题路由（ADR 0013：问题里出现某文档封面标题独有的词、且/或问题里的年份是该文档打印过的年份，恰好一个命中即选中）；选不出唯一文档时**在全部已挂载文档里跨文档检索作答**（[ADR 0032](adr/0032-cross-document-answers.md)；此前是 422）。`"cross_document": true` 直接跨文档检索（不走标题路由），与 `document` / 文档 model id 同时给 → 422。
+
+**跨文档回答**：各已挂载文档的成员合成一个语料（`adapters/cross_document.py`）：BM25 在并集上建一份索引（语料统计统一、分数可比），向量通道每份文档各取前 `channel_limit` 合并后按分数截断回 `channel_limit`（查询向量每题只算一次），树通道只对「并集 BM25 第一名所在文档」路由一次、只取该文档的页；RRF 与单文档相同，`top_k` 席位、prompt 字符预算、每题 1 次合成调用都不变。每个证据块与页窗口在 prompt 里标 `document=<封面标题或文件名> (<sha12>)`，页窗口按（文档, 页）分组；claim 仍只按它所引用成员自己的证据核验，所以引用 A 文档的同名表格却写 B 文档的数字会被拒（`claim_not_in_evidence`）。信封多出 `searched_documents`（检索过的全部文档），每条引用、`member_ranks`、`page_windows` 都带自己的 `document_sha256`；信封顶层 `document_sha256` 为第一个进 prompt 的成员所在文档；正文引用列表在页码前加文档 sha 前 12 位。
 
 `filters` 可省略：省略 → 从问题自动抽取（期间用同一套规范化规则，地区只在该文档自己的地区词表里做大小写不敏感的逐字匹配）；`{}` → 关闭过滤；显式给 `periods`（任意写法，裸年份匹配该年所有期间）/ `regions`（各 ≤8 个）→ 按等值收窄候选。封面 / 目录页默认不进候选。收窄后候选数 < `top_k` 时去过滤重试，信封 `filters_relaxed: true`。最后一条消息必须是 `user`；之前的 `user`/`assistant` 轮作为数据进入 prompt，客户端 `system` 消息被丢弃。请求 `extra=forbid`，`temperature` 等未声明字段 → 422。`rerank` 默认 `false`。
 
@@ -620,7 +624,8 @@ export APP_ANSWER_AUDIT_PATH=/abs/path/answers-audit.sqlite   # 可省略；默�
 | `status` / `abstain_reason` / `abstain_detail` / `answer_text` | 最终结果；`answer_text` 只在 `answered` 时有值 |
 | `claims_verified` / `claims_rejected` | 通过校验的 claim 及其全部引用（成员、页号、页标题、字段路径、证据 id、逐字引文、行/列/表头）（JSON）；被丢弃的 claim 及原因（JSON） |
 | `error` | 抛错路径的错误码；正常路径为 NULL |
-| `ranked` | 选席**之前**的整条融合排名（JSON）：每条 `member_id`、0 起的 `page_index`、`fused_score` 与 BM25（`lexical_rank`）/ 向量 / 树三个通道各自的名次。后加的列：旧库在下次打开时 `ALTER TABLE` 补上，旧行保持 NULL（检索测试台据此标 `n/a`） |
+| `ranked` | 选席**之前**的整条融合排名（JSON）：每条 `member_id`、`document_sha256`（该成员所在文档）、0 起的 `page_index`、`fused_score` 与 BM25（`lexical_rank`）/ 向量 / 树三个通道各自的名次。后加的列：旧库在下次打开时 `ALTER TABLE` 补上，旧行保持 NULL（检索测试台据此标 `n/a`） |
+| `searched_documents` | 跨文档回答（ADR 0032）检索过的全部文档 sha256（JSON 数组）；单文档回答为 NULL。后加的列，同上补列。跨文档行的 `document_sha256` 列是第一个进 prompt 的成员所在文档，`fused` / `page_windows` / `claims_verified` 里每条也带各自的 `document_sha256` |
 
 索引：`request_fingerprint`、`started_at`、`document_sha256`。
 
@@ -700,15 +705,16 @@ print(format_table(bench)); write_testbench(bench, REPORT_DIR)
 
 `notebooks/run_folder.ipynb` 在 `answers` 格之后的 `testbench` 格就是这段代码：审计库取 `settings.answer_audit_path or (INGESTION_ROOT / "answers-audit.sqlite")`；没有题集 / 用例、审计库不存在或打不开时打印提示并跳过，不抛。
 
-**关联**：审计库不存题目 id，按**问题原文**关联，有 `report.json` 时再收窄到该题被路由到的文档；同一题多次运行取**最新**一行（`audit_id` 列给出是哪一行）。
+**关联**：审计库不存题目 id，按**问题原文**关联，有 `report.json` 时再收窄到该题回答所记的文档（跨文档时为第一个进 prompt 的成员所在文档）；同一题多次运行取**最新**一行（`audit_id` 列给出是哪一行）。
 
 **各列**（`n/a` = 记录里没有、无从判断；`∞` = 找过、整条排名里都没有）：
 
 | 列 | 含义 |
 | --- | --- |
 | `question_id` / `doc` / `expected_pages` / `expected` / `question` | 题集原样；`expected_pages` 1 起，多组用 `\|` 分隔 |
+| `expected_doc` | 题目 `doc` 解析到的已发布文档 sha256（来自 `report.json`，或 `folder` + `doc_aliases` 的只读解析）；对不上为 `n/a`。只是评估标注 |
 | `document_sha256` / `audit_id` / `link` | 关联到的审计行；`link` = `text+document` / `text` / `n/a` |
-| `routing_failed` / `routing_detail` | 题目的 `doc` 有没有路由到本次发布的文档（来自 `report.json`，或 `folder` + `doc_aliases` 的只读解析） |
+| `cross_document` / `routing_detail` | 是否在全部已发布文档里跨文档检索（审计行的 `searched_documents`）；`routing_detail` 只在这道题根本没问时写原因 |
 | `fusion_mode` / `translated` / `filters` / `filters_relaxed` | 实际跑的通道（ADR 0018）、是否走过查询翻译、期间 / 地区预过滤、是否因候选少于席位被放宽（"饿死放宽"） |
 | `ranking` | `full` = 有 `ranked` 列的整条融合排名；`head` = 旧行，只有进席的前 k 条（需 `--ingestion-root` 才知道成员在哪页）；`n/a` = 连页号都没有 |
 | `bm25_rank` / `vector_rank` / `tree_rank` | 该通道**自己的**名次里，期望页成员的最佳名次（多组取最差组）；通道没跑为 `n/a` |
@@ -716,14 +722,14 @@ print(format_table(bench)); write_testbench(bench, REPORT_DIR)
 | `prompt_rank` / `prompt_page_rank` | 进 prompt 的成员里的名次——与 `report.json` 的 `page_rank` 同口径 |
 | `in_prompt` / `page_window_hit` | 期望页是否进了 prompt（进席成员或其页窗口）；没给 `pages` 而给了 `expected` 时，改为查 prompt 正文（去掉问题本身）是否含 `expected` |
 | `status` / `abstain_reason` / `answer` | 最终状态（`answered` / `abstained` / `error` / `open`）、原因码、回答原文 |
-| `content_hit` / `cited_pages` / `cited_page_hit` | 回答是否含 `expected`（`content_hit`，规范化同 nl_gold）；通过校验的 claim 引用的页；引用页是否命中期望页 |
+| `content_hit` / `cited_pages` / `cited_page_hit` / `cited_doc_hit` | 回答是否含 `expected`（`content_hit`，规范化同 nl_gold）；通过校验的 claim 引用的页；引用页是否命中期望页；引用是否落在 `expected_doc` |
 | `diagnosis` / `diagnosis_text` | 诊断类别与一句中文说明 |
 
 **诊断类别**（按排错顺序判定，先中先停）：
 
 | 类别 | 判定 | 去查哪里 |
 | --- | --- | --- |
-| `routing_failed` | 题目 `doc` 没对上本次发布的文档，根本没检索 | doc 写法 / `DOC_ALIASES` / 该 PDF 是否 published |
+| `routing_failed` | 这道题根本没问（没有已发布文档，或 `restrict_to_question_doc=True` 时 `doc` 对不上） | 入库结果 / doc 写法 |
 | `correct` | 答了且含 `expected`（没有 `expected` 时：引用页命中期望页） | — |
 | `unjudged` | 题目既无 `pages` 也无 `expected` | 补题目标注 |
 | `in_prompt_abstained` | 期望页进了 prompt，但弃答 | 核验 / 生成：claim 被拒原因见 `audit --show <audit_id>` |
@@ -734,6 +740,8 @@ print(format_table(bench)); write_testbench(bench, REPORT_DIR)
 | `no_record` | 审计库里没有这道题 | 没问到（`MAX_QUESTIONS`）/ 请求失败 / 换过审计库 |
 
 **汇总**（JSON 的 `summary`，表格下方同样打印）：各类别计数；`metrics.prompt` = 进 prompt 成员上的 recall@k / page_recall@k / MRR（k = 1, 3, 5, 10；路由失败与无记录的有页题记为未命中，与 `report.json` 的 `eval.metrics` 相等）；`metrics.fused` = 整条融合排名上的同一组指标（只算 `ranking=full` 的有页题）；`channels` = 各通道命中率（有页且 `ranking=full`、该通道跑过的题里，排到期望页的比例与前 10 内的比例）；`by_doc` = 按 `doc` 的类别分布；`n/a` = 各类缺失的计数（`pages` / `expected` 题目没给，`audit_record` 没有审计行，`ranked` 旧行无整条排名，`member_pages` 旧行且无法映射页号）。
+
+**跨文档**（ADR 0032）：一行跨文档时，各名次只在 `expected_doc` 里找期望页（别的文档同页号不算命中）；`doc` 对不上时期望页无从定位，各名次为 `n/a`，计入 `n/a.expected_doc`，这道题只按 `expected` 判对错。
 
 **排错顺序**：先看 `routing_failed`（零成本可修）→ `not_retrieved`（解析 / 分块 / 索引，`audit --show` 看不到它，要回到 processing 产物）→ `retrieved_not_in_prompt`（看 `bm25_rank` / `vector_rank` 谁排到了、`fused_rank` 掉到第几）→ `in_prompt_abstained` / `in_prompt_wrong`（`audit --show <audit_id>` 看 prompt 原文、模型原始输出与被拒 claim）。
 

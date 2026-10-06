@@ -7,6 +7,12 @@ directory written before this ADR is reused as is. With the new arguments at the
 the pipeline ingests, routes and answers exactly as before, except that (a) a question's
 `doc` may now also match a PDF by its normalized name and (b) the per-PDF ceiling is higher.
 
+> Amended by [ADR 0032](0032-cross-document-answers.md) (2026-10-06): the resolution below no
+> longer routes the answer. Every light question is answered across every published document of
+> the run; `doc` decides ingest scope and selection exactly as below and labels the evaluation
+> (`expected_doc`, `cited_doc_hit`). `routing_failed` is left for a question that was not asked;
+> `restrict_to_question_doc=True` restores this ADR's routing for comparison.
+
 Two further parts of the same incident — re-verifying the whole source snapshot on every
 `load`, and the `.claim` a killed process leaves behind — are decided separately.
 

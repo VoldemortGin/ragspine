@@ -27,7 +27,8 @@ the same `pyproject.toml` — import name unchanged, not under `ragspine.*`
    [ADR 0017](../../docs/enterprise-pdf-rag/adr/0017-page-context-window.md),
    [ADR 0018](../../docs/enterprise-pdf-rag/adr/0018-query-classification-and-translation.md),
    [ADR 0019](../../docs/enterprise-pdf-rag/adr/0019-document-tree-channel.md),
-   [ADR 0025](../../docs/enterprise-pdf-rag/adr/0025-lite-ingest-mode.md)
+   [ADR 0025](../../docs/enterprise-pdf-rag/adr/0025-lite-ingest-mode.md),
+   [ADR 0032](../../docs/enterprise-pdf-rag/adr/0032-cross-document-answers.md)
    and [PRD v0.2](../../docs/enterprise-pdf-rag/PRD-v0.2.md) define scope; the full list is
    [`docs/enterprise-pdf-rag/adr/`](../../docs/enterprise-pdf-rag/adr/).
 4. [`testing-and-ingestion.md`](../../docs/enterprise-pdf-rag/testing-and-ingestion.md) — what is
@@ -64,7 +65,11 @@ adapters/     every SDK and I/O: pdfspine (every source PDF opens through pdf_pa
               (qualify / index / publish), page_metadata_extraction.py (page_metadata stage),
               document_catalog.py (scan / mount), hybrid_search.py (BM25 + RRF + opt-in
               rerank borrowed from ragspine; the channels a query uses are chosen, not
-              fixed — ADR 0018), query_translation.py (restate a question written outside
+              fixed — ADR 0018), cross_document.py (ADR 0032: every mounted document as one
+              `MountedDocument` corpus — one BM25 over the union, each document's vector top
+              `channel_limit` merged and cut back, hits re-pinned to their own document;
+              `AnswerRequest.cross_document`, `rag-chat-v1` `cross_document`, and a request
+              whose title words select no single document), query_translation.py (restate a question written outside
               the index's language), document_tree_extraction.py (the document_tree
               ingestion stage: one routing note per branch, the structure saved even when the
               budget defers them) + tree_retrieval.py (one bounded call routing a question to
@@ -94,8 +99,13 @@ adapters/     every SDK and I/O: pdfspine (every source PDF opens through pdf_pa
               exact name → stem → sha prefix → NFKC/separator-normalized name; ambiguous or a near
               miss never matches, near misses are only `candidates`; the same resolution feeds the
               `only_question_docs` selection (others `skipped_not_referenced`, unread) and the
-              answer routing; `doc_aliases`; `on_unmatched_docs="error"` stops before any write,
-              `"skip"` answers those as `routing_failed`; `check_question_docs` is the read-only
+              evaluation labels — since ADR 0032 it never routes the answer: every light question
+              is asked across every published document (`cross_document`), `EvalCase.expected_doc`
+              / `cited_doc_hit` / `cited_documents` / `searched_documents` / `routing` record it,
+              `page_rank` is judged inside `expected_doc` across documents, and `routing_failed`
+              is left for an unasked question (`restrict_to_question_doc=True`, off by default,
+              restores the ADR 0022 routing); `doc_aliases`; `on_unmatched_docs="error"` stops
+              before any write, `"skip"` lets those through; `check_question_docs` is the read-only
               check the notebook's `question-docs` cell prints); per-PDF ingest ceiling
               `MAX_INGEST_LIVE_CALLS` = 10 000, or `max_live_calls_per_pdf="auto"` (notebook default):
               min(ceiling, selected pages × 4 + 50) from the page count the source stage reads,
@@ -210,13 +220,16 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   back with `enterprise-pdf-rag audit --db <path> [--last N] [--fingerprint X] [--question-like …]
   [--show ID]` (no service, no model). It quotes the evidence verbatim: local file, never shared.
   Its `ranked` column (added later; older rows NULL) is the whole fused ranking with each member's
-  page and BM25 / vector / tree seat. **Retrieval test bench** (`adapters/retrieval_testbench.py`,
+  document, page and BM25 / vector / tree seat; `searched_documents` (NULL for one document) lists
+  the documents a cross-document answer searched (ADR 0032). **Retrieval test bench** (`adapters/retrieval_testbench.py`,
   `audit --testbench --question-set <path> [--report …] [--format table|json|csv] [--write]`, or
-  the `testbench` cell of `notebooks/run_folder.ipynb`): one row per question — routing, pre-filters, each
-  channel's seat for the expected page, in prompt or not, status, `content_hit` — and a diagnosis
-  (`routing_failed` / `not_retrieved` / `retrieved_not_in_prompt` / `in_prompt_abstained` /
+  the `testbench` cell of `notebooks/run_folder.ipynb`): one row per question — cross-document or
+  not, expected document and whether a citation hit it, pre-filters, each channel's seat for the
+  expected page (inside the expected document across documents, `n/a` without one), in prompt or
+  not, status, `content_hit` — and a diagnosis
+  (`not_retrieved` / `retrieved_not_in_prompt` / `in_prompt_abstained` /
   `in_prompt_wrong` / `correct`, plus `not_in_prompt` / `unjudged` / `no_record` where the record
-  cannot tell); questions link to their latest row by text. Read-only, no model; writes
+  cannot tell, and `routing_failed` for a question never asked); questions link to their latest row by text. Read-only, no model; writes
   `testbench.csv` / `.json` only under `ROOT_DIR/data`, and logs nothing.
 - **Deploy:** `deploy/enterprise-pdf-rag/open-webui/` — `backend.Dockerfile` is not re-verified
   since the merge (local `../corespine` uv source; see ADR 0021 follow-ups).
@@ -238,7 +251,9 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   or its exact source display and whose unit, when it states one, is the point's own, cited
   back to SVG elements); failed claims are dropped, and any number in the prose outside a
   verified claim abstains the
-  whole answer (ADR 0011). One synthesis call per answer, plus at most one earlier
+  whole answer (ADR 0011). Across documents (ADR 0032) a member is read and verified only from
+  its own document and each citation names that document (`document_sha256`), never one the
+  model chose. One synthesis call per answer, plus at most one earlier
   translation call for a question written outside the index's language (bounded, cached,
   skipped when unavailable — ADR 0018); `llm_live_calls` counts both. Nothing is derived or
   retried, and a translation only ever reaches retrieval — the **lexical** channel (BM25 and
