@@ -1,6 +1,6 @@
 ---
 covers: src/enterprise_pdf_rag/
-verified-against: f1b30c0
+verified-against: 27df6a0
 ---
 
 # enterprise_pdf_rag — agent contract
@@ -113,7 +113,8 @@ adapters/     every SDK and I/O: pdfspine (every source PDF opens through pdf_pa
               formula calls, chart description from IR, deterministic page metadata, default
               tree, review exports, `unverified_tables_as_rows` (ADR 0027: lite on, full off)
               and `layout` (`make_partitioner`: `"model"` in both presets,
-              `"deterministic-text-pages"` only when asked — ADR 0028); `ingest_pdf` /
+              `"deterministic-text-pages"` and `"onnx-layout"` only when asked — ADR 0028 /
+              ADR 00NN); `ingest_pdf` /
               `run_folder_pipeline` take `layout_policy` / `unverified_tables_as_rows` as
               one-switch overrides of the preset (`None` keeps it); `published_ingest_mode` reads a
               snapshot's mode back from its page-metadata producer; lite after full sends no call,
@@ -128,6 +129,15 @@ adapters/     every SDK and I/O: pdfspine (every source PDF opens through pdf_pa
               (`IngestionSummary.pages_partitioned_deterministically` /
               `pages_partition_model_fallback` / `partition_fallback_reasons`); `"model"`
               keeps every page on the model layout, byte for byte),
+              onnx_partition.py (ADR 00NN: `layout_policy="onnx-layout"` composes
+              deterministic text pages -> pdfspine's local PP-DocLayoutV3 (`find_layout()`,
+              in-process ONNX, zero LLM calls, producer
+              `page-layout-onnx-v1:pdfspine/<ver>:<weights sha256[:12]>`) -> per-page model
+              fallback with `onnx_*` reason codes; chart IR stays model-only; a two-threshold
+              guard (accept >= 0.5, suspect visuals in [0.3, 0.5) force the fallback) keeps a
+              low-score chart from being silently dropped; weights via `APP_ONNX_LAYOUT_MODEL`
+              or `PDFSPINE_ONNX_MODELS`, missing runtime/weights is a pre-ingest error, never a
+              silent fallback; `IngestionSummary.pages_partitioned_onnx`),
               answer_llm.py (`make_answer_llm()`: the answer `JsonCompletionClient` built from
               settings, what `run_folder_pipeline` and `notebooks/run_folder.ipynb` call)
 resources/    packaged prompts / static data

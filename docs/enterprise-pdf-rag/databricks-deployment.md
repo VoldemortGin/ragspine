@@ -166,6 +166,28 @@ embeddings are sent in batches ([ADR 0026](adr/0026-batched-embeddings.md)). Set
 one `data/ingestion` (a full rerun after lite sends only the calls lite skipped). Review pages for one document on demand:
 `export_document_review(<ingestion root>/<sha256>)` from `enterprise_pdf_rag.adapters.pdf_ingestion`.
 
+### Optional: local ONNX layout for the remaining pages (ADR 00NN, explicit only)
+
+`layout_policy="onnx-layout"` additionally partitions the pages the deterministic triage
+declines (figures, residual graphics) with pdfspine's bundled local PP-DocLayoutV3 model —
+in-process ONNX inference, zero LLM calls — and only the pages ONNX itself declines fall back
+to the model layout, each with a machine-readable reason code
+([ADR 00NN](adr/00NN-onnx-layout-partitioner.md); chart IR still comes from the model only).
+On Databricks:
+
+- **Weights on a Unity Catalog volume** (they are not in any wheel and must not enter a Git
+  folder): upload `pp_doc_layoutv3.onnx` (ModelScope, RapidAI export; pdfspine documents the
+  URL) to e.g. `/Volumes/<catalog>/<schema>/models/pdfspine-onnx/`, and set
+  `APP_ONNX_LAYOUT_MODEL` to that absolute file (or directory) path. The weights file is read
+  once per process (sha256 into the partition producer, then one cached onnxruntime session);
+  per-page inference does not re-read the volume.
+- **Install the runtime**: `%pip install 'pdfspine[onnx]'` (onnxruntime CPU, numpy, Pillow).
+  A missing runtime or weights file stops the ingest before any page with an error naming
+  `APP_ONNX_LAYOUT_MODEL` — never a silent per-page fallback that would look like saved calls.
+- **Not yet validated on Databricks or on long financial reports** (FUSE weight loading and
+  per-page render memory untested; the measured comparison is a 20-page deck). The status line
+  reports, per PDF, deterministic / onnx / model-fallback page counts with reason codes.
+
 ## Data directory on workspace files or a Unity Catalog volume
 
 `notebooks/run_folder.ipynb` writes everything under `ROOT_DIR/data`. Run from a Git folder,
