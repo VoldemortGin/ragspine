@@ -17,6 +17,7 @@ import pytest
 from enterprise_pdf_rag.adapters import pdfspine_tsr
 from enterprise_pdf_rag.adapters.answer_audit import AnswerAuditStore
 from enterprise_pdf_rag.adapters.folder_pipeline import (
+    DocumentRun,
     EvalCase,
     EvalSummary,
     FolderPipelineResult,
@@ -1010,3 +1011,78 @@ def test_the_testbench_prints_and_writes_its_table_from_an_empty_journal(
         "testbench.csv",
         "testbench.json",
     ]
+
+
+def test_the_cases_cell_shows_how_many_questions_crossed_and_where_they_cited(
+    tmp_path: Path,
+) -> None:
+    """ADR 0032: every question searched every PDF; the cell says so and names the cited PDFs."""
+    meridian, orion = "a" * 64, "b" * 64
+    cases = (
+        EvalCase(
+            case_id="q1",
+            question="Revenue?",
+            document_id=orion,
+            verdict="answered",
+            failures=(),
+            routing="cross_document",
+            searched_documents=2,
+            cited_documents=(orion,),
+            expected_doc=None,
+        ),
+        EvalCase(
+            case_id="q2",
+            question="Margin?",
+            document_id=meridian,
+            verdict="answered",
+            failures=(),
+            routing="cross_document",
+            searched_documents=2,
+            cited_documents=(meridian,),
+            expected_doc=meridian,
+            cited_doc_hit=True,
+        ),
+    )
+    result = FolderPipelineResult(
+        folder=str(tmp_path / "pdfs"),
+        ingestion_root=str(tmp_path / "ingestion"),
+        documents=tuple(
+            DocumentRun(pdf_path=str(tmp_path / "pdfs" / name), sha256=sha, status="published")
+            for name, sha in (("meridian.pdf", meridian), ("orion.pdf", orion))
+        ),
+        eval=EvalSummary(format="questions", totals={}, metrics={}, cases=cases),
+        live_calls=LiveCalls(),
+        budget_exhausted=False,
+    )
+
+    def show(rows: list[dict[str, object]], columns: list[str]) -> None:
+        print(" ".join(columns))  # noqa: T201 — stands in for the notebook's own table printer
+        for row in rows:
+            print(" | ".join(str(row.get(column, "")) for column in columns))  # noqa: T201
+
+    namespace: dict[str, Any] = {
+        "result": result,
+        "MAX_QUESTIONS": None,
+        "Path": Path,
+        "show": show,
+    }
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        exec(compile(_code_cell("cases"), "cases", "exec"), namespace)
+    printed = buffer.getvalue()
+    assert "2 道题在 2 份已发布 PDF 里跨文档检索作答" in printed
+    assert "docs cited_docs cited_doc_hit" in printed
+    assert "q1 | answered |  | 0 | 2 | orion.pdf |  |" in printed
+    assert "q2 | answered |  | 0 | 2 | meridian.pdf | True |" in printed
+
+
+def test_the_question_docs_cell_says_a_miss_is_answered_across_every_pdf(tmp_path: Path) -> None:
+    printed, raised = _run_question_docs(
+        tmp_path, QUESTION_SELECTION="first", ONLY_QUESTION_DOCS=False, ON_UNMATCHED_DOCS="skip"
+    )
+    assert raised is None
+    assert "检索本身在所有已入库 PDF 中进行" in printed
+    assert "'absent report': 文件夹里找不到" in printed
+    assert "将改为在所有已入库 PDF 中跨文档检索作答" in printed
+    source = _code_cell("question-docs")
+    assert "对不上的题将改为跨文档检索作答" in source
