@@ -158,6 +158,23 @@ class Settings(BaseSettings):
     # None → <ingestion_root>/answers-audit.sqlite;给绝对路径即用它。
     answer_audit_path: Path | None = None
 
+    # ---- 对象库后端(common/evidence/object_backend;sqlite 对象库 PR-1)----------------
+    # 存储后端:auto(探测可用即 sqlite,否则回退文件布局)| sqlite(显式;探测失败即
+    # 报错,绝不静默回退)| files(今天的文件布局)。
+    # 注意:PR-1 只新增后端包,没有任何调用方读本字段——默认 auto 要等 PR-2/3 把
+    # store / 模型缓存接到 open_backend 之后才会实际改变行为;在那之前全部路径仍走
+    # 现有文件布局,行为与字节逐位不变。
+    object_store_backend: Literal["auto", "sqlite", "files"] = "auto"
+    # 内联进 db 的对象大小上限(字节);更大的对象外置到 objects/sha256-sharded/。
+    object_store_inline_max_bytes: int = 262_144
+    # 无论大小一律外置的媒体类型(逗号分隔;PDF 原件永远留文件系统)。
+    object_store_external_media_types: str = "application/pdf"
+    # sqlite 的 PRAGMA synchronous:FULL(默认,最稳)或 NORMAL(WAL 下可降)。
+    object_store_synchronous: Literal["FULL", "NORMAL"] = "FULL"
+    # 单个 store db 的保护阈(字节;默认 400 MiB,Workspace 单文件 500 MB 限制之下):
+    # 超过后 > 16 KiB 的新对象一律外置。
+    object_store_max_db_bytes: int = 400 * 1024 * 1024
+
     # notebook / 一键流程(run_folder_pipeline)的输入输出位置,环境变量名不带 APP_ 前缀。
     # 都可缺省且不校验存在性;相对路径相对项目根,~ 展开;空串视为未设置。
     pdf_source_dir: Path | None = Field(default=None, validation_alias="NB_PDF_DIR")
