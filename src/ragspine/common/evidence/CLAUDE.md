@@ -40,7 +40,7 @@ providers/    providers.py (explicit APP_LLM_* / embedding / APP_RERANK_* enviro
               validation, content-addressed immutable cache), local_models.py (embedding /
               rerank HTTP adapters; `embed_descriptions` batches index texts, 16 inputs /
               48 000 chars, halving on failure — enterprise-pdf-rag ADR 0026 — after a
-              transient failure's retries are spent, ADR 0034), transient.py (ADR 0034:
+              transient failure's retries are spent, ADR 0035), transient.py (ADR 0035:
               `TRANSIENT_HTTP_STATUSES` / `TRANSIENT_FAILURE_CODES`, jittered backoff,
               the process-wide `Retry-After` cooldown per (URL, model); `_sleep` / `_clock` /
               `_random` are the test seams),
@@ -92,7 +92,7 @@ providers/    providers.py (explicit APP_LLM_* / embedding / APP_RERANK_* enviro
 - **A provider error body is read only for a 400, and only two fields are kept** — `_send_once` reads ≤ 4096
   bytes, keeps the checked `error.param` / `error.code` (`^[A-Za-z0-9_.\[\]-]{1,64}$`) and drops the rest
   unretained; the message never reaches a record, exception, log or trace. Other statuses read no body;
-  of a non-200's headers only `retry-after-ms` / `Retry-After` is read (ADR 0034).
+  of a non-200's headers only `retry-after-ms` / `Retry-After` is read (ADR 0035).
   `JsonCompletionClient` drops a refused `temperature` / `seed` (`DEGRADABLE_SAMPLING_PARAMETERS`; code
   `unsupported_value` / `unsupported_parameter`) and resends under the dropped body's own fingerprint;
   refusals are remembered per (URL, model) in process and on disk (`provider_error_param` on the 400 record,
@@ -110,7 +110,7 @@ providers/    providers.py (explicit APP_LLM_* / embedding / APP_RERANK_* enviro
   is > `LEGACY_CLAIM_LEASE_SECONDS` (900) old, is taken over by `O_EXCL` of `<claim>.takeover-<n+1>` —
   never `link_new_file` / rename / replace; one live call, record marked `diagnostics.claim_takeover`.
   `claim_blocked_count` / `claims_taken_over` count both outcomes. Lease clock `_wall_clock` is the test seam.
-  [ADR 0023](../../../../docs/enterprise-pdf-rag/adr/0023-claim-takeover.md). Since ADR 0034 the lease
+  [ADR 0023](../../../../docs/enterprise-pdf-rag/adr/0023-claim-takeover.md). Since ADR 0035 the lease
   covers one `RETRY_MAX_PAUSE` (31 s) too (331 s / 871 s) and a holder renews it before each transient
   retry by creating the next `.takeover-<n>` itself (losing that create ends the call unsent).
 - **A transient provider failure is retried, never cached** — HTTP 408 / 429 / 500 / 502 / 503 / 504,
@@ -121,7 +121,7 @@ providers/    providers.py (explicit APP_LLM_* / embedding / APP_RERANK_* enviro
   and replaced unless it fails transiently again; `cache_only` still replays it. Permanent failures
   (400 / 401 / 403 / 404 / 413 / 422, invalid replies) are recorded and replayed as before. Embedding
   requests retry the same way before ADR 0026 halves a batch.
-  [ADR 0034](../../../../docs/enterprise-pdf-rag/adr/0034-transient-provider-errors.md).
+  [ADR 0035](../../../../docs/enterprise-pdf-rag/adr/0035-transient-provider-errors.md).
 - **A damaged model-cache entry is called again once, never stuck** — a record that does not
   parse, or a success record whose response is missing / not its digest, is re-sent under a
   claim (budgeted; `cache_only` still raises `invalid_cache_record` / `missing_cached_response`)

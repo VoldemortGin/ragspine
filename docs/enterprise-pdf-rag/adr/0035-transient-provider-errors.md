@@ -1,4 +1,4 @@
-# ADR 0034: Rate limits and server errors are retried, never cached as a permanent failure
+# ADR 0035: Rate limits and server errors are retried, never cached as a permanent failure
 
 Status: Accepted, 2026-10-06. Amends the failure records of
 [ADR 0011](0011-document-catalog-and-verified-answer-chain.md) / [ADR 0021](0021-sampling-parameter-fallback.md)

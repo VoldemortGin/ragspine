@@ -111,7 +111,7 @@ def _forget_unsupported_sampling_parameters():
 
 @pytest.fixture(autouse=True)
 def _no_real_transient_backoff(monkeypatch):
-    """临时错误(429/5xx/超时/连接)的退避等待一律不真睡,端点冷却每个用例前后清空(ADR 0034)。
+    """临时错误(429/5xx/超时/连接)的退避等待一律不真睡,端点冷却每个用例前后清空(ADR 0035)。
     需要观察等待时长的用例自行再 monkeypatch ``transient._sleep``。"""
     from ragspine.common.evidence.providers import transient
 

@@ -65,7 +65,7 @@ def _metadata_sender(url: str, *, api_key: str, payload: bytes, timeout: float) 
 
 def _summary_sender(prompts: list[str], *, fail_first: bool = False) -> Callable[..., bytes]:
     """Answers each node prompt from its own title; optionally refuses the first call (a
-    permanent 403: a timeout would now be retried within the call, ADR 0034)."""
+    permanent 403: a timeout would now be retried within the call, ADR 0035)."""
 
     def sender(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
         request = json.loads(payload)

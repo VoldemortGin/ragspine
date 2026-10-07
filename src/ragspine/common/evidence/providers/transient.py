@@ -5,7 +5,7 @@ error says nothing about the request itself: the same request may well succeed a
 Every other failure (400, 401, 403, 404, 413, 422, a malformed reply, ...) would fail the same
 way again. Model calls and embedding requests retry the former within one call, with jittered
 exponential backoff that honours ``Retry-After``, and never cache them as a permanent failure
-(enterprise-pdf-rag ADR 0034). Counts only; no body, header value or text is kept.
+(enterprise-pdf-rag ADR 0035). Counts only; no body, header value or text is kept.
 """
 
 import random
@@ -22,7 +22,7 @@ TRANSIENT_HTTP_STATUSES: frozenset[int] = frozenset({408, 429, 500, 502, 503, 50
 # ``ProviderRequestError.category`` values that say the same without a status.
 TRANSIENT_CATEGORIES: frozenset[str] = frozenset({"timeout", "connection"})
 # Model-cache ``failure_code``s of those failures. A record holding one was written before
-# ADR 0034 (it no longer writes them): it is called again instead of replayed.
+# ADR 0035 (it no longer writes them): it is called again instead of replayed.
 TRANSIENT_FAILURE_CODES: frozenset[str] = frozenset(
     {f"provider_http_{status}" for status in TRANSIENT_HTTP_STATUSES}
     | {f"provider_{category}" for category in TRANSIENT_CATEGORIES}

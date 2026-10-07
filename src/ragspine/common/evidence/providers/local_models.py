@@ -181,7 +181,7 @@ class LocalEmbeddingAdapter:
         and refused unless it covers every input once with one finite dimension. A failed
         batch is halved down to single inputs; a single input fails exactly as
         ``embed_description`` does. A transient failure is first retried within the request
-        (ADR 0034); only once those retries are spent is the batch halved. An endpoint refusing arrays (HTTP 400 on a pair whose
+        (ADR 0035); only once those retries are spent is the batch halved. An endpoint refusing arrays (HTTP 400 on a pair whose
         singles answer, before any array worked) and an adapter past
         ``EMBEDDING_BATCH_MAX_FAILURES`` failed batches send single inputs from then on.
         """
@@ -254,7 +254,7 @@ class LocalEmbeddingAdapter:
         api_key = self._config.api_key.get_secret_value()
         key = (url, self._config.model)
         # A transient failure (429, 5xx, timeout, connection) is retried here, before any
-        # split: halving a rate-limited batch only multiplies the requests (ADR 0034).
+        # split: halving a rate-limited batch only multiplies the requests (ADR 0035).
         retry = 0
         transient.pause(key)
         while True:

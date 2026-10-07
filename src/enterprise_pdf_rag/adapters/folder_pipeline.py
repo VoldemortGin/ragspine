@@ -236,7 +236,7 @@ class DocumentRun(BoundaryModel):
     # digest, e.g. lost by an asynchronous flush) and repaired or recomputed, by kind
     # (object, stage_cache, model_cache, source); counts only.
     storage_repairs: dict[str, int] = Field(default_factory=dict)
-    # ADR 0034, over this document's ingest, index embeddings and tree: requests resent after a
+    # ADR 0035, over this document's ingest, index embeddings and tree: requests resent after a
     # transient failure (429, 5xx, timeout, connection), and calls that still failed
     # transiently once their retries were spent — left unrecorded, so a rerun calls them again.
     retries: int = 0
@@ -1515,7 +1515,7 @@ def _ingest_count_lines(result: FolderPipelineResult) -> list[str]:
 
 
 def _transient_lines(result: FolderPipelineResult) -> list[str]:
-    """One line when any document met a transient provider error (ADR 0034); none otherwise."""
+    """One line when any document met a transient provider error (ADR 0035); none otherwise."""
     retries = sum(item.retries for item in result.documents)
     failures = sum(item.transient_failures for item in result.documents)
     if not retries and not failures:

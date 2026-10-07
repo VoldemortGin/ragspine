@@ -200,7 +200,7 @@ def test_a_claim_names_its_holder_and_lease_and_is_released_once_recorded(
 
 
 def test_the_lease_covers_every_blocking_step_of_the_slowest_allowed_call() -> None:
-    # ADR 0034: one pause of at most 31 s before each attempt; a retry renews the claim.
+    # ADR 0035: one pause of at most 31 s before each attempt; a retry renews the claim.
     assert json_completion._claim_lease(45.0) == 331
     assert json_completion._claim_lease(180.0) == 871
     assert json_completion._claim_lease(180.0) < LEGACY_CLAIM_LEASE_SECONDS

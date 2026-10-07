@@ -418,7 +418,7 @@ def test_other_statuses_are_never_read_and_never_resent(
 def test_transient_statuses_are_never_read_and_resent_with_the_same_body(
     tmp_path: Path, endpoint: Callable[[Rule], _Endpoint], status: int
 ) -> None:
-    """ADR 0034: retried within the call, the temperature kept, nothing recorded."""
+    """ADR 0035: retried within the call, the temperature kept, nothing recorded."""
     scripted = endpoint(lambda body: (status, AZURE_TEMPERATURE_400))
     with pytest.raises(JsonCompletionError) as raised:
         _ask(_client(tmp_path))

@@ -137,7 +137,7 @@ def test_failed_correction_is_not_retried_by_a_client_with_retry_enabled(
         calls.append(payload)
         if len(calls) == 1:
             return _response(prepared, "0" * 64)
-        # A permanent failure: a transient one (429, 5xx) is retried in the call (ADR 0034).
+        # A permanent failure: a transient one (429, 5xx) is retried in the call (ADR 0035).
         raise ProviderRequestError("bounded correction failed", status=403, category="http")
 
     client = JsonCompletionClient(

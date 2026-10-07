@@ -128,7 +128,7 @@ class IngestionSummary(BoundaryModel):
     # (``request_in_progress_or_uncertain``), and claims of dead attempts taken over and resent.
     calls_claim_blocked: int = 0
     claims_taken_over: int = 0
-    # ADR 0034: requests resent after a transient failure (429, 5xx, timeout, connection), and
+    # ADR 0035: requests resent after a transient failure (429, 5xx, timeout, connection), and
     # calls that still failed transiently once their retries were spent (no record is written,
     # so the next run calls them again).
     retries: int = 0

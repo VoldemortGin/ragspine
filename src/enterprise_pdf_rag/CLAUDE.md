@@ -117,7 +117,7 @@ adapters/     every SDK and I/O: pdfspine (every source PDF opens through pdf_pa
               no extra PDF open, still bounded by the shared total; `IngestionSummary.pages_complete` /
               `pages_budget_deferred` / `pages_claim_blocked` (and the call-level `calls_claim_blocked` /
               `claims_taken_over`, ADR 0023; `retries` / `transient_failures`, also on `DocumentRun`,
-              in `document_done` and one `report.md` line — ADR 0034: 429 / 5xx / timeouts are
+              in `document_done` and one `report.md` line — ADR 0035: 429 / 5xx / timeouts are
               retried in the call and left unrecorded for the next run) and `document_done.pages="X/Y"` show a
               partly ingested `published` document; `document_progress` reports pages / calls /
               cache hits, counts only;

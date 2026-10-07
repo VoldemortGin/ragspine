@@ -33,7 +33,7 @@ class ProviderRequestError(ValueError):
     HTTP 400 body, each charset- and length-checked; the provider's message and every other
     byte of the body are discarded unretained. Both are ``None`` for any other failure.
     ``retry_after`` is the wait (seconds) a non-200 response's ``Retry-After`` /
-    ``retry-after-ms`` header asked for, else ``None`` (enterprise-pdf-rag ADR 0034).
+    ``retry-after-ms`` header asked for, else ``None`` (enterprise-pdf-rag ADR 0035).
     """
 
     def __init__(
@@ -329,7 +329,7 @@ def _send_once(url: str, *, api_key: str, payload: bytes, timeout: float) -> byt
         response = connection.getresponse()
         if response.status != 200:
             # Only a 400 names a request field; every other status stays unread. Of the
-            # headers only the requested wait is read (ADR 0034).
+            # headers only the requested wait is read (ADR 0035).
             param, code = _rejected_field(response) if response.status == 400 else (None, None)
             raise ProviderRequestError(
                 f"Provider returned HTTP {response.status}; no retry performed",

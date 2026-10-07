@@ -167,7 +167,7 @@ No `max_parallel_questions` is added.
   like every failure it is recorded and replayed (ADR 0021's permanent failure record), so a
   page or object rate-limited once stays failed until its record is removed. Concurrency raises
   that probability; keep N where the deployment never answers 429.
-  **Resolved by [ADR 0034](0034-transient-provider-errors.md) (2026-10-06):** 429 / 408 / 5xx /
+  **Resolved by [ADR 0035](0035-transient-provider-errors.md) (2026-10-06):** 429 / 408 / 5xx /
   timeouts / connection errors are now transient — retried within the call with jittered
   backoff, a `Retry-After` shared by every worker calling the same (endpoint, model), and never
   recorded, so a rerun calls them again (old such records included). Lower N when the status
@@ -183,7 +183,7 @@ No `max_parallel_questions` is added.
   of several seconds per call the waiting dominates and the gain approaches N.
 
 Raising N beyond the endpoint's comfortable concurrency buys nothing and risks permanent 429
-records (since ADR 0034: retries, waiting and pages left for the next run); lowering it to 1
+records (since ADR 0035: retries, waiting and pages left for the next run); lowering it to 1
 restores the old run exactly.
 
 ## Consequences

@@ -6,7 +6,7 @@ Submodules:
     local_model_tunnel.py — 项目自有、只走回环的 SSH 模型隧道配置。
     local_models.py — 带鉴权的 OpenAI 兼容 embedding 与 rerank HTTP 适配器。
     providers.py — 显式 provider 环境与有界、opt-in 的连通性 smoke。
-    transient.py — 临时错误(429/5xx/超时/连接)的分类、退避与按端点共享的 Retry-After 冷却(ADR 0034)。
+    transient.py — 临时错误(429/5xx/超时/连接)的分类、退避与按端点共享的 Retry-After 冷却(ADR 0035)。
 """
 
 from ragspine import _lazy_submodules

@@ -1089,7 +1089,7 @@ def test_the_question_docs_cell_says_a_miss_is_answered_across_every_pdf(tmp_pat
     assert "对不上的题将改为跨文档检索作答" in source
 
 
-# ───────────── 并发入库 (ADR 0033) 与临时错误 (ADR 0034) ─────────────
+# ───────────── 并发入库 (ADR 0033) 与临时错误 (ADR 0035) ─────────────
 
 
 def test_parallel_documents_default_to_four_with_the_reasons_and_reach_the_run() -> None:

@@ -1,4 +1,4 @@
-"""Rate limits and server-side errors are retried, never cached as a permanent failure (ADR 0034).
+"""Rate limits and server-side errors are retried, never cached as a permanent failure (ADR 0035).
 
 Every wait goes through ``transient._sleep`` (stubbed: nothing here really sleeps) on the clock
 ``transient._clock``; ``transient._random`` is the jitter source.
@@ -394,7 +394,7 @@ def test_a_response_that_fails_validation_is_not_retried(tmp_path: Path) -> None
     assert script.sent == 1 and len(_records(tmp_path)) == 1
 
 
-# ---- records written before ADR 0034 ------------------------------------------------------
+# ---- records written before ADR 0035 ------------------------------------------------------
 
 
 def _old_failure(cache: Path, code: str, *, status: int | None) -> Path:

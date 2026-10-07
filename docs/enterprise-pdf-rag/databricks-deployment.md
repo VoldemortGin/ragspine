@@ -187,7 +187,7 @@ time):
 - each worker has at most one model call in flight, so N is the request concurrency the Azure
   deployment sees; a 429 (or 408 / 5xx, timeout, connection error) is retried within the call
   with jittered backoff, honouring `Retry-After` for every worker of that endpoint, and is never
-  recorded, so a rerun calls it again (ADR 0034) — lower N when the status table's `retries` /
+  recorded, so a rerun calls it again (ADR 0035) — lower N when the status table's `retries` /
   `transient_failures` columns are frequently non-zero;
 - the shared `MAX_LIVE_CALLS_TOTAL` is reserved per allotment and never overspent, but under a
   tight total *which* PDF ends `budget_starved` depends on timing;
@@ -199,7 +199,7 @@ time):
   no `.claim` is left), never starts the queued ones, then stops (the notebook prints a
   `stopping` line saying so). Rerun to continue.
 
-### Rate limits and server errors (ADR 0034)
+### Rate limits and server errors (ADR 0035)
 
 HTTP 429 / 408 / 500 / 502 / 503 / 504, timeouts and connection errors are transient: a model
 call retries them up to three times (about 1, 2, 4 s with jitter, at most 30 s per wait; the

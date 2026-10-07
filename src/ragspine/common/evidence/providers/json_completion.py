@@ -375,7 +375,7 @@ def _context_document(
 def _claim_lease(timeout: float) -> int:
     """Seconds after which a claim's holder is presumed dead. ``timeout`` bounds each blocking
     socket operation (connect, send, wait, read), not the whole call, hence four of them; one
-    attempt is preceded by at most one ``RETRY_MAX_PAUSE`` (a backoff or a cooldown, ADR 0034),
+    attempt is preceded by at most one ``RETRY_MAX_PAUSE`` (a backoff or a cooldown, ADR 0035),
     and a holder renews its claim before every retry, so a lease covers one pause and one
     attempt, plus room for the cache writes around the transport."""
     return math.ceil(4 * timeout + transient.RETRY_MAX_PAUSE) + 120
@@ -611,7 +611,7 @@ class JsonCompletionClient:
 
     @property
     def retry_count(self) -> int:
-        """Requests resent after a transient failure (429, 5xx, timeout, connection; ADR 0034).
+        """Requests resent after a transient failure (429, 5xx, timeout, connection; ADR 0035).
         Each is also a live call."""
         return self._retries
 
@@ -857,7 +857,7 @@ class JsonCompletionClient:
         # The record already there when it is damaged (or names a lost response): it is
         # called again and replaced, ADR 0029. None = an ordinary first call or retry.
         damaged: _CacheRecord | Literal["unreadable"] | None = None
-        # The record there is a transient failure written before ADR 0034: it is called again
+        # The record there is a transient failure written before ADR 0035: it is called again
         # at the same path, and whatever comes back (other than a new transient failure)
         # replaces it.
         stale = False
@@ -949,7 +949,7 @@ class JsonCompletionClient:
             takeover = {"claim_takeover": generation}
         context_path, context_warning = self._store_context(fingerprint, context)
         # The claim is held through every retry; a transient failure is retried after a
-        # jittered backoff (or the endpoint's Retry-After), each retry a live call (ADR 0034).
+        # jittered backoff (or the endpoint's Retry-After), each retry a live call (ADR 0035).
         key = _endpoint_key(self._config)
         retry = 0
         holder = generation  # the claim generation this call holds now
@@ -1069,7 +1069,7 @@ class JsonCompletionClient:
         droppable: frozenset[str],
     ) -> NoReturn:
         """Record a classified transport failure when ``record`` (a failed repair, ADR 0029,
-        and a transient failure, ADR 0034, leave no record) and raise it — as
+        and a transient failure, ADR 0035, leave no record) and raise it — as
         ``_ParameterRefused`` when the endpoint refused a droppable parameter (ADR 0021)."""
         code, status, exception_type = failure
         examined: dict[str, Any] = {}

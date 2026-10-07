@@ -273,7 +273,7 @@ def test_a_transient_batch_failure_is_retried_whole_before_any_split(
     endpoint = _Endpoint(fault=fault)
     texts = _texts(16)
     assert _adapter(endpoint).embed_descriptions(texts) == tuple(_vector(t) for t in texts)
-    assert endpoint.sizes == [16, 16]  # ADR 0034: the same batch again, not two halves
+    assert endpoint.sizes == [16, 16]  # ADR 0035: the same batch again, not two halves
 
 
 def test_an_endpoint_that_is_down_costs_one_round_of_retries_per_halving_level() -> None:
@@ -300,7 +300,7 @@ def test_failed_batch_requests_are_capped_then_batching_stops() -> None:
     texts = _texts(64)
     assert adapter.embed_descriptions(texts) == tuple(_vector(t) for t in texts)
     failed = [size for size in endpoint.sizes if size > 1]
-    # Each failed batch is one round of transient retries (ADR 0034).
+    # Each failed batch is one round of transient retries (ADR 0035).
     assert len(failed) == EMBEDDING_BATCH_MAX_FAILURES * (1 + TRANSIENT_MAX_RETRIES)
     assert endpoint.sizes.count(1) == 64
     endpoint.inputs.clear()

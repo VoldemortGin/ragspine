@@ -53,7 +53,7 @@ class _OptionalAnswer(BaseModel):
 
 def test_two_clients_cannot_both_issue_the_one_explicit_retry(tmp_path: Path) -> None:
     def fail_once(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
-        # A permanent failure: a transient one is never recorded (ADR 0034).
+        # A permanent failure: a transient one is never recorded (ADR 0035).
         raise ProviderRequestError("Provider response too large", category="response_limit")
 
     original = JsonCompletionClient(
@@ -381,7 +381,7 @@ def test_model_schema_requires_every_declared_property_including_nested_definiti
         (200, True, "provider_timeout"),
     ],
 )
-# A 429 and a timeout are transient (ADR 0034): with a budget of one there is no retry, and
+# A 429 and a timeout are transient (ADR 0035): with a budget of one there is no retry, and
 # nothing is recorded, so they are sent once and never replayed.
 def test_real_transport_classifies_http_and_timeout_without_response_secrets(
     tmp_path: Path,
@@ -450,7 +450,7 @@ def test_explicit_failed_retry_preserves_first_attempt_and_is_limited_to_one(
     def sender(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
         calls.append(payload)
         if len(calls) == 1 or not retry_succeeds:
-            # A permanent failure: a transient one is never recorded (ADR 0034).
+            # A permanent failure: a transient one is never recorded (ADR 0035).
             raise ProviderRequestError("too large", category="response_limit")
         assert timeout == 180.0
         return _response()
