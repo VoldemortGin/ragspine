@@ -6,8 +6,10 @@ fact_store v2 / extraction_eval）共用这里的 pytest fixture，避免各自�
 （PRD user story 20）。
 """
 
+import ipaddress
 import json
 import os
+import socket
 
 import pytest
 import rootutils
@@ -19,19 +21,78 @@ os.environ["PYTHON_DOTENV_DISABLED"] = "1"
 from ragspine.fixtures.excel import GT_PATH, XLSX_PATH
 from ragspine.fixtures.excel import main as make_excel_fixtures
 
+# 开发者 shell 里的 OPENAI_* 与各家 provider key / token:测试进程一律看不到(防止偷偷联网或用真 key)。
+_OPENAI_NAMES = (
+    "OPENAI_API_KEY",
+    "OPENAI_BASE_URL",
+    "OPENAI_MODEL",
+    "OPENAI_EMBEDDING_MODEL",
+    "OPENAI_TEMPERATURE",
+)
+_PROVIDER_SECRET_NAMES = (
+    "OPENAI_ORG_ID",
+    "DEEPSEEK_API_KEY",
+    "OPENROUTER_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "AZURE_API_KEY",
+    "AZURE_OPENAI_API_KEY",
+    "GROQ_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "MISTRAL_API_KEY",
+    "COHERE_API_KEY",
+    "HF_TOKEN",
+    "HUGGINGFACE_HUB_TOKEN",
+    "LANGCHAIN_API_KEY",
+    "LANGSMITH_API_KEY",
+)
+# 本机 HTTP 代理变量:放行回环会漏过代理流量,所以也清掉(含小写)。
+_PROXY_NAMES = (
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "no_proxy",
+)
+# 只有显式开启这些开关的 network 用例,才会拿回真实 key 与代理(见 _isolate_ambient_... 与 no_network)。
+_SMOKE_SWITCHES = ("RAGSPINE_LITELLM_SMOKE", "RAGSPINE_CLAUDE_CLI_SMOKE")
+# conftest 导入期(任何清理之前)的真实环境快照,仅供 smoke 用例恢复。
+_AMBIENT_ENV = {
+    name: os.environ[name]
+    for name in (*_OPENAI_NAMES, *_PROVIDER_SECRET_NAMES, *_PROXY_NAMES)
+    if name in os.environ
+}
+
+
+def _is_network_case(node) -> bool:
+    return node.get_closest_marker("network") is not None
+
+
+def _is_smoke_case(node) -> bool:
+    """带 network 标记且对应 RAGSPINE_*_SMOKE=1 已显式开启的真实调用用例。"""
+    return _is_network_case(node) and any(os.environ.get(name) == "1" for name in _SMOKE_SWITCHES)
+
+
+def _is_loopback_host(host: object) -> bool:
+    if not isinstance(host, str):
+        return False
+    if host in ("localhost", ""):
+        return True
+    try:
+        return ipaddress.ip_address(host.split("%", 1)[0]).is_loopback
+    except ValueError:
+        return False
+
 
 @pytest.fixture(scope="session", autouse=True)
 def _isolate_ambient_openai_for_scoped_fixtures():
     """OPENAI_* 是 LLM 首选名,会盖过用例设的 APP_LLM_*;module/session 级 fixture 先于下面的
     函数级清理运行,所以这里在会话级先清一遍。"""
     with pytest.MonkeyPatch.context() as patch:
-        for name in (
-            "OPENAI_API_KEY",
-            "OPENAI_BASE_URL",
-            "OPENAI_MODEL",
-            "OPENAI_EMBEDDING_MODEL",
-            "OPENAI_TEMPERATURE",
-        ):
+        for name in (*_OPENAI_NAMES, *_PROVIDER_SECRET_NAMES, *_PROXY_NAMES):
             patch.delenv(name, raising=False)
         yield
 
@@ -49,20 +110,20 @@ def _forget_unsupported_sampling_parameters():
 
 
 @pytest.fixture(autouse=True)
-def _isolate_ambient_llm_and_notebook_settings(monkeypatch):
-    """开发者 shell 里的 OPENAI_* / NB_* / PDF_INGEST_PASSWORD 不得影响测试(configs 会把它们读成 LLM 首选名与 notebook 路径)。
+def _isolate_ambient_llm_and_notebook_settings(monkeypatch, request):
+    """开发者 shell 里的 OPENAI_* / provider key / 代理 / NB_* / PDF_INGEST_PASSWORD 不得影响测试(configs 会把它们读成 LLM 首选名与 notebook 路径)。
 
     要测这些变量的用例自己 monkeypatch.setenv;get_settings() 是进程级缓存,前后各清一次,
     让它既不带着 import 期的环境,也不把某个用例的环境漏给下一个。
+    例外:带 network 标记的用例需要出网(下载模型权重),拿回代理变量;若同时显式开了
+    RAGSPINE_LITELLM_SMOKE=1 / RAGSPINE_CLAUDE_CLI_SMOKE=1(真实调用 smoke),还拿回真实 key。
     """
     from ragspine.common.evidence.configs import get_settings
 
     for name in (
-        "OPENAI_API_KEY",
-        "OPENAI_BASE_URL",
-        "OPENAI_MODEL",
-        "OPENAI_EMBEDDING_MODEL",
-        "OPENAI_TEMPERATURE",
+        *_OPENAI_NAMES,
+        *_PROVIDER_SECRET_NAMES,
+        *_PROXY_NAMES,
         "NB_PDF_DIR",
         "NB_QUESTIONS_PATH",
         "DATASET_PATH",  # questions_path 的回落别名
@@ -70,9 +131,56 @@ def _isolate_ambient_llm_and_notebook_settings(monkeypatch):
         "PDF_INGEST_PASSWORD",
     ):
         monkeypatch.delenv(name, raising=False)
+    restore: tuple[str, ...] = ()
+    if _is_smoke_case(request.node):
+        restore = (*_OPENAI_NAMES, *_PROVIDER_SECRET_NAMES, *_PROXY_NAMES)
+    elif _is_network_case(request.node):
+        restore = _PROXY_NAMES
+    for name in restore:
+        if name in _AMBIENT_ENV:
+            monkeypatch.setenv(name, _AMBIENT_ENV[name])
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def no_network(monkeypatch, request):
+    """默认断网:对非回环地址的 connect / connect_ex / create_connection 抛 BLOCKED_OUTBOUND。
+
+    放行回环地址与 unix socket;带 network 标记的用例(下载模型权重 / 真实调用 smoke)不拦。
+    """
+    if _is_network_case(request.node):
+        return
+
+    def _check(address) -> None:
+        if isinstance(address, tuple) and address:
+            host = address[0]
+            port = address[1] if len(address) > 1 else None
+            if not _is_loopback_host(host):
+                raise RuntimeError(f"BLOCKED_OUTBOUND host={host} port={port}")
+
+    real_connect = socket.socket.connect
+    real_connect_ex = socket.socket.connect_ex
+    real_create_connection = socket.create_connection
+
+    def connect(self, address):
+        if self.family != getattr(socket, "AF_UNIX", None):
+            _check(address)
+        return real_connect(self, address)
+
+    def connect_ex(self, address):
+        if self.family != getattr(socket, "AF_UNIX", None):
+            _check(address)
+        return real_connect_ex(self, address)
+
+    def create_connection(address, *args, **kwargs):
+        _check(address)
+        return real_create_connection(address, *args, **kwargs)
+
+    monkeypatch.setattr(socket.socket, "connect", connect)
+    monkeypatch.setattr(socket.socket, "connect_ex", connect_ex)
+    monkeypatch.setattr(socket, "create_connection", create_connection)
 
 
 @pytest.fixture(scope="session", autouse=True)

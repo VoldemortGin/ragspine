@@ -48,6 +48,7 @@ Docs describing code carry `covers:` + `verified-against:` frontmatter;
   (the `VIRTUAL_ENV=` prefix is required so `uv` targets this venv, not a system Python).
   Extras: `[pdf]` `[ocr]` `[llm]` `[embed]`.
 - **Tests:** `.venv/bin/python -m pytest tests/ -q` → as split by `scripts/ci.sh` (all extras via `uv sync --all-extras`, no Postgres): step 5 **11 + 7082 passed, 95 skipped** (40 gpu/docling/network deselected), step 6 docling **19 passed**.
+- **Test isolation:** `tests/conftest.py` strips provider keys / tokens and `*_PROXY` variables from the test process and blocks outbound (non-loopback) sockets with `RuntimeError("BLOCKED_OUTBOUND ...")`. Only `@pytest.mark.network` cases are exempt (proxy vars restored); the real-call smokes additionally need `RAGSPINE_LITELLM_SMOKE=1` / `RAGSPINE_CLAUDE_CLI_SMOKE=1`, which also restores the real keys.
 - **CI (local):** `scripts/ci.sh` is the gate (tests + 4-gate QA eval ratchet + demo smoke); enable the pre-push hook
   once with `git config core.hooksPath .githooks`. GitHub Actions is dormant (manual-only) to
   avoid consuming quota — see README "Continuous integration (local)".
