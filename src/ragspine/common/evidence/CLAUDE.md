@@ -35,6 +35,22 @@ file_placement.py  link_new_file (create-if-absent by hard link; rename + re-rea
               sharded layout (`sharded_path` = `<dir>-sharded/<ab>/<name>`, `stored_path` /
               `read_stored` sharded first then flat, `stored_names` both) and the repair ledger
               (`recording_repairs` / `note_repair`, a context variable, counts only)
+object_backend/  the store persistence seam (sqlite object-store PR-1): ObjectBackend /
+              ModelCacheBackend protocols + typed errors (protocol.py), FileBackend /
+              FileModelCacheBackend carrying today's three placement paths byte-identically
+              (files.py), SqliteBackend / SqliteModelCacheBackend (one WAL db per store root,
+              zlib-inlined small objects, external large objects via the sharded layout,
+              read-through of every legacy generation, O_EXCL writer lease instead of FUSE
+              file locks — sqlite.py), the per-directory availability probe whose failure
+              codes never carry a path (probe.py), the generalized ADR 0023 writer lease
+              (lease.py; json_completion keeps its own copy until PR-3), and
+              open_backend(root, kind) (registry.py: files | sqlite — probe failure raises,
+              never silently falls back | auto). **Not wired yet**: no store or model-cache
+              call site reads it until PR-2/3, so behavior and bytes are unchanged; the
+              APP_OBJECT_STORE_* settings in configs.py are inert until then. Digests /
+              fingerprints / envelope bytes / published ids are invariant across backends
+              (tests/enterprise_pdf_rag/object_backend/). ADR: docs/enterprise-pdf-rag/adr/
+              00NN-sqlite-object-backend.md.
 providers/    providers.py (explicit APP_LLM_* / embedding / APP_RERANK_* environment, opt-in
               connectivity smoke), json_completion.py (bounded JSON model calls, strict DTO
               validation, content-addressed immutable cache), local_models.py (embedding /
