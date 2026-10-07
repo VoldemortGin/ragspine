@@ -9,7 +9,9 @@ import re
 import socket
 import tempfile
 import uuid
-from contextlib import suppress
+from _thread import RLock
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -59,11 +61,19 @@ _wall_clock = time
 
 
 class _UnsupportedSampling:
-    """Process-wide memory: (chat-completions URL, model) → parameters it was seen to refuse."""
+    """Process-wide memory: (chat-completions URL, model) → parameters it was seen to refuse.
+
+    Inside ``one_sampling_probe()`` scopes, until one call to an endpoint has finished, a later
+    first call from another thread waits for it (``first_call``), so clients running at once
+    learn a refusal from one probe instead of each sending its own (ADR 00NN). Outside any
+    such scope nothing ever waits, exactly as before."""
 
     def __init__(self) -> None:
         self._lock = Lock()
         self._known: dict[tuple[str, str], frozenset[str]] = {}
+        self._settled: set[tuple[str, str]] = set()
+        self._probes: dict[tuple[str, str], RLock] = {}
+        self._scopes = 0
 
     def get(self, key: tuple[str, str]) -> frozenset[str]:
         with self._lock:
@@ -73,9 +83,33 @@ class _UnsupportedSampling:
         with self._lock:
             self._known[key] = self._known.get(key, frozenset()) | {parameter}
 
+    def scope(self, delta: int) -> None:
+        with self._lock:
+            self._scopes += delta
+
+    def first_call(self, key: tuple[str, str]) -> RLock | None:
+        """Inside a scope, the held probe lock when no call to ``key`` has finished yet."""
+        with self._lock:
+            if not self._scopes or key in self._settled:
+                return None
+            probe = self._probes.setdefault(key, RLock())
+        probe.acquire()
+        with self._lock:
+            if key in self._settled:
+                probe.release()
+                return None
+        return probe
+
+    def settle(self, key: tuple[str, str], probe: RLock) -> None:
+        """The first call to ``key`` finished, whatever its outcome: nobody waits any more."""
+        with self._lock:
+            self._settled.add(key)
+        probe.release()
+
     def clear(self) -> None:
         with self._lock:
             self._known.clear()
+            self._settled.clear()
 
 
 _UNSUPPORTED = _UnsupportedSampling()
@@ -93,6 +127,21 @@ def unsupported_sampling_parameters(config: LLMConfig) -> tuple[str, ...]:
 def forget_unsupported_sampling_parameters() -> None:
     """Drop the in-process memory (tests; a long-lived process after an endpoint upgrade)."""
     _UNSUPPORTED.clear()
+
+
+@contextmanager
+def one_sampling_probe() -> Iterator[None]:
+    """While any such block runs, the first call to an endpoint is sent alone: concurrent
+    first calls from other threads wait for it to finish, then send what it learned (ADR 00NN).
+
+    For callers that start many clients at once (``run_folder_pipeline`` with parallel
+    documents); a call whose sender waits on another thread's call must not run inside one.
+    """
+    _UNSUPPORTED.scope(1)
+    try:
+        yield
+    finally:
+        _UNSUPPORTED.scope(-1)
 
 
 class RequestDiagnostics(BaseModel):
@@ -655,6 +704,36 @@ class JsonCompletionClient:
         is dropped at most once, so there are at most ``len(DEGRADABLE_SAMPLING_PARAMETERS)``
         extra rounds."""
         key = _endpoint_key(self._config)
+        probe = (
+            _UNSUPPORTED.first_call(key)
+            if DEGRADABLE_SAMPLING_PARAMETERS.intersection(request)
+            else None
+        )
+        try:
+            return self._call_learning(
+                request,
+                key,
+                contract=contract,
+                task=task,
+                response_model=response_model,
+                cache_only=cache_only,
+                allow_failed_retry=allow_failed_retry,
+            )
+        finally:
+            if probe is not None:
+                _UNSUPPORTED.settle(key, probe)
+
+    def _call_learning[T: BaseModel](
+        self,
+        request: dict[str, object],
+        key: tuple[str, str],
+        *,
+        contract: str,
+        task: str,
+        response_model: type[T],
+        cache_only: bool,
+        allow_failed_retry: bool,
+    ) -> JsonCompletionResult[T]:
         dropped: list[str] = []
         while True:
             body = {name: value for name, value in request.items() if name not in dropped}
