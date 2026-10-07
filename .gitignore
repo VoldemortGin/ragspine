@@ -51,6 +51,7 @@ src/ragspine/service/studio_dist/
 /output/
 /logs/
 .env
+*.env
 .env.*
 !.env.example
 *.key
