@@ -316,6 +316,12 @@ def test_script_and_api_isolate_documents_and_resume_without_source_extraction(
         **os.environ,
         "APP_ROOT_DIR": str(tmp_path),
         "APP_DATA_DIR": str(tmp_path / "data"),
+        # The script must run this checkout's source, not whatever the venv's editable
+        # install points at (e.g. a worktree borrowing another checkout's venv): a store
+        # written by another code version may not be a cache hit for the in-process resume.
+        "PYTHONPATH": os.pathsep.join(
+            filter(None, (str(ROOT_DIR / "src"), os.environ.get("PYTHONPATH")))
+        ),
     }
     completed = subprocess.run(
         [
