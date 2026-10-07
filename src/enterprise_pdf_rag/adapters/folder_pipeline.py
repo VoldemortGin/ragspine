@@ -153,7 +153,7 @@ AUTO_CALLS_BASE: Final = 50
 # ``document_progress``: at most one line per this many pages, or per this many seconds.
 _PROGRESS_PAGES = 10
 _PROGRESS_SECONDS = 30.0
-# ``max_parallel_documents``: documents ingested at once, at most (ADR 00NN), and how often
+# ``max_parallel_documents``: documents ingested at once, at most (ADR 0033), and how often
 # the waiting caller looks up, so an interrupt is seen within this many seconds.
 MAX_PARALLEL_DOCUMENTS: Final = 16
 _POLL_SECONDS = 0.2
@@ -322,7 +322,7 @@ class _Budget:
 
     An allotment stays reserved until ``spend`` settles it with the calls actually made, under
     one lock, so documents running at once are never granted more than the total between them;
-    one document at a time, every allotment sees exactly what it always saw (ADR 00NN).
+    one document at a time, every allotment sees exactly what it always saw (ADR 0033).
     """
 
     def __init__(self, total: int | None) -> None:
@@ -351,14 +351,14 @@ class _Budget:
 
 
 class _Cancelled(BaseException):
-    """A document stopped at a page or stage boundary because the run is stopping (ADR 00NN).
+    """A document stopped at a page or stage boundary because the run is stopping (ADR 0033).
 
     A ``BaseException``, like the ``KeyboardInterrupt`` it usually follows, so no stage's
     ``except Exception`` records it as that stage's failure."""
 
 
 class _DocumentEmbedder:
-    """One document's view of an embedder shared by documents running at once (ADR 00NN).
+    """One document's view of an embedder shared by documents running at once (ADR 0033).
 
     Calls go one at a time through the shared ``lock`` and ``request_count`` counts only this
     document's requests, so ``DraftIndex.embedding_requests`` reads what the serial run read.
@@ -419,7 +419,7 @@ def _run_in_parallel(
     workers: int,
     progress: Progress | None,
 ) -> list[tuple[DocumentRun, int]]:
-    """Every job on a pool of ``workers`` threads; results in job order (ADR 00NN).
+    """Every job on a pool of ``workers`` threads; results in job order (ADR 0033).
 
     The progress callback is entered by one thread at a time and every event of a document
     carries its ``slot`` (1..workers). Whatever stops the run — an interrupt, or a failure that
@@ -792,7 +792,7 @@ def _page_reporter(
     between at most one event per ``_PROGRESS_PAGES`` pages or ``_PROGRESS_SECONDS``.
 
     With ``cancel``, a finished page is where a stopping run leaves the document: that page's
-    calls are recorded and their claims released, the next page's never start (ADR 00NN)."""
+    calls are recorded and their claims released, the next page's never start (ADR 0033)."""
     if progress is None and cancel is None:
         return None
     last: dict[str, Any] = {"stage": None, "done": 0, "at": 0.0}
@@ -1021,7 +1021,7 @@ def _run_document(
             raise
         message = str(error) or type(error).__name__
         if str(error) and not isinstance(error, (ValueError, OSError)):
-            # Only a worker thread records these (ADR 00NN); the type says what broke.
+            # Only a worker thread records these (ADR 0033); the type says what broke.
             message = f"{type(error).__name__}: {message}"
         run.update(failed_stage=stage, error=message)
         # A published document whose tree failed is still published and answerable.
@@ -1637,7 +1637,7 @@ def run_folder_pipeline(
     its own check. A failing document is recorded and the rest continue unless
     ``continue_on_error`` is false, when its ``ValueError`` / ``OSError`` propagates.
 
-    ``max_parallel_documents`` (ADR 00NN; 1 = one at a time, exactly as before, at most
+    ``max_parallel_documents`` (ADR 0033; 1 = one at a time, exactly as before, at most
     ``MAX_PARALLEL_DOCUMENTS``) ingests that many PDFs at once on worker threads, each in its
     own ``<root>/<sha>/`` with its own stores and clients, and writes the very bytes the serial
     run writes. ``documents`` keeps discovery order; per-document events may interleave, each

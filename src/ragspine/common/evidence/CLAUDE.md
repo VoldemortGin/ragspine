@@ -91,7 +91,7 @@ providers/    providers.py (explicit APP_LLM_* / embedding / APP_RERANK_* enviro
   refusals are remembered per (URL, model) in process and on disk (`provider_error_param` on the 400 record,
   `sampling_parameter_unsupported` skip records), and a pre-ADR param-less 400 record gets one re-probe at
   `.retry-1.json`. Inside a `one_sampling_probe()` scope (held by `run_folder_pipeline` while PDFs run
-  in parallel, enterprise-pdf-rag ADR 00NN) the first call to an (URL, model) is sent alone and racing
+  in parallel, enterprise-pdf-rag ADR 0033) the first call to an (URL, model) is sent alone and racing
   first calls wait for it; outside any scope nothing waits. `cache_hit_count` counts the calls a client answered from the model cache (the
   run-folder `document_progress` event reports it; enterprise-pdf-rag ADR 0022). Records stay byte-identical unless a 400 body was examined (`exclude_unset`).
   [ADR 0021](../../../../docs/enterprise-pdf-rag/adr/0021-sampling-parameter-fallback.md).

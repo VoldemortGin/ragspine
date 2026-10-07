@@ -65,7 +65,7 @@ class _UnsupportedSampling:
 
     Inside ``one_sampling_probe()`` scopes, until one call to an endpoint has finished, a later
     first call from another thread waits for it (``first_call``), so clients running at once
-    learn a refusal from one probe instead of each sending its own (ADR 00NN). Outside any
+    learn a refusal from one probe instead of each sending its own (ADR 0033). Outside any
     such scope nothing ever waits, exactly as before."""
 
     def __init__(self) -> None:
@@ -132,7 +132,7 @@ def forget_unsupported_sampling_parameters() -> None:
 @contextmanager
 def one_sampling_probe() -> Iterator[None]:
     """While any such block runs, the first call to an endpoint is sent alone: concurrent
-    first calls from other threads wait for it to finish, then send what it learned (ADR 00NN).
+    first calls from other threads wait for it to finish, then send what it learned (ADR 0033).
 
     For callers that start many clients at once (``run_folder_pipeline`` with parallel
     documents); a call whose sender waits on another thread's call must not run inside one.

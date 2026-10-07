@@ -89,7 +89,7 @@ adapters/     every SDK and I/O: pdfspine (every source PDF opens through pdf_pa
               once on threads — same bytes as serial, `documents` in discovery order, events
               tagged `slot` and entered under one lock, the shared total reserved per allotment,
               any worker exception a `failed` document, an interrupt stopping at the next page;
-              answers stay serial (ADR 00NN); `folder` / questions / report
+              answers stay serial (ADR 0033); `folder` / questions / report
               default to NB_PDF_DIR / NB_QUESTIONS_PATH / NB_REPORT_DIR, an argument wins
               (`notebooks/run_folder.ipynb` ignores NB_REPORT_DIR: it pins reports to
               ROOT_DIR/data/reports/<question-set stem> and guards that every write dir is under

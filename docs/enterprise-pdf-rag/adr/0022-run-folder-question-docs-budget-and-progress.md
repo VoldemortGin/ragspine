@@ -13,7 +13,7 @@ the pipeline ingests, routes and answers exactly as before, except that (a) a qu
 > (`expected_doc`, `cited_doc_hit`). `routing_failed` is left for a question that was not asked;
 > `restrict_to_question_doc=True` restores this ADR's routing for comparison.
 
-> Amended by [ADR 00NN](00NN-parallel-documents.md) (2026-10-06): with
+> Amended by [ADR 0033](0033-parallel-documents.md) (2026-10-06): with
 > `max_parallel_documents > 1` several PDFs ingest at once. The shared total is then reserved per
 > allotment and released with the calls actually made, so it is never overspent; one PDF at a
 > time every allotment is the one described below. Per-document progress events interleave and

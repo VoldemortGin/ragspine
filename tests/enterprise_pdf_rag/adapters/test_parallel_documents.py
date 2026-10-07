@@ -1,4 +1,4 @@
-"""``run_folder_pipeline(max_parallel_documents=N)``: documents ingested at once (ADR 00NN).
+"""``run_folder_pipeline(max_parallel_documents=N)``: documents ingested at once (ADR 0033).
 
 Every document still runs alone in its own ``<root>/<sha>/`` directory with its own stores,
 clients and pdfspine documents; what is shared — the budget total, the progress callback, the

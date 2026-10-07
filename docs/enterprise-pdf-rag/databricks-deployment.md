@@ -174,7 +174,7 @@ where the mount disables it, the cell says so and skips). Set
 one `data/ingestion` (a full rerun after lite sends only the calls lite skipped). Review pages for one document on demand:
 `export_document_review(<ingestion root>/<sha256>)` from `enterprise_pdf_rag.adapters.pdf_ingestion`.
 
-### Several PDFs at once (`max_parallel_documents`, ADR 00NN)
+### Several PDFs at once (`max_parallel_documents`, ADR 0033)
 
 A folder run spends almost all its time waiting — on Azure OpenAI (seconds per call) and on
 workspace files (a round trip per file operation). `run_folder_pipeline(max_parallel_documents=N)`

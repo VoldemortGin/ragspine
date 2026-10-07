@@ -1,4 +1,4 @@
-# ADR 00NN: run-folder ingests several PDFs at once
+# ADR 0033: run-folder ingests several PDFs at once
 
 Status: Accepted, 2026-10-06. Amends `run_folder_pipeline` (`adapters/folder_pipeline.py`), its
 shared budget ([ADR 0022](0022-run-folder-question-docs-budget-and-progress.md)) and the
