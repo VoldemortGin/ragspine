@@ -7,7 +7,8 @@
 - 同进程多线程:线程本地连接池;事务作用域是可重入的 contextvar;
 - 多进程:不信任 FUSE 上的 sqlite 文件锁,写者互斥用 O_EXCL 的 ``<db>.writer``
   租约文件(``lease.py``,复用 ADR 0023 的持有者 JSON + 租约 + 接管代次),
-  拿不到 → ``StoreBusy``;
+  拿不到 → ``StoreBusy``。store db 的租约按进程持有(文档级 db 只有一个写者进程);
+  模型缓存 db 按事务持有(根级共享缓存会被多个进程轮流写,见 ``SqliteModelCacheBackend``);
 - WAL + ``synchronous``(默认 FULL);撕裂尾帧由 sqlite 丢弃 = 只丢最后的事务;
   损坏 db 在打开时 ``quick_check`` 失败 → 改名 ``.corrupt-<utc>`` + 重建空库 +
   ``note_repair("store_db")``(ADR 0029 的自愈语义);
@@ -26,13 +27,14 @@ import re
 import sqlite3
 import threading
 import zlib
+from _thread import LockType
 from collections.abc import Iterable, Iterator
-from contextlib import AbstractContextManager, contextmanager, suppress
+from contextlib import AbstractContextManager, contextmanager, nullcontext, suppress
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
-from time import time
+from time import monotonic, sleep, time
 from typing import Literal
 
 from ragspine.common.evidence.file_placement import note_repair
@@ -67,6 +69,13 @@ _COMPRESS_MIN = 1024
 # 持有者死亡仍由 pid / 租约规则接管(lease.lease_expired)。
 WRITER_LEASE_SECONDS = 3600
 WRITER_CLAIM_FORMAT = "object-store-writer-v1"
+# 按事务持有的写者租约(模型缓存 db):持有者只在一个毫秒级事务里拿着它;等它的时长与
+# ``busy_timeout`` 相同,租期远长于任何事务(持有者死了照样按 pid 立即接管)。
+TRANSACTION_LEASE_SECONDS = 120
+TRANSACTION_LEASE_WAIT_SECONDS = 30.0
+WriterScope = Literal["process", "transaction"]
+# claims 行的 (claim, host, pid, process, created_at, lease_seconds)。
+_ClaimColumns = tuple[str, str, int, str, float, int]
 
 STORE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -132,11 +141,38 @@ CREATE TABLE IF NOT EXISTS claims(
 # 本进程已持有的写者租约:db 路径 → 持有它的后端实例数(同进程可重入,见 §4)。
 _WRITER_LOCK = Lock()
 _WRITER_COUNTS: dict[Path, int] = {}
+# 按事务持有租约的 db:同进程的事务先在这把(按 db 路径的)锁上排队,再取文件租约。
+_TRANSACTION_LOCKS: dict[Path, LockType] = {}
+
+
+def _transaction_lock(db_path: Path) -> LockType:
+    with _WRITER_LOCK:
+        return _TRANSACTION_LOCKS.setdefault(db_path, Lock())
 
 
 def _require_digest(digest: str) -> None:
     if _DIGEST.fullmatch(digest) is None:
         raise ValueError("Invalid content-addressed artifact identifier")
+
+
+_CORRUPTION_CODES = frozenset({sqlite3.SQLITE_CORRUPT, sqlite3.SQLITE_NOTADB})
+_BUSY_CODES = frozenset({sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED})
+# 与 ``PRAGMA busy_timeout = 30000`` 同长。
+_BUSY_SECONDS = 30.0
+
+
+def _busy(error: sqlite3.OperationalError) -> bool:
+    code = getattr(error, "sqlite_errorcode", None)
+    return isinstance(code, int) and (code & 0xFF) in _BUSY_CODES
+
+
+def _corrupt(error: sqlite3.DatabaseError) -> bool:
+    """这个错误说的是"db 文件坏了"(而不是忙 / 锁 / I/O 等可重试的状况)吗?
+    本模块自己抛的 quick_check 失败不带错误码,算损坏。"""
+    code = getattr(error, "sqlite_errorcode", None)
+    if not isinstance(code, int):
+        return True
+    return (code & 0xFF) in _CORRUPTION_CODES
 
 
 def _compressible(media_type: str) -> bool:
@@ -167,12 +203,20 @@ def _decode(blob: bytes, encoding: str) -> bytes:
 class _SqliteCore:
     """连接池、PRAGMA、版本门、quick_check 自愈、事务作用域与写者租约:两种 db 共用。"""
 
-    def __init__(self, db_path: Path, schema: str, *, synchronous: str) -> None:
+    def __init__(
+        self,
+        db_path: Path,
+        schema: str,
+        *,
+        synchronous: str,
+        writer_scope: WriterScope = "process",
+    ) -> None:
         if synchronous not in {"FULL", "NORMAL"}:
             raise ValueError("object_store_synchronous must be FULL or NORMAL")
         self.db_path = db_path
         self._schema = schema
         self._synchronous = synchronous
+        self._writer_scope = writer_scope
         self._connections: dict[int, sqlite3.Connection] = {}
         self._lock = Lock()
         self._initialized = False
@@ -201,15 +245,27 @@ class _SqliteCore:
     def _connect(self) -> sqlite3.Connection:
         # check_same_thread=False 只为 close() 能从关闭线程统一收尾:
         # 使用始终是线程本地的(connection() 按 thread id 取),从不跨线程共享游标。
-        connection = sqlite3.connect(
-            self.db_path, isolation_level=None, timeout=30.0, check_same_thread=False
-        )
-        try:
-            self._apply_pragmas(connection)
-        except sqlite3.Error:
-            connection.close()
-            raise
-        return connection
+        # 新库第一次切 WAL(``journal_mode``)撞上别的连接时直接回 SQLITE_BUSY、不走
+        # busy handler:与 busy_timeout 同长的退避重试,而不是失败(更不是当成损坏)。
+        deadline = monotonic() + _BUSY_SECONDS
+        pause = 0.002
+        while True:
+            connection = sqlite3.connect(
+                self.db_path, isolation_level=None, timeout=_BUSY_SECONDS, check_same_thread=False
+            )
+            try:
+                self._apply_pragmas(connection)
+            except sqlite3.OperationalError as error:
+                connection.close()
+                if not _busy(error) or monotonic() >= deadline:
+                    raise
+                sleep(pause)
+                pause = min(pause * 2, 0.05)
+                continue
+            except sqlite3.Error:
+                connection.close()
+                raise
+            return connection
 
     def _apply_pragmas(self, connection: sqlite3.Connection) -> None:
         connection.execute(f"PRAGMA page_size = {PAGE_SIZE}")
@@ -222,26 +278,51 @@ class _SqliteCore:
         connection.execute("PRAGMA wal_autocheckpoint = 2000")
 
     def _initialize(self) -> None:
-        """首次使用:版本门 + 建表 + ``quick_check``;损坏 db 改名重建(一次)。"""
+        """首次使用:版本门 + 建表 + ``quick_check``;损坏 db 改名重建(一次)。
+
+        只有"损坏"才重建(``SQLITE_CORRUPT`` / ``SQLITE_NOTADB`` / quick_check 不过);
+        ``database is locked`` 一类 ``OperationalError`` 原样上抛——把别的进程正在写的 db
+        当成损坏改名,会让那个进程之后的写全部落进改了名的旧文件(丢数据)。"""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            connection = self._connect()
-            try:
-                self._gate_and_create(connection)
-                check = connection.execute("PRAGMA quick_check(1)").fetchone()
-                if check is None or check[0] != "ok":
-                    raise sqlite3.DatabaseError("quick_check failed")
-            finally:
-                connection.close()
-        except sqlite3.DatabaseError:
-            self._rebuild_corrupt()
-            connection = self._connect()
-            try:
-                self._gate_and_create(connection)
-            finally:
-                connection.close()
+            self._open_checked()
+        except sqlite3.DatabaseError as error:
+            if not _corrupt(error):
+                raise
+            with self._init_guard():
+                # 拿到写者互斥后再看一次:别的进程可能刚重建过,别把它的新库也改名。
+                try:
+                    self._open_checked(guarded=True)
+                    return
+                except sqlite3.DatabaseError as again:
+                    if not _corrupt(again):
+                        raise
+                self._rebuild_corrupt()
+                connection = self._connect()
+                try:
+                    self._gate_and_create(connection, guarded=True)
+                finally:
+                    connection.close()
 
-    def _gate_and_create(self, connection: sqlite3.Connection) -> None:
+    def _init_guard(self) -> AbstractContextManager[None]:
+        """打开时要写(建表 / 重建)才取的写者互斥:按事务持租约的 db 取同一把短租约;
+        按进程持租约的 db 照旧(租约在第一次写事务时才取)。"""
+        if self._writer_scope == "transaction":
+            return self._transaction_writer()
+        return nullcontext()
+
+    def _open_checked(self, *, guarded: bool = False) -> None:
+        """版本门 + 必要时建表 + ``quick_check``;损坏以 ``sqlite3.DatabaseError`` 上抛。"""
+        connection = self._connect()
+        try:
+            self._gate_and_create(connection, guarded=guarded)
+            check = connection.execute("PRAGMA quick_check(1)").fetchone()
+            if check is None or check[0] != "ok":
+                raise sqlite3.DatabaseError("quick_check failed")
+        finally:
+            connection.close()
+
+    def _gate_and_create(self, connection: sqlite3.Connection, *, guarded: bool = False) -> None:
         application_id = int(connection.execute("PRAGMA application_id").fetchone()[0])
         user_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
         if application_id not in (0, APPLICATION_ID):
@@ -255,18 +336,21 @@ class _SqliteCore:
             if int(tables) > 0:
                 # 有表却没打我们的标:不是我们的 db,拒绝(版本门)。
                 raise BackendSchemaError("backend_schema_unmarked_database")
-        connection.execute("BEGIN IMMEDIATE")
-        try:
-            for statement in self._schema.strip().split(";\n"):
-                text = statement.strip()
-                if text:
-                    connection.execute(text)
-            connection.execute(f"PRAGMA application_id = {APPLICATION_ID}")
-            connection.execute(f"PRAGMA user_version = {USER_VERSION}")
-        except BaseException:
-            connection.execute("ROLLBACK")
-            raise
-        connection.execute("COMMIT")
+        elif user_version == USER_VERSION:
+            return  # 本版本的表已经建好:打开一个现成的 db 不开写事务
+        with nullcontext() if guarded else self._init_guard():
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                for statement in self._schema.strip().split(";\n"):
+                    text = statement.strip()
+                    if text:
+                        connection.execute(text)
+                connection.execute(f"PRAGMA application_id = {APPLICATION_ID}")
+                connection.execute(f"PRAGMA user_version = {USER_VERSION}")
+            except BaseException:
+                connection.execute("ROLLBACK")
+                raise
+            connection.execute("COMMIT")
 
     def _rebuild_corrupt(self) -> None:
         """quick_check / 打开失败的 db:改名 ``.corrupt-<utc>``,从零重建;计一次修复。"""
@@ -281,7 +365,19 @@ class _SqliteCore:
 
     @contextmanager
     def transaction(self) -> Iterator[None]:
-        self._acquire_writer()
+        if self._writer_scope == "transaction" and self._txn_depth.get() == 0:
+            # 先在租约之外拿到本线程的连接:首次打开要写时自己会取同一把(不可重入的)租约。
+            self.connection()
+            with self._transaction_writer(), self._scoped_transaction():
+                yield
+            return
+        if self._writer_scope == "process":
+            self._acquire_writer()
+        with self._scoped_transaction():
+            yield
+
+    @contextmanager
+    def _scoped_transaction(self) -> Iterator[None]:
         depth = self._txn_depth.get()
         connection = self.connection()
         if depth == 0:
@@ -303,6 +399,30 @@ class _SqliteCore:
 
     def _lease_base(self) -> Path:
         return Path(str(self.db_path) + ".writer")
+
+    @contextmanager
+    def _transaction_writer(self) -> Iterator[None]:
+        """按事务的写者互斥:同进程排队于按 db 路径的锁,跨进程排队于非持久的
+        ``<db>.writer`` 短租约(等至多 ``TRANSACTION_LEASE_WAIT_SECONDS``,仍拿不到 →
+        ``StoreBusy``);事务结束即释放,别的进程随后就能写(根级共享模型缓存)。"""
+        base = self._lease_base()
+        with _transaction_lock(self.db_path):
+            owner = lease.current_owner(WRITER_CLAIM_FORMAT, TRANSACTION_LEASE_SECONDS)
+            content = lease.owner_payload(WRITER_CLAIM_FORMAT, owner)
+            deadline = monotonic() + TRANSACTION_LEASE_WAIT_SECONDS
+            pause = 0.002
+            while (
+                lease.acquire_lease(base, content, claim_format=WRITER_CLAIM_FORMAT, durable=False)
+                is None
+            ):
+                if monotonic() >= deadline:
+                    raise StoreBusy("store_busy")
+                sleep(pause)
+                pause = min(pause * 2, 0.05)
+            try:
+                yield
+            finally:
+                lease.release_lease(base)
 
     def _acquire_writer(self) -> None:
         if self._writer_acquired:
@@ -706,7 +826,14 @@ def _envelope_columns(envelope: bytes) -> tuple[str, str, str]:
 
 class SqliteModelCacheBackend:
     """模型缓存的 sqlite 后端:requests / responses / contexts / claims 四表 +
-    文件布局只读回退;旧 ``.claim`` 文件仍按 ADR 0023 的 mtime 规则被尊重。"""
+    文件布局只读回退;旧 ``.claim`` 文件仍按 ADR 0023 的 mtime 规则被尊重。
+
+    事务按调用提交(claim 建立 / 续租 / 记录写入 / 响应 / 上下文 / 释放各一事务),
+    写者租约按事务持有:根级共享缓存被多个进程轮流写时互不长期占用。
+    读顺序 db 行 → 旧文件(``requests/`` / ``responses/`` / ``contexts/``);旧文件
+    只读,完好的不改写不搬迁,损坏的由 db 行替代。一个实例第一次用到某个旧目录时
+    探测它在不在,之后不再探测(旧文件只由 PR-3 之前的代码写出;此后才出现的旧目录由
+    下一个实例看到)。"""
 
     kind: Literal["files", "sqlite"] = "sqlite"
 
@@ -719,7 +846,21 @@ class SqliteModelCacheBackend:
     ) -> None:
         self.cache_dir = cache_dir
         self._files = FileModelCacheBackend(cache_dir)
-        self._core = _SqliteCore(cache_dir / db_name, MODEL_CACHE_SCHEMA, synchronous=synchronous)
+        self._core = _SqliteCore(
+            cache_dir / db_name,
+            MODEL_CACHE_SCHEMA,
+            synchronous=synchronous,
+            writer_scope="transaction",
+        )
+        self._legacy_dirs: dict[str, bool] = {}
+
+    def _legacy(self, directory: str) -> bool:
+        """旧布局目录 ``cache_dir/<directory>`` 在不在(每个实例只探测一次)。"""
+        present = self._legacy_dirs.get(directory)
+        if present is None:
+            present = (self.cache_dir / directory).is_dir()
+            self._legacy_dirs[directory] = present
+        return present
 
     # ---- 记录 / 响应 / 上下文 ----------------------------------------------------------
 
@@ -731,7 +872,7 @@ class SqliteModelCacheBackend:
         )
         if row is not None:
             return bytes(row[0])
-        return self._files.record(key)
+        return self._files.record(key) if self._legacy("requests") else None
 
     def put_record(self, key: str, data: bytes, *, replace_damaged: bool = False) -> None:
         columns = _record_columns(key, data)
@@ -758,7 +899,7 @@ class SqliteModelCacheBackend:
             .fetchone()
         )
         if row is None:
-            return self._files.response(digest)
+            return self._files.response(digest) if self._legacy("responses") else None
         data = _decode(bytes(row[1]), str(row[0]))
         if hashlib.sha256(data).hexdigest() != digest:
             raise DamagedEntry("cached_response_digest_mismatch")
@@ -804,11 +945,24 @@ class SqliteModelCacheBackend:
             .fetchone()
         )
         if row is None:
-            return self._files.context(fingerprint)
+            return self._files.context(fingerprint) if self._legacy("contexts") else None
         return _decode(bytes(row[1]), str(row[0]))
 
     def put_context(self, fingerprint: str, data: bytes) -> None:
         _require_digest(fingerprint)
+        # 已有(db 行或旧文件)即 no-op,且不开写事务:回放一轮只读不写。
+        if (
+            self._core.connection()
+            .execute("SELECT 1 FROM contexts WHERE request_fingerprint = ?", (fingerprint,))
+            .fetchone()
+            is not None
+        ):
+            return
+        if (
+            self._legacy("contexts")
+            and (self.cache_dir / "contexts" / f"{fingerprint}.json").exists()
+        ):
+            return
         blob, encoding = _encode(data, "application/json")
         with self._core.transaction():
             connection = self._core.connection()
@@ -821,86 +975,116 @@ class SqliteModelCacheBackend:
             # 的 ``path.exists() -> return`` 一致;差异上报是 PR-3 调用方的事)。
             del cursor
 
-    # ---- claim / release(ADR 0023 的 claims 表)---------------------------------------
+    # ---- claim / renew / release(ADR 0023 的 claims 表)-------------------------------
 
-    def claim(self, key: str, owner: ClaimOwner) -> int | None:
-        legacy = self._legacy_claim_blocks(key, owner)
-        if legacy:
-            return None
-        payload = lease.owner_payload(
-            CLAIM_FORMAT, owner, extra={"request_fingerprint": key.partition(".")[0]}
-        ).decode()
-        with self._core.transaction():
-            connection = self._core.connection()
-            row = connection.execute(
-                "SELECT generation, claim, created_at FROM claims WHERE record_key = ?",
-                (key,),
-            ).fetchone()
-            if row is None:
-                connection.execute(
-                    "INSERT INTO claims (record_key, generation, claim, host, pid, process,"
-                    " created_at, lease_seconds) VALUES (?, 0, ?, ?, ?, ?, ?, ?)",
-                    (
-                        key,
-                        payload,
-                        owner.host,
-                        owner.pid,
-                        owner.process,
-                        owner.created_at,
-                        owner.lease_seconds,
-                    ),
+    def claim(
+        self,
+        key: str,
+        owner: ClaimOwner,
+        *,
+        expired: lease.Expired | None = None,
+    ) -> int | None:
+        """读顺序 claims 行 → 旧 ``.claim`` 文件。判定在事务外(每个调用方对当前持有者
+        只判一次),取得在事务内以比较并交换完成——与文件布局的 O_EXCL 创建同义:
+        无行 → ``INSERT OR IGNORE``(被忽略 = 别人刚拿到);有行且已过期 →
+        ``UPDATE … WHERE generation = 读到的代次``(``changes() == 1`` 才算接管)。
+        旧文件的持有者已结束时以其代次 + 1 接管(与文件布局的接管代次一致)。"""
+        judge = expired if expired is not None else _default_expired(owner)
+        columns = _claim_columns(key, owner)
+        row = (
+            self._core.connection()
+            .execute(
+                "SELECT generation, claim, created_at FROM claims WHERE record_key = ?", (key,)
+            )
+            .fetchone()
+        )
+        if row is None:
+            generation = 0
+            legacy = self._legacy_holder(key)
+            if legacy is not None:
+                held_generation, held, modified = legacy
+                if not judge(held, modified):
+                    return None
+                generation = held_generation + 1
+            with self._core.transaction():
+                cursor = self._core.connection().execute(
+                    "INSERT OR IGNORE INTO claims (record_key, generation, claim, host, pid,"
+                    " process, created_at, lease_seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (key, generation, *columns),
                 )
-                return 0
-            generation, held, held_created = int(row[0]), str(row[1]), float(row[2])
-            if not lease.lease_expired(
-                held.encode(),
-                held_created,
-                claim_format=CLAIM_FORMAT,
-                process_token=owner.process,
-            ):
-                return None
-            cursor = connection.execute(
+                return generation if cursor.rowcount == 1 else None
+        generation, held_claim, held_created = int(row[0]), str(row[1]), float(row[2])
+        if not judge(held_claim.encode(), held_created):
+            return None
+        return self._advance(key, generation, columns)
+
+    def renew(self, key: str, owner: ClaimOwner, generation: int) -> int | None:
+        """重试前续租:仍是第 ``generation`` 代的持有者才前进一代(ADR 0035)。"""
+        return self._advance(key, generation, _claim_columns(key, owner))
+
+    def _advance(self, key: str, generation: int, columns: _ClaimColumns) -> int | None:
+        with self._core.transaction():
+            cursor = self._core.connection().execute(
                 "UPDATE claims SET generation = ?, claim = ?, host = ?, pid = ?, process = ?,"
                 " created_at = ?, lease_seconds = ? WHERE record_key = ? AND generation = ?",
-                (
-                    generation + 1,
-                    payload,
-                    owner.host,
-                    owner.pid,
-                    owner.process,
-                    owner.created_at,
-                    owner.lease_seconds,
-                    key,
-                    generation,
-                ),
+                (generation + 1, *columns, key, generation),
             )
             return generation + 1 if cursor.rowcount == 1 else None
 
-    def _legacy_claim_blocks(self, key: str, owner: ClaimOwner) -> bool:
-        """旧代码留下的 ``.claim`` 文件:持有者还可能在跑就挡住(ADR 0023 的 mtime 规则)。"""
-        base = self.cache_dir / "requests" / f"{key}.json.claim"
-        holder = lease.generation_path(base, lease.latest_generation(base))
-        try:
-            held = holder.read_bytes()
-            modified = holder.stat().st_mtime
-        except OSError:
-            return False
-        return not lease.lease_expired(
-            held, modified, claim_format=CLAIM_FORMAT, process_token=owner.process
+    def claimed(self, key: str) -> bool:
+        row = (
+            self._core.connection()
+            .execute("SELECT 1 FROM claims WHERE record_key = ?", (key,))
+            .fetchone()
         )
+        return row is not None or (self._legacy("requests") and self._files.claimed(key))
+
+    def _legacy_holder(self, key: str) -> tuple[int, bytes, float] | None:
+        """旧代码留下的 ``.claim`` 文件里最高代次的持有者:(代次, 字节, mtime)。"""
+        if not self._legacy("requests"):
+            return None
+        base = self.cache_dir / "requests" / f"{key}.json.claim"
+        generation = lease.latest_generation(base)
+        holder = lease.generation_path(base, generation)
+        try:
+            return generation, holder.read_bytes(), holder.stat().st_mtime
+        except OSError:
+            return None
 
     def release(self, key: str, owner: ClaimOwner) -> None:
+        """删本进程持有的 claims 行;本进程接管过的旧 ``.claim`` 文件一并删掉(与文件布局
+        "记录写好即整组释放"一致;只有持有该请求的调用方才会走到这里)。"""
         with self._core.transaction():
             self._core.connection().execute(
                 "DELETE FROM claims WHERE record_key = ? AND process = ?",
                 (key, owner.process),
             )
+        if self._legacy("requests"):
+            self._files.release(key, owner)
 
     def transaction(self) -> AbstractContextManager[None]:
         return self._core.transaction()
 
     def close(self) -> None:
         self._core.close()
+
+
+def _default_expired(owner: ClaimOwner) -> lease.Expired:
+    def expired(content: bytes, modified: float) -> bool:
+        return lease.lease_expired(
+            content, modified, claim_format=CLAIM_FORMAT, process_token=owner.process
+        )
+
+    return expired
+
+
+def _claim_columns(key: str, owner: ClaimOwner) -> _ClaimColumns:
+    """claims 行的 (claim, host, pid, process, created_at, lease_seconds);claim 列与
+    文件布局的 ``.claim`` 字节相同(ADR 0023 的持有者 JSON,从不含正文)。"""
+    payload = lease.owner_payload(
+        CLAIM_FORMAT, owner, extra={"request_fingerprint": key.partition(".")[0]}
+    ).decode()
+    return payload, owner.host, owner.pid, owner.process, owner.created_at, owner.lease_seconds
 
 
 _REQUESTS_INSERT = (

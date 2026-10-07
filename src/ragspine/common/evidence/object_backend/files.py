@@ -8,12 +8,13 @@
   ``_write_pointer`` / ``_envelope`` / ``save_document_tree`` / ``current_id`` →
   ``put_stage_entry`` / ``stage_entry`` / ``put_record`` / ``pointer``
   (分层 ``stage-cache-sharded/<ab>/``,三代指针格式,``current-*`` 原子替换 —— ADR 0029 及其 Amendment 1);
-- ``ragspine.common.evidence.providers.json_completion`` 的 ``_immutable_write`` /
+- ``ragspine.common.evidence.providers.json_completion`` 原来的 ``_immutable_write`` /
   ``_claim_request`` / ``_release_claims`` → ``FileModelCacheBackend``(requests / responses /
-  contexts / ``.claim`` / ``.takeover-N`` —— ADR 0021 / 0023)。
+  contexts / ``.claim`` / ``.takeover-N`` —— ADR 0021 / 0023;PR-3 起 json_completion 只经
+  本后端写模型缓存)。
 
 字节级等价由 ``tests/enterprise_pdf_rag/object_backend/test_file_backend_equivalence.py``
-对照现有写路径钉死。
+钉死(模型缓存一侧对照 ``legacy_model_cache.py`` 里冻结的 PR-3 之前原实现)。
 """
 
 import hashlib
@@ -365,24 +366,50 @@ class FileModelCacheBackend:
             return
         _immutable_write(path, data)
 
-    def claim(self, key: str, owner: ClaimOwner) -> int | None:
-        base = self._record_path(key).with_suffix(".json.claim")
-        content = lease.owner_payload(
-            CLAIM_FORMAT, owner, extra={"request_fingerprint": key.partition(".")[0]}
-        )
+    def _claim_base(self, key: str) -> Path:
+        return self._record_path(key).with_suffix(".json.claim")
+
+    def claim(
+        self,
+        key: str,
+        owner: ClaimOwner,
+        *,
+        expired: lease.Expired | None = None,
+    ) -> int | None:
         return lease.acquire_lease(
-            base, content, claim_format=CLAIM_FORMAT, process_token=owner.process
+            self._claim_base(key),
+            _claim_payload(key, owner),
+            claim_format=CLAIM_FORMAT,
+            process_token=owner.process,
+            expired=expired,
         )
+
+    def renew(self, key: str, owner: ClaimOwner, generation: int) -> int | None:
+        """排他地创建下一代 ``.takeover-<n+1>``(与接管同一种创建,ADR 0035)。"""
+        target = lease.generation_path(self._claim_base(key), generation + 1)
+        if not lease.write_lease(target, _claim_payload(key, owner)):
+            return None
+        return generation + 1
+
+    def claimed(self, key: str) -> bool:
+        return self._claim_base(key).exists()
 
     def release(self, key: str, owner: ClaimOwner) -> None:
         del owner  # 文件布局按路径整组释放(ADR 0023 §5),不看持有者
-        lease.release_lease(self._record_path(key).with_suffix(".json.claim"))
+        lease.release_lease(self._claim_base(key))
 
     def close(self) -> None:
         return None
 
 
 _RECORD_KEY = re.compile(r"[0-9a-f]{64}(\.retry-1)?")
+
+
+def _claim_payload(key: str, owner: ClaimOwner) -> bytes:
+    """claim 文件 / claims 行的字节(ADR 0023 的持有者 JSON;只含身份与租期,从不含正文)。"""
+    return lease.owner_payload(
+        CLAIM_FORMAT, owner, extra={"request_fingerprint": key.partition(".")[0]}
+    )
 
 
 def _require_record_key(key: str) -> None:

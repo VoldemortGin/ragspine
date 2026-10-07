@@ -93,7 +93,7 @@ from ragspine.common.evidence.object_backend.sqlite import SqliteModelCacheBacke
 cache = SqliteModelCacheBackend(Path(sys.argv[1]))
 owner = lease.current_owner("json-completion-claim-v2", 300)
 assert cache.claim("{key}", owner) == 0
-os._exit(0)  # 既不 release 也不 close:死进程留下 claim 行与写者租约
+os._exit(0)  # 既不 release 也不 close:死进程留下 claim 行
 """
 
 
@@ -105,10 +105,58 @@ def test_dead_child_claim_is_taken_over(tmp_path: Path) -> None:
         timeout=60,
     )
     cache = SqliteModelCacheBackend(tmp_path)
-    # 子进程已死(POSIX 下按 pid 判定),它的 claim 行被代次 +1 接管;
-    # 它留下的 <db>.writer 租约同样被接管(写路径先取写者租约)。
+    # 子进程已死(POSIX 下按 pid 判定),它的 claim 行被代次 +1 接管;模型缓存的写者租约
+    # 按事务持有,claim 事务一提交就已释放,子进程没有留下 <db>.writer。
+    assert not tuple(tmp_path.glob("*.writer*"))
     assert cache.claim(key, live_owner()) == 1
     cache.close()
+
+
+# ---- 并发的首次打开:忙不是损坏 -------------------------------------------------------------
+
+
+def test_concurrent_first_opens_neither_fail_nor_rebuild_each_other(tmp_path: Path) -> None:
+    """八个实例同时第一次打开同一个新 db 并各写一行:没有一个把"忙"当成"损坏"去改名重建
+    (那会让别的实例之后的写全部落进改了名的旧文件),一行也不丢。"""
+    count = 8
+    barrier = threading.Barrier(count)
+    errors: list[BaseException] = []
+
+    def first_open(index: int) -> None:
+        cache = SqliteModelCacheBackend(tmp_path)
+        try:
+            barrier.wait()
+            cache.put_record(f"{index:064x}", b'{"index": %d}' % index)
+        except BaseException as error:  # noqa: BLE001 — collected and asserted below
+            errors.append(error)
+        finally:
+            cache.close()
+
+    with recording_repairs() as repairs:
+        threads = [threading.Thread(target=first_open, args=(index,)) for index in range(count)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+    assert errors == [] and repairs == {}
+    assert not tuple(tmp_path.glob("*.corrupt-*"))
+    with closing(sqlite3.connect(tmp_path / "model-cache.sqlite")) as connection:
+        assert connection.execute("SELECT count(*) FROM requests").fetchone() == (count,)
+
+
+def test_only_corruption_codes_count_as_a_damaged_db() -> None:
+    from ragspine.common.evidence.object_backend.sqlite import _corrupt
+
+    locked = sqlite3.OperationalError("database is locked")
+    locked.sqlite_errorcode = sqlite3.SQLITE_BUSY
+    malformed = sqlite3.DatabaseError("database disk image is malformed")
+    malformed.sqlite_errorcode = sqlite3.SQLITE_CORRUPT
+    not_a_db = sqlite3.DatabaseError("file is not a database")
+    not_a_db.sqlite_errorcode = sqlite3.SQLITE_NOTADB
+    assert not _corrupt(locked)
+    assert _corrupt(malformed) and _corrupt(not_a_db)
+    assert _corrupt(sqlite3.DatabaseError("quick_check failed"))  # 本模块自己的判定
 
 
 # ---- WAL 尾帧截断与损坏 db 重建 -----------------------------------------------------------

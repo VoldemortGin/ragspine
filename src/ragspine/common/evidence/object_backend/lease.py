@@ -1,8 +1,9 @@
 """O_EXCL 写者租约:持有者 JSON + 租约过期 + 接管代次(从 ADR 0023 的 claim 逻辑抽取)。
 
-与 ``providers/json_completion.py`` 的 ``_claim_*`` 家族判定等价(由
-``tests/enterprise_pdf_rag/object_backend/test_lease.py`` 钉死);原实现**原样保留**,
-PR-3 才把模型缓存切到这里。本模块同时服务 ``SqliteBackend`` 的 ``store.sqlite.writer``
+与 ``providers/json_completion.py`` 原 ``_claim_*`` 家族判定等价(由
+``tests/enterprise_pdf_rag/object_backend/test_lease.py`` 对照冻结的原实现钉死);
+PR-3 起模型缓存的 claim 经 ``FileModelCacheBackend`` 走这里(``json_completion._expired``
+仍是判定者,经 ``expired`` 参数传入)。本模块同时服务 ``SqliteBackend`` 的 ``store.sqlite.writer``
 跨进程写者互斥(设计稿 §4:不信任 FUSE 上的 sqlite 文件锁)。
 
 租约文件从不含 prompt / key / 正文,只含持有者身份与租期。
@@ -28,6 +29,8 @@ LEGACY_LEASE_SECONDS = 900
 PROCESS_TOKEN = uuid.uuid4().hex
 # 租约时钟(epoch 秒);测试注入的缝。
 wall_clock: Callable[[], float] = time
+# 调用方自带的过期判定:(租约字节, mtime 或 db 行的 created_at) → 持有者是否确定已结束。
+Expired = Callable[[bytes, float], bool]
 
 
 def current_owner(claim_format: str, lease_seconds: int) -> ClaimOwner:
@@ -107,17 +110,22 @@ def lease_expired(
     return now - created > lease
 
 
-def write_lease(path: Path, content: bytes) -> bool:
-    """以 ``content`` 排他地、持久地创建 ``path``;已存在 → ``False``。"""
+def write_lease(path: Path, content: bytes, *, durable: bool = True) -> bool:
+    """以 ``content`` 排他地创建 ``path``;已存在 → ``False``。
+
+    ``durable=False`` 省掉文件与目录的 fsync:只护一个毫秒级事务的短租约
+    (模型缓存 db 的按事务写者互斥)掉电丢了也无妨——丢了反而等于已释放。"""
     try:
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:
         return False
     with os.fdopen(descriptor, "wb") as stream:
         stream.write(content)
-        stream.flush()
-        os.fsync(stream.fileno())
-    fsync_directory(path.parent)
+        if durable:
+            stream.flush()
+            os.fsync(stream.fileno())
+    if durable:
+        fsync_directory(path.parent)
     return True
 
 
@@ -141,15 +149,19 @@ def acquire_lease(
     claim_format: str,
     process_token: str = PROCESS_TOKEN,
     legacy_lease_seconds: int = LEGACY_LEASE_SECONDS,
+    expired: Expired | None = None,
+    durable: bool = True,
 ) -> int | None:
     """取得(或接管)``base`` 名下的写者租约;返回接管代次(0 = 全新),拿不到 → ``None``。
 
-    与 ``json_completion._claim_request`` 的流程等价,只是"拿不到"以 ``None`` 表达
-    (那边抛 ``request_in_progress_or_uncertain``),由调用方决定错误语义。
+    与 ADR 0023 的 claim 流程等价,只是"拿不到"以 ``None`` 表达(模型缓存的调用方
+    抛 ``request_in_progress_or_uncertain``),由调用方决定错误语义。
     持有者中途消失(释放了)同样返回 ``None``:调用方应重查其记录 / 现状再来。
+    ``expired(content, mtime)`` 给出时代替 ``lease_expired`` 作判定(json_completion
+    以它自己的 ``_expired`` 判定,测试的时钟 / 屏障缝在那边)。
     """
     base.parent.mkdir(parents=True, exist_ok=True)
-    if write_lease(generation_path(base), content):
+    if write_lease(generation_path(base), content, durable=durable):
         return 0
     generation = latest_generation(base)
     holder = generation_path(base, generation)
@@ -158,13 +170,18 @@ def acquire_lease(
         modified = holder.stat().st_mtime
     except FileNotFoundError:
         return None
-    if not lease_expired(
-        held,
-        modified,
-        claim_format=claim_format,
-        process_token=process_token,
-        legacy_lease_seconds=legacy_lease_seconds,
-    ) or not write_lease(generation_path(base, generation + 1), content):
+    over = (
+        expired(held, modified)
+        if expired is not None
+        else lease_expired(
+            held,
+            modified,
+            claim_format=claim_format,
+            process_token=process_token,
+            legacy_lease_seconds=legacy_lease_seconds,
+        )
+    )
+    if not over or not write_lease(generation_path(base, generation + 1), content, durable=durable):
         return None
     return generation + 1
 

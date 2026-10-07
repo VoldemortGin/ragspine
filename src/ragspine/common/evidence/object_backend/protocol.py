@@ -8,7 +8,7 @@ stage-cache 条目、``current-*`` 指针、可变 records(document-tree)、漂�
 本包只定义机制;store 层的校验 / 自愈 / 先到先得语义仍由各 store 自己绑定(PR-2/3 接线)。
 """
 
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
@@ -181,9 +181,29 @@ class ModelCacheBackend(Protocol):
         """首写胜出;已存在即 no-op,异字节 → ``StoreConflict``。"""
         ...
 
-    def claim(self, key: str, owner: ClaimOwner) -> int | None:
+    def claim(
+        self,
+        key: str,
+        owner: ClaimOwner,
+        *,
+        expired: Callable[[bytes, float], bool] | None = None,
+    ) -> int | None:
         """跨进程认领一次真实调用(ADR 0023):成功返回接管代次(0 = 全新),
-        持有者可能还在跑 → ``None``(调用方按 ``request_in_progress_or_uncertain`` 处理)。"""
+        持有者可能还在跑 → ``None``(调用方按 ``request_in_progress_or_uncertain`` 处理)。
+
+        ``expired(持有者字节, mtime 或行的 created_at)`` 给出时由它判定持有者是否已结束
+        (json_completion 传自己的 ``_expired``);缺省用 ``lease.lease_expired``。
+        判定在比较并交换之外,每个调用方对当前持有者只判一次。"""
+        ...
+
+    def renew(self, key: str, owner: ClaimOwner, generation: int) -> int | None:
+        """重试前续租(ADR 0035):以下一代次重新持有;返回新代次。
+        当前代次已不是 ``generation``(别人判定本次已结束并接管了)→ ``None``。"""
+        ...
+
+    def claimed(self, key: str) -> bool:
+        """``key`` 是否有 claim 在场——ADR 0021 的跳过记录不写在它下面
+        (文件布局看第 0 代 ``.claim`` 文件,与原 ``_save_skip`` 相同)。"""
         ...
 
     def release(self, key: str, owner: ClaimOwner) -> None:

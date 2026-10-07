@@ -8,6 +8,7 @@ import hashlib
 import json
 import sqlite3
 import zlib
+from collections.abc import Callable
 from contextlib import closing
 from pathlib import Path
 
@@ -27,6 +28,7 @@ from tests.enterprise_pdf_rag.object_backend.conftest import (
     expired_owner,
     live_owner,
     make_backend,
+    make_model_cache,
     sha,
     stage_envelope,
 )
@@ -334,3 +336,82 @@ def test_model_cache_expired_claim_is_taken_over(model_cache: ModelCacheBackend)
     follower = live_owner()
     assert model_cache.claim(key, follower) == 1  # 过期持有者被接管,代次 +1
     assert model_cache.claim(key, live_owner()) is None
+
+
+def test_model_cache_renew_moves_the_holder_to_the_next_generation(
+    model_cache: ModelCacheBackend,
+) -> None:
+    """ADR 0035:重试前续租 = 以下一代次重新持有;代次已被别人推进则续不上。"""
+    key = "7" * 64
+    owner = live_owner()
+    assert model_cache.claim(key, owner) == 0
+    assert model_cache.renew(key, live_owner(), 0) == 1
+    assert model_cache.renew(key, live_owner(), 1) == 2
+    assert model_cache.renew(key, live_owner(), 1) is None  # 第 1 代已不是当前持有者
+    assert model_cache.claim(key, live_owner()) is None  # 续过的租约仍是活的
+    model_cache.release(key, owner)
+    assert model_cache.claim(key, owner) == 0
+
+
+def test_model_cache_claimed_says_whether_a_claim_is_held(model_cache: ModelCacheBackend) -> None:
+    key = "6" * 64 + ".retry-1"
+    owner = live_owner()
+    assert not model_cache.claimed(key)
+    assert model_cache.claim(key, owner) == 0
+    assert model_cache.claimed(key) and not model_cache.claimed("6" * 64)
+    model_cache.release(key, owner)
+    assert not model_cache.claimed(key)
+
+
+def test_model_cache_claim_asks_the_given_judge_once_per_attempt(
+    model_cache: ModelCacheBackend,
+) -> None:
+    """json_completion 传自己的 ``_expired``:每个调用方对当前持有者只判一次,判"已结束"
+    才接管,判"还在跑"就拿不到——两后端一样。"""
+    key = "5" * 64
+    assert model_cache.claim(key, live_owner()) == 0
+    asked: list[bytes] = []
+
+    def judge(verdict: bool) -> Callable[[bytes, float], bool]:
+        def expired(content: bytes, modified: float) -> bool:
+            asked.append(content)
+            return verdict
+
+        return expired
+
+    assert model_cache.claim(key, live_owner(), expired=judge(False)) is None
+    assert model_cache.claim(key, live_owner(), expired=judge(True)) == 1
+    assert len(asked) == 2
+    assert all(json.loads(content)["request_fingerprint"] == key for content in asked)
+
+
+def _plant_legacy_claim(cache_dir: Path, key: str, content: bytes, *, generation: int = 0) -> Path:
+    base = cache_dir / "requests" / f"{key}.json.claim"
+    base.parent.mkdir(parents=True, exist_ok=True)
+    path = base if generation == 0 else base.with_name(f"{base.name}.takeover-{generation}")
+    path.write_bytes(content)
+    return path
+
+
+@pytest.mark.parametrize("kind", ["files", "sqlite"])
+def test_a_legacy_claim_file_is_judged_then_taken_over_at_its_next_generation(
+    tmp_path: Path, kind: str
+) -> None:
+    """旧 ``.claim`` 文件(旧代码写的):还可能在跑就挡住;已结束则以其代次 + 1 接管,
+    释放时连同旧文件一起删掉——sqlite 读穿旧文件,与文件布局逐例一致。"""
+    key = "4" * 64
+    cache_dir = tmp_path / "model-cache"
+    _plant_legacy_claim(cache_dir, key, b"")
+    dead = _plant_legacy_claim(cache_dir, key, b"", generation=1)
+    cache = make_model_cache(kind, cache_dir)
+    try:
+        assert cache.claim(key, live_owner(), expired=lambda content, modified: False) is None
+        assert cache.claimed(key)
+        owner = live_owner()
+        assert cache.claim(key, owner, expired=lambda content, modified: True) == 2
+        assert cache.claim(key, live_owner()) is None  # 新持有者是本进程,租约内
+        cache.release(key, owner)
+        assert not dead.exists() and not tuple((cache_dir / "requests").iterdir())
+        assert not cache.claimed(key)
+    finally:
+        cache.close()
