@@ -23,6 +23,9 @@ from ragspine.common.evidence.providers.json_completion import (
 )
 from ragspine.common.evidence.providers.providers import LLMConfig, ProviderRequestError
 from ragspine.common.evidence.providers.transient import TRANSIENT_MAX_RETRIES
+from tests.enterprise_pdf_rag.adapters.model_cache_helpers import claim_generations, records
+
+pytestmark = pytest.mark.usefixtures("model_cache_backend")
 
 PNG = b"\x89PNG\r\n\x1a\nfixture-bytes"
 KEY = "test-secret-never-written"
@@ -162,7 +165,7 @@ def _files(cache: Path) -> str:
 
 
 def _records(cache: Path) -> dict[str, dict[str, Any]]:
-    return {path.name: json.loads(path.read_text()) for path in (cache / "requests").glob("*.json")}
+    return records(cache)
 
 
 # ---- 0. the constant the notebook shares -----------------------------------------------------
@@ -643,10 +646,10 @@ def test_old_param_less_400_records_are_probed_once_then_bypassed_without_reques
     # One re-probe of the first old record (it learns why), then the drop for all three.
     assert scripted.with_temperature() == 1 and len(scripted.sent) == 4
     assert client.live_call_count == 4
-    records = _records(cache)
-    assert records[f"{old[0]}.retry-1.json"]["diagnostics"]["provider_error_param"] == "temperature"
+    stored = _records(cache)
+    assert stored[f"{old[0]}.retry-1"]["diagnostics"]["provider_error_param"] == "temperature"
     for fingerprint in old[1:]:
-        redirect = records[f"{fingerprint}.retry-1.json"]
+        redirect = stored[f"{fingerprint}.retry-1"]
         assert redirect["failure_code"] == "sampling_parameter_unsupported"
         assert redirect["diagnostics"]["http_status"] is None
     # The old records and their claims are left exactly as they were.
@@ -726,7 +729,7 @@ def test_a_claim_left_by_a_killed_kernel_is_bypassed_once_the_memory_knows(
     stuck = JsonCompletionClient(_config(), cache_dir=tmp_path, max_live_calls=1, sender=killed)
     with pytest.raises(RuntimeError):
         stuck.complete_text_json(task="t", prompt="stuck", response_model=_Answer)
-    (claim,) = (tmp_path / "requests").glob("*.claim")
+    (key,) = claim_generations(tmp_path)
 
     scripted = endpoint(_refuses("temperature"))
     _ask(_client(tmp_path / "elsewhere"), "learn")
@@ -734,4 +737,31 @@ def test_a_claim_left_by_a_killed_kernel_is_bypassed_once_the_memory_knows(
     assert result.dropped_parameters == ("temperature",)
     assert scripted.with_temperature() == 1
     # No record is written under a claim another process may still hold.
-    assert not (tmp_path / "requests" / claim.name.removesuffix(".claim")).exists()
+    assert key not in _records(tmp_path)
+
+
+def test_a_legacy_claim_file_suppresses_the_skip_record_too(
+    tmp_path: Path, endpoint: Callable[[Rule], _Endpoint]
+) -> None:
+    def refused(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
+        raise ProviderRequestError("captured")
+
+    probe = JsonCompletionClient(
+        _config(), cache_dir=tmp_path / "capture", max_live_calls=1, sender=refused
+    )
+    with pytest.raises(JsonCompletionError) as raised:
+        probe.complete_text_json(task="t", prompt="stuck", response_model=_Answer)
+    key = raised.value.request_fingerprint
+    cache = tmp_path / "model-cache"
+    (cache / "requests").mkdir(parents=True)
+    # A claim file left by older code, fresh enough that its holder may still be running.
+    (cache / "requests" / f"{key}.json.claim").write_text(key)
+
+    scripted = endpoint(_refuses("temperature"))
+    _ask(_client(tmp_path / "elsewhere"), "learn")
+    result = _ask(_client(cache), "stuck")
+    assert result.dropped_parameters == ("temperature",)
+    assert scripted.with_temperature() == 1
+    # No record is written under a claim another process may still hold.
+    assert key not in _records(cache)
+    assert (cache / "requests" / f"{key}.json.claim").exists()

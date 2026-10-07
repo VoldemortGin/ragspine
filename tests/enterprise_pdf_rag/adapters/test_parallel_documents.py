@@ -8,6 +8,7 @@ embedder, the sampling-refusal memory — is pinned here to stay exact under thr
 import _thread
 import hashlib
 import json
+import shutil
 import threading
 import time
 from collections.abc import Callable
@@ -42,6 +43,15 @@ from tests.enterprise_pdf_rag.adapters.lite_ingest_helpers import (
     mixed_folder,
     store_digest,
 )
+from tests.enterprise_pdf_rag.adapters.model_cache_helpers import (
+    claims,
+    context_bytes,
+    context_fingerprints,
+    record_bytes,
+    record_keys,
+    response_bytes,
+    response_digests,
+)
 from tests.enterprise_pdf_rag.adapters.no_hard_link_helpers import (
     fail_directory_fsync,
     forbid_hard_links,
@@ -53,6 +63,8 @@ from tests.enterprise_pdf_rag.adapters.test_folder_pipeline import (
     _azure_like,
     _pdf,
 )
+
+pytestmark = pytest.mark.usefixtures("model_cache_backend")
 
 _LABELS = (
     ("a.pdf", "Atlas FY2025 Japan"),
@@ -129,9 +141,52 @@ def _run(
     )
 
 
+def _cache_dirs(root: Path) -> list[Path]:
+    return sorted(path for path in root.rglob("model-cache") if path.is_dir())
+
+
+def _assert_no_claim_left(root: Path) -> None:
+    assert not [path for path in root.rglob("*.claim*")]
+    assert all(claims(cache) == [] for cache in _cache_dirs(root))
+
+
+def _logical_tree(root: Path) -> Path:
+    """``root`` itself on the files backend; on sqlite a copy of it in which every
+    ``model-cache.sqlite*`` is replaced by the records / responses / contexts it holds, as the
+    files layout would store them (the sqlite file is not byte-deterministic, its content is)."""
+    if not any(root.rglob("model-cache.sqlite")):
+        return root
+    logical = root.parent / f"{root.name}.logical"
+    shutil.rmtree(logical, ignore_errors=True)
+    for path in sorted(root.rglob("*")):
+        if path.is_file() and not path.name.startswith("model-cache.sqlite"):
+            target = logical / path.relative_to(root)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(path, target)
+    for cache in _cache_dirs(root):
+        out = logical / cache.relative_to(root)
+        for kind in ("requests", "responses", "contexts"):
+            (out / kind).mkdir(parents=True, exist_ok=True)
+        for key in record_keys(cache):
+            data = record_bytes(cache, key)
+            assert data is not None
+            (out / "requests" / f"{key}.json").write_bytes(data)
+        for digest in response_digests(cache):
+            data = response_bytes(cache, digest)
+            assert data is not None
+            (out / "responses" / f"{digest}.json").write_bytes(data)
+        for fingerprint in context_fingerprints(cache):
+            data = context_bytes(cache, fingerprint)
+            assert data is not None
+            (out / "contexts" / f"{fingerprint}.json").write_bytes(data)
+    return logical
+
+
 def _files(root: Path) -> dict[str, str]:
     """Every file under ``root`` by relative path → sha256 (model-cache contexts carry a wall
-    clock ``created_at`` and verification receipts file stats, ADR 0034: both kept by name only)."""
+    clock ``created_at`` and verification receipts file stats, ADR 0034: both kept by name only;
+    on sqlite the model cache is compared logically, see ``_logical_tree``)."""
+    root = _logical_tree(root)
     return {
         path.relative_to(root).as_posix(): ""
         if "/model-cache/contexts/" in path.as_posix()
@@ -173,7 +228,7 @@ def _assert_parallel_matches_serial(tmp_path: Path, model: _Model) -> None:
     # Every file, in every document's own directory, is the serial run's file: no request,
     # stage-cache entry, claim or pointer of one document lands in another's.
     assert _files(parallel_root) == _files(serial_root)
-    assert not [path for path in parallel_root.rglob("*.claim*")]
+    _assert_no_claim_left(parallel_root)
     for item in parallel.documents:
         assert item.publication is not None and item.ingestion is not None
         processing = Path(item.ingestion.processing_store)
@@ -224,8 +279,9 @@ def test_full_mode_store_bytes_are_unchanged_with_parallel_documents(
     (document,) = result.documents
     assert document.publication is not None
     assert document.publication.published_processing_id == FULL_PUBLISHED_ID
-    digest, count, requests = store_digest(tmp_path / "ingestion")
-    nonvolatile = count - sum(1 for _ in (tmp_path / "ingestion").rglob("contexts/*.json"))
+    logical = _logical_tree(tmp_path / "ingestion")
+    digest, count, requests = store_digest(logical)
+    nonvolatile = count - sum(1 for _ in logical.rglob("contexts/*.json"))
     assert (digest, nonvolatile, requests) == (
         FULL_STORE_DIGEST,
         FULL_STORE_FILES,
@@ -421,7 +477,7 @@ def test_an_interrupt_stops_at_page_boundaries_and_leaves_no_claim(
         _run(root, folder, parallel=2, events=events)
 
     assert not _worker_threads(), "a worker kept running after the interrupt"
-    assert not [path for path in root.rglob("*.claim*")]
+    _assert_no_claim_left(root)
     # Only the two documents that had started were touched; the queued ones never began.
     started = {Path(str(p["pdf"])).name for e, p in events if e == "document_start"}
     assert started == {"a.pdf", "b.pdf"}

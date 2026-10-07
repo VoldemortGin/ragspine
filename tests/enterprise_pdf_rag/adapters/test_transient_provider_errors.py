@@ -36,6 +36,16 @@ from ragspine.common.evidence.providers.transient import (
     TRANSIENT_MAX_RETRIES,
     is_transient,
 )
+from tests.enterprise_pdf_rag.adapters.model_cache_helpers import (
+    claim_generations,
+    claims,
+    read_record,
+    record_bytes,
+    record_keys,
+    take_over_claim,
+)
+
+pytestmark = pytest.mark.usefixtures("model_cache_backend")
 
 PNG = b"\x89PNG\r\n\x1a\nfixture-bytes"
 KEY = "transient-test-key"
@@ -112,8 +122,8 @@ def _ask(
     )
 
 
-def _records(cache: Path) -> list[Path]:
-    return sorted((cache / "requests").glob("*.json"))
+def _records(cache: Path) -> list[str]:
+    return record_keys(cache)
 
 
 class _Waits:
@@ -266,10 +276,10 @@ def test_a_transient_failure_is_retried_within_the_call_and_each_retry_is_a_live
     assert (client.live_call_count, client.retry_count, client.transient_failure_count) == (2, 1, 0)
     assert len(waits.slept) == 1 and 0.5 <= waits.slept[0] <= 1.0
     (record,) = _records(tmp_path)
-    stored = json.loads(record.read_bytes())
+    stored = read_record(tmp_path, record)
     assert stored["failure_code"] is None
     # A success after a retry is recorded exactly as a first-attempt success.
-    assert set(stored["diagnostics"]) == {
+    assert set(stored["diagnostics"]) == {  # type: ignore[call-overload]
         "endpoint_path",
         "request_bytes",
         "response_bytes",
@@ -293,8 +303,8 @@ def test_a_success_record_after_retries_is_byte_identical_to_a_first_attempt_suc
     _ask(_client(tmp_path / "retried", _Script(_http(429), _http(503), _response())))
     (direct,) = _records(tmp_path / "direct")
     (retried,) = _records(tmp_path / "retried")
-    assert direct.name == retried.name
-    assert direct.read_bytes() == retried.read_bytes()
+    assert direct == retried
+    assert record_bytes(tmp_path / "direct", direct) == record_bytes(tmp_path / "retried", retried)
 
 
 def test_retry_after_is_honoured_and_capped(tmp_path: Path, waits: _Waits) -> None:
@@ -323,7 +333,7 @@ def test_exhausted_retries_leave_no_record_and_the_next_run_calls_again(
         True
     ] * 3
     assert not _records(tmp_path)
-    assert not tuple((tmp_path / "requests").glob("*.claim*"))
+    assert claims(tmp_path) == []
     # cache_only sees nothing cached (not a replayed failure).
     with pytest.raises(JsonCompletionError, match="cache_miss"):
         _ask(_client(tmp_path, down), cache_only=True)
@@ -351,24 +361,24 @@ def test_retries_stop_when_the_budget_runs_out(tmp_path: Path) -> None:
 def test_the_claim_is_held_through_every_retry_and_released_at_the_end(tmp_path: Path) -> None:
     seen: list[int] = []
 
-    def claims() -> None:
-        seen.append(len(tuple((tmp_path / "requests").glob("*.json.claim"))))
+    def held() -> None:
+        seen.append(len(claim_generations(tmp_path)))
 
-    script = _Script(_http(429), _http(502), _response(), on_send=claims)
+    script = _Script(_http(429), _http(502), _response(), on_send=held)
     _ask(_client(tmp_path, script))
     assert seen == [1, 1, 1]
-    assert not tuple((tmp_path / "requests").glob("*.claim*"))
+    assert claims(tmp_path) == []
 
     failing = tmp_path / "failing"
     seen.clear()
 
     def claims_failing() -> None:
-        seen.append(len(tuple((failing / "requests").glob("*.json.claim"))))
+        seen.append(len(claim_generations(failing)))
 
     with pytest.raises(JsonCompletionError):
         _ask(_client(failing, _Script(_http(503), on_send=claims_failing)))
     assert seen == [1] * (1 + TRANSIENT_MAX_RETRIES)
-    assert not tuple((failing / "requests").glob("*.claim*"))
+    assert claims(failing) == []
 
 
 @pytest.mark.parametrize("status", [400, 401, 403, 404, 413, 422])
@@ -381,7 +391,7 @@ def test_a_permanent_failure_is_sent_once_recorded_and_replayed(
         _ask(client)
     assert script.sent == 1 and client.retry_count == 0 and client.transient_failure_count == 0
     (record,) = _records(tmp_path)
-    assert json.loads(record.read_bytes())["failure_code"] == f"provider_http_{status}"
+    assert read_record(tmp_path, record)["failure_code"] == f"provider_http_{status}"
     with pytest.raises(JsonCompletionError, match=f"provider_http_{status}"):
         _ask(_client(tmp_path, script))
     assert script.sent == 1
@@ -397,8 +407,9 @@ def test_a_response_that_fails_validation_is_not_retried(tmp_path: Path) -> None
 # ---- records written before ADR 0035 ------------------------------------------------------
 
 
-def _old_failure(cache: Path, code: str, *, status: int | None) -> Path:
-    """What the old client left: a permanent-looking record of a transient failure."""
+def _old_failure(cache: Path, code: str, *, status: int | None) -> str:
+    """What the old client left, as a legacy file: a permanent-looking record of a transient
+    failure. Returns its record key (on sqlite the backend reads the file through)."""
     with pytest.raises(JsonCompletionError) as missed:
         _ask(_client(cache, _Script(_response()), budget=0), cache_only=True)
     fingerprint = missed.value.request_fingerprint
@@ -425,7 +436,11 @@ def _old_failure(cache: Path, code: str, *, status: int | None) -> Path:
             }
         )
     )
-    return path
+    return fingerprint
+
+
+def _legacy_claim(cache: Path, key: str) -> Path:
+    return cache / "requests" / f"{key}.json.claim"
 
 
 @pytest.mark.parametrize(
@@ -443,8 +458,8 @@ def test_an_old_transient_failure_record_is_called_again_and_overwritten(
     healthy = _Script(_response())
     result = _ask(_client(tmp_path, healthy))
     assert result.parsed.answer == "ok" and not result.cache_hit and healthy.sent == 1
-    assert json.loads(old.read_bytes())["failure_code"] is None
-    assert not tuple((tmp_path / "requests").glob("*.claim*"))
+    assert read_record(tmp_path, old)["failure_code"] is None
+    assert claims(tmp_path) == []
     assert _ask(_client(tmp_path, healthy)).cache_hit and healthy.sent == 1
 
 
@@ -452,13 +467,13 @@ def test_an_old_transient_record_that_fails_transiently_again_stays_for_the_next
     tmp_path: Path,
 ) -> None:
     old = _old_failure(tmp_path, "provider_http_429", status=429)
-    before = old.read_bytes()
+    before = record_bytes(tmp_path, old)
     down = _Script(_http(429))
     with pytest.raises(JsonCompletionError, match="provider_http_429"):
         _ask(_client(tmp_path, down))
     assert down.sent == 1 + TRANSIENT_MAX_RETRIES
-    assert old.read_bytes() == before
-    assert not tuple((tmp_path / "requests").glob("*.claim*"))
+    assert record_bytes(tmp_path, old) == before
+    assert claims(tmp_path) == []
 
 
 def test_an_old_transient_record_answered_by_a_permanent_failure_is_replaced_by_it(
@@ -468,7 +483,7 @@ def test_an_old_transient_record_answered_by_a_permanent_failure_is_replaced_by_
     refused = _Script(_http(401))
     with pytest.raises(JsonCompletionError, match="provider_http_401"):
         _ask(_client(tmp_path, refused))
-    assert json.loads(old.read_bytes())["failure_code"] == "provider_http_401"
+    assert read_record(tmp_path, old)["failure_code"] == "provider_http_401"
     with pytest.raises(JsonCompletionError, match="provider_http_401"):
         _ask(_client(tmp_path, refused))
     assert refused.sent == 1
@@ -476,12 +491,11 @@ def test_an_old_transient_record_answered_by_a_permanent_failure_is_replaced_by_
 
 def test_an_old_transient_record_under_a_live_claim_is_blocked_not_looped(tmp_path: Path) -> None:
     old = _old_failure(tmp_path, "provider_http_429", status=429)
-    claim = old.with_suffix(".json.claim")
-    claim.write_text(
+    _legacy_claim(tmp_path, old).write_text(
         json.dumps(
             {
                 "claim": json_completion.CLAIM_FORMAT,
-                "request_fingerprint": old.stem,
+                "request_fingerprint": old,
                 "host": "another-host",
                 "pid": 1,
                 "process": "another-process",
@@ -502,16 +516,16 @@ def test_an_old_transient_record_beside_the_old_clients_leftover_claim_heals(
 ) -> None:
     """Clients before ADR 0023 never released a claim: the user's records sit beside one."""
     old = _old_failure(tmp_path, "provider_http_429", status=429)
-    claim = old.with_suffix(".json.claim")
-    claim.write_text(old.stem)  # the legacy claim format: just the fingerprint
+    claim = _legacy_claim(tmp_path, old)
+    claim.write_text(old)  # the legacy claim format: just the fingerprint
     stamp = json_completion._wall_clock() - json_completion.LEGACY_CLAIM_LEASE_SECONDS - 1
     os.utime(claim, (stamp, stamp))
     script = _Script(_response())
     client = _client(tmp_path, script)
     assert _ask(client).parsed.answer == "ok"
     assert script.sent == 1 and client.claims_taken_over == 1
-    assert json.loads(old.read_bytes())["failure_code"] is None
-    assert not tuple((tmp_path / "requests").glob("*.claim*"))
+    assert read_record(tmp_path, old)["failure_code"] is None
+    assert claims(tmp_path) == []
 
 
 def test_an_old_transient_record_of_a_refused_temperature_goes_without_it(
@@ -552,7 +566,7 @@ def test_a_refused_temperature_then_a_rate_limit_then_success(tmp_path: Path) ->
     assert result.dropped_parameters == ("temperature",)
     assert script.sent == 3 and client.live_call_count == 3 and client.retry_count == 1
     codes = sorted(
-        json.loads(path.read_bytes())["failure_code"] or "ok" for path in _records(tmp_path)
+        str(read_record(tmp_path, key)["failure_code"] or "ok") for key in _records(tmp_path)
     )
     assert codes == ["ok", "provider_http_400"]
 
@@ -566,31 +580,39 @@ def test_a_lease_covers_one_pause_and_one_attempt_because_every_retry_renews_it(
     assert json_completion._claim_lease(180.0) < json_completion.LEGACY_CLAIM_LEASE_SECONDS
 
 
-def test_a_retry_renews_the_claim_with_the_next_generation(tmp_path: Path) -> None:
+def test_a_retry_renews_the_claim_with_the_next_generation(
+    tmp_path: Path, model_cache_backend: str
+) -> None:
+    generations: list[int] = []
     holders: list[list[str]] = []
 
-    def claims() -> None:
+    def held() -> None:
+        (generation,) = claim_generations(tmp_path).values()
+        generations.append(generation)
         found = sorted(path.name.split(".json.")[1] for path in (tmp_path / "requests").glob("*"))
         holders.append([name for name in found if name.startswith("claim")])
 
-    _ask(_client(tmp_path, _Script(_http(429), _http(429), _response(), on_send=claims)))
-    assert holders == [
-        ["claim"],
-        ["claim", "claim.takeover-1"],
-        ["claim", "claim.takeover-1", "claim.takeover-2"],
-    ]
-    assert not tuple((tmp_path / "requests").glob("*.claim*"))
+    _ask(_client(tmp_path, _Script(_http(429), _http(429), _response(), on_send=held)))
+    # Each retry moves the one claim to the next generation (a file or the row's column).
+    assert generations == [0, 1, 2]
+    if model_cache_backend == "files":  # the generations are claim files, one per generation
+        assert holders == [
+            ["claim"],
+            ["claim", "claim.takeover-1"],
+            ["claim", "claim.takeover-1", "claim.takeover-2"],
+        ]
+    assert claims(tmp_path) == []
     # A record after renewals is an ordinary record, not a takeover.
     (record,) = _records(tmp_path)
-    assert "claim_takeover" not in json.loads(record.read_bytes())["diagnostics"]
+    assert "claim_takeover" not in read_record(tmp_path, record)["diagnostics"]  # type: ignore[operator]
 
 
 def test_a_retry_whose_claim_was_taken_over_meanwhile_is_not_sent_again(
-    tmp_path: Path, waits: _Waits
+    tmp_path: Path, waits: _Waits, model_cache_backend: str
 ) -> None:
     def contender() -> None:  # another process judged this call over during the backoff
-        (claim,) = (tmp_path / "requests").glob("*.json.claim")
-        claim.with_name(claim.name + ".takeover-1").write_text("{}")
+        (key,) = claim_generations(tmp_path)
+        take_over_claim(tmp_path, key)
 
     waits.during.append(contender)
     script = _Script(_http(503), _response())
@@ -600,7 +622,10 @@ def test_a_retry_whose_claim_was_taken_over_meanwhile_is_not_sent_again(
     assert script.sent == 1 and client.claim_blocked_count == 1
     assert not _records(tmp_path)
     # The new holder's claim is left alone.
-    assert len(tuple((tmp_path / "requests").glob("*.claim*"))) == 2
+    (generation,) = claim_generations(tmp_path).values()
+    assert generation == 1
+    # Files: the first holder's claim plus the new holder's takeover file; sqlite: the one row.
+    assert len(claims(tmp_path)) == (2 if model_cache_backend == "files" else 1)
 
 
 # ---- shared cooldown ----------------------------------------------------------------------
@@ -785,11 +810,16 @@ def test_a_folder_run_counts_retries_and_heals_a_page_that_stayed_rate_limited(
     assert (done["retries"], done["transient_failures"]) == (1 + TRANSIENT_MAX_RETRIES, 1)
     report = (tmp_path / "first" / "report.md").read_text()
     assert f"{1 + TRANSIENT_MAX_RETRIES} retries, 1 calls still failing" in report
-    assert not tuple((tmp_path / "ingestion").rglob("requests/*.claim*"))
+    caches = {path.parent for path in (tmp_path / "ingestion").rglob("requests")} | {
+        path.parent for path in (tmp_path / "ingestion").rglob("model-cache.sqlite")
+    }
+    assert caches
+    assert all(claims(cache) == [] for cache in caches)
     failed = [
-        path
-        for path in (tmp_path / "ingestion").rglob("requests/*.json")
-        if json.loads(path.read_bytes())["failure_code"] is not None
+        key
+        for cache in caches
+        for key in record_keys(cache)
+        if read_record(cache, key)["failure_code"] is not None
     ]
     assert failed == []
 

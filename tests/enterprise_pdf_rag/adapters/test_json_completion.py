@@ -12,17 +12,31 @@ import pytest
 from pydantic import BaseModel, ConfigDict, SecretStr
 
 import ragspine.common.evidence.providers.providers as provider_module
+from ragspine.common.evidence.object_backend.protocol import StoreConflict
+from ragspine.common.evidence.object_backend.registry import open_backend
 from ragspine.common.evidence.providers.json_completion import (
     JsonCompletionClient,
     JsonCompletionError,
     JsonCompletionResult,
-    _immutable_write,
 )
 from ragspine.common.evidence.providers.providers import LLMConfig, ProviderRequestError
+from tests.enterprise_pdf_rag.adapters.model_cache_helpers import (
+    claims,
+    context_bytes,
+    context_fingerprints,
+    damage_context,
+    entry_count,
+    read_record,
+    record_bytes,
+    record_keys,
+    response_digests,
+)
 from tests.enterprise_pdf_rag.adapters.no_hard_link_helpers import (
     fail_directory_fsync,
     forbid_hard_links,
 )
+
+pytestmark = pytest.mark.usefixtures("model_cache_backend")
 
 PNG = b"\x89PNG\r\n\x1a\nfixture-bytes"
 KEY = "test-secret-never-written"
@@ -63,8 +77,9 @@ def test_two_clients_cannot_both_issue_the_one_explicit_retry(tmp_path: Path) ->
         original.complete_json(
             task="parallel", prompt="same", image_png=PNG, response_model=_Answer
         )
-    (record,) = tuple((tmp_path / "requests").glob("*.json"))
-    original_bytes = record.read_bytes()
+    (key,) = record_keys(tmp_path)
+    original_bytes = record_bytes(tmp_path, key)
+    assert original_bytes is not None
     entered, release = Event(), Event()
     calls: list[str] = []
 
@@ -114,7 +129,7 @@ def test_two_clients_cannot_both_issue_the_one_explicit_retry(tmp_path: Path) ->
         completed = pending.result(timeout=5)
     assert calls == ["first"]
     assert completed.diagnostics is not None and completed.diagnostics.attempt == 2
-    assert record.read_bytes() == original_bytes
+    assert record_bytes(tmp_path, key) == original_bytes
     cached = second.complete_json(
         task="parallel", prompt="same", image_png=PNG, response_model=_Answer
     )
@@ -136,9 +151,8 @@ def test_uncertain_inflight_claim_survives_and_cannot_be_silently_retried(
     )
     with pytest.raises(RuntimeError, match="simulated worker interruption"):
         first.complete_json(task="uncertain", prompt="same", image_png=PNG, response_model=_Answer)
-    assert not tuple((tmp_path / "requests").glob("*.json"))
-    (claim,) = tuple((tmp_path / "requests").glob("*.claim"))
-    content = claim.read_bytes()
+    assert record_keys(tmp_path) == []
+    (content,) = claims(tmp_path)
     assert KEY.encode() not in content
     second = JsonCompletionClient(
         _config(),
@@ -150,7 +164,7 @@ def test_uncertain_inflight_claim_survives_and_cannot_be_silently_retried(
     with pytest.raises(JsonCompletionError, match="request_in_progress_or_uncertain"):
         second.complete_json(task="uncertain", prompt="same", image_png=PNG, response_model=_Answer)
     assert calls == 1
-    assert claim.read_bytes() == content
+    assert claims(tmp_path) == [content]
 
 
 def _config() -> LLMConfig:
@@ -204,6 +218,7 @@ def test_strict_json_call_uses_one_image_and_reuses_persistent_cache(
     serialized = json.dumps(calls[0])
     assert '"image_url"' in serialized and "data:image/png;base64," in serialized
     assert '"json_schema"' in serialized
+    # A scan of every file: on the sqlite backend this covers the db and its wal too.
     assert all(
         KEY.encode() not in path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()
     )
@@ -226,7 +241,9 @@ def test_live_call_count_excludes_cached_replay(tmp_path: Path) -> None:
     assert fresh.live_call_count == 0
 
 
-def test_cache_only_never_uses_available_live_budget(tmp_path: Path) -> None:
+def test_cache_only_never_uses_available_live_budget(
+    tmp_path: Path, model_cache_backend: str
+) -> None:
     def forbidden(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
         raise AssertionError("An explicit cache read cannot dispatch transport")
 
@@ -246,7 +263,9 @@ def test_cache_only_never_uses_available_live_budget(tmp_path: Path) -> None:
             cache_only=True,
         )
     assert client.live_call_count == 0
-    assert not tuple(tmp_path.iterdir())
+    assert entry_count(tmp_path) == 0
+    if model_cache_backend == "files":
+        assert not tuple(tmp_path.iterdir())
 
 
 @pytest.mark.parametrize(
@@ -331,7 +350,9 @@ def test_provider_failure_retains_only_a_trusted_status_and_never_error_text(
         )
     assert raised.value.code == expected
     assert KEY not in str(raised.value)
-    assert all(KEY not in path.read_text() for path in tmp_path.rglob("*.json"))
+    assert all(
+        KEY.encode() not in path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()
+    )
 
 
 def test_model_schema_uses_homogeneous_arrays_and_keeps_local_tuple_length_validation(
@@ -428,7 +449,7 @@ def test_real_transport_classifies_http_and_timeout_without_response_secrets(
             )
         if transient and attempt:
             assert raised.value.code == "call_budget_exhausted"
-            assert not tuple((tmp_path / "requests").glob("*.json"))
+            assert record_keys(tmp_path) == []
             break
         assert raised.value.code == code
         diagnostic = raised.value.diagnostics
@@ -470,8 +491,9 @@ def test_explicit_failed_retry_preserves_first_attempt_and_is_limited_to_one(
         invoke(JsonCompletionClient(_config(), cache_dir=tmp_path, max_live_calls=1, sender=sender))
         == "provider_response_limit"
     )
-    (original,) = tuple((tmp_path / "requests").glob("*.json"))
-    original_bytes = original.read_bytes()
+    (original,) = record_keys(tmp_path)
+    original_bytes = record_bytes(tmp_path, original)
+    assert original_bytes is not None
     assert (
         invoke(
             JsonCompletionClient(
@@ -512,8 +534,8 @@ def test_explicit_failed_retry_preserves_first_attempt_and_is_limited_to_one(
         )
         == expected
     )
-    assert original.read_bytes() == original_bytes
-    assert original.with_name(original.stem + ".retry-1.json").exists()
+    assert record_bytes(tmp_path, original) == original_bytes
+    assert f"{original}.retry-1" in record_keys(tmp_path)
     assert len(calls) == 2 and calls[0] == calls[1]
 
 
@@ -533,7 +555,9 @@ def test_text_call_stores_the_complete_request_body_for_retrospection(tmp_path: 
         system="Quote every value verbatim.",
     )
     relative = f"contexts/{result.request_fingerprint}.json"
-    context = json.loads((tmp_path / relative).read_text("utf-8"))
+    stored = context_bytes(tmp_path, result.request_fingerprint)
+    assert stored is not None
+    context = json.loads(stored)
     assert context["request_fingerprint"] == result.request_fingerprint
     assert context["endpoint_path"] == "/v1/chat/completions"
     assert context["task"] == "page-metadata-v1"
@@ -547,10 +571,8 @@ def test_text_call_stores_the_complete_request_body_for_retrospection(tmp_path: 
     assert result.diagnostics is not None
     assert result.diagnostics.context_path == relative
     assert result.diagnostics.context_warning is None
-    record = json.loads(
-        (tmp_path / "requests" / f"{result.request_fingerprint}.json").read_text("utf-8")
-    )
-    assert record["diagnostics"]["context_path"] == relative
+    diagnostics = read_record(tmp_path, result.request_fingerprint)["diagnostics"]
+    assert isinstance(diagnostics, dict) and diagnostics["context_path"] == relative
 
 
 def test_image_call_stores_the_request_with_only_the_base64_image_omitted(tmp_path: Path) -> None:
@@ -568,9 +590,9 @@ def test_image_call_stores_the_request_with_only_the_base64_image_omitted(tmp_pa
         image_png=PNG,
         response_model=_Answer,
     )
-    context = json.loads(
-        (tmp_path / "contexts" / f"{result.request_fingerprint}.json").read_text("utf-8")
-    )
+    stored = context_bytes(tmp_path, result.request_fingerprint)
+    assert stored is not None
+    context = json.loads(stored)
     content = context["payload"]["messages"][1]["content"]
     assert content[0] == {"type": "text", "text": "Read the source image."}
     assert content[1] == {
@@ -603,25 +625,33 @@ def test_stored_context_is_backfilled_on_replay_and_never_rewritten(tmp_path: Pa
     fingerprint = invoke(
         JsonCompletionClient(_config(), cache_dir=tmp_path, max_live_calls=1, sender=sender)
     )
-    path = tmp_path / "contexts" / f"{fingerprint}.json"
     sentinel = b'{"request_fingerprint":"kept-as-first-written"}'
-    path.write_bytes(sentinel)
+    damage_context(tmp_path, fingerprint, sentinel)
     invoke(JsonCompletionClient(_config(), cache_dir=tmp_path, max_live_calls=0, sender=forbidden))
-    assert path.read_bytes() == sentinel
-    path.unlink()
+    assert context_bytes(tmp_path, fingerprint) == sentinel
+    damage_context(tmp_path, fingerprint, None)
     invoke(JsonCompletionClient(_config(), cache_dir=tmp_path, max_live_calls=0, sender=forbidden))
-    assert json.loads(path.read_text("utf-8"))["request_fingerprint"] == fingerprint
+    restored = context_bytes(tmp_path, fingerprint)
+    assert restored is not None
+    assert json.loads(restored)["request_fingerprint"] == fingerprint
 
 
-def test_a_context_that_cannot_be_written_never_fails_the_call(tmp_path: Path) -> None:
-    (tmp_path / "contexts").write_bytes(b"a file where the context directory would go")
-
+def test_a_context_that_cannot_be_written_never_fails_the_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model_cache_backend: str
+) -> None:
     def sender(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
         return _response()
 
-    result = JsonCompletionClient(
-        _config(), cache_dir=tmp_path, max_live_calls=1, sender=sender
-    ).complete_text_json(task="unwritable", prompt="read", response_model=_Answer)
+    client = JsonCompletionClient(_config(), cache_dir=tmp_path, max_live_calls=1, sender=sender)
+    if model_cache_backend == "files":
+        (tmp_path / "contexts").write_bytes(b"a file where the context directory would go")
+    else:
+        # A file in the way does not stop a db write, so the write itself is made to fail.
+        def refuse(*_args: object, **_kwargs: object) -> None:
+            raise OSError(errno.EIO, "context store unavailable")
+
+        monkeypatch.setattr(client.backend, "put_context", refuse)
+    result = client.complete_text_json(task="unwritable", prompt="read", response_model=_Answer)
     assert result.parsed.answer == "observed"
     assert result.diagnostics is not None
     assert result.diagnostics.context_path is None
@@ -654,9 +684,9 @@ def test_every_completion_asks_for_greedy_decoding_and_the_configured_seed(
     # The envelope is the wire body, so the sampling a cached answer was produced under is
     # readable from `contexts/` without re-running anything.
     for result in (text, vision):
-        context = json.loads(
-            (tmp_path / "contexts" / f"{result.request_fingerprint}.json").read_text("utf-8")
-        )
+        stored = context_bytes(tmp_path, result.request_fingerprint)
+        assert stored is not None
+        context = json.loads(stored)
         assert context["payload"]["temperature"] == 0.0
         assert context["payload"]["seed"] == 7
 
@@ -698,7 +728,7 @@ def test_the_sampling_parameters_are_part_of_the_request_fingerprint(tmp_path: P
 
 
 def test_calls_and_replays_work_where_hard_links_and_directory_fsync_do_not(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model_cache_backend: str
 ) -> None:
     forbid_hard_links(monkeypatch)
     fail_directory_fsync(monkeypatch, errno.EINVAL)
@@ -719,40 +749,81 @@ def test_calls_and_replays_work_where_hard_links_and_directory_fsync_do_not(
     assert (first.cache_hit, second.cache_hit) == (False, True)
     assert second.parsed == first.parsed and len(calls) == 1
     fingerprint = first.request_fingerprint
-    assert sorted(
-        path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*") if path.is_file()
-    ) == sorted(
-        (
-            f"contexts/{fingerprint}.json",
-            f"requests/{fingerprint}.json",  # its claim is released once recorded
-            f"responses/{hashlib.sha256(_response()).hexdigest()}.json",
+    digest = hashlib.sha256(_response()).hexdigest()
+    if model_cache_backend == "files":
+        assert sorted(
+            path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*") if path.is_file()
+        ) == sorted(
+            (
+                f"contexts/{fingerprint}.json",
+                f"requests/{fingerprint}.json",  # its claim is released once recorded
+                f"responses/{digest}.json",
+            )
         )
-    )
+    # The same, as logical entries: its claim is released once recorded.
+    assert record_keys(tmp_path) == [fingerprint]
+    assert response_digests(tmp_path) == [digest]
+    assert context_fingerprints(tmp_path) == [fingerprint]
+    assert claims(tmp_path) == []
 
 
 def test_without_hard_links_an_immutable_cache_entry_is_never_overwritten(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model_cache_backend: str
+) -> None:
+    forbid_hard_links(monkeypatch)
+    key = "0" * 64
+    backend = open_backend(tmp_path, "model-cache")
+    assert backend.kind == model_cache_backend
+    backend.put_record(key, b"first")
+    backend.put_record(key, b"first")
+
+    with pytest.raises(StoreConflict):
+        backend.put_record(key, b"second")
+
+    assert record_bytes(tmp_path, key) == b"first"
+    assert record_keys(tmp_path) == [key]
+    if model_cache_backend == "files":
+        assert [item.name for item in (tmp_path / "requests").iterdir()] == [f"{key}.json"]
+
+
+def test_the_client_reports_a_conflicting_record_write_as_cache_conflict(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     forbid_hard_links(monkeypatch)
-    path = tmp_path / "requests" / "entry.json"
-    _immutable_write(path, b"first")
-    _immutable_write(path, b"first")
+    backend = open_backend(tmp_path, "model-cache")
 
+    def conflicting(key: str, data: bytes, *, replace_damaged: bool = False) -> None:
+        raise StoreConflict  # an intact record of other bytes is already there
+
+    monkeypatch.setattr(backend, "put_record", conflicting)
+
+    def sender(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
+        return _response()
+
+    client = JsonCompletionClient(
+        _config(), cache_dir=tmp_path, max_live_calls=1, sender=sender, backend=backend
+    )
     with pytest.raises(JsonCompletionError, match="cache_conflict"):
-        _immutable_write(path, b"second")
-
-    assert path.read_bytes() == b"first"
-    assert [item.name for item in path.parent.iterdir()] == ["entry.json"]
+        client.complete_json(task="conflict", prompt="same", image_png=PNG, response_model=_Answer)
+    assert record_keys(tmp_path) == []
 
 
 def test_a_real_directory_fsync_failure_still_stops_the_claim_before_transport(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model_cache_backend: str
 ) -> None:
     fail_directory_fsync(monkeypatch, errno.EIO)
 
     def forbidden(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
         raise AssertionError("An unsynced claim must not reach the provider")
 
+    if model_cache_backend == "sqlite":
+        # The db never fsyncs a directory (sqlite owns its durability), so there is no claim
+        # placement to fail: the call goes through to the transport instead.
+        result = JsonCompletionClient(
+            _config(), cache_dir=tmp_path, max_live_calls=1, sender=lambda *_a, **_k: _response()
+        ).complete_json(task="eio", prompt="same", image_png=PNG, response_model=_Answer)
+        assert result.parsed.answer == "observed"
+        return
     with pytest.raises(OSError) as raised:
         JsonCompletionClient(
             _config(), cache_dir=tmp_path, max_live_calls=1, sender=forbidden

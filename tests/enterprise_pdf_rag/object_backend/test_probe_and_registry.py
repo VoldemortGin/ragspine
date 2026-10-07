@@ -156,7 +156,8 @@ def test_external_media_types_parsing() -> None:
     assert external_media_types(settings) == frozenset({"application/pdf", "image/svg+xml"})
 
 
-def test_settings_defaults() -> None:
+def test_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("APP_OBJECT_STORE_BACKEND", raising=False)  # tests/conftest.py pins files
     settings = _settings()
     assert settings.object_store_backend == "auto"
     assert settings.object_store_inline_max_bytes == 262_144

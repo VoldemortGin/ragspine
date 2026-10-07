@@ -7,6 +7,11 @@ from pathlib import Path
 import pytest
 
 from ragspine.common.evidence.providers import json_completion
+from tests.enterprise_pdf_rag.adapters.model_cache_helpers import (
+    claim_generations,
+    claims,
+    drop_db_claims,
+)
 from tests.enterprise_pdf_rag.adapters.test_folder_pipeline import (
     _MERIDIAN,
     _PAGES,
@@ -15,6 +20,14 @@ from tests.enterprise_pdf_rag.adapters.test_folder_pipeline import (
     _model_env,
     _run,
 )
+
+pytestmark = pytest.mark.usefixtures("model_cache_backend")
+
+
+def _cache_dir(tmp_path: Path) -> Path:
+    """The one per-PDF model cache of a single-PDF folder run."""
+    (cache,) = (path for path in (tmp_path / "ingestion").rglob("model-cache") if path.is_dir())
+    return cache
 
 
 def test_an_interrupted_run_shows_the_blocked_call_then_recovers_once_the_lease_runs_out(
@@ -35,7 +48,8 @@ def test_an_interrupted_run_shows_the_blocked_call_then_recovers_once_the_lease_
     with pytest.raises(KeyboardInterrupt):
         _run(tmp_path, folder)
     monkeypatch.setattr(json_completion, "_send_once", real)
-    (claim,) = (tmp_path / "ingestion").rglob("requests/*.claim")
+    cache = _cache_dir(tmp_path)
+    assert len(claims(cache)) == 1
 
     # Rerun at once: the claim may still be in flight, so the call is not sent — but it shows.
     blocked = _run(tmp_path, folder)
@@ -48,7 +62,7 @@ def test_an_interrupted_run_shows_the_blocked_call_then_recovers_once_the_lease_
         + document.ingestion.metadata_page_states.get("succeeded", 0)
         == 2 * _PAGES - 1
     )
-    assert claim.exists()
+    assert len(claims(cache)) == 1
 
     # Past the lease the claim's holder is presumed dead: the call is made again, once.
     lease = json_completion._claim_lease(180.0)
@@ -62,7 +76,7 @@ def test_an_interrupted_run_shows_the_blocked_call_then_recovers_once_the_lease_
     assert document.ingestion.calls_claim_blocked == 0
     assert document.ingestion.layout_succeeded_pages == _PAGES
     assert document.ingestion.metadata_page_states == {"succeeded": _PAGES}
-    assert not tuple((tmp_path / "ingestion").rglob("requests/*.claim*"))
+    assert claims(cache) == []
 
     again = _run(tmp_path, folder)
     assert again.live_calls.total == 0
@@ -89,8 +103,15 @@ def test_a_claim_left_by_the_old_client_heals_on_a_rerun_once_it_is_old_enough(
     with pytest.raises(KeyboardInterrupt):
         _run(tmp_path, folder)
     monkeypatch.setattr(json_completion, "_send_once", real)
-    (claim,) = (tmp_path / "ingestion").rglob("requests/*.claim")
-    claim.write_text(claim.name.removesuffix(".json.claim"))  # the old client's claim format
+    cache = _cache_dir(tmp_path)
+    ((key, generation),) = claim_generations(cache).items()
+    assert generation == 0 and len(claims(cache)) == 1
+    # The old client's claim: a bare fingerprint in a ``.claim`` file (on the sqlite backend the
+    # run's own db claim is replaced by that file, which the backend reads through).
+    drop_db_claims(cache)
+    claim = cache / "requests" / f"{key}.json.claim"
+    claim.parent.mkdir(parents=True, exist_ok=True)
+    claim.write_text(key)
 
     blocked = _run(tmp_path, folder)
     assert blocked.documents[0].ingestion is not None

@@ -12,7 +12,18 @@ from ragspine.common.evidence.providers.json_completion import (
     JsonCompletionError,
 )
 from ragspine.common.evidence.providers.providers import LLMConfig
+from tests.enterprise_pdf_rag.adapters.model_cache_helpers import (
+    claims,
+    damage_record,
+    damage_response,
+    record_bytes,
+    record_keys,
+    response_bytes,
+    response_digests,
+)
 from tests.enterprise_pdf_rag.adapters.no_hard_link_helpers import forbid_hard_links
+
+pytestmark = pytest.mark.usefixtures("model_cache_backend")
 
 
 class _Answer(BaseModel):
@@ -57,14 +68,20 @@ def _ask(
     return result.parsed.answer, client
 
 
-def _record(cache: Path) -> Path:
-    (record,) = (cache / "requests").glob("*.json")
-    return record
+def _key(cache: Path) -> str:
+    (key,) = record_keys(cache)
+    return key
 
 
-def _response(cache: Path) -> Path:
-    (response,) = (cache / "responses").glob("*.json")
-    return response
+def _record(cache: Path) -> bytes:
+    data = record_bytes(cache, _key(cache))
+    assert data is not None
+    return data
+
+
+def _digest(cache: Path) -> str:
+    (digest,) = response_digests(cache)
+    return digest
 
 
 @pytest.mark.parametrize("damage", ["response-missing", "response-truncated", "record-empty"])
@@ -77,11 +94,14 @@ def test_a_damaged_entry_is_called_again_once_then_replays(
     first = _Sender(["first"])
     assert _ask(tmp_path, first)[0] == "first"
     if damage == "response-missing":
-        _response(tmp_path).unlink()
+        damage_response(tmp_path, _digest(tmp_path), None)
     elif damage == "response-truncated":
-        _response(tmp_path).write_bytes(_response(tmp_path).read_bytes()[:9])
+        digest = _digest(tmp_path)
+        stored = response_bytes(tmp_path, digest)
+        assert stored is not None
+        damage_response(tmp_path, digest, stored[:9])
     else:
-        _record(tmp_path).write_bytes(b"")
+        damage_record(tmp_path, _key(tmp_path), b"")
 
     again = _Sender(["second"])
     with recording_repairs() as repairs:
@@ -92,20 +112,20 @@ def test_a_damaged_entry_is_called_again_once_then_replays(
     replay = _Sender(["never"])
     assert _ask(tmp_path, replay, budget=0)[0] == "second"
     assert replay.calls == 0
-    assert not list((tmp_path / "requests").glob("*.claim*"))
+    assert claims(tmp_path) == []
 
 
 def test_a_lost_response_reproduced_identically_keeps_the_record(tmp_path: Path) -> None:
     _ask(tmp_path, _Sender(["same"]))
-    written = _record(tmp_path).read_bytes()
-    _response(tmp_path).unlink()
+    written = _record(tmp_path)
+    damage_response(tmp_path, _digest(tmp_path), None)
     assert _ask(tmp_path, _Sender(["same"]))[0] == "same"
-    assert _record(tmp_path).read_bytes() == written
+    assert _record(tmp_path) == written
 
 
 def test_cache_only_and_no_budget_never_call_for_a_damaged_entry(tmp_path: Path) -> None:
     _ask(tmp_path, _Sender(["first"]))
-    _response(tmp_path).unlink()
+    damage_response(tmp_path, _digest(tmp_path), None)
     sender = _Sender(["second"])
     with pytest.raises(JsonCompletionError, match="missing_cached_response"):
         _ask(tmp_path, sender, cache_only=True)
@@ -116,10 +136,9 @@ def test_cache_only_and_no_budget_never_call_for_a_damaged_entry(tmp_path: Path)
 
 def test_a_record_bound_to_another_request_is_still_refused(tmp_path: Path) -> None:
     _ask(tmp_path, _Sender(["first"]))
-    record = _record(tmp_path)
-    data = json.loads(record.read_bytes())
+    data = json.loads(_record(tmp_path))
     data["request_fingerprint"] = "0" * 64
-    record.write_text(json.dumps(data))
+    damage_record(tmp_path, _key(tmp_path), json.dumps(data).encode())
     sender = _Sender(["second"])
     with pytest.raises(JsonCompletionError, match="cache_binding_mismatch"):
         _ask(tmp_path, sender)

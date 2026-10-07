@@ -17,6 +17,10 @@ import rootutils
 ROOT_DIR = rootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 # 与开发者本机项目根的 .env 隔离(configs 默认读它);要测 .env 的用例自行 delenv。
 os.environ["PYTHON_DOTENV_DISABLED"] = "1"
+# 对象库后端(APP_OBJECT_STORE_BACKEND):测试默认走文件布局——许多用例按文件检查模型缓存;
+# 两后端双跑的用例经 model_cache_backend fixture 显式切换。setdefault:导出该变量
+# (如 auto)即可让整套测试在那个模式下跑。
+os.environ.setdefault("APP_OBJECT_STORE_BACKEND", "files")
 
 from ragspine.fixtures.excel import GT_PATH, XLSX_PATH
 from ragspine.fixtures.excel import main as make_excel_fixtures

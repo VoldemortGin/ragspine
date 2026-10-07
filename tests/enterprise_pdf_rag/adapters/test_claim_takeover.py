@@ -21,6 +21,7 @@ from threading import Barrier, Event
 import pytest
 from pydantic import BaseModel, ConfigDict, SecretStr
 
+from ragspine.common.evidence.object_backend.protocol import ModelCacheBackend
 from ragspine.common.evidence.providers import json_completion
 from ragspine.common.evidence.providers.json_completion import (
     CLAIM_FORMAT,
@@ -31,10 +32,13 @@ from ragspine.common.evidence.providers.json_completion import (
     forget_unsupported_sampling_parameters,
 )
 from ragspine.common.evidence.providers.providers import LLMConfig, ProviderRequestError
+from tests.enterprise_pdf_rag.adapters.model_cache_helpers import claims, read_record, record_keys
 from tests.enterprise_pdf_rag.adapters.no_hard_link_helpers import (
     fail_directory_fsync,
     forbid_hard_links,
 )
+
+pytestmark = pytest.mark.usefixtures("model_cache_backend")
 
 PNG = b"\x89PNG\r\n\x1a\nfixture-bytes"
 KEY = "claim-test-key"
@@ -141,9 +145,7 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> Iterator[Callable[[float], None]]:
 
 
 def _record(cache: Path, fingerprint: str, suffix: str = ".json") -> dict[str, object]:
-    loaded = json.loads((cache / "requests" / f"{fingerprint}{suffix}").read_bytes())
-    assert isinstance(loaded, dict)
-    return loaded
+    return read_record(cache, fingerprint + suffix.removesuffix(".json"))
 
 
 def _interrupted(cache: Path) -> str:
@@ -154,9 +156,11 @@ def _interrupted(cache: Path) -> str:
 
     with pytest.raises(KeyboardInterrupt):
         _ask(_client(cache, interrupted))
-    (claim,) = (cache / "requests").glob("*.claim")
-    assert not tuple((cache / "requests").glob("*.json"))
-    return claim.name.removesuffix(".json.claim")
+    (held,) = claims(cache)
+    assert record_keys(cache) == []
+    fingerprint = json.loads(held)["request_fingerprint"]
+    assert isinstance(fingerprint, str)
+    return fingerprint
 
 
 # ---- the claim itself ----------------------------------------------------------------------
@@ -168,8 +172,7 @@ def test_a_claim_names_its_holder_and_lease_and_is_released_once_recorded(
     seen: list[dict[str, object]] = []
 
     def sender(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
-        (claim,) = (tmp_path / "requests").glob("*.claim")
-        raw = claim.read_bytes()
+        (raw,) = claims(tmp_path)
         assert KEY.encode() not in raw and b"same" not in raw
         seen.append(json.loads(raw))
         return _response()
@@ -193,7 +196,7 @@ def test_a_claim_names_its_holder_and_lease_and_is_released_once_recorded(
         _LEASE,
     )
     assert owner["request_fingerprint"] == result.request_fingerprint
-    assert not tuple((tmp_path / "requests").glob("*.claim*"))
+    assert claims(tmp_path) == []
     # A record without a claim takeover keeps the old record bytes (no new key).
     diagnostics = _record(tmp_path, result.request_fingerprint)["diagnostics"]
     assert isinstance(diagnostics, dict) and "claim_takeover" not in diagnostics
@@ -247,7 +250,7 @@ def test_an_interrupted_call_stays_blocked_until_its_lease_runs_out(
     assert recovered.live_call_count == 1  # the resend is one live call
     assert result.diagnostics is not None and result.diagnostics.claim_takeover == 1
     assert _record(tmp_path, fingerprint)["diagnostics"]["claim_takeover"] == 1  # type: ignore[index]
-    assert not tuple((tmp_path / "requests").glob("*.claim*"))
+    assert claims(tmp_path) == []
     again = _ask(_client(tmp_path, _counting(calls), budget=0))
     assert again.cache_hit and calls == ["sent"]
 
@@ -278,7 +281,7 @@ def test_a_live_holder_in_this_process_is_never_overtaken(tmp_path: Path) -> Non
 
 @pytest.mark.parametrize("case", ["alive-here", "other-host", "this-process"])
 def test_a_current_format_claim_within_its_lease_stays_in_progress(
-    tmp_path: Path, case: str
+    tmp_path: Path, case: str, model_cache_backend: str
 ) -> None:
     fingerprint = _fingerprint(tmp_path)
     content = {
@@ -297,6 +300,7 @@ def test_a_current_format_claim_within_its_lease_stays_in_progress(
     assert calls == [] and client.claims_taken_over == 0
     assert claim.read_bytes() == content
     assert sorted(path.name for path in claim.parent.iterdir()) == [claim.name]
+    assert record_keys(tmp_path) == []
 
 
 @pytest.mark.parametrize("case", ["alive-here", "other-host", "this-process"])
@@ -322,7 +326,9 @@ def test_a_current_format_claim_past_its_lease_is_taken_over(
 
 
 @posix_only
-def test_a_claim_of_a_dead_process_of_this_host_is_taken_over_at_once(tmp_path: Path) -> None:
+def test_a_claim_of_a_dead_process_of_this_host_is_taken_over_at_once(
+    tmp_path: Path, model_cache_backend: str
+) -> None:
     fingerprint = _fingerprint(tmp_path)
     _place_claim(tmp_path, fingerprint, _owner(fingerprint, pid=_finished_pid()))
     calls: list[str] = []
@@ -332,9 +338,12 @@ def test_a_claim_of_a_dead_process_of_this_host_is_taken_over_at_once(tmp_path: 
 
     assert calls == ["sent"] and client.claims_taken_over == 1
     assert _record(tmp_path, fingerprint)["diagnostics"]["claim_takeover"] == 1  # type: ignore[index]
-    assert sorted(path.name for path in (tmp_path / "requests").iterdir()) == [
-        f"{fingerprint}.json"
-    ]
+    assert record_keys(tmp_path) == [fingerprint]
+    assert claims(tmp_path) == []
+    if model_cache_backend == "files":
+        assert sorted(path.name for path in (tmp_path / "requests").iterdir()) == [
+            f"{fingerprint}.json"
+        ]
 
 
 @posix_only
@@ -367,15 +376,16 @@ def test_a_process_killed_mid_call_leaves_a_claim_the_next_process_recovers(
     )
     child = subprocess.run([sys.executable, "-c", script], cwd=_ROOT, check=False)
     assert child.returncode == 9
-    (claim,) = (tmp_path / "requests").glob("*.claim")
-    assert not tuple((tmp_path / "requests").glob("*.json"))
+    # The child inherits APP_OBJECT_STORE_BACKEND: a claim file (files) or a ``claims`` row (sqlite).
+    assert len(claims(tmp_path)) == 1
+    assert record_keys(tmp_path) == []
 
     calls: list[str] = []
     client = _client(tmp_path, _counting(calls))
     _ask(client)
 
     assert calls == ["sent"] and client.claims_taken_over == 1
-    assert not claim.exists()
+    assert claims(tmp_path) == []
 
 
 @posix_only
@@ -383,14 +393,15 @@ def test_a_dead_takeover_is_itself_taken_over_by_the_next_generation(tmp_path: P
     fingerprint = _fingerprint(tmp_path)
     dead = _owner(fingerprint, pid=_finished_pid())
     _place_claim(tmp_path, fingerprint, dead)
-    record = tmp_path / "requests" / f"{fingerprint}.json"
     (tmp_path / "requests" / f"{fingerprint}.json.claim.takeover-1").write_bytes(dead)
+    backend = _client(tmp_path, _counting([])).backend
 
-    assert json_completion._claim_request(record, fingerprint, _LEASE) == 2
+    assert json_completion._claim_request(backend, fingerprint, fingerprint, _LEASE) == 2
     # The new holder is this (running) process: nobody may take it over now.
     with pytest.raises(JsonCompletionError, match="request_in_progress_or_uncertain"):
-        json_completion._claim_request(record, fingerprint, _LEASE)
-    json_completion._release_claims(record)
+        json_completion._claim_request(backend, fingerprint, fingerprint, _LEASE)
+    json_completion._release_claims(backend, fingerprint)
+    assert claims(tmp_path) == []
     assert not tuple((tmp_path / "requests").iterdir())
 
 
@@ -487,14 +498,16 @@ def test_a_holder_that_finishes_while_we_look_is_replayed_not_resent(
     real_claim = json_completion._claim_request
     finished: list[bool] = []
 
-    def holder_finishes_first(record_path: Path, fingerprint: str, lease: int) -> int:
+    def holder_finishes_first(
+        backend: ModelCacheBackend, key: str, fingerprint: str, lease: int
+    ) -> int:
         # Between our record lookup and our claim, another process sends, records and releases.
         if not finished:
             finished.append(True)
             monkeypatch.setattr(json_completion, "_claim_request", real_claim)
             _ask(_client(tmp_path, _counting(calls)))
             monkeypatch.setattr(json_completion, "_claim_request", holder_finishes_first)
-        return real_claim(record_path, fingerprint, lease)
+        return real_claim(backend, key, fingerprint, lease)
 
     monkeypatch.setattr(json_completion, "_claim_request", holder_finishes_first)
     late = _client(tmp_path, _counting(calls))
@@ -502,7 +515,7 @@ def test_a_holder_that_finishes_while_we_look_is_replayed_not_resent(
     result = _ask(late)
 
     assert result.cache_hit and calls == ["sent"] and late.live_call_count == 0
-    assert not tuple((tmp_path / "requests").glob("*.claim*"))
+    assert claims(tmp_path) == []
 
 
 # ---- budget and the sampling fallback (ADR 0021) --------------------------------------------
@@ -518,7 +531,7 @@ def test_a_takeover_needs_budget_and_leaves_the_claim_when_there_is_none(
     with pytest.raises(JsonCompletionError, match="call_budget_exhausted"):
         _ask(starved)
     assert calls == [] and starved.claims_taken_over == 0
-    assert len(tuple((tmp_path / "requests").glob("*.claim"))) == 1
+    assert len(claims(tmp_path)) == 1
 
 
 def _refuses_temperature(calls: list[str]) -> Sender:
@@ -551,7 +564,7 @@ def test_a_taken_over_claim_on_a_refusing_endpoint_probes_once_then_drops(
 
     assert result.dropped_parameters == ("temperature",)
     assert calls == ["with-temperature", "without"] and client.claims_taken_over == 1
-    assert not tuple((tmp_path / "requests").glob("*.claim*"))
+    assert claims(tmp_path) == []
     forget_unsupported_sampling_parameters()
     again = _ask(_client(tmp_path, _refuses_temperature(calls), budget=0))
     assert again.cache_hit and len(calls) == 2

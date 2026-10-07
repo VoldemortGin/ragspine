@@ -1,6 +1,7 @@
 """lease.py 与 json_completion 原 claim 逻辑的判定等价(含 legacy 空 claim 的 mtime 规则)。
 
-原实现不改动(PR-3 才切换);这里把两边喂同样的输入,断言同样的判定。
+PR-3 起 json_completion 只经后端走 lease.py;原 claim 家族冻结在 ``legacy_model_cache.py``,
+``_expired`` 仍在 json_completion。这里把两边喂同样的输入,断言同样的判定。
 """
 
 import json
@@ -16,6 +17,7 @@ import pytest
 from ragspine.common.evidence.object_backend import lease
 from ragspine.common.evidence.object_backend.files import CLAIM_FORMAT
 from ragspine.common.evidence.providers import json_completion
+from tests.enterprise_pdf_rag.object_backend import legacy_model_cache as legacy
 from tests.enterprise_pdf_rag.object_backend.conftest import live_owner
 
 NOW = 1_791_200_000.0
@@ -110,7 +112,7 @@ def test_acquire_release_files_match_json_completion(tmp_path: Path) -> None:
     record_a.parent.mkdir(parents=True)
     base_b = tmp_path / "b" / "requests" / f"{fingerprint}.json.claim"
 
-    assert json_completion._claim_request(record_a, fingerprint, 300) == 0
+    assert legacy._claim_request(record_a, fingerprint, 300) == 0
     owner = live_owner(300)
     content = lease.owner_payload(CLAIM_FORMAT, owner, extra={"request_fingerprint": fingerprint})
     assert lease.acquire_lease(base_b, content, claim_format=CLAIM_FORMAT) == 0
@@ -121,10 +123,10 @@ def test_acquire_release_files_match_json_completion(tmp_path: Path) -> None:
 
     # 持有者还活着:一边抛 request_in_progress_or_uncertain,一边 None —— 同一个判定。
     with pytest.raises(json_completion.JsonCompletionError, match="request_in_progress"):
-        json_completion._claim_request(record_a, fingerprint, 300)
+        legacy._claim_request(record_a, fingerprint, 300)
     assert lease.acquire_lease(base_b, content, claim_format=CLAIM_FORMAT) is None
 
-    json_completion._release_claims(record_a)
+    legacy._release_claims(record_a)
     lease.release_lease(base_b)
     assert not claim_a.exists() and not base_b.exists()
 
@@ -143,14 +145,14 @@ def test_legacy_empty_claim_blocks_then_is_taken_over(
     base_b.write_bytes(b"")
 
     with pytest.raises(json_completion.JsonCompletionError, match="request_in_progress"):
-        json_completion._claim_request(record_a, fingerprint, 300)
+        legacy._claim_request(record_a, fingerprint, 300)
     content = lease.owner_payload(CLAIM_FORMAT, live_owner(300))
     assert lease.acquire_lease(base_b, content, claim_format=CLAIM_FORMAT) is None
 
     late = time() + lease.LEGACY_LEASE_SECONDS + 60
     monkeypatch.setattr(json_completion, "_wall_clock", lambda: late)
     monkeypatch.setattr(lease, "wall_clock", lambda: late)
-    assert json_completion._claim_request(record_a, fingerprint, 300) == 1
+    assert legacy._claim_request(record_a, fingerprint, 300) == 1
     assert lease.acquire_lease(base_b, content, claim_format=CLAIM_FORMAT) == 1
     assert claim_a.with_name(claim_a.name + ".takeover-1").is_file()
     assert base_b.with_name(base_b.name + ".takeover-1").is_file()

@@ -1,7 +1,8 @@
 """FileBackend 的字节级等价:对同一组操作,它产生的目录与现有 store 代码逐字节一致。
 
 基准由**现有写路径**生成(``LocalDocumentStore.put`` / ``ProcessingStore.cache`` 与指针 /
-``save_document_tree`` / ``json_completion`` 的 ``_immutable_write`` 与 claim 家族),
+``save_document_tree`` / PR-3 之前 ``json_completion`` 的 ``_immutable_write`` 与 claim 家族,
+后者冻结在 ``legacy_model_cache.py``),
 FileBackend 在另一个根重放同样的操作,然后比对两棵目录树的文件集合与每个文件的字节。
 含 EPERM(无硬链接)回退路径。
 """
@@ -33,6 +34,7 @@ from ragspine.common.evidence.object_backend.protocol import (
 from ragspine.common.evidence.providers import json_completion
 from ragspine.extraction.evidence.page.models import StageOutcome, StageState
 from tests.enterprise_pdf_rag.adapters.no_hard_link_helpers import forbid_hard_links
+from tests.enterprise_pdf_rag.object_backend import legacy_model_cache as legacy
 from tests.enterprise_pdf_rag.object_backend.conftest import live_owner, sha, tree
 
 FP = "b" * 64
@@ -151,42 +153,38 @@ def test_model_cache_matches_json_completion_write_path(placement: str, tmp_path
     # claim → response → context → record → release:json_completion 的一次成功调用留下的字节。
     record_path = baseline / "requests" / f"{fingerprint}.json"
     record_path.parent.mkdir(parents=True, exist_ok=True)
-    generation = json_completion._claim_request(record_path, fingerprint, 300)
+    generation = legacy._claim_request(record_path, fingerprint, 300)
     owner = live_owner(300)
     assert backend.claim(fingerprint, owner) == generation == 0
     claim_a = record_path.with_suffix(".json.claim")
     claim_b = replay / "requests" / f"{fingerprint}.json.claim"
     assert _claim_keys(claim_a) == _claim_keys(claim_b)  # 同一组持有者字段,从不含正文
-    json_completion._immutable_write(
-        baseline / "responses" / f"{digest}.json", body, replace_damaged=True
-    )
+    legacy._immutable_write(baseline / "responses" / f"{digest}.json", body, replace_damaged=True)
     backend.put_response(digest, body)
-    json_completion._immutable_write(baseline / "contexts" / f"{fingerprint}.json", context)
+    legacy._immutable_write(baseline / "contexts" / f"{fingerprint}.json", context)
     backend.put_context(fingerprint, context)
-    json_completion._immutable_write(record_path, record)
+    legacy._immutable_write(record_path, record)
     backend.put_record(fingerprint, record)
-    json_completion._release_claims(record_path)
+    legacy._release_claims(record_path)
     backend.release(fingerprint, owner)
     assert tree(baseline) == tree(replay)
 
     # 重复 / 冲突:同字节 no-op,异字节两边都拒绝且不改写。
-    json_completion._immutable_write(record_path, record)
+    legacy._immutable_write(record_path, record)
     backend.put_record(fingerprint, record)
     with pytest.raises(json_completion.JsonCompletionError, match="cache_conflict"):
-        json_completion._immutable_write(record_path, b'{"other": 1}')
+        legacy._immutable_write(record_path, b'{"other": 1}')
     with pytest.raises(StoreConflict, match="cache_conflict"):
         backend.put_record(fingerprint, b'{"other": 1}')
     assert tree(baseline) == tree(replay)
 
     # .retry-1 记录(ADR 0021)与损坏响应的替换(ADR 0029)。
     retry = json.dumps({"request_fingerprint": fingerprint, "response_digest": None}).encode()
-    json_completion._immutable_write(baseline / "requests" / f"{fingerprint}.retry-1.json", retry)
+    legacy._immutable_write(baseline / "requests" / f"{fingerprint}.retry-1.json", retry)
     backend.put_record(f"{fingerprint}.retry-1", retry)
     for root in (baseline, replay):
         (root / "responses" / f"{digest}.json").write_bytes(b"torn response")
-    json_completion._immutable_write(
-        baseline / "responses" / f"{digest}.json", body, replace_damaged=True
-    )
+    legacy._immutable_write(baseline / "responses" / f"{digest}.json", body, replace_damaged=True)
     backend.put_response(digest, body)
     assert tree(baseline) == tree(replay)
 
@@ -200,13 +198,13 @@ def test_claim_takeover_files_match_json_completion(
     fingerprint = "e" * 64
     record_path = baseline / "requests" / f"{fingerprint}.json"
     record_path.parent.mkdir(parents=True, exist_ok=True)
-    json_completion._claim_request(record_path, fingerprint, 10)
+    legacy._claim_request(record_path, fingerprint, 10)
     assert backend.claim(fingerprint, live_owner(10)) == 0
 
     clock: Callable[[], float] = lambda: time() + 100_000  # noqa: E731
     monkeypatch.setattr(json_completion, "_wall_clock", clock)
     monkeypatch.setattr(lease, "wall_clock", clock)
-    assert json_completion._claim_request(record_path, fingerprint, 10) == 1
+    assert legacy._claim_request(record_path, fingerprint, 10) == 1
     late = ClaimOwner(
         host=live_owner().host,
         pid=live_owner().pid,
