@@ -1,5 +1,6 @@
 """Content-addressed processing outcomes with a local atomic discovery pointer."""
 
+import hashlib
 import os
 import re
 import tempfile
@@ -29,8 +30,8 @@ from enterprise_pdf_rag.processing.retrieval import (
 from ragspine.common.evidence.file_placement import (
     link_new_file,
     note_repair,
+    read_stored,
     sharded_path,
-    stored_path,
 )
 from ragspine.extraction.evidence.document.models import AssetRef
 from ragspine.extraction.evidence.metadata.document_metadata import summarize_document
@@ -93,20 +94,25 @@ class ProcessingStore:
     def _lookup(self, fingerprint: str) -> tuple[StageOutcome | None, bool]:
         """(the cached outcome, whether an entry exists but is damaged).
 
-        Damaged = the pointer is unreadable or not a digest, or the envelope or the output it
-        names is missing or not its digest (an asynchronous flush that failed after the write
-        returned). Such an entry is a miss: the stage is recomputed (its model calls replay from
-        the model cache) and ``cache`` replaces the pointer (ADR 0029).
+        A pointer's first line is the digest of its ``StageEnvelope``. Since ADR 0029
+        Amendment 1 the envelope follows inline and must hash to that digest; a pointer that
+        holds the digest alone (written before) names an envelope object of this store.
+
+        Damaged = the pointer is unreadable or does not start with a digest, its inline
+        envelope is not those bytes, or the envelope object or the output it names is missing
+        or not its digest (an asynchronous flush that failed after the write returned). Such
+        an entry is a miss: the stage is recomputed (its model calls replay from the model
+        cache) and ``cache`` replaces the pointer (ADR 0029).
         """
         target = self._cache_path(fingerprint)
-        path = stored_path(self.root / "stage-cache", fingerprint)
-        if path is None:
-            return None, False
         try:
-            digest = path.read_text().strip()
-            if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
-                raise ValueError("damaged pointer")
-            payload = self.assets.read_content(digest)
+            _, data = read_stored(self.root / "stage-cache", fingerprint)
+        except FileNotFoundError:
+            return None, False
+        except OSError:
+            return None, self._damaged(target)
+        try:
+            payload = self._envelope(data)
         except (OSError, ValueError):
             return None, self._damaged(target)
         outcome = StageEnvelope.model_validate_json(payload).outcome
@@ -117,6 +123,19 @@ class ProcessingStore:
         except (OSError, ValueError):
             return None, self._damaged(target)
         return outcome, False
+
+    def _envelope(self, pointer: bytes) -> bytes:
+        """The envelope bytes a pointer names, verified against its digest line."""
+        head, _, inline = pointer.partition(b"\n")
+        digest = head.strip().decode()
+        if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise ValueError("damaged pointer")
+        if not inline.strip():
+            return self.assets.read_content(digest)
+        envelope = inline.removesuffix(b"\n")
+        if hashlib.sha256(envelope).hexdigest() != digest:
+            raise ValueError("damaged pointer")
+        return envelope
 
     def _damaged(self, target: Path) -> bool:
         if target not in self._damaged_seen:
@@ -137,14 +156,18 @@ class ProcessingStore:
             if existing != outcome:
                 raise ValueError("Stage fingerprint already names another actual output")
             return
-        ref = self.assets.put(
-            StageEnvelope(outcome=outcome).model_dump_json().encode(),
-            media_type="application/json",
-        )
+        # The envelope is written inline, after its digest: one file per entry, not two
+        # (ADR 0029 Amendment 1).
+        envelope = StageEnvelope(outcome=outcome).model_dump_json().encode()
         target = self._cache_path(outcome.input_fingerprint)
         target.parent.mkdir(parents=True, exist_ok=True)
         # A damaged entry names nothing usable, so it is replaced rather than conflicted with.
-        self._write_pointer(target, ref.sha256, immutable=not damaged)
+        self._write_pointer(
+            target,
+            hashlib.sha256(envelope).hexdigest(),
+            immutable=not damaged,
+            inline=envelope,
+        )
 
     def publish(self, manifest: ProcessingManifest, *, sources: LocalDocumentStore) -> str:
         digest = self.save_draft(manifest, sources=sources)
@@ -394,10 +417,14 @@ class ProcessingStore:
         return snapshot_id, self.load(snapshot_id)
 
     @staticmethod
-    def _write_pointer(target: Path, digest: str, *, immutable: bool = False) -> None:
-        with tempfile.NamedTemporaryFile(dir=target.parent, delete=False, mode="w") as stream:
+    def _write_pointer(
+        target: Path, digest: str, *, immutable: bool = False, inline: bytes = b""
+    ) -> None:
+        """Write ``digest`` (then ``inline``, if any) as one line each. An immutable pointer is
+        first-writer-wins: an existing one is accepted only when its first line is ``digest``."""
+        with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as stream:
             temporary = Path(stream.name)
-            stream.write(digest + "\n")
+            stream.write(digest.encode() + b"\n" + (inline + b"\n" if inline else b""))
             stream.flush()
             os.fsync(stream.fileno())
         try:
@@ -405,7 +432,7 @@ class ProcessingStore:
                 try:
                     link_new_file(temporary, target)
                 except FileExistsError:
-                    if target.read_text().strip() != digest:
+                    if target.read_bytes().partition(b"\n")[0].strip() != digest.encode():
                         raise ValueError("Conflicting immutable stage cache entry") from None
             else:
                 os.replace(temporary, target)

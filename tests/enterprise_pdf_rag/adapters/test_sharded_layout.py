@@ -181,7 +181,8 @@ def test_a_damaged_stage_cache_entry_is_a_miss_and_recaching_repairs_it(
     if damage == "pointer-empty":
         pointer.write_text("")
     elif damage == "envelope":
-        store.assets.content_path(pointer.read_text().strip()).write_bytes(b"{")
+        # The envelope sits inline after its digest (ADR 0029 Amendment 1): cut it short.
+        pointer.write_bytes(pointer.read_bytes()[:-2])
     else:
         assert outcome.artifact is not None
         store.assets.asset_path(outcome.artifact).unlink()

@@ -388,9 +388,12 @@ LLM_ENV = {
 # every file the full-mode folder run writes under the ingestion root (model-cache
 # ``contexts/`` records carry a wall-clock ``created_at`` and are compared by name only),
 # the published processing id and every model request fingerprint. Full mode must keep
-# producing exactly these bytes.
-FULL_STORE_DIGEST = "ddade1cd9c43b7ab7b28617874533fe3bf10b538b3aff556a608f80a9ba3caa2"
-FULL_STORE_FILES = 815
+# producing exactly these bytes. Re-recorded for ADR 0029 Amendment 1 (envelopes inline in
+# their stage-cache pointers): the 140 envelope objects are gone and the 140 pointers carry
+# them, the other 535 files are byte-identical (was ddade1cd…, 815 files; pinned in
+# test_inline_stage_cache by turning the pointers back into that form).
+FULL_STORE_DIGEST = "620f220d255312e833b0b6e0f2242798ea24883cdfd59717eadc184361e26906"
+FULL_STORE_FILES = 675
 FULL_PUBLISHED_ID = "7d90791cc842875e334fadecf96072c4e31b626540461967d237f88c915f2e40"
 FULL_REQUESTS_DIGEST = "e51e5226da9421778b274054212f07a8d66551179cf72d861c5b1410db0834a5"
 FULL_TASKS = {
