@@ -323,6 +323,36 @@ class _SqliteCore:
             connection.close()
 
     def _gate_and_create(self, connection: sqlite3.Connection, *, guarded: bool = False) -> None:
+        # 版本门的几次读放进同一个读事务(同一快照):分开自动提交时,别的实例恰好在两次读
+        # 之间提交建表,会读到"没打标却有表"而被误判成不是我们的 db。只读事务不写任何东西。
+        connection.execute("BEGIN")
+        try:
+            current = self._gate(connection)
+        finally:
+            if connection.in_transaction:
+                connection.execute("ROLLBACK")
+        if current:
+            return  # 本版本的表已经建好:打开一个现成的 db 不开写事务
+        with nullcontext() if guarded else self._init_guard():
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                # 拿到写锁后在同一快照里再判一次:别的实例可能刚建好(或改了)这个 db。
+                if not self._gate(connection):
+                    for statement in self._schema.strip().split(";\n"):
+                        text = statement.strip()
+                        if text:
+                            connection.execute(text)
+                    connection.execute(f"PRAGMA application_id = {APPLICATION_ID}")
+                    connection.execute(f"PRAGMA user_version = {USER_VERSION}")
+            except BaseException:
+                connection.execute("ROLLBACK")
+                raise
+            connection.execute("COMMIT")
+
+    @staticmethod
+    def _gate(connection: sqlite3.Connection) -> bool:
+        """版本门(须在一个事务内调用):不是本代码可写的版本 → ``BackendSchemaError``;
+        返回"已是本版本"(True)还是"还要建表 / 升级"(False)。"""
         application_id = int(connection.execute("PRAGMA application_id").fetchone()[0])
         user_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
         if application_id not in (0, APPLICATION_ID):
@@ -336,21 +366,8 @@ class _SqliteCore:
             if int(tables) > 0:
                 # 有表却没打我们的标:不是我们的 db,拒绝(版本门)。
                 raise BackendSchemaError("backend_schema_unmarked_database")
-        elif user_version == USER_VERSION:
-            return  # 本版本的表已经建好:打开一个现成的 db 不开写事务
-        with nullcontext() if guarded else self._init_guard():
-            connection.execute("BEGIN IMMEDIATE")
-            try:
-                for statement in self._schema.strip().split(";\n"):
-                    text = statement.strip()
-                    if text:
-                        connection.execute(text)
-                connection.execute(f"PRAGMA application_id = {APPLICATION_ID}")
-                connection.execute(f"PRAGMA user_version = {USER_VERSION}")
-            except BaseException:
-                connection.execute("ROLLBACK")
-                raise
-            connection.execute("COMMIT")
+            return False
+        return user_version == USER_VERSION
 
     def _rebuild_corrupt(self) -> None:
         """quick_check / 打开失败的 db:改名 ``.corrupt-<utc>``,从零重建;计一次修复。"""

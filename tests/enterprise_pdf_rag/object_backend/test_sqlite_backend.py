@@ -145,6 +145,40 @@ def test_concurrent_first_opens_neither_fail_nor_rebuild_each_other(tmp_path: Pa
         assert connection.execute("SELECT count(*) FROM requests").fetchone() == (count,)
 
 
+def test_a_peer_creating_the_tables_mid_gate_is_not_an_unmarked_db(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """版本门的几次读必须落在同一个读快照里:别的实例恰好在"读 application_id"与"查
+    sqlite_master"之间提交了建表,本实例不能看到"没打标却有表"而判成不是我们的 db。"""
+    from ragspine.common.evidence.object_backend.sqlite import _SqliteCore
+
+    real_connect = _SqliteCore._connect
+    peers: list[SqliteModelCacheBackend] = []
+
+    def peer_creates_before(statement: str) -> None:
+        if "sqlite_master" in statement and not peers:
+            peer = SqliteModelCacheBackend(tmp_path)  # 别的实例的首次打开:建表 + 打标
+            peers.append(peer)
+            peer.put_record("f" * 64, b'{"peer": 1}')
+
+    def connect(self: _SqliteCore) -> sqlite3.Connection:
+        connection = real_connect(self)
+        connection.set_trace_callback(peer_creates_before)
+        return connection
+
+    monkeypatch.setattr(_SqliteCore, "_connect", connect)
+    cache = SqliteModelCacheBackend(tmp_path)
+    with recording_repairs() as repairs:
+        cache.put_record("e" * 64, b'{"self": 1}')
+    cache.close()
+    for peer in peers:  # 关闭时的 checkpoint 等读者:放到本实例的读事务结束之后
+        peer.close()
+
+    assert len(peers) == 1 and repairs == {}
+    with closing(sqlite3.connect(tmp_path / "model-cache.sqlite")) as connection:
+        assert connection.execute("SELECT count(*) FROM requests").fetchone() == (2,)
+
+
 def test_only_corruption_codes_count_as_a_damaged_db() -> None:
     from ragspine.common.evidence.object_backend.sqlite import _corrupt
 

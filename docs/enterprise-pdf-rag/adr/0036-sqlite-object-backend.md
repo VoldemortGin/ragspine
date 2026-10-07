@@ -87,7 +87,10 @@ busy timeout and then raised — PR-1 renamed it as "corrupt", which silently se
 process's later writes into the renamed file (found by PR-3's two-process test: 30 of 60
 records lost). The rebuild itself re-checks under the writer lease, so two processes never
 rebuild each other's fresh db, and opening a db already at this version starts no write
-transaction. `close()` runs `wal_checkpoint(TRUNCATE)`.
+transaction. The version gate reads `application_id`, `user_version` and the table count in one read
+transaction (one snapshot) and re-reads them under `BEGIN IMMEDIATE` before creating the schema:
+as separate autocommit reads, a peer's schema commit landing between them made a fresh db look
+like a foreign one (`backend_schema_unmarked_database`). `close()` runs `wal_checkpoint(TRUNCATE)`.
 
 ### 6. Probe, settings and the no-silent-fallback rule
 
