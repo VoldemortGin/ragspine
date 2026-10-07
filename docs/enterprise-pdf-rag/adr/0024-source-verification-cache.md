@@ -152,3 +152,17 @@ spent because the request fingerprint (and so the cache lookup) includes the ima
 - **Deferring the layout PNG until the budget allows a call.** A cached reply is found by a
   fingerprint over the request body, which embeds the image; skipping the render would skip
   replay.
+
+## Amendment 1 (2026-10-06): the full verification persists as a receipt (ADR 0034)
+
+Decision 3 ("a new process starts with empty caches", "each of those re-checks the disk once")
+is narrowed by [ADR 0034](0034-persisted-verification-receipts.md): after an instance that did
+not write a snapshot has statted, read and hashed all of it, it records a receipt beside the
+objects; a later instance (another stage, scan, mount or process) whose receipt is intact,
+for the same manifest and file set, with every not-yet-read file's size / mtime / ctime
+unchanged, replaces the sweep of `LocalDocumentStore.load` and `ProcessingStore.load` with one
+`stat` per object. The final `publish_draft`, `save_draft`'s own sweep, `publish`, `verify`,
+`put` and every consuming read still read for real; the scan and the mount reuse receipts but
+never write one. `APP_VERIFY_PERSISTED_RECEIPTS=false` restores this ADR exactly;
+`APP_VERIFY_EVERY_REQUEST=1` still verifies every call. The threat-model paragraph above now
+also applies across instances until a file's stat moves — see ADR 0034's threat model.
