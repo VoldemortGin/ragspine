@@ -128,6 +128,11 @@ class IngestionSummary(BoundaryModel):
     # (``request_in_progress_or_uncertain``), and claims of dead attempts taken over and resent.
     calls_claim_blocked: int = 0
     claims_taken_over: int = 0
+    # ADR 0034: requests resent after a transient failure (429, 5xx, timeout, connection), and
+    # calls that still failed transiently once their retries were spent (no record is written,
+    # so the next run calls them again).
+    retries: int = 0
+    transient_failures: int = 0
     # ADR 0025: the mode this ingest ran in and the model calls it left unsent by mode (by
     # category, ``ingest_mode.SKIPPED_CALL_KINDS``).
     ingest_mode: IngestMode = "full"
@@ -466,6 +471,8 @@ def ingest_pdf(
         pages_claim_blocked=blocked,
         calls_claim_blocked=0 if client is None else client.claim_blocked_count,
         claims_taken_over=0 if client is None else client.claims_taken_over,
+        retries=0 if client is None else client.retry_count,
+        transient_failures=0 if client is None else client.transient_failure_count,
         ingest_mode=plan.mode,
         skipped_calls=_skipped_calls(objects, metadata),
         table_row_transcriptions=len(row_tables),

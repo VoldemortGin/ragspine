@@ -727,3 +727,79 @@ def test_embedding_and_chat_on_one_gateway_share_nothing_but_their_own_key(
     waits.during.append(meanwhile)
     _ask(_client(tmp_path, _Script(_http(429, retry_after=5.0), _response())))
     assert len(waits.slept) == 1
+
+
+# ---- run-folder: counted, reported, and healed by a plain rerun ---------------------------
+
+
+def test_a_folder_run_counts_retries_and_heals_a_page_that_stayed_rate_limited(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.enterprise_pdf_rag.adapters.test_folder_pipeline import (
+        _MERIDIAN,
+        _OFFLINE,
+        _PAGES,
+        _PER_PDF,
+        _folder,
+        _model_env,
+    )
+
+    _model_env(monkeypatch)
+    real: Callable[..., bytes] = vars(json_completion)["_send_once"]
+    first_payloads: list[bytes] = []
+
+    def limited(url: str, *, payload: bytes, **kwargs: object) -> bytes:
+        if not first_payloads:
+            first_payloads.append(payload)
+            raise _http(429, retry_after=2.0)  # once: retried at once, within the call
+        if len(first_payloads) == 1 and payload != first_payloads[0]:
+            first_payloads.append(payload)  # the second distinct call: down for this run
+        if len(first_payloads) == 2 and payload == first_payloads[1]:
+            raise _http(503)
+        return real(url, payload=payload, **kwargs)
+
+    folder = _folder(tmp_path, ("meridian.pdf", _MERIDIAN))
+    events: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(json_completion, "_send_once", limited)
+    from enterprise_pdf_rag.adapters.folder_pipeline import run_folder_pipeline
+
+    def run(report: str) -> object:
+        return run_folder_pipeline(
+            folder,
+            ingestion_root=tmp_path / "ingestion",
+            max_live_calls_per_pdf=_PER_PDF + 10,
+            build_tree=False,
+            report_dir=tmp_path / report,
+            embedder=_OFFLINE,
+            progress=lambda event, payload: events.append((event, payload)),
+        )
+
+    first = run("first")
+    (document,) = first.documents  # type: ignore[attr-defined]
+    assert document.ingestion is not None
+    assert document.ingestion.retries == 1 + TRANSIENT_MAX_RETRIES
+    assert document.ingestion.transient_failures == 1
+    assert (document.retries, document.transient_failures) == (1 + TRANSIENT_MAX_RETRIES, 1)
+    assert document.ingestion.pages_complete == _PAGES - 1
+    (done,) = [payload for event, payload in events if event == "document_done"]
+    assert (done["retries"], done["transient_failures"]) == (1 + TRANSIENT_MAX_RETRIES, 1)
+    report = (tmp_path / "first" / "report.md").read_text()
+    assert f"{1 + TRANSIENT_MAX_RETRIES} retries, 1 calls still failing" in report
+    assert not tuple((tmp_path / "ingestion").rglob("requests/*.claim*"))
+    failed = [
+        path
+        for path in (tmp_path / "ingestion").rglob("requests/*.json")
+        if json.loads(path.read_bytes())["failure_code"] is not None
+    ]
+    assert failed == []
+
+    # The endpoint is back: a plain rerun calls the one missing call again, nothing deleted.
+    monkeypatch.setattr(json_completion, "_send_once", real)
+    events.clear()
+    second = run("second")
+    (document,) = second.documents  # type: ignore[attr-defined]
+    assert document.ingestion is not None
+    assert document.ingestion.pages_complete == _PAGES
+    assert (document.retries, document.transient_failures) == (0, 0)
+    assert second.live_calls.ingest == 1  # type: ignore[attr-defined]
+    assert "transient provider errors" not in (tmp_path / "second" / "report.md").read_text()

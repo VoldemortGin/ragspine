@@ -1123,6 +1123,8 @@ def test_a_password_protected_pdf_fails_clearly_then_publishes_once_the_password
             "pages": f"{_PAGES}/{_PAGES}",
             "pages_budget_deferred": 0,
             "pages_claim_blocked": 0,
+            "retries": 0,
+            "transient_failures": 0,
         }
         assert item.ingestion is not None and item.ingestion.source_page_count == _PAGES
         texts = source_span_texts(

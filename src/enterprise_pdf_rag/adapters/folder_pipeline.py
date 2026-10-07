@@ -236,6 +236,11 @@ class DocumentRun(BoundaryModel):
     # digest, e.g. lost by an asynchronous flush) and repaired or recomputed, by kind
     # (object, stage_cache, model_cache, source); counts only.
     storage_repairs: dict[str, int] = Field(default_factory=dict)
+    # ADR 0034, over this document's ingest, index embeddings and tree: requests resent after a
+    # transient failure (429, 5xx, timeout, connection), and calls that still failed
+    # transiently once their retries were spent — left unrecorded, so a rerun calls them again.
+    retries: int = 0
+    transient_failures: int = 0
 
 
 class EvalCase(BoundaryModel):
@@ -368,6 +373,8 @@ class _DocumentEmbedder:
         self._inner = inner
         self._lock = lock
         self._requests = 0
+        self._retries = 0
+        self._transient = 0
 
     @property
     def fingerprint(self) -> str:
@@ -377,13 +384,27 @@ class _DocumentEmbedder:
     def request_count(self) -> int:
         return self._requests
 
+    @property
+    def retry_count(self) -> int:
+        return self._retries
+
+    @property
+    def transient_failure_count(self) -> int:
+        return self._transient
+
     def _counted[T](self, call: Callable[[], T]) -> T:
         with self._lock:
-            before = getattr(self._inner, "request_count", 0)
+            before = _embedding_counts(self._inner)
             try:
                 return call()
             finally:
-                self._requests += getattr(self._inner, "request_count", 0) - before
+                requests, retries, failures = (
+                    after - start
+                    for after, start in zip(_embedding_counts(self._inner), before, strict=True)
+                )
+                self._requests += requests
+                self._retries += retries
+                self._transient += failures
 
     def embed_description(self, text: str) -> tuple[float, ...]:
         return self._counted(lambda: self._inner.embed_description(text))
@@ -401,6 +422,15 @@ class _DocumentBatchEmbedder(_DocumentEmbedder):
 
     def embed_descriptions(self, texts: Sequence[str]) -> tuple[tuple[float, ...], ...]:
         return self._counted(lambda: self._batch.embed_descriptions(texts))
+
+
+def _embedding_counts(embedder: EmbeddingPort) -> tuple[int, int, int]:
+    """``(request_count, retry_count, transient_failure_count)``; 0 where it keeps none."""
+    return (
+        getattr(embedder, "request_count", 0),
+        getattr(embedder, "retry_count", 0),
+        getattr(embedder, "transient_failure_count", 0),
+    )
 
 
 def _document_embedder(embedder: EmbeddingPort, lock: LockType) -> EmbeddingPort:
@@ -867,6 +897,8 @@ def _run_document(
         "sha256": digest,
         "live_call_budget": 0,
         "ingest_mode": plan.mode,
+        "retries": 0,
+        "transient_failures": 0,
     }
     # ``held``: the shared-total allotments of this document not yet settled by ``spend``.
     allotment: dict[str, Any] = {"started": False, "cut": False, "held": 0}
@@ -887,6 +919,10 @@ def _run_document(
             ingest_mode=plan.mode,
         )
         return granted
+
+    def transient(retries: int, failures: int) -> None:
+        run["retries"] += retries
+        run["transient_failures"] += failures
 
     def finish(status: DocumentStatus) -> tuple[DocumentRun, int]:
         if not allotment["started"]:
@@ -915,6 +951,8 @@ def _run_document(
                 pages=f"{ingested.pages_complete}/{len(ingested.selected_physical_pages)}",
                 pages_budget_deferred=ingested.pages_budget_deferred,
                 pages_claim_blocked=ingested.pages_claim_blocked,
+                retries=run["retries"],
+                transient_failures=run["transient_failures"],
             )
         if repairs:
             reason["storage_repairs"] = sum(repairs.values())
@@ -952,6 +990,7 @@ def _run_document(
         budget.spend(ingestion.live_call_count, allotment["held"])
         allotment["held"] = 0
         run.update(ingestion=ingestion, live_calls=ingestion.live_call_count)
+        transient(ingestion.retries, ingestion.transient_failures)
         source_store = Path(ingestion.source_store)
         processing_store = Path(ingestion.processing_store)
         sources = LocalDocumentStore(source_store, activate_on_publish=False)
@@ -979,14 +1018,19 @@ def _run_document(
             indexed_id = outputs.load_current()[0]
             run["index_reused"] = True
         else:
-            indexed = index_draft(
-                source_store=source_store,
-                processing_store=processing_store,
-                processing_id=draft_id,
-                embedder=embedder,
-                review=plan.review_exports,
-                index_options=plan.index_options,
-            )
+            before = _embedding_counts(embedder)
+            try:
+                indexed = index_draft(
+                    source_store=source_store,
+                    processing_store=processing_store,
+                    processing_id=draft_id,
+                    embedder=embedder,
+                    review=plan.review_exports,
+                    index_options=plan.index_options,
+                )
+            finally:
+                _, retries, failures = _embedding_counts(embedder)
+                transient(retries - before[1], failures - before[2])
             run["index"] = indexed
             indexed_id = indexed.indexed_processing_id
         stage = enter("publish")
@@ -1006,12 +1050,15 @@ def _run_document(
                 max_live_calls=granted,
                 timeout=180.0,
             )
-            tree = annotate_document_tree(
-                sources,
-                outputs,
-                processing_id=publication.published_processing_id,
-                client=client,
-            )
+            try:
+                tree = annotate_document_tree(
+                    sources,
+                    outputs,
+                    processing_id=publication.published_processing_id,
+                    client=client,
+                )
+            finally:
+                transient(client.retry_count, client.transient_failure_count)
             tree_calls = client.live_call_count
             budget.spend(tree_calls, granted)
             allotment["held"] = 0
@@ -1467,6 +1514,18 @@ def _ingest_count_lines(result: FolderPipelineResult) -> list[str]:
     return out
 
 
+def _transient_lines(result: FolderPipelineResult) -> list[str]:
+    """One line when any document met a transient provider error (ADR 0034); none otherwise."""
+    retries = sum(item.retries for item in result.documents)
+    failures = sum(item.transient_failures for item in result.documents)
+    if not retries and not failures:
+        return []
+    return [
+        f"- transient provider errors (429 / 5xx / timeout / connection): {retries} retries, "
+        f"{failures} calls still failing after their retries (not cached; a rerun retries them)"
+    ]
+
+
 def _markdown(result: FolderPipelineResult) -> str:
     lines = [
         "# Folder pipeline report",
@@ -1486,6 +1545,7 @@ def _markdown(result: FolderPipelineResult) -> str:
             if result.sampling_parameters_dropped
             else []
         ),
+        *_transient_lines(result),
         *_question_docs_lines(result.question_docs),
         "",
         "| pdf | sha256 | status | stage | pages | eligible | index reused | live calls | s "
