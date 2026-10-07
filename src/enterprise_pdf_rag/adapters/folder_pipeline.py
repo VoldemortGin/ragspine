@@ -16,12 +16,15 @@ folder makes no call at all. Configuration is read through the provider loaders 
 import asyncio
 import json
 import re
+from _thread import LockType
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import replace
 from hashlib import sha256
 from pathlib import Path
+from queue import SimpleQueue
+from threading import Event, Lock
 from time import perf_counter
 from typing import Any, Final, Literal
 
@@ -88,6 +91,7 @@ from ragspine.common.evidence.configs import get_settings
 from ragspine.common.evidence.file_placement import recording_repairs
 from ragspine.common.evidence.providers.json_completion import (
     JsonCompletionClient,
+    one_sampling_probe,
     unsupported_sampling_parameters,
 )
 from ragspine.common.evidence.providers.local_models import (
@@ -107,7 +111,7 @@ from ragspine.eval.retrieval_only import (
     recall_ks,
     retrieval_metrics,
 )
-from ragspine.extraction.evidence.figures.ports import EmbeddingPort
+from ragspine.extraction.evidence.figures.ports import BatchEmbeddingPort, EmbeddingPort
 from ragspine.extraction.evidence.page.models import StageState
 from ragspine.retrieval.rerank.listwise_rerank import ListwiseJudge
 
@@ -149,6 +153,10 @@ AUTO_CALLS_BASE: Final = 50
 # ``document_progress``: at most one line per this many pages, or per this many seconds.
 _PROGRESS_PAGES = 10
 _PROGRESS_SECONDS = 30.0
+# ``max_parallel_documents``: documents ingested at once, at most (ADR 00NN), and how often
+# the waiting caller looks up, so an interrupt is seen within this many seconds.
+MAX_PARALLEL_DOCUMENTS: Final = 16
+_POLL_SECONDS = 0.2
 # The ranks ``ragspine.eval.retrieval_only`` reports at; the prompt seats rarely pass ten.
 _METRIC_TOP_K = 10
 _SHA_PREFIX = re.compile(r"[0-9a-f]{12,64}")
@@ -310,23 +318,159 @@ class FolderPipelineResult(BoundaryModel):
 
 
 class _Budget:
-    """The optional shared total; every allotment smaller than asked marks exhaustion."""
+    """The optional shared total; every allotment smaller than asked marks exhaustion.
+
+    An allotment stays reserved until ``spend`` settles it with the calls actually made, under
+    one lock, so documents running at once are never granted more than the total between them;
+    one document at a time, every allotment sees exactly what it always saw (ADR 00NN).
+    """
 
     def __init__(self, total: int | None) -> None:
         self.total = total
         self.used = 0
+        self.reserved = 0
         self.exhausted = False
+        self._lock = Lock()
 
     def allot(self, wanted: int) -> int:
         if self.total is None:
             return wanted
-        granted = max(0, min(wanted, self.total - self.used))
-        if granted < wanted:
-            self.exhausted = True
-        return granted
+        with self._lock:
+            granted = max(0, min(wanted, self.total - self.used - self.reserved))
+            self.reserved += granted
+            if granted < wanted:
+                self.exhausted = True
+            return granted
 
-    def spend(self, calls: int) -> None:
-        self.used += calls
+    def spend(self, calls: int, granted: int = 0) -> None:
+        """Count ``calls`` and release the ``granted`` allotment they were made under."""
+        with self._lock:
+            self.used += calls
+            if self.total is not None:
+                self.reserved -= granted
+
+
+class _Cancelled(BaseException):
+    """A document stopped at a page or stage boundary because the run is stopping (ADR 00NN).
+
+    A ``BaseException``, like the ``KeyboardInterrupt`` it usually follows, so no stage's
+    ``except Exception`` records it as that stage's failure."""
+
+
+class _DocumentEmbedder:
+    """One document's view of an embedder shared by documents running at once (ADR 00NN).
+
+    Calls go one at a time through the shared ``lock`` and ``request_count`` counts only this
+    document's requests, so ``DraftIndex.embedding_requests`` reads what the serial run read.
+    """
+
+    def __init__(self, inner: EmbeddingPort, lock: LockType) -> None:
+        self._inner = inner
+        self._lock = lock
+        self._requests = 0
+
+    @property
+    def fingerprint(self) -> str:
+        return self._inner.fingerprint
+
+    @property
+    def request_count(self) -> int:
+        return self._requests
+
+    def _counted[T](self, call: Callable[[], T]) -> T:
+        with self._lock:
+            before = getattr(self._inner, "request_count", 0)
+            try:
+                return call()
+            finally:
+                self._requests += getattr(self._inner, "request_count", 0) - before
+
+    def embed_description(self, text: str) -> tuple[float, ...]:
+        return self._counted(lambda: self._inner.embed_description(text))
+
+    def embed_query(self, text: str) -> tuple[float, ...]:
+        return self._counted(lambda: self._inner.embed_query(text))
+
+
+class _DocumentBatchEmbedder(_DocumentEmbedder):
+    """``_DocumentEmbedder`` of a ``BatchEmbeddingPort``, batching as the shared one does."""
+
+    def __init__(self, inner: BatchEmbeddingPort, lock: LockType) -> None:
+        super().__init__(inner, lock)
+        self._batch = inner
+
+    def embed_descriptions(self, texts: Sequence[str]) -> tuple[tuple[float, ...], ...]:
+        return self._counted(lambda: self._batch.embed_descriptions(texts))
+
+
+def _document_embedder(embedder: EmbeddingPort, lock: LockType) -> EmbeddingPort:
+    if isinstance(embedder, BatchEmbeddingPort):
+        return _DocumentBatchEmbedder(embedder, lock)
+    return _DocumentEmbedder(embedder, lock)
+
+
+type _DocumentWork = Callable[[Path, str, Progress | None, Event], tuple[DocumentRun, int]]
+
+
+def _run_in_parallel(
+    jobs: Sequence[tuple[Path, str]],
+    work: _DocumentWork,
+    *,
+    workers: int,
+    progress: Progress | None,
+) -> list[tuple[DocumentRun, int]]:
+    """Every job on a pool of ``workers`` threads; results in job order (ADR 00NN).
+
+    The progress callback is entered by one thread at a time and every event of a document
+    carries its ``slot`` (1..workers). Whatever stops the run — an interrupt, or a failure that
+    ``continue_on_error=False`` lets through — sets ``cancel``: queued documents never start,
+    running ones stop at their next page or stage boundary, after their calls in flight have
+    been recorded, and only then is it raised. Waiting polls, so an interrupt is seen at once.
+    """
+    lock = Lock()
+    slots: SimpleQueue[int] = SimpleQueue()
+    for slot in range(1, workers + 1):
+        slots.put(slot)
+    cancel = Event()
+
+    def say(event: str, payload: dict[str, object]) -> None:
+        if progress is not None:
+            with lock:
+                progress(event, payload)
+
+    def one(pdf: Path, digest: str) -> tuple[DocumentRun, int]:
+        slot = slots.get()
+        try:
+            if cancel.is_set():
+                raise _Cancelled
+            tagged: Progress | None = (
+                None
+                if progress is None
+                else lambda event, payload: say(event, payload | {"slot": slot})
+            )
+            return work(pdf, digest, tagged, cancel)
+        finally:
+            slots.put(slot)
+
+    pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="run-folder")
+    futures = [pool.submit(one, pdf, digest) for pdf, digest in jobs]
+    try:
+        pending = set(futures)
+        while pending:
+            done, pending = wait(pending, timeout=_POLL_SECONDS, return_when=FIRST_COMPLETED)
+            for future in done:
+                error = future.exception()
+                if error is not None:
+                    raise error
+    except BaseException as error:
+        cancel.set()
+        running = sum(future.running() for future in futures)
+        say("stopping", {"reason": type(error).__name__, "running": running})
+        # ``cancel_futures``: a plain shutdown would still run every queued document first.
+        pool.shutdown(wait=True, cancel_futures=True)
+        raise
+    pool.shutdown(wait=True)
+    return [future.result() for future in futures]
 
 
 def discover_pdfs(folder: Path) -> tuple[Path, ...]:
@@ -362,6 +506,11 @@ def _check_per_pdf(value: int | str) -> None:
 def _check_total(value: int | None) -> None:
     if value is not None and value < 0:
         raise ValueError("max_live_calls_total must not be negative")
+
+
+def _check_parallel(value: int) -> None:
+    if not 1 <= value <= MAX_PARALLEL_DOCUMENTS:
+        raise ValueError(f"max_parallel_documents must be within 1..{MAX_PARALLEL_DOCUMENTS}")
 
 
 def _check_max_questions(value: int | None) -> None:
@@ -634,15 +783,25 @@ def _emit(progress: Progress | None, event: str, **payload: object) -> None:
 
 
 def _page_reporter(
-    progress: Progress | None, pdf: Path, budget: Callable[[], int]
+    progress: Progress | None,
+    pdf: Path,
+    budget: Callable[[], int],
+    cancel: Event | None = None,
 ) -> Callable[[IngestProgress], None] | None:
     """``document_progress`` for ingest pages: each stage's first and last page, and in
-    between at most one event per ``_PROGRESS_PAGES`` pages or ``_PROGRESS_SECONDS``."""
-    if progress is None:
+    between at most one event per ``_PROGRESS_PAGES`` pages or ``_PROGRESS_SECONDS``.
+
+    With ``cancel``, a finished page is where a stopping run leaves the document: that page's
+    calls are recorded and their claims released, the next page's never start (ADR 00NN)."""
+    if progress is None and cancel is None:
         return None
     last: dict[str, Any] = {"stage": None, "done": 0, "at": 0.0}
 
     def report(update: IngestProgress) -> None:
+        if cancel is not None and cancel.is_set():
+            raise _Cancelled
+        if progress is None:
+            return
         now = perf_counter()
         if not (
             update.stage != last["stage"]
@@ -695,8 +854,13 @@ def _run_document(
     continue_on_error: bool,
     progress: Progress | None,
     repairs: Counter[str] | None = None,
+    errors: tuple[type[Exception], ...] = (ValueError, OSError),
+    cancel: Event | None = None,
 ) -> tuple[DocumentRun, int]:
-    """One PDF through every stage; returns the run and its tree's live calls."""
+    """One PDF through every stage; returns the run and its tree's live calls.
+
+    ``errors`` are recorded as the document's failure (``continue_on_error``); ``cancel``, once
+    set, stops the document at its next page or stage boundary with ``_Cancelled``."""
     started = perf_counter()
     run: dict[str, Any] = {
         "pdf_path": str(pdf),
@@ -704,14 +868,15 @@ def _run_document(
         "live_call_budget": 0,
         "ingest_mode": plan.mode,
     }
-    allotment: dict[str, Any] = {"started": False, "cut": False}
+    # ``held``: the shared-total allotments of this document not yet settled by ``spend``.
+    allotment: dict[str, Any] = {"started": False, "cut": False, "held": 0}
     tree_calls = 0
     stage: PipelineStage = "ingest"
 
     def allot(wanted: int) -> int:
         """Grant this document's ingest budget from the shared total and announce it."""
         granted = budget.allot(wanted)
-        allotment.update(started=True, cut=granted < wanted)
+        allotment.update(started=True, cut=granted < wanted, held=granted)
         run["live_call_budget"] = granted
         _emit(
             progress,
@@ -757,6 +922,8 @@ def _run_document(
         return done, tree_calls
 
     def enter(name: PipelineStage) -> PipelineStage:
+        if cancel is not None and cancel.is_set():
+            raise _Cancelled
         _emit(progress, "document_progress", pdf=str(pdf), stage=name)
         return name
 
@@ -768,19 +935,22 @@ def _run_document(
         else allot(per_pdf)
     )
     try:
+        if cancel is not None and cancel.is_set():
+            raise _Cancelled
         ingestion = ingest_pdf(
             pdf=pdf,
             pages=pages,
             output_dir=root,
             stage="semantics",
             max_live_calls=limit,
-            progress=_page_reporter(progress, pdf, lambda: int(run["live_call_budget"])),
+            progress=_page_reporter(progress, pdf, lambda: int(run["live_call_budget"]), cancel),
             ingest_mode=plan.mode,
             layout_policy=plan.layout,
             unverified_tables_as_rows=plan.unverified_tables_as_rows,
             unverified_table_structure=plan.unverified_table_structure,
         )
-        budget.spend(ingestion.live_call_count)
+        budget.spend(ingestion.live_call_count, allotment["held"])
+        allotment["held"] = 0
         run.update(ingestion=ingestion, live_calls=ingestion.live_call_count)
         source_store = Path(ingestion.source_store)
         processing_store = Path(ingestion.processing_store)
@@ -829,10 +999,11 @@ def _run_document(
         run["publication"] = publication
         if build_tree:
             stage = enter("tree")
+            granted = allotment["held"] = budget.allot(tree_max_live_calls)
             client = JsonCompletionClient(
                 load_llm_config(),
                 cache_dir=processing_store / "model-cache",
-                max_live_calls=budget.allot(tree_max_live_calls),
+                max_live_calls=granted,
                 timeout=180.0,
             )
             tree = annotate_document_tree(
@@ -842,14 +1013,22 @@ def _run_document(
                 client=client,
             )
             tree_calls = client.live_call_count
-            budget.spend(tree_calls)
+            budget.spend(tree_calls, granted)
+            allotment["held"] = 0
             run["tree"] = tree
-    except (ValueError, OSError) as error:
+    except errors as error:
         if not continue_on_error:
             raise
-        run.update(failed_stage=stage, error=str(error) or type(error).__name__)
+        message = str(error) or type(error).__name__
+        if str(error) and not isinstance(error, (ValueError, OSError)):
+            # Only a worker thread records these (ADR 00NN); the type says what broke.
+            message = f"{type(error).__name__}: {message}"
+        run.update(failed_stage=stage, error=message)
         # A published document whose tree failed is still published and answerable.
         return finish("published" if "publication" in run else "failed")
+    finally:
+        # An allotment a failed or stopped stage never settled goes back, uncounted, as before.
+        budget.spend(0, allotment["held"])
     return finish("published")
 
 
@@ -1403,6 +1582,7 @@ def run_folder_pipeline(
     reranker: ListwiseJudge | None = None,
     answer_llm: JsonCompletionClient | None = None,
     progress: Progress | None = None,
+    max_parallel_documents: int = 1,
 ) -> FolderPipelineResult:
     """Ingest, requalify, qualify, index, publish and tree every PDF in ``folder``, then evaluate.
 
@@ -1456,8 +1636,19 @@ def run_folder_pipeline(
     any ingest or model call. An injected ``embedder`` / ``reranker`` / ``answer_llm`` skips
     its own check. A failing document is recorded and the rest continue unless
     ``continue_on_error`` is false, when its ``ValueError`` / ``OSError`` propagates.
+
+    ``max_parallel_documents`` (ADR 00NN; 1 = one at a time, exactly as before, at most
+    ``MAX_PARALLEL_DOCUMENTS``) ingests that many PDFs at once on worker threads, each in its
+    own ``<root>/<sha>/`` with its own stores and clients, and writes the very bytes the serial
+    run writes. ``documents`` keeps discovery order; per-document events may interleave, each
+    carrying its worker ``slot``, and the progress callback is entered by one thread at a
+    time. The shared total is reserved per allotment, so it is never overspent; a worker's
+    unexpected exception is recorded as that document's failure (``continue_on_error``). An
+    interrupt stops queued documents from starting and running ones at their next page, then
+    is raised. The question set is still answered one question at a time.
     """
     _check_per_pdf(max_live_calls_per_pdf)
+    _check_parallel(max_parallel_documents)
     _check_budget("tree_max_live_calls", tree_max_live_calls)
     _check_budget("answer_max_live_calls", answer_max_live_calls)
     _check_total(max_live_calls_total)
@@ -1542,7 +1733,34 @@ def run_folder_pipeline(
 
     _emit(progress, "discovered", folder=str(folder), count=len(pdfs), ingest_mode=plan.mode)
 
+    parallel = max_parallel_documents > 1
+    embedding_lock = Lock()
+
+    def work(
+        pdf: Path, digest: str, said: Progress | None, cancel: Event | None = None
+    ) -> tuple[DocumentRun, int]:
+        with recording_repairs() as repairs:
+            return _run_document(
+                pdf,
+                digest,
+                root=root,
+                plan=plan,
+                pages=pages,
+                per_pdf=max_live_calls_per_pdf,
+                budget=budget,
+                requalify=requalify,
+                build_tree=tree,
+                tree_max_live_calls=tree_max_live_calls,
+                embedder=_document_embedder(embedder, embedding_lock) if parallel else embedder,
+                continue_on_error=continue_on_error,
+                progress=said,
+                repairs=repairs,
+                errors=(Exception,) if parallel else (ValueError, OSError),
+                cancel=cancel,
+            )
+
     documents: list[DocumentRun] = []
+    jobs: list[tuple[int, Path, str]] = []
     first: dict[str, str] = {}
     tree_total = 0
     for pdf in pdfs:
@@ -1566,25 +1784,24 @@ def run_folder_pipeline(
             )
             continue
         first[digest] = str(pdf)
-        with recording_repairs() as repairs:
-            run, tree_calls = _run_document(
-                pdf,
-                digest,
-                root=root,
-                plan=plan,
-                pages=pages,
-                per_pdf=max_live_calls_per_pdf,
-                budget=budget,
-                requalify=requalify,
-                build_tree=tree,
-                tree_max_live_calls=tree_max_live_calls,
-                embedder=embedder,
-                continue_on_error=continue_on_error,
-                progress=progress,
-                repairs=repairs,
-            )
+        if parallel:
+            # Its place in discovery order, filled in once every job has finished.
+            jobs.append((len(documents) + len(jobs), pdf, digest))
+            continue
+        run, tree_calls = work(pdf, digest, progress)
         documents.append(run)
         tree_total += tree_calls
+    if jobs:
+        with one_sampling_probe():
+            finished = _run_in_parallel(
+                [(pdf, digest) for _, pdf, digest in jobs],
+                work,
+                workers=min(max_parallel_documents, len(jobs)),
+                progress=progress,
+            )
+        for (index, _, _), (run, tree_calls) in zip(jobs, finished, strict=True):
+            documents.insert(index, run)
+            tree_total += tree_calls
     ingest_total = sum(item.live_calls for item in documents)
 
     summary: EvalSummary | None = None
@@ -1602,15 +1819,14 @@ def run_folder_pipeline(
         )
         mounted = frozenset(entry.document_id for entry in catalog.ready)
         llm = answer_llm
+        answer_granted = 0
         if llm is None:
-            llm = make_answer_llm(
-                cache_dir=root / "model-cache",
-                max_live_calls=budget.allot(
-                    settings.answer_max_live_calls
-                    if answer_max_live_calls is None
-                    else answer_max_live_calls
-                ),
+            answer_granted = budget.allot(
+                settings.answer_max_live_calls
+                if answer_max_live_calls is None
+                else answer_max_live_calls
             )
+            llm = make_answer_llm(cache_dir=root / "model-cache", max_live_calls=answer_granted)
         before = llm.live_call_count
         post: ChatPost | None = None
         member_pages: dict[str, tuple[str, int]] = {}
@@ -1651,7 +1867,7 @@ def run_folder_pipeline(
             )
         answer_total = llm.live_call_count - before
         answer_client = llm
-        budget.spend(answer_total)
+        budget.spend(answer_total, answer_granted)
 
     try:
         dropped = set(unsupported_sampling_parameters(load_llm_config()))

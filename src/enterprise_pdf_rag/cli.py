@@ -208,6 +208,13 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional budget shared by ingest, tree and answers; once spent, the rest replay the cache",
     )
+    run_folder.add_argument(
+        "--max-parallel-documents",
+        type=int,
+        default=1,
+        help="PDFs ingested at once on worker threads (1-16; default 1, one at a time); "
+        "questions are still answered one at a time",
+    )
     run_folder.add_argument("--pages", default="all")
     run_folder.add_argument(
         "--output-dir",
@@ -556,6 +563,7 @@ def main(argv: list[str] | None = None) -> int:
                     only_question_docs=arguments.only_question_docs,
                     continue_on_error=not arguments.fail_fast,
                     report_dir=arguments.report_dir,
+                    max_parallel_documents=arguments.max_parallel_documents,
                 )
             except (ValueError, FileNotFoundError) as error:
                 sys.stdout.write(json.dumps({"error": str(error)}, indent=2) + "\n")
