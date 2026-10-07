@@ -174,6 +174,26 @@ where the mount disables it, the cell says so and skips). Set
 one `data/ingestion` (a full rerun after lite sends only the calls lite skipped). Review pages for one document on demand:
 `export_document_review(<ingestion root>/<sha256>)` from `enterprise_pdf_rag.adapters.pdf_ingestion`.
 
+### Several PDFs at once (`max_parallel_documents`, ADR 00NN)
+
+A folder run spends almost all its time waiting — on Azure OpenAI (seconds per call) and on
+workspace files (a round trip per file operation). `run_folder_pipeline(max_parallel_documents=N)`
+(CLI `--max-parallel-documents N`; default 1 = one PDF at a time, exactly as before) ingests N
+PDFs at once on worker threads, each in its own `<root>/<sha256>/`, writing the same bytes the
+serial run writes; the questions are still answered one at a time. Suggested notebook setting
+`MAX_PARALLEL_DOCUMENTS = 4` (the notebook does not pass it yet):
+
+- each worker has at most one model call in flight, so N is the request concurrency the Azure
+  deployment sees; a 429 is recorded and replayed like any failure (ADR 0021), so keep N where
+  the deployment never rate-limits rather than pushing it;
+- the shared `MAX_LIVE_CALLS_TOTAL` is reserved per allotment and never overspent, but under a
+  tight total *which* PDF ends `budget_starved` depends on timing;
+- memory per worker is its PDF's bytes, one opened document and one rendered page PNG — four
+  stay within a few hundred MB on a standard driver;
+- progress lines of different PDFs interleave; each names its `pdf` and its worker `slot`;
+- interrupting the cell lets running PDFs finish their current page (their calls are recorded,
+  no `.claim` is left), never starts the queued ones, then stops. Rerun to continue.
+
 ### Optional: local ONNX models — layout (ADR 0030) and table structure (ADR 0031), opt-in
 
 `layout_policy="onnx-layout"` additionally partitions the pages the deterministic triage
