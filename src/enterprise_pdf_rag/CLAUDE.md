@@ -1,6 +1,6 @@
 ---
 covers: src/enterprise_pdf_rag/
-verified-against: 33d55c4
+verified-against: 6d12c74
 ---
 
 # enterprise_pdf_rag — agent contract
@@ -365,7 +365,10 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   Objects and stage-cache pointers live in `objects/sha256-sharded/<ab>/<digest>` and
   `stage-cache-sharded/<ab>/<fingerprint>` (a pointer is the envelope's digest line followed by
   the envelope itself, which must hash to it; a digest-only pointer of an earlier release names
-  an envelope object and is read, never rewritten — ADR 0029 Amendment 1); the legacy flat
+  an envelope object and is read, never rewritten — ADR 0029 Amendment 1; a stage output of at
+  most 64 KiB written by `ProcessingStore.cache_output` follows the envelope as raw bytes and is
+  never an object — every read by digest looks in a known inline location, then the objects,
+  then scans the store's stage cache, and hashes what it finds — Amendment 2); the legacy flat
   `objects/sha256/` and
   `stage-cache/` are read (after the sharded place) and never written, so a full one (Workspace
   files: 10 000 children per folder) never blocks a write. They are created by hard link; where
