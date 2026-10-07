@@ -340,3 +340,13 @@ so each re-checks the disk once; `APP_VERIFY_EVERY_REQUEST=1` (or `verify_every_
 restores verify-on-every-call. A byte changed after an instance verified it, and that the instance
 only re-verifies without consuming, is caught by the next consuming read or the next stage, not by
 that instance. Pinned by `tests/enterprise_pdf_rag/adapters/test_source_verification_cache.py`.
+Since [enterprise-pdf-rag ADR 0034](enterprise-pdf-rag/adr/0034-persisted-verification-receipts.md)
+a full sweep that an instance (not the writer) statted, read and hashed itself is recorded as a
+self-hashed receipt in `<store>/verification-receipts/<manifest id>`; a later instance or process
+skips the `load` / `ProcessingStore.load` sweep only while the receipt is intact, names the same
+manifest and file set, and every not-yet-read file's size / mtime / ctime is unchanged — otherwise
+it sweeps for real. `publish_draft`, `save_draft`'s own sweep, `publish` / `verify` / `put` and every
+consuming read never use a receipt; scan and mount reuse but never write one.
+`APP_VERIFY_PERSISTED_RECEIPTS=false` restores the per-instance sweep. A rewrite that keeps size,
+mtime and ctime is caught by the next consuming read or the publish, not by a receipt reader.
+Pinned by `tests/enterprise_pdf_rag/adapters/test_verification_receipts.py`.

@@ -327,6 +327,17 @@ first run is writing the content-addressed objects through the ADR 0020 fallback
 ingestion directory on the fastest mount available. A rerun whose model replies are all cached
 still verifies, re-derives and re-exports every object once.
 
+Since [ADR 0034](adr/0034-persisted-verification-receipts.md) the full verification each stage,
+scan and mount used to repeat is recorded as a small receipt per snapshot
+(`<store>/verification-receipts/`, one file per manifest, never counted as an object), and a
+later stage or run replaces re-reading the snapshot with one `stat` per file. On the local
+harness a fully cached rerun reads 38–40 % fewer files and 28–32 % fewer bytes (the whole PDF is
+no longer re-read per stage) for about as many extra `stat` calls (reads + stats −3 %); a first
+run reads 8–14 % fewer files but, counting a `stat` like a read, does 13–19 % more file
+operations. The net gain on Workspace files therefore depends on how much cheaper a `stat` is
+than reading a file there — not yet measured. `APP_VERIFY_PERSISTED_RECEIPTS=false` turns receipts off. The asynchronous upload may
+change a file's mtime after the run that wrote it; that only costs one more full verification.
+
 Not validated on Databricks: rename and exclusive creation on these mounts, SQLite behavior,
 and performance with the many small
 content-addressed files one PDF produces (hundreds to thousands, which counts against the

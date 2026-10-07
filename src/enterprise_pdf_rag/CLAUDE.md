@@ -1,6 +1,6 @@
 ---
 covers: src/enterprise_pdf_rag/
-verified-against: 0f44281
+verified-against: eeebe54
 ---
 
 # enterprise_pdf_rag — agent contract
@@ -394,7 +394,15 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   what that instance already checked; bytes a caller consumes (`get`, `read_content`, the
   processing manifest object on every `ProcessingStore.load`) are always re-read and re-hashed,
   and every stage, scan and mount opens its own instance, so each re-checks the disk once ([ADR
-  0024](../../docs/enterprise-pdf-rag/adr/0024-source-verification-cache.md)). Within a
+  0024](../../docs/enterprise-pdf-rag/adr/0024-source-verification-cache.md)) — or, since [ADR
+  0034](../../docs/enterprise-pdf-rag/adr/0034-persisted-verification-receipts.md), stats it: a
+  full sweep a non-writing instance statted, read and hashed itself is recorded as a self-hashed
+  receipt (`adapters/verification_receipt.py`, `<store>/verification-receipts/<manifest id>`), and
+  a later instance / process skips the `load` / `ProcessingStore.load` sweep while the receipt
+  names the same manifest and file set and every unread file's size / mtime / ctime is unchanged.
+  `publish_draft` (receipts off), `save_draft`'s own sweep, `publish` / `verify` / `put` and every
+  consuming read stay real reads; scan and mount reuse receipts but never write one;
+  `APP_VERIFY_PERSISTED_RECEIPTS=false` restores ADR 0024. Within a
   `shared_pdfs()` scope (`validate_processing_source`, `ProcessingRetrieval.build`, the ingest
   pipeline's `run`, `requalify_visual_objects`) a source PDF is read and opened once and shared by
   every table / formula / chart proof. `APP_VERIFY_EVERY_REQUEST=1` puts the full verification
