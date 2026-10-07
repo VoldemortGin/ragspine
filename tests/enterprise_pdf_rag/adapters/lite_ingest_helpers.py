@@ -11,8 +11,11 @@ by task so a test can see exactly which calls a mode sends.
 import hashlib
 import json
 import re
+import sqlite3
+import zlib
 from collections import Counter
 from collections.abc import Callable
+from contextlib import closing
 from pathlib import Path
 from typing import Any, cast
 
@@ -435,7 +438,13 @@ def mixed_folder(tmp_path: Path) -> Path:
 # ADR 0029 moved hash-named files from ``<dir>/<name>`` to ``<dir>-sharded/<name[:2]>/<name>``.
 # The pinned digest is over each file's logical (flat) name, so it still proves that full mode
 # writes the very same files with the very same bytes; ``sharded_layout_only`` pins the move.
+# ADR 0036 moved small entries into one ``store.sqlite`` per store root: ``store_digest`` maps
+# each db row back to the very same logical name and the very same bytes (envelope lines,
+# trailing newlines, inline outputs included), so ``FULL_STORE_DIGEST`` is pinned to one value
+# whatever the backend.
 _SHARDED = re.compile(r"(?P<dir>[^/]+)-sharded/[0-9a-f]{2}/(?P<name>[^/]+)$")
+# The backend db and its side files never enter the logical view themselves.
+_DB_ARTIFACTS = re.compile(r"(^|/)(store|model-cache)\.sqlite(-wal|-shm|\.writer.*|\.corrupt-.*)?$")
 
 
 def _logical(relative: str) -> str:
@@ -443,27 +452,68 @@ def _logical(relative: str) -> str:
 
 
 def sharded_layout_only(root: Path) -> bool:
-    """No file sits in a legacy flat ``objects/sha256`` or ``stage-cache`` directory."""
+    """No file sits in a legacy flat ``objects/sha256`` or ``stage-cache`` directory (under
+    the sqlite backend equally: db rows aside, externals only ever land sharded)."""
     return not any(root.glob("*/*/objects/sha256")) and not any(root.glob("*/*/stage-cache"))
+
+
+def _decode_row(blob: bytes, encoding: str) -> bytes:
+    return zlib.decompress(blob) if encoding == "zlib" else bytes(blob)
+
+
+def _db_logical_files(db: Path) -> dict[str, bytes]:
+    """One store db's rows as the byte-identical file layout they stand for (ADR 0036)."""
+    out: dict[str, bytes] = {}
+    with closing(sqlite3.connect(db)) as connection:
+        for digest, encoding, external, blob in connection.execute(
+            "SELECT digest, encoding, external, bytes FROM objects"
+        ):
+            if external:
+                continue  # 外置对象本来就是文件,rglob 会看到它
+            out[f"objects/sha256/{digest}"] = _decode_row(blob, str(encoding))
+        for fingerprint, envelope_digest, envelope, product, product_encoding in connection.execute(
+            "SELECT fingerprint, envelope_digest, envelope, product, product_encoding"
+            " FROM stage_cache"
+        ):
+            payload = str(envelope_digest).encode() + b"\n" + bytes(envelope) + b"\n"
+            if product is not None:
+                payload += _decode_row(product, str(product_encoding))
+            out[f"stage-cache/{fingerprint}"] = payload
+        for name, digest in connection.execute("SELECT name, digest FROM pointers"):
+            out[str(name)] = str(digest).encode() + b"\n"
+        for name, blob in connection.execute("SELECT name, bytes FROM records"):
+            out[str(name)] = bytes(blob)
+    return out
 
 
 def store_digest(root: Path) -> tuple[str, int, str]:
     files: dict[str, str] = {}
     requests: list[str] = []
+
+    def take(relative: str, source: Path | bytes) -> None:
+        if "/verification-receipts/" in relative or relative.startswith("verification-receipts/"):
+            # ADR 0034: a receipt records file stats (mtime / ctime), not content.
+            return
+        if "/model-cache/requests/" in relative:
+            requests.append(relative.rsplit("/", 1)[-1].removesuffix(".json"))
+        if "/model-cache/contexts/" in relative:
+            files[relative] = ""
+            return
+        data = source if isinstance(source, bytes) else source.read_bytes()
+        files[relative] = hashlib.sha256(data).hexdigest()
+
     for path in sorted(root.rglob("*")):
         if not path.is_file():
             continue
-        relative = _logical(path.relative_to(root).as_posix())
-        if "/verification-receipts/" in relative:
-            # ADR 0034: a receipt records file stats (mtime / ctime), not content.
+        relative = path.relative_to(root).as_posix()
+        if _DB_ARTIFACTS.search(relative):
+            if path.name == "store.sqlite":
+                prefix = path.parent.relative_to(root).as_posix()
+                for name, data in sorted(_db_logical_files(path).items()):
+                    logical = f"{prefix}/{name}" if prefix != "." else name
+                    take(logical, data)
             continue
-        if "/model-cache/requests/" in relative:
-            requests.append(path.name.removesuffix(".json"))
-        files[relative] = (
-            ""
-            if "/model-cache/contexts/" in relative
-            else hashlib.sha256(path.read_bytes()).hexdigest()
-        )
+        take(_logical(relative), path)
     digest = hashlib.sha256(
         json.dumps({key: value for key, value in files.items() if value}, sort_keys=True).encode()
     ).hexdigest()

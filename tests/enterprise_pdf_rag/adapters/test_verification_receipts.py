@@ -44,7 +44,7 @@ _SWEEP = 1 + 2 * 4  # the PDF plus every page's SVG and text, for the four-page 
 
 
 def _fresh(root: Path, **options: bool) -> LocalDocumentStore:
-    return LocalDocumentStore(root, activate_on_publish=False, **options)
+    return LocalDocumentStore(root, activate_on_publish=False, **options)  # type: ignore[arg-type]
 
 
 def _recorded(root: Path) -> str:

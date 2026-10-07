@@ -47,13 +47,13 @@ from ragspine.common.evidence.file_placement import sharded_path
 
 # The stage-pointer format and the inline-output machinery live with the backend seam now
 # (sqlite object store PR-2); these names are re-exported so existing imports keep working.
-from ragspine.common.evidence.object_backend.files import (  # noqa: F401
-    _INLINE_INDEXES,
-    INLINE_ARTIFACT_LIMIT,
-    _envelope_artifact,
-    _inline_index,
-    _InlineIndex,
-    split_stage_pointer,
+from ragspine.common.evidence.object_backend.files import (
+    _INLINE_INDEXES as _INLINE_INDEXES,
+    INLINE_ARTIFACT_LIMIT as INLINE_ARTIFACT_LIMIT,
+    _envelope_artifact as _envelope_artifact,
+    _inline_index as _inline_index,
+    _InlineIndex as _InlineIndex,
+    split_stage_pointer as split_stage_pointer,
 )
 from ragspine.common.evidence.object_backend.protocol import ObjectBackend, PinToken
 from ragspine.common.evidence.object_backend.registry import open_backend
