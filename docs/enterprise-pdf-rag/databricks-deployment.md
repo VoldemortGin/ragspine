@@ -180,19 +180,36 @@ A folder run spends almost all its time waiting — on Azure OpenAI (seconds per
 workspace files (a round trip per file operation). `run_folder_pipeline(max_parallel_documents=N)`
 (CLI `--max-parallel-documents N`; default 1 = one PDF at a time, exactly as before) ingests N
 PDFs at once on worker threads, each in its own `<root>/<sha256>/`, writing the same bytes the
-serial run writes; the questions are still answered one at a time. Suggested notebook setting
-`MAX_PARALLEL_DOCUMENTS = 4` (the notebook does not pass it yet):
+serial run writes; the questions are still answered one at a time. The notebook sets
+`MAX_PARALLEL_DOCUMENTS = 4` in its configuration cell and passes it to the run (1 = one at a
+time):
 
 - each worker has at most one model call in flight, so N is the request concurrency the Azure
-  deployment sees; a 429 is recorded and replayed like any failure (ADR 0021), so keep N where
-  the deployment never rate-limits rather than pushing it;
+  deployment sees; a 429 (or 408 / 5xx, timeout, connection error) is retried within the call
+  with jittered backoff, honouring `Retry-After` for every worker of that endpoint, and is never
+  recorded, so a rerun calls it again (ADR 0034) — lower N when the status table's `retries` /
+  `transient_failures` columns are frequently non-zero;
 - the shared `MAX_LIVE_CALLS_TOTAL` is reserved per allotment and never overspent, but under a
   tight total *which* PDF ends `budget_starved` depends on timing;
 - memory per worker is its PDF's bytes, one opened document and one rendered page PNG — four
   stay within a few hundred MB on a standard driver;
-- progress lines of different PDFs interleave; each names its `pdf` and its worker `slot`;
+- progress lines of different PDFs interleave; each names its `pdf`, and the notebook prints
+  its worker `slot` as a `[slot N]` prefix;
 - interrupting the cell lets running PDFs finish their current page (their calls are recorded,
-  no `.claim` is left), never starts the queued ones, then stops. Rerun to continue.
+  no `.claim` is left), never starts the queued ones, then stops (the notebook prints a
+  `stopping` line saying so). Rerun to continue.
+
+### Rate limits and server errors (ADR 0034)
+
+HTTP 429 / 408 / 500 / 502 / 503 / 504, timeouts and connection errors are transient: a model
+call retries them up to three times (about 1, 2, 4 s with jitter, at most 30 s per wait; the
+endpoint's `Retry-After` / `retry-after-ms` when it sends one), each retry a live call against
+the budget, holding and renewing its `.claim` meanwhile. A call that still fails writes **no**
+failure record: the page is unfinished this run (`transient_failures` in the status table and
+the `document_done` event, one line in `report.md`) and the next run retries it — nothing to
+delete. `provider_http_429` / `provider_timeout` records left by an earlier version are called
+again on the next run and replaced. Embedding batches are retried whole before ADR 0026 halves
+them. 400 / 401 / 403 / 404 / 413 / 422 stay permanent failures, recorded and replayed.
 
 ### Optional: local ONNX models — layout (ADR 0030) and table structure (ADR 0031), opt-in
 
