@@ -1,6 +1,7 @@
 # ADR 0036: A sqlite object backend behind the stores, probed and never silently different
 
-Status: Draft (PR-1 merged; wiring lands in PR-2/3, visibility and tooling in PR-4). Builds on
+Status: Draft (PR-1 and PR-3 — the model cache — merged; store wiring lands in PR-2, visibility
+and tooling in PR-4). Builds on
 [ADR 0020](0020-storage-without-hard-links.md) (placement without hard links),
 [ADR 0023](0023-claim-takeover.md) (claims with holders and leases),
 [ADR 0024](0024-source-verification-cache.md) (per-instance verification) and
@@ -64,7 +65,9 @@ sqlite's own file locking is not trusted on FUSE. Same-process threads use threa
 connections and a contextvar transaction scope (reentrant; one `BEGIN IMMEDIATE` per outermost
 scope). Across processes the writer side takes an `O_EXCL` lease file `<db>.writer`
 (lease.py — the ADR 0023 holder JSON + lease + takeover generations, extracted and generalized;
-`json_completion` keeps its own copy until PR-3). A live foreign holder means `StoreBusy`
+since PR-3 `json_completion` reaches it only through the backends). A store db holds its lease for
+the life of the process; a model-cache db holds it per transaction (§8). A live foreign holder
+means `StoreBusy`
 (reason code `store_busy`); a dead or out-of-lease holder is taken over. Readers take no lease:
 every byte read is digest-verified anyway, and a torn read surfaces as `SQLITE_CORRUPT` or a
 digest mismatch. Model-call claims move into a `claims` table with a generation-guarded
@@ -78,7 +81,13 @@ transactions, with the main db intact (pinned by test: truncating the hot WAL lo
 last transaction). A db that fails `quick_check` on open (or cannot be opened) is renamed
 `store.sqlite.corrupt-<utc>` and rebuilt empty, counted as `note_repair("store_db")` — the next
 run recomputes into it, exactly ADR 0029's stance that only writers holding the bytes repair.
-`close()` runs `wal_checkpoint(TRUNCATE)`.
+Only corruption counts (PR-3): `SQLITE_CORRUPT`, `SQLITE_NOTADB` or a failed `quick_check`. A
+busy or locked db (another process converting a new file to WAL, or writing) is retried for the
+busy timeout and then raised — PR-1 renamed it as "corrupt", which silently sent the other
+process's later writes into the renamed file (found by PR-3's two-process test: 30 of 60
+records lost). The rebuild itself re-checks under the writer lease, so two processes never
+rebuild each other's fresh db, and opening a db already at this version starts no write
+transaction. `close()` runs `wal_checkpoint(TRUNCATE)`.
 
 ### 6. Probe, settings and the no-silent-fallback rule
 
@@ -102,9 +111,65 @@ path, and results are cached per directory. `APP_OBJECT_STORE_BACKEND`:
 2. PR-2: store wiring (`LocalDocumentStore` / `ProcessingStore` / `scan_catalog` / mount pins /
    transaction scopes; layout-coupled tests parametrized).
 3. PR-3: model-cache wiring (`JsonCompletionClient(cache_dir, backend=…)`; ADR 0021/0023/0029
-   tests parametrized; lease.py replaces the private claim family).
+   tests parametrized; lease.py replaces the private claim family) — §8.
 4. PR-4: visibility (`object_backend` in summaries / events / report), `store probe|migrate|
    export` tooling, the benchmark script, and this ADR's Measured section.
+
+### 8. PR-3: the model cache
+
+`JsonCompletionClient(config, cache_dir=…, backend=None)` reads and writes its cache only
+through a `ModelCacheBackend`, opened on first use by `open_backend(cache_dir, "model-cache")`
+(`auto` probes `cache_dir`); building a client touches no file. `client.backend_kind` says
+which (`"sqlite"` / `"files"`); the `object_backend` report fields are PR-2 / PR-4's.
+
+- **Call sites.** The record lookup (`<fp>` / `<fp>.retry-1` keys), immutable record writes
+  (`StoreConflict` → `cache_conflict`; `replace_damaged` for ADR 0029 repairs and ADR 0035
+  stale transient records), response writes (content-addressed, a damaged one replaced),
+  context writes (first stored body wins; an existing row or legacy file is a no-op without a
+  write transaction), response reads (`DamagedEntry` → `cached_response_digest_mismatch`),
+  the claim (`claim(key, owner, expired=…)`), the ADR 0035 renewal before each retry
+  (`renew(key, owner, generation)`), the release, and `_save_skip`'s "no skip record under a
+  claim" check (`claimed(key)`) are backend calls. The record bytes are identical in both
+  backends — `context_path` stays the logical `contexts/<fp>.json` — so the full-mode
+  `FULL_STORE_DIGEST` / `FULL_REQUESTS_DIGEST` hold on sqlite when the model cache is read back
+  logically (`test_parallel_documents`).
+- **One judge.** `json_completion._expired` still decides whether a holder is over; the
+  backend calls it once per claim attempt (outside the compare-and-set): for a claim file with
+  its mtime, for a `claims` row with its `created_at`. Taking over is a compare-and-set in both
+  backends — `O_EXCL` of `.claim.takeover-<n+1>`, or `INSERT OR IGNORE` / `UPDATE … WHERE
+  generation = ?` — so of racing callers exactly one wins. Renewal is the same compare-and-set
+  from the holder's own generation.
+- **Legacy entries.** On sqlite the lookup order is `requests` row → `requests/<key>.json` (the
+  `.retry-1` variant too), and likewise for responses and contexts; claims: `claims` row → the
+  highest legacy `.claim[.takeover-<n>]` file, judged by its mtime rule and taken over at
+  generation n+1 (a row), the files removed on release as the files layout does. Intact legacy
+  files are never rewritten or moved; a damaged one is superseded by a row (the file stays).
+  A backend instance probes each legacy directory once, so a cache that never had one costs no
+  file operation for read-through.
+- **Transactions.** One per write: claim, context, response, record, release — five per live
+  call, and none for a replay (opening an existing db writes nothing). Nothing joins a store's
+  page transaction.
+- **The writer lease is per transaction** for a model-cache db: the root-level answer cache
+  (`<ingestion_root>/model-cache/`) may be written by several processes (a notebook kernel and
+  the API), and a process-long lease would lock every other one out with `store_busy` for the
+  life of the first. Same-process transactions queue on a per-db-path lock; across processes
+  each transaction creates a non-durable `<db>.writer` lease (no fsync: losing it in a crash
+  only frees it), waits up to the busy timeout, and removes it at commit. A process killed
+  inside a transaction leaves the lease file with a dead pid: the next writer takes it over at
+  once (ADR 0023's rule), and sqlite rolls the half transaction back.
+- **Crashes.** A child killed mid-transport leaves a `claims` row, taken over once its pid is
+  gone or its lease over (the ADR 0023 subprocess test runs on both backends); a WAL tail torn
+  inside the last call's first frame loses exactly that call, which is simply made again; a db
+  that is not a database is set aside and rebuilt, counted `storage_repairs.store_db`.
+- **Tests.** The seven model-cache test modules (`test_json_completion`, `…_sampling_fallback`,
+  `…_claim_takeover`, `…_model_cache_self_heal`, `…_transient_provider_errors`,
+  `…_parallel_documents`, `…_folder_claim_recovery`) run every case on both backends through the
+  `model_cache_backend` fixture; `tests/conftest.py` pins `APP_OBJECT_STORE_BACKEND=files` for
+  the rest of the suite (export it to run everything under `auto`).
+  `test_model_cache_backend_wiring.py` pins the selection, the Volumes-like fallback, legacy
+  read-through without migration, the transaction count, two processes sharing one db, and the
+  crash cases above. The files-layout equivalence pack now compares against a frozen copy of the
+  pre-PR-3 write path (`tests/enterprise_pdf_rag/object_backend/legacy_model_cache.py`).
 
 ## Weaker / unverified
 
@@ -125,9 +190,34 @@ path, and results are cached per directory. `APP_OBJECT_STORE_BACKEND`:
 
 ## Measured
 
-Deferred to PR-4 (the wiring PRs carry the pipeline-level numbers; PR-1 has only
-micro-benchmarks of the backends themselves, recorded in the PR discussion, measured on a
-developer Mac, not Databricks).
+Store-level numbers are deferred to PR-2 / PR-4. **PR-3, the model cache** (developer Mac, not
+Databricks): 600 scripted calls with distinct prompts, then a replay round by a new client,
+every file-system syscall counted (and, in a second run, delayed) by a `DYLD_INSERT_LIBRARIES`
+interposer, so sqlite's own C-level I/O is counted like Python's. `-shm` is mmap'd and costs no
+syscall; the fake sender returns one body, so `responses` holds a single entry.
+
+| backend | round | files left | syscalls (per call) | of which fcntl locks | wall, 0 ms | wall, +5 ms / syscall* |
+|---|---|---|---|---|---|---|
+| files | first (600 live) | 1 201 | 29 393 (49.0) | 0 | 1.65 s | 215 s |
+| files | replay | 1 201 | 8 400 (14.0) | 0 | 0.36 s | 62 s |
+| sqlite | first (600 live) | 1 (3 open) | 60 741 (101.2) | 22 894 | 1.31 s | 445 s |
+| sqlite | replay | 1 (3 open) | 7 476 (12.5) | 4 851 | 0.30 s | 55 s |
+| sqlite, no `.writer` lease | first | 1 (3 open) | 36 737 (61.2) | 22 894 | 0.83 s | 268 s |
+
+\* `usleep(5000)` measured 7.4 ms here. Five write transactions per live call (3 001 in all),
+none in the replay round. The per-transaction `<db>.writer` lease is 8 syscalls a transaction,
+39.5 % of the first round. Every model-cache file of three earlier generations (`b989625`,
+`3414e0c`, `f577170`, each a full-mode folder of 24 calls, 68 files) reruns under sqlite with
+0 live calls, the same published id, no repair and no row written — also with every stage
+cache dropped, when all 24 calls are answered from the old files.
+
+Reading: sqlite turns 1 201 files into one db and makes a replay slightly cheaper, but a first
+round of live calls costs about twice the syscalls of the files layout, mostly sqlite's own
+WAL locking plus the lease. On a FUSE mount where every syscall is a round trip that is slower;
+next to the seconds a real model call takes, it is ≈ 0.3 s per call at 5 ms. Whether fcntl
+locks are round trips on Workspace files decides most of that and is unmeasured. Cheaper
+options, not taken here: one transaction for response + record + release (5 → 3), or no
+`.writer` lease where the probe proves sqlite's own locks.
 
 ## Rejected alternatives
 

@@ -43,17 +43,20 @@ object_backend/  the store persistence seam (sqlite object-store PR-1): ObjectBa
               read-through of every legacy generation, O_EXCL writer lease instead of FUSE
               file locks — sqlite.py), the per-directory availability probe whose failure
               codes never carry a path (probe.py), the generalized ADR 0023 writer lease
-              (lease.py; json_completion keeps its own copy until PR-3), and
-              open_backend(root, kind) (registry.py: files | sqlite — probe failure raises,
-              never silently falls back | auto). **Not wired yet**: no store or model-cache
-              call site reads it until PR-2/3, so behavior and bytes are unchanged; the
-              APP_OBJECT_STORE_* settings in configs.py are inert until then. Digests /
-              fingerprints / envelope bytes / published ids are invariant across backends
-              (tests/enterprise_pdf_rag/object_backend/). ADR: docs/enterprise-pdf-rag/adr/
-              0036-sqlite-object-backend.md.
+              (lease.py), and open_backend(root, kind) (registry.py: files | sqlite — probe
+              failure raises, never silently falls back | auto). **Wired for the model
+              cache (PR-3)**: JsonCompletionClient opens its cache through it (below); the
+              stores are not wired until PR-2. A store db holds its writer lease per process,
+              a model-cache db per transaction. Only SQLITE_CORRUPT / NOTADB / a failed
+              quick_check rebuild a db — busy / locked is retried, then raised. Digests /
+              fingerprints / envelope bytes / record bytes / published ids are invariant
+              across backends (tests/enterprise_pdf_rag/object_backend/). ADR:
+              docs/enterprise-pdf-rag/adr/0036-sqlite-object-backend.md.
 providers/    providers.py (explicit APP_LLM_* / embedding / APP_RERANK_* environment, opt-in
               connectivity smoke), json_completion.py (bounded JSON model calls, strict DTO
-              validation, content-addressed immutable cache), local_models.py (embedding /
+              validation, content-addressed immutable cache through a ModelCacheBackend:
+              `backend=` or opened on first use by open_backend(cache_dir, "model-cache");
+              `backend_kind`), local_models.py (embedding /
               rerank HTTP adapters; `embed_descriptions` batches index texts, 16 inputs /
               48 000 chars, halving on failure — enterprise-pdf-rag ADR 0026 — after a
               transient failure's retries are spent, ADR 0035), transient.py (ADR 0035:
@@ -118,8 +121,16 @@ providers/    providers.py (explicit APP_LLM_* / embedding / APP_RERANK_* enviro
   first calls wait for it; outside any scope nothing waits. `cache_hit_count` counts the calls a client answered from the model cache (the
   run-folder `document_progress` event reports it; enterprise-pdf-rag ADR 0022). Records stay byte-identical unless a 400 body was examined (`exclude_unset`).
   [ADR 0021](../../../../docs/enterprise-pdf-rag/adr/0021-sampling-parameter-fallback.md).
-- **A model-call claim blocks only while its holder may run** — `requests/<fp>.json.claim` is created
-  `O_EXCL` before transport and holds `{claim: json-completion-claim-v2, host, pid, process token,
+- **The model cache is a `ModelCacheBackend`, never paths** (ADR 0036 §8, PR-3) — `json_completion`
+  touches no cache file itself: records by key (`<fp>` / `<fp>.retry-1`), responses, contexts,
+  `claim(key, owner, expired=_judged_expired)` / `renew` / `claimed` / `release`. `files` keeps the
+  flat layout byte for byte; `sqlite` keeps `model-cache.sqlite` (one transaction per write, none
+  per replay) and reads every legacy file (records, responses, contexts, `.claim` files by their
+  rule) without rewriting or moving it. `_expired` / `_wall_clock` / `_PROCESS_TOKEN` stay the
+  claim seams in both. Tests: the seven model-cache modules run on both backends
+  (`model_cache_backend` fixture); the rest of the suite is pinned to `files` by tests/conftest.py.
+- **A model-call claim blocks only while its holder may run** — `requests/<fp>.json.claim` (files;
+  a `claims` row on sqlite) is created `O_EXCL` before transport and holds `{claim: json-completion-claim-v2, host, pid, process token,
   created_at, lease_seconds = ceil(4·timeout+31)+120}` (never a body); it is deleted once the record is written, and
   a caller re-checks the record after acquiring a claim (replay, never a second send). A holder that is a
   gone pid on this host (POSIX only), or past its lease, or a legacy claim (fingerprint / empty) whose mtime

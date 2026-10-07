@@ -23,6 +23,13 @@ existing cache entry still hits.
 > instead of replayed and replaced by the outcome. "Every failure record is a permanent negative
 > cache" below now holds for permanent failures only; the 400 refusal logic is unchanged.
 
+> Amended by [ADR 0036](0036-sqlite-object-backend.md) §8 (2026-10-06, PR-3): the model cache
+> may live in `model-cache.sqlite` instead of `requests/` files. A record is addressed by its
+> key — `<fp>` or `<fp>.retry-1` — in either backend, with the same bytes; "no skip record
+> under a claim" asks the backend (`claimed(key)`: a `claims` row, or the `.claim` file as
+> before, legacy files included on sqlite). Every rule of this ADR is unchanged and its tests
+> run on both backends.
+
 ## Context
 
 A user ran `notebooks/run_folder.ipynb` on Databricks against Azure OpenAI

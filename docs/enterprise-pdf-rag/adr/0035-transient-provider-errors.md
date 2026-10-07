@@ -9,6 +9,13 @@ Status: Accepted, 2026-10-06. Amends the failure records of
 every success record are unchanged byte for byte (`FULL_STORE_DIGEST` holds); a request that
 succeeds at its first attempt behaves exactly as before.
 
+> Amended by [ADR 0036](0036-sqlite-object-backend.md) §8 (2026-10-06, PR-3): the renewal
+> before each retry (§5) is `backend.renew(key, owner, generation)` — the next
+> `.claim.takeover-<n>` file, or the `claims` row moved to the next generation only if it
+> still holds this caller's generation; losing it still ends the call unsent. A stale
+> transient record is replaced by `replace_damaged` in either backend (on sqlite, a legacy
+> file is superseded by a row, never rewritten). Its tests run on both backends.
+
 ## Context
 
 Every failure of a model call was written to `requests/<fingerprint>.json` and replayed by every

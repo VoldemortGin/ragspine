@@ -17,6 +17,15 @@ directories (legacy claims and records) are used as they are, with no migration.
 > above the 840 s a legacy writer (which never paused or retried) could run. The numbers in §1,
 > §2 and the Consequences below are the pre-ADR-0035 ones.
 
+> Amended by [ADR 0036](0036-sqlite-object-backend.md) §8 (2026-10-06, PR-3): a claim is
+> a `.claim[.takeover-<n>]` file (files backend) or a `claims` row with a `generation` column
+> (sqlite backend, `model-cache.sqlite`), holding the same holder JSON. `_expired` stays the
+> one judge (for a row, `created_at` plays the mtime); taking over is a compare-and-set in
+> both — the exclusive create, or `INSERT OR IGNORE` / `UPDATE … WHERE generation = ?` — so
+> exactly one of racing callers wins. On sqlite a legacy `.claim` file is still honoured by
+> its rule, taken over at its generation + 1 and removed on release. Its tests (the killed
+> child process included) run on both backends.
+
 ## Context
 
 `JsonCompletionClient` serializes a live call by creating `requests/<fp>.json.claim` with
