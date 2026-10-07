@@ -257,16 +257,18 @@ How the backend adapts ([ADR 0020](adr/0020-storage-without-hard-links.md)):
   is written.
 - **A Workspace-files folder holds at most 10 000 children** (observed in the field:
   `MAX_CHILD_NODE_SIZE_EXCEEDED ... Current size: 10000 Limit: 10000`, reported through
-  `AsyncFlushFailedException`). One cached stage costs two files (pointer + envelope) plus its
-  output, so a lite ingest writes about 2P + 6.5M stage-cache pointers (≈ 5 per text object,
-  7 per table, 10–12 per chart / formula / diagram, plus one embedding per indexed member) and
-  twice as many processing objects (P pages, M objects): for 300 pages and 3 000 objects
-  ≈ 20 000–23 000 pointers, ≈ 40 000–47 000 objects, ≈ 600 source objects and 3 files per
-  model call — about 63 000–73 000 files.
+  `AsyncFlushFailedException`). One cached stage costs one pointer, which carries its envelope
+  inline (ADR 0029 Amendment 1; before, the envelope was a separate object), plus its output, so
+  a lite ingest writes about 2P + 6.5M stage-cache pointers (≈ 5 per text object, 7 per table,
+  10–12 per chart / formula / diagram, plus one embedding per indexed member) and about as many
+  processing objects (P pages, M objects): for 300 pages and 3 000 objects ≈ 20 000–23 000
+  pointers, ≈ 20 000–24 000 objects, ≈ 600 source objects and 3 files per model call — about
+  43 000–50 000 files (63 000–73 000 before the envelopes moved inline).
   Since [ADR 0029](adr/0029-sharded-store-layout-and-self-healing.md) objects and stage-cache
   pointers are written to `objects/sha256-sharded/<ab>/` and `stage-cache-sharded/<ab>/` (256
-  shards, ≈ 185 / 90 files each at that size); the old flat directories are only read, so a full
-  one needs no cleanup and no migration.
+  shards, ≈ 94 / 90 files each at that size); the old flat directories are only read, so a full
+  one needs no cleanup and no migration, and pointers written by earlier releases (digest only,
+  envelope as an object) keep being read as they are.
 - **Asynchronous flush**: a write that returned can still be lost, leaving a file missing, empty
   or truncated. The next run repairs it (ADR 0029): an object is rewritten by the stage that
   produces it, a damaged stage-cache entry is recomputed from the model cache, a damaged source

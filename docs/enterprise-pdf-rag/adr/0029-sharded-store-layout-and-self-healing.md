@@ -194,3 +194,91 @@ directory, roughly 5–10 minutes at 30–60 ms each).
   holding the content can repair, and only it does.
 - **A post-write verification pass**: served from the writer's page cache, it cannot see an
   asynchronous flush failure.
+
+## Amendment 1 (2026-10-06): the envelope travels inside its stage-cache pointer
+
+Every cached stage cost three files: the pointer `stage-cache-sharded/<ab>/<fingerprint>`, the
+`StageEnvelope` object it named, and the stage's output. The envelope is a few hundred bytes that
+only the pointer ever reads, so it now lives **in** the pointer, and one file per cached stage
+disappears. Changed: `ProcessingStore.cache` / `_lookup` / `_write_pointer` only (both the source
+and the processing store use them).
+
+**Format.** A new pointer is two lines — the envelope's SHA-256 digest (exactly the name its
+envelope object used to have), then the envelope bytes themselves
+(`StageEnvelope(outcome=…).model_dump_json()`, unchanged):
+
+```
+<sha256 of the envelope>\n
+{"outcome":{...}}\n
+```
+
+**Reading both formats.** The first line is always the envelope's digest; what follows decides:
+
+| After the first line | Format | The envelope is |
+|---|---|---|
+| nothing (or whitespace) | legacy (every release before this amendment) | the store object of that digest, read and re-hashed as before |
+| the envelope | inline | those bytes, which must hash to the first line |
+
+Lookup uses `read_stored` (sharded, then flat) directly, one call fewer than the earlier
+`stored_path` + read.
+
+**Unchanged.**
+
+- No stage fingerprint, no envelope byte, no artifact, no processing id and no published id moves:
+  the full-mode regression's 535 non-pointer files are byte-identical, its 140 envelope objects
+  are gone and its 140 pointers carry them (`FULL_STORE_DIGEST` re-recorded `ddade1cd…` / 815 files
+  → `620f220d…` / 675 files; `test_inline_stage_cache` turns the pointers back into the legacy form
+  and gets `ddade1cd…` / 815 again). `FULL_PUBLISHED_ID` is unchanged.
+- **Self-healing (section 3) is equivalent.** An inline pointer that is empty, cut short, has
+  other bytes than its digest names, or does not start with a digest is a miss (counted once as
+  `stage_cache`), recomputed and replaced — the digest line keeps the guarantee that envelope
+  bytes which do not hash to their name are never used. A legacy pointer whose envelope object is
+  lost or damaged is a miss too, and is replaced by an inline one. An intact entry naming another
+  outcome is still `Stage fingerprint already names another actual output`; an envelope bound to
+  another fingerprint is still refused.
+- **First writer wins** (`immutable=True`, hard link or the ADR 0020 rename fallback): an existing
+  pointer is accepted only when its first line is the same digest — a concurrent writer of the
+  same entry, in either format, is not a conflict; any other is `Conflicting immutable stage cache
+  entry` and the first writer's bytes stay.
+- An intact legacy pointer is **never rewritten**: an old ingestion directory keeps its pointers
+  and envelope objects, hits, publishes and answers with no migration; only new or repaired
+  entries are inline, so one store can hold both formats.
+- ADR 0024's verification cache is untouched (the artifact is still re-read by `get` on a hit).
+- Nothing in production enumerates the stage cache (`scan_catalog` lists document directories,
+  review exports read manifests); the test helpers that read pointers handle both formats.
+
+**Measured** (scratchpad harness, offline stub sender; synthetic mixed report, lite unless
+noted; file-system operations counted under the ingestion root):
+
+| Run | Files before → after | Envelope objects | I/O operations before → after |
+|---|---|---|---|
+| lite, 7 pages, 14 objects | 418 → 298 (−29 %) | 120 → 0 | 5 979 → 4 773 (−20 %) |
+| lite, 35 pages, 70 objects | 1 978 → 1 382 (−30 %) | 596 → 0 | 26 816 → 21 406 (−20 %) |
+| full, 7 pages, with tree | 843 → 702 (−17 %) | 141 → 0 | 8 337 → 6 950 (−17 %) |
+| lite 35 pages, rerun, all hits | — | — | 11 757 → 10 030 (−15 %) |
+
+Stage-cache files (pointers + envelopes + outputs) fall to two thirds: 354 → 234 at 7 pages,
+1 730 → 1 134 at 35. Each new entry saves one object write (temporary file, link, unlink, the
+existence checks and its shard `mkdir`); each hit reads two files instead of three.
+
+**The per-kind formula becomes:** a lite ingest writes S ≈ 2P + Σ k·M_kind + E stage-cache
+pointers (unchanged) and ≈ S + P processing objects (was ≈ 2S + P; measured 129 objects for
+S = 119 at 7 pages and 593 for S = 595 at 35, identical outputs deduping). For 300 pages and
+3 000 objects that is ≈ 20 000–23 000 pointers and ≈ 20 000–24 000 objects (was 40 000–47 000),
+plus ≈ 600 source objects and 3 files per model call: **≈ 43 000–50 000 files instead of
+63 000–73 000, about 20 000–23 000 fewer (a third)**, and ≈ 94 objects per shard instead of 185.
+
+**Across versions** (scratchpad harness, lite folder run answering 5 questions, once with hard
+links and once with `os.link` refusing `EPERM`): stores written by `b8243bc` (flat), `2825c57`
+(sharded) and `b989625` (the last commit before this amendment) rerun under this code with
+0 model calls, 0 repairs and 5/5 answered. From `b989625` nothing is written and the published id
+is the same; from `2825c57` / `b8243bc` both land on one new id, and from `2825c57` unmodified
+`b989625` lands on that same id (one embedding stage changed between those releases — 6 new
+files there, 5 here, the envelope being the difference). A
+second PDF then writes 65 inline pointers and **no envelope object**; damaging 40 recent files
+repairs `{object: 25, stage_cache: 18}` into the inline format with 0 calls and the same ids.
+
+**Rejected:** dropping the digest line and trusting JSON parsing alone — a pointer whose
+`producer` or artifact field changed by a byte would still parse, be used, and change a
+processing id; the digest line keeps "bytes that do not hash to their name are never used", and
+makes the legacy pointer a prefix of the new one.
