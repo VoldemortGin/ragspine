@@ -148,8 +148,8 @@ class FileBackend:
 
         1. 旧平铺 / digest-only:第一行是信封对象的摘要,信封是 store 里那个对象;
         2. Amendment 1:两行,信封内联在摘要之后,必须 hash 到它;
-        3. Amendment 2(预留):信封行之后的第三段是内联产物字节,必须 hash 到信封里
-           artifact 的摘要 —— 主分支合入后在 rebase 时与其实际格式对齐。
+        3. Amendment 2:信封行之后的第三段是内联产物字节,必须 hash 到信封里
+           artifact 的摘要(与 ``document_store.split_stage_pointer`` 的格式逐字节一致)。
         """
         _require_digest(fingerprint)
         try:
@@ -189,7 +189,7 @@ class FileBackend:
             raise ValueError("Stage envelope does not hash to its digest line")
         payload = entry.envelope_digest.encode() + b"\n" + entry.envelope + b"\n"
         if entry.product is not None:
-            # Amendment 2 预留的第三段(见 stage_entry);rebase 时与主分支格式对齐。
+            # Amendment 2 的第三段(见 stage_entry;与 ProcessingStore.cache_output 同字节)。
             if hashlib.sha256(entry.product).hexdigest() != _artifact_digest(entry.envelope):
                 raise ValueError("Inline stage product does not hash to its artifact digest")
             payload += entry.product

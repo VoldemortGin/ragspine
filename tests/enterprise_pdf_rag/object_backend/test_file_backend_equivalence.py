@@ -13,7 +13,10 @@ from time import time
 
 import pytest
 
-from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
+from enterprise_pdf_rag.adapters.document_store import (
+    INLINE_ARTIFACT_LIMIT,
+    LocalDocumentStore,
+)
 from enterprise_pdf_rag.adapters.http.processing_schemas import DocumentTreeRecord, StageEnvelope
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from ragspine.common.evidence.object_backend import lease
@@ -219,3 +222,30 @@ def test_claim_takeover_files_match_json_completion(
         == claims_b
         == {f"{fingerprint}.json.claim", f"{fingerprint}.json.claim.takeover-1"}
     )
+
+
+def test_inline_stage_output_matches_cache_output(placement: str, tmp_path: Path) -> None:
+    """Amendment 2:小产物内联进指针;与 ProcessingStore.cache_output 的字节逐位一致。"""
+    baseline_root, replay_root = tmp_path / "baseline", tmp_path / "replay"
+    store = ProcessingStore(baseline_root, verify_every_load=False)
+    backend = FileBackend(replay_root)
+
+    payload = b'{"inline": "output"}' * 20  # 远小于 INLINE_ARTIFACT_LIMIT:内联,不落对象
+    outcome = store.cache_output("description", FP, "producer-v1", payload)
+    assert outcome.artifact is not None
+    envelope = StageEnvelope(outcome=outcome).model_dump_json().encode()
+    backend.put_stage_entry(FP, StageEntry(sha(envelope), envelope, payload))
+    assert tree(baseline_root) == tree(replay_root)  # 没有对象文件,只有一个三段指针
+
+    read = backend.stage_entry(FP)
+    assert read is not None and read.product == payload
+
+    # 超过内联上限:两边都退回"对象 + 两段指针"。
+    big = b"x" * (INLINE_ARTIFACT_LIMIT + 1)
+    fp_big = "f" * 64
+    outcome_big = store.cache_output("description", fp_big, "producer-v1", big)
+    assert outcome_big.artifact is not None
+    envelope_big = StageEnvelope(outcome=outcome_big).model_dump_json().encode()
+    backend.put_object(outcome_big.artifact.sha256, big, "application/json")
+    backend.put_stage_entry(fp_big, StageEntry(sha(envelope_big), envelope_big))
+    assert tree(baseline_root) == tree(replay_root)

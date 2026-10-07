@@ -23,8 +23,8 @@ class StageEntry:
 
     ``envelope`` 必须 sha256 到 ``envelope_digest``(ADR 0029 Amendment 1 的指针不变量)。
     ``product`` 是 ADR 0029 Amendment 2 的内联小产物(即 outcome.artifact 的字节,
-    必须 sha256 到信封里 artifact 的 digest);主分支合入前此字段按设计稿预留,
-    FileBackend 的第三段指针格式在 rebase 时与主分支对齐。
+    必须 sha256 到信封里 artifact 的 digest);FileBackend 的第三段指针格式与
+    ``document_store.split_stage_pointer`` 逐字节一致。
     """
 
     envelope_digest: str

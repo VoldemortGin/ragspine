@@ -1,4 +1,4 @@
-# ADR 00NN: A sqlite object backend behind the stores, probed and never silently different
+# ADR 0034: A sqlite object backend behind the stores, probed and never silently different
 
 Status: Draft (PR-1 merged; wiring lands in PR-2/3, visibility and tooling in PR-4). Builds on
 [ADR 0020](0020-storage-without-hard-links.md) (placement without hard links),
@@ -7,9 +7,6 @@ Status: Draft (PR-1 merged; wiring lands in PR-2/3, visibility and tooling in PR
 [ADR 0029](0029-sharded-store-layout-and-self-healing.md) (sharded layout, self-healing writes,
 inline stage envelopes). It changes **no hash, no fingerprint, no envelope byte, no request
 fingerprint and no published id** — only where small store entries live.
-
-> 编号说明:`00NN` 在 rebase 到最新 main 时按当时的最大 ADR 编号 +1 定号(并行分支也在写
-> ADR,编号最后定)。
 
 ## Context
 
@@ -121,9 +118,10 @@ path, and results are cached per directory. `APP_OBJECT_STORE_BACKEND`:
   cannot stat falls back to re-reading and re-hashing the row.
 - Rolling back to a pre-backend release cannot read db-resident objects: it recomputes and may
   re-send model calls. `store export --to files` (PR-4) is the escape hatch.
-- Amendment 2's inline product column / third pointer segment is reserved to the design's
-  `StageEntry.product` shape; the exact on-disk third-segment format is aligned with `main`
-  when that amendment lands.
+- ADR 0029 Amendment 2 (inline stage outputs) landed on `main` while this PR was built:
+  `FileBackend`'s third pointer segment is byte-identical to `split_stage_pointer`'s format
+  (`<digest>\n<envelope>\n<output>`), pinned against `ProcessingStore.cache_output` by the
+  equivalence pack; the sqlite `stage_cache.product` column carries the same bytes.
 
 ## Measured
 
