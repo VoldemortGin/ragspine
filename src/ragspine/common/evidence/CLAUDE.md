@@ -50,7 +50,7 @@ object_backend/  the store persistence seam (sqlite object-store PR-1): ObjectBa
               APP_OBJECT_STORE_* settings in configs.py are inert until then. Digests /
               fingerprints / envelope bytes / published ids are invariant across backends
               (tests/enterprise_pdf_rag/object_backend/). ADR: docs/enterprise-pdf-rag/adr/
-              0035-sqlite-object-backend.md.
+              0036-sqlite-object-backend.md.
 providers/    providers.py (explicit APP_LLM_* / embedding / APP_RERANK_* environment, opt-in
               connectivity smoke), json_completion.py (bounded JSON model calls, strict DTO
               validation, content-addressed immutable cache), local_models.py (embedding /
