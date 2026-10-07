@@ -4,7 +4,6 @@ import re
 from collections import Counter, OrderedDict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from hashlib import sha256
 from pathlib import Path
 from threading import Lock
 from typing import Literal
@@ -31,6 +30,9 @@ from enterprise_pdf_rag.processing.retrieval import (
     RetrievalMember,
     RetrievalPlan,
 )
+from ragspine.common.evidence.configs import get_settings
+from ragspine.common.evidence.object_backend.files import FileBackend
+from ragspine.common.evidence.object_backend.sqlite import SqliteBackend
 from ragspine.extraction.evidence.document.models import AssetRef, Bounds
 from ragspine.extraction.evidence.figures.chart_qa.displayed_models import DisplayedLookupContext
 from ragspine.extraction.evidence.figures.chart_qa.models import ChartContext, QueryPin
@@ -65,6 +67,9 @@ class CatalogEntry(BoundaryModel):
     processing_store: str
     retrieval_status: CatalogRetrievalStatus
     reason: str | None = None
+    # Which store backend holds this document's bytes (ADR 0036): "files" or "sqlite";
+    # None in an entry recorded before the field existed.
+    object_backend: str | None = None
     source_sha256: str | None = None
     source_manifest_id: str | None = None
     current_processing_id: str | None = None
@@ -108,8 +113,20 @@ class DocumentCatalog(BoundaryModel):
         return next((entry for entry in self.documents if entry.document_id == document_id), None)
 
 
-def _pointer(path: Path) -> str | None:
-    return path.read_text().strip() if path.is_file() else None
+def _published_pointer(processing_root: Path) -> str | None:
+    """The ``current-processing`` digest, read with zero writes: the pointer file first, then
+    (unless the file layout is pinned) the backend db — no probe, no db creation, so a scan
+    over draft or legacy directories leaves them untouched."""
+    pointer = FileBackend(processing_root).pointer("current-processing")
+    if pointer is not None:
+        return pointer
+    if get_settings().object_store_backend == "files":
+        return None
+    backend = SqliteBackend(processing_root)
+    try:
+        return backend.pointer("current-processing")
+    finally:
+        backend.close()
 
 
 def _span_union(span_ids: Sequence[str], boxes: Mapping[str, Bounds]) -> Bounds | None:
@@ -125,12 +142,6 @@ def _span_union(span_ids: Sequence[str], boxes: Mapping[str, Bounds]) -> Bounds 
     )
 
 
-def _file_state(path: Path) -> tuple[int, int]:
-    """Size and modification time: what says a pinned file has not been touched at all."""
-    stat = path.stat()
-    return stat.st_size, stat.st_mtime_ns
-
-
 @dataclass(slots=True)
 class _Probe:
     """Facts read so far; whatever a corrupt entry managed to read stays visible."""
@@ -139,6 +150,7 @@ class _Probe:
     origin: CatalogOrigin
     source_root: Path
     processing_root: Path
+    object_backend: str | None = None
     source_sha256: str | None = None
     source_manifest_id: str | None = None
     current_processing_id: str | None = None
@@ -165,6 +177,7 @@ class _Probe:
             processing_store=str(self.processing_root),
             retrieval_status=status,
             reason=reason,
+            object_backend=self.object_backend,
             source_sha256=self.source_sha256,
             source_manifest_id=self.source_manifest_id,
             current_processing_id=self.current_processing_id,
@@ -199,7 +212,8 @@ def _inspect(
         # Read-only: persisted receipts are reused, never written (ADR 0034).
         outputs = ProcessingStore(processing_root, record_receipts=False)
         sources = LocalDocumentStore(source_root, activate_on_publish=False, record_receipts=False)
-        processing_id = _pointer(processing_root / "current-processing")
+        probe.object_backend = outputs.object_backend
+        processing_id = outputs.current_id()
         if processing_id is None:
             raise FileNotFoundError(
                 f"Missing discovery pointer {processing_root / 'current-processing'}"
@@ -235,9 +249,7 @@ def _inspect(
         if snapshot.manifest.source.sha256 != scope.source_sha256:
             raise ValueError("Source manifest does not carry the processing scope source sha256")
         probe.document_label = snapshot.manifest.filename
-        probe.source_activated = (
-            _pointer(source_root / "current-manifest") == scope.source_manifest_id
-        )
+        probe.source_activated = sources.current_manifest_id() == scope.source_manifest_id
         if manifest.retrieval is None:
             return probe.entry("not_indexed", "current processing has no retrieval publication")
         probe.retrieval_snapshot_id = manifest.retrieval.snapshot_id
@@ -276,7 +288,7 @@ def scan_catalog(ingestion_root: Path, *, legacy_roots: Sequence[Path] = ()) -> 
             if not child.is_dir() or _DOCUMENT_ID.fullmatch(child.name) is None:
                 continue
             processing = child / "processing"
-            if not (processing / "current-processing").is_file():
+            if _published_pointer(processing) is None:
                 unpublished.append(child.name)
                 continue
             entries.append(
@@ -360,10 +372,11 @@ class MountedDocument:
         self._tree: DocumentTree | None = None
         self._tree_read = False
         self._verify_every_request = verify_every_request
-        # The one file a request must watch: the pinned manifest object. Its name is its
-        # digest, so any rewrite of the release is a digest mismatch here.
-        self._pinned_path = outputs.assets.content_path(self._processing_id)
-        self._pinned_stat = _file_state(self._pinned_path)
+        # The one entry a request must watch: the pinned manifest object. Its name is its
+        # digest, so any rewrite of the release is a digest mismatch here. The pin token is
+        # the backend's cheap drift marks (file size + mtime, or the db's data_version +
+        # stat), never content (ADR 0036).
+        self._pin_token = outputs.assets.pin(self._processing_id)
         # Evidence hydrated under this pinned manifest; every entry was fully verified on
         # its first read, and the manifest guard below invalidates the whole mount on drift.
         self._resolved: dict[str, RetrievalContext] = {}
@@ -397,20 +410,33 @@ class MountedDocument:
 
         The whole release — every asset digest, the source it was cut from, every member's
         evidence — was verified once when this document was mounted. What a request re-reads
-        is the manifest object that names all of it: the file is content-addressed, so its
-        digest *is* the pinned processing id and no rewrite of the release can keep it. Size
-        and mtime are only a shortcut past re-hashing a file nothing has touched; a file that
-        moved at all is re-hashed, and a digest that no longer matches falls through to the
-        full mount-time validation, which refuses. ``verify_every_request`` skips the
-        shortcut and revalidates the whole release on every call.
+        is the manifest object that names all of it: the entry is content-addressed, so its
+        digest *is* the pinned processing id and no rewrite of the release can keep it. The
+        pin marks (file size + mtime, or the backend db's data_version + stat) are only a
+        shortcut past re-hashing an entry nothing has touched; an entry whose marks moved at
+        all is re-read and re-hashed (token refreshed when it still holds those bytes), and a
+        digest that no longer matches falls through to the full mount-time validation, which
+        refuses. ``verify_every_request`` skips the shortcut and revalidates the whole
+        release on every call.
         """
         if not self._verify_every_request:
-            state = _file_state(self._pinned_path)
-            if state == self._pinned_stat:
-                return self._pinned
-            if sha256(self._pinned_path.read_bytes()).hexdigest() == self._processing_id:
-                self._pinned_stat = state
-                return self._pinned
+            fresh = None
+            try:
+                fresh = self._outputs.assets.pin(self._processing_id)
+                if fresh == self._pin_token:
+                    return self._pinned
+            except (LookupError, OSError):
+                pass
+            if fresh is not None:
+                try:
+                    self._outputs.assets.read_content(self._processing_id)
+                except (OSError, ValueError):
+                    pass
+                else:
+                    # Still exactly those bytes (read_content re-hashed them): keep the
+                    # mount and remember the new marks.
+                    self._pin_token = fresh
+                    return self._pinned
         manifest = self._outputs.load(self._processing_id)
         if manifest != self._pinned:
             raise ValueError("Immutable processing manifest changed")
