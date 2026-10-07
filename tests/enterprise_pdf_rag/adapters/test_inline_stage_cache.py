@@ -299,6 +299,15 @@ def _legacify(root: Path, *, every: int = 1) -> dict[Path, bytes]:
     return legacy
 
 
+def _content_files(root: Path) -> int:
+    """Every file but the verification receipts (ADR 0034: stats, not content)."""
+    return sum(
+        1
+        for path in root.rglob("*")
+        if path.is_file() and path.parent.name != "verification-receipts"
+    )
+
+
 def _stores(root: Path) -> list[Path]:
     return sorted(path.parent for path in root.glob("*/*/stage-cache-sharded"))
 
@@ -399,7 +408,7 @@ def test_the_seven_page_lite_ingest_writes_a_third_fewer_stage_cache_files(
 
     pointers = len(list(root.rglob("stage-cache-sharded/*/*")))
     objects = len(list(root.rglob("sha256-sharded/*/*")))
-    files = sum(1 for path in root.rglob("*") if path.is_file())
+    files = _content_files(root)
 
     assert sum(_envelope_objects(store) for store in _stores(root)) == 0
     assert pointers == 120
@@ -408,4 +417,4 @@ def test_the_seven_page_lite_ingest_writes_a_third_fewer_stage_cache_files(
     _legacify(root)
     # Back to exactly the pre-amendment store: its envelope objects and (Amendment 2) its
     # output objects return.
-    assert sum(1 for path in root.rglob("*") if path.is_file()) == 418
+    assert _content_files(root) == 418

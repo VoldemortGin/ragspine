@@ -131,10 +131,11 @@ def _run(
 
 def _files(root: Path) -> dict[str, str]:
     """Every file under ``root`` by relative path → sha256 (model-cache contexts carry a wall
-    clock ``created_at`` and are kept by name only)."""
+    clock ``created_at`` and verification receipts file stats, ADR 0034: both kept by name only)."""
     return {
         path.relative_to(root).as_posix(): ""
         if "/model-cache/contexts/" in path.as_posix()
+        or path.parent.name == "verification-receipts"
         else hashlib.sha256(path.read_bytes()).hexdigest()
         for path in sorted(root.rglob("*"))
         if path.is_file()

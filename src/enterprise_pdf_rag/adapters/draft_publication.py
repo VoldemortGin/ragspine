@@ -204,8 +204,9 @@ def publish_draft(
     discoverable. Both moves are idempotent: repeating a publish yields the same ids
     and leaves the pointers in place.
     """
-    sources = LocalDocumentStore(Path(source_store).resolve())
-    outputs = ProcessingStore(Path(processing_store).resolve())
+    # The release about to become current is read for real, never on a receipt (ADR 0034).
+    sources = LocalDocumentStore(Path(source_store).resolve(), persisted_receipts=False)
+    outputs = ProcessingStore(Path(processing_store).resolve(), persisted_receipts=False)
     manifest = outputs.load(processing_id)
     if manifest.retrieval is None:
         raise ValueError("draft has no retrieval index; run index before publish")

@@ -142,6 +142,12 @@ class Settings(BaseSettings):
     # 它同时是 LocalDocumentStore 的 verify_every_load 默认值:打开后入库流程每次读取都
     # 全量校验,不复用本存储实例已校验过的快照与对象摘要。
     verify_every_request: bool = False
+    # 持久化校验凭据(enterprise-pdf-rag ADR 0034):某个存储实例亲自 stat + 读 + 哈希过一份
+    # 不可变快照的全部文件后,在快照目录 verification-receipts/ 下记一张凭据;之后的新实例 /
+    # 新进程只要凭据完好、清单与文件集合相同、每个文件的 size / mtime / ctime 都没变,就跳过
+    # 整份快照的重读。关掉(false)即回到 ADR 0024:每个实例各全量读一遍;verify_every_request
+    # 打开时凭据也一律不用。最终发布(publish_draft)与所有消费性读取始终真读。
+    verify_persisted_receipts: bool = True
     # 单次模型调用的等待上限(秒)。默认与 JsonCompletionClient 自身的默认一致;页级上下文
     # (ADR 0017)让"总结某一节"这类问题的 prompt 与生成都更长,超过默认即 503,所以它可配。
     # 上限 180 与该客户端的构造校验一致。

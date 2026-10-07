@@ -58,6 +58,8 @@ class ProcessingStore:
     ``verify_every_load`` controls on its own (see ``LocalDocumentStore``). A manifest object
     itself is re-read and re-hashed on every ``load``: it is the one file that names all the
     rest, and the mount's drift guard falls through to ``load`` to refuse a changed one.
+    ``load``'s sweep of the assets it names may be skipped by a persisted receipt (ADR 0034;
+    ``persisted_receipts`` / ``record_receipts``, see ``LocalDocumentStore``).
     """
 
     def __init__(
@@ -66,12 +68,16 @@ class ProcessingStore:
         *,
         verify_every_request: bool = False,
         verify_every_load: bool | None = None,
+        persisted_receipts: bool | None = None,
+        record_receipts: bool = True,
     ) -> None:
         self.root = root
         self.assets = LocalDocumentStore(
             root,
             activate_on_publish=False,
             verify_every_load=True if verify_every_request else verify_every_load,
+            persisted_receipts=persisted_receipts,
+            record_receipts=record_receipts,
         )
         self._verify_every_request = verify_every_request
         self._verify_every_load = verify_every_load
@@ -238,8 +244,7 @@ class ProcessingStore:
         manifest = ProcessingEnvelope.model_validate_json(
             self.assets.read_content(snapshot_id)
         ).manifest
-        for ref in processing_assets(manifest):
-            self.assets.verify(ref)
+        self.assets.verify_snapshot(snapshot_id, processing_assets(manifest))
         pages = self.load_page_metadata(manifest)
         if manifest.document_metadata != summarize_document(tuple(pages.values())):
             raise ValueError("Document metadata differs from its page metadata stages")
@@ -301,7 +306,7 @@ class ProcessingStore:
             raise ValueError("Retrieval publication has a different dependency closure")
         if plan.index_version.startswith(UNIT_INDEX_VERSION + ":"):
             for ref in publication.dependencies:
-                self.assets.verify(ref)
+                self.assets.verify(ref, receipt=True)
             self._check_unit_index(plan, index)
             return plan, index
         if tuple(entry.member_id for entry in index.entries) != tuple(
@@ -310,7 +315,7 @@ class ProcessingStore:
             raise ValueError("Retrieval index readiness does not cover the exact members")
         indexed = {entry.member_id: entry.vector for entry in index.entries}
         for ref in publication.dependencies:
-            self.assets.verify(ref)
+            self.assets.verify(ref, receipt=True)
         for member in plan.members:
             embedding = TypeAdapter(RetrievalEmbedding).validate_json(
                 self.assets.get(member.embedding)

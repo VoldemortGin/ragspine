@@ -12,6 +12,14 @@ Inline stage outputs (ADR 0029 Amendment 2): a stage output of at most
 Every read by digest resolves it: a known inline location first, then the sharded and the flat
 object, then a scan of this store's sharded stage cache for the pointers not read yet. A location
 is only where to look — the bytes found there are hashed like any object's.
+
+Persisted receipts (ADR 0034): a whole-snapshot sweep (``verify_snapshot``: ``load``, and
+``ProcessingStore.load``'s asset sweep) that statted, read and hashed every file itself records
+a receipt (``verification_receipt``); a later instance whose receipt still holds — intact, same
+manifest and file set, every file's size / mtime / ctime unchanged — skips the sweep. Only those
+sweeps use one: ``verify``, ``publish`` and ``put`` read for real. ``persisted_receipts``
+(default: ``APP_VERIFY_PERSISTED_RECEIPTS``) turns them off, and so does ``verify_every_load``;
+``record_receipts=False`` reads them but never writes one (the read-only catalog scan / mount).
 """
 
 import hashlib
@@ -20,9 +28,18 @@ import os
 import re
 import tempfile
 import threading
+from collections.abc import Sequence
 from pathlib import Path
 
 from enterprise_pdf_rag.adapters.http.document_schemas import ManifestEnvelope
+from enterprise_pdf_rag.adapters.verification_receipt import (
+    FileState,
+    encode_receipt,
+    inline_pointer,
+    receipt_holds,
+    state_of,
+    write_receipt,
+)
 from ragspine.common.evidence.configs import get_settings
 from ragspine.common.evidence.file_placement import (
     link_new_file,
@@ -109,15 +126,28 @@ class LocalDocumentStore:
         *,
         activate_on_publish: bool = True,
         verify_every_load: bool | None = None,
+        persisted_receipts: bool | None = None,
+        record_receipts: bool = True,
     ) -> None:
         self.root = root
         self._activate_on_publish = activate_on_publish
+        settings = get_settings()
         self._verify_every_load = (
-            get_settings().verify_every_request if verify_every_load is None else verify_every_load
+            settings.verify_every_request if verify_every_load is None else verify_every_load
         )
+        self._receipts = not self._verify_every_load and (
+            settings.verify_persisted_receipts if persisted_receipts is None else persisted_receipts
+        )
+        self._record_receipts = record_receipts
         # digest -> byte length, for objects this instance read back and hashed itself. An
         # object it only wrote is not in here: the first sweep after a write reads it once.
         self._verified: dict[str, int] = {}
+        # Objects this instance wrote: a sweep covering one records no receipt (ADR 0034).
+        self._written: set[str] = set()
+        # Snapshots whose persisted receipt held for this instance, and the objects it vouched
+        # for (digest -> byte length); only ``verify(..., receipt=True)`` sweeps accept those.
+        self._attested_subjects: set[str] = set()
+        self._attested: dict[str, int] = {}
         self._snapshots: dict[str, DocumentSnapshot] = {}
 
     def auditing(self) -> "LocalDocumentStore":
@@ -155,6 +185,7 @@ class LocalDocumentStore:
         if existing is not None and self._intact(existing, ref):
             return ref
         target.parent.mkdir(parents=True, exist_ok=True)
+        self._written.add(ref.sha256)
         with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as stream:
             temporary = Path(stream.name)
             stream.write(data)
@@ -298,13 +329,109 @@ class LocalDocumentStore:
             raise ValueError("Stored artifact length mismatch")
         return data
 
-    def verify(self, ref: AssetRef) -> None:
-        """Check one object against its reference; skipped when this instance already did."""
-        if not self._is_verified(ref):
-            self.get(ref)
+    def verify(self, ref: AssetRef, *, receipt: bool = False) -> None:
+        """Check one object against its reference; skipped when this instance already did, and
+        with ``receipt`` also when a persisted receipt vouched for it here (ADR 0034)."""
+        if self._is_verified(ref) or (
+            receipt and self._receipts and self._attested.get(ref.sha256) == ref.byte_length
+        ):
+            return
+        self.get(ref)
 
     def _is_verified(self, ref: AssetRef) -> bool:
         return not self._verify_every_load and self._verified.get(ref.sha256) == ref.byte_length
+
+    def verify_snapshot(self, subject: str, refs: Sequence[AssetRef]) -> None:
+        """Verify every object one immutable snapshot names; ``subject`` is its manifest digest.
+
+        Skipped for objects this instance already read back, then for the whole set when a
+        persisted receipt still holds for the rest (ADR 0034): one receipt read and one ``stat``
+        per object not yet read back; the inline locations it names seed this process's index.
+        Otherwise every distinct object is located, statted, then read and hashed — the state
+        taken *before* the read, so a receipt never vouches for a state later than the bytes it
+        hashed — and, unless this instance wrote one of them, a receipt is recorded.
+        """
+        pending = [ref for ref in refs if not self._is_verified(ref)]
+        if not pending:
+            return
+        if not self._receipts:
+            for ref in pending:
+                self.verify(ref)
+            return
+        if subject in self._attested_subjects:
+            return
+        pointers = self.root / "stage-cache"
+        held = receipt_holds(
+            self.root,
+            self._flat(),
+            pointers,
+            subject,
+            refs,
+            unverified={ref.sha256 for ref in pending},
+        )
+        if held is not None:
+            for state in held:
+                name = inline_pointer(pointers, state)
+                if name is not None:
+                    self.note_inline(state.sha256, name)
+            self._attested_subjects.add(subject)
+            self._attested.update((ref.sha256, ref.byte_length) for ref in refs)
+            return
+        states: dict[str, FileState] = {}
+        recordable = self._record_receipts
+        for ref in refs:
+            seen = states.get(ref.sha256)
+            if seen is not None:
+                if seen.byte_length != ref.byte_length:
+                    raise ValueError("Stored artifact length mismatch")
+                continue
+            recorded = self._read_recorded(ref)
+            if recorded is None:
+                recordable = False
+                self.get(ref)
+                continue
+            states[ref.sha256] = recorded
+        if recordable and not self._written.intersection(states):
+            write_receipt(self.root, subject, encode_receipt(subject, refs, tuple(states.values())))
+
+    def _located(self, digest: str) -> tuple[Path, os.stat_result]:
+        """The file ``digest`` is read from and its ``stat``, in ``_read_digest``'s order (a known
+        inline location, the sharded object, the flat one, then a stage-cache scan): one ``stat``
+        per place tried, no separate existence probe. ``FileNotFoundError`` when in none."""
+        index = _inline_index(self.root)
+        with index.lock:
+            name = index.where.get(digest)
+        places = [sharded_path(self._flat(), digest), self._flat() / digest]
+        if name is not None:
+            places.insert(0, self._stage_cache_pointer(name))
+        for path in places:
+            try:
+                return path, path.stat()
+            except FileNotFoundError:
+                continue
+        path = self.content_path(digest)
+        return path, path.stat()
+
+    def _read_recorded(self, ref: AssetRef) -> FileState | None:
+        """Stat, then read and hash, the one file ``ref`` is read from (an object, or the
+        stage-cache pointer carrying it inline). None when an inline location no longer holds
+        those bytes: the caller then reads it the ordinary way and records nothing."""
+        path, state = self._located(ref.sha256)
+        data = path.read_bytes()
+        recorded = state_of(self.root, path, ref, state)
+        if inline_pointer(self.root / "stage-cache", recorded) is not None:
+            try:
+                data = split_stage_pointer(data)[2] or b""
+            except ValueError:
+                return None
+            if hashlib.sha256(data).hexdigest() != ref.sha256:
+                return None
+        elif hashlib.sha256(data).hexdigest() != ref.sha256:
+            raise ValueError("Stored artifact digest mismatch; source review is unavailable")
+        if len(data) != ref.byte_length:
+            raise ValueError("Stored artifact length mismatch")
+        self._verified[ref.sha256] = len(data)
+        return recorded
 
     def read_content(self, digest: str) -> bytes:
         """Read an immutable manifest/cache object identified by its actual digest."""
@@ -362,8 +489,7 @@ class LocalDocumentStore:
             return self._snapshots[manifest_id]
         payload = self._read_digest(manifest_id)
         manifest = ManifestEnvelope.model_validate_json(payload).manifest
-        for ref in manifest_assets(manifest):
-            self.verify(ref)
+        self.verify_snapshot(manifest_id, manifest_assets(manifest))
         snapshot = DocumentSnapshot(manifest_id, manifest)
         if not self._verify_every_load:
             self._snapshots[manifest_id] = snapshot

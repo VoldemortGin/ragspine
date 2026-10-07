@@ -454,6 +454,9 @@ def store_digest(root: Path) -> tuple[str, int, str]:
         if not path.is_file():
             continue
         relative = _logical(path.relative_to(root).as_posix())
+        if "/verification-receipts/" in relative:
+            # ADR 0034: a receipt records file stats (mtime / ctime), not content.
+            continue
         if "/model-cache/requests/" in relative:
             requests.append(path.name.removesuffix(".json"))
         files[relative] = (

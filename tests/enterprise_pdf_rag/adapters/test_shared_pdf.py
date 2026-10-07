@@ -29,7 +29,9 @@ def test_formula_members_open_their_source_pdf_once_per_publication(
     published = _published(tmp_path, monkeypatch, page_count=2, formula_page=True)
     monkeypatch.setattr(pdfspine, "open", counting_open)
     reads = _Reads(monkeypatch)
-    store = LocalDocumentStore(Path(published.source_store), activate_on_publish=False)
+    store = LocalDocumentStore(
+        Path(published.source_store), activate_on_publish=False, persisted_receipts=False
+    )
     source = store.load(published.source_manifest_id).manifest.source
 
     publish_draft(

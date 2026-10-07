@@ -582,11 +582,20 @@ def test_the_seven_page_lite_ingest_writes_no_stage_output_object(
 
     pointers = len(list(root.rglob("stage-cache-sharded/*/*")))
     objects = len(list(root.rglob("sha256-sharded/*/*")))
-    files = sum(1 for path in root.rglob("*") if path.is_file())
+    # Verification receipts (ADR 0034) record file stats, not content: not counted here.
+    files = sum(
+        1
+        for path in root.rglob("*")
+        if path.is_file() and path.parent.name != "verification-receipts"
+    )
 
     assert pointers == 120
     assert sum(len(_artifact_objects(store)) for store in _stores(root)) == 1
     assert objects <= 33
     assert files <= 185
     added = _deinline(root)
-    assert sum(1 for path in root.rglob("*") if path.is_file()) - files <= len(added)
+    assert sum(
+        1
+        for path in root.rglob("*")
+        if path.is_file() and path.parent.name != "verification-receipts"
+    ) - files <= len(added)

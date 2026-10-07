@@ -196,8 +196,9 @@ def _inspect(
     """Follow the processing pointer and verify the whole release; reads only."""
     probe = _Probe(document_id or source_root.name, origin, source_root, processing_root)
     try:
-        outputs = ProcessingStore(processing_root)
-        sources = LocalDocumentStore(source_root, activate_on_publish=False)
+        # Read-only: persisted receipts are reused, never written (ADR 0034).
+        outputs = ProcessingStore(processing_root, record_receipts=False)
+        sources = LocalDocumentStore(source_root, activate_on_publish=False, record_receipts=False)
         processing_id = _pointer(processing_root / "current-processing")
         if processing_id is None:
             raise FileNotFoundError(
@@ -619,9 +620,13 @@ def mount_document(
         )
     if embedder is not None and entry.embedding_fingerprint != embedder.fingerprint:
         raise ValueError(_MOUNT_REFUSAL)
-    sources = LocalDocumentStore(Path(entry.source_store), activate_on_publish=False)
+    sources = LocalDocumentStore(
+        Path(entry.source_store), activate_on_publish=False, record_receipts=False
+    )
     outputs = ProcessingStore(
-        Path(entry.processing_store), verify_every_request=verify_every_request
+        Path(entry.processing_store),
+        verify_every_request=verify_every_request,
+        record_receipts=False,
     )
     manifest = outputs.load(entry.current_processing_id)
     publication = manifest.retrieval
