@@ -20,7 +20,7 @@ from enterprise_pdf_rag.adapters.http.processing_schemas import DocumentTreeReco
 from enterprise_pdf_rag.adapters.pdf_ingestion import ingest_pdf
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
-from ragspine.common.evidence.providers.providers import LLMConfig
+from ragspine.common.evidence.providers.providers import LLMConfig, ProviderRequestError
 from ragspine.extraction.evidence.metadata.document_tree import DocumentTree
 from ragspine.extraction.evidence.page.models import StageState
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import PROVIDER_BASE_URL
@@ -64,7 +64,8 @@ def _metadata_sender(url: str, *, api_key: str, payload: bytes, timeout: float) 
 
 
 def _summary_sender(prompts: list[str], *, fail_first: bool = False) -> Callable[..., bytes]:
-    """Answers each node prompt from its own title; optionally drops the first connection."""
+    """Answers each node prompt from its own title; optionally refuses the first call (a
+    permanent 403: a timeout would now be retried within the call, ADR 0034)."""
 
     def sender(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
         request = json.loads(payload)
@@ -72,7 +73,9 @@ def _summary_sender(prompts: list[str], *, fail_first: bool = False) -> Callable
         prompt = str(request["messages"][1]["content"])
         prompts.append(prompt)
         if fail_first and len(prompts) == 1:
-            raise TimeoutError("offline transport refused")
+            raise ProviderRequestError(
+                "Provider returned HTTP 403; no retry performed", status=403, category="http"
+            )
         title = prompt.splitlines()[0].removeprefix("Section title: ")
         reply = {"summary": f"Routing note for {title}.", "key_topics": [title]}
         return json.dumps(
@@ -294,7 +297,7 @@ def test_one_node_whose_call_fails_fails_the_stage_but_keeps_the_tree_and_the_ot
 
     assert len(prompts) == _EXPECTED_BRANCHES
     assert folded.state is StageState.FAILED
-    assert folded.diagnostic is not None and "provider_timeout" in folded.diagnostic
+    assert folded.diagnostic is not None and "provider_http_403" in folded.diagnostic
     assert (folded.node_count, folded.leaf_count) == (_EXPECTED_NODES, _EXPECTED_LEAVES)
 
     outputs = ProcessingStore(processing_store)

@@ -200,9 +200,13 @@ def test_a_claim_names_its_holder_and_lease_and_is_released_once_recorded(
 
 
 def test_the_lease_covers_every_blocking_step_of_the_slowest_allowed_call() -> None:
-    assert json_completion._claim_lease(45.0) == 300
-    assert json_completion._claim_lease(180.0) == 840
-    assert json_completion._claim_lease(180.0) + 60 <= LEGACY_CLAIM_LEASE_SECONDS
+    # ADR 0034: one pause of at most 31 s before each attempt; a retry renews the claim.
+    assert json_completion._claim_lease(45.0) == 331
+    assert json_completion._claim_lease(180.0) == 871
+    assert json_completion._claim_lease(180.0) < LEGACY_CLAIM_LEASE_SECONDS
+    # A legacy claim's writer predates ADR 0023 and never retried or paused: its longest call
+    # was 4 x 180 + 120 = 840 s, a minute inside the legacy lease.
+    assert LEGACY_CLAIM_LEASE_SECONDS >= 4 * 180 + 120 + 60
 
 
 def test_old_data_with_a_success_record_and_its_claim_replays_untouched(tmp_path: Path) -> None:

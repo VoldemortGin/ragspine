@@ -22,6 +22,7 @@ from ragspine.common.evidence.providers.json_completion import (
     unsupported_sampling_parameters,
 )
 from ragspine.common.evidence.providers.providers import LLMConfig, ProviderRequestError
+from ragspine.common.evidence.providers.transient import TRANSIENT_MAX_RETRIES
 
 PNG = b"\x89PNG\r\n\x1a\nfixture-bytes"
 KEY = "test-secret-never-written"
@@ -398,7 +399,7 @@ def test_a_refused_temperature_that_was_never_sent_is_not_retried(
     assert len(scripted.sent) == 1
 
 
-@pytest.mark.parametrize("status", [401, 403, 404, 429, 500, 503])
+@pytest.mark.parametrize("status", [401, 403, 404])
 def test_other_statuses_are_never_read_and_never_resent(
     tmp_path: Path, endpoint: Callable[[Rule], _Endpoint], status: int
 ) -> None:
@@ -413,7 +414,23 @@ def test_other_statuses_are_never_read_and_never_resent(
     assert "provider_error_param" not in record["diagnostics"]
 
 
-def test_a_timeout_is_unchanged_and_never_resent(
+@pytest.mark.parametrize("status", [429, 500, 503])
+def test_transient_statuses_are_never_read_and_resent_with_the_same_body(
+    tmp_path: Path, endpoint: Callable[[Rule], _Endpoint], status: int
+) -> None:
+    """ADR 0034: retried within the call, the temperature kept, nothing recorded."""
+    scripted = endpoint(lambda body: (status, AZURE_TEMPERATURE_400))
+    with pytest.raises(JsonCompletionError) as raised:
+        _ask(_client(tmp_path))
+    assert raised.value.code == f"provider_http_{status}"
+    assert len(scripted.sent) == 1 + TRANSIENT_MAX_RETRIES and scripted.reads == []
+    assert all(body == scripted.sent[0] for body in scripted.sent)
+    assert "temperature" in scripted.sent[0]
+    assert unsupported_sampling_parameters(_config()) == ()
+    assert _records(tmp_path) == {}
+
+
+def test_a_timeout_is_retried_with_the_same_body_and_never_recorded(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     sent: list[str] = []
@@ -432,8 +449,9 @@ def test_a_timeout_is_unchanged_and_never_resent(
     monkeypatch.setattr(provider_module, "HTTPSConnection", Connection)
     with pytest.raises(JsonCompletionError, match="provider_timeout"):
         _ask(_client(tmp_path))
-    assert sent == ["/v1/chat/completions"]
+    assert sent == ["/v1/chat/completions"] * (1 + TRANSIENT_MAX_RETRIES)
     assert MARKER not in _files(tmp_path)
+    assert _records(tmp_path) == {}
 
 
 # ---- 4. seed, and more than one refused parameter --------------------------------------------

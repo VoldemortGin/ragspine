@@ -10,9 +10,10 @@ separate loopback service; rerank never inherits LLM settings.
 import json
 import math
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from email.utils import parsedate_to_datetime
 from http.client import HTTPException, HTTPSConnection
-from time import monotonic
+from time import monotonic, time
 from typing import Literal, Protocol, runtime_checkable
 from urllib.parse import urlsplit
 
@@ -31,6 +32,8 @@ class ProviderRequestError(ValueError):
     ``param`` / ``error_code`` are the OpenAI-style ``error.param`` / ``error.code`` of an
     HTTP 400 body, each charset- and length-checked; the provider's message and every other
     byte of the body are discarded unretained. Both are ``None`` for any other failure.
+    ``retry_after`` is the wait (seconds) a non-200 response's ``Retry-After`` /
+    ``retry-after-ms`` header asked for, else ``None`` (enterprise-pdf-rag ADR 0034).
     """
 
     def __init__(
@@ -44,6 +47,7 @@ class ProviderRequestError(ValueError):
         exception_type: str | None = None,
         param: str | None = None,
         error_code: str | None = None,
+        retry_after: float | None = None,
     ) -> None:
         super().__init__(message)
         self.status = status
@@ -51,6 +55,7 @@ class ProviderRequestError(ValueError):
         self.exception_type = exception_type
         self.param = param
         self.error_code = error_code
+        self.retry_after = retry_after
 
 
 # Greedy decoding. Two identical questions must produce one answer, and a cached answer must
@@ -266,6 +271,48 @@ def _rejected_field(response: _Readable) -> tuple[str | None, str | None]:
     return _error_field(error.get("param")), _error_field(error.get("code"))
 
 
+def retry_after_seconds(headers: Callable[[str], str | None]) -> float | None:
+    """The wait a response asks for: ``retry-after-ms`` (Azure OpenAI), else ``Retry-After``
+    as delta-seconds or an HTTP date. Malformed, negative or absent → ``None``. Only these two
+    header values are read; nothing of the body."""
+    milliseconds = (headers("retry-after-ms") or "").strip()
+    if milliseconds:
+        try:
+            value = float(milliseconds) / 1000
+        except ValueError:
+            value = math.nan
+        if math.isfinite(value) and value >= 0:
+            return value
+    raw = (headers("retry-after") or "").strip()
+    if not raw:
+        return None
+    if raw.isdigit():
+        return float(raw)
+    try:
+        when = parsedate_to_datetime(raw)
+    except (TypeError, ValueError, IndexError):
+        return None
+    if when.tzinfo is None:
+        return None
+    return max(0.0, when.timestamp() - time())
+
+
+def _retry_after(response: object) -> float | None:
+    """The ``Retry-After`` wait of a response, through its ``getheader`` when it has one."""
+    getheader = getattr(response, "getheader", None)
+    if not callable(getheader):
+        return None
+
+    def header(name: str) -> str | None:
+        value = getheader(name)
+        return value if isinstance(value, str) else None
+
+    try:
+        return retry_after_seconds(header)
+    except (OSError, HTTPException, ValueError, TypeError):
+        return None
+
+
 def _send_once(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
     parsed = urlsplit(url)
     connection = HTTPSConnection(parsed.netloc, timeout=timeout)
@@ -281,7 +328,8 @@ def _send_once(url: str, *, api_key: str, payload: bytes, timeout: float) -> byt
         )
         response = connection.getresponse()
         if response.status != 200:
-            # Only a 400 names a request field; every other status stays unread.
+            # Only a 400 names a request field; every other status stays unread. Of the
+            # headers only the requested wait is read (ADR 0034).
             param, code = _rejected_field(response) if response.status == 400 else (None, None)
             raise ProviderRequestError(
                 f"Provider returned HTTP {response.status}; no retry performed",
@@ -289,6 +337,7 @@ def _send_once(url: str, *, api_key: str, payload: bytes, timeout: float) -> byt
                 category="http",
                 param=param,
                 error_code=code,
+                retry_after=_retry_after(response),
             )
         body = response.read(1_048_577)
         if len(body) > 1_048_576:

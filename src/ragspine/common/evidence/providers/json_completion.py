@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
 from time import monotonic, time
-from typing import Any, Literal
+from typing import Any, Literal, NoReturn
 
 from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, ValidationError
 
@@ -27,6 +27,7 @@ from ragspine.common.evidence.file_placement import (
     note_repair,
     replace_file,
 )
+from ragspine.common.evidence.providers import transient
 from ragspine.common.evidence.providers.providers import (
     LLMConfig,
     ProviderRequestError,
@@ -49,7 +50,8 @@ _SKIPPED_CODE = "sampling_parameter_unsupported"
 # fingerprint (or nothing) and is judged by its mtime.
 CLAIM_FORMAT = "json-completion-claim-v2"
 # A legacy claim is presumed abandoned this long after its mtime: longer than the lease of any
-# call (``_claim_lease(180)`` = 840 s), since nothing says how long its holder may run.
+# call (``_claim_lease(180)`` = 871 s; its writer, older than ADR 0023, never paused or retried
+# and ran at most 840 s), since nothing says how long its holder may run.
 LEGACY_CLAIM_LEASE_SECONDS = 900
 # Replay failures that mean "this entry was lost or damaged on disk" (an asynchronous flush that
 # failed after the write returned): the call is made again once, never stuck (ADR 0029).
@@ -372,9 +374,11 @@ def _context_document(
 
 def _claim_lease(timeout: float) -> int:
     """Seconds after which a claim's holder is presumed dead. ``timeout`` bounds each blocking
-    socket operation (connect, send, wait, read), not the whole call, hence four of them plus
-    room for the cache writes around the transport."""
-    return math.ceil(4 * timeout) + 120
+    socket operation (connect, send, wait, read), not the whole call, hence four of them; one
+    attempt is preceded by at most one ``RETRY_MAX_PAUSE`` (a backoff or a cooldown, ADR 0034),
+    and a holder renews its claim before every retry, so a lease covers one pause and one
+    attempt, plus room for the cache writes around the transport."""
+    return math.ceil(4 * timeout + transient.RETRY_MAX_PAUSE) + 120
 
 
 def _claim_owner(fingerprint: str, lease_seconds: int) -> bytes:
@@ -493,6 +497,50 @@ def _claim_request(record_path: Path, fingerprint: str, lease_seconds: int) -> i
     return generation + 1
 
 
+def _transport_failure(error: ProviderRequestError | OSError) -> tuple[str, int | None, str | None]:
+    """``(failure_code, http_status, exception_type)`` of a failed send. The code is what a
+    record would hold, and whether it is in ``TRANSIENT_FAILURE_CODES`` decides a retry."""
+    matched = (
+        re.fullmatch(r"Provider returned HTTP ([1-5][0-9]{2}); no retry performed", str(error))
+        if isinstance(error, ProviderRequestError)
+        else None
+    )
+    status = error.status if isinstance(error, ProviderRequestError) else None
+    if status is None and matched is not None:
+        status = int(matched.group(1))
+    category = (
+        error.category
+        if isinstance(error, ProviderRequestError)
+        else "timeout"
+        if isinstance(error, TimeoutError)
+        else "connection"
+    )
+    exception_type = (
+        error.exception_type
+        if isinstance(error, ProviderRequestError)
+        else "TimeoutError"
+        if isinstance(error, TimeoutError)
+        else "OSError"
+    )
+    code = (
+        f"provider_http_{status}"
+        if status is not None
+        else f"provider_{category}"
+        if category in {"timeout", "connection", "response_limit"}
+        else "provider_request_failed"
+    )
+    return code, status, exception_type
+
+
+def _holds_transient_failure(record_path: Path) -> bool:
+    """Is the record there still a transient failure (no other attempt replaced it)?"""
+    try:
+        record = _CacheRecord.model_validate_json(record_path.read_bytes())
+    except (ValueError, OSError):
+        return False
+    return record.failure_code in transient.TRANSIENT_FAILURE_CODES
+
+
 def _release_claims(record_path: Path) -> None:
     """Remove a request's claim files once its record exists (the record alone answers from
     then on), newest takeover first; one left behind is harmless next to its record."""
@@ -531,6 +579,8 @@ class JsonCompletionClient:
         self._taken_over = 0
         self._claim_blocked = 0
         self._repaired = 0
+        self._retries = 0
+        self._transient_failures = 0
 
     @property
     def live_call_count(self) -> int:
@@ -558,6 +608,18 @@ class JsonCompletionClient:
         """Damaged cache entries (unreadable record, lost or truncated response) this client
         called again and repaired (ADR 0029)."""
         return self._repaired
+
+    @property
+    def retry_count(self) -> int:
+        """Requests resent after a transient failure (429, 5xx, timeout, connection; ADR 0034).
+        Each is also a live call."""
+        return self._retries
+
+    @property
+    def transient_failure_count(self) -> int:
+        """Calls that still failed transiently once their retries (or budget) were spent; none
+        of them left a record, so the next run calls them again."""
+        return self._transient_failures
 
     @property
     def dropped_parameters(self) -> tuple[str, ...]:
@@ -795,6 +857,10 @@ class JsonCompletionClient:
         # The record already there when it is damaged (or names a lost response): it is
         # called again and replaced, ADR 0029. None = an ordinary first call or retry.
         damaged: _CacheRecord | Literal["unreadable"] | None = None
+        # The record there is a transient failure written before ADR 0034: it is called again
+        # at the same path, and whatever comes back (other than a new transient failure)
+        # replaces it.
+        stale = False
         record: _CacheRecord | None = None
         if record_path.exists():
             try:
@@ -810,7 +876,12 @@ class JsonCompletionClient:
             if refused is not None:
                 self._store_context(fingerprint, context)
                 raise _ParameterRefused(refused)
-            if record_path == original_path and droppable and _unexamined_400(record):
+            if record.failure_code in transient.TRANSIENT_FAILURE_CODES and not cache_only:
+                if known:  # the body holds a parameter the endpoint refuses: go without it
+                    self._store_context(fingerprint, context)
+                    raise _ParameterRefused(min(known))
+                stale = True
+            elif record_path == original_path and droppable and _unexamined_400(record):
                 # Recorded before a 400 body was read: it may be a refused sampling parameter.
                 if known:
                     parameter = min(known)
@@ -849,13 +920,15 @@ class JsonCompletionClient:
                 record_path, fingerprint, _claim_lease(self._timeout)
             )
         except JsonCompletionError:
-            if damaged is not None or not record_path.exists():
+            if damaged is not None or stale or not record_path.exists():
                 self._claim_blocked += 1
                 raise
             generation = None
         else:
-            if record_path.exists() and (
-                damaged is None or self._intact(record_path, fingerprint, response_model)
+            if (
+                record_path.exists()
+                and (damaged is None or self._intact(record_path, fingerprint, response_model))
+                and not (stale and _holds_transient_failure(record_path))
             ):
                 _release_claims(record_path)
                 generation = None
@@ -875,83 +948,50 @@ class JsonCompletionClient:
             self._taken_over += 1
             takeover = {"claim_takeover": generation}
         context_path, context_warning = self._store_context(fingerprint, context)
-        self._remaining -= 1
-        started = monotonic()
-        try:
-            raw = self._sender(
-                self._config.chat_completions_url,
-                api_key=self._config.api_key.get_secret_value(),
-                payload=payload,
-                timeout=self._timeout,
-            )
-        except (ProviderRequestError, OSError) as error:
-            matched = (
-                re.fullmatch(
-                    r"Provider returned HTTP ([1-5][0-9]{2}); no retry performed",
-                    str(error),
+        # The claim is held through every retry; a transient failure is retried after a
+        # jittered backoff (or the endpoint's Retry-After), each retry a live call (ADR 0034).
+        key = _endpoint_key(self._config)
+        retry = 0
+        holder = generation  # the claim generation this call holds now
+        transient.pause(key)
+        while True:
+            self._remaining -= 1
+            started = monotonic()
+            try:
+                raw = self._sender(
+                    self._config.chat_completions_url,
+                    api_key=self._config.api_key.get_secret_value(),
+                    payload=payload,
+                    timeout=self._timeout,
                 )
-                if isinstance(error, ProviderRequestError)
-                else None
-            )
-            status = error.status if isinstance(error, ProviderRequestError) else None
-            if status is None and matched is not None:
-                status = int(matched.group(1))
-            category = (
-                error.category
-                if isinstance(error, ProviderRequestError)
-                else "timeout"
-                if isinstance(error, TimeoutError)
-                else "connection"
-            )
-            exception_type = (
-                error.exception_type
-                if isinstance(error, ProviderRequestError)
-                else "TimeoutError"
-                if isinstance(error, TimeoutError)
-                else "OSError"
-            )
-            code = (
-                f"provider_http_{status}"
-                if status is not None
-                else f"provider_{category}"
-                if category in {"timeout", "connection", "response_limit"}
-                else "provider_request_failed"
-            )
-            examined: dict[str, Any] = {}
-            if status == 400:
-                examined = {
-                    "provider_error_param": getattr(error, "param", None),
-                    "provider_error_code": getattr(error, "error_code", None),
-                }
-            diagnostic = RequestDiagnostics(
-                endpoint_path="/v1/chat/completions",
-                request_bytes=len(payload),
-                response_bytes=None,
-                elapsed_ms=round((monotonic() - started) * 1000),
-                http_status=status,
-                exception_type=exception_type,
-                finish_category="transport_error",
-                attempt=2 if record_path == retry_path else 1,
-                context_path=context_path,
-                context_warning=context_warning,
-                **examined,
-                **takeover,
-            )
-            if damaged is None:  # a failed repair leaves the damaged entry to try again
-                self._save_record(record_path, fingerprint, None, code, diagnostic)
-            _release_claims(record_path)
-            refused = _refused_parameter(
-                _CacheRecord(
-                    request_fingerprint=fingerprint,
-                    response_digest=None,
-                    failure_code=code,
-                    diagnostics=diagnostic,
-                ),
-                droppable,
-            )
-            if refused is not None:
-                raise _ParameterRefused(refused) from None
-            raise JsonCompletionError(code, fingerprint, diagnostics=diagnostic) from None
+                break
+            except (ProviderRequestError, OSError) as error:
+                failure = _transport_failure(error)
+                passing = failure[0] in transient.TRANSIENT_FAILURE_CODES
+                if passing:
+                    retry_after = transient.note_failure(key, error)
+                    if retry < transient.TRANSIENT_MAX_RETRIES and self._remaining > 0:
+                        transient.pause(key, transient.retry_delay(retry, retry_after))
+                        holder = self._renew_claim(record_path, fingerprint, holder)
+                        retry += 1
+                        self._retries += 1
+                        continue
+                    self._transient_failures += 1
+                self._raise_failure(
+                    error,
+                    failure,
+                    payload,
+                    fingerprint,
+                    record_path=record_path,
+                    started=started,
+                    attempt=2 if record_path == retry_path else 1,
+                    context_path=context_path,
+                    context_warning=context_warning,
+                    takeover=takeover,
+                    record=damaged is None and not passing,
+                    replace=stale,
+                    droppable=droppable,
+                )
         diagnostic = RequestDiagnostics(
             endpoint_path="/v1/chat/completions",
             request_bytes=len(payload),
@@ -968,7 +1008,12 @@ class JsonCompletionClient:
         if len(raw) > 1_048_576:
             if damaged is None:
                 self._save_record(
-                    record_path, fingerprint, None, "response_budget_exceeded", diagnostic
+                    record_path,
+                    fingerprint,
+                    None,
+                    "response_budget_exceeded",
+                    diagnostic,
+                    replace_damaged=stale,
                 )
             _release_claims(record_path)
             raise JsonCompletionError(
@@ -981,12 +1026,16 @@ class JsonCompletionClient:
             result = self._parse(raw, fingerprint, response_model, cache_hit=False)
         except JsonCompletionError as error:
             if damaged is None:
-                self._save_record(record_path, fingerprint, digest, error.code, diagnostic)
+                self._save_record(
+                    record_path, fingerprint, digest, error.code, diagnostic, replace_damaged=stale
+                )
             _release_claims(record_path)
             raise JsonCompletionError(error.code, fingerprint, diagnostics=diagnostic) from None
         diagnostic = diagnostic.model_copy(update={"finish_category": "stop"})
         if damaged is None:
-            self._save_record(record_path, fingerprint, digest, None, diagnostic)
+            self._save_record(
+                record_path, fingerprint, digest, None, diagnostic, replace_damaged=stale
+            )
         else:
             self._repaired += 1
             note_repair("model_cache")
@@ -1001,6 +1050,76 @@ class JsonCompletionClient:
                 )
         _release_claims(record_path)
         return replace(result, diagnostics=diagnostic)
+
+    def _raise_failure(
+        self,
+        error: ProviderRequestError | OSError,
+        failure: tuple[str, int | None, str | None],
+        payload: bytes,
+        fingerprint: str,
+        *,
+        record_path: Path,
+        started: float,
+        attempt: int,
+        context_path: str | None,
+        context_warning: str | None,
+        takeover: dict[str, Any],
+        record: bool,
+        replace: bool,
+        droppable: frozenset[str],
+    ) -> NoReturn:
+        """Record a classified transport failure when ``record`` (a failed repair, ADR 0029,
+        and a transient failure, ADR 0034, leave no record) and raise it — as
+        ``_ParameterRefused`` when the endpoint refused a droppable parameter (ADR 0021)."""
+        code, status, exception_type = failure
+        examined: dict[str, Any] = {}
+        if status == 400:
+            examined = {
+                "provider_error_param": getattr(error, "param", None),
+                "provider_error_code": getattr(error, "error_code", None),
+            }
+        diagnostic = RequestDiagnostics(
+            endpoint_path="/v1/chat/completions",
+            request_bytes=len(payload),
+            response_bytes=None,
+            elapsed_ms=round((monotonic() - started) * 1000),
+            http_status=status,
+            exception_type=exception_type,
+            finish_category="transport_error",
+            attempt=attempt,
+            context_path=context_path,
+            context_warning=context_warning,
+            **examined,
+            **takeover,
+        )
+        if record:
+            self._save_record(
+                record_path, fingerprint, None, code, diagnostic, replace_damaged=replace
+            )
+        _release_claims(record_path)
+        refused = _refused_parameter(
+            _CacheRecord(
+                request_fingerprint=fingerprint,
+                response_digest=None,
+                failure_code=code,
+                diagnostics=diagnostic,
+            ),
+            droppable,
+        )
+        if refused is not None:
+            raise _ParameterRefused(refused) from None
+        raise JsonCompletionError(code, fingerprint, diagnostics=diagnostic) from None
+
+    def _renew_claim(self, record_path: Path, fingerprint: str, holder: int) -> int:
+        """Before a retry, take a fresh lease by creating the next claim generation — the same
+        exclusive create a takeover uses (ADR 0023), so a lease only ever has to cover one
+        attempt. Losing that create means another process judged this call over and took it:
+        it is not sent again here."""
+        lease = _claim_lease(self._timeout)
+        if not _write_claim(_claim_path(record_path, holder + 1), _claim_owner(fingerprint, lease)):
+            self._claim_blocked += 1
+            raise JsonCompletionError("request_in_progress_or_uncertain", fingerprint)
+        return holder + 1
 
     def _intact[T: BaseModel](
         self, record_path: Path, fingerprint: str, response_model: type[T]

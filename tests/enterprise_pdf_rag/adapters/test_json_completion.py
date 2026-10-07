@@ -53,12 +53,13 @@ class _OptionalAnswer(BaseModel):
 
 def test_two_clients_cannot_both_issue_the_one_explicit_retry(tmp_path: Path) -> None:
     def fail_once(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
-        raise ProviderRequestError("Provider timed out", category="timeout")
+        # A permanent failure: a transient one is never recorded (ADR 0034).
+        raise ProviderRequestError("Provider response too large", category="response_limit")
 
     original = JsonCompletionClient(
         _config(), cache_dir=tmp_path, max_live_calls=1, sender=fail_once
     )
-    with pytest.raises(JsonCompletionError, match="provider_timeout"):
+    with pytest.raises(JsonCompletionError, match="provider_response_limit"):
         original.complete_json(
             task="parallel", prompt="same", image_png=PNG, response_model=_Answer
         )
@@ -380,6 +381,8 @@ def test_model_schema_requires_every_declared_property_including_nested_definiti
         (200, True, "provider_timeout"),
     ],
 )
+# A 429 and a timeout are transient (ADR 0034): with a budget of one there is no retry, and
+# nothing is recorded, so they are sent once and never replayed.
 def test_real_transport_classifies_http_and_timeout_without_response_secrets(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -417,11 +420,16 @@ def test_real_transport_classifies_http_and_timeout_without_response_secrets(
 
     monkeypatch.setattr(provider_module, "HTTPSConnection", Connection)
     client = JsonCompletionClient(_config(), cache_dir=tmp_path, max_live_calls=1)
-    for _ in range(2):
+    transient = code in {"provider_http_429", "provider_timeout"}
+    for attempt in range(2):
         with pytest.raises(JsonCompletionError) as raised:
             client.complete_json(
                 task="safe-cause", prompt="read", image_png=PNG, response_model=_Answer
             )
+        if transient and attempt:
+            assert raised.value.code == "call_budget_exhausted"
+            assert not tuple((tmp_path / "requests").glob("*.json"))
+            break
         assert raised.value.code == code
         diagnostic = raised.value.diagnostics
         assert diagnostic is not None
@@ -442,7 +450,8 @@ def test_explicit_failed_retry_preserves_first_attempt_and_is_limited_to_one(
     def sender(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
         calls.append(payload)
         if len(calls) == 1 or not retry_succeeds:
-            raise ProviderRequestError("timeout", category="timeout", exception_type="TimeoutError")
+            # A permanent failure: a transient one is never recorded (ADR 0034).
+            raise ProviderRequestError("too large", category="response_limit")
         assert timeout == 180.0
         return _response()
 
@@ -459,7 +468,7 @@ def test_explicit_failed_retry_preserves_first_attempt_and_is_limited_to_one(
 
     assert (
         invoke(JsonCompletionClient(_config(), cache_dir=tmp_path, max_live_calls=1, sender=sender))
-        == "provider_timeout"
+        == "provider_response_limit"
     )
     (original,) = tuple((tmp_path / "requests").glob("*.json"))
     original_bytes = original.read_bytes()
@@ -476,7 +485,7 @@ def test_explicit_failed_retry_preserves_first_attempt_and_is_limited_to_one(
         )
         == "call_budget_exhausted"
     )
-    expected = "observed" if retry_succeeds else "provider_timeout"
+    expected = "observed" if retry_succeeds else "provider_response_limit"
     assert (
         invoke(
             JsonCompletionClient(

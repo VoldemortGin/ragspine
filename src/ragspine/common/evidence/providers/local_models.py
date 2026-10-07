@@ -9,9 +9,11 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from ragspine.common.evidence.providers import transient
 from ragspine.common.evidence.providers.providers import (
     LocalModelConfig,
     ProviderRequestError,
+    _retry_after,
 )
 
 
@@ -50,6 +52,7 @@ def _send_local_once(
                 f"Local model returned HTTP {response.status}; no retry performed",
                 status=response.status,
                 category="http",
+                retry_after=_retry_after(response),
             )
         body = response.read(max_response_bytes + 1)
         if len(body) > max_response_bytes:
@@ -139,6 +142,8 @@ class LocalEmbeddingAdapter:
         self._batch_max_items = batch_max_items
         self._batch_max_chars = batch_max_chars
         self._request_count = 0
+        self._retries = 0
+        self._transient_failures = 0
         self._batch_failures = 0
         self._arrays_worked = False
         self._arrays_refused = False
@@ -151,6 +156,16 @@ class LocalEmbeddingAdapter:
     def request_count(self) -> int:
         """Requests this adapter has sent, failed ones included."""
         return self._request_count
+
+    @property
+    def retry_count(self) -> int:
+        """Requests resent after a transient failure (also in ``request_count``)."""
+        return self._retries
+
+    @property
+    def transient_failure_count(self) -> int:
+        """Requests that still failed transiently once their retries were spent."""
+        return self._transient_failures
 
     def embed_description(self, text: str) -> tuple[float, ...]:
         return self._embed(text)
@@ -165,7 +180,8 @@ class LocalEmbeddingAdapter:
         one-text batch is that very request, and a reply is aligned by its ``index`` alone
         and refused unless it covers every input once with one finite dimension. A failed
         batch is halved down to single inputs; a single input fails exactly as
-        ``embed_description`` does. An endpoint refusing arrays (HTTP 400 on a pair whose
+        ``embed_description`` does. A transient failure is first retried within the request
+        (ADR 0034); only once those retries are spent is the batch halved. An endpoint refusing arrays (HTTP 400 on a pair whose
         singles answer, before any array worked) and an adapter past
         ``EMBEDDING_BATCH_MAX_FAILURES`` failed batches send single inputs from then on.
         """
@@ -236,16 +252,33 @@ class LocalEmbeddingAdapter:
         ).encode()
         url = _endpoint(self._config.base_url, "/v1/embeddings")
         api_key = self._config.api_key.get_secret_value()
-        self._request_count += 1
-        if isinstance(text, list) and self._sender is _DEFAULT_SENDER:
-            return _send_local_once(
-                url,
-                api_key=api_key,
-                payload=payload,
-                timeout=timeout,
-                max_response_bytes=_RESPONSE_LIMIT * len(text),
-            )
-        return self._sender(url, api_key=api_key, payload=payload, timeout=timeout)
+        key = (url, self._config.model)
+        # A transient failure (429, 5xx, timeout, connection) is retried here, before any
+        # split: halving a rate-limited batch only multiplies the requests (ADR 0034).
+        retry = 0
+        transient.pause(key)
+        while True:
+            self._request_count += 1
+            try:
+                if isinstance(text, list) and self._sender is _DEFAULT_SENDER:
+                    return _send_local_once(
+                        url,
+                        api_key=api_key,
+                        payload=payload,
+                        timeout=timeout,
+                        max_response_bytes=_RESPONSE_LIMIT * len(text),
+                    )
+                return self._sender(url, api_key=api_key, payload=payload, timeout=timeout)
+            except (ProviderRequestError, OSError) as error:
+                if not transient.is_transient(error):
+                    raise
+                retry_after = transient.note_failure(key, error)
+                if retry >= transient.TRANSIENT_MAX_RETRIES:
+                    self._transient_failures += 1
+                    raise
+                transient.pause(key, transient.retry_delay(retry, retry_after))
+                retry += 1
+                self._retries += 1
 
     def _embed(self, text: str) -> tuple[float, ...]:
         if not text.strip():

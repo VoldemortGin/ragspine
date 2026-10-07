@@ -137,7 +137,8 @@ def test_failed_correction_is_not_retried_by_a_client_with_retry_enabled(
         calls.append(payload)
         if len(calls) == 1:
             return _response(prepared, "0" * 64)
-        raise ProviderRequestError("bounded correction failed", status=429, category="http")
+        # A permanent failure: a transient one (429, 5xx) is retried in the call (ADR 0034).
+        raise ProviderRequestError("bounded correction failed", status=403, category="http")
 
     client = JsonCompletionClient(
         load_llm_config(
@@ -158,7 +159,7 @@ def test_failed_correction_is_not_retried_by_a_client_with_retry_enabled(
         client, prepared, correction_of=old.value.request_fingerprint
     )
     for _ in range(2):
-        with pytest.raises(JsonCompletionError, match="provider_http_429"):
+        with pytest.raises(JsonCompletionError, match="provider_http_403"):
             correction.infer(prepared.svg)
     assert len(calls) == client.live_call_count == 2
     assert not tuple((tmp_path / "requests").glob("*.retry-1.json"))

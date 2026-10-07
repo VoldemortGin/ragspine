@@ -110,6 +110,18 @@ def _forget_unsupported_sampling_parameters():
 
 
 @pytest.fixture(autouse=True)
+def _no_real_transient_backoff(monkeypatch):
+    """临时错误(429/5xx/超时/连接)的退避等待一律不真睡,端点冷却每个用例前后清空(ADR 0034)。
+    需要观察等待时长的用例自行再 monkeypatch ``transient._sleep``。"""
+    from ragspine.common.evidence.providers import transient
+
+    monkeypatch.setattr(transient, "_sleep", lambda seconds: None)
+    transient.forget_cooldowns()
+    yield
+    transient.forget_cooldowns()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_ambient_llm_and_notebook_settings(monkeypatch, request):
     """开发者 shell 里的 OPENAI_* / provider key / 代理 / NB_* / PDF_INGEST_PASSWORD 不得影响测试(configs 会把它们读成 LLM 首选名与 notebook 路径)。
 

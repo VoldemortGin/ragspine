@@ -17,6 +17,7 @@ from ragspine.common.evidence.providers.providers import (
     ProviderRequestError,
     load_local_model_config,
 )
+from ragspine.common.evidence.providers.transient import TRANSIENT_MAX_RETRIES
 from ragspine.extraction.evidence.figures.ports import BatchEmbeddingPort, EmbeddingPort
 
 _CONFIG = {
@@ -260,7 +261,9 @@ def test_a_non_finite_value_in_a_batch_is_a_failure() -> None:
         ),
     ],
 )
-def test_a_transient_batch_failure_is_retried_as_halves(error: ProviderRequestError) -> None:
+def test_a_transient_batch_failure_is_retried_whole_before_any_split(
+    error: ProviderRequestError,
+) -> None:
     calls = {"count": 0}
 
     def fault(inputs: list[str] | str) -> ProviderRequestError | None:
@@ -270,14 +273,15 @@ def test_a_transient_batch_failure_is_retried_as_halves(error: ProviderRequestEr
     endpoint = _Endpoint(fault=fault)
     texts = _texts(16)
     assert _adapter(endpoint).embed_descriptions(texts) == tuple(_vector(t) for t in texts)
-    assert endpoint.sizes == [16, 8, 8]
+    assert endpoint.sizes == [16, 16]  # ADR 0034: the same batch again, not two halves
 
 
-def test_an_endpoint_that_is_down_costs_one_failed_request_per_halving_level() -> None:
+def test_an_endpoint_that_is_down_costs_one_round_of_retries_per_halving_level() -> None:
     endpoint = _Endpoint(fault=lambda inputs: _http(503))
     with pytest.raises(ProviderRequestError, match="HTTP 503"):
         _adapter(endpoint).embed_descriptions(_texts(16))
-    assert endpoint.sizes == [16, 8, 4, 2, 1]
+    attempts = 1 + TRANSIENT_MAX_RETRIES
+    assert endpoint.sizes == [size for size in (16, 8, 4, 2, 1) for _ in range(attempts)]
 
 
 @pytest.mark.parametrize("status", [401, 403, 404])
@@ -296,7 +300,8 @@ def test_failed_batch_requests_are_capped_then_batching_stops() -> None:
     texts = _texts(64)
     assert adapter.embed_descriptions(texts) == tuple(_vector(t) for t in texts)
     failed = [size for size in endpoint.sizes if size > 1]
-    assert len(failed) == EMBEDDING_BATCH_MAX_FAILURES
+    # Each failed batch is one round of transient retries (ADR 0034).
+    assert len(failed) == EMBEDDING_BATCH_MAX_FAILURES * (1 + TRANSIENT_MAX_RETRIES)
     assert endpoint.sizes.count(1) == 64
     endpoint.inputs.clear()
     adapter.embed_descriptions(_texts(4))
