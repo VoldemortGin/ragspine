@@ -117,6 +117,11 @@ class LocalDocumentStore:
         """Which backend holds this store's bytes: ``files`` or ``sqlite`` (ADR 0036)."""
         return self._backend.kind
 
+    @property
+    def backend(self) -> ObjectBackend:
+        """The backend itself, for a sibling store of the same root to share (one lease)."""
+        return self._backend
+
     def transaction(self) -> AbstractContextManager[None]:
         """A reentrant write-transaction scope (no-op on the file layout)."""
         return self._backend.transaction()

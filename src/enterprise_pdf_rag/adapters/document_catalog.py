@@ -208,6 +208,8 @@ def _inspect(
 ) -> CatalogEntry:
     """Follow the processing pointer and verify the whole release; reads only."""
     probe = _Probe(document_id or source_root.name, origin, source_root, processing_root)
+    outputs: ProcessingStore | None = None
+    sources: LocalDocumentStore | None = None
     try:
         # Read-only: persisted receipts are reused, never written (ADR 0034).
         outputs = ProcessingStore(processing_root, record_receipts=False)
@@ -270,6 +272,12 @@ def _inspect(
         return probe.entry("ready", None)
     except (ValueError, OSError) as error:
         return probe.entry("corrupt", str(error) or type(error).__name__)
+    finally:
+        # The scan's stores are read-only and stage-scoped; a mount opens its own.
+        if outputs is not None:
+            outputs.close()
+        if sources is not None:
+            sources.close()
 
 
 def scan_catalog(ingestion_root: Path, *, legacy_roots: Sequence[Path] = ()) -> DocumentCatalog:

@@ -296,12 +296,14 @@ def annotate_page_metadata(
     for record in manifest.pages:
         outcome: StageOutcome
         metadata: PageMetadata | None
-        if deterministic:
-            page = inputs[record.page_index]
-            outcome, metadata = _deterministic_stage(outputs, page, record, running)
-        else:
-            page = _page_input(sources, source, manifest, record.page_index)
-            outcome, metadata = _page_stage(outputs, extractor, page, record)
+        # One backend transaction per page (ADR 0036 §7.2); a no-op on the file layout.
+        with outputs.transaction():
+            if deterministic:
+                page = inputs[record.page_index]
+                outcome, metadata = _deterministic_stage(outputs, page, record, running)
+            else:
+                page = _page_input(sources, source, manifest, record.page_index)
+                outcome, metadata = _page_stage(outputs, extractor, page, record)
         records.append(replace(record, metadata=outcome))
         states[outcome.state.value] += 1
         if metadata is not None:
@@ -355,9 +357,15 @@ def annotate_metadata_draft(
     client: JsonCompletionClient | None,
 ) -> PageMetadataSummary:
     """CLI entry over store paths: annotate a saved draft (or a published release) by id."""
-    return annotate_page_metadata(
-        LocalDocumentStore(Path(source_store).resolve(), activate_on_publish=False),
-        ProcessingStore(Path(processing_store).resolve()),
-        processing_id=processing_id,
-        client=client,
-    )
+    sources = LocalDocumentStore(Path(source_store).resolve(), activate_on_publish=False)
+    outputs = ProcessingStore(Path(processing_store).resolve())
+    try:
+        return annotate_page_metadata(
+            sources,
+            outputs,
+            processing_id=processing_id,
+            client=client,
+        )
+    finally:
+        outputs.close()
+        sources.close()

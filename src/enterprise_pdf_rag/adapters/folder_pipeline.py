@@ -89,6 +89,8 @@ from enterprise_pdf_rag.adapters.visual_requalification import (
 from enterprise_pdf_rag.processing.index_text import ONE_UNIT_EACH, IndexTextOptions
 from ragspine.common.evidence.configs import get_settings
 from ragspine.common.evidence.file_placement import recording_repairs
+from ragspine.common.evidence.object_backend.probe import probe_directory
+from ragspine.common.evidence.object_backend.protocol import StoreBusy
 from ragspine.common.evidence.providers.json_completion import (
     JsonCompletionClient,
     one_sampling_probe,
@@ -216,6 +218,8 @@ class DocumentRun(BoundaryModel):
     failed_stage: PipelineStage | None = None
     error: str | None = None
     ingestion: IngestionSummary | None = None
+    # Which store backend held this document's bytes (ADR 0036); None before ingest ran.
+    object_backend: str | None = None
     requalification: RequalificationCounts | None = None
     qualification: DraftQualification | None = None
     index: DraftIndex | None = None
@@ -308,6 +312,8 @@ class FolderPipelineResult(BoundaryModel):
     # The ingest mode of this run (ADR 0025) and the page layout it used (ADR 0028).
     ingest_mode: IngestMode = "full"
     layout_policy: LayoutPolicy = "model"
+    # The store backend this run's ingestion root resolved to (ADR 0036).
+    object_backend: str = "files"
     # What a light question set's answers searched (ADR 0032): every published document of
     # the run (the default), or only the document each question's ``doc`` names.
     retrieval_scope: RetrievalScope = "all_documents"
@@ -859,13 +865,28 @@ def _page_reporter(
 def _current_mode(processing_store: Path) -> IngestMode | None:
     """The ingest mode of the snapshot ``current-processing`` names, or None without one."""
     outputs = ProcessingStore(processing_store)
-    current_id = outputs.current_id()
-    if current_id is None:
-        return None
     try:
-        return published_ingest_mode(outputs.load(current_id))
-    except (OSError, ValueError):
-        return None
+        current_id = outputs.current_id()
+        if current_id is None:
+            return None
+        try:
+            return published_ingest_mode(outputs.load(current_id))
+        except (OSError, ValueError):
+            return None
+    finally:
+        outputs.close()
+
+
+def _resolved_backend_kind(ingestion_root: Path) -> str:
+    """The store backend this run will use under ``ingestion_root`` (ADR 0036): ``files``
+    when pinned, else what the directory's availability probe says ``auto`` resolves to
+    (explicit ``sqlite`` is reported as such; an unavailable directory then fails the
+    stores themselves, never silently)."""
+    mode = get_settings().object_store_backend
+    if mode == "files":
+        return "files"
+    ingestion_root.mkdir(parents=True, exist_ok=True)
+    return "sqlite" if mode == "sqlite" or probe_directory(ingestion_root).ok else "files"
 
 
 def _run_document(
@@ -884,7 +905,8 @@ def _run_document(
     continue_on_error: bool,
     progress: Progress | None,
     repairs: Counter[str] | None = None,
-    errors: tuple[type[Exception], ...] = (ValueError, OSError),
+    backend_kind: str = "files",
+    errors: tuple[type[Exception], ...] = (ValueError, OSError, StoreBusy),
     cancel: Event | None = None,
 ) -> tuple[DocumentRun, int]:
     """One PDF through every stage; returns the run and its tree's live calls.
@@ -904,6 +926,10 @@ def _run_document(
     allotment: dict[str, Any] = {"started": False, "cut": False, "held": 0}
     tree_calls = 0
     stage: PipelineStage = "ingest"
+    # The stage-scoped stores of this document; closed when the document is over so the
+    # sqlite backend's connections and writer lease are released (ADR 0036).
+    sources: LocalDocumentStore | None = None
+    outputs: ProcessingStore | None = None
 
     def allot(wanted: int) -> int:
         """Grant this document's ingest budget from the shared total and announce it."""
@@ -917,6 +943,7 @@ def _run_document(
             sha256=digest,
             budget=granted,
             ingest_mode=plan.mode,
+            object_backend=backend_kind,
         )
         return granted
 
@@ -934,6 +961,7 @@ def _run_document(
                 sha256=digest,
                 budget=0,
                 ingest_mode=plan.mode,
+                object_backend=backend_kind,
             )
         ingested: IngestionSummary | None = run.get("ingestion")
         if ingested is not None:
@@ -995,6 +1023,7 @@ def _run_document(
         processing_store = Path(ingestion.processing_store)
         sources = LocalDocumentStore(source_store, activate_on_publish=False)
         outputs = ProcessingStore(processing_store)
+        run["object_backend"] = ingestion.object_backend
         if allotment["cut"] and _starved(outputs, ingestion.processing_id):
             return finish("budget_starved")
         draft_id = ingestion.processing_id
@@ -1076,6 +1105,10 @@ def _run_document(
     finally:
         # An allotment a failed or stopped stage never settled goes back, uncounted, as before.
         budget.spend(0, allotment["held"])
+        if outputs is not None:
+            outputs.close()
+        if sources is not None:
+            sources.close()
     return finish("published")
 
 
@@ -1535,6 +1568,7 @@ def _markdown(result: FolderPipelineResult) -> str:
         f"- ok: **{result.ok}**; budget exhausted: {result.budget_exhausted}",
         f"- ingest mode: **{result.ingest_mode}**",
         f"- layout: **{result.layout_policy}**",
+        f"- object store backend: **{result.object_backend}** (ADR 0036)",
         f"- live calls: ingest {result.live_calls.ingest}, tree {result.live_calls.tree}, "
         f"answer {result.live_calls.answer}, total {result.live_calls.total}",
         *(
@@ -1791,7 +1825,15 @@ def run_folder_pipeline(
     root = root.expanduser().resolve()
     budget = _Budget(max_live_calls_total)
 
-    _emit(progress, "discovered", folder=str(folder), count=len(pdfs), ingest_mode=plan.mode)
+    backend_kind = _resolved_backend_kind(root)
+    _emit(
+        progress,
+        "discovered",
+        folder=str(folder),
+        count=len(pdfs),
+        ingest_mode=plan.mode,
+        object_backend=backend_kind,
+    )
 
     parallel = max_parallel_documents > 1
     embedding_lock = Lock()
@@ -1815,7 +1857,8 @@ def run_folder_pipeline(
                 continue_on_error=continue_on_error,
                 progress=said,
                 repairs=repairs,
-                errors=(Exception,) if parallel else (ValueError, OSError),
+                backend_kind=backend_kind,
+                errors=(Exception,) if parallel else (ValueError, OSError, StoreBusy),
                 cancel=cancel,
             )
 
@@ -1954,6 +1997,7 @@ def run_folder_pipeline(
         question_docs=check,
         ingest_mode=plan.mode,
         layout_policy=plan.layout,
+        object_backend=backend_kind,
         retrieval_scope="question_doc" if restrict_to_question_doc else "all_documents",
     )
     if report_dir is not None:
