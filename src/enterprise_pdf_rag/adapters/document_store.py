@@ -23,11 +23,9 @@ sweeps use one: ``verify``, ``publish`` and ``put`` read for real. ``persisted_r
 """
 
 import hashlib
-import json
 import os
 import re
 import tempfile
-import threading
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -51,6 +49,17 @@ from ragspine.common.evidence.file_placement import (
     stored_names,
     stored_path,
 )
+
+# The stage-pointer format and the inline-output machinery live with the backend seam now
+# (sqlite object store PR-2); these names are re-exported so existing imports keep working.
+from ragspine.common.evidence.object_backend.files import (  # noqa: F401
+    _INLINE_INDEXES,
+    INLINE_ARTIFACT_LIMIT,
+    _envelope_artifact,
+    _InlineIndex,
+    _inline_index,
+    split_stage_pointer,
+)
 from ragspine.extraction.evidence.document.models import (
     AssetRef,
     DocumentManifest,
@@ -58,65 +67,6 @@ from ragspine.extraction.evidence.document.models import (
 )
 
 _DIGEST = re.compile(r"[0-9a-f]{64}")
-
-# A stage output of at most this many bytes is written inside its stage-cache pointer instead of
-# as an object of its own (ADR 0029 Amendment 2). Measured on the synthetic reports every stage
-# output is below 11 KiB (the source manifest, never inlined, grows with the page count); a real
-# embedding of 1 024 to 3 072 dimensions is ≈ 20 to 60 KiB of JSON. Larger outputs stay objects.
-INLINE_ARTIFACT_LIMIT = 64 * 1024
-
-
-def split_stage_pointer(data: bytes) -> tuple[str, bytes | None, bytes | None]:
-    """(envelope digest, envelope or None, inline output or None) of a stage-cache pointer.
-
-    Three generations share one prefix: ``<digest>\\n`` (the envelope an object), then
-    ``<envelope>\\n`` (Amendment 1), then the output's raw bytes (Amendment 2). The envelope is
-    compact JSON, so it holds no raw newline; the output is everything after it. Raises
-    ``ValueError`` when the first line is not a digest. Nothing here is verified.
-    """
-    head, _, rest = data.partition(b"\n")
-    digest = head.strip().decode(errors="replace")
-    if _DIGEST.fullmatch(digest) is None:
-        raise ValueError("damaged pointer")
-    if not rest.strip():
-        return digest, None, None
-    envelope, _, output = rest.partition(b"\n")
-    return digest, envelope, output or None
-
-
-def _envelope_artifact(envelope: bytes) -> str | None:
-    """The output digest a stage envelope names, if it parses and names one."""
-    try:
-        artifact = json.loads(envelope)["outcome"]["artifact"]
-    except (ValueError, KeyError, TypeError):
-        return None
-    digest = artifact.get("sha256") if isinstance(artifact, dict) else None
-    return digest if isinstance(digest, str) and _DIGEST.fullmatch(digest) else None
-
-
-class _InlineIndex:
-    """Where this process has seen inline outputs of one store: digest -> pointer name."""
-
-    def __init__(self) -> None:
-        self.lock = threading.Lock()
-        self.where: dict[str, str] = {}
-        # Pointer names already read by a scan and found intact; a damaged one is read again.
-        self.settled: set[str] = set()
-
-
-# Process-wide, so that every store instance of one root (each stage opens its own) shares what
-# the others wrote or read. Locations only: never trusted, every read hashes its bytes.
-_INLINE_INDEXES: dict[str, _InlineIndex] = {}
-_INLINE_INDEXES_LOCK = threading.Lock()
-
-
-def _inline_index(root: Path) -> _InlineIndex:
-    key = os.path.abspath(root)
-    with _INLINE_INDEXES_LOCK:
-        index = _INLINE_INDEXES.get(key)
-        if index is None:
-            index = _INLINE_INDEXES[key] = _InlineIndex()
-        return index
 
 
 class LocalDocumentStore:

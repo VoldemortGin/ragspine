@@ -63,6 +63,8 @@ DEFAULT_MAX_DB_BYTES = 400 * 1024 * 1024
 # 超过保护阈后仍可内联的小对象上限(设计稿 §6)。
 _OVERFLOW_INLINE_MAX = 16_384
 _COMPRESS_MIN = 1024
+# 批量校验(verify_many)单条 IN 查询的摘要数上限(设计稿 §3 的 ADR 0024 批量读)。
+_VERIFY_BATCH = 500
 # 写者租约:持有者是进程而不是单次调用,租期取顶格调用租约(840 s)之上的整小时;
 # 持有者死亡仍由 pid / 租约规则接管(lease.lease_expired)。
 WRITER_LEASE_SECONDS = 3600
@@ -197,6 +199,17 @@ class _SqliteCore:
         with self._lock:
             self._connections[ident] = connection
         return connection
+
+    def reader_connection(self) -> sqlite3.Connection | None:
+        """只读路径的连接:db 文件还不存在时返回 ``None``,**不**创建它。
+
+        扫描 / 挂载一个纯文件布局(或旧代)的 store 根绝不能在那里留下一个空 db;
+        只有第一次写(``connection()``)才建库。"""
+        if self._closed:
+            raise RuntimeError("backend is closed")
+        if not self._initialized and not self.db_path.is_file():
+            return None
+        return self.connection()
 
     def _connect(self) -> sqlite3.Connection:
         # check_same_thread=False 只为 close() 能从关闭线程统一收尾:
@@ -380,16 +393,21 @@ class SqliteBackend:
         except OSError:
             return False
 
+    def _object_row(self, digest: str) -> tuple[int, str, int, bytes | None] | None:
+        connection = self._core.reader_connection()
+        if connection is None:
+            return None
+        row = connection.execute(
+            "SELECT byte_length, encoding, external, bytes FROM objects WHERE digest = ?",
+            (digest,),
+        ).fetchone()
+        if row is None:
+            return None
+        return int(row[0]), str(row[1]), int(row[2]), row[3]
+
     def get_object(self, digest: str) -> bytes | None:
         _require_digest(digest)
-        row = (
-            self._core.connection()
-            .execute(
-                "SELECT byte_length, encoding, external, bytes FROM objects WHERE digest = ?",
-                (digest,),
-            )
-            .fetchone()
-        )
+        row = self._object_row(digest)
         if row is None:
             return self._files.get_object(digest)
         byte_length, encoding, external, blob = row
@@ -405,12 +423,69 @@ class SqliteBackend:
             raise DamagedEntry("Stored artifact digest mismatch; source review is unavailable")
         return data
 
+    def get_content(self, digest: str) -> bytes | None:
+        """db 的完整读顺序(设计稿 §5):``objects`` 行 → ``stage_cache.product``
+        (按 ``artifact_digest`` 索引)→ 文件布局(含旧代内联指针的扫描)。"""
+        _require_digest(digest)
+        data = self.get_object(digest)  # 与文件布局一致:损坏的对象条目在读时即拒绝
+        if data is not None:
+            return data
+        data = self._product_row(digest)
+        if data is not None:
+            return data
+        return self._files.get_content(digest)
+
+    def _product_row(self, digest: str) -> bytes | None:
+        """``stage_cache`` 里内联携带 ``digest`` 产物的行;损坏的行当作缺失(写路径修复)。"""
+        connection = self._core.reader_connection()
+        if connection is None:
+            return None
+        rows = connection.execute(
+            "SELECT product, product_encoding FROM stage_cache"
+            " WHERE artifact_digest = ? AND product IS NOT NULL",
+            (digest,),
+        ).fetchall()
+        for blob, encoding in rows:
+            try:
+                data = _decode(bytes(blob), str(encoding))
+            except DamagedEntry:
+                continue
+            if hashlib.sha256(data).hexdigest() == digest:
+                return data
+        return None
+
+    def note_product(self, digest: str, fingerprint: str) -> None:
+        # db 行有自己的 artifact_digest 索引;旧代内联指针仍喂文件层的进程内索引。
+        self._files.note_product(digest, fingerprint)
+
+    def object_location(self, digest: str) -> Path | None:
+        _require_digest(digest)
+        row = self._object_row(digest)
+        if row is None:
+            if self._product_row(digest) is not None:
+                return None  # 内联在 db 的 stage 行里
+            return self._files.object_location(digest)
+        if row[2]:  # external
+            return self._files.object_location(digest)
+        return None
+
+    def content_path(self, digest: str) -> Path:
+        """外置与旧代文件给其路径;住在 db 行里(或不存在,将写进 db)→ ``LookupError``。"""
+        _require_digest(digest)
+        located = self.object_location(digest)
+        if located is None:
+            raise LookupError("Object lives in the store database; there is no file to watch")
+        return located
+
     def read_existing(self, digest: str) -> bytes | None:
         _require_digest(digest)
+        connection = self._core.reader_connection()
         row = (
-            self._core.connection()
-            .execute("SELECT encoding, external, bytes FROM objects WHERE digest = ?", (digest,))
-            .fetchone()
+            None
+            if connection is None
+            else connection.execute(
+                "SELECT encoding, external, bytes FROM objects WHERE digest = ?", (digest,)
+            ).fetchone()
         )
         if row is None:
             return self._files.read_existing(digest)
@@ -506,7 +581,8 @@ class SqliteBackend:
             return False
 
     def object_names(self) -> list[str]:
-        rows = self._core.connection().execute("SELECT digest FROM objects").fetchall()
+        connection = self._core.reader_connection()
+        rows = [] if connection is None else connection.execute("SELECT digest FROM objects").fetchall()
         names = {str(row[0]) for row in rows}
         names.update(self._files.object_names())
         return sorted(names)
@@ -515,14 +591,15 @@ class SqliteBackend:
 
     def stage_entry(self, fingerprint: str) -> StageEntry | None:
         _require_digest(fingerprint)
+        connection = self._core.reader_connection()
         row = (
-            self._core.connection()
-            .execute(
+            None
+            if connection is None
+            else connection.execute(
                 "SELECT envelope_digest, envelope, product, product_encoding"
                 " FROM stage_cache WHERE fingerprint = ?",
                 (fingerprint,),
-            )
-            .fetchone()
+            ).fetchone()
         )
         if row is None:
             return self._files.stage_entry(fingerprint)
@@ -602,10 +679,11 @@ class SqliteBackend:
     # ---- 命名指针与可变记录 ------------------------------------------------------------
 
     def pointer(self, name: str) -> str | None:
+        connection = self._core.reader_connection()
         row = (
-            self._core.connection()
-            .execute("SELECT digest FROM pointers WHERE name = ?", (name,))
-            .fetchone()
+            None
+            if connection is None
+            else connection.execute("SELECT digest FROM pointers WHERE name = ?", (name,)).fetchone()
         )
         if row is not None:
             digest = str(row[0])
@@ -621,10 +699,11 @@ class SqliteBackend:
             )
 
     def record(self, name: str) -> bytes | None:
+        connection = self._core.reader_connection()
         row = (
-            self._core.connection()
-            .execute("SELECT bytes FROM records WHERE name = ?", (name,))
-            .fetchone()
+            None
+            if connection is None
+            else connection.execute("SELECT bytes FROM records WHERE name = ?", (name,)).fetchone()
         )
         if row is not None:
             return bytes(row[0])
@@ -640,7 +719,10 @@ class SqliteBackend:
     # ---- pin / 事务 / 批量校验 ----------------------------------------------------------
 
     def _db_marks(self) -> tuple[int, ...]:
-        data_version = int(self._core.connection().execute("PRAGMA data_version").fetchone()[0])
+        connection = self._core.reader_connection()
+        data_version = (
+            0 if connection is None else int(connection.execute("PRAGMA data_version").fetchone()[0])
+        )
         marks = [data_version]
         for suffix in ("", "-wal"):
             try:
@@ -652,12 +734,8 @@ class SqliteBackend:
 
     def pin(self, digest: str) -> PinToken:
         _require_digest(digest)
-        row = (
-            self._core.connection()
-            .execute("SELECT external FROM objects WHERE digest = ?", (digest,))
-            .fetchone()
-        )
-        if row is None or row[0]:
+        row = self._object_row(digest)
+        if row is None or row[2]:
             return self._files.pin(digest)
         return PinToken(digest, "sqlite", self._db_marks())
 
@@ -675,10 +753,43 @@ class SqliteBackend:
         return self._core.transaction()
 
     def verify_many(self, digests: Iterable[str]) -> Iterator[tuple[str, bytes]]:
+        """流式批量读回并校验:每批 ≤ 500 个摘要一条 ``IN`` 查询读 db 行,db 里没有的
+        (外置 / 旧代 / 内联产物)逐个走完整读顺序;损坏 → ``DamagedEntry``。"""
+        batch: list[str] = []
         for digest in digests:
-            data = self.get_object(digest)
-            if data is None:
-                raise LookupError("Object to verify is absent")
+            _require_digest(digest)
+            batch.append(digest)
+            if len(batch) >= _VERIFY_BATCH:
+                yield from self._verify_batch(batch)
+                batch = []
+        if batch:
+            yield from self._verify_batch(batch)
+
+    def _verify_batch(self, batch: list[str]) -> Iterator[tuple[str, bytes]]:
+        connection = self._core.reader_connection()
+        rows: dict[str, tuple[int, str, int, bytes | None]] = {}
+        if connection is not None:
+            marks = ",".join("?" for _ in batch)
+            for row in connection.execute(
+                "SELECT digest, byte_length, encoding, external, bytes FROM objects"
+                f" WHERE digest IN ({marks})",
+                batch,
+            ):
+                rows[str(row[0])] = (int(row[1]), str(row[2]), int(row[3]), row[4])
+        for digest in batch:
+            row = rows.get(digest)
+            if row is None or row[2]:
+                data = self.get_content(digest)
+                if data is None:
+                    raise LookupError("Object to verify is absent")
+                yield digest, data
+                continue
+            byte_length, encoding, _, blob = row
+            if blob is None:
+                raise DamagedEntry("Stored artifact digest mismatch; source review is unavailable")
+            data = _decode(blob, encoding)
+            if len(data) != byte_length or hashlib.sha256(data).hexdigest() != digest:
+                raise DamagedEntry("Stored artifact digest mismatch; source review is unavailable")
             yield digest, data
 
     def close(self) -> None:
