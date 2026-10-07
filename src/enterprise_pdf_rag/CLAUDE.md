@@ -1,6 +1,6 @@
 ---
 covers: src/enterprise_pdf_rag/
-verified-against: b671273
+verified-against: 33d55c4
 ---
 
 # enterprise_pdf_rag — agent contract
@@ -363,7 +363,10 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   response is called once more; counts land in `DocumentRun.storage_repairs` ([ADR
   0029](../../docs/enterprise-pdf-rag/adr/0029-sharded-store-layout-and-self-healing.md)).
   Objects and stage-cache pointers live in `objects/sha256-sharded/<ab>/<digest>` and
-  `stage-cache-sharded/<ab>/<fingerprint>`; the legacy flat `objects/sha256/` and
+  `stage-cache-sharded/<ab>/<fingerprint>` (a pointer is the envelope's digest line followed by
+  the envelope itself, which must hash to it; a digest-only pointer of an earlier release names
+  an envelope object and is read, never rewritten — ADR 0029 Amendment 1); the legacy flat
+  `objects/sha256/` and
   `stage-cache/` are read (after the sharded place) and never written, so a full one (Workspace
   files: 10 000 children per folder) never blocks a write. They are created by hard link; where
   the filesystem cannot hard-link they fall
