@@ -9,6 +9,11 @@ live call is cached and replayed), and the rule that a provider's error body is 
 parameter, nothing changes: same request bytes, same fingerprints, same record bytes, so every
 existing cache entry still hits.
 
+> Amended by [ADR 00NN](00NN-parallel-documents.md) (2026-10-06): inside a
+> `one_sampling_probe()` scope, which `run_folder_pipeline` holds while PDFs ingest at once, the
+> first call to an (endpoint, model) is sent alone and concurrent first calls wait for it, so the
+> in-process memory below is learned from one probe per run. Outside any scope nothing waits.
+
 ## Context
 
 A user ran `notebooks/run_folder.ipynb` on Databricks against Azure OpenAI
