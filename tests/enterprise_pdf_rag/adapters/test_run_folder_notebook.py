@@ -1087,3 +1087,120 @@ def test_the_question_docs_cell_says_a_miss_is_answered_across_every_pdf(tmp_pat
     assert "将改为在所有已入库 PDF 中跨文档检索作答" in printed
     source = _code_cell("question-docs")
     assert "对不上的题将改为跨文档检索作答" in source
+
+
+# ───────────── 并发入库 (ADR 0033) 与临时错误 (ADR 0034) ─────────────
+
+
+def test_parallel_documents_default_to_four_with_the_reasons_and_reach_the_run() -> None:
+    config = _code_cell("config")
+    assert re.search(r"^MAX_PARALLEL_DOCUMENTS\s*=\s*4\b", config, re.MULTILINE)
+    # The comment gives ADR 0033's grounds and how to go back to one at a time.
+    for reason in ("同时只有一个请求", "Azure", "Workspace", "内存", "= 1", "串行"):
+        assert reason in config, reason
+    assert "max_parallel_documents=MAX_PARALLEL_DOCUMENTS" in _code_cell("run")
+    intro = _source(next(cell for cell in _notebook()["cells"] if cell["id"] == "intro"))
+    assert "MAX_PARALLEL_DOCUMENTS" in intro and "slot" in intro
+
+
+def _run_progress(
+    monkeypatch: pytest.MonkeyPatch, events: list[tuple[str, dict[str, object]]]
+) -> str:
+    """Execute the run cell against a stand-in pipeline that only emits ``events``."""
+    from enterprise_pdf_rag.adapters import folder_pipeline
+
+    seen: dict[str, object] = {}
+
+    def fake(folder: object, **kwargs: object) -> str:
+        seen.update(kwargs)
+        progress = kwargs["progress"]
+        assert callable(progress)
+        for event, payload in events:
+            progress(event, payload)
+        return "result"
+
+    monkeypatch.setattr(folder_pipeline, "run_folder_pipeline", fake)
+    names = [
+        "PDF_DIR",
+        "QUESTIONS",
+        "INGESTION_ROOT",
+        "MAX_LIVE_CALLS_PER_PDF",
+        "MAX_LIVE_CALLS_TOTAL",
+        "MAX_QUESTIONS",
+        "QUESTION_SELECTION",
+        "ONLY_QUESTION_DOCS",
+        "DOC_ALIASES",
+        "ON_UNMATCHED_DOCS",
+        "INGEST_MODE",
+        "BUILD_TREE",
+        "EFFECTIVE_TABLE_STRUCTURE",
+        "EFFECTIVE_LAYOUT",
+        "REQUALIFY",
+        "REPORT_DIR",
+    ]
+    namespace: dict[str, Any] = dict.fromkeys(names)
+    namespace["MAX_PARALLEL_DOCUMENTS"] = 4
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        exec(compile(_code_cell("run"), "run", "exec"), namespace)
+    assert seen["max_parallel_documents"] == 4
+    return buffer.getvalue()
+
+
+def test_progress_lines_name_their_slot_and_say_what_stopping_means(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = _run_progress(
+        monkeypatch,
+        [
+            ("discovered", {"pdfs": 2}),
+            ("document_start", {"pdf": "a.pdf", "budget": 10, "slot": 2}),
+            ("document_done", {"pdf": "a.pdf", "status": "published", "slot": 2}),
+            ("stopping", {"reason": "interrupted", "running": 1}),
+        ],
+    ).splitlines()
+    assert output[0] == "discovered {'pdfs': 2}"  # no slot: printed exactly as before
+    assert output[1].startswith("[slot 2] document_start ")
+    assert "'slot'" not in output[1] and "'a.pdf'" in output[1]
+    assert output[2].startswith("[slot 2] document_done ")
+    assert output[3].startswith("stopping ")
+    assert "正在停止\uff1a排队的文档不再开始\uff0c进行中的文档在当前页结束后停止" in output[4]
+
+
+def _run_results(result: FolderPipelineResult) -> str:
+    namespace: dict[str, Any] = {"result": result}
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        exec(compile(_code_cell("results"), "results", "exec"), namespace)
+    return buffer.getvalue()
+
+
+def test_the_status_shows_transient_retries_and_explains_a_rerun_heals_them(
+    tmp_path: Path,
+) -> None:
+    results = _code_cell("results")
+    assert '"retries"' in results and '"transient_failures"' in results
+
+    def run_with(retries: int, failures: int) -> str:
+        document = DocumentRun(
+            pdf_path=str(tmp_path / "a.pdf"),
+            sha256="0" * 64,
+            status="published",
+            retries=retries,
+            transient_failures=failures,
+        )
+        result = FolderPipelineResult(
+            folder=str(tmp_path),
+            ingestion_root=str(tmp_path / "ingestion"),
+            documents=(document,),
+            eval=None,
+            live_calls=LiveCalls(),
+            budget_exhausted=False,
+        )
+        return _run_results(result)
+
+    hint = "2 次调用因限流 / 服务端错误在本轮重试耗尽\uff0c对应页本轮未完成\uff1b重跑会自动重试\uff0c无需删除文件"
+    assert hint in run_with(5, 2)
+    assert "重试耗尽" not in run_with(3, 0)
+    intro = _source(next(cell for cell in _notebook()["cells"] if cell["id"] == "intro"))
+    assert "transient_failures" in intro and "429" in intro
