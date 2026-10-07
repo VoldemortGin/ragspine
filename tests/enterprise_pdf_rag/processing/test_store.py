@@ -30,6 +30,7 @@ from ragspine.extraction.evidence.page.models import (
     StageState,
 )
 from ragspine.extraction.evidence.page.service import canonical_page
+from tests.enterprise_pdf_rag.adapters.legacy_pointer_helpers import write_pointer
 from tests.enterprise_pdf_rag.adapters.no_hard_link_helpers import forbid_hard_links
 
 
@@ -162,7 +163,7 @@ def test_stage_cache_stays_first_writer_wins_without_hard_links(
     written = pointer.read_bytes()
 
     with pytest.raises(ValueError, match="Conflicting immutable stage cache entry"):
-        ProcessingStore._write_pointer(pointer, "d" * 64, immutable=True)
+        write_pointer(pointer, "d" * 64, immutable=True)
 
     assert pointer.read_bytes() == written
     assert [path.name for path in pointer.parent.iterdir()] == ["e" * 64]

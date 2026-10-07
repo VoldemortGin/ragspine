@@ -412,10 +412,9 @@ class SqliteBackend:
             return self._files.get_object(digest)
         byte_length, encoding, external, blob = row
         if external:
-            data = self._files.get_object(digest)
-            if data is None:
-                raise DamagedEntry("Stored artifact digest mismatch; source review is unavailable")
-            return data
+            # 索引行只是提示,不是字节:文件丢了 → 与文件布局同义的"缺失"(None),
+            # 文件被改 → ``DamagedEntry``;两者都由下一次携带字节的写修复(ADR 0029)。
+            return self._files.get_object(digest)
         if blob is None:
             raise DamagedEntry("Stored artifact digest mismatch; source review is unavailable")
         data = _decode(blob, encoding)

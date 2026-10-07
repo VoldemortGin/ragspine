@@ -28,6 +28,11 @@ from ragspine.common.evidence.file_placement import sharded_directory, sharded_p
 from ragspine.extraction.evidence.document.models import AssetRef
 
 RECEIPT_POLICY = "verification-receipt-v1"
+# ADR 0036 (sqlite object backend): a receipt over the snapshot's **external files only** —
+# db-resident entries are always read back and re-hashed by the sweep itself, so this policy
+# vouches for strictly less than ``verification-receipt-v1`` does. Stored as the backend
+# record ``verification-receipts/<subject>`` (file layout kept for the files backend).
+SQLITE_RECEIPT_POLICY = "verification-receipt-sqlite-v1"
 RECEIPTS_DIRECTORY = "verification-receipts"
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 
@@ -172,6 +177,56 @@ def receipt_holds(
     ):
         return None
     return states
+
+
+def encode_external_receipt(
+    subject: str, refs: Sequence[AssetRef], states: Sequence[FileState]
+) -> bytes:
+    """A sqlite-backend receipt: the subject, the whole reference set's fingerprint, and one
+    entry per **external** file read and hashed (a subset of the refs; db rows are never
+    vouched for)."""
+    body = json.dumps(
+        {
+            "receipt": SQLITE_RECEIPT_POLICY,
+            "subject": subject,
+            "refs": refs_fingerprint(refs),
+            "files": [asdict(state) for state in sorted(states, key=lambda item: item.sha256)],
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return hashlib.sha256(body).hexdigest().encode() + b"\n" + body + b"\n"
+
+
+def decode_external_receipt(
+    data: bytes, subject: str, refs: Sequence[AssetRef]
+) -> tuple[FileState, ...] | None:
+    """The external-file entries of an intact sqlite-backend receipt for exactly this subject
+    and reference set; every entry must name a (digest, length) the set actually contains."""
+    head, _, body = data.partition(b"\n")
+    body = body.removesuffix(b"\n")
+    if hashlib.sha256(body).hexdigest().encode() != head.strip():
+        return None
+    try:
+        payload = json.loads(body)
+        if (payload["receipt"], payload["subject"], payload["refs"]) != (
+            SQLITE_RECEIPT_POLICY,
+            subject,
+            refs_fingerprint(refs),
+        ):
+            return None
+        states = tuple(FileState(**entry) for entry in payload["files"])
+    except (ValueError, KeyError, TypeError):
+        return None
+    expected = {(ref.sha256, ref.byte_length) for ref in refs}
+    if not {(state.sha256, state.byte_length) for state in states} <= expected:
+        return None
+    return states
+
+
+def external_unchanged(root: Path, flat: Path, pointers: Path, state: FileState) -> bool:
+    """Whether one receipt entry's file is still where that digest is read from, untouched."""
+    return _unchanged(root, flat, pointers, state)
 
 
 def write_receipt(root: Path, subject: str, payload: bytes) -> None:

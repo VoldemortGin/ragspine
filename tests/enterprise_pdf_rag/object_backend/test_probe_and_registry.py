@@ -156,7 +156,9 @@ def test_external_media_types_parsing() -> None:
     assert external_media_types(settings) == frozenset({"application/pdf", "image/svg+xml"})
 
 
-def test_settings_defaults() -> None:
+def test_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 默认值与环境无关:整套测试可能在 APP_OBJECT_STORE_BACKEND 钉死的双跑环境里执行。
+    monkeypatch.delenv("APP_OBJECT_STORE_BACKEND", raising=False)
     settings = _settings()
     assert settings.object_store_backend == "auto"
     assert settings.object_store_inline_max_bytes == 262_144

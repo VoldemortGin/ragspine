@@ -1,18 +1,13 @@
 """Content-addressed processing outcomes with a local atomic discovery pointer."""
 
 import hashlib
-import os
 import re
-import tempfile
+from contextlib import AbstractContextManager
 from pathlib import Path
 
 from pydantic import TypeAdapter
 
-from enterprise_pdf_rag.adapters.document_store import (
-    INLINE_ARTIFACT_LIMIT,
-    LocalDocumentStore,
-    split_stage_pointer,
-)
+from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.http.processing_schemas import (
     DocumentTreeRecord,
     ProcessingEnvelope,
@@ -31,12 +26,14 @@ from enterprise_pdf_rag.processing.retrieval import (
     RetrievalUnitEmbeddings,
     retrieval_dependencies,
 )
-from ragspine.common.evidence.file_placement import (
-    link_new_file,
-    note_repair,
-    read_stored,
-    sharded_path,
+from ragspine.common.evidence.file_placement import note_repair
+from ragspine.common.evidence.object_backend.files import INLINE_ARTIFACT_LIMIT
+from ragspine.common.evidence.object_backend.protocol import (
+    DamagedEntry,
+    ObjectBackend,
+    StageEntry,
 )
+from ragspine.common.evidence.object_backend.registry import open_backend
 from ragspine.extraction.evidence.document.models import AssetRef
 from ragspine.extraction.evidence.metadata.document_metadata import summarize_document
 from ragspine.extraction.evidence.metadata.document_tree import DocumentTree
@@ -66,14 +63,20 @@ class ProcessingStore:
         self,
         root: Path,
         *,
+        backend: ObjectBackend | None = None,
         verify_every_request: bool = False,
         verify_every_load: bool | None = None,
         persisted_receipts: bool | None = None,
         record_receipts: bool = True,
     ) -> None:
         self.root = root
+        # One backend per store root (ADR 0036), shared with the asset store so the writer
+        # lease and the connections are held once; ``close()`` releases them.
+        self._backend = open_backend(root) if backend is None else backend
+        self._owns_backend = backend is None
         self.assets = LocalDocumentStore(
             root,
+            backend=self._backend,
             activate_on_publish=False,
             verify_every_load=True if verify_every_request else verify_every_load,
             persisted_receipts=persisted_receipts,
@@ -86,79 +89,85 @@ class ProcessingStore:
         # objects and misses. Re-reading 200-odd embedding artifacts per request cost more
         # than everything else an answer does.
         self._retrieval: dict[tuple[str, str], tuple[RetrievalPlan, RetrievalIndex]] = {}
-        # Stage-cache pointers this instance found damaged, so each is counted once.
-        self._damaged_seen: set[Path] = set()
+        # Stage-cache fingerprints this instance found damaged, so each is counted once.
+        self._damaged_seen: set[str] = set()
 
     def auditing(self) -> "ProcessingStore":
         """The same store whose assets are re-verified on every call (no verification cache)."""
         return ProcessingStore(
-            self.root, verify_every_request=self._verify_every_request, verify_every_load=True
+            self.root,
+            backend=self._backend,
+            verify_every_request=self._verify_every_request,
+            verify_every_load=True,
         )
 
-    def _cache_path(self, fingerprint: str) -> Path:
-        """Where a stage-cache pointer is written: the sharded layout (ADR 0029)."""
+    @property
+    def object_backend(self) -> str:
+        """Which backend holds this store's bytes: ``files`` or ``sqlite`` (ADR 0036)."""
+        return self._backend.kind
+
+    def transaction(self) -> AbstractContextManager[None]:
+        """A reentrant write-transaction scope (no-op on the file layout; ADR 0036 §7.2)."""
+        return self._backend.transaction()
+
+    def close(self) -> None:
+        """Release the backend (sqlite: connections + the writer lease); a borrowed one stays."""
+        if self._owns_backend:
+            self._backend.close()
+
+    @staticmethod
+    def _require_fingerprint(fingerprint: str) -> None:
         if re.fullmatch(r"[0-9a-f]{64}", fingerprint) is None:
             raise ValueError("Stage cache requires a SHA-256 input fingerprint")
-        return sharded_path(self.root / "stage-cache", fingerprint)
 
     def _lookup(self, fingerprint: str) -> tuple[StageOutcome | None, bool]:
         """(the cached outcome, whether an entry exists but is damaged).
 
-        A pointer's first line is the digest of its ``StageEnvelope``. Since ADR 0029
-        Amendment 1 the envelope follows inline and must hash to that digest; a pointer that
-        holds the digest alone (written before) names an envelope object of this store. Since
-        Amendment 2 a small output may follow the envelope: it must be exactly the artifact the
-        envelope names (length and digest); otherwise the output is an object of this store.
+        A stage entry is the envelope's digest plus the envelope itself, which must hash to
+        it (ADR 0029 Amendment 1; an entry written before that names an envelope object of
+        this store), optionally followed by the inline output (Amendment 2), which must be
+        exactly the artifact the envelope names (length and digest); otherwise the output is
+        an object of this store. Where the entry lives — the sharded pointer file, or a
+        ``stage_cache`` db row — is the backend's business (ADR 0036).
 
-        Damaged = the pointer is unreadable or does not start with a digest, its inline
-        envelope or output is not those bytes, or the envelope object or the output object it
-        names is missing or not its digest (an asynchronous flush that failed after the write
-        returned). Such an entry is a miss: the stage is recomputed (its model calls replay
-        from the model cache) and ``cache`` / ``cache_output`` replaces the pointer (ADR 0029).
+        Damaged = the entry is unreadable or malformed, its inline envelope or output is not
+        those bytes, or the envelope object or the output object it names is missing or not
+        its digest (an asynchronous flush that failed after the write returned). Such an
+        entry is a miss: the stage is recomputed (its model calls replay from the model
+        cache) and ``cache`` / ``cache_output`` replaces it (ADR 0029).
         """
-        target = self._cache_path(fingerprint)
+        self._require_fingerprint(fingerprint)
         try:
-            _, data = read_stored(self.root / "stage-cache", fingerprint)
-        except FileNotFoundError:
-            return None, False
+            entry = self._backend.stage_entry(fingerprint)
+        except DamagedEntry:
+            return None, self._damaged(fingerprint)
         except OSError:
-            return None, self._damaged(target)
-        try:
-            payload, output = self._envelope(data)
-        except (OSError, ValueError):
-            return None, self._damaged(target)
-        outcome = StageEnvelope.model_validate_json(payload).outcome
+            return None, self._damaged(fingerprint)
+        if entry is None:
+            return None, False
+        outcome = StageEnvelope.model_validate_json(entry.envelope).outcome
         if outcome.input_fingerprint != fingerprint or outcome.artifact is None:
             raise ValueError("Cached stage binding does not match its input")
         artifact = outcome.artifact
+        output = entry.product
         if output is not None:
             if (len(output), hashlib.sha256(output).hexdigest()) != (
                 artifact.byte_length,
                 artifact.sha256,
             ):
-                return None, self._damaged(target)
+                return None, self._damaged(fingerprint)
             self.assets.note_inline_verified(artifact.sha256, fingerprint, len(output))
             return outcome, False
         try:
             # The entry names an object: a copy inline elsewhere does not make it whole.
             self.assets.get_object(artifact)
         except (OSError, ValueError):
-            return None, self._damaged(target)
+            return None, self._damaged(fingerprint)
         return outcome, False
 
-    def _envelope(self, pointer: bytes) -> tuple[bytes, bytes | None]:
-        """(the envelope bytes a pointer names, verified against its digest line; the output
-        it carries inline, not yet verified)."""
-        digest, envelope, output = split_stage_pointer(pointer)
-        if envelope is None:
-            return self.assets.read_object(digest), None
-        if hashlib.sha256(envelope).hexdigest() != digest:
-            raise ValueError("damaged pointer")
-        return envelope, output
-
-    def _damaged(self, target: Path) -> bool:
-        if target not in self._damaged_seen:
-            self._damaged_seen.add(target)
+    def _damaged(self, fingerprint: str) -> bool:
+        if fingerprint not in self._damaged_seen:
+            self._damaged_seen.add(fingerprint)
             note_repair("stage_cache")
         return True
 
@@ -203,26 +212,23 @@ class ProcessingStore:
             if existing != outcome:
                 raise ValueError("Stage fingerprint already names another actual output")
             return
-        # The envelope is written inline, after its digest: one file per entry, not two
+        # The envelope is written inline, after its digest: one entry, not two
         # (ADR 0029 Amendment 1); a small output follows it (Amendment 2).
         envelope = StageEnvelope(outcome=outcome).model_dump_json().encode()
-        target = self._cache_path(outcome.input_fingerprint)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        # A damaged entry names nothing usable, so it is replaced rather than conflicted with.
-        self._write_pointer(
-            target,
-            hashlib.sha256(envelope).hexdigest(),
-            immutable=not damaged,
-            inline=envelope,
-            artifact=output,
+        entry = StageEntry(
+            hashlib.sha256(envelope).hexdigest(), envelope, output if output else None
         )
+        # A damaged entry names nothing usable, so it is replaced rather than conflicted with;
+        # an intact conflicting one raises the backend's StoreConflict, a ValueError carrying
+        # the same "Conflicting immutable stage cache entry" text as before.
+        self._backend.put_stage_entry(outcome.input_fingerprint, entry, replace=damaged)
         if output:
             assert outcome.artifact is not None
             self.assets.note_inline(outcome.artifact.sha256, outcome.input_fingerprint)
 
     def publish(self, manifest: ProcessingManifest, *, sources: LocalDocumentStore) -> str:
         digest = self.save_draft(manifest, sources=sources)
-        self._write_pointer(self.root / "current-processing", digest)
+        self._backend.set_pointer("current-processing", digest)
         return digest
 
     def save_draft(self, manifest: ProcessingManifest, *, sources: LocalDocumentStore) -> str:
@@ -385,10 +391,10 @@ class ProcessingStore:
             pages[page.page_index] = metadata
         return pages
 
-    def _document_tree_path(self, processing_id: str) -> Path:
+    def _document_tree_record_name(self, processing_id: str) -> str:
         if re.fullmatch(r"[0-9a-f]{64}", processing_id) is None:
             raise ValueError("A document tree is recorded under a SHA-256 processing id")
-        return self.root / "document-tree" / f"{processing_id}.json"
+        return f"document-tree/{processing_id}.json"
 
     def save_document_tree(self, processing_id: str, record: DocumentTreeRecord) -> None:
         """Record the routing tree (ADR 0019) of one processing id, replacing any earlier one."""
@@ -396,27 +402,19 @@ class ProcessingStore:
             raise ValueError("Document tree record is bound to another processing id")
         if record.artifact is not None:
             self.assets.verify(record.artifact)
-        target = self._document_tree_path(processing_id)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        # Unlike a stage-cache pointer this record is mutable on purpose: a later run with a
+        # Unlike a stage-cache entry this record is mutable on purpose: a later run with a
         # real call budget replaces a deferred tree with a summarised one over the same
-        # processing id. So it is replaced atomically rather than linked into place.
-        with tempfile.NamedTemporaryFile(dir=target.parent, delete=False, mode="wb") as stream:
-            temporary = Path(stream.name)
-            stream.write(record.model_dump_json().encode())
-            stream.flush()
-            os.fsync(stream.fileno())
-        try:
-            os.replace(temporary, target)
-        finally:
-            temporary.unlink(missing_ok=True)
+        # processing id. So it is replaced atomically rather than first-writer-wins.
+        self._backend.put_record(
+            self._document_tree_record_name(processing_id), record.model_dump_json().encode()
+        )
 
     def document_tree_record(self, processing_id: str) -> DocumentTreeRecord | None:
         """The saved document-tree state of one processing id, in any state; None if absent."""
-        path = self._document_tree_path(processing_id)
-        if not path.is_file():
+        payload = self._backend.record(self._document_tree_record_name(processing_id))
+        if payload is None:
             return None
-        record = DocumentTreeRecord.model_validate_json(path.read_bytes())
+        record = DocumentTreeRecord.model_validate_json(payload)
         if record.processing_id != processing_id:
             raise ValueError("Document tree record is bound to another processing id")
         return record
@@ -456,46 +454,13 @@ class ProcessingStore:
     def current_id(self) -> str | None:
         """The snapshot ``current-processing`` names; None when absent or unreadable (a pointer
         lost by an asynchronous flush, ADR 0029 — the next publish rewrites it)."""
-        try:
-            snapshot_id = (self.root / "current-processing").read_text().strip()
-        except OSError:
-            return None
-        return snapshot_id if re.fullmatch(r"[0-9a-f]{64}", snapshot_id) else None
+        return self._backend.pointer("current-processing")
 
     def load_current(self) -> tuple[str, ProcessingManifest]:
-        snapshot_id = (self.root / "current-processing").read_text().strip()
+        snapshot_id = self._backend.pointer("current-processing")
+        if snapshot_id is None:
+            raise FileNotFoundError(str(self.root / "current-processing"))
         return snapshot_id, self.load(snapshot_id)
-
-    @staticmethod
-    def _write_pointer(
-        target: Path,
-        digest: str,
-        *,
-        immutable: bool = False,
-        inline: bytes = b"",
-        artifact: bytes = b"",
-    ) -> None:
-        """Write ``digest`` (then ``inline``, if any) as one line each, then ``artifact``'s raw
-        bytes (only after an ``inline`` envelope). An immutable pointer is first-writer-wins:
-        an existing one is accepted only when its first line is ``digest``."""
-        if artifact and not inline:
-            raise ValueError("An inline stage output follows its envelope")
-        with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as stream:
-            temporary = Path(stream.name)
-            stream.write(digest.encode() + b"\n" + (inline + b"\n" if inline else b"") + artifact)
-            stream.flush()
-            os.fsync(stream.fileno())
-        try:
-            if immutable:
-                try:
-                    link_new_file(temporary, target)
-                except FileExistsError:
-                    if target.read_bytes().partition(b"\n")[0].strip() != digest.encode():
-                        raise ValueError("Conflicting immutable stage cache entry") from None
-            else:
-                os.replace(temporary, target)
-        finally:
-            temporary.unlink(missing_ok=True)
 
 
 def processing_assets(manifest: ProcessingManifest) -> tuple[AssetRef, ...]:

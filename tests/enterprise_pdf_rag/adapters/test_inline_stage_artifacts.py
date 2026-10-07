@@ -16,6 +16,7 @@ from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from ragspine.common.evidence.file_placement import recording_repairs, sharded_path
 from ragspine.extraction.evidence.document.models import AssetRef
 from ragspine.extraction.evidence.page.models import StageOutcome, StageState
+from tests.enterprise_pdf_rag.adapters.legacy_pointer_helpers import write_pointer
 from tests.enterprise_pdf_rag.adapters.lite_ingest_helpers import (
     FULL_PUBLISHED_ID,
     FULL_REQUESTS_DIGEST,
@@ -374,14 +375,14 @@ def test_a_rival_pointer_conflicts_and_the_same_entry_does_not(
     digest = hashlib.sha256(envelope).hexdigest()
 
     # A concurrent writer of the very same entry, in any format, is not a conflict ...
-    ProcessingStore._write_pointer(pointer, digest, immutable=True, inline=envelope)
-    ProcessingStore._write_pointer(
+    write_pointer(pointer, digest, immutable=True, inline=envelope)
+    write_pointer(
         pointer, digest, immutable=True, inline=envelope, artifact=PAYLOAD
     )
     # ... a writer of another envelope is, and the first writer's bytes stay.
     rival = envelope.replace(b"prompt-v1", b"prompt-v2")
     with pytest.raises(ValueError, match="Conflicting immutable stage cache entry"):
-        ProcessingStore._write_pointer(
+        write_pointer(
             pointer,
             hashlib.sha256(rival).hexdigest(),
             immutable=True,

@@ -32,10 +32,15 @@ from ragspine.common.evidence.object_backend.protocol import (
 )
 from ragspine.common.evidence.providers import json_completion
 from ragspine.extraction.evidence.page.models import StageOutcome, StageState
+from tests.enterprise_pdf_rag.adapters.legacy_pointer_helpers import write_pointer
 from tests.enterprise_pdf_rag.adapters.no_hard_link_helpers import forbid_hard_links
 from tests.enterprise_pdf_rag.object_backend.conftest import live_owner, sha, tree
 
 FP = "b" * 64
+
+# 本文件钉的是 FileBackend 与三处现有**文件**写路径的逐字节等价:store 侧必须跑在
+# 文件布局上(PR-2 之后 store 默认经 registry,auto 在本机会选 sqlite)。
+pytestmark = pytest.mark.usefixtures("files_object_backend")
 
 
 @pytest.fixture(params=["hard-links", "no-hard-links"])
@@ -117,7 +122,7 @@ def test_stage_cache_matches_processing_store(placement: str, tmp_path: Path) ->
 
     # current-processing 指针与 document-tree 记录。
     digest = outcome.artifact.sha256  # type: ignore[union-attr]
-    ProcessingStore._write_pointer(baseline_root / "current-processing", digest)
+    write_pointer(baseline_root / "current-processing", digest)
     backend.set_pointer("current-processing", digest)
     record = DocumentTreeRecord(
         processing_id="c" * 64,
