@@ -282,3 +282,164 @@ repairs `{object: 25, stage_cache: 18}` into the inline format with 0 calls and 
 `producer` or artifact field changed by a byte would still parse, be used, and change a
 processing id; the digest line keeps "bytes that do not hash to their name are never used", and
 makes the legacy pointer a prefix of the new one.
+
+## Amendment 2 (2026-10-06): a small stage output travels inside its pointer too
+
+After Amendment 1 a cached stage still cost two files: the pointer (digest line + envelope) and
+the stage's output object. The output is usually a few KiB and is named by its digest only, so a
+small one now lives **in** the pointer, after the envelope, and the output object disappears.
+Changed: `ProcessingStore.cache_output` (new; `cache` is unchanged), `_lookup`, `_write_pointer`,
+and the read path of `LocalDocumentStore`; the stage writers that used `assets.put` + `cache`
+(`aia_processing` canonical / partition / normalized_partition, `object_processing`,
+`semantic_objects`, `page_metadata_extraction`, the two embedding writers of
+`processing_retrieval`) call `cache_output` instead. Not changed: the source stage (its output is
+the source manifest, addressed by its id from `current-manifest` and every processing manifest),
+the document-tree stage (its output is written whatever the stage state and named by the
+`document-tree/` record), and every object that is not a stage output (manifests, plans, indexes,
+deterministic page metadata, review exports).
+
+**Format.** A pointer written by `cache_output` for an output of 1 to `INLINE_ARTIFACT_LIMIT`
+(64 KiB) bytes is the Amendment 1 pointer followed by the output's **raw bytes**:
+
+```
+<sha256 of the envelope>\n
+{"outcome":{... "artifact":{"sha256": D, "byte_length": N, ...}}}\n
+<exactly N bytes whose SHA-256 is D>
+```
+
+The envelope is compact JSON and holds no raw newline, so everything after the second newline is
+the output; it must be exactly `byte_length` bytes hashing to the envelope's `artifact.sha256`.
+Raw bytes rather than base64: nothing has to be escaped (the length and digest delimit them), the
+file is a third smaller, and `link_new_file`'s read-back comparison (the EPERM fallback) compares
+the very bytes written. A larger or empty output is put as an object and cached exactly as in
+Amendment 1. Digests are unchanged by construction: the output's `AssetRef` is computed from the
+same bytes the object would have held.
+
+| After the digest line | Generation | The output is |
+|---|---|---|
+| nothing | before Amendment 1 | an object; the envelope an object too |
+| envelope + `\n` | Amendment 1, or a large / empty output | an object |
+| envelope + `\n` + N bytes | Amendment 2 | those bytes |
+
+**Threshold, measured** (every stage-cache entry of the synthetic mixed report, offline stub
+sender): 7-page lite 120 entries, p50 1.3 KiB, p90 6.9 KiB, max 10.0 KiB; 35-page lite 596
+entries, p50 1.2 KiB, p90 7.0 KiB, max 10.0 KiB apart from the source manifest (25.8 KiB, which
+grows with the page count and is never inlined); 7-page full 141 entries, max 10.0 KiB. Largest
+by stage: svg ≤ 10.0 KiB, native_crop ≤ 8.1, table_detection ≤ 6.5, ir ≤ 6.3, canonical ≤ 4.7,
+partition ≤ 3.4, qualification ≤ 2.9, embedding ≤ 1.0 (offline 64-dimension embedder). On a real
+report the outliers are dense page SVG / canonical text and real embeddings (1 024 to 3 072
+floats ≈ 20 to 60 KiB of JSON). 64 KiB covers all of these while keeping a pointer small enough
+to be read whole on every hit; anything larger keeps its own object.
+
+**One resolution layer for reads by digest.** Every path that reads an output by its digest —
+`get`, `read_content`, `verify`, `content_path` / `asset_path`, so `load`, `save_draft`, the
+retrieval plan / index / embedding reads, the mount and its drift guard, the source-review
+reads — goes through `LocalDocumentStore._read_digest`:
+
+1. a **known inline location** (a process-wide index, per store root, of digest → pointer name,
+   filled by every `cache_output` and every stage-cache hit of this process);
+2. the **sharded object**, then the **flat object** (ADR 0029 section 2);
+3. a **scan** of the store's `stage-cache-sharded/` for pointers no scan has settled yet, which
+   indexes every intact inline output (and marks it verified for that store instance, ADR 0024),
+   then step 1 again. Neither: `FileNotFoundError`; a located copy whose bytes do not hash:
+   `ValueError` (digest mismatch), as for an object.
+
+A location is only where to look: the bytes found there are hashed against the digest asked for,
+so the guarantee "bytes that do not hash to their name never reach a proof, a prompt or an
+answer" is unchanged. The scan exists because not every reference carries a stage fingerprint (a
+retrieval plan names its members' embeddings by `AssetRef` only) and must not change; it runs
+only in a process that reads an inline output it has not met, typically once per mount or per
+rerun of a published document (measured: 0 scans in a fresh ingest, 1 in a 35-page rerun,
+≈ 230 shard listings), and its reads stand in for the verification reads that would follow.
+Intact pointers are never read twice by later scans. `digests()` still lists object files only;
+`ProcessingStore._lookup` reads an entry that names an object from the object files only
+(`get_object` / `read_object`): a copy inline elsewhere does not make such an entry whole.
+
+**Unchanged.**
+
+- No stage fingerprint, envelope byte, output byte, processing id, published id or request
+  fingerprint moves. The full-mode regression loses 132 output objects into its pointers:
+  `FULL_STORE_DIGEST` is re-recorded `620f220d…` / 675 files → `363650ac…` / 543 files;
+  `test_inline_stage_artifacts` writes the inline outputs back as objects and gets `620f220d…` /
+  675 again, and `test_inline_stage_cache` turns that into the pre-Amendment-1 store and gets
+  `ddade1cd…` / 815. `FULL_PUBLISHED_ID` and `FULL_REQUESTS_DIGEST` are unchanged. The store
+  holds fewer files, so `test_sharded_layout_pipeline` (section 5) now damages every sixth file
+  instead of every ninth to keep more than 20 sharded files damaged, and its legacy-flat
+  emulation writes inline outputs back as objects first, as every flat-layout release stored
+  them.
+- **Self-healing (section 3) is equivalent.** An inline output that is cut off, truncated, of
+  other bytes or followed by extra bytes, a pointer cut inside its envelope, an empty pointer and
+  one not starting with a digest are all a miss (counted once as `stage_cache`), recomputed and
+  replaced. A pointer cut exactly after its envelope reads as an Amendment 1 entry whose output
+  object is missing — also a miss. An intact entry naming another outcome is still `Stage
+  fingerprint already names another actual output`; an envelope bound to another fingerprint is
+  still refused.
+- **First writer wins** (hard link or the ADR 0020 rename fallback): only the first line is
+  compared, so a concurrent writer of the same entry in any of the three formats is not a
+  conflict, and any other is `Conflicting immutable stage cache entry` with the first writer's
+  bytes kept.
+- Earlier pointers are **never rewritten**: a digest-only or Amendment 1 entry whose output object
+  is intact hits, publishes and answers as it is; only new or repaired entries carry their
+  output, so one store can hold all three generations.
+- ADR 0024's verification cache is untouched: an inline output read and hashed (a hit, a `get`, a
+  scan) is recorded like an object read, one written is not.
+
+**Duplicates.** An object was stored once per store whatever wrote it; an inline output is stored
+once per pointer, so identical outputs of two entries of one document are now two copies (there
+was never sharing across documents: each document has its own store). Measured: 7-page lite
+6 duplicate copies, 36.5 KB (store 751.5 → 788.1 KB, +4.9 %); 35-page lite 58 copies, 246 KB
+(3.58 → 3.83 MB, +6.9 %); 7-page full 7 copies, 41 KB (2.257 → 2.298 MB, +1.8 %). They are almost
+all an object's `native_crop` equal to its `svg`, plus repeated `model_render` /
+`table_detection` / `qualification_exclusions`. Accepted: a few per cent of bytes against
+thousands of files and network round trips — on Workspace files the cost is per file and per
+operation, not per byte — and deduplicating them would bring back the shared object file this
+amendment removes.
+
+**Measured** (scratchpad harness, offline stub sender, synthetic mixed report; file-system
+operations counted under the ingestion root):
+
+| Run | Files A1 → A2 | Processing objects | I/O operations A1 → A2 |
+|---|---|---|---|
+| lite, 7 pages, 14 objects | 298 → 185 (−38 %) | 129 → 16 | 4 773 → 3 592 (−25 %) |
+| lite, 35 pages, 70 objects | 1 382 → 845 (−39 %) | 593 → 56 | 21 406 → 16 223 (−24 %) |
+| full, 7 pages, with tree | 702 → 570 (−19 %) | 142 → 10 | 6 950 → 5 574 (−20 %) |
+| lite 35 pages, rerun, all hits | — | — | 10 030 → 8 634 (−14 %) |
+
+Against the release before Amendment 1 the 7-page lite run is 418 → 185 files (−56 %). Each new
+entry saves the output's object write (temporary file, link, unlink, existence checks, a shard
+`mkdir`); each hit reads one file instead of two.
+
+**The per-kind formula becomes:** a lite ingest writes S ≈ 2P + Σ k·M_kind + E stage-cache
+pointers (unchanged) and ≈ 1.5 P processing objects that are not stage outputs (deterministic
+page metadata, unscored members, plan, index, manifests; measured 16 at 7 pages and 56 at 35;
+was ≈ S + P). For 300 pages and 3 000 objects: ≈ 20 000–23 000 pointers, ≈ 450 processing
+objects, ≈ 600 source objects and 3 files per model call — **≈ 23 000–26 000 files instead of
+43 000–50 000** (63 000–73 000 before Amendment 1), ≈ 80–90 pointers and ≈ 2 objects per shard,
+and at the measured ≈ 464 instead of ≈ 612 operations per page about 45 000 fewer file-system
+operations per ingest.
+
+**Across versions** (scratchpad harness, lite folder run answering 5 questions, once with hard
+links and once with `os.link` refusing `EPERM`): stores written by `3414e0c` (Amendment 1),
+`b989625` and `2825c57` (digest-only pointers) rerun under this code with 0 model calls,
+0 repairs and 5/5 answered, all on the same published id (`3414e0c` / `b989625`: nothing
+written; `2825c57`: the one embedding stage that changed between those releases is written, now
+as 1 inline pointer and 3 other files, 4 files instead of Amendment 1's 5). A second PDF then
+writes 64 inline pointers, 1 Amendment 1 pointer (the source stage) and **no output object** in
+its processing store; damaging 40 recent files and deleting a response repairs `{stage_cache:
+30, object: 10, model_cache: 1}` with 1 live call and the same ids. Going back: `3414e0c` run on
+such a store reads each inline pointer as damaged (its envelope check covers the trailing
+output), recomputes those 64 entries from the model cache with 0 calls and the same ids, and
+this code then reruns that store writing nothing.
+
+**Rejected.**
+
+- *Base64 or a length-prefixed frame*: the envelope already states length and digest; base64
+  costs a third more bytes and an encode on every write and decode on every hit.
+- *An index file (digest → pointer)*: one more mutable file per store, exposed to the same
+  asynchronous flush losses, and a second source of truth; the scan rebuilds the same map from
+  the pointers themselves.
+- *Recording the pointer's fingerprint next to each reference*: it would change the bytes of
+  manifests and plans, and so every processing and published id.
+- *Inlining only outputs whose readers know the fingerprint*: embeddings — read from the
+  retrieval plan by `AssetRef` alone — are one entry in nine, and the scan costs one pass per
+  process instead.
