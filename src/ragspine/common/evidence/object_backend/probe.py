@@ -98,39 +98,36 @@ def _probe_database(db: Path, connect: Connect) -> ProbeResult:
             writer.execute("COMMIT")
         except sqlite3.Error:
             return ProbeResult(False, "sqlite_write")
-        shm = _read_back_second_connection(db, connect)
-        if shm is not None:
-            return shm  # -shm 可用性已定论(成功,或 EXCLUSIVE 的结论,或失败码)
-        try:
-            check = writer.execute("PRAGMA quick_check(1)").fetchone()
-            if check is None or str(check[0]) != "ok":
+        if _read_back_second_connection(db, connect):
+            try:
+                check = writer.execute("PRAGMA quick_check(1)").fetchone()
+                if check is None or str(check[0]) != "ok":
+                    return ProbeResult(False, "sqlite_quick_check")
+            except sqlite3.Error:
                 return ProbeResult(False, "sqlite_quick_check")
-        except sqlite3.Error:
-            return ProbeResult(False, "sqlite_quick_check")
-        try:
-            writer.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        except sqlite3.Error:
-            return ProbeResult(False, "sqlite_checkpoint")
-        return ProbeResult(True)
+            try:
+                writer.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except sqlite3.Error:
+                return ProbeResult(False, "sqlite_checkpoint")
+            return ProbeResult(True)
     finally:
         with suppress(sqlite3.Error):
             writer.close()
+    # -shm 不可用(第二个连接读不回):写者已关,再试单连接 EXCLUSIVE 候选。
+    return _probe_exclusive(db, connect)
 
 
-def _read_back_second_connection(db: Path, connect: Connect) -> ProbeResult | None:
-    """第二个连接读回(验 ``-shm`` / WAL 跨连接可见性);成功 → ``None``(继续主流程),
-    失败 → EXCLUSIVE 候选的最终结论。"""
+def _read_back_second_connection(db: Path, connect: Connect) -> bool:
+    """第二个连接读回(验 ``-shm`` / WAL 跨连接可见性)。"""
     try:
         reader = connect(str(db))
         try:
             row = reader.execute("SELECT length(value) FROM probe WHERE key = 1").fetchone()
         finally:
             reader.close()
-        if row is not None and int(row[0]) == _BLOB_BYTES:
-            return None
+        return row is not None and int(row[0]) == _BLOB_BYTES
     except sqlite3.Error:
-        pass
-    return _probe_exclusive(db, connect)
+        return False
 
 
 def _probe_exclusive(db: Path, connect: Connect) -> ProbeResult:

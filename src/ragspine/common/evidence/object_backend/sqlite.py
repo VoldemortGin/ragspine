@@ -199,8 +199,16 @@ class _SqliteCore:
         return connection
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.db_path, isolation_level=None, timeout=30.0)
-        self._apply_pragmas(connection)
+        # check_same_thread=False 只为 close() 能从关闭线程统一收尾:
+        # 使用始终是线程本地的(connection() 按 thread id 取),从不跨线程共享游标。
+        connection = sqlite3.connect(
+            self.db_path, isolation_level=None, timeout=30.0, check_same_thread=False
+        )
+        try:
+            self._apply_pragmas(connection)
+        except sqlite3.Error:
+            connection.close()
+            raise
         return connection
 
     def _apply_pragmas(self, connection: sqlite3.Connection) -> None:

@@ -11,6 +11,7 @@ stage-cache 条目、``current-*`` 指针、可变 records(document-tree)、漂�
 from collections.abc import Iterable, Iterator
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal, Protocol, runtime_checkable
 
 BackendKind = Literal["files", "sqlite"]
@@ -80,6 +81,7 @@ class ObjectBackend(Protocol):
     """一个 store 根目录的持久化原语;实现必须保持 digest / 指纹 / 发布 id 不变。"""
 
     kind: BackendKind
+    root: Path
 
     def get_object(self, digest: str) -> bytes | None:
         """按摘要读回并校验;不存在 → ``None``,存在但不是其摘要 → ``DamagedEntry``。"""

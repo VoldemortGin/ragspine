@@ -223,6 +223,7 @@ class FileBackend:
     def set_pointer(self, name: str, digest: str) -> None:
         _require_digest(digest)
         target = self.root / name
+        target.parent.mkdir(parents=True, exist_ok=True)
         temporary = _write_temporary(target.parent, digest.encode() + b"\n")
         try:
             os.replace(temporary, target)
