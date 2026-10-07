@@ -8,6 +8,15 @@ blocks" bullet of [ADR 0021](0021-sampling-parameter-fallback.md) §4. Request f
 record and response bytes, and the replay of every existing record are unchanged; old cache
 directories (legacy claims and records) are used as they are, with no migration.
 
+> Amended by [ADR 0034](0034-transient-provider-errors.md) (2026-10-06): a call now retries a
+> transient failure up to three times, pausing up to `RETRY_MAX_PAUSE` = 31 s before an attempt.
+> The holder **renews** its claim before each retry by exclusively creating the next generation
+> (`.takeover-<n+1>`, the §3 primitive; losing that create stops the call unsent), so a lease
+> still covers one attempt: `lease_seconds = ceil(4 × timeout + 31) + 120` — **331 s** at 45 s
+> (was 300), **871 s** at 180 s (was 840). `LEGACY_CLAIM_LEASE_SECONDS` stays 900: above both, and
+> above the 840 s a legacy writer (which never paused or retried) could run. The numbers in §1,
+> §2 and the Consequences below are the pre-ADR-0034 ones.
+
 ## Context
 
 `JsonCompletionClient` serializes a live call by creating `requests/<fp>.json.claim` with

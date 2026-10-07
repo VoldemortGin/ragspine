@@ -6,6 +6,12 @@ the index-build embeddings behind [ADR 0012](0012-chart-index-text-and-retrieval
 no snapshot id and no single-text request**: an ingestion directory indexed before this ADR is
 re-indexed with zero embedding requests.
 
+> Amended by [ADR 0034](0034-transient-provider-errors.md) (2026-10-06): a transient failure
+> (HTTP 408 / 429 / 500 / 502 / 503 / 504, timeout, connection error) of any request — single
+> or batch — is first retried whole, up to three times with jittered backoff and `Retry-After`
+> honoured; only once those retries are spent is a batch halved as below. A rate-limited batch
+> is therefore never split into more requests. `request_count` includes the retries.
+
 ## Context
 
 `ProcessingRetrieval.build` embedded each eligible member with one `embed_description` call,

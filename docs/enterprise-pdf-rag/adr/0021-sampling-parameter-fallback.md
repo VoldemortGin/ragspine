@@ -13,6 +13,15 @@ existing cache entry still hits.
 > `one_sampling_probe()` scope, which `run_folder_pipeline` holds while PDFs ingest at once, the
 > first call to an (endpoint, model) is sent alone and concurrent first calls wait for it, so the
 > in-process memory below is learned from one probe per run. Outside any scope nothing waits.
+>
+> Amended by [ADR 0034](0034-transient-provider-errors.md) (2026-10-06): a failure record is no
+> longer written for a **transient** failure (HTTP 408 / 429 / 500 / 502 / 503 / 504, timeout,
+> connection error). Such a failure is retried within the call (jittered exponential backoff,
+> `Retry-After` honoured — `_send_once` now reads that header, still no non-400 body; every
+> retry a live call), and if it still fails the call leaves no record, so the next run calls it
+> again. A `provider_http_429` / `provider_timeout` / ... record written before is called again
+> instead of replayed and replaced by the outcome. "Every failure record is a permanent negative
+> cache" below now holds for permanent failures only; the 400 refusal logic is unchanged.
 
 ## Context
 
