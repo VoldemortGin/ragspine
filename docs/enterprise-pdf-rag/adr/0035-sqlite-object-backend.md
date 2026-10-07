@@ -1,4 +1,4 @@
-# ADR 0034: A sqlite object backend behind the stores, probed and never silently different
+# ADR 0035: A sqlite object backend behind the stores, probed and never silently different
 
 Status: Draft (PR-1 merged; wiring lands in PR-2/3, visibility and tooling in PR-4). Builds on
 [ADR 0020](0020-storage-without-hard-links.md) (placement without hard links),
