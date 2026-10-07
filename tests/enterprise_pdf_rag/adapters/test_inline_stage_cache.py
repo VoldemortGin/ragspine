@@ -271,7 +271,8 @@ def test_a_rival_pointer_conflicts_and_the_same_entry_does_not(
 
 def _legacify(root: Path, *, every: int = 1) -> dict[Path, bytes]:
     """Turn every ``every``-th inline pointer under ``root`` into the pre-amendment form:
-    its envelope written as an object, the pointer naming it by digest. Returns their bytes."""
+    its envelope written as an object, the pointer naming it by digest. Returns their bytes.
+    An output carried inline (Amendment 2) is written back as its object first."""
     legacy: dict[Path, bytes] = {}
     pointers = sorted(root.rglob("stage-cache-sharded/*/*"))
     for index, pointer in enumerate(pointers):
@@ -279,8 +280,18 @@ def _legacify(root: Path, *, every: int = 1) -> dict[Path, bytes]:
         if index % every or not inline:
             continue
         store_root = pointer.parents[2]
+        envelope, _, output = inline.partition(b"\n")
+        if output:
+            artifact = StageEnvelope.model_validate_json(envelope).outcome.artifact
+            assert artifact is not None
+            assert (
+                LocalDocumentStore(store_root, activate_on_publish=False).put(
+                    output, media_type=artifact.media_type
+                )
+                == artifact
+            )
         ref = LocalDocumentStore(store_root, activate_on_publish=False).put(
-            inline.removesuffix(b"\n"), media_type="application/json"
+            envelope, media_type="application/json"
         )
         assert ref.sha256 == head.decode()
         pointer.write_text(ref.sha256 + "\n")
@@ -395,4 +406,6 @@ def test_the_seven_page_lite_ingest_writes_a_third_fewer_stage_cache_files(
     assert objects <= 266 - 120
     assert files <= 418 - 120
     _legacify(root)
-    assert sum(1 for path in root.rglob("*") if path.is_file()) == files + pointers
+    # Back to exactly the pre-amendment store: its envelope objects and (Amendment 2) its
+    # output objects return.
+    assert sum(1 for path in root.rglob("*") if path.is_file()) == 418

@@ -222,13 +222,9 @@ def _page_stage(
         return StageOutcome(
             PAGE_METADATA_STAGE, fingerprint, StageState.FAILED, producer, diagnostic=str(error)
         ), None
-    artifact = outputs.assets.put(
-        TypeAdapter(PageMetadata).dump_json(metadata), media_type="application/json"
+    outcome = outputs.cache_output(
+        PAGE_METADATA_STAGE, fingerprint, producer, TypeAdapter(PageMetadata).dump_json(metadata)
     )
-    outcome = StageOutcome(
-        PAGE_METADATA_STAGE, fingerprint, StageState.SUCCEEDED, producer, artifact
-    )
-    outputs.cache(outcome)
     return outcome, metadata
 
 

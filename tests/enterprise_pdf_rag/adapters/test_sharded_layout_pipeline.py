@@ -7,7 +7,9 @@ from pathlib import Path
 
 import pytest
 
+from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.folder_pipeline import FolderPipelineResult, run_folder_pipeline
+from enterprise_pdf_rag.adapters.http.processing_schemas import StageEnvelope
 from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
 from ragspine.common.evidence.file_placement import SHARDED_SUFFIX
 from tests.enterprise_pdf_rag.adapters.lite_ingest_helpers import (
@@ -31,7 +33,18 @@ def _run(tmp_path: Path, *, budget: int = 200) -> FolderPipelineResult:
 
 
 def _flatten(root: Path) -> list[Path]:
-    """Move every sharded file back where the pre-ADR-0029 code wrote it; the flat dirs."""
+    """Move every sharded file back where the pre-ADR-0029 code wrote it; the flat dirs.
+
+    That code stored every stage output as an object, so an output carried inside its pointer
+    (Amendment 2) is first written back as its object and cut from the pointer."""
+    for pointer in sorted(root.rglob("stage-cache" + SHARDED_SUFFIX + "/*/*")):
+        head, envelope, output = [*pointer.read_bytes().split(b"\n", 2), b"", b""][:3]
+        if output:
+            artifact = StageEnvelope.model_validate_json(envelope).outcome.artifact
+            assert artifact is not None
+            store = LocalDocumentStore(pointer.parents[2], activate_on_publish=False)
+            assert store.put(output, media_type=artifact.media_type) == artifact
+            pointer.write_bytes(head + b"\n" + envelope + b"\n")
     flats = []
     for sharded in sorted(root.rglob("*" + SHARDED_SUFFIX)):
         flat = sharded.with_name(sharded.name.removesuffix(SHARDED_SUFFIX))
@@ -95,7 +108,7 @@ def _damage(root: Path) -> Counter[str]:
     damaged: Counter[str] = Counter()
     for index, path in enumerate(sorted(p for p in root.rglob("*") if p.is_file())):
         relative = path.relative_to(root).as_posix()
-        if "/model-cache/contexts/" in relative or index % 9:
+        if "/model-cache/contexts/" in relative or index % 6:
             continue
         if "/model-cache/responses/" in relative:
             path.unlink()

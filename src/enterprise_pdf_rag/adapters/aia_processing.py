@@ -111,16 +111,7 @@ class ProcessingPipeline:
         cached = self.outputs.cached(fingerprint)
         if cached is not None:
             return cached
-        artifact = self.outputs.assets.put(payload, media_type="application/json")
-        outcome = StageOutcome(
-            "canonical",
-            fingerprint,
-            StageState.SUCCEEDED,
-            "canonical-source-v1",
-            artifact,
-        )
-        self.outputs.cache(outcome)
-        return outcome
+        return self.outputs.cache_output("canonical", fingerprint, "canonical-source-v1", payload)
 
     def _partition(
         self, page: PageInput, canonical: StageOutcome
@@ -157,18 +148,12 @@ class ProcessingPipeline:
                 self.partitioner.fingerprint,
                 diagnostic=str(error),
             ), None
-        artifact = self.outputs.assets.put(
-            TypeAdapter(PagePartition).dump_json(partition),
-            media_type="application/json",
-        )
-        outcome = StageOutcome(
+        outcome = self.outputs.cache_output(
             "partition",
             fingerprint,
-            StageState.SUCCEEDED,
             self.partitioner.fingerprint,
-            artifact,
+            TypeAdapter(PagePartition).dump_json(partition),
         )
-        self.outputs.cache(outcome)
         return outcome, partition
 
     def _normalize(
@@ -189,18 +174,12 @@ class ProcessingPipeline:
             ):
                 raise ValueError("Normalized layout cache differs from its source rule")
             return cached, expected
-        ref = self.outputs.assets.put(
-            TypeAdapter(PagePartition).dump_json(expected),
-            media_type="application/json",
-        )
-        outcome = StageOutcome(
+        outcome = self.outputs.cache_output(
             "normalized_partition",
             fingerprint,
-            StageState.SUCCEEDED,
             NORMALIZATION_VERSION,
-            ref,
+            TypeAdapter(PagePartition).dump_json(expected),
         )
-        self.outputs.cache(outcome)
         return outcome, expected
 
     def _object(self, page: PageInput, item: LayoutObject) -> ObjectProcessingRecord:

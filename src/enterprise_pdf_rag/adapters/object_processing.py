@@ -8,7 +8,7 @@ from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.pdfspine_svg import crop_native_svg
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.source_objects import source_object_ir
-from ragspine.extraction.evidence.document.models import AssetRef, TextSidecar
+from ragspine.extraction.evidence.document.models import TextSidecar
 from ragspine.extraction.evidence.figures.models import Verification
 from ragspine.extraction.evidence.objects.typed_ir import (
     LiteralQualification,
@@ -153,7 +153,6 @@ class ProcessingObjectAdapter:
                 )
             ).encode()
         ).hexdigest()
-        ref: AssetRef = self.outputs.assets.put(payload, media_type=media_type)
-        outcome = StageOutcome(stage, fingerprint, StageState.SUCCEEDED, producer, ref)
-        self.outputs.cache(outcome)
-        return outcome
+        return self.outputs.cache_output(
+            stage, fingerprint, producer, payload, media_type=media_type
+        )

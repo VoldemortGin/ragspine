@@ -72,7 +72,6 @@ from ragspine.extraction.evidence.page.models import (
     ObjectProcessingRecord,
     ProcessingScope,
     RetrievalPublication,
-    StageOutcome,
     StageState,
 )
 
@@ -561,33 +560,27 @@ class ProcessingRetrieval:
         self, key: str, description: AssetRef, vector: tuple[float, ...]
     ) -> tuple[AssetRef, RetrievalEmbedding]:
         embedding = RetrievalEmbedding(description.sha256, self.embedder.fingerprint, vector)
-        ref = self.outputs.assets.put(
+        outcome = self.outputs.cache_output(
+            "embedding",
+            key,
+            self.embedder.fingerprint,
             TypeAdapter(RetrievalEmbedding).dump_json(embedding),
-            media_type="application/json",
         )
-        self.outputs.cache(
-            StageOutcome(
-                "embedding",
-                key,
-                StageState.SUCCEEDED,
-                self.embedder.fingerprint,
-                ref,
-            )
-        )
-        return ref, embedding
+        assert outcome.artifact is not None
+        return outcome.artifact, embedding
 
     def _store_units(
         self, key: str, description: AssetRef, vectors: tuple[tuple[float, ...], ...]
     ) -> tuple[AssetRef, RetrievalUnitEmbeddings]:
         embeddings = RetrievalUnitEmbeddings(description.sha256, self.embedder.fingerprint, vectors)
-        ref = self.outputs.assets.put(
+        outcome = self.outputs.cache_output(
+            "embedding",
+            key,
+            self.embedder.fingerprint,
             TypeAdapter(RetrievalUnitEmbeddings).dump_json(embeddings),
-            media_type="application/json",
         )
-        self.outputs.cache(
-            StageOutcome("embedding", key, StageState.SUCCEEDED, self.embedder.fingerprint, ref)
-        )
-        return ref, embeddings
+        assert outcome.artifact is not None
+        return outcome.artifact, embeddings
 
     def _unscored(self, description: AssetRef) -> AssetRef:
         """A running member's embedding artifact: no vector at all, so no channel scores it."""

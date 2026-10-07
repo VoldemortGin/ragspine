@@ -8,7 +8,11 @@ from pathlib import Path
 
 from pydantic import TypeAdapter
 
-from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
+from enterprise_pdf_rag.adapters.document_store import (
+    INLINE_ARTIFACT_LIMIT,
+    LocalDocumentStore,
+    split_stage_pointer,
+)
 from enterprise_pdf_rag.adapters.http.processing_schemas import (
     DocumentTreeRecord,
     ProcessingEnvelope,
@@ -96,13 +100,15 @@ class ProcessingStore:
 
         A pointer's first line is the digest of its ``StageEnvelope``. Since ADR 0029
         Amendment 1 the envelope follows inline and must hash to that digest; a pointer that
-        holds the digest alone (written before) names an envelope object of this store.
+        holds the digest alone (written before) names an envelope object of this store. Since
+        Amendment 2 a small output may follow the envelope: it must be exactly the artifact the
+        envelope names (length and digest); otherwise the output is an object of this store.
 
         Damaged = the pointer is unreadable or does not start with a digest, its inline
-        envelope is not those bytes, or the envelope object or the output it names is missing
-        or not its digest (an asynchronous flush that failed after the write returned). Such
-        an entry is a miss: the stage is recomputed (its model calls replay from the model
-        cache) and ``cache`` replaces the pointer (ADR 0029).
+        envelope or output is not those bytes, or the envelope object or the output object it
+        names is missing or not its digest (an asynchronous flush that failed after the write
+        returned). Such an entry is a miss: the stage is recomputed (its model calls replay
+        from the model cache) and ``cache`` / ``cache_output`` replaces the pointer (ADR 0029).
         """
         target = self._cache_path(fingerprint)
         try:
@@ -112,30 +118,37 @@ class ProcessingStore:
         except OSError:
             return None, self._damaged(target)
         try:
-            payload = self._envelope(data)
+            payload, output = self._envelope(data)
         except (OSError, ValueError):
             return None, self._damaged(target)
         outcome = StageEnvelope.model_validate_json(payload).outcome
         if outcome.input_fingerprint != fingerprint or outcome.artifact is None:
             raise ValueError("Cached stage binding does not match its input")
+        artifact = outcome.artifact
+        if output is not None:
+            if (len(output), hashlib.sha256(output).hexdigest()) != (
+                artifact.byte_length,
+                artifact.sha256,
+            ):
+                return None, self._damaged(target)
+            self.assets.note_inline_verified(artifact.sha256, fingerprint, len(output))
+            return outcome, False
         try:
-            self.assets.get(outcome.artifact)
+            # The entry names an object: a copy inline elsewhere does not make it whole.
+            self.assets.get_object(artifact)
         except (OSError, ValueError):
             return None, self._damaged(target)
         return outcome, False
 
-    def _envelope(self, pointer: bytes) -> bytes:
-        """The envelope bytes a pointer names, verified against its digest line."""
-        head, _, inline = pointer.partition(b"\n")
-        digest = head.strip().decode()
-        if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
-            raise ValueError("damaged pointer")
-        if not inline.strip():
-            return self.assets.read_content(digest)
-        envelope = inline.removesuffix(b"\n")
+    def _envelope(self, pointer: bytes) -> tuple[bytes, bytes | None]:
+        """(the envelope bytes a pointer names, verified against its digest line; the output
+        it carries inline, not yet verified)."""
+        digest, envelope, output = split_stage_pointer(pointer)
+        if envelope is None:
+            return self.assets.read_object(digest), None
         if hashlib.sha256(envelope).hexdigest() != digest:
             raise ValueError("damaged pointer")
-        return envelope
+        return envelope, output
 
     def _damaged(self, target: Path) -> bool:
         if target not in self._damaged_seen:
@@ -151,13 +164,41 @@ class ProcessingStore:
         if outcome.state is not StageState.SUCCEEDED or outcome.artifact is None:
             raise ValueError("Only successful stages can be reused as output cache")
         self.assets.verify(outcome.artifact)
+        self._cache(outcome)
+
+    def cache_output(
+        self,
+        stage: str,
+        fingerprint: str,
+        producer: str,
+        payload: bytes,
+        *,
+        media_type: str = "application/json",
+    ) -> StageOutcome:
+        """Store a succeeded stage's output and cache it under ``fingerprint``; the outcome.
+
+        An output of 1 to ``INLINE_ARTIFACT_LIMIT`` bytes is written inside the pointer, after
+        the envelope, and never as an object (ADR 0029 Amendment 2); a larger one is put as an
+        object, exactly as ``put`` + ``cache`` did. Same outcome, same digest either way.
+        """
+        if not 0 < len(payload) <= INLINE_ARTIFACT_LIMIT:
+            ref = self.assets.put(payload, media_type=media_type)
+            outcome = StageOutcome(stage, fingerprint, StageState.SUCCEEDED, producer, ref)
+            self.cache(outcome)
+            return outcome
+        ref = AssetRef(hashlib.sha256(payload).hexdigest(), media_type, len(payload))
+        outcome = StageOutcome(stage, fingerprint, StageState.SUCCEEDED, producer, ref)
+        self._cache(outcome, output=payload)
+        return outcome
+
+    def _cache(self, outcome: StageOutcome, *, output: bytes = b"") -> None:
         existing, damaged = self._lookup(outcome.input_fingerprint)
         if existing is not None:
             if existing != outcome:
                 raise ValueError("Stage fingerprint already names another actual output")
             return
         # The envelope is written inline, after its digest: one file per entry, not two
-        # (ADR 0029 Amendment 1).
+        # (ADR 0029 Amendment 1); a small output follows it (Amendment 2).
         envelope = StageEnvelope(outcome=outcome).model_dump_json().encode()
         target = self._cache_path(outcome.input_fingerprint)
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -167,7 +208,11 @@ class ProcessingStore:
             hashlib.sha256(envelope).hexdigest(),
             immutable=not damaged,
             inline=envelope,
+            artifact=output,
         )
+        if output:
+            assert outcome.artifact is not None
+            self.assets.note_inline(outcome.artifact.sha256, outcome.input_fingerprint)
 
     def publish(self, manifest: ProcessingManifest, *, sources: LocalDocumentStore) -> str:
         digest = self.save_draft(manifest, sources=sources)
@@ -418,13 +463,21 @@ class ProcessingStore:
 
     @staticmethod
     def _write_pointer(
-        target: Path, digest: str, *, immutable: bool = False, inline: bytes = b""
+        target: Path,
+        digest: str,
+        *,
+        immutable: bool = False,
+        inline: bytes = b"",
+        artifact: bytes = b"",
     ) -> None:
-        """Write ``digest`` (then ``inline``, if any) as one line each. An immutable pointer is
-        first-writer-wins: an existing one is accepted only when its first line is ``digest``."""
+        """Write ``digest`` (then ``inline``, if any) as one line each, then ``artifact``'s raw
+        bytes (only after an ``inline`` envelope). An immutable pointer is first-writer-wins:
+        an existing one is accepted only when its first line is ``digest``."""
+        if artifact and not inline:
+            raise ValueError("An inline stage output follows its envelope")
         with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as stream:
             temporary = Path(stream.name)
-            stream.write(digest.encode() + b"\n" + (inline + b"\n" if inline else b""))
+            stream.write(digest.encode() + b"\n" + (inline + b"\n" if inline else b"") + artifact)
             stream.flush()
             os.fsync(stream.fileno())
         try:

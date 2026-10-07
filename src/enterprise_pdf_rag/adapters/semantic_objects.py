@@ -111,10 +111,9 @@ class _Writer:
                 )
             ).encode()
         ).hexdigest()
-        ref = self.outputs.assets.put(payload, media_type=media_type)
-        outcome = StageOutcome(stage, fingerprint, StageState.SUCCEEDED, self.producer, ref)
-        self.outputs.cache(outcome)
-        return outcome
+        return self.outputs.cache_output(
+            stage, fingerprint, self.producer, payload, media_type=media_type
+        )
 
     def diagnostic(
         self, stage: str, reason: str, *, failed: bool = False, skipped: bool = False

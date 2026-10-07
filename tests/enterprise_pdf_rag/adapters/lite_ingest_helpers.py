@@ -391,9 +391,12 @@ LLM_ENV = {
 # producing exactly these bytes. Re-recorded for ADR 0029 Amendment 1 (envelopes inline in
 # their stage-cache pointers): the 140 envelope objects are gone and the 140 pointers carry
 # them, the other 535 files are byte-identical (was ddade1cd…, 815 files; pinned in
-# test_inline_stage_cache by turning the pointers back into that form).
-FULL_STORE_DIGEST = "620f220d255312e833b0b6e0f2242798ea24883cdfd59717eadc184361e26906"
-FULL_STORE_FILES = 675
+# test_inline_stage_cache by turning the pointers back into that form). Re-recorded for
+# Amendment 2 (small stage outputs inline after the envelope): the 132 output objects are gone
+# and their pointers carry them (was 620f220d…, 675 files; pinned in test_inline_stage_artifacts
+# by writing the outputs back as objects).
+FULL_STORE_DIGEST = "363650ace4500a9f245ffd7c4b9c152bc15b2c04f793da263ac419ce10244a25"
+FULL_STORE_FILES = 543
 FULL_PUBLISHED_ID = "7d90791cc842875e334fadecf96072c4e31b626540461967d237f88c915f2e40"
 FULL_REQUESTS_DIGEST = "e51e5226da9421778b274054212f07a8d66551179cf72d861c5b1410db0834a5"
 FULL_TASKS = {
