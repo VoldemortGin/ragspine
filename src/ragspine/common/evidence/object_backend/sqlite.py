@@ -809,15 +809,9 @@ class SqliteModelCacheBackend:
                 " created_at) VALUES (?, ?, ?, ?)",
                 (fingerprint, encoding, blob, time()),
             )
-            if cursor.rowcount == 1:
-                return
-            row = connection.execute(
-                "SELECT encoding, bytes FROM contexts WHERE request_fingerprint = ?",
-                (fingerprint,),
-            ).fetchone()
-            if row is not None and _decode(bytes(row[1]), str(row[0])) == data:
-                return
-            raise StoreConflict("stored_context_mismatch")
+            # 首个存进去的上下文胜出,后来者静默让位(与 json_completion._store_context
+            # 的 ``path.exists() -> return`` 一致;差异上报是 PR-3 调用方的事)。
+            del cursor
 
     # ---- claim / release(ADR 0023 的 claims 表)---------------------------------------
 
