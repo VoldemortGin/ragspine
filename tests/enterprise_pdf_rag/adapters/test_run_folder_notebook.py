@@ -1,5 +1,6 @@
 """The example notebook is valid nbformat 4, ships without outputs and carries no secrets."""
 
+import ast
 import contextlib
 import csv
 import errno
@@ -384,7 +385,7 @@ def test_llm_selfcheck_cell_never_prints_the_key_or_authorization_and_writes_no_
     assert "TemporaryDirectory(" in source and "sender=" in source
 
 
-_Rule = Callable[[dict[str, Any]], tuple[int, str]]
+_Rule = Callable[[dict[str, Any]], tuple[int, str] | tuple[int, str, dict[str, str]]]
 
 
 class _Net:
@@ -396,14 +397,19 @@ class _Net:
         self.sent: list[dict[str, Any]] = []
         self.targets: list[tuple[str, str]] = []
         self.authorizations: list[str] = []
+        self.sleeps: list[float] = []
 
     def connection(self) -> type:
         net = self
 
         class _Response:
-            def __init__(self, status: int, text: str) -> None:
+            def __init__(self, status: int, text: str, headers: dict[str, str]) -> None:
                 self.status = status
                 self._text = text.encode()
+                self._headers = {name.lower(): value for name, value in headers.items()}
+
+            def getheader(self, name: str, default: str | None = None) -> str | None:
+                return self._headers.get(name.lower(), default)
 
             def read(self, amount: int = -1) -> bytes:
                 return self._text[:amount] if amount >= 0 else self._text
@@ -424,8 +430,8 @@ class _Net:
                 net.authorizations.append(headers.get("Authorization", ""))
 
             def getresponse(self) -> _Response:
-                status, text = net.rule(self._body)
-                return _Response(status, text)
+                status, text, *headers = net.rule(self._body)
+                return _Response(status, text, headers[0] if headers else {})
 
             def close(self) -> None:
                 pass
@@ -463,6 +469,7 @@ def _selfcheck(
     get_settings.cache_clear()
     net = _Net(rule, error)
     monkeypatch.setattr(http.client, "HTTPSConnection", net.connection())
+    monkeypatch.setattr("time.sleep", net.sleeps.append)  # 退避不真等
     system_tmp = tmp_path / "system-tmp"
     system_tmp.mkdir()
     monkeypatch.setattr(tempfile, "tempdir", str(system_tmp))
@@ -638,7 +645,9 @@ def test_llm_selfcheck_connection_failures_are_classified_as_network_and_not_bis
     assert isinstance(raised, RuntimeError)
     assert net.sent == []
     assert "网络 / 代理 / 证书问题\uff0c不是请求体问题" in output
-    assert "[连接失败]" in output and output.count("[连接失败]") == 1
+    # ADR 0035: 连接错误是临时错误, 逐形态各试 1 次 (共用 2 次重试), 四种全失败才阻断
+    assert output.count("[连接失败]") == 4 and output.count("重试") >= 2
+    assert len(net.sleeps) == 2 and "共发出 6 次请求" in output
     assert "最先被拒的一项" not in output
 
 
@@ -651,6 +660,97 @@ def test_llm_selfcheck_auth_failure_is_not_a_body_problem_and_is_not_bisected(
     assert isinstance(raised, RuntimeError)
     assert len(net.sent) == 1
     assert "[被拒 HTTP 401]" in output and "不是请求体问题" in _conclusion(output)
+
+
+def _transient_then_ok(status: int, failures: int, headers: dict[str, str] | None = None) -> _Rule:
+    left = [failures]
+
+    def rule(body: dict[str, Any]) -> tuple[int, str, dict[str, str]]:
+        if left[0] > 0:
+            left[0] -= 1
+            return status, '{"error":"slow down"}', headers or {}
+        return (*_REPLY_OK, {})
+
+    return rule
+
+
+@pytest.mark.parametrize("status", [429, 500, 502, 503, 504, 408])
+def test_llm_selfcheck_a_transient_status_once_is_retried_and_passes_without_blocking(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, status: int
+) -> None:
+    output, raised, net = _selfcheck(monkeypatch, tmp_path, _transient_then_ok(status, 1))
+    assert raised is None
+    assert len(net.sent) == 5 and len(net.sleeps) == 1
+    assert output.count("[通过]") == 4 and "重试 1/2" in output
+    assert "不是请求体问题" in _conclusion(output)
+    assert "最先被拒的一项" not in output
+
+
+def test_llm_selfcheck_persistent_429_warns_in_chinese_and_does_not_block_unless_all_four_fail(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # 前 3 个请求 (含 2 次重试) 全是 429, 之后端点恢复: 只有一种形态未能确认
+    output, raised, net = _selfcheck(monkeypatch, tmp_path, _transient_then_ok(429, 3))
+    assert raised is None
+    assert len(net.sleeps) == 2 and output.count("[通过]") == 3
+    assert "[被拒 HTTP 429]" in output and "未能确认" in _conclusion(output)
+    assert "端点当前限流 / 不可用\uff08HTTP 429\uff09" in output
+    assert "管线运行时会自动退避重试\uff0c不会把它当作永久失败" in output
+    assert "请检查配额" in output and "不阻断" in _conclusion(output)
+
+
+def test_llm_selfcheck_blocks_only_when_all_four_forms_fail_transiently_and_caps_requests(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    output, raised, net = _selfcheck(
+        monkeypatch, tmp_path, lambda body: (503, '{"error":"overloaded"}')
+    )
+    assert isinstance(raised, RuntimeError) and "临时错误" in str(raised)
+    assert "不会写入失败缓存" in str(raised) and "永久缓存" not in str(raised)
+    assert len(net.sent) == 6 and len(net.sleeps) == 2  # 4 基线 + 共用的 2 次重试, 不二分
+    assert "共发出 6 次请求" in output and "端点当前整体不可用" in _conclusion(output)
+    assert "最先被拒的一项" not in output
+
+
+def test_llm_selfcheck_honours_retry_after_capped_at_thirty_seconds_without_real_sleep(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from ragspine.common.evidence.providers.transient import RETRY_BASE_DELAY, RETRY_MAX_DELAY
+
+    _, raised, net = _selfcheck(
+        monkeypatch, tmp_path, _transient_then_ok(429, 1, {"Retry-After": "7"})
+    )
+    assert raised is None and len(net.sleeps) == 1
+    assert 7 <= net.sleeps[0] <= 7 + RETRY_BASE_DELAY
+    (tmp_path / "b").mkdir()
+    _, raised, net = _selfcheck(
+        monkeypatch, tmp_path / "b", _transient_then_ok(503, 1, {"Retry-After": "600"})
+    )
+    assert raised is None and len(net.sleeps) == 1
+    assert RETRY_MAX_DELAY <= net.sleeps[0] <= RETRY_MAX_DELAY + RETRY_BASE_DELAY
+    (tmp_path / "c").mkdir()
+    _, _, net = _selfcheck(
+        monkeypatch, tmp_path / "c", _transient_then_ok(429, 1)
+    )  # 无 Retry-After
+    assert 0 < net.sleeps[0] <= 2 * RETRY_BASE_DELAY
+
+
+def test_llm_selfcheck_classification_comes_from_the_implementation_not_a_copy() -> None:
+    source = _code_cell("llm-selfcheck")
+    assert "providers.transient import" in source and "transient_status" in source
+    assert "retry_after_seconds" in source
+    numbers = {n.value for n in ast.walk(ast.parse(source)) if isinstance(n, ast.Constant)}
+    assert not numbers & {408, 429, 500, 502, 503, 504}
+
+
+@pytest.mark.parametrize("status", [401, 403, 404, 407])
+def test_llm_selfcheck_permanent_statuses_still_block_without_retry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, status: int
+) -> None:
+    output, raised, net = _selfcheck(monkeypatch, tmp_path, lambda body: (status, "{}"))
+    assert isinstance(raised, RuntimeError) and net.sleeps == []
+    assert len(net.sent) == 1 and f"[被拒 HTTP {status}]" in output
+    assert "不是请求体问题" in _conclusion(output) and "永久缓存" not in str(raised)
 
 
 def test_llm_selfcheck_switch_off_sends_nothing_and_does_not_block(
