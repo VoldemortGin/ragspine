@@ -87,8 +87,30 @@ class ObjectBackend(Protocol):
         """按摘要读回并校验;不存在 → ``None``,存在但不是其摘要 → ``DamagedEntry``。"""
         ...
 
+    def get_content(self, digest: str) -> bytes | None:
+        """按摘要读回并校验,**含内联 stage 产物**(ADR 0029 Amendment 2 的完整读顺序:
+        已知内联位置 → 对象 → 内联产物扫描/索引)。不存在 → ``None``;只找到损坏的
+        副本 → ``DamagedEntry``。"""
+        ...
+
     def read_existing(self, digest: str) -> bytes | None:
         """按摘要读回**不校验**(供写路径判断现状);不存在 → ``None``。"""
+        ...
+
+    def note_product(self, digest: str, fingerprint: str) -> None:
+        """提示:指纹 ``fingerprint`` 的 stage 条目内联携带 ``digest`` 的产物字节。
+        只是位置,从不被信任——每次读回都重新 hash(files: 喂进程内索引;sqlite:
+        no-op,``stage_cache.artifact_digest`` 索引已覆盖)。"""
+        ...
+
+    def object_location(self, digest: str) -> Path | None:
+        """``digest`` 的字节当前会从哪个**文件**读出(对象文件,或内联携带它的
+        stage-cache 指针文件);存放在 db 行里或不存在 → ``None``。"""
+        ...
+
+    def content_path(self, digest: str) -> Path:
+        """``digest`` 的字节所在(或将写入)的那个文件,供调用方盯漂移;
+        对象住在 db 行里(sqlite 的内联对象与内联产物)→ ``LookupError``。"""
         ...
 
     def put_object(

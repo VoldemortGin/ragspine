@@ -338,9 +338,15 @@ def annotate_document_tree_draft(
     client: JsonCompletionClient | None,
 ) -> DocumentTreeSummary:
     """CLI entry over store paths: build and summarise the tree of a saved draft by id."""
-    return annotate_document_tree(
-        LocalDocumentStore(Path(source_store).resolve(), activate_on_publish=False),
-        ProcessingStore(Path(processing_store).resolve()),
-        processing_id=processing_id,
-        client=client,
-    )
+    sources = LocalDocumentStore(Path(source_store).resolve(), activate_on_publish=False)
+    outputs = ProcessingStore(Path(processing_store).resolve())
+    try:
+        return annotate_document_tree(
+            sources,
+            outputs,
+            processing_id=processing_id,
+            client=client,
+        )
+    finally:
+        outputs.close()
+        sources.close()

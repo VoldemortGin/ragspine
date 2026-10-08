@@ -46,6 +46,16 @@ def qualify_draft(
     """
     sources = LocalDocumentStore(Path(source_store).resolve())
     outputs = ProcessingStore(Path(processing_store).resolve())
+    try:
+        return _qualify_draft(sources, outputs, processing_id)
+    finally:
+        outputs.close()
+        sources.close()
+
+
+def _qualify_draft(
+    sources: LocalDocumentStore, outputs: ProcessingStore, processing_id: str
+) -> DraftQualification:
     manifest = outputs.load(processing_id)
     plan = None if manifest.retrieval is None else outputs.load_retrieval(manifest.retrieval)[0]
     validate_processing_source(
@@ -128,46 +138,56 @@ def index_draft(
     """
     sources = LocalDocumentStore(Path(source_store).resolve())
     outputs = ProcessingStore(Path(processing_store).resolve())
-    manifest = outputs.load(processing_id)
-    records = tuple((page.page_index, record) for page in manifest.pages for record in page.objects)
-    retrieval = ProcessingRetrieval(sources, outputs, embedder)
-    publication = retrieval.build(
-        manifest.scope, records, outputs.index_contexts(manifest), index_options
-    )
-    indexed_id = outputs.save_draft(replace(manifest, retrieval=publication), sources=sources)
-    plan, _ = outputs.load_retrieval(publication)
-    written: Path | None = None
-    if review:
-        label = (
-            document_label
-            if document_label is not None
-            else sources.load(manifest.scope.source_manifest_id).manifest.filename
+    try:
+        manifest = outputs.load(processing_id)
+        records = tuple(
+            (page.page_index, record) for page in manifest.pages for record in page.objects
         )
-        written = export_processing_review(
-            sources,
-            outputs,
-            indexed_id,
-            update_current=False,
-            title=f"{label} · 检索索引审阅",
+        retrieval = ProcessingRetrieval(sources, outputs, embedder)
+        publication = retrieval.build(
+            manifest.scope, records, outputs.index_contexts(manifest), index_options
         )
-    return DraftIndex(
-        source_sha256=manifest.scope.source_sha256,
-        source_manifest_id=manifest.scope.source_manifest_id,
-        processing_id=processing_id,
-        indexed_processing_id=indexed_id,
-        retrieval_snapshot_id=publication.snapshot_id,
-        member_count=len(plan.members),
-        embedding_dimensions=tuple(
-            sorted({member.embedding_dimensions for member in plan.members})
-        ),
-        embedding_fingerprint=embedder.fingerprint,
-        embedding_requests=retrieval.embedding_requests,
-        embedded_objects=retrieval.embedded_objects,
-        row_unit_tables=retrieval.row_unit_tables,
-        row_units=retrieval.row_units,
-        unscored_running_members=retrieval.unscored_running,
-        review_path=None if written is None else str(written),
-    )
+        # One transaction for the indexed snapshot itself (ADR 0036 §7.2): the plan, the
+        # index and the manifest envelope commit together (the per-slice embedding entries
+        # committed as they were stored).
+        with outputs.transaction():
+            indexed_id = outputs.save_draft(replace(manifest, retrieval=publication), sources=sources)
+        plan, _ = outputs.load_retrieval(publication)
+        written: Path | None = None
+        if review:
+            label = (
+                document_label
+                if document_label is not None
+                else sources.load(manifest.scope.source_manifest_id).manifest.filename
+            )
+            written = export_processing_review(
+                sources,
+                outputs,
+                indexed_id,
+                update_current=False,
+                title=f"{label} · 检索索引审阅",
+            )
+        return DraftIndex(
+            source_sha256=manifest.scope.source_sha256,
+            source_manifest_id=manifest.scope.source_manifest_id,
+            processing_id=processing_id,
+            indexed_processing_id=indexed_id,
+            retrieval_snapshot_id=publication.snapshot_id,
+            member_count=len(plan.members),
+            embedding_dimensions=tuple(
+                sorted({member.embedding_dimensions for member in plan.members})
+            ),
+            embedding_fingerprint=embedder.fingerprint,
+            embedding_requests=retrieval.embedding_requests,
+            embedded_objects=retrieval.embedded_objects,
+            row_unit_tables=retrieval.row_unit_tables,
+            row_units=retrieval.row_units,
+            unscored_running_members=retrieval.unscored_running,
+            review_path=None if written is None else str(written),
+        )
+    finally:
+        outputs.close()
+        sources.close()
 
 
 class DraftPublication(BoundaryModel):
@@ -207,25 +227,32 @@ def publish_draft(
     # The release about to become current is read for real, never on a receipt (ADR 0034).
     sources = LocalDocumentStore(Path(source_store).resolve(), persisted_receipts=False)
     outputs = ProcessingStore(Path(processing_store).resolve(), persisted_receipts=False)
-    manifest = outputs.load(processing_id)
-    if manifest.retrieval is None:
-        raise ValueError("draft has no retrieval index; run index before publish")
-    published_id = outputs.publish(manifest, sources=sources)
-    if activate_source:
-        sources.activate(manifest.scope.source_manifest_id)
-    plan, _ = outputs.load_retrieval(manifest.retrieval)
-    return DraftPublication(
-        source_sha256=manifest.scope.source_sha256,
-        source_manifest_id=manifest.scope.source_manifest_id,
-        processing_id=processing_id,
-        published_processing_id=published_id,
-        retrieval_snapshot_id=manifest.retrieval.snapshot_id,
-        member_count=len(plan.members),
-        embedding_dimensions=tuple(
-            sorted({member.embedding_dimensions for member in plan.members})
-        ),
-        source_store=str(sources.root),
-        processing_store=str(outputs.root),
-        current_processing_id=published_id,
-        source_activated=activate_source,
-    )
+    try:
+        manifest = outputs.load(processing_id)
+        if manifest.retrieval is None:
+            raise ValueError("draft has no retrieval index; run index before publish")
+        # One transaction for the publish itself (ADR 0036 §7.2): the re-saved manifest and
+        # the current-processing pointer commit together.
+        with outputs.transaction():
+            published_id = outputs.publish(manifest, sources=sources)
+        if activate_source:
+            sources.activate(manifest.scope.source_manifest_id)
+        plan, _ = outputs.load_retrieval(manifest.retrieval)
+        return DraftPublication(
+            source_sha256=manifest.scope.source_sha256,
+            source_manifest_id=manifest.scope.source_manifest_id,
+            processing_id=processing_id,
+            published_processing_id=published_id,
+            retrieval_snapshot_id=manifest.retrieval.snapshot_id,
+            member_count=len(plan.members),
+            embedding_dimensions=tuple(
+                sorted({member.embedding_dimensions for member in plan.members})
+            ),
+            source_store=str(sources.root),
+            processing_store=str(outputs.root),
+            current_processing_id=published_id,
+            source_activated=activate_source,
+        )
+    finally:
+        outputs.close()
+        sources.close()

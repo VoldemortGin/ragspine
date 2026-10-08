@@ -71,31 +71,35 @@ class ProcessingPipeline:
         )
         pages: list[PageProcessingRecord] = []
         for page_index in scope.selected_page_indices:
-            observed = source.manifest.pages[page_index]
-            page = PageInput(
-                source_manifest_id,
-                scope.source_sha256,
-                page_index,
-                observed.width,
-                observed.height,
-                observed.svg,
-                read_text_sidecar(self.sources, source, page_index),
-            )
-            canonical = self._canonical(page)
-            partition_stage, partition = self._partition(page, canonical)
-            raw_partition_stage = partition_stage if self.normalize_layout else None
-            if partition is not None and self.normalize_layout:
-                partition_stage, partition = self._normalize(page, partition_stage, partition)
-            records = (
-                tuple(self._object(page, item) for item in partition.objects)
-                if partition is not None
-                else ()
-            )
-            pages.append(
-                PageProcessingRecord(
-                    page_index, canonical, partition_stage, records, raw_partition_stage
+            # One backend transaction per page (ADR 0036 §7.2): every stage entry and small
+            # object of the page commits together; a crash loses at most this page, and its
+            # model calls replay from the model cache. A no-op on the file layout.
+            with self.outputs.transaction():
+                observed = source.manifest.pages[page_index]
+                page = PageInput(
+                    source_manifest_id,
+                    scope.source_sha256,
+                    page_index,
+                    observed.width,
+                    observed.height,
+                    observed.svg,
+                    read_text_sidecar(self.sources, source, page_index),
                 )
-            )
+                canonical = self._canonical(page)
+                partition_stage, partition = self._partition(page, canonical)
+                raw_partition_stage = partition_stage if self.normalize_layout else None
+                if partition is not None and self.normalize_layout:
+                    partition_stage, partition = self._normalize(page, partition_stage, partition)
+                records = (
+                    tuple(self._object(page, item) for item in partition.objects)
+                    if partition is not None
+                    else ()
+                )
+                pages.append(
+                    PageProcessingRecord(
+                        page_index, canonical, partition_stage, records, raw_partition_stage
+                    )
+                )
             if on_page is not None:
                 on_page(len(pages), len(scope.selected_page_indices))
         manifest = ProcessingManifest("processing-v1", scope, self.producer, tuple(pages))

@@ -16,6 +16,7 @@ from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from ragspine.common.evidence.file_placement import recording_repairs, sharded_path
 from ragspine.extraction.evidence.document.models import AssetRef
 from ragspine.extraction.evidence.page.models import StageOutcome, StageState
+from tests.enterprise_pdf_rag.adapters.legacy_pointer_helpers import write_pointer
 from tests.enterprise_pdf_rag.adapters.lite_ingest_helpers import (
     FULL_PUBLISHED_ID,
     FULL_REQUESTS_DIGEST,
@@ -28,6 +29,12 @@ from tests.enterprise_pdf_rag.adapters.lite_ingest_helpers import (
     write_questions,
 )
 from tests.enterprise_pdf_rag.adapters.no_hard_link_helpers import forbid_hard_links
+
+# 本文件钉的是 ADR 0029 Amendment 2 的**文件布局格式**本身(分代字节、分层路径、指针格式),所以固定
+# 跑在 files 后端上;sqlite 后端的同一批语义(首写胜出 / 损坏即修 / 读穿旧代)由
+# tests/enterprise_pdf_rag/object_backend/ 的一致性包与 test_sqlite_store_wiring.py 双跑钉死。
+pytestmark = pytest.mark.usefixtures("files_object_backend")
+
 
 FINGERPRINT = "e" * 64
 PAYLOAD = b'{"model": "result"}'
@@ -374,14 +381,14 @@ def test_a_rival_pointer_conflicts_and_the_same_entry_does_not(
     digest = hashlib.sha256(envelope).hexdigest()
 
     # A concurrent writer of the very same entry, in any format, is not a conflict ...
-    ProcessingStore._write_pointer(pointer, digest, immutable=True, inline=envelope)
-    ProcessingStore._write_pointer(
+    write_pointer(pointer, digest, immutable=True, inline=envelope)
+    write_pointer(
         pointer, digest, immutable=True, inline=envelope, artifact=PAYLOAD
     )
     # ... a writer of another envelope is, and the first writer's bytes stay.
     rival = envelope.replace(b"prompt-v1", b"prompt-v2")
     with pytest.raises(ValueError, match="Conflicting immutable stage cache entry"):
-        ProcessingStore._write_pointer(
+        write_pointer(
             pointer,
             hashlib.sha256(rival).hexdigest(),
             immutable=True,

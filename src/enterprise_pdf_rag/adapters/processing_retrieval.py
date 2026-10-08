@@ -545,15 +545,18 @@ class ProcessingRetrieval:
                 self.embedding_requests += embedder.request_count - sent
             if len(vectors) != len(chunk):
                 raise ValueError("Batch embedder returned a vector count unlike its inputs")
-            for (job, _), vector in zip(chunk, vectors, strict=True):
-                done.setdefault(job, []).append(vector)
-                key, (description, texts, units) = jobs[job]
-                if len(done[job]) < len(texts):
-                    continue
-                if units:
-                    self._store_units(key, description, tuple(done.pop(job)))
-                else:
-                    self._store(key, description, done.pop(job)[0])
+            # One backend transaction per slice (ADR 0036 §7.2): the entries a slice completed
+            # commit together, so a crash loses at most one slice; earlier slices stay cached.
+            with self.outputs.transaction():
+                for (job, _), vector in zip(chunk, vectors, strict=True):
+                    done.setdefault(job, []).append(vector)
+                    key, (description, texts, units) = jobs[job]
+                    if len(done[job]) < len(texts):
+                        continue
+                    if units:
+                        self._store_units(key, description, tuple(done.pop(job)))
+                    else:
+                        self._store(key, description, done.pop(job)[0])
             self.embedded_objects += len(chunk)
 
     def _store(

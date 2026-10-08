@@ -1,6 +1,6 @@
 # ADR 0036: A sqlite object backend behind the stores, probed and never silently different
 
-Status: Draft (PR-1 and PR-3 — the model cache — merged; store wiring lands in PR-2, visibility
+Status: Draft (PR-1, PR-2 — the store wiring — and PR-3 — the model cache — merged; visibility
 and tooling in PR-4). Builds on
 [ADR 0020](0020-storage-without-hard-links.md) (placement without hard links),
 [ADR 0023](0023-claim-takeover.md) (claims with holders and leases),

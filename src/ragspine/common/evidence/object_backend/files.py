@@ -22,6 +22,7 @@ import json
 import os
 import re
 import tempfile
+import threading
 from collections.abc import Iterable, Iterator
 from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
@@ -32,6 +33,7 @@ from ragspine.common.evidence.file_placement import (
     note_repair,
     read_stored,
     replace_file,
+    sharded_directory,
     sharded_path,
     stored_names,
     stored_path,
@@ -50,10 +52,72 @@ _DIGEST = re.compile(r"[0-9a-f]{64}")
 # 避免 object_backend → providers 的依赖方向。
 CLAIM_FORMAT = "json-completion-claim-v2"
 
+# A stage output of at most this many bytes is written inside its stage-cache pointer instead of
+# as an object of its own (ADR 0029 Amendment 2). Measured on the synthetic reports every stage
+# output is below 11 KiB (the source manifest, never inlined, grows with the page count); a real
+# embedding of 1 024 to 3 072 dimensions is ≈ 20 to 60 KiB of JSON. Larger outputs stay objects.
+# (PR-2 把它从 ``enterprise_pdf_rag.adapters.document_store`` 下沉到这里;store 层引用。)
+INLINE_ARTIFACT_LIMIT = 64 * 1024
+
+_MISMATCH = "Stored artifact digest mismatch; source review is unavailable"
+
 
 def _require_digest(digest: str) -> None:
     if _DIGEST.fullmatch(digest) is None:
         raise ValueError("Invalid content-addressed artifact identifier")
+
+
+def split_stage_pointer(data: bytes) -> tuple[str, bytes | None, bytes | None]:
+    """(envelope digest, envelope or None, inline output or None) of a stage-cache pointer.
+
+    Three generations share one prefix: ``<digest>\\n`` (the envelope an object), then
+    ``<envelope>\\n`` (Amendment 1), then the output's raw bytes (Amendment 2). The envelope is
+    compact JSON, so it holds no raw newline; the output is everything after it. Raises
+    ``ValueError`` when the first line is not a digest. Nothing here is verified.
+    """
+    head, _, rest = data.partition(b"\n")
+    digest = head.strip().decode(errors="replace")
+    if _DIGEST.fullmatch(digest) is None:
+        raise ValueError("damaged pointer")
+    if not rest.strip():
+        return digest, None, None
+    envelope, _, output = rest.partition(b"\n")
+    return digest, envelope, output or None
+
+
+def _envelope_artifact(envelope: bytes) -> str | None:
+    """The output digest a stage envelope names, if it parses and names one."""
+    try:
+        artifact = json.loads(envelope)["outcome"]["artifact"]
+    except (ValueError, KeyError, TypeError):
+        return None
+    digest = artifact.get("sha256") if isinstance(artifact, dict) else None
+    return digest if isinstance(digest, str) and _DIGEST.fullmatch(digest) else None
+
+
+class _InlineIndex:
+    """Where this process has seen inline outputs of one store: digest -> pointer name."""
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.where: dict[str, str] = {}
+        # Pointer names already read by a scan and found intact; a damaged one is read again.
+        self.settled: set[str] = set()
+
+
+# Process-wide, so that every store / backend instance of one root (each stage opens its own)
+# shares what the others wrote or read. Locations only: never trusted, every read hashes.
+_INLINE_INDEXES: dict[str, _InlineIndex] = {}
+_INLINE_INDEXES_LOCK = threading.Lock()
+
+
+def _inline_index(root: Path) -> _InlineIndex:
+    key = os.path.abspath(root)
+    with _INLINE_INDEXES_LOCK:
+        index = _INLINE_INDEXES.get(key)
+        if index is None:
+            index = _INLINE_INDEXES[key] = _InlineIndex()
+        return index
 
 
 def _write_temporary(directory: Path, data: bytes) -> Path:
@@ -138,6 +202,116 @@ class FileBackend:
 
     def object_names(self) -> list[str]:
         return [name for name in stored_names(self._flat()) if _DIGEST.fullmatch(name)]
+
+    # ---- 内联 stage 产物的读取(ADR 0029 Amendment 2;原 document_store 的进程内索引)----
+
+    def note_product(self, digest: str, fingerprint: str) -> None:
+        """Remember that the stage-cache pointer ``fingerprint`` carries ``digest`` inline."""
+        index = _inline_index(self.root)
+        with index.lock:
+            index.where[digest] = fingerprint
+
+    def _pointer_path(self, name: str) -> Path:
+        return sharded_path(self._stage_flat(), name)
+
+    def _inline_bytes(self, index: _InlineIndex, digest: str) -> tuple[bytes | None, bool]:
+        """(the inline output of ``digest`` at its known location, whether one was there but
+        did not hash to it)."""
+        with index.lock:
+            name = index.where.get(digest)
+        if name is None:
+            return None, False
+        try:
+            _, _, output = split_stage_pointer(self._pointer_path(name).read_bytes())
+        except FileNotFoundError:
+            return None, False
+        except (OSError, ValueError):
+            return None, True
+        if output is None:
+            return None, False
+        if hashlib.sha256(output).hexdigest() != digest:
+            return None, True
+        return output, False
+
+    def _scan_inline(self, index: _InlineIndex) -> None:
+        """Read the sharded stage-cache pointers no scan has settled and index their outputs.
+
+        Only reached when a digest is in no known location and no object: a new process
+        reading an inline output it has not met yet, or a missing object. Pointers already
+        found intact are not read again, so a later scan costs one listing per shard.
+        """
+        directory = sharded_directory(self._stage_flat())
+        try:
+            shards = [shard for shard in directory.iterdir() if shard.is_dir()]
+        except FileNotFoundError:
+            return
+        for shard in shards:
+            for pointer in shard.iterdir():
+                name = pointer.name
+                with index.lock:
+                    if name in index.settled:
+                        continue
+                try:
+                    digest, envelope, output = split_stage_pointer(pointer.read_bytes())
+                except (OSError, ValueError):
+                    continue
+                named = None
+                if envelope is not None:
+                    if hashlib.sha256(envelope).hexdigest() != digest:
+                        continue
+                    named = _envelope_artifact(envelope)
+                if output is not None and hashlib.sha256(output).hexdigest() != named:
+                    continue
+                with index.lock:
+                    index.settled.add(name)
+                    if output is not None and named is not None:
+                        index.where[named] = name
+
+    def get_content(self, digest: str) -> bytes | None:
+        """The bytes of ``digest`` wherever they are stored: a known inline location first,
+        then the object files, then a scan of this store's sharded stage cache (see
+        ``split_stage_pointer``). A location is only where to look — bytes are hashed."""
+        _require_digest(digest)
+        index = _inline_index(self.root)
+        data, damaged = self._inline_bytes(index, digest)
+        if data is not None:
+            return data
+        found = self.get_object(digest)  # a damaged object file raises, as it always has
+        if found is not None:
+            return found
+        self._scan_inline(index)
+        data, damaged_now = self._inline_bytes(index, digest)
+        if data is not None:
+            return data
+        if damaged or damaged_now:
+            raise DamagedEntry(_MISMATCH)
+        return None
+
+    def object_location(self, digest: str) -> Path | None:
+        """The file ``digest`` is read from: a known inline pointer, the sharded object, the
+        flat one, then after a stage-cache scan; ``None`` when it is in none of them."""
+        _require_digest(digest)
+        index = _inline_index(self.root)
+        for scan in (False, True):
+            if scan:
+                self._scan_inline(index)
+            with index.lock:
+                name = index.where.get(digest)
+            if name is not None:
+                return self._pointer_path(name)
+            if not scan:
+                existing = stored_path(self._flat(), digest)
+                if existing is not None:
+                    return existing
+        return None
+
+    def content_path(self, digest: str) -> Path:
+        """Where such an object lives (either layout, or the stage-cache pointer carrying it
+        inline), so a caller can watch that one file for drift; where it would be written when
+        it is in none."""
+        _require_digest(digest)
+        located = self.object_location(digest)
+        return located if located is not None else sharded_path(self._flat(), digest)
 
     # ---- stage-cache 条目(processing_store._lookup / _envelope / _write_pointer) -----
 
@@ -279,7 +453,7 @@ class FileBackend:
 
     def verify_many(self, digests: Iterable[str]) -> Iterator[tuple[str, bytes]]:
         for digest in digests:
-            data = self.get_object(digest)
+            data = self.get_content(digest)
             if data is None:
                 raise LookupError("Object to verify is absent")
             yield digest, data

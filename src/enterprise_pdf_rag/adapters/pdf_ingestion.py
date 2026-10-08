@@ -24,6 +24,7 @@ from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.http.schemas import BoundaryModel
 from enterprise_pdf_rag.adapters.ingest_mode import (
     IngestMode,
+    IngestPlan,
     LayoutPolicy,
     UnverifiedTableStructure,
     ingest_plan,
@@ -99,6 +100,8 @@ class IngestionSummary(BoundaryModel):
     processing_id: str
     source_store: str
     processing_store: str
+    # Which store backend holds this document's bytes (ADR 0036): "files" or "sqlite".
+    object_backend: str = "files"
     source_page_count: int
     selected_physical_pages: tuple[int, ...]
     page_selection_scope: Literal["downstream-only; complete source retained"] = (
@@ -183,12 +186,16 @@ def _selected_pages(pages: str, page_count: int) -> tuple[int, ...]:
 
 
 def _source(
-    sources: LocalDocumentStore, *, pdf: bytes, filename: str, pages: str
+    sources: LocalDocumentStore,
+    cache: ProcessingStore,
+    *,
+    pdf: bytes,
+    filename: str,
+    pages: str,
 ) -> tuple[DocumentSnapshot, tuple[int, ...], bool]:
     digest = sha256(pdf).hexdigest()
     producer = f"pdfspine/{pdfspine.__version__}; native-svg/text-dict-v2"
     fingerprint = stage_fingerprint("source", producer, (digest, filename))
-    cache = ProcessingStore(sources.root)
     cached = cache.cached(fingerprint)
     if cached is not None:
         assert cached.artifact is not None
@@ -342,8 +349,46 @@ def ingest_pdf(
     document_root = parent / sha256(data).hexdigest()
     sources = LocalDocumentStore(document_root / "source", activate_on_publish=False)
     outputs = ProcessingStore(document_root / "processing")
+    # The source stage's own cache lives in the source root: share that root's backend so the
+    # writer lease and the connections are held once; closing ``sources`` releases both.
+    source_cache = ProcessingStore(sources.root, backend=sources.backend)
+    try:
+        return _ingest_pdf(
+            pdf=pdf,
+            data=data,
+            pages=pages,
+            stage=stage,
+            max_live_calls=max_live_calls,
+            progress=progress,
+            plan=plan,
+            options=options,
+            sources=sources,
+            outputs=outputs,
+            source_cache=source_cache,
+        )
+    finally:
+        outputs.close()
+        sources.close()
+
+
+def _ingest_pdf(
+    *,
+    pdf: Path,
+    data: bytes,
+    pages: str,
+    stage: IngestionStage,
+    max_live_calls: int | Callable[[int], int],
+    progress: Callable[[IngestProgress], None] | None,
+    plan: IngestPlan,
+    options: _Options,
+    sources: LocalDocumentStore,
+    outputs: ProcessingStore,
+    source_cache: ProcessingStore,
+) -> IngestionSummary:
     config = None if stage == "source" else load_llm_config()
-    source, selected, cached = _source(sources, pdf=data, filename=pdf.name, pages=pages)
+    source, selected, cached = _source(
+        sources, source_cache, pdf=data, filename=pdf.name, pages=pages
+    )
     if config is not None and not isinstance(max_live_calls, int):
         options = _Options(
             stage=stage,
@@ -430,6 +475,7 @@ def ingest_pdf(
         processing_id=processing_id,
         source_store=str(sources.root),
         processing_store=str(outputs.root),
+        object_backend=outputs.object_backend,
         source_page_count=len(source.manifest.pages),
         selected_physical_pages=manifest.scope.physical_pages,
         stage=stage,
@@ -522,16 +568,20 @@ def export_document_review(document_root: Path, processing_id: str | None = None
     """
     sources = LocalDocumentStore(document_root / "source", activate_on_publish=False)
     outputs = ProcessingStore(document_root / "processing")
-    if processing_id is None:
-        if not (outputs.root / "current-processing").is_file():
-            raise ValueError("document has no published snapshot; pass processing_id")
-        processing_id = outputs.load_current()[0]
-    manifest = outputs.load(processing_id)
-    source = sources.load(manifest.scope.source_manifest_id)
-    return _export_review(
-        sources,
-        outputs,
-        source,
-        processing_id,
-        title=f"PDF 处理审阅: {source.manifest.filename}",
-    )
+    try:
+        if processing_id is None:
+            if outputs.current_id() is None:
+                raise ValueError("document has no published snapshot; pass processing_id")
+            processing_id = outputs.load_current()[0]
+        manifest = outputs.load(processing_id)
+        source = sources.load(manifest.scope.source_manifest_id)
+        return _export_review(
+            sources,
+            outputs,
+            source,
+            processing_id,
+            title=f"PDF 处理审阅: {source.manifest.filename}",
+        )
+    finally:
+        outputs.close()
+        sources.close()

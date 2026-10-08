@@ -2683,6 +2683,18 @@
             "title": "Mounted",
             "type": "boolean"
           },
+          "object_backend": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Object Backend"
+          },
           "origin": {
             "$ref": "#/$defs/CatalogOrigin"
           },
@@ -3065,6 +3077,18 @@
           "mounted": {
             "title": "Mounted",
             "type": "boolean"
+          },
+          "object_backend": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Object Backend"
           },
           "origin": {
             "$ref": "#/$defs/CatalogOrigin"

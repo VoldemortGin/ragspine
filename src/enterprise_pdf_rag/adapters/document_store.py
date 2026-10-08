@@ -23,34 +23,40 @@ sweeps use one: ``verify``, ``publish`` and ``put`` read for real. ``persisted_r
 """
 
 import hashlib
-import json
 import os
 import re
-import tempfile
-import threading
 from collections.abc import Sequence
+from contextlib import AbstractContextManager
 from pathlib import Path
 
 from enterprise_pdf_rag.adapters.http.document_schemas import ManifestEnvelope
 from enterprise_pdf_rag.adapters.verification_receipt import (
+    RECEIPTS_DIRECTORY,
     FileState,
+    decode_external_receipt,
+    encode_external_receipt,
     encode_receipt,
+    external_unchanged,
     inline_pointer,
     receipt_holds,
     state_of,
     write_receipt,
 )
 from ragspine.common.evidence.configs import get_settings
-from ragspine.common.evidence.file_placement import (
-    link_new_file,
-    note_repair,
-    read_stored,
-    replace_file,
-    sharded_directory,
-    sharded_path,
-    stored_names,
-    stored_path,
+from ragspine.common.evidence.file_placement import sharded_path
+
+# The stage-pointer format and the inline-output machinery live with the backend seam now
+# (sqlite object store PR-2); these names are re-exported so existing imports keep working.
+from ragspine.common.evidence.object_backend.files import (
+    _INLINE_INDEXES as _INLINE_INDEXES,
+    INLINE_ARTIFACT_LIMIT as INLINE_ARTIFACT_LIMIT,
+    _envelope_artifact as _envelope_artifact,
+    _inline_index as _inline_index,
+    _InlineIndex as _InlineIndex,
+    split_stage_pointer as split_stage_pointer,
 )
+from ragspine.common.evidence.object_backend.protocol import ObjectBackend, PinToken
+from ragspine.common.evidence.object_backend.registry import open_backend
 from ragspine.extraction.evidence.document.models import (
     AssetRef,
     DocumentManifest,
@@ -59,77 +65,24 @@ from ragspine.extraction.evidence.document.models import (
 
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 
-# A stage output of at most this many bytes is written inside its stage-cache pointer instead of
-# as an object of its own (ADR 0029 Amendment 2). Measured on the synthetic reports every stage
-# output is below 11 KiB (the source manifest, never inlined, grows with the page count); a real
-# embedding of 1 024 to 3 072 dimensions is ≈ 20 to 60 KiB of JSON. Larger outputs stay objects.
-INLINE_ARTIFACT_LIMIT = 64 * 1024
-
-
-def split_stage_pointer(data: bytes) -> tuple[str, bytes | None, bytes | None]:
-    """(envelope digest, envelope or None, inline output or None) of a stage-cache pointer.
-
-    Three generations share one prefix: ``<digest>\\n`` (the envelope an object), then
-    ``<envelope>\\n`` (Amendment 1), then the output's raw bytes (Amendment 2). The envelope is
-    compact JSON, so it holds no raw newline; the output is everything after it. Raises
-    ``ValueError`` when the first line is not a digest. Nothing here is verified.
-    """
-    head, _, rest = data.partition(b"\n")
-    digest = head.strip().decode(errors="replace")
-    if _DIGEST.fullmatch(digest) is None:
-        raise ValueError("damaged pointer")
-    if not rest.strip():
-        return digest, None, None
-    envelope, _, output = rest.partition(b"\n")
-    return digest, envelope, output or None
-
-
-def _envelope_artifact(envelope: bytes) -> str | None:
-    """The output digest a stage envelope names, if it parses and names one."""
-    try:
-        artifact = json.loads(envelope)["outcome"]["artifact"]
-    except (ValueError, KeyError, TypeError):
-        return None
-    digest = artifact.get("sha256") if isinstance(artifact, dict) else None
-    return digest if isinstance(digest, str) and _DIGEST.fullmatch(digest) else None
-
-
-class _InlineIndex:
-    """Where this process has seen inline outputs of one store: digest -> pointer name."""
-
-    def __init__(self) -> None:
-        self.lock = threading.Lock()
-        self.where: dict[str, str] = {}
-        # Pointer names already read by a scan and found intact; a damaged one is read again.
-        self.settled: set[str] = set()
-
-
-# Process-wide, so that every store instance of one root (each stage opens its own) shares what
-# the others wrote or read. Locations only: never trusted, every read hashes its bytes.
-_INLINE_INDEXES: dict[str, _InlineIndex] = {}
-_INLINE_INDEXES_LOCK = threading.Lock()
-
-
-def _inline_index(root: Path) -> _InlineIndex:
-    key = os.path.abspath(root)
-    with _INLINE_INDEXES_LOCK:
-        index = _INLINE_INDEXES.get(key)
-        if index is None:
-            index = _INLINE_INDEXES[key] = _InlineIndex()
-        return index
-
 
 class LocalDocumentStore:
     def __init__(
         self,
         root: Path,
         *,
+        backend: ObjectBackend | None = None,
         activate_on_publish: bool = True,
         verify_every_load: bool | None = None,
         persisted_receipts: bool | None = None,
         record_receipts: bool = True,
     ) -> None:
         self.root = root
+        # Where the bytes live (ADR 0036): the file layout, or sqlite when available and
+        # selected (``APP_OBJECT_STORE_BACKEND``). A borrowed backend (``ProcessingStore``
+        # shares one with its asset store) is never closed here.
+        self._backend = open_backend(root) if backend is None else backend
+        self._owns_backend = backend is None
         self._activate_on_publish = activate_on_publish
         settings = get_settings()
         self._verify_every_load = (
@@ -153,10 +106,33 @@ class LocalDocumentStore:
     def auditing(self) -> "LocalDocumentStore":
         """The same store without the verification cache: every call re-verifies live bytes."""
         return LocalDocumentStore(
-            self.root, activate_on_publish=self._activate_on_publish, verify_every_load=True
+            self.root,
+            backend=self._backend,
+            activate_on_publish=self._activate_on_publish,
+            verify_every_load=True,
         )
 
+    @property
+    def object_backend(self) -> str:
+        """Which backend holds this store's bytes: ``files`` or ``sqlite`` (ADR 0036)."""
+        return self._backend.kind
+
+    @property
+    def backend(self) -> ObjectBackend:
+        """The backend itself, for a sibling store of the same root to share (one lease)."""
+        return self._backend
+
+    def transaction(self) -> AbstractContextManager[None]:
+        """A reentrant write-transaction scope (no-op on the file layout)."""
+        return self._backend.transaction()
+
+    def close(self) -> None:
+        """Release the backend (sqlite: connections + the writer lease); a borrowed one stays."""
+        if self._owns_backend:
+            self._backend.close()
+
     def asset_path(self, ref: AssetRef) -> Path:
+        """``content_path`` for a reference; ``LookupError`` for a db-resident object."""
         return self.content_path(ref.sha256)
 
     def _flat(self) -> Path:
@@ -169,79 +145,39 @@ class LocalDocumentStore:
         return sharded_path(self._flat(), digest)
 
     def digests(self) -> list[str]:
-        """Every stored object's digest, in either layout (sorted)."""
-        return [name for name in stored_names(self._flat()) if _DIGEST.fullmatch(name)]
+        """Every stored object's digest, in any layout or the backend db (sorted)."""
+        return self._backend.object_names()
 
     def put(self, data: bytes, *, media_type: str) -> AssetRef:
         """Store ``data`` under its digest. An object already there is read back and verified;
         a damaged one (missing, empty, truncated or other bytes — e.g. lost by an asynchronous
         flush) is rewritten with these bytes, which are by construction the bytes the name
-        means (ADR 0029). Never writes into the legacy flat directory."""
+        means (ADR 0029). Never writes into the legacy flat directory; where the entry lands
+        (sharded file, or a db row with large objects external) is the backend's (ADR 0036)."""
         ref = AssetRef(hashlib.sha256(data).hexdigest(), media_type, len(data))
         if self._is_verified(ref):
             return ref
-        target = self._object_path(ref.sha256)
-        existing = stored_path(self._flat(), ref.sha256)
-        if existing is not None and self._intact(existing, ref):
-            return ref
-        target.parent.mkdir(parents=True, exist_ok=True)
-        self._written.add(ref.sha256)
-        with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as stream:
-            temporary = Path(stream.name)
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
-        try:
-            try:
-                link_new_file(temporary, target)
-            except FileExistsError:
-                if self._intact(target, ref):
-                    return ref
-                replace_file(temporary, target)
-        finally:
-            temporary.unlink(missing_ok=True)
-        if existing is not None:
-            note_repair("object")
+        if self._backend.put_object(ref.sha256, data, media_type) == "existing":
+            self._verified[ref.sha256] = len(data)
+        else:
+            self._written.add(ref.sha256)
         return ref
-
-    def _intact(self, path: Path, ref: AssetRef) -> bool:
-        """Does ``path`` hold exactly ``ref``'s bytes? Records the digest as verified if so."""
-        try:
-            data = path.read_bytes()
-        except FileNotFoundError:
-            return False
-        if len(data) != ref.byte_length or hashlib.sha256(data).hexdigest() != ref.sha256:
-            return False
-        self._verified[ref.sha256] = len(data)
-        return True
 
     def _read_digest(self, digest: str) -> bytes:
         """The bytes of ``digest`` wherever they are stored (see the module docstring)."""
         self._object_path(digest)
-        index = _inline_index(self.root)
-        data, damaged = self._inline_bytes(index, digest)
-        if data is not None:
-            return data
-        try:
-            data = self.read_object(digest)
-        except FileNotFoundError:
-            self._scan_inline(index)
-            data, damaged_now = self._inline_bytes(index, digest)
-            if data is not None:
-                return data
-            if damaged or damaged_now:
-                raise ValueError(
-                    "Stored artifact digest mismatch; source review is unavailable"
-                ) from None
-            raise
+        data = self._backend.get_content(digest)
+        if data is None:
+            raise FileNotFoundError(f"No stored object or inline output for digest {digest}")
+        self._verified[digest] = len(data)
         return data
 
     def read_object(self, digest: str) -> bytes:
-        """The object file of ``digest`` (sharded, then flat), hashed; no inline lookup."""
+        """The object entry of ``digest`` (db row, sharded, then flat), hashed; no inline lookup."""
         self._object_path(digest)
-        _, data = read_stored(self._flat(), digest)
-        if hashlib.sha256(data).hexdigest() != digest:
-            raise ValueError("Stored artifact digest mismatch; source review is unavailable")
+        data = self._backend.get_object(digest)
+        if data is None:
+            raise FileNotFoundError(f"No stored object for digest {digest}")
         self._verified[digest] = len(data)
         return data
 
@@ -257,71 +193,12 @@ class LocalDocumentStore:
 
     def note_inline(self, digest: str, pointer_name: str) -> None:
         """Remember that the stage-cache pointer ``pointer_name`` carries ``digest`` inline."""
-        index = _inline_index(self.root)
-        with index.lock:
-            index.where[digest] = pointer_name
+        self._backend.note_product(digest, pointer_name)
 
     def note_inline_verified(self, digest: str, pointer_name: str, length: int) -> None:
         """As ``note_inline``, for bytes the caller has just read there and hashed."""
         self.note_inline(digest, pointer_name)
         self._verified[digest] = length
-
-    def _inline_bytes(self, index: _InlineIndex, digest: str) -> tuple[bytes | None, bool]:
-        """(the inline output of ``digest`` at its known location, whether one was there but
-        did not hash to it)."""
-        with index.lock:
-            name = index.where.get(digest)
-        if name is None:
-            return None, False
-        try:
-            _, _, output = split_stage_pointer(self._stage_cache_pointer(name).read_bytes())
-        except FileNotFoundError:
-            return None, False
-        except (OSError, ValueError):
-            return None, True
-        if output is None:
-            return None, False
-        if hashlib.sha256(output).hexdigest() != digest:
-            return None, True
-        self._verified[digest] = len(output)
-        return output, False
-
-    def _scan_inline(self, index: _InlineIndex) -> None:
-        """Read the sharded stage-cache pointers no scan has settled and index their outputs.
-
-        Only reached when a digest is in no known location and no object: a new process
-        reading an inline output it has not met yet, or a missing object. Pointers already
-        found intact are not read again, so a later scan costs one listing per shard.
-        """
-        directory = sharded_directory(self.root / "stage-cache")
-        try:
-            shards = [shard for shard in directory.iterdir() if shard.is_dir()]
-        except FileNotFoundError:
-            return
-        for shard in shards:
-            for pointer in shard.iterdir():
-                name = pointer.name
-                with index.lock:
-                    if name in index.settled:
-                        continue
-                try:
-                    digest, envelope, output = split_stage_pointer(pointer.read_bytes())
-                except (OSError, ValueError):
-                    continue
-                named = None
-                if envelope is not None:
-                    if hashlib.sha256(envelope).hexdigest() != digest:
-                        continue
-                    named = _envelope_artifact(envelope)
-                if output is not None:
-                    actual = hashlib.sha256(output).hexdigest()
-                    if actual != named:
-                        continue
-                    self._verified[actual] = len(output)
-                with index.lock:
-                    index.settled.add(name)
-                    if output is not None and named is not None:
-                        index.where[named] = name
 
     def get(self, ref: AssetRef) -> bytes:
         data = self._read_digest(ref.sha256)
@@ -360,6 +237,13 @@ class LocalDocumentStore:
             return
         if subject in self._attested_subjects:
             return
+        if self._backend.kind != "files":
+            # sqlite (ADR 0036): db-resident entries are always read back and re-hashed —
+            # the sweep is a handful of batched row reads, so no receipt ever vouches for
+            # them; only the external files (the PDF, large indexes, legacy entries) keep
+            # the ADR 0034 stat-receipt shortcut.
+            self._verify_snapshot_external(subject, refs)
+            return
         pointers = self.root / "stage-cache"
         held = receipt_holds(
             self.root,
@@ -393,6 +277,93 @@ class LocalDocumentStore:
             states[ref.sha256] = recorded
         if recordable and not self._written.intersection(states):
             write_receipt(self.root, subject, encode_receipt(subject, refs, tuple(states.values())))
+
+    def _verify_snapshot_external(self, subject: str, refs: Sequence[AssetRef]) -> None:
+        """The sqlite-backend sweep (ADR 0036): every db-resident object is read back and
+        re-hashed in batches, and only external files carry a persisted stat receipt
+        (``verification-receipt-sqlite-v1``, stored as the backend record
+        ``verification-receipts/<subject>``). Tampering with a db row is therefore caught by
+        the next sweep itself — a receipt can never vouch past it (ADR 0034, not weakened)."""
+        backend = self._backend
+        flat = self._flat()
+        pointers = self.root / "stage-cache"
+        record_name = f"{RECEIPTS_DIRECTORY}/{subject}"
+        payload = backend.record(record_name)
+        held = None if payload is None else decode_external_receipt(payload, subject, refs)
+        attested = {} if held is None else {state.sha256: state for state in held}
+        lengths: dict[str, int] = {}
+        in_db: list[str] = []
+        states: dict[str, FileState] = {}
+        recordable = self._record_receipts
+        fresh = False
+        for ref in refs:
+            seen = lengths.get(ref.sha256)
+            if seen is not None:
+                if seen != ref.byte_length:
+                    raise ValueError("Stored artifact length mismatch")
+                continue
+            lengths[ref.sha256] = ref.byte_length
+            location = backend.object_location(ref.sha256)
+            if location is None:
+                # In the db (or an inline product there): always read back and re-hash.
+                if not self._is_verified(ref):
+                    in_db.append(ref.sha256)
+                continue
+            previous = attested.get(ref.sha256)
+            if (
+                previous is not None
+                and previous.byte_length == ref.byte_length
+                and external_unchanged(self.root, flat, pointers, previous)
+            ):
+                states[ref.sha256] = previous
+                self._attested[ref.sha256] = ref.byte_length
+                name = inline_pointer(pointers, previous)
+                if name is not None:
+                    self.note_inline(ref.sha256, name)
+                continue
+            fresh = True
+            recorded = self._read_external(ref, location)
+            if recorded is None:
+                recordable = False
+                self.get(ref)
+                continue
+            states[ref.sha256] = recorded
+        try:
+            for digest, data in backend.verify_many(in_db):
+                if len(data) != lengths[digest]:
+                    raise ValueError("Stored artifact length mismatch")
+                self._verified[digest] = len(data)
+        except LookupError as error:
+            raise FileNotFoundError(str(error)) from None
+        self._attested_subjects.add(subject)
+        if recordable and states and fresh and not self._written.intersection(states):
+            backend.put_record(
+                record_name, encode_external_receipt(subject, refs, tuple(states.values()))
+            )
+
+    def _read_external(self, ref: AssetRef, path: Path) -> FileState | None:
+        """Stat, then read and hash, one external file of the sqlite backend (an object file,
+        or the legacy stage-cache pointer carrying ``ref`` inline). None when the location no
+        longer holds those bytes: the caller then reads the ordinary way and records nothing."""
+        try:
+            state = path.stat()
+            data = path.read_bytes()
+        except OSError:
+            return None
+        recorded = state_of(self.root, path, ref, state)
+        if inline_pointer(self.root / "stage-cache", recorded) is not None:
+            try:
+                data = split_stage_pointer(data)[2] or b""
+            except ValueError:
+                return None
+            if hashlib.sha256(data).hexdigest() != ref.sha256:
+                return None
+        elif hashlib.sha256(data).hexdigest() != ref.sha256:
+            raise ValueError("Stored artifact digest mismatch; source review is unavailable")
+        if len(data) != ref.byte_length:
+            raise ValueError("Stored artifact length mismatch")
+        self._verified[ref.sha256] = len(data)
+        return recorded
 
     def _located(self, digest: str) -> tuple[Path, os.stat_result]:
         """The file ``digest`` is read from and its ``stat``, in ``_read_digest``'s order (a known
@@ -438,21 +409,23 @@ class LocalDocumentStore:
         return self._read_digest(digest)
 
     def content_path(self, digest: str) -> Path:
-        """Where such an object lives (either layout, or the stage-cache pointer carrying it
-        inline), so a caller can watch that one file for drift; where it would be written when
-        it is in none."""
-        target = self._object_path(digest)
-        index = _inline_index(self.root)
-        for scan in (False, True):
-            if scan:
-                self._scan_inline(index)
-            with index.lock:
-                name = index.where.get(digest)
-            if name is not None:
-                return self._stage_cache_pointer(name)
-            if not scan and (existing := stored_path(self._flat(), digest)) is not None:
-                return existing
-        return target
+        """The one **file** such an object lives in (either layout, or the stage-cache pointer
+        carrying it inline), so a caller can watch that one file for drift; under the file
+        layout, where it would be written when it is in none. An object living in the backend
+        db (sqlite: an inlined object or inline stage output) has no file to watch —
+        ``LookupError``; pin it with ``pin`` / ``pin_unchanged`` instead."""
+        self._object_path(digest)
+        return self._backend.content_path(digest)
+
+    def pin(self, digest: str) -> PinToken:
+        """A drift token for one stored object (the mount guard's shortcut, ADR 0036):
+        backend-opaque marks, never content. ``LookupError`` when the object is absent."""
+        self._object_path(digest)
+        return self._backend.pin(digest)
+
+    def pin_unchanged(self, token: PinToken) -> bool:
+        """Whether the pinned object is still those bytes (cheap marks, else re-hash)."""
+        return self._backend.pin_unchanged(token)
 
     def publish(self, manifest: DocumentManifest) -> str:
         for ref in manifest_assets(manifest):
@@ -465,18 +438,17 @@ class LocalDocumentStore:
 
     def activate(self, manifest_id: str) -> None:
         self.load(manifest_id)
-        with tempfile.NamedTemporaryFile(dir=self.root, delete=False, mode="w") as stream:
-            temporary = Path(stream.name)
-            stream.write(manifest_id + "\n")
-            stream.flush()
-            os.fsync(stream.fileno())
-        try:
-            os.replace(temporary, self.root / "current-manifest")
-        finally:
-            temporary.unlink(missing_ok=True)
+        self._backend.set_pointer("current-manifest", manifest_id)
+
+    def current_manifest_id(self) -> str | None:
+        """The manifest ``current-manifest`` names; None when absent or unreadable."""
+        return self._backend.pointer("current-manifest")
 
     def load_current(self) -> DocumentSnapshot:
-        return self.load((self.root / "current-manifest").read_text().strip())
+        current = self.current_manifest_id()
+        if current is None:
+            raise FileNotFoundError(str(self.root / "current-manifest"))
+        return self.load(current)
 
     def load(self, manifest_id: str) -> DocumentSnapshot:
         """The manifest and every asset it names, verified; once per instance and manifest id.

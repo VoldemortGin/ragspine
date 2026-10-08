@@ -21,6 +21,11 @@ from tests.enterprise_pdf_rag.adapters.lite_ingest_helpers import (
 )
 from tests.enterprise_pdf_rag.adapters.test_sharded_layout import refuse_writes_under
 
+# 本文件钉的是 ADR 0029 的**文件布局格式**本身(分代字节、分层路径、指针格式),所以固定
+# 跑在 files 后端上;sqlite 后端的同一批语义(首写胜出 / 损坏即修 / 读穿旧代)由
+# tests/enterprise_pdf_rag/object_backend/ 的一致性包与 test_sqlite_store_wiring.py 双跑钉死。
+pytestmark = pytest.mark.usefixtures("files_object_backend")
+
 
 def _run(tmp_path: Path, *, budget: int = 200) -> FolderPipelineResult:
     return run_folder_pipeline(

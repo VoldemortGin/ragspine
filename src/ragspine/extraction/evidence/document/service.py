@@ -1,6 +1,8 @@
 """The source identity is checked before SDK or persistence calls."""
 
 import json
+from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import asdict
 from hashlib import sha256
 from math import isfinite
@@ -52,27 +54,34 @@ def ingest_document(
         != (focus.width, focus.height, focus.rotation)
     ):
         raise ValueError("Region is not bound to the same source page")
+    # A store may offer a reentrant write-transaction scope (duck-typed: this package stays
+    # pure and depends on no backend); one page's SVG and sidecar then commit together.
+    raw_transaction = getattr(store, "transaction", None)
+    page_scope: Callable[[], AbstractContextManager[None]] = (
+        raw_transaction if callable(raw_transaction) else nullcontext
+    )
     pages: list[PageRecord] = []
     for page in extracted.pages:
         if page.width <= 0 or page.height <= 0:
             raise ValueError("Invalid source page geometry")
         text = TextSidecar("text-spans-v1", spec.sha256, page.page_index, page.text_spans)
-        pages.append(
-            PageRecord(
-                page.page_index,
-                page.width,
-                page.height,
-                page.rotation,
-                store.put(page.native_svg.encode(), media_type="image/svg+xml"),
-                store.put(
-                    json.dumps(asdict(text), ensure_ascii=False, sort_keys=True).encode(),
-                    media_type="application/json",
-                ),
-                len(page.text_spans),
-                page.warnings,
-                page.text_layer,
+        with page_scope():
+            pages.append(
+                PageRecord(
+                    page.page_index,
+                    page.width,
+                    page.height,
+                    page.rotation,
+                    store.put(page.native_svg.encode(), media_type="image/svg+xml"),
+                    store.put(
+                        json.dumps(asdict(text), ensure_ascii=False, sort_keys=True).encode(),
+                        media_type="application/json",
+                    ),
+                    len(page.text_spans),
+                    page.warnings,
+                    page.text_layer,
+                )
             )
-        )
     region_text = TextSidecar("text-spans-v1", spec.sha256, region.page_index, region.text_spans)
     record = RegionRecord(
         region.page_index,
