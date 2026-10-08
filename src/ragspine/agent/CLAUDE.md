@@ -80,6 +80,14 @@ loop, LLM provider abstraction.
   `max_tokens` argument, else the call's `usage.completion_tokens`) plus `reasoning_effort="none"` + `drop_params=True`;
   a `BadRequestError` on that request ⇒ the same request is sent again without the two params, and this instance stops
   sending them. `chat_stream` does not retry.
+- `openai_compat_provider.py` — `OpenAICompatProvider(config: LLMConfig, *, timeout, max_tokens, image_input, sender)`:
+  stdlib HTTP straight to an OpenAI-style `/v1/chat/completions` (no openai SDK), `provider_type="openai"`. Reuses the
+  evidence-chain transport/config (`common/evidence/providers/providers.py`: `LLMConfig`, `load_llm_config` reading
+  `OPENAI_API_KEY` / `_BASE_URL` (https) / `_MODEL` (`APP_LLM_*` are aliases), `_send_once`, injectable `SmokeSender`) and
+  `litellm_provider._openai_content` (messages / tools are already OpenAI-shaped and go out as is). **One HTTP request
+  per `chat`, no retry**; `finish_reason="length"` ⇒ `TruncatedOutputError` (no truncation retry). `ProviderRequestError`
+  and malformed responses ⇒ `ProviderError` (key never in the message); program errors propagate. Images are declared
+  (`image_input`, default off; the factory leaves it off). `chat` carries `instrument_llm_call`; no logging, no trace.
 - `truncation.py` — **provider-layer truncation retry** shared by `LiteLLMProvider` / `ClaudeCliProvider` /
   `AnthropicProvider` (`stop_reason="max_tokens"`; it never enables thinking, so there is nothing to turn off).
   `TruncationPolicy` (`RAGSPINE_LLM_TRUNCATION_RETRY=on|off`, default `on`; `RAGSPINE_LLM_TRUNCATION_MAX_TOKENS`,

@@ -183,7 +183,7 @@ calls, so a not-found answer can only ever stream the refusal.
   `provider_expr` to a serialized payload (Dify trust boundary, above).
   `provider_type` is `mock` | `anthropic` | `claude-cli` (eval-only local `claude -p`; its model is
   the separate `claude_cli_model` / `RAGSPINE_CLAUDE_CLI_MODEL`, default unset — it does **not**
-  inherit the anthropic `model` default) | `litellm` (`[litellm]`; `litellm_model` /
+  inherit the anthropic `model` default) | `openai` (direct OpenAI-compatible `/v1/chat/completions`, no SDK; configured by `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL` (`APP_LLM_*` are aliases), not `RAGSPINE_*`; nothing extra in `provider_config_dict`) | `litellm` (`[litellm]`; `litellm_model` /
   `RAGSPINE_LITELLM_MODEL`, default `deepseek/deepseek-chat`; `litellm_api_base` / `RAGSPINE_LITELLM_API_BASE`;
   `litellm_image_input` / `RAGSPINE_LITELLM_IMAGE_INPUT`, default off — all three travel in
   `provider_config_dict`). The default `provider_type` stays `mock`.

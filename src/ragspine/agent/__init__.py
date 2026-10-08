@@ -12,6 +12,7 @@ Submodules:
     litellm_provider.py — LiteLLMProvider：经 litellm 接 OpenAI 兼容各家模型（默认 deepseek/deepseek-chat；需 [litellm]，惰性加载）。
     llm_provider.py — LLMProvider 协议 + AnthropicProvider（真实）+ MockProvider（离线确定性）。
     number_guard.py — 叙事数字防编造（ADR 0024）：答案数字须在检索片段原样可找，否则确定性改写。
+    openai_compat_provider.py — OpenAICompatProvider：标准库 HTTP 直连 OpenAI 风格 /v1/chat/completions（读 APP_LLM_*，无 SDK，不重试）。
     query_tools.py — 参数化 query_metric 查询工具：found/not_found/unrecognized，绝不臆造。
     query_transform.py — opt-in LLM 查询变换（W9）：HyDE + RAG-Fusion + step-back + Adaptive-RAG；默认 none 时旁路、字节不变。
     security_gate.py — 确定性安全门（ADR 0010）：越权/竞品拒答 + 命中遮蔽。

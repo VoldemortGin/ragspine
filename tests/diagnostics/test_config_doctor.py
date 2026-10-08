@@ -78,6 +78,26 @@ def test_doctor_checks_litellm_dependency_not_unknown_provider(
     assert "provider.unknown" not in codes
 
 
+def test_doctor_checks_openai_provider_env_not_unknown_provider(tmp_path: Path) -> None:
+    config = load_effective_config(
+        env={},
+        overrides={
+            "provider_type": "openai",
+            "db_path": str(tmp_path / "facts.db"),
+            "n8n_store_path": str(tmp_path),
+        },
+    )
+    codes = {f.code for f in run_doctor(config, env={}).findings}
+    assert "key.openai_compat.invalid" in codes and "provider.unknown" not in codes
+    ok_env = {
+        "APP_LLM_API_KEY": "k",
+        "APP_LLM_BASE_URL": "https://gw.example.com/v1",
+        "APP_LLM_MODEL": "m",
+    }
+    codes = {f.code for f in run_doctor(config, env=ok_env).findings}
+    assert "key.openai_compat.invalid" not in codes and "provider.unknown" not in codes
+
+
 def test_doctor_reports_missing_database_parent(tmp_path: Path) -> None:
     config = load_effective_config(
         env={},

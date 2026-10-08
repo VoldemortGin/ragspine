@@ -31,6 +31,11 @@ All notable changes to RAGSpine are documented here. This project follows Semant
   `NB_QUESTIONS_PATH` wins; a blank `NB_QUESTIONS_PATH=` counts as unset and falls back to `DATASET_PATH`. Relative paths
   resolve exactly as before. Only this field gained an alias.
 
+- **`OpenAICompatProvider` / `provider_type="openai"`** (`agent/openai_compat_provider.py`): a stdlib-HTTP `LLMProvider`
+  for any OpenAI-style `/v1/chat/completions` endpoint, no openai SDK. Configured by `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL` (`APP_LLM_*` are aliases)
+  (base URL https) through the evidence chain's `load_llm_config`; one request per call,
+  no retry; a length cut raises `TruncatedOutputError`. `ragspine doctor` validates the three settings for it.
+
 ## [0.17.3] - 2026-09-28
 
 ### Changed

@@ -148,6 +148,25 @@ def run_doctor(
     elif runtime.provider_type == "litellm":
         # key 由 litellm 按模型厂商读各自的环境变量，这里只查依赖。
         findings.append(_dependency("litellm", "litellm"))
+    elif runtime.provider_type == "openai":
+        # 直连 OpenAI 兼容服务（无 SDK）：只校验 OPENAI_*（APP_LLM_* 为别名）是否齐全且合法，不联网。
+        from ragspine.common.evidence.providers.providers import (
+            ProviderConfigurationError,
+            load_llm_config,
+        )
+
+        try:
+            load_llm_config(None if env is None else environment)
+        except ProviderConfigurationError as exc:
+            findings.append(
+                DoctorFinding(
+                    "key.openai_compat.invalid",
+                    "error",
+                    "key",
+                    str(exc),
+                    "set OPENAI_API_KEY / OPENAI_BASE_URL (https) / OPENAI_MODEL (APP_LLM_* are aliases)",
+                )
+            )
     elif runtime.provider_type != "mock":
         findings.append(
             DoctorFinding(
