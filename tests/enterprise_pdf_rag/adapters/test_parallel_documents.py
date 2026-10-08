@@ -12,7 +12,7 @@ import shutil
 import threading
 import time
 from collections.abc import Callable
-from contextlib import nullcontext
+from contextlib import closing, nullcontext
 from pathlib import Path
 
 import pytest
@@ -27,6 +27,7 @@ from enterprise_pdf_rag.adapters.folder_pipeline import (
 )
 from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
 from enterprise_pdf_rag.adapters.pdf_ingestion import ingest_pdf
+from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from ragspine.common.evidence.providers.json_completion import (
     JsonCompletionClient,
     forget_unsupported_sampling_parameters,
@@ -35,10 +36,12 @@ from ragspine.common.evidence.providers.json_completion import (
 from ragspine.common.evidence.providers.providers import LLMConfig, ProviderRequestError
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import PROVIDER_BASE_URL
 from tests.enterprise_pdf_rag.adapters.lite_ingest_helpers import (
+    _DB_ARTIFACTS,
     FULL_PUBLISHED_ID,
     FULL_REQUESTS_DIGEST,
     FULL_STORE_DIGEST,
     FULL_STORE_FILES,
+    _db_logical_files,
     lite_env,
     mixed_folder,
     store_digest,
@@ -152,17 +155,23 @@ def _assert_no_claim_left(root: Path) -> None:
 
 def _logical_tree(root: Path) -> Path:
     """``root`` itself on the files backend; on sqlite a copy of it in which every
-    ``model-cache.sqlite*`` is replaced by the records / responses / contexts it holds, as the
-    files layout would store them (the sqlite file is not byte-deterministic, its content is)."""
-    if not any(root.rglob("model-cache.sqlite")):
+    ``model-cache.sqlite*`` is replaced by the records / responses / contexts it holds, and every
+    ``store.sqlite*`` by the objects / stage entries / pointers / records it holds, as the files
+    layout would store them (a sqlite file is not byte-deterministic, its content is)."""
+    if not any(root.rglob("model-cache.sqlite")) and not any(root.rglob("store.sqlite")):
         return root
     logical = root.parent / f"{root.name}.logical"
     shutil.rmtree(logical, ignore_errors=True)
     for path in sorted(root.rglob("*")):
-        if path.is_file() and not path.name.startswith("model-cache.sqlite"):
+        if path.is_file() and not _DB_ARTIFACTS.search(path.relative_to(root).as_posix()):
             target = logical / path.relative_to(root)
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(path, target)
+    for db in sorted(root.rglob("store.sqlite")):
+        for name, row in _db_logical_files(db).items():
+            target = logical / db.parent.relative_to(root) / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(row)
     for cache in _cache_dirs(root):
         out = logical / cache.relative_to(root)
         for kind in ("requests", "responses", "contexts"):
@@ -233,9 +242,8 @@ def _assert_parallel_matches_serial(tmp_path: Path, model: _Model) -> None:
         assert item.publication is not None and item.ingestion is not None
         processing = Path(item.ingestion.processing_store)
         assert processing.parent.name == item.sha256
-        assert (processing / "current-processing").read_text().strip() == (
-            item.publication.published_processing_id
-        )
+        with closing(ProcessingStore(processing)) as store:
+            assert store.current_id() == item.publication.published_processing_id
 
 
 def test_four_documents_at_once_write_exactly_what_the_serial_run_writes(

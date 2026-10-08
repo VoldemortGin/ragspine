@@ -718,7 +718,11 @@ class SqliteBackend:
 
     def object_names(self) -> list[str]:
         connection = self._core.reader_connection()
-        rows = [] if connection is None else connection.execute("SELECT digest FROM objects").fetchall()
+        rows = (
+            []
+            if connection is None
+            else connection.execute("SELECT digest FROM objects").fetchall()
+        )
         names = {str(row[0]) for row in rows}
         names.update(self._files.object_names())
         return sorted(names)
@@ -819,7 +823,9 @@ class SqliteBackend:
         row = (
             None
             if connection is None
-            else connection.execute("SELECT digest FROM pointers WHERE name = ?", (name,)).fetchone()
+            else connection.execute(
+                "SELECT digest FROM pointers WHERE name = ?", (name,)
+            ).fetchone()
         )
         if row is not None:
             digest = str(row[0])
@@ -857,7 +863,9 @@ class SqliteBackend:
     def _db_marks(self) -> tuple[int, ...]:
         connection = self._core.reader_connection()
         data_version = (
-            0 if connection is None else int(connection.execute("PRAGMA data_version").fetchone()[0])
+            0
+            if connection is None
+            else int(connection.execute("PRAGMA data_version").fetchone()[0])
         )
         marks = [data_version]
         for suffix in ("", "-wal"):

@@ -259,15 +259,11 @@ def test_a_rival_pointer_conflicts_and_the_same_entry_does_not(
     envelope = _envelope(outcome)
 
     # A concurrent writer of the very same entry (either format) is not a conflict ...
-    write_pointer(
-        pointer, hashlib.sha256(envelope).hexdigest(), immutable=True, inline=envelope
-    )
+    write_pointer(pointer, hashlib.sha256(envelope).hexdigest(), immutable=True, inline=envelope)
     # ... a writer of another envelope is, and the first writer's bytes stay.
     rival = envelope.replace(b"prompt-v1", b"prompt-v2")
     with pytest.raises(ValueError, match="Conflicting immutable stage cache entry"):
-        write_pointer(
-            pointer, hashlib.sha256(rival).hexdigest(), immutable=True, inline=rival
-        )
+        write_pointer(pointer, hashlib.sha256(rival).hexdigest(), immutable=True, inline=rival)
 
     assert pointer.read_bytes() == written
     assert [path.name for path in pointer.parent.iterdir()] == [FINGERPRINT]

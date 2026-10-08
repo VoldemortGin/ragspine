@@ -382,9 +382,7 @@ def test_a_rival_pointer_conflicts_and_the_same_entry_does_not(
 
     # A concurrent writer of the very same entry, in any format, is not a conflict ...
     write_pointer(pointer, digest, immutable=True, inline=envelope)
-    write_pointer(
-        pointer, digest, immutable=True, inline=envelope, artifact=PAYLOAD
-    )
+    write_pointer(pointer, digest, immutable=True, inline=envelope, artifact=PAYLOAD)
     # ... a writer of another envelope is, and the first writer's bytes stay.
     rival = envelope.replace(b"prompt-v1", b"prompt-v2")
     with pytest.raises(ValueError, match="Conflicting immutable stage cache entry"):

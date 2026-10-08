@@ -151,7 +151,9 @@ def index_draft(
         # index and the manifest envelope commit together (the per-slice embedding entries
         # committed as they were stored).
         with outputs.transaction():
-            indexed_id = outputs.save_draft(replace(manifest, retrieval=publication), sources=sources)
+            indexed_id = outputs.save_draft(
+                replace(manifest, retrieval=publication), sources=sources
+            )
         plan, _ = outputs.load_retrieval(publication)
         written: Path | None = None
         if review:

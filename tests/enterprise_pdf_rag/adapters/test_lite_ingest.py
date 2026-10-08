@@ -26,6 +26,7 @@ from tests.enterprise_pdf_rag.adapters.lite_ingest_helpers import (
     sharded_layout_only,
     store_digest,
 )
+from tests.enterprise_pdf_rag.adapters.model_cache_helpers import context_fingerprints
 from tests.enterprise_pdf_rag.answers.fake_llm import scripted_client
 
 
@@ -46,7 +47,8 @@ def test_full_mode_writes_byte_for_byte_what_the_release_before_lite_wrote(
     assert document.publication.published_processing_id == FULL_PUBLISHED_ID
     assert dict(tasks) == FULL_TASKS
     digest, count, requests = store_digest(tmp_path / "ingestion")
-    nonvolatile = count - sum(1 for _ in (tmp_path / "ingestion").rglob("contexts/*.json"))
+    caches = [path for path in (tmp_path / "ingestion").rglob("model-cache") if path.is_dir()]
+    nonvolatile = count - sum(len(context_fingerprints(cache)) for cache in caches)
     assert (digest, nonvolatile, requests) == (
         FULL_STORE_DIGEST,
         FULL_STORE_FILES,

@@ -438,10 +438,10 @@ def mixed_folder(tmp_path: Path) -> Path:
 # ADR 0029 moved hash-named files from ``<dir>/<name>`` to ``<dir>-sharded/<name[:2]>/<name>``.
 # The pinned digest is over each file's logical (flat) name, so it still proves that full mode
 # writes the very same files with the very same bytes; ``sharded_layout_only`` pins the move.
-# ADR 0036 moved small entries into one ``store.sqlite`` per store root: ``store_digest`` maps
-# each db row back to the very same logical name and the very same bytes (envelope lines,
-# trailing newlines, inline outputs included), so ``FULL_STORE_DIGEST`` is pinned to one value
-# whatever the backend.
+# ADR 0036 moved small entries into one ``store.sqlite`` per store root and the model cache
+# into ``model-cache.sqlite``: ``store_digest`` maps each db row back to the very same logical
+# name and the very same bytes (envelope lines, trailing newlines, inline outputs included), so
+# ``FULL_STORE_DIGEST`` is pinned to one value whatever the backend.
 _SHARDED = re.compile(r"(?P<dir>[^/]+)-sharded/[0-9a-f]{2}/(?P<name>[^/]+)$")
 # The backend db and its side files never enter the logical view themselves.
 _DB_ARTIFACTS = re.compile(r"(^|/)(store|model-cache)\.sqlite(-wal|-shm|\.writer.*|\.corrupt-.*)?$")
@@ -486,6 +486,24 @@ def _db_logical_files(db: Path) -> dict[str, bytes]:
     return out
 
 
+def _model_cache_db_files(db: Path) -> dict[str, bytes]:
+    """One model-cache db's rows as the flat ``requests`` / ``responses`` / ``contexts`` files
+    they stand for (sqlite object store PR-3: the record bytes are identical in both backends)."""
+    out: dict[str, bytes] = {}
+    with closing(sqlite3.connect(db)) as connection:
+        for key, record in connection.execute("SELECT record_key, record FROM requests"):
+            out[f"requests/{key}.json"] = bytes(record)
+        for digest, encoding, blob in connection.execute(
+            "SELECT digest, encoding, bytes FROM responses"
+        ):
+            out[f"responses/{digest}.json"] = _decode_row(blob, str(encoding))
+        for fingerprint, encoding, blob in connection.execute(
+            "SELECT request_fingerprint, encoding, bytes FROM contexts"
+        ):
+            out[f"contexts/{fingerprint}.json"] = _decode_row(blob, str(encoding))
+    return out
+
+
 def store_digest(root: Path) -> tuple[str, int, str]:
     files: dict[str, str] = {}
     requests: list[str] = []
@@ -507,9 +525,13 @@ def store_digest(root: Path) -> tuple[str, int, str]:
             continue
         relative = path.relative_to(root).as_posix()
         if _DB_ARTIFACTS.search(relative):
-            if path.name == "store.sqlite":
+            expand = {
+                "store.sqlite": _db_logical_files,
+                "model-cache.sqlite": _model_cache_db_files,
+            }
+            if path.name in expand:
                 prefix = path.parent.relative_to(root).as_posix()
-                for name, data in sorted(_db_logical_files(path).items()):
+                for name, data in sorted(expand[path.name](path).items()):
                     logical = f"{prefix}/{name}" if prefix != "." else name
                     take(logical, data)
             continue

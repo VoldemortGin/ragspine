@@ -49,10 +49,20 @@ from ragspine.common.evidence.file_placement import sharded_path
 # (sqlite object store PR-2); these names are re-exported so existing imports keep working.
 from ragspine.common.evidence.object_backend.files import (
     _INLINE_INDEXES as _INLINE_INDEXES,
+)
+from ragspine.common.evidence.object_backend.files import (
     INLINE_ARTIFACT_LIMIT as INLINE_ARTIFACT_LIMIT,
+)
+from ragspine.common.evidence.object_backend.files import (
     _envelope_artifact as _envelope_artifact,
+)
+from ragspine.common.evidence.object_backend.files import (
     _inline_index as _inline_index,
+)
+from ragspine.common.evidence.object_backend.files import (
     _InlineIndex as _InlineIndex,
+)
+from ragspine.common.evidence.object_backend.files import (
     split_stage_pointer as split_stage_pointer,
 )
 from ragspine.common.evidence.object_backend.protocol import ObjectBackend, PinToken

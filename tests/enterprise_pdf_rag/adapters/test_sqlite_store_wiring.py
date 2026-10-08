@@ -94,16 +94,14 @@ def test_sqlite_run_produces_the_same_logical_bytes_and_published_id(
     _run(tmp_path / "files-arm")
     assert store_digest(tmp_path / "files-arm" / "ingestion") == (digest, count, requests)
     assert sharded_layout_only(tmp_path / "ingestion")
-    # 平铺写入为零:db 行之外只有外置对象(PDF)与(PR-2 仍是文件的)模型缓存。
+    # 平铺写入为零:db 行之外只有外置对象(PDF)与模型缓存(PR-3 起在 model-cache.sqlite)。
     (document_dir,) = _document_dirs(tmp_path)
     sharded = [
         path.relative_to(document_dir).as_posix()
         for path in document_dir.rglob("*")
         if path.is_file() and "-sharded/" in path.relative_to(document_dir).as_posix()
     ]
-    assert sharded == [
-        f"source/objects/sha256-sharded/{document_dir.name[:2]}/{document_dir.name}"
-    ]
+    assert sharded == [f"source/objects/sha256-sharded/{document_dir.name[:2]}/{document_dir.name}"]
 
 
 # ---- 旧数据兼容 -------------------------------------------------------------------------
@@ -208,7 +206,7 @@ def test_a_second_pdf_into_a_files_generation_root_writes_rows_plus_external_pdf
         if path.is_file() and path not in first
     )
     digest = sha256((tmp_path / "pdfs" / "second.pdf").read_bytes()).hexdigest()
-    # 新增文件只许是:db(第一份文档的重跑也只新增它的 db)、模型缓存(PR-2 仍是文件)、
+    # 新增文件只许是:db(第一份文档的重跑也只新增它的 db)、模型缓存(model-cache.sqlite)、
     # 每次运行都会写的 runs/ 诊断,与第二份 PDF 的外置原件;绝无新的分层小对象或
     # stage-cache 指针文件。
     review_export = f"{digest}/source/"  # full 模式的审阅导出(source.pdf / text.json 等)
@@ -220,9 +218,7 @@ def test_a_second_pdf_into_a_files_generation_root_writes_rows_plus_external_pdf
         and "/runs/" not in name
         and name != f"{digest}/source/objects/sha256-sharded/{digest[:2]}/{digest}"
         and not (
-            name.startswith(review_export)
-            and "/objects/" not in name
-            and "stage-cache" not in name
+            name.startswith(review_export) and "/objects/" not in name and "stage-cache" not in name
         )
     ]
     assert unexpected == []
@@ -234,7 +230,8 @@ def test_files_pinned_code_meets_a_sqlite_store_at_a_version_gate_not_a_misread(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """旧代码(files 钉死)读 sqlite 写的目录:看不到发布指针(unpublished),重跑则重算
-    stage 并从(仍是文件的)模型缓存回放 → 同发布 id、零真实调用,绝不静默错读。"""
+    stage;模型缓存也在 db 里(PR-3),旧代码同样读不到,于是重发每个调用(ADR 0036
+    "Weaker":回滚到无后端版本会重算并可能重发模型调用)→ 同发布 id,绝不静默错读。"""
     tasks = lite_env(monkeypatch)
     mixed_folder(tmp_path)
     _select(monkeypatch, "sqlite")
@@ -249,7 +246,8 @@ def test_files_pinned_code_meets_a_sqlite_store_at_a_version_gate_not_a_misread(
     (document,) = _run(tmp_path).documents
     assert document.status == "published" and document.publication is not None
     assert document.publication.published_processing_id == FULL_PUBLISHED_ID
-    assert (sum(tasks.values()), document.live_calls) == (0, 0)
+    assert tasks == FULL_TASKS
+    assert document.live_calls == sum(FULL_TASKS.values())
 
 
 # ---- 崩溃与回退 -------------------------------------------------------------------------
@@ -316,7 +314,7 @@ def test_a_corrupt_db_is_rebuilt_and_the_rerun_recovers_from_the_model_cache(
 
     assert document.status == "published" and document.publication is not None
     assert document.publication.published_processing_id == FULL_PUBLISHED_ID
-    assert (sum(tasks.values()), document.live_calls) == (0, 0)  # 模型缓存仍是文件,零真实调用
+    assert (sum(tasks.values()), document.live_calls) == (0, 0)  # 模型缓存在另一个 db,零真实调用
     assert document.storage_repairs.get("store_db", 0) >= 1
     assert list(document_dir.glob("processing/store.sqlite.corrupt-*"))
 
@@ -354,9 +352,7 @@ def test_wal_tail_truncation_loses_at_most_the_last_transactions(
 
     fresh = SqliteBackend(store)
     try:
-        recovered = [
-            fresh.get_object(sha256(data).hexdigest()) is not None for data in payloads
-        ]
+        recovered = [fresh.get_object(sha256(data).hexdigest()) is not None for data in payloads]
         # 一个前缀被恢复,最后的事务丢了;丢的由下一次携带字节的写补上。
         assert recovered == sorted(recovered, reverse=True)
         assert not all(recovered)
