@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/common/evidence/
-verified-against: f04d077
+verified-against: 17c1dd3
 ---
 
 # common/evidence — agent contract
@@ -38,16 +38,18 @@ file_placement.py  link_new_file (create-if-absent by hard link; rename + re-rea
 object_backend/  the store persistence seam (sqlite object-store PR-1): ObjectBackend /
               ModelCacheBackend protocols + typed errors (protocol.py), FileBackend /
               FileModelCacheBackend carrying today's three placement paths byte-identically
-              (files.py), SqliteBackend / SqliteModelCacheBackend (one WAL db per store root,
-              zlib-inlined small objects, external large objects via the sharded layout,
+              (files.py, which also owns the stage-pointer format and the inline-output
+              reads that document_store re-exports), SqliteBackend /
+              SqliteModelCacheBackend (one WAL db per store root, zlib-inlined small objects, external large objects via the sharded layout,
               read-through of every legacy generation, O_EXCL writer lease instead of FUSE
               file locks — sqlite.py), the per-directory availability probe whose failure
               codes never carry a path (probe.py), the generalized ADR 0023 writer lease
               (lease.py), and open_backend(root, kind) (registry.py: files | sqlite — probe
-              failure raises, never silently falls back | auto). **Wired for the model
-              cache (PR-3)**: JsonCompletionClient opens its cache through it (below); the
-              stores are not wired until PR-2. A store db holds its writer lease per process,
-              a model-cache db per transaction. Only SQLITE_CORRUPT / NOTADB / a failed
+              failure raises, never silently falls back | auto). **Wired for the stores
+              (PR-2)** — LocalDocumentStore / ProcessingStore / scan_catalog / mount pins
+              read and write only through it — **and the model cache (PR-3)**:
+              JsonCompletionClient opens its cache through it (below). A store db holds its
+              writer lease per process, a model-cache db per transaction. Only SQLITE_CORRUPT / NOTADB / a failed
               quick_check rebuild a db — busy / locked is retried, then raised. Digests /
               fingerprints / envelope bytes / record bytes / published ids are invariant
               across backends (tests/enterprise_pdf_rag/object_backend/). ADR:

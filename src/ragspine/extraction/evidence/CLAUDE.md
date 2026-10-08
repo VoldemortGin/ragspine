@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/extraction/evidence/
-verified-against: c7da5dd
+verified-against: 17c1dd3
 ---
 
 # extraction/evidence — agent contract
@@ -19,7 +19,8 @@ Long-form docs: `docs/enterprise-pdf-rag/` (ADR 0002 / 0008 / 0009 / 0014 / 0015
 
 ```
 document/     pure source model — models.py (spans, regions, assets), ports.py, service.py (source
-              identity checked before any SDK call), text_layer.py (per-page text-layer
+              identity checked before any SDK call; a store's optional `transaction()` wraps
+              each page's two writes, duck-typed — no backend import), text_layer.py (per-page text-layer
               diagnosis ok / outlined_text / garbled — detection only)
 page/         selected-page processing records and coverage checks — models.py, service.py,
               ports.py, geometry.py (model region vs canonical geometry, 1e-6 tolerance),

@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/common/
-verified-against: f04d077
+verified-against: 17c1dd3
 ---
 
 # common — agent contract
@@ -48,7 +48,7 @@ before. Used by `agent/decompose`, `agent/query_transform` (RAG-Fusion) and `gra
 (a 400's `error.param` / `error.code` only, never its message; a refused `temperature` / `seed` is dropped and the call resent,
 enterprise-pdf-rag ADR 0021, learned from one probe inside a `one_sampling_probe()` scope, ADR 0033; a model-call claim whose holder is dead or out of lease is taken over, ADR 0023;
 429 / 408 / 5xx / timeouts / connection errors are retried in the call with backoff and `Retry-After` and never cached as a failure, ADR 0035;
-the model cache sits behind an `object_backend` `ModelCacheBackend` — the flat files or `model-cache.sqlite`, legacy files read through, ADR 0036;
+the model cache sits behind an `object_backend` `ModelCacheBackend` — the flat files or `model-cache.sqlite`, legacy files read through — and the stores behind its `ObjectBackend` — the file layout or one `store.sqlite` per store root, ADR 0036;
 `file_placement` also shards hash-named store files and counts repairs of entries lost on disk, ADR 0029)
 (ADR 0022); its own contract is [`evidence/CLAUDE.md`](evidence/CLAUDE.md).
 

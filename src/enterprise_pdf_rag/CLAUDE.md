@@ -1,6 +1,6 @@
 ---
 covers: src/enterprise_pdf_rag/
-verified-against: 002dc23
+verified-against: 17c1dd3
 ---
 
 # enterprise_pdf_rag — agent contract
@@ -382,7 +382,14 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   the filesystem cannot hard-link they fall
   back to check + rename + re-read (`ragspine.common.evidence.file_placement`, [ADR
   0020](../../docs/enterprise-pdf-rag/adr/0020-storage-without-hard-links.md): same bytes,
-  first-writer-wins no longer atomic under concurrent writers). A mount verifies
+  first-writer-wins no longer atomic under concurrent writers). Since [ADR
+  0036](../../docs/enterprise-pdf-rag/adr/0036-sqlite-object-backend.md) PR-2 the stores,
+  `scan_catalog` and mount pins reach that layout only through an `ObjectBackend`
+  (`open_backend(root)`, `APP_OBJECT_STORE_BACKEND` = `files` | `sqlite` | `auto`): `files` is the
+  layout above byte for byte; `sqlite` keeps objects, stage entries, `current-*` pointers,
+  document-tree records and receipts as rows of one `store.sqlite` per store root (external
+  objects such as the PDF stay sharded files) — same digests, envelopes and published ids; one
+  page's writes share a `transaction()`. A mount verifies
   its **whole** pinned release once, when it is mounted — every asset digest, the source it was
   cut from, every member's evidence. Every later request re-reads the one file that names all
   of it, the pinned manifest object whose digest **is** the processing id, and refuses any
@@ -399,7 +406,9 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   0024](../../docs/enterprise-pdf-rag/adr/0024-source-verification-cache.md)) — or, since [ADR
   0034](../../docs/enterprise-pdf-rag/adr/0034-persisted-verification-receipts.md), stats it: a
   full sweep a non-writing instance statted, read and hashed itself is recorded as a self-hashed
-  receipt (`adapters/verification_receipt.py`, `<store>/verification-receipts/<manifest id>`), and
+  receipt (`adapters/verification_receipt.py`, `<store>/verification-receipts/<manifest id>`; on
+  sqlite the backend record `verification-receipts/<subject>`, vouching for external files only —
+  db rows are re-read and re-hashed by every sweep), and
   a later instance / process skips the `load` / `ProcessingStore.load` sweep while the receipt
   names the same manifest and file set and every unread file's size / mtime / ctime is unchanged.
   `publish_draft` (receipts off), `save_draft`'s own sweep, `publish` / `verify` / `put` and every
