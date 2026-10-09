@@ -219,6 +219,10 @@ class Settings(BaseSettings):
     # 文档并行入库(enterprise-pdf-rag ADR 0033)时,共享 embedder 同时在途的调用数上限
     # (ADR 0039);只对按线程计数的 embedder 生效,其余仍一次一个。
     embedding_max_concurrency: int = Field(default=4, ge=1)
+    # 每个 /v1/embeddings 请求的 input 条数与字符数上限(ADR 0026 Amendment);
+    # 默认值即原硬编码的 16 / 48000,须与 local_models.EMBEDDING_BATCH_MAX_* 一致。
+    embedding_batch_max_items: int = Field(default=16, ge=1, le=1024)
+    embedding_batch_max_chars: int = Field(default=48_000, ge=1000)
     rerank_api_key: SecretStr | None = None  # 本地 rerank(loopback)
     rerank_base_url: str | None = None
     rerank_model: str | None = None

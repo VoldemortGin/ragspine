@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/common/evidence/
-verified-against: 17c1dd3
+verified-against: f4e15f2
 ---
 
 # common/evidence — agent contract
@@ -158,7 +158,8 @@ providers/    providers.py (explicit APP_LLM_* / embedding / APP_RERANK_* enviro
   (`providers._open_connection` / `_release_connection`, reused only after a fully read reply,
   dropped when the idle socket turns readable). `LocalEmbeddingAdapter` is thread-safe and counts
   per thread (`thread_counts`), which lets run-folder share it through
-  `APP_EMBEDDING_MAX_CONCURRENCY` (default 4).
+  `APP_EMBEDDING_MAX_CONCURRENCY` (default 4). Batch size per request is
+  `APP_EMBEDDING_BATCH_MAX_ITEMS` (16) / `APP_EMBEDDING_BATCH_MAX_CHARS` (48000), ADR 0026.
   [ADR 0039](../../../../docs/enterprise-pdf-rag/adr/0039-ingest-concurrency.md).
 - **A damaged model-cache entry is called again once, never stuck** — a record that does not
   parse, or a success record whose response is missing / not its digest, is re-sent under a

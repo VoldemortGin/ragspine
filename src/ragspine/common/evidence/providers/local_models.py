@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from ragspine.common.evidence.configs import Settings
 from ragspine.common.evidence.providers import transient
 from ragspine.common.evidence.providers.providers import (
     LocalModelConfig,
@@ -134,11 +135,18 @@ class LocalEmbeddingAdapter:
         config: LocalModelConfig,
         *,
         sender: LocalModelSender | None = None,
-        batch_max_items: int = EMBEDDING_BATCH_MAX_ITEMS,
-        batch_max_chars: int = EMBEDDING_BATCH_MAX_CHARS,
+        batch_max_items: int | None = None,
+        batch_max_chars: int | None = None,
     ) -> None:
         if config.purpose != "embedding":
             raise ValueError("Embedding adapter requires embedding configuration")
+        if batch_max_items is None or batch_max_chars is None:
+            # APP_EMBEDDING_BATCH_MAX_ITEMS / _CHARS (range-checked by Settings, ADR 0026).
+            settings = Settings()
+            if batch_max_items is None:
+                batch_max_items = settings.embedding_batch_max_items
+            if batch_max_chars is None:
+                batch_max_chars = settings.embedding_batch_max_chars
         if batch_max_items < 1 or batch_max_chars < 1:
             raise ValueError("Embedding batch limits must be positive")
         self._config = config
@@ -159,6 +167,11 @@ class LocalEmbeddingAdapter:
     @property
     def fingerprint(self) -> str:
         return f"local-http/{self._config.model}"
+
+    @property
+    def batch_max_items(self) -> int:
+        """Most inputs this adapter puts in one request."""
+        return self._batch_max_items
 
     def thread_counts(self) -> tuple[int, int, int]:
         """``(request_count, retry_count, transient_failure_count)`` of the calling thread's

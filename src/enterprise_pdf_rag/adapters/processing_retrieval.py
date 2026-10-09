@@ -536,8 +536,10 @@ class ProcessingRetrieval:
         jobs = list(uncached.items())
         work = [(job, text) for job, (_, (_, texts, _)) in enumerate(jobs) for text in texts]
         done: dict[int, list[tuple[float, ...]]] = {}
-        for start in range(0, len(work), _EMBED_SLICE):
-            chunk = work[start : start + _EMBED_SLICE]
+        # A slice smaller than the embedder's batch limit would waste the larger batches.
+        step = max(_EMBED_SLICE, getattr(embedder, "batch_max_items", 0))
+        for start in range(0, len(work), step):
+            chunk = work[start : start + step]
             sent = embedder.request_count
             try:
                 vectors = embedder.embed_descriptions([text for _, text in chunk])

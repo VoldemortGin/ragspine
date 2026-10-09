@@ -63,3 +63,20 @@ included, takes `input` as an array and answers a `data` list carrying each inpu
   `SingleTextEmbeddingBackend` still loops single texts; it can adopt `embed_descriptions` later.
 - What is embedded is unchanged: every eligible member's index text, with no sensitivity
   filter in this chain (gateway-mode embedding sends it to the LLM gateway, as before).
+
+## Amendment 2026-10-09: batch limits are configurable
+
+The two limits are no longer fixed at 16 items / 48000 characters per request. They are read
+from `Settings`: `APP_EMBEDDING_BATCH_MAX_ITEMS` (default 16, range 1-1024) and
+`APP_EMBEDDING_BATCH_MAX_CHARS` (default 48000, at least 1000); a value outside its range fails
+as a validation error naming the setting (in the preflight, a `PreflightError`). Explicit
+constructor arguments of `LocalEmbeddingAdapter` still win. The defaults keep the request
+split exactly as before.
+
+- Degradation is unchanged: a failed batch is halved (`len // 2`) down to 1, so 128 -> 64 -> 32
+  -> ... -> 1; the 8-failure cutoff to single inputs is still counted in failed batches.
+- The outer `_EMBED_SLICE` (256 texts per stored slice) would cut a larger batch short, so the
+  slice is `max(256, batch_max_items)`. A slice stays the crash-loss unit (ADR 0036 section 7.2).
+- Requests in flight are about `batch_max_items x APP_EMBEDDING_MAX_CONCURRENCY` (ADR 0039);
+  e.g. 64 x 4. Raise the batch only after checking the gateway's per-request limits (vLLM
+  sequence / token caps, body size): each refused batch costs extra requests before it halves.
