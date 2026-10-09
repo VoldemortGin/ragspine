@@ -191,6 +191,8 @@ class Settings(BaseSettings):
     pdf_ingest_password: SecretStr | None = Field(
         default=None, validation_alias="PDF_INGEST_PASSWORD"
     )
+    # 整本 PDF 抽取(extract_document)逐页并行的线程数;None → min(4, CPU 数),1 → 串行。ADR 0040。
+    pdf_extract_workers: int | None = Field(default=None, ge=1, le=64)
 
     # 模型与 SSH 隧道。全部可缺省:import / 构造时不校验,哪一组缺失或不合法,只在真正用到
     # 那一组的阶段报错(providers.load_*_config / local_model_tunnel.load_tunnel_config)。

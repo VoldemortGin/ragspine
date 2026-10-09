@@ -635,6 +635,13 @@ class JsonCompletionClient:
         """Sampling parameters at least one call of this client went without (sorted)."""
         return tuple(sorted(self._dropped))
 
+    def refuses_every_call(self) -> bool:
+        """True when every call that is not ``cache_only`` can only end in
+        ``call_budget_exhausted``: no live call is left and the model cache holds no record a
+        request could replay. A caller may then skip building a costly request body (the page
+        PNG, ADR 0039); while any record exists it cannot tell without the body's fingerprint."""
+        return self._remaining == 0 and not self.backend.has_records()
+
     @property
     def fingerprint(self) -> str:
         return _digest(

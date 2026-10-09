@@ -511,6 +511,14 @@ class FileModelCacheBackend:
     def put_record(self, key: str, data: bytes, *, replace_damaged: bool = False) -> None:
         _immutable_write(self._record_path(key), data, replace_damaged=replace_damaged)
 
+    def has_records(self) -> bool:
+        # 记录是 ``<key>.json``;``.json.claim`` / ``.takeover-N`` / 写入临时文件都不是。
+        try:
+            with os.scandir(self.cache_dir / "requests") as entries:
+                return any(entry.name.endswith(".json") for entry in entries)
+        except FileNotFoundError:
+            return False
+
     def response(self, digest: str) -> bytes | None:
         _require_digest(digest)
         try:
