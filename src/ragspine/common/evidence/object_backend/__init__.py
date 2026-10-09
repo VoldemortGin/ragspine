@@ -7,6 +7,7 @@ Submodules:
     probe.py — 目录上 sqlite 可用性的真实探测(结果缓存;失败码不含路径)。
     lease.py — O_EXCL 写者租约(ADR 0023 的持有者 JSON + 租约 + 接管代次,通用化)。
     registry.py — ``open_backend(root, kind)``:读设置 → 探测 → 返回实现。
+    staged.py — opt-in 分阶段后端(ADR 0044):本地盘 sqlite 工作副本 + 阶段结束整文件发布。
 """
 
 from ragspine import _lazy_submodules
