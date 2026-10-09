@@ -16,6 +16,8 @@ producer 含模型文件 sha256 前 12 位(``page-layout-onnx-v1:pdfspine/<ver>:
 
 import importlib.util
 import os
+import shutil
+import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from hashlib import sha256
@@ -46,6 +48,11 @@ ONNX_PRODUCER_PREFIX = "page-layout-onnx-v1"
 ONNX_LAYOUT_MODEL_FILE = "pp_doc_layoutv3.onnx"
 # pdfspine 自己的模型目录环境变量(ragspine 设置 APP_ONNX_LAYOUT_MODEL 优先, 此变量兜底).
 ONNX_MODELS_ENV = "PDFSPINE_ONNX_MODELS"
+# 版面权重的下载地址(与 pdfspine ``_onnx.LAYOUT_MODEL_URL`` 一致; notebook 安装步骤用它).
+ONNX_LAYOUT_MODEL_URL = (
+    "https://www.modelscope.cn/models/RapidAI/RapidLayout/resolve/v1.2.0/"
+    "onnx/pp_doc_layout/pp_doc_layoutv3.onnx"
+)
 
 # block 置信度下限: 达到它的框才进划分.
 ONNX_MIN_BLOCK_SCORE = 0.5
@@ -71,6 +78,9 @@ ONNX_FALLBACK_REASONS = (
     "onnx_partition_invalid",
 )
 ONNX_MARK = "onnx-partition: ok"
+# ADR 0039, ``layout_fallback="onnx-accept"``: 本该 ``onnx_low_confidence`` 回退的页接受了 ONNX
+# 返回的全部框(含 [0.3, 0.5) 的低分框), 这条码记在该页诊断里.
+ONNX_ACCEPTED_LOW_CONFIDENCE = "onnx_low_confidence_accepted"
 ONNX_FALLBACK_MARK = "onnx-partition: model fallback ("
 
 # 测试缝: 可注入的 find_spec(模拟 onnxruntime 缺失).
@@ -109,6 +119,62 @@ def onnx_layout_unavailable(configured: str | None) -> str | None:
     except ValueError as error:
         return str(error)
     return _runtime_problem()
+
+
+def _configured_target(configured: str | None) -> Path | None:
+    """权重该在的位置(不查存在): 显式配置的文件 / 目录, 其次 ``PDFSPINE_ONNX_MODELS``; 都没有为 None."""
+    value = (configured or "").strip()
+    if value:
+        path = Path(value).expanduser()
+        return path / ONNX_LAYOUT_MODEL_FILE if path.is_dir() or not path.suffix else path
+    root = os.environ.get(ONNX_MODELS_ENV, "").strip()
+    return Path(root).expanduser() / ONNX_LAYOUT_MODEL_FILE if root else None
+
+
+def _download(url: str, target: Path) -> None:
+    with urllib.request.urlopen(url, timeout=300) as response, target.open("wb") as sink:
+        shutil.copyfileobj(response, sink)
+
+
+def ensure_onnx_layout_weights(
+    configured: str | None, *, download: Callable[[str, Path], None] = _download
+) -> str:
+    """notebook 安装步骤: 已配置的位置缺权重就从 ``ONNX_LAYOUT_MODEL_URL`` 下载; 返回一行中文说明.
+
+    没配置位置时不下载(下载到 ragspine 读不到的地方等于没装), 只说该设哪个变量; 下载失败
+    不抛异常, 给出地址让人手工放置——之后的自检行与 ``"auto"`` 选择会如实显示它仍不可用.
+    """
+    target = _configured_target(configured)
+    if target is None:
+        return (
+            "ONNX 版面权重: 未配置位置, 未下载。请在 .env 设 APP_ONNX_LAYOUT_MODEL 指向一个目录"
+            "(Databricks 上用 Volume 里的绝对路径), 重跑本格即自动下载; 或手工下载 "
+            f"{ONNX_LAYOUT_MODEL_URL} 放进该目录。"
+        )
+    if target.is_file():
+        return f"ONNX 版面权重: 已存在 {target}"
+    partial = target.with_name(target.name + ".part")
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        download(ONNX_LAYOUT_MODEL_URL, partial)
+        partial.replace(target)
+    except OSError as error:
+        partial.unlink(missing_ok=True)
+        return (
+            f"ONNX 版面权重: 下载失败({type(error).__name__}: {error})。请手工下载 "
+            f"{ONNX_LAYOUT_MODEL_URL} 放到 {target}"
+        )
+    return f"ONNX 版面权重: 已下载到 {target}"
+
+
+def onnx_layout_status(configured: str | None) -> str:
+    """notebook 开头的自检行: ONNX 版面是否可用 + 权重路径; 不可用时附带安装 / 配置提示."""
+    target = _configured_target(configured)
+    weights = "未配置" if target is None else str(target)
+    problem = onnx_layout_unavailable(configured)
+    if problem is None:
+        return f"ONNX 版面自检: 可用=是, 权重={weights}"
+    return f"ONNX 版面自检: 可用=否, 权重={weights}。{problem}"
 
 
 def resolve_onnx_layout_model(configured: str | None) -> Path:
@@ -328,12 +394,16 @@ class OnnxPagePartitioner:
         *,
         producer: str,
         blocks_for: Callable[[PageInput], Sequence[pdfspine.LayoutBlock]],
+        accept_low_confidence: bool = False,
     ) -> None:
         self.model = model
         self.snapshot = snapshot
         self.producer = producer
-        self.fingerprint = f"page-layout-onnx-router-v1:{producer};{model.fingerprint}"
+        # ADR 0039: 接受低置信结果的路由产出不同的划分, 指纹随之区分(默认逐字节不变).
+        accept = ";accept-low-confidence" if accept_low_confidence else ""
+        self.fingerprint = f"page-layout-onnx-router-v1:{producer}{accept};{model.fingerprint}"
         self._blocks_for = blocks_for
+        self._accept_low_confidence = accept_low_confidence
 
     def partition(self, page: PageInput) -> PagePartition:
         if page.source_sha256 != self.snapshot.manifest.source.sha256:
@@ -353,19 +423,16 @@ class OnnxPagePartitioner:
             # 构造切分器时已做过可用性预检并明确报错; 走到这里是单页推理 / 渲染失败,
             # 按页回退并计入原因分布, 让用户看得见而不是悄悄变成全模型.
             return "onnx_unavailable", None
-        regions = [
-            region
-            for block in blocks
-            if float(block.score) >= ONNX_MIN_BLOCK_SCORE
-            and (region := _region_from_block(block, width=page.width, height=page.height))
-            is not None
-        ]
-        if not regions:
-            # 模型在这一页没给出任何达到阈值的框: 版面没读懂, 交回模型版面.
-            return "onnx_low_confidence", None
-        if self._unexplained_suspect(page, blocks, regions):
-            # 低分视觉框没有任何已接受的视觉区覆盖: 这页可能有图被漏掉, 回退而不是静默丢图.
-            return "onnx_low_confidence", None
+        regions = self._regions(page, blocks, ONNX_MIN_BLOCK_SCORE)
+        accepted: tuple[str, ...] = ()
+        if not regions or self._unexplained_suspect(page, blocks, regions):
+            # 没有达到阈值的框(版面没读懂), 或低分视觉框没有任何已接受的视觉区覆盖(可能漏图):
+            # 默认交回被包装的切分器; "onnx-accept" 改为接受 ONNX 返回的全部框(低分图表框也成
+            # 对象, 不丢图), 完全没框时仍交回去(由文本切块兜底).
+            regions = self._regions(page, blocks, 0.0) if self._accept_low_confidence else []
+            if not regions:
+                return "onnx_low_confidence", None
+            accepted = (ONNX_ACCEPTED_LOW_CONFIDENCE,)
         reason, assignment = _assign_spans(page, regions)
         if assignment is None:
             return reason, None
@@ -386,6 +453,7 @@ class OnnxPagePartitioner:
                 f"objects={len(objects)}",
                 f"blocks={len(blocks)}",
                 f"merged_spans={assignment.merged}",
+                *accepted,
             ),
         )
         try:
@@ -394,6 +462,18 @@ class OnnxPagePartitioner:
             # 产出不满足覆盖/几何约束说明这页我们没读懂: 零代价回退, 不猜.
             return "onnx_partition_invalid", None
         return "ok", partition
+
+    @staticmethod
+    def _regions(
+        page: PageInput, blocks: tuple[pdfspine.LayoutBlock, ...], min_score: float
+    ) -> list[_Region]:
+        return [
+            region
+            for block in blocks
+            if float(block.score) >= min_score
+            and (region := _region_from_block(block, width=page.width, height=page.height))
+            is not None
+        ]
 
     def _unexplained_suspect(
         self,
@@ -472,6 +552,7 @@ def make_onnx_page_partitioner(
     snapshot: DocumentSnapshot,
     *,
     layout_model: str | None = None,
+    accept_low_confidence: bool = False,
 ) -> PagePartitioner:
     """``"onnx-layout"`` 策略的 ONNX 切分器; 在入库开始前完成可用性预检, 绝不静默回退.
 
@@ -500,4 +581,10 @@ def make_onnx_page_partitioner(
         with opened_pdf(pdf) as document:
             return layout_blocks(document, page, options)
 
-    return OnnxPagePartitioner(model, snapshot, producer=producer, blocks_for=blocks_for)
+    return OnnxPagePartitioner(
+        model,
+        snapshot,
+        producer=producer,
+        blocks_for=blocks_for,
+        accept_low_confidence=accept_low_confidence,
+    )

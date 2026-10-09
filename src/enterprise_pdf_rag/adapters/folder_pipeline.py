@@ -984,6 +984,12 @@ def _run_document(
                 retries=run["retries"],
                 transient_failures=run["transient_failures"],
             )
+            if ingested.pages_partition_text_fallback:
+                # ADR 0039: 版面没用模型、只按文字层切块的页, 只报计数与原因码.
+                reason.update(
+                    pages_partition_text_fallback=ingested.pages_partition_text_fallback,
+                    partition_text_fallback_reasons=ingested.partition_text_fallback_reasons,
+                )
         if repairs:
             reason["storage_repairs"] = sum(repairs.values())
         _emit(progress, "document_done", pdf=str(pdf), status=status, **reason)
@@ -1504,6 +1510,7 @@ def _ingest_count_lines(result: FolderPipelineResult) -> list[str]:
             ingested.pages_partitioned_deterministically
             or ingested.pages_partitioned_onnx
             or ingested.pages_partition_model_fallback
+            or ingested.pages_partition_text_fallback
         ):
             reasons = ", ".join(
                 f"{code} {count}"
@@ -1515,10 +1522,22 @@ def _ingest_count_lines(result: FolderPipelineResult) -> list[str]:
                 if ingested.pages_partitioned_onnx
                 else ""
             )
+            # ADR 0039: 文本切块页只在 layout_fallback 非 "model" 时出现; 为 0 时行文不变.
+            text_reasons = ", ".join(
+                f"{code} {count}"
+                for code, count in sorted(ingested.partition_text_fallback_reasons.items())
+            )
+            text_part = (
+                f", text fallback {ingested.pages_partition_text_fallback}"
+                + (f" ({text_reasons})" if text_reasons else "")
+                if ingested.pages_partition_text_fallback
+                else ""
+            )
             partition.append(
                 f"- `{name}`: deterministic {ingested.pages_partitioned_deterministically}, "
                 f"{onnx_part}model fallback {ingested.pages_partition_model_fallback}"
                 + (f" ({reasons})" if reasons else "")
+                + text_part
             )
         if ingested is not None and ingested.table_row_transcriptions:
             rows.append(

@@ -14,6 +14,10 @@ mode name only picks a preset. ``layout`` is the selection point for the page pa
 explicitly until it is validated on long reports; ``"onnx-layout"`` (ADR 0030) additionally
 partitions the remaining pages with pdfspine's local PP-DocLayoutV3 model (deterministic text
 pages -> onnx -> per-page model fallback), also chosen explicitly only.
+``layout_fallback`` (ADR 0039) is what those two routers hand an unsure page to: the model
+layout (``"model"``, both presets), or never the model — ``"onnx-accept"`` keeps a low-confidence
+ONNX result, ``"text-only"`` does not, and either partitions every other page from its text
+layer alone (``text_block_partition.py``). It does nothing under ``layout="model"``.
 ``unverified_tables_as_rows`` (ADR 0027) indexes a Table with no detected grid as its verbatim
 printed rows; lite turns it on. ``table_row_index_units`` / ``drop_running_lines_from_index``
 lay out the index text (row units for a long row table, nothing for a running header /
@@ -34,6 +38,7 @@ from enterprise_pdf_rag.adapters.onnx_partition import (
 from enterprise_pdf_rag.adapters.page_metadata_extraction import PAGE_METADATA_DETERMINISTIC
 from enterprise_pdf_rag.adapters.page_partition import ModelPagePartitioner
 from enterprise_pdf_rag.adapters.pdfspine_tsr import table_structure_unavailable
+from enterprise_pdf_rag.adapters.text_block_partition import TextBlockPartitioner
 from enterprise_pdf_rag.processing.index_text import IndexTextOptions
 from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
 from ragspine.extraction.evidence.document.models import DocumentSnapshot
@@ -45,11 +50,16 @@ type IngestMode = Literal["full", "lite"]
 # pages without figures or images with a per-page model fallback (ADR 0028); or those two plus
 # pdfspine's local ONNX layout model (PP-DocLayoutV3) on the remaining pages (ADR 0030).
 type LayoutPolicy = Literal["model", "deterministic-text-pages", "onnx-layout"]
+# What those routers hand a page they are unsure of (ADR 0039): the model layout, or never the
+# model — a low-confidence ONNX result kept ("onnx-accept") or not ("text-only"), every other
+# such page partitioned from its text layer alone.
+type LayoutFallback = Literal["model", "onnx-accept", "text-only"]
 # How a Table with no detected grid is structured when it is indexed: ADR 0027's verbatim
 # printed rows, or a grid a local SLANet-plus model infers (kept pending, rows on fallback).
 type UnverifiedTableStructure = Literal["rows", "tsr"]
 INGEST_MODES: Final[tuple[str, ...]] = get_args(IngestMode.__value__)
 LAYOUT_POLICIES: Final[tuple[str, ...]] = get_args(LayoutPolicy.__value__)
+LAYOUT_FALLBACKS: Final[tuple[str, ...]] = get_args(LayoutFallback.__value__)
 UNVERIFIED_TABLE_STRUCTURES: Final[tuple[str, ...]] = get_args(UnverifiedTableStructure.__value__)
 # The notebook's ``LAYOUT_POLICY = "auto"``: in lite, the local ONNX layout when its weights and
 # runtime are present, else the deterministic text pages (ADR 0030); never a library preset.
@@ -69,6 +79,8 @@ class IngestPlan:
 
     mode: IngestMode
     layout: LayoutPolicy = "model"
+    # Where ``layout``'s routers send an unsure page (ADR 0039); ``"model"`` keeps today's bytes.
+    layout_fallback: LayoutFallback = "model"
     # Send an Image object's two model branches (images are never retrievable either way).
     image_semantics: bool = True
     # Send a Formula object's two model branches (lineage only; the proof reads the PDF).
@@ -152,6 +164,17 @@ def check_layout_policy(value: str) -> LayoutPolicy:
     if value == "onnx-layout":
         return "onnx-layout"
     raise ValueError(f"layout_policy must be one of {list(LAYOUT_POLICIES)}, not {value!r}")
+
+
+def check_layout_fallback(value: str) -> LayoutFallback:
+    """``value`` as a ``LayoutFallback``, or a ``ValueError`` naming the accepted fallbacks."""
+    if value == "model":
+        return "model"
+    if value == "onnx-accept":
+        return "onnx-accept"
+    if value == "text-only":
+        return "text-only"
+    raise ValueError(f"layout_fallback must be one of {list(LAYOUT_FALLBACKS)}, not {value!r}")
 
 
 def choose_layout_policy(
@@ -239,6 +262,7 @@ def ingest_plan(
     mode: IngestMode,
     *,
     layout_policy: LayoutPolicy | None = None,
+    layout_fallback: LayoutFallback | None = None,
     unverified_tables_as_rows: bool | None = None,
     table_row_index_units: bool | None = None,
     drop_running_lines_from_index: bool | None = None,
@@ -252,6 +276,8 @@ def ingest_plan(
         plan = replace(plan, drop_running_lines_from_index=drop_running_lines_from_index)
     if layout_policy is not None:
         plan = replace(plan, layout=check_layout_policy(layout_policy))
+    if layout_fallback is not None:
+        plan = replace(plan, layout_fallback=check_layout_fallback(layout_fallback))
     if unverified_tables_as_rows is not None:
         plan = replace(plan, unverified_tables_as_rows=unverified_tables_as_rows)
     if unverified_table_structure is not None:
@@ -272,11 +298,18 @@ def make_partitioner(
     model = ModelPagePartitioner(client, sources)
     if plan.layout == "model":
         return model
+    # ADR 0039: 回退位默认是模型版面; 非 "model" 时换成文本切块, 拿不准的页零调用、绝不丢页.
+    fallback = model if plan.layout_fallback == "model" else TextBlockPartitioner(snapshot)
     if plan.layout == "deterministic-text-pages":
-        return make_text_page_partitioner(model, sources, snapshot)
+        return make_text_page_partitioner(fallback, sources, snapshot)
     if plan.layout == "onnx-layout":
-        # 组合顺序: 纯文字页确定性(零调用、零推理) -> 其余页本地 ONNX 版面 -> 回退页模型版面.
-        onnx = make_onnx_page_partitioner(model, sources, snapshot)
+        # 组合顺序: 纯文字页确定性(零调用、零推理) -> 其余页本地 ONNX 版面 -> 回退位.
+        onnx = make_onnx_page_partitioner(
+            fallback,
+            sources,
+            snapshot,
+            accept_low_confidence=plan.layout_fallback == "onnx-accept",
+        )
         return make_text_page_partitioner(onnx, sources, snapshot)
     raise ValueError(f"unknown layout policy {plan.layout!r}")
 

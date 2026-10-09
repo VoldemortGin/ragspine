@@ -175,6 +175,16 @@ adapters/     every SDK and I/O: pdfspine (every source PDF opens through pdf_pa
               lite -> "tsr" when `pdfspine_tsr.table_structure_unavailable()` is `None`, else
               "rows"; full -> "rows"; with row units on, a pending TSR grid is split into row
               units like a verbatim-rows table — `index_text.inferred_table_row_units`),
+              text_block_partition.py (ADR 0039: `layout_fallback` / `APP_LAYOUT_FALLBACK`,
+              `ingest_pdf(layout_fallback=…)` — what the two routers hand an unsure page:
+              `"model"` (default, byte for byte), `"onnx-accept"` (keep a low-confidence ONNX
+              result, `onnx_low_confidence_accepted`) or `"text-only"`; either non-model value
+              partitions every other such page from its text layer alone — zero calls, Text
+              objects only, producer `page-layout-text-blocks-v1`, every page partitioned even at
+              budget 0 — counted apart in `pages_partition_text_fallback` /
+              `partition_text_fallback_reasons` / `pages_onnx_low_confidence_accepted`; inert
+              under `layout="model"`; the notebooks' `onnx-check` cell prints
+              `onnx_partition.ensure_onnx_layout_weights` / `onnx_layout_status`),
               answer_llm.py (`make_answer_llm()`: the answer `JsonCompletionClient` built from
               settings, what `run_folder_pipeline` and `notebooks/run_folder.ipynb` call)
 resources/    packaged prompts / static data

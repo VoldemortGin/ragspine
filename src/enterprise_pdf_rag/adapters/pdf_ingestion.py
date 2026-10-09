@@ -25,6 +25,7 @@ from enterprise_pdf_rag.adapters.http.schemas import BoundaryModel
 from enterprise_pdf_rag.adapters.ingest_mode import (
     IngestMode,
     IngestPlan,
+    LayoutFallback,
     LayoutPolicy,
     UnverifiedTableStructure,
     ingest_plan,
@@ -159,6 +160,12 @@ class IngestionSummary(BoundaryModel):
     pages_partition_model_fallback: int = 0
     partition_fallback_reasons: dict[str, int] = Field(default_factory=dict)
     pages_partitioned_onnx: int = 0
+    # ADR 0039, ``layout_fallback`` other than ``"model"``: pages the routers handed to the
+    # text-layer partitioner instead of the model (zero calls; not in the model count above),
+    # their innermost reason codes, and ONNX pages that kept a low-confidence result.
+    pages_partition_text_fallback: int = 0
+    partition_text_fallback_reasons: dict[str, int] = Field(default_factory=dict)
+    pages_onnx_low_confidence_accepted: int = 0
     activated: Literal[False] = False
     indexed: Literal[False] = False
     retrieval_status: Literal[
@@ -311,6 +318,7 @@ def ingest_pdf(
     layout_policy: LayoutPolicy | None = None,
     unverified_tables_as_rows: bool | None = None,
     unverified_table_structure: UnverifiedTableStructure | None = None,
+    layout_fallback: LayoutFallback | None = None,
 ) -> IngestionSummary:
     """Save complete PDF sources and selected downstream stages without activation.
 
@@ -324,11 +332,15 @@ def ingest_pdf(
     ``layout_policy`` and ``unverified_tables_as_rows`` override that mode's preset for one
     switch each (ADR 0028, ADR 0027), ``None`` keeps the preset; so does
     ``unverified_table_structure`` (ADR 0031: ``"tsr"`` needs the SLANet-plus weights and
-    ``pdfspine[onnx]``, and refuses to start without them).
+    ``pdfspine[onnx]``, and refuses to start without them). ``layout_fallback`` (ADR 0039)
+    defaults to the settings' ``layout_fallback`` (``APP_LAYOUT_FALLBACK``).
     """
     plan = ingest_plan(
         ingest_mode,
         layout_policy=layout_policy,
+        layout_fallback=layout_fallback
+        if layout_fallback is not None
+        else get_settings().layout_fallback,
         unverified_tables_as_rows=unverified_tables_as_rows,
         unverified_table_structure=unverified_table_structure,
     )
@@ -530,6 +542,9 @@ def _ingest_pdf(
         pages_partition_model_fallback=partition_tally.model_fallback_pages,
         partition_fallback_reasons=partition_tally.fallback_reasons,
         pages_partitioned_onnx=partition_tally.onnx_pages,
+        pages_partition_text_fallback=partition_tally.text_fallback_pages,
+        partition_text_fallback_reasons=partition_tally.text_fallback_reasons,
+        pages_onnx_low_confidence_accepted=partition_tally.onnx_low_confidence_accepted_pages,
         review_path=None if review is None else str(review),
     )
 

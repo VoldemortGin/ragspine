@@ -128,6 +128,10 @@ class Settings(BaseSettings):
     # (按默认文件名 pp_doc_layoutv3.onnx 拼接)。未设或空串 → 退回环境变量 PDFSPINE_ONNX_MODELS。
     # 权重不随任何 wheel 分发;Databricks 上放 Volume 并填绝对路径。
     onnx_layout_model: str | None = None
+    # 版面路由切分器(deterministic-text-pages / onnx-layout)拿不准的页交给谁(enterprise-pdf-rag
+    # ADR 0039):model = 每页一次 VLM 版面(原样);onnx-accept = 接受低置信 ONNX 结果、ONNX 无框
+    # 的页按文字层切块;text-only = 一律不调 VLM 版面,ONNX 之外的页按文字层切块。每页都产出划分。
+    layout_fallback: Literal["model", "onnx-accept", "text-only"] = "model"
     # 兼容根:每项是一个 processing store 根,其父目录即 source store 根;默认空
     legacy_document_roots: tuple[Path, ...] = ()
     # document-catalog 聊天端点整个进程的模型真实调用预算(缓存回放不计;用尽即 503)

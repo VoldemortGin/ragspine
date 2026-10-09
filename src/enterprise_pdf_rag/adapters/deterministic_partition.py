@@ -11,7 +11,7 @@ ADR 0028(deterministic-text-page-partition). 组合切分器按页分诊: "可�
 
 from collections import Counter
 from collections.abc import Iterable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from math import ceil
 from typing import Any
 
@@ -31,10 +31,15 @@ from enterprise_pdf_rag.adapters.deterministic_partition_geometry import (
     text_lines,
 )
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
-from enterprise_pdf_rag.adapters.onnx_partition import ONNX_FALLBACK_MARK, ONNX_PRODUCER_PREFIX
+from enterprise_pdf_rag.adapters.onnx_partition import (
+    ONNX_ACCEPTED_LOW_CONFIDENCE,
+    ONNX_FALLBACK_MARK,
+    ONNX_PRODUCER_PREFIX,
+)
 from enterprise_pdf_rag.adapters.pdfspine_tables import LINE_MAX_THICKNESS
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.shared_pdf import opened_pdf, source_pdf
+from enterprise_pdf_rag.adapters.text_block_partition import TEXT_BLOCK_PRODUCER_PREFIX
 from ragspine.extraction.evidence.document.models import Bounds, DocumentSnapshot, TextSpan
 from ragspine.extraction.evidence.figures.models import Confidence, content_id
 from ragspine.extraction.evidence.page.geometry import contains
@@ -189,6 +194,11 @@ class PartitionCounts:
     fallback_reasons: dict[str, int]
     # ADR 0030: 本地 ONNX 版面模型(零 LLM 调用)切分的页数; "onnx-layout" 之外恒为 0.
     onnx_pages: int = 0
+    # ADR 0039: 回退位是文本切块(layout_fallback 非 "model")时, 落到它的页数与最内层路由的
+    # 原因码分布(不计入 model_fallback_pages), 以及其中接受了低置信 ONNX 结果的 ONNX 页数.
+    text_fallback_pages: int = 0
+    text_fallback_reasons: dict[str, int] = field(default_factory=dict)
+    onnx_low_confidence_accepted_pages: int = 0
 
 
 EMPTY_PARTITION_COUNTS = PartitionCounts(0, 0, {})
@@ -495,7 +505,9 @@ def partition_counts(outputs: ProcessingStore, manifest: ProcessingManifest) -> 
     """
     deterministic = 0
     onnx = 0
+    accepted = 0
     reasons: Counter[str] = Counter()
+    text_reasons: Counter[str] = Counter()
     for record in manifest.pages:
         outcome = record.partition
         if outcome.state is not StageState.SUCCEEDED or outcome.artifact is None:
@@ -506,6 +518,7 @@ def partition_counts(outputs: ProcessingStore, manifest: ProcessingManifest) -> 
             continue
         if partition.producer.startswith(ONNX_PRODUCER_PREFIX):
             onnx += 1
+            accepted += ONNX_ACCEPTED_LOW_CONFIDENCE in partition.diagnostics
             continue
         reason = None
         for diagnostic in partition.diagnostics:
@@ -519,5 +532,16 @@ def partition_counts(outputs: ProcessingStore, manifest: ProcessingManifest) -> 
             ):
                 reason = diagnostic[len(_FALLBACK_MARK) : -1]
         if reason is not None:
-            reasons[reason] += 1
-    return PartitionCounts(deterministic, sum(reasons.values()), dict(reasons), onnx)
+            if partition.producer.startswith(TEXT_BLOCK_PRODUCER_PREFIX):
+                text_reasons[reason] += 1
+            else:
+                reasons[reason] += 1
+    return PartitionCounts(
+        deterministic,
+        sum(reasons.values()),
+        dict(reasons),
+        onnx,
+        sum(text_reasons.values()),
+        dict(text_reasons),
+        accepted,
+    )
