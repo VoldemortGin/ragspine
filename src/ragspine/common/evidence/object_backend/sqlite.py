@@ -456,10 +456,11 @@ class _SqliteCore:
                 lease.release_lease(base)
 
     def _acquire_writer(self) -> None:
-        if self._writer_acquired:
-            return
         base = self._lease_base()
         with _WRITER_LOCK:
+            # 锁内判断:同一实例的几个线程(文档内页级并发,ADR 0045)可能同时首写,只记一次。
+            if self._writer_acquired:
+                return
             count = _WRITER_COUNTS.get(self.db_path, 0)
             if count == 0:
                 owner = lease.current_owner(WRITER_CLAIM_FORMAT, WRITER_LEASE_SECONDS)

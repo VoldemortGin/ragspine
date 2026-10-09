@@ -77,6 +77,6 @@ split exactly as before.
   -> ... -> 1; the 8-failure cutoff to single inputs is still counted in failed batches.
 - The outer `_EMBED_SLICE` (256 texts per stored slice) would cut a larger batch short, so the
   slice is `max(256, batch_max_items)`. A slice stays the crash-loss unit (ADR 0036 section 7.2).
-- Requests in flight are about `batch_max_items x APP_EMBEDDING_MAX_CONCURRENCY` (ADR 0039);
+- Requests in flight are about `batch_max_items x APP_EMBEDDING_MAX_CONCURRENCY` (ADR 0042);
   e.g. 64 x 4. Raise the batch only after checking the gateway's per-request limits (vLLM
   sequence / token caps, body size): each refused batch costs extra requests before it halves.

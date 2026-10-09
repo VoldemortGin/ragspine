@@ -9,6 +9,7 @@ ADR 0028(deterministic-text-page-partition). 组合切分器按页分诊: "可�
 归属, 产物通过 ``validate_partition``; 诊断只记原因码与计数, 不记正文.
 """
 
+import threading
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
@@ -220,6 +221,8 @@ class TextPageRouterPartitioner:
             f"page-layout-text-page-router-v1:{self.deterministic_fingerprint};{model.fingerprint}"
         )
         self._stats: _DocumentStats | None = None
+        # Pages at once (ADR 0045) scan the whole document for these stats once, not N times.
+        self._stats_lock = threading.Lock()
 
     def partition(self, page: PageInput) -> PagePartition:
         if page.source_sha256 != self.snapshot.manifest.source.sha256:
@@ -234,26 +237,27 @@ class TextPageRouterPartitioner:
         return replace(fallback, diagnostics=(*fallback.diagnostics, f"{_FALLBACK_MARK}{reason})"))
 
     def _document_stats(self, document: pdfspine.Document) -> _DocumentStats:
-        if self._stats is not None:
+        with self._stats_lock:
+            if self._stats is not None:
+                return self._stats
+            pages = self.snapshot.manifest.pages
+            sidecars = [
+                (record.height, read_text_sidecar(self.sources, self.snapshot, index).spans)
+                for index, record in enumerate(pages)
+            ]
+            needed = max(MIN_DECORATION_PAGES, ceil(DECORATION_PAGE_SHARE * len(pages)))
+            drawing_counts: Counter[tuple[object, ...]] = Counter()
+            image_counts: Counter[tuple[object, ...]] = Counter()
+            for index in range(len(pages)):
+                source_page = document.load_page(index)
+                drawing_counts.update({drawing_signature(d) for d in source_page.get_drawings()})
+                image_counts.update({image_signature(i) for i in source_page.get_image_info()})
+            self._stats = _DocumentStats(
+                running_lines(sidecars),
+                frozenset(key for key, count in drawing_counts.items() if count >= needed),
+                frozenset(key for key, count in image_counts.items() if count >= needed),
+            )
             return self._stats
-        pages = self.snapshot.manifest.pages
-        sidecars = [
-            (record.height, read_text_sidecar(self.sources, self.snapshot, index).spans)
-            for index, record in enumerate(pages)
-        ]
-        needed = max(MIN_DECORATION_PAGES, ceil(DECORATION_PAGE_SHARE * len(pages)))
-        drawing_counts: Counter[tuple[object, ...]] = Counter()
-        image_counts: Counter[tuple[object, ...]] = Counter()
-        for index in range(len(pages)):
-            source_page = document.load_page(index)
-            drawing_counts.update({drawing_signature(d) for d in source_page.get_drawings()})
-            image_counts.update({image_signature(i) for i in source_page.get_image_info()})
-        self._stats = _DocumentStats(
-            running_lines(sidecars),
-            frozenset(key for key, count in drawing_counts.items() if count >= needed),
-            frozenset(key for key, count in image_counts.items() if count >= needed),
-        )
-        return self._stats
 
     def _deterministic(
         self, page: PageInput, document: pdfspine.Document, stats: _DocumentStats

@@ -3,10 +3,12 @@
 import json
 from collections.abc import Callable
 from dataclasses import replace
+from functools import partial
 
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.figure_reasoning import render_svg_png
 from enterprise_pdf_rag.adapters.http.layout_schemas import PageLayoutDTO
+from ragspine.common.evidence.configs import get_settings
 from ragspine.common.evidence.providers.json_completion import (
     JsonCompletionClient,
     JsonCompletionError,
@@ -18,9 +20,13 @@ from ragspine.extraction.evidence.page.service import (
     validate_partition,
 )
 
+# The page image width the layout prompts were written against; another width (ADR 0045,
+# ``APP_LAYOUT_PNG_WIDTH``) names itself in the partitioner fingerprint.
+DEFAULT_LAYOUT_PNG_WIDTH = 960
 
-def _render(data: bytes) -> bytes:
-    return render_svg_png(data).png
+
+def _render(data: bytes, *, width: int = DEFAULT_LAYOUT_PNG_WIDTH) -> bytes:
+    return render_svg_png(data, width=width).png
 
 
 class ModelPagePartitioner:
@@ -29,12 +35,17 @@ class ModelPagePartitioner:
         client: JsonCompletionClient,
         sources: LocalDocumentStore,
         *,
-        renderer: Callable[[bytes], bytes] = _render,
+        renderer: Callable[[bytes], bytes] | None = None,
     ) -> None:
+        width = get_settings().layout_png_width
         self.client = client
         self.sources = sources
-        self.renderer = renderer
-        self.fingerprint = "page-layout-mapper-v3:" + client.fingerprint
+        self.renderer = partial(_render, width=width) if renderer is None else renderer
+        self.fingerprint = (
+            "page-layout-mapper-v3:"
+            + client.fingerprint
+            + ("" if width == DEFAULT_LAYOUT_PNG_WIDTH else f":png-width={width}")
+        )
 
     def partition(self, page: PageInput) -> PagePartition:
         aliases = {f"s{index:04d}": span for index, span in enumerate(page.text.spans)}

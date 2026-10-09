@@ -236,6 +236,11 @@ class Settings(BaseSettings):
     # 默认值即原硬编码的 16 / 48000,须与 local_models.EMBEDDING_BATCH_MAX_* 一致。
     embedding_batch_max_items: int = Field(default=16, ge=1, le=1024)
     embedding_batch_max_chars: int = Field(default=48_000, ge=1000)
+    # 文档内页级并发(enterprise-pdf-rag ADR 0045):一份文档同时处理的页数,页的版面调用与
+    # 对象的语义调用共用这 N 个名额;1 = 逐页串行(逐字节同旧行为)。上限同文档并行的 16。
+    page_concurrency: int = Field(default=1, ge=1, le=16)
+    # 回退页送版面模型的 PNG 宽度(像素)。默认 960 不变;改它会换一份版面请求与 partition 阶段缓存。
+    layout_png_width: int = Field(default=960, ge=64, le=4096)
     rerank_api_key: SecretStr | None = None  # 本地 rerank(loopback)
     rerank_base_url: str | None = None
     rerank_model: str | None = None

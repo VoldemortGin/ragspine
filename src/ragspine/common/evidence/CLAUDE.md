@@ -56,7 +56,8 @@ object_backend/  the store persistence seam (sqlite object-store PR-1): ObjectBa
               (PR-2)** — LocalDocumentStore / ProcessingStore / scan_catalog / mount pins
               read and write only through it — **and the model cache (PR-3)**:
               JsonCompletionClient opens its cache through it (below). A store db holds its
-              writer lease per process, a model-cache db per transaction. Only SQLITE_CORRUPT / NOTADB / a failed
+              writer lease per process (counted once per instance, under the lock, however
+              many threads write first — ADR 0045), a model-cache db per transaction. Only SQLITE_CORRUPT / NOTADB / a failed
               quick_check rebuild a db — busy / locked is retried, then raised. Digests /
               fingerprints / envelope bytes / record bytes / published ids are invariant
               across backends (tests/enterprise_pdf_rag/object_backend/). ADR:
