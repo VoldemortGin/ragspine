@@ -24,7 +24,7 @@ from dataclasses import replace
 from hashlib import sha256
 from pathlib import Path
 from queue import SimpleQueue
-from threading import Event, Lock
+from threading import BoundedSemaphore, Event, Lock, Semaphore
 from time import perf_counter
 from typing import Any, Final, Literal
 
@@ -373,11 +373,12 @@ class _Cancelled(BaseException):
 class _DocumentEmbedder:
     """One document's view of an embedder shared by documents running at once (ADR 0033).
 
-    Calls go one at a time through the shared ``lock`` and ``request_count`` counts only this
+    Calls go through the shared ``lock`` (``_embedding_gate``: a semaphore for an embedder that
+    counts per thread, ADR 0039, else one call at a time) and ``request_count`` counts only this
     document's requests, so ``DraftIndex.embedding_requests`` reads what the serial run read.
     """
 
-    def __init__(self, inner: EmbeddingPort, lock: LockType) -> None:
+    def __init__(self, inner: EmbeddingPort, lock: LockType | Semaphore) -> None:
         self._inner = inner
         self._lock = lock
         self._requests = 0
@@ -402,13 +403,13 @@ class _DocumentEmbedder:
 
     def _counted[T](self, call: Callable[[], T]) -> T:
         with self._lock:
-            before = _embedding_counts(self._inner)
+            before = _thread_counts(self._inner)
             try:
                 return call()
             finally:
                 requests, retries, failures = (
                     after - start
-                    for after, start in zip(_embedding_counts(self._inner), before, strict=True)
+                    for after, start in zip(_thread_counts(self._inner), before, strict=True)
                 )
                 self._requests += requests
                 self._retries += retries
@@ -424,7 +425,7 @@ class _DocumentEmbedder:
 class _DocumentBatchEmbedder(_DocumentEmbedder):
     """``_DocumentEmbedder`` of a ``BatchEmbeddingPort``, batching as the shared one does."""
 
-    def __init__(self, inner: BatchEmbeddingPort, lock: LockType) -> None:
+    def __init__(self, inner: BatchEmbeddingPort, lock: LockType | Semaphore) -> None:
         super().__init__(inner, lock)
         self._batch = inner
 
@@ -441,7 +442,22 @@ def _embedding_counts(embedder: EmbeddingPort) -> tuple[int, int, int]:
     )
 
 
-def _document_embedder(embedder: EmbeddingPort, lock: LockType) -> EmbeddingPort:
+def _thread_counts(embedder: EmbeddingPort) -> tuple[int, int, int]:
+    """``_embedding_counts`` of the calling thread's requests when the embedder keeps them."""
+    counts = getattr(embedder, "thread_counts", None)
+    return counts() if callable(counts) else _embedding_counts(embedder)
+
+
+def _embedding_gate(embedder: EmbeddingPort, limit: int) -> LockType | Semaphore:
+    """What documents running at once share around embedding calls (ADR 0039): up to ``limit``
+    calls at once for an embedder that counts per thread (``thread_counts``, so each
+    document's counts stay exact), one at a time for any other (ADR 0033 §5)."""
+    if callable(getattr(embedder, "thread_counts", None)):
+        return BoundedSemaphore(limit)
+    return Lock()
+
+
+def _document_embedder(embedder: EmbeddingPort, lock: LockType | Semaphore) -> EmbeddingPort:
     if isinstance(embedder, BatchEmbeddingPort):
         return _DocumentBatchEmbedder(embedder, lock)
     return _DocumentEmbedder(embedder, lock)
@@ -1867,7 +1883,7 @@ def run_folder_pipeline(
     )
 
     parallel = max_parallel_documents > 1
-    embedding_lock = Lock()
+    embedding_lock = _embedding_gate(embedder, settings.embedding_max_concurrency)
 
     def work(
         pdf: Path, digest: str, said: Progress | None, cancel: Event | None = None

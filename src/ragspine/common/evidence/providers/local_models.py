@@ -2,9 +2,10 @@
 
 import json
 import math
+import threading
 from collections.abc import Sequence
 from http.client import HTTPConnection, HTTPException, HTTPSConnection
-from typing import Protocol, runtime_checkable
+from typing import Protocol, cast, runtime_checkable
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -13,6 +14,8 @@ from ragspine.common.evidence.providers import transient
 from ragspine.common.evidence.providers.providers import (
     LocalModelConfig,
     ProviderRequestError,
+    _open_connection,
+    _release_connection,
     _retry_after,
 )
 
@@ -35,7 +38,8 @@ def _send_local_once(
 ) -> bytes:
     parsed = urlsplit(url)
     connection_type = HTTPSConnection if parsed.scheme == "https" else HTTPConnection
-    connection = connection_type(parsed.netloc, timeout=timeout)
+    connection = cast(HTTPConnection, _open_connection(connection_type, parsed.netloc, timeout))
+    response: object = None
     try:
         connection.request(
             "POST",
@@ -66,7 +70,7 @@ def _send_local_once(
             category="timeout" if isinstance(error, TimeoutError) else "connection",
         ) from None
     finally:
-        connection.close()
+        _release_connection(connection, connection_type, parsed.netloc, response)
 
 
 _DEFAULT_SENDER = _send_local_once
@@ -147,10 +151,29 @@ class LocalEmbeddingAdapter:
         self._batch_failures = 0
         self._arrays_worked = False
         self._arrays_refused = False
+        # Shared by every thread calling at once (ADR 0039): counts and what batching learned
+        # change under ``_lock``; each thread also keeps its own counts (``thread_counts``).
+        self._lock = threading.Lock()
+        self._local = threading.local()
 
     @property
     def fingerprint(self) -> str:
         return f"local-http/{self._config.model}"
+
+    def thread_counts(self) -> tuple[int, int, int]:
+        """``(request_count, retry_count, transient_failure_count)`` of the calling thread's
+        requests alone, so callers sharing this adapter across threads each count their own."""
+        return (
+            getattr(self._local, "_request_count", 0),
+            getattr(self._local, "_retries", 0),
+            getattr(self._local, "_transient_failures", 0),
+        )
+
+    def _count(self, name: str) -> None:
+        """One more of the counter ``name``, for the adapter and for the calling thread."""
+        with self._lock:
+            setattr(self, name, getattr(self, name) + 1)
+        setattr(self._local, name, getattr(self._local, name, 0) + 1)
 
     @property
     def request_count(self) -> int:
@@ -213,12 +236,14 @@ class LocalEmbeddingAdapter:
         except ProviderRequestError as error:
             if error.status in _FATAL_STATUSES:
                 raise
-            self._batch_failures += 1
+            with self._lock:
+                self._batch_failures += 1
             middle = len(texts) // 2
             left = self._embed_split(texts[:middle])
             right = self._embed_split(texts[middle:])
-            if len(texts) == 2 and error.status == 400 and not self._arrays_worked:
-                self._arrays_refused = True
+            with self._lock:
+                if len(texts) == 2 and error.status == 400 and not self._arrays_worked:
+                    self._arrays_refused = True
             return left + right
         self._arrays_worked = True
         return vectors
@@ -258,7 +283,7 @@ class LocalEmbeddingAdapter:
         retry = 0
         transient.pause(key)
         while True:
-            self._request_count += 1
+            self._count("_request_count")
             try:
                 if isinstance(text, list) and self._sender is _DEFAULT_SENDER:
                     return _send_local_once(
@@ -274,11 +299,11 @@ class LocalEmbeddingAdapter:
                     raise
                 retry_after = transient.note_failure(key, error)
                 if retry >= transient.TRANSIENT_MAX_RETRIES:
-                    self._transient_failures += 1
+                    self._count("_transient_failures")
                     raise
                 transient.pause(key, transient.retry_delay(retry, retry_after))
                 retry += 1
-                self._retries += 1
+                self._count("_retries")
 
     def _embed(self, text: str) -> tuple[float, ...]:
         if not text.strip():

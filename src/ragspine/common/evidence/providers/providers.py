@@ -10,11 +10,15 @@ separate loopback service; rerank never inherits LLM settings.
 import json
 import math
 import re
+import select
+import threading
+import weakref
 from collections.abc import Callable, Mapping
+from contextlib import suppress
 from email.utils import parsedate_to_datetime
-from http.client import HTTPException, HTTPSConnection
+from http.client import HTTPConnection, HTTPException, HTTPResponse, HTTPSConnection
 from time import monotonic, time
-from typing import Literal, Protocol, runtime_checkable
+from typing import Literal, Protocol, cast, runtime_checkable
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, SecretStr, TypeAdapter, ValidationError
@@ -313,9 +317,93 @@ def _retry_after(response: object) -> float | None:
         return None
 
 
+class _Pool:
+    """This thread's idle keep-alive connections, one per (connection class, host:port)."""
+
+    def __init__(self) -> None:
+        self.idle: dict[tuple[object, str], HTTPConnection] = {}
+        # Closed when the thread ends (its locals are dropped) or the interpreter exits.
+        weakref.finalize(self, _close_all, self.idle)
+
+
+def _close_all(idle: dict[tuple[object, str], HTTPConnection]) -> None:
+    for connection in idle.values():
+        with suppress(OSError):
+            connection.close()
+    idle.clear()
+
+
+_POOLS = threading.local()
+
+
+def _pool() -> _Pool:
+    pool: _Pool | None = getattr(_POOLS, "pool", None)
+    if pool is None:
+        pool = _POOLS.pool = _Pool()
+    return pool
+
+
+def forget_connections() -> None:
+    """Close this thread's idle keep-alive connections (tests; after an endpoint change)."""
+    _close_all(_pool().idle)
+
+
+def _dropped(connection: HTTPConnection) -> bool:
+    """Has the peer closed (or written unasked to) this idle connection? A readable idle
+    socket is one; such a connection is never reused, so a reused one is not sent into a
+    connection the server already closed after its keep-alive timeout."""
+    if connection.sock is None:
+        return False
+    try:
+        return bool(select.select([connection.sock], [], [], 0)[0])
+    except (OSError, ValueError):
+        return True
+
+
+def _open_connection(connection_type: Callable[..., object], netloc: str, timeout: float) -> object:
+    """This thread's idle connection to ``netloc`` (HTTP keep-alive), else a new one. Only
+    the calling thread ever uses it, so no lock is needed; ``timeout`` applies as before.
+    Typed ``object``: ``connection_type`` may be a test's stand-in for ``http.client``."""
+    connection = _pool().idle.pop((connection_type, netloc), None)
+    if connection is not None and _dropped(connection):
+        connection.close()
+        connection = None
+    if connection is None:
+        return connection_type(netloc, timeout=timeout)
+    connection.timeout = timeout
+    if connection.sock is not None:
+        connection.sock.settimeout(timeout)
+    return connection
+
+
+def _release_connection(
+    connection: object, connection_type: Callable[..., object], netloc: str, response: object
+) -> None:
+    """Keep ``connection`` for this thread's next request when it is an ``http.client`` one
+    whose reply was read to the end and the server keeps open; close it otherwise (an error,
+    an unread or partly read body, ``Connection: close``, a test's stand-in)."""
+    if (
+        isinstance(connection, HTTPConnection)
+        and isinstance(response, HTTPResponse)
+        and response.isclosed()
+        and not response.will_close
+        and connection.sock is not None
+    ):
+        stale = _pool().idle.pop((connection_type, netloc), None)
+        if stale is not None:
+            stale.close()
+        _pool().idle[(connection_type, netloc)] = connection
+        return
+    close = getattr(connection, "close", None)
+    if callable(close):
+        close()
+
+
 def _send_once(url: str, *, api_key: str, payload: bytes, timeout: float) -> bytes:
     parsed = urlsplit(url)
-    connection = HTTPSConnection(parsed.netloc, timeout=timeout)
+    connection_type = HTTPSConnection
+    connection = cast(HTTPSConnection, _open_connection(connection_type, parsed.netloc, timeout))
+    response: object = None
     try:
         connection.request(
             "POST",
@@ -370,7 +458,7 @@ def _send_once(url: str, *, api_key: str, payload: bytes, timeout: float) -> byt
             exception_type=exception_type,
         ) from None
     finally:
-        connection.close()
+        _release_connection(connection, connection_type, parsed.netloc, response)
 
 
 class SmokeResult(BaseModel):

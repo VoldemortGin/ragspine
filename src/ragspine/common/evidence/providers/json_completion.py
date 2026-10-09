@@ -9,7 +9,7 @@ import re
 import socket
 import sqlite3
 import uuid
-from _thread import RLock
+from _thread import LockType, RLock
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, replace
@@ -536,7 +536,10 @@ class JsonCompletionClient:
         self._seed = seed
         self._sender = _send_once if sender is None else sender
         self._retry_failed = retry_failed
+        # Guards the counters, the budget and ``_flights`` only, never a network call: calls
+        # of one client run at once (ADR 0039). One fingerprint is in flight at most once.
         self._lock = Lock()
+        self._flights: dict[str, tuple[LockType, list[int]]] = {}
         self._dropped: set[str] = set()
         self._cache_hits = 0
         self._taken_over = 0
@@ -544,6 +547,35 @@ class JsonCompletionClient:
         self._repaired = 0
         self._retries = 0
         self._transient_failures = 0
+
+    def _tally(self, name: str) -> None:
+        """One more of the counter ``name``, under the client's lock."""
+        with self._lock:
+            setattr(self, name, getattr(self, name) + 1)
+
+    def _take_call(self) -> bool:
+        """Spend one live call of the budget, unless none is left."""
+        with self._lock:
+            if self._remaining == 0:
+                return False
+            self._remaining -= 1
+            return True
+
+    @contextmanager
+    def _single_flight(self, fingerprint: str) -> Iterator[None]:
+        """Calls of one fingerprint run one at a time, so a concurrent caller of a fingerprint
+        in flight waits for it and then replays its record instead of sending it again."""
+        with self._lock:
+            flight = self._flights.setdefault(fingerprint, (Lock(), [0]))
+            flight[1][0] += 1
+        try:
+            with flight[0]:
+                yield
+        finally:
+            with self._lock:
+                flight[1][0] -= 1
+                if not flight[1][0]:
+                    del self._flights[fingerprint]
 
     @property
     def backend(self) -> ModelCacheBackend:
@@ -667,15 +699,14 @@ class JsonCompletionClient:
             "stream": False,
             **_sampling(self._config.temperature, self._seed),
         }
-        with self._lock:
-            return self._call(
-                request,
-                contract="bounded-vision-json-v2",
-                task=task,
-                response_model=response_model,
-                cache_only=cache_only,
-                allow_failed_retry=allow_failed_retry,
-            )
+        return self._call(
+            request,
+            contract="bounded-vision-json-v2",
+            task=task,
+            response_model=response_model,
+            cache_only=cache_only,
+            allow_failed_retry=allow_failed_retry,
+        )
 
     def complete_text_json[T: BaseModel](
         self,
@@ -718,15 +749,14 @@ class JsonCompletionClient:
             "stream": False,
             **_sampling(self._config.temperature, self._seed),
         }
-        with self._lock:
-            return self._call(
-                request,
-                contract="bounded-text-json-v1",
-                task=task,
-                response_model=response_model,
-                cache_only=cache_only,
-                allow_failed_retry=allow_failed_retry,
-            )
+        return self._call(
+            request,
+            contract="bounded-text-json-v1",
+            task=task,
+            response_model=response_model,
+            cache_only=cache_only,
+            allow_failed_retry=allow_failed_retry,
+        )
 
     def _call[T: BaseModel](
         self,
@@ -790,25 +820,27 @@ class JsonCompletionClient:
             )
             droppable = DEGRADABLE_SAMPLING_PARAMETERS.intersection(body)
             try:
-                result = self._complete(
-                    payload,
-                    fingerprint,
-                    response_model,
-                    context=_context_document(
-                        fingerprint, contract=contract, task=task, request=body
-                    ),
-                    cache_only=cache_only,
-                    allow_failed_retry=allow_failed_retry,
-                    droppable=droppable,
-                    known=_UNSUPPORTED.get(key) & droppable,
-                )
+                with self._single_flight(fingerprint):
+                    result = self._complete(
+                        payload,
+                        fingerprint,
+                        response_model,
+                        context=_context_document(
+                            fingerprint, contract=contract, task=task, request=body
+                        ),
+                        cache_only=cache_only,
+                        allow_failed_retry=allow_failed_retry,
+                        droppable=droppable,
+                        known=_UNSUPPORTED.get(key) & droppable,
+                    )
             except _ParameterRefused as refused:
                 dropped.append(refused.parameter)
-                self._dropped.add(refused.parameter)
+                with self._lock:
+                    self._dropped.add(refused.parameter)
                 _UNSUPPORTED.add(key, refused.parameter)
                 continue
             if result.cache_hit:
-                self._cache_hits += 1
+                self._tally("_cache_hits")
             return replace(result, dropped_parameters=tuple(dropped))
 
     def _complete[T: BaseModel](
@@ -901,7 +933,7 @@ class JsonCompletionClient:
             )
         except JsonCompletionError:
             if damaged is not None or stale or self._load_record(record_key) is None:
-                self._claim_blocked += 1
+                self._tally("_claim_blocked")
                 raise
             generation = None
         else:
@@ -925,7 +957,7 @@ class JsonCompletionClient:
             )
         takeover: dict[str, Any] = {}
         if generation:
-            self._taken_over += 1
+            self._tally("_taken_over")
             takeover = {"claim_takeover": generation}
         context_path, context_warning = self._store_context(fingerprint, context)
         # The claim is held through every retry; a transient failure is retried after a
@@ -933,9 +965,11 @@ class JsonCompletionClient:
         key = _endpoint_key(self._config)
         retry = 0
         holder = generation  # the claim generation this call holds now
+        if not self._take_call():  # spent by a concurrent call since the check above
+            _release_claims(backend, record_key)
+            raise JsonCompletionError("call_budget_exhausted", fingerprint)
         transient.pause(key)
         while True:
-            self._remaining -= 1
             started = monotonic()
             try:
                 raw = self._sender(
@@ -950,13 +984,18 @@ class JsonCompletionClient:
                 passing = failure[0] in transient.TRANSIENT_FAILURE_CODES
                 if passing:
                     retry_after = transient.note_failure(key, error)
-                    if retry < transient.TRANSIENT_MAX_RETRIES and self._remaining > 0:
+                    if retry < transient.TRANSIENT_MAX_RETRIES and self._take_call():
                         transient.pause(key, transient.retry_delay(retry, retry_after))
-                        holder = self._renew_claim(record_key, fingerprint, holder)
+                        try:
+                            holder = self._renew_claim(record_key, fingerprint, holder)
+                        except JsonCompletionError:  # not sent: the call goes back
+                            with self._lock:
+                                self._remaining += 1
+                            raise
                         retry += 1
-                        self._retries += 1
+                        self._tally("_retries")
                         continue
-                    self._transient_failures += 1
+                    self._tally("_transient_failures")
                 self._raise_failure(
                     error,
                     failure,
@@ -1017,7 +1056,7 @@ class JsonCompletionClient:
                 record_key, fingerprint, digest, None, diagnostic, replace_damaged=stale
             )
         else:
-            self._repaired += 1
+            self._tally("_repaired")
             note_repair("model_cache")
             # The same response reproduced: the record still names it and stays as written.
             if not (
@@ -1102,7 +1141,7 @@ class JsonCompletionClient:
         except StoreBusy:
             renewed = None
         if renewed is None:
-            self._claim_blocked += 1
+            self._tally("_claim_blocked")
             raise JsonCompletionError("request_in_progress_or_uncertain", fingerprint)
         return renewed
 
