@@ -1,4 +1,4 @@
-"""分阶段后端(enterprise-pdf-rag ADR 0040):本地盘 sqlite 工作副本 + 阶段结束整文件发布。
+"""分阶段后端(enterprise-pdf-rag ADR 0044):本地盘 sqlite 工作副本 + 阶段结束整文件发布。
 
 ``StagedBackend`` 是 ``SqliteBackend`` 的一个变体:store db 放在本地盘工作目录
 (``/tmp``、Databricks 的 ``/local_disk0``),运行期所有 db 读写都只碰本地;``commit()``

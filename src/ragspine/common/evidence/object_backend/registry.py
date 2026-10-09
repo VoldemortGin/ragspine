@@ -10,7 +10,7 @@
 - ``files``:直接返回文件布局实现,不探测;
 - ``sqlite``:显式要求 sqlite;探测失败即抛 ``BackendUnavailable``(绝不静默回退);
 - ``auto``(默认):探测可用 → sqlite,否则回退文件布局;
-- ``staged``(opt-in,enterprise-pdf-rag ADR 0040):对象 store 的 db 在本地工作目录
+- ``staged``(opt-in,enterprise-pdf-rag ADR 0044):对象 store 的 db 在本地工作目录
   (``APP_OBJECT_STORE_STAGING_DIR``)读写、阶段结束整文件发布回 ``root``,进程内每个 root
   共享一个 ``StagedBackend``;工作目录探测失败即 ``BackendUnavailable``。模型缓存走文件布局。
 

@@ -949,7 +949,7 @@ def _run_document(
     # sqlite backend's connections and writer lease are released (ADR 0036).
     sources: LocalDocumentStore | None = None
     outputs: ProcessingStore | None = None
-    # ADR 0040: the staged backend's local copies of this document's stores are published at
+    # ADR 0044: the staged backend's local copies of this document's stores are published at
     # every stage boundary; a no-op for every other backend (nothing is registered).
     document_root = root.expanduser().resolve() / digest
 

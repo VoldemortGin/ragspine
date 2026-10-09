@@ -1,4 +1,4 @@
-# ADR 0040: An opt-in staged object backend — local working copy, whole-file publish per stage
+# ADR 0044: An opt-in staged object backend — local working copy, whole-file publish per stage
 
 Status: Proposed (opt-in, default off). Builds on
 [ADR 0036](0036-sqlite-object-backend.md) (the `ObjectBackend` seam and the sqlite backend),

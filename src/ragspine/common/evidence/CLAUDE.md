@@ -52,7 +52,7 @@ object_backend/  the store persistence seam (sqlite object-store PR-1): ObjectBa
               failure raises, never silently falls back | auto | staged — opt-in, staged.py:
               the store db in a local working copy, published whole to the store root at each
               ingest stage boundary, one shared instance per root per process, model cache on
-              files; enterprise-pdf-rag ADR 0040). **Wired for the stores
+              files; enterprise-pdf-rag ADR 0044). **Wired for the stores
               (PR-2)** — LocalDocumentStore / ProcessingStore / scan_catalog / mount pins
               read and write only through it — **and the model cache (PR-3)**:
               JsonCompletionClient opens its cache through it (below). A store db holds its

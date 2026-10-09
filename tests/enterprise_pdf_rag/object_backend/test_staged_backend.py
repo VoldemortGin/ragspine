@@ -1,4 +1,4 @@
-"""StagedBackend(enterprise-pdf-rag ADR 0040):本地盘 sqlite 工作副本 + 阶段结束整文件发布。
+"""StagedBackend(enterprise-pdf-rag ADR 0044):本地盘 sqlite 工作副本 + 阶段结束整文件发布。
 
 - commit 后发布目录可见,且是整文件原子替换(临时名 → rename);
 - 中途被杀(临时文件已写、尚未 rename):发布版原样不动,下一次 commit 清掉残留;

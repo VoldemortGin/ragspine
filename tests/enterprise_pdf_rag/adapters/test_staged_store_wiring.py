@@ -1,4 +1,4 @@
-"""ADR 0040:``APP_OBJECT_STORE_BACKEND=staged`` 下的 run-folder 端到端。
+"""ADR 0044:``APP_OBJECT_STORE_BACKEND=staged`` 下的 run-folder 端到端。
 
 - 逻辑字节与发布 id 与 files / sqlite 相同(``FULL_STORE_DIGEST`` / ``FULL_PUBLISHED_ID``);
 - 发布目录里每个 store 根只有一个整文件 ``store.sqlite``(没有 -wal / 写者租约残留),

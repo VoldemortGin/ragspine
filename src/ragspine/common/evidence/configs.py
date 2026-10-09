@@ -172,7 +172,7 @@ class Settings(BaseSettings):
     # store / 模型缓存接到 open_backend 之后才会实际改变行为;在那之前全部路径仍走
     # 现有文件布局,行为与字节逐位不变。
     object_store_backend: Literal["auto", "sqlite", "files", "staged"] = "auto"
-    # staged(opt-in,enterprise-pdf-rag ADR 0040):store db 在本地盘工作目录读写,阶段结束
+    # staged(opt-in,enterprise-pdf-rag ADR 0044):store db 在本地盘工作目录读写,阶段结束
     # 整文件发布回 store 根(FUSE)。工作目录根 = 本项(APP_OBJECT_STORE_STAGING_DIR);
     # None → <系统临时目录>/ragspine-staged。Databricks 上建议 /local_disk0/ragspine-staged。
     object_store_staging_dir: Path | None = None
