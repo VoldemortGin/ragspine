@@ -1,4 +1,4 @@
-# ADR 0039: Lexical-only object kinds — tables and charts may skip the vector channel
+# ADR 0043: Lexical-only object kinds — tables and charts may skip the vector channel
 
 Status: Accepted as an **opt-in** switch, 2026-10-09. Default off (empty set): every snapshot,
 index version, cache entry and ranking is byte for byte what it was. Measured below; the

@@ -40,7 +40,7 @@ class MemberText:
     # verbatim-rows table's row units, or ``()`` for a running header / footer that scores
     # nothing. ``None`` scores ``text`` as one unit. ``text`` stays the page-window line.
     units: tuple[str, ...] | None = None
-    # Indexed without a vector because its kind is lexical-only (ADR 0039): only BM25 can
+    # Indexed without a vector because its kind is lexical-only (ADR 0043): only BM25 can
     # rank it, so fusion scores its missing vector term as its BM25 term (Amendment 1).
     lexical_only: bool = False
 

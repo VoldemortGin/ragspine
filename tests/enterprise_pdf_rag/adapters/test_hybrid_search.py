@@ -795,7 +795,7 @@ def test_search_without_tree_pages_is_pinned_to_the_two_channel_fusion() -> None
     assert search.search(question, top_k=3, mode="rrf", tree_pages=()).hits == expected
 
 
-# ---- ADR 0039 Amendment 1: a lexical-only member's missing vector term ---------------------
+# ---- ADR 0043 Amendment 1: a lexical-only member's missing vector term ---------------------
 
 
 def _ranked(*member_ids: str, score: float = 1.0) -> tuple[PinnedRetrievalHit, ...]:

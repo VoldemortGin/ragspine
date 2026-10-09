@@ -164,9 +164,9 @@ def fuse(
     not a relevance it ever measured. ``tree`` defaults to empty, which fuses exactly as
     the two-channel call always did.
 
-    ``lexical_only`` names the members indexed without a vector (ADR 0039). When the fusion
+    ``lexical_only`` names the members indexed without a vector (ADR 0043). When the fusion
     has a vector ranking, such a member BM25 ranked earns its BM25 term once more in place of
-    the vector term it could never earn (ADR 0039 Amendment 1). Empty — the default, and
+    the vector term it could never earn (ADR 0043 Amendment 1). Empty — the default, and
     every snapshot indexed without the setting — changes nothing.
     """
     snapshots = {hit.snapshot_id for hit in (*vector, *lexical, *tree)}

@@ -347,8 +347,8 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   ids kept, never a model's text or a rendered number). `MemberText.lexical_only` flags it, and
   when a vector ranking is fused `fuse` scores its missing vector term as its BM25 term
   (2/(k + bm25 rank)); with no flagged member, or under `bm25_only`, fusion is byte for byte RRF
-  (ADR 0039 Amendment 1). It still loses the vector channel's own signal, so it is not on in any
-  preset (ADR 0039).
+  (ADR 0043 Amendment 1). It still loses the vector channel's own signal, so it is not on in any
+  preset (ADR 0043).
 - **Page context informs, it never cites** (ADR 0017) — beside each hit the prompt prints the
   rest of that hit's page, one line per member in reading order, with no field path and no
   member id; it is generation context only. A claim naming it is an `unknown member` and is
