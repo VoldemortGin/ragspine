@@ -314,7 +314,5 @@ def test_package_exports_the_recursive_in_process_sink():
     assert issubclass(Exported, corespine.InProcessPrivacyTraceSink)
     with pytest.raises(TraceError):
         Exported().emit("trace", llm_calls=[_LeakyCall("synthesis", _SECRET)])
-    # 反证：corespine 原实现只查顶层，同一载荷照样收下——递归来自 ragspine 子类。
-    corespine.InProcessPrivacyTraceSink().emit(
-        "trace", llm_calls=[_LeakyCall("synthesis", _SECRET)]
-    )
+    # corespine 当前（未发版的 Unreleased，ADR 0006）起核心 sink 自己也递归拒绝嵌套禁词键，
+    # 原先「核心只查顶层」的反证断言已过时，按 CHANGELOG「下游升级须知」删除（不改为断言核心也拒绝，免得绑死未发版语义）。
