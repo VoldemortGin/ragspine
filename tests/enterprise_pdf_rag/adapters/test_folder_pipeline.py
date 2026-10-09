@@ -26,6 +26,7 @@ from enterprise_pdf_rag.adapters.folder_pipeline import (
 from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.visual_requalification import RequalificationSummary
+from enterprise_pdf_rag.answers.prompt import SYSTEM_RULES, SYSTEM_RULES_DERIVED
 from ragspine.common.evidence.configs import get_settings
 from ragspine.common.evidence.providers.json_completion import (
     JsonCompletionClient,
@@ -1321,3 +1322,92 @@ def test_omit_in_the_settings_never_sends_a_temperature_and_never_probes(
     assert endpoint.with_temperature() == 0 and endpoint.sent
     assert result.sampling_parameters_dropped == ()
     assert not [event for event, _ in events if event == "sampling_parameters_dropped"]
+
+
+def test_answer_system_rules_reach_the_answer_prompt_and_stay_out_of_the_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = _two_documents(tmp_path, monkeypatch)
+    questions = tmp_path / "questions.jsonl"
+    questions.write_text(json.dumps({"id": "q", "question": "What does page 2 say?"}) + "\n")
+    llm, _ = _answer_llm(tmp_path)
+    rules = "Always answer in English, secret-marker-123."
+
+    result = run_folder_pipeline(
+        folder,
+        questions=questions,
+        ingestion_root=tmp_path / "ingestion",
+        max_live_calls_per_pdf=_PER_PDF,
+        build_tree=False,
+        embedder=_OFFLINE,
+        answer_llm=llm,
+        answer_system_rules=rules,
+    )
+
+    (envelope_path,) = (tmp_path / "answer-cache" / "contexts").glob("*.json")
+    system = json.loads(envelope_path.read_text(encoding="utf-8"))["payload"]["messages"][0][
+        "content"
+    ]
+    assert system.startswith(SYSTEM_RULES) and system.endswith(rules)
+    assert "secret-marker-123" not in result.model_dump_json()
+
+
+def test_too_long_answer_system_rules_fail_before_any_work(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="answer_system_rules_too_long"):
+        run_folder_pipeline(
+            tmp_path / "missing",
+            ingestion_root=tmp_path / "ingestion",
+            max_live_calls_per_pdf=_PER_PDF,
+            answer_system_rules="x" * 9_000,
+        )
+    assert not (tmp_path / "ingestion").exists()
+
+
+def test_answer_constants_reach_the_answer_system_and_stay_out_of_the_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = _two_documents(tmp_path, monkeypatch)
+    questions = tmp_path / "questions.jsonl"
+    questions.write_text(json.dumps({"id": "q", "question": "What does page 2 say?"}) + "\n")
+    llm, _ = _answer_llm(tmp_path)
+
+    result = run_folder_pipeline(
+        folder,
+        questions=questions,
+        ingestion_root=tmp_path / "ingestion",
+        max_live_calls_per_pdf=_PER_PDF,
+        build_tree=False,
+        embedder=_OFFLINE,
+        answer_llm=llm,
+        answer_derivations=True,
+        answer_constants={"secret_marker_rate": 7.8125},
+    )
+
+    (envelope_path,) = (tmp_path / "answer-cache" / "contexts").glob("*.json")
+    payload = json.loads(envelope_path.read_text(encoding="utf-8"))["payload"]
+    system = payload["messages"][0]["content"]
+    assert system.startswith(SYSTEM_RULES_DERIVED) and system.endswith(
+        "secret_marker_rate = 7.8125"
+    )
+    assert "derivations" in payload["response_format"]["json_schema"]["schema"]["properties"]
+    dumped = result.model_dump_json()
+    assert "secret_marker_rate" not in dumped and "7.8125" not in dumped
+
+
+def test_an_invalid_answer_constant_fails_before_any_work(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="invalid_answer_constant_name"):
+        run_folder_pipeline(
+            tmp_path / "missing",
+            ingestion_root=tmp_path / "ingestion",
+            max_live_calls_per_pdf=_PER_PDF,
+            answer_derivations=True,
+            answer_constants={"HKD per USD": 7.8},
+        )
+    with pytest.raises(ValueError, match="answer_constants_need_derivations"):
+        run_folder_pipeline(
+            tmp_path / "missing",
+            ingestion_root=tmp_path / "ingestion",
+            max_live_calls_per_pdf=_PER_PDF,
+            answer_constants={"hkd_per_usd_default": 7.8},
+        )
+    assert not (tmp_path / "ingestion").exists()

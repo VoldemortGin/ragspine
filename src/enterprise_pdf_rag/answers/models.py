@@ -218,6 +218,57 @@ class RejectedClaim:
     detail: str
 
 
+class DerivationFailure(StrEnum):
+    """一条派生计算被拒的原因(ADR 0038);被拒只影响 prose 能否引用它的结果。"""
+
+    DUPLICATE_NAME = "duplicate_name"
+    INVALID_INPUT = "invalid_input"
+    UNVERIFIED_CLAIM = "unverified_claim"
+    INPUT_NOT_IN_CLAIM = "input_not_in_claim"
+    UNKNOWN_CONSTANT = "unknown_constant"
+    CONSTANT_MISMATCH = "constant_mismatch"
+    INVALID_EXPRESSION = "invalid_expression"
+    DIVISION_BY_ZERO = "division_by_zero"
+    RESULT_MISMATCH = "result_mismatch"
+    INVALID_RESULT = "invalid_result"
+
+
+@dataclass(frozen=True, slots=True)
+class DerivationOperand:
+    """已核对的一个操作数:来自某条已验证 claim,或来自调用方给定的常量。"""
+
+    name: str
+    value: Decimal
+    claim_id: str | None
+    constant: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class VerifiedDerivation:
+    """代码复算通过的派生:``computed`` 是复算值,``result`` 是模型写进回答的写法。"""
+
+    name: str
+    expression: str
+    inputs: tuple[DerivationOperand, ...]
+    result: str
+    computed: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class RejectedDerivation:
+    name: str
+    expression: str
+    result: str
+    reason: DerivationFailure
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class DerivationVerification:
+    verified: tuple[VerifiedDerivation, ...] = ()
+    rejected: tuple[RejectedDerivation, ...] = ()
+
+
 @dataclass(frozen=True, slots=True)
 class AnswerResult:
     status: AnswerStatus
@@ -247,3 +298,6 @@ class AnswerResult:
     # empty for a one-document answer. ``document_sha256`` then names the document of the
     # first prompt member, and each citation and fused hit names its own.
     searched_documents: tuple[str, ...] = ()
+    # 放开计算时(ADR 0038)代码复算通过 / 被拒的派生;默认路径恒为空。
+    derivations: tuple[VerifiedDerivation, ...] = ()
+    rejected_derivations: tuple[RejectedDerivation, ...] = ()

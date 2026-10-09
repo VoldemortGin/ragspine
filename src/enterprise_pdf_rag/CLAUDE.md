@@ -53,7 +53,10 @@ processing/   context_builder.py (evidence blocks for the prompt, plus the uncit
               objects}, and figures/ to ragspine.extraction.evidence.figures (ADR 0022)
 answers/      pure answer chain — ports.py (MountedDocument, MemberText), models.py
               (MemberFilters, TranslatedQuery), prompt.py (strict model output schema),
-              verify.py (claim re-read), page_window.py (one page context block per hit
+              verify.py (claim re-read), derivations.py (ADR 0038: opt-in model arithmetic —
+              a hand-written four-operation evaluator re-computes every derivation from
+              verified claims or whitelisted constants; off by default, byte for byte),
+              page_window.py (one page context block per hit
               page, its members in the diagram reading order — ADR 0017),
               query_filters.py / member_filter.py (period / region pre-filters derived
               from the question, relaxed when they starve), query_mode.py (which
@@ -258,7 +261,9 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   or its exact source display and whose unit, when it states one, is the point's own, cited
   back to SVG elements); failed claims are dropped, and any number in the prose outside a
   verified claim abstains the
-  whole answer (ADR 0011). Across documents (ADR 0032) a member is read and verified only from
+  whole answer (ADR 0011). Model arithmetic is opt-in only (ADR 0038): each computed number is a
+  derivation over verified claims or whitelisted constants, re-computed by code before the prose
+  may state it; the default system text, schema and fingerprints are unchanged. Across documents (ADR 0032) a member is read and verified only from
   its own document and each citation names that document (`document_sha256`), never one the
   model chose. One synthesis call per answer, plus at most one earlier
   translation call for a question written outside the index's language (bounded, cached,

@@ -17,6 +17,7 @@ from enterprise_pdf_rag.adapters.cross_document import CrossDocument
 from enterprise_pdf_rag.adapters.hybrid_search import HybridSearch, LexicalIndex, lexical_rank
 from enterprise_pdf_rag.adapters.query_translation import is_foreign_script, translate_query
 from enterprise_pdf_rag.adapters.tree_retrieval import route_tree
+from enterprise_pdf_rag.answers.derivations import verify_derivations
 from enterprise_pdf_rag.answers.member_filter import candidate_members, region_vocabulary
 from enterprise_pdf_rag.answers.models import (
     AbstainReason,
@@ -33,8 +34,9 @@ from enterprise_pdf_rag.answers.models import (
 from enterprise_pdf_rag.answers.page_window import with_page_context
 from enterprise_pdf_rag.answers.ports import MemberText, MountedDocument
 from enterprise_pdf_rag.answers.prompt import (
-    SYSTEM_RULES,
     ModelAnswer,
+    ModelAnswerWithDerivations,
+    answer_system,
     build_prompt,
     member_aliases,
     resolve_member_aliases,
@@ -205,6 +207,12 @@ class AnswerSettings:
     # Print the rest of each hit's page beside it (ADR 0017), and how much of one page.
     page_window: bool = True
     page_window_budget_chars: int = 6_000
+    # 追加在 ``SYSTEM_RULES`` 之后的调用方规则;``None`` 时 system 文本逐字节不变。
+    extra_system_rules: str | None = None
+    # ADR 0038:放开模型计算/换算,每个算出的数由代码复算;``answer_constants`` 是派生可引用的
+    # 常量白名单(须同时放开)。默认关闭时 system、schema 与请求指纹逐字节不变。
+    allow_derivations: bool = False
+    answer_constants: Mapping[str, float] | None = None
 
 
 class AnswerService:
@@ -223,6 +231,15 @@ class AnswerService:
         self._documents = documents
         self._llm = llm
         self._settings = AnswerSettings() if settings is None else settings
+        # 构造期解析一次:附加规则超长在此抛 ValueError,而不是每题失败。
+        self._system = answer_system(
+            self._settings.extra_system_rules,
+            derivations=self._settings.allow_derivations,
+            constants=self._settings.answer_constants,
+        )
+        self._response_model: type[ModelAnswer] = (
+            ModelAnswerWithDerivations if self._settings.allow_derivations else ModelAnswer
+        )
         self._reranker = reranker
         self._index_cache: MutableMapping[str, LexicalIndex] = (
             {} if index_cache is None else index_cache
@@ -490,7 +507,7 @@ class AnswerService:
                 primary.source_sha256,
                 primary.processing_id,
                 primary.retrieval_snapshot_id,
-                SYSTEM_RULES,
+                self._system,
                 prompt,
                 member_ids,
                 fused,
@@ -508,8 +525,8 @@ class AnswerService:
             completion = self._llm.complete_text_json(
                 task=_TASK,
                 prompt=prompt,
-                response_model=ModelAnswer,
-                system=SYSTEM_RULES,
+                response_model=self._response_model,
+                system=self._system,
                 max_output_tokens=self._settings.max_output_tokens,
             )
         except JsonCompletionError as error:
@@ -545,6 +562,11 @@ class AnswerService:
         # citations, the HTTP contract — keeps naming members by their real id.
         model = resolve_member_aliases(completion.parsed, aliases)
         verification = verify_claims(model, by_member, chart_evidence=chart_evidence)
+        derivations = (
+            verify_derivations(model, verification.verified, self._settings.answer_constants or {})
+            if self._settings.allow_derivations
+            else None
+        )
         status, reason, detail = decide(
             model,
             verification,
@@ -553,6 +575,7 @@ class AnswerService:
             # The members' own text, never the rendering: a block's ``page_index=`` is
             # metadata about the page, not a figure printed on it.
             context_texts=tuple(member.text for block in page_blocks for member in block.members),
+            derivations=derivations,
         )
         result = AnswerResult(
             status,
@@ -576,6 +599,8 @@ class AnswerService:
             translation,
             route,
             searched,
+            derivations=() if derivations is None else derivations.verified,
+            rejected_derivations=() if derivations is None else derivations.rejected,
         )
         self._close_audit(journal, result, model_output_raw=completion.json_text)
         return result

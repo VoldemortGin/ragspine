@@ -1,7 +1,10 @@
 """The answer service retrieves, calls the model exactly once, verifies and abstains."""
 
+import json
 import re
+import sqlite3
 from collections.abc import Mapping
+from contextlib import closing
 from dataclasses import dataclass, replace
 from decimal import Decimal
 from pathlib import Path
@@ -9,6 +12,7 @@ from typing import Never
 
 import pytest
 
+from enterprise_pdf_rag.adapters.answer_audit import AnswerAuditStore
 from enterprise_pdf_rag.adapters.answer_service import (
     AmbiguousDocument,
     AnswerService,
@@ -30,13 +34,22 @@ from enterprise_pdf_rag.answers.models import (
     AnswerResult,
     AnswerStatus,
     ClaimKind,
+    DerivationFailure,
     MemberFilters,
     PageWindowStat,
     TranslatedQuery,
     TreeRoute,
 )
 from enterprise_pdf_rag.answers.ports import MemberText
-from enterprise_pdf_rag.answers.prompt import SYSTEM_RULES, ModelAnswer, ModelClaim
+from enterprise_pdf_rag.answers.prompt import (
+    SYSTEM_RULES,
+    SYSTEM_RULES_DERIVED,
+    DerivationInput,
+    ModelAnswer,
+    ModelAnswerWithDerivations,
+    ModelClaim,
+    ModelDerivation,
+)
 from enterprise_pdf_rag.processing.context_builder import BlockKind
 from ragspine.extraction.evidence.figures.models import Verification
 from ragspine.extraction.evidence.metadata.document_tree import (
@@ -1885,3 +1898,131 @@ def test_by_default_a_narrative_question_routes_and_a_label_query_does_not(
     assert "glossary" in narrative.member_ids
     assert label_routes == [] and label.tree_route is None
     assert "glossary" not in label.member_ids
+
+
+# 实施 ADR 0038 之前,用默认设置对柱状图那道题算出的请求指纹:默认路径的 system、schema
+# 与请求体都不能动,否则模型缓存全部失效。
+_DEFAULT_FINGERPRINT = "491fdf18437fbec1ba9769c22c4fd0952fc01f26b812fca70478fc7c8150062e"
+
+
+def test_the_default_request_fingerprint_is_unchanged(
+    tmp_path: Path, bar: tuple[StoreMountedDocument, str]
+) -> None:
+    document, _ = bar
+    service, _ = _service(tmp_path, document, _one_chart_claim("15%"))
+    result = service.answer(AnswerRequest(_QUESTION))
+    assert result.status is AnswerStatus.ANSWERED
+    assert result.request_fingerprint == _DEFAULT_FINGERPRINT
+    assert result.derivations == () and result.rejected_derivations == ()
+
+
+_ANY_CELL = re.compile(r"^cells\.(\S+) \(\d+,\d+\): (\S+)", re.MULTILINE)
+_USD_QUESTION = "What was revenue in US dollars, and the margin?"
+_CONSTANTS = {"hkd_per_usd_default": 7.8}
+
+
+def _conversion_script(result: str) -> Script:
+    def script(prompt: str) -> ModelAnswer:
+        cells = {text: cell for cell, text in _ANY_CELL.findall(prompt)}
+        (table,) = _members(prompt, "table")
+
+        def cell(claim_id: str, text: str) -> ModelClaim:
+            return ModelClaim(
+                claim_id=claim_id,
+                member_id=table,
+                kind="cell",
+                field_path=f"cells.{cells[text]}",
+                text=text,
+            )
+
+        claims = (cell("c1", "1,234"), cell("c2", "12%"))
+        derivation = ModelDerivation(
+            name="revenue_usd",
+            expression="hkd / rate",
+            inputs=(
+                DerivationInput(name="hkd", claim_id="c1", value="1,234"),
+                DerivationInput(name="rate", constant="hkd_per_usd_default", value="7.80"),
+            ),
+            result=result,
+        )
+        return ModelAnswerWithDerivations(
+            abstain=False,
+            abstain_reason=None,
+            answer=(
+                f"Revenue was US${result} million (HK$1,234 million at 7.80 HK$ per US$); "
+                "the margin was 12%."
+            ),
+            claims=claims,
+            derivations=(derivation,),
+        )
+
+    return script
+
+
+def test_an_opted_in_conversion_is_recomputed_and_answers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    document = _ruled_table_document(tmp_path, monkeypatch)
+    client, _ = scripted_client(tmp_path / "llm", _conversion_script("158.21"))
+    audit = AnswerAuditStore(tmp_path / "answers-audit.sqlite")
+    service = AnswerService(
+        {document.source_sha256: document},
+        client,
+        settings=AnswerSettings(allow_derivations=True, answer_constants=_CONSTANTS),
+        audit=audit,
+    )
+
+    result = service.answer(AnswerRequest(_USD_QUESTION))
+
+    assert result.status is AnswerStatus.ANSWERED, result
+    assert result.answer is not None and result.answer.startswith("Revenue was US$158.21 million")
+    (derivation,) = result.derivations
+    assert derivation.computed == Decimal("158.2051282051282051282051282051282")
+    assert derivation.result == "158.21" and result.rejected_derivations == ()
+    envelope = json.loads(
+        (tmp_path / "llm" / "contexts" / f"{result.request_fingerprint}.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    system = envelope["payload"]["messages"][0]["content"]
+    assert system.startswith(SYSTEM_RULES_DERIVED) and "\nhkd_per_usd_default = 7.8" in system
+    schema = envelope["payload"]["response_format"]["json_schema"]["schema"]
+    assert "derivations" in schema["properties"]
+    with closing(sqlite3.connect(audit.path)) as connection:
+        (journaled,) = connection.execute("SELECT derivations FROM answers").fetchone()
+    assert json.loads(journaled)[0]["name"] == "revenue_usd"
+
+    # 同一道题不放开计算:system 与 schema 都不同,请求指纹随之不同。
+    off, _ = _service(tmp_path / "off", document, _conversion_script("158.21"))
+    plain = off.answer(AnswerRequest(_USD_QUESTION))
+    assert plain.request_fingerprint != result.request_fingerprint
+    assert plain.status is AnswerStatus.ABSTAINED and plain.derivations == ()
+
+
+def test_a_derivation_whose_result_does_not_recompute_abstains(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    document = _ruled_table_document(tmp_path, monkeypatch)
+    service, _ = _service(
+        tmp_path,
+        document,
+        _conversion_script("160.00"),
+        settings=AnswerSettings(allow_derivations=True, answer_constants=_CONSTANTS),
+    )
+
+    result = service.answer(AnswerRequest(_USD_QUESTION))
+
+    assert result.status is AnswerStatus.ABSTAINED
+    assert result.abstain_reason is AbstainReason.CLAIM_NOT_IN_EVIDENCE
+    assert result.abstain_detail is not None
+    assert "160.00" in result.abstain_detail
+    assert "rejected derivations: revenue_usd(result_mismatch)" in result.abstain_detail
+    (rejected,) = result.rejected_derivations
+    assert rejected.reason is DerivationFailure.RESULT_MISMATCH and result.derivations == ()
+
+
+def test_constants_without_derivations_fail_when_the_service_is_built(tmp_path: Path) -> None:
+    document = FakeDocument((FakeMember("a", "text"),), ("a",))
+    settings = AnswerSettings(answer_constants=_CONSTANTS)
+    with pytest.raises(ValueError, match="answer_constants_need_derivations"):
+        _service(tmp_path, document, _one_chart_claim("15%"), settings=settings)

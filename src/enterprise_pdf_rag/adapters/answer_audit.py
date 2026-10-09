@@ -11,7 +11,9 @@ write closes that same row with the
 model's raw output, the verified claims, the rejections and the answer the caller got.
 An answer that searched several documents as one corpus (ADR 0032) also lists them in
 ``searched_documents`` (NULL for a one-document answer), and every ranked hit, page window and
-citation it journals names its own ``document_sha256``.
+citation it journals names its own ``document_sha256``. An answer that let the model
+calculate (ADR 0038) journals its verified and rejected derivations in ``derivations``
+(NULL otherwise; an older journal gains the column on open).
 
 A journal write never changes an answer: every failure is a warning and the chain
 continues. Unlike ``ragspine``'s privacy-aware traces (codes, counts and timings only)
@@ -75,7 +77,8 @@ CREATE TABLE IF NOT EXISTS answers (
     elapsed_ms INTEGER,
     error TEXT,
     ranked TEXT,
-    searched_documents TEXT
+    searched_documents TEXT,
+    derivations TEXT
 );
 CREATE INDEX IF NOT EXISTS answers_request_fingerprint ON answers (request_fingerprint);
 CREATE INDEX IF NOT EXISTS answers_started_at ON answers (started_at);
@@ -90,13 +93,17 @@ INSERT INTO answers (
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 # Columns added after the first release, with their type: an older journal gains them on open.
-_ADDED_COLUMNS: Final = (("ranked", "TEXT"), ("searched_documents", "TEXT"))
+_ADDED_COLUMNS: Final = (
+    ("ranked", "TEXT"),
+    ("searched_documents", "TEXT"),
+    ("derivations", "TEXT"),
+)
 
 _UPDATE: Final = """
 UPDATE answers SET
     finished_at = ?, request_fingerprint = ?, model_output_raw = ?, llm_live_calls = ?,
     cache_hit = ?, status = ?, abstain_reason = ?, abstain_detail = ?, claims_verified = ?,
-    claims_rejected = ?, answer_text = ?, elapsed_ms = ?, error = ?
+    claims_rejected = ?, answer_text = ?, elapsed_ms = ?, error = ?, derivations = ?
 WHERE id = ?
 """
 
@@ -107,7 +114,7 @@ _SUMMARY_COLUMNS: Final = (
 _RECORD_COLUMNS: Final = (
     "finished_at, translated_question, processing_id, snapshot_id, filters_applied, "
     "filters_relaxed, fusion_mode, page_windows, member_ids, fused, prompt_system, "
-    "prompt_user, model_output_raw, answer_text, claims_verified, claims_rejected"
+    "prompt_user, model_output_raw, answer_text, claims_verified, claims_rejected, derivations"
 )
 
 
@@ -175,6 +182,8 @@ class AuditRecord:
     answer_text: str | None
     claims_verified: str | None
     claims_rejected: str | None
+    # ADR 0038:已验证与被拒的派生合成一个 JSON 列表;未放开计算或无派生时为 ``None``。
+    derivations: str | None = None
 
 
 class AnswerAuditStore:
@@ -268,6 +277,7 @@ class AnswerAuditStore:
                         else result.answer,
                         _elapsed_ms(None if started is None else _text(started[0]), finished),
                         error,
+                        None if result is None else _derivations(result),
                         row_id,
                     ),
                 )
@@ -333,6 +343,7 @@ def read_answer(path: Path, row_id: int) -> AuditRecord | None:
         _optional_text(rest[13]),
         _optional_text(rest[14]),
         _optional_text(rest[15]),
+        _optional_text(rest[16]),
     )
 
 
@@ -383,6 +394,7 @@ def format_record(record: AuditRecord) -> str:
         ("fused", record.fused),
         ("claims_verified", record.claims_verified or "-"),
         ("claims_rejected", record.claims_rejected or "-"),
+        ("derivations", record.derivations or "-"),
         ("answer_text", record.answer_text or "-"),
     )
     width = max(len(name) for name, _ in fields)
@@ -522,6 +534,42 @@ def _rejected(claims: Sequence[RejectedClaim]) -> str:
             for claim in claims
         ]
     )
+
+
+def _derivations(result: AnswerResult) -> str | None:
+    if not result.derivations and not result.rejected_derivations:
+        return None
+    verified = [
+        {
+            "status": "verified",
+            "name": item.name,
+            "expression": item.expression,
+            "inputs": [
+                {
+                    "name": operand.name,
+                    "value": str(operand.value),
+                    "claim_id": operand.claim_id,
+                    "constant": operand.constant,
+                }
+                for operand in item.inputs
+            ],
+            "result": item.result,
+            "computed": str(item.computed),
+        }
+        for item in result.derivations
+    ]
+    rejected = [
+        {
+            "status": "rejected",
+            "name": item.name,
+            "expression": item.expression,
+            "result": item.result,
+            "reason": item.reason.value,
+            "detail": item.detail,
+        }
+        for item in result.rejected_derivations
+    ]
+    return _dumps([*verified, *rejected])
 
 
 def _summary(row: Sequence[object]) -> AuditSummary:

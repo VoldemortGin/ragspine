@@ -5,6 +5,7 @@ import logging
 import re
 import sqlite3
 from contextlib import closing
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -19,7 +20,11 @@ from enterprise_pdf_rag.adapters.answer_audit import (
     open_audit_store,
     read_answer,
 )
-from enterprise_pdf_rag.adapters.answer_service import AnswerService, DependencyUnavailable
+from enterprise_pdf_rag.adapters.answer_service import (
+    AnswerService,
+    AnswerSettings,
+    DependencyUnavailable,
+)
 from enterprise_pdf_rag.answers.models import (
     AbstainReason,
     AnswerRequest,
@@ -27,11 +32,15 @@ from enterprise_pdf_rag.answers.models import (
     AnswerStatus,
     ClaimCitation,
     ClaimKind,
+    DerivationFailure,
+    DerivationOperand,
     FusedHit,
     MemberFilters,
     PageWindowStat,
     RejectedClaim,
+    RejectedDerivation,
     VerifiedClaim,
+    VerifiedDerivation,
 )
 from enterprise_pdf_rag.answers.prompt import SYSTEM_RULES, ModelAnswer
 from enterprise_pdf_rag.processing.context_builder import BlockKind
@@ -406,3 +415,86 @@ def test_a_journal_written_before_the_ranking_column_is_upgraded_in_place(
         _QUESTION,
         "after the upgrade",
     ]
+
+
+def test_extra_system_rules_reach_the_model_and_the_journal(tmp_path: Path) -> None:
+    document, _ = bar_document(tmp_path)
+    client, _ = scripted_client(tmp_path / "llm", _chart_script)
+    store = AnswerAuditStore(tmp_path / "answers-audit.sqlite")
+    rules = "Always answer in English."
+    service = AnswerService(
+        {document.source_sha256: document},
+        client,
+        audit=store,
+        settings=AnswerSettings(extra_system_rules=rules),
+    )
+
+    result = service.answer(AnswerRequest(_QUESTION))
+
+    (row,) = list_answers(store.path)
+    record = read_answer(store.path, row.id)
+    assert record is not None
+    assert record.prompt_system.startswith(SYSTEM_RULES) and rules in record.prompt_system
+    envelope = json.loads(
+        (tmp_path / "llm" / "contexts" / f"{result.request_fingerprint}.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert envelope["payload"]["messages"][0]["content"] == record.prompt_system
+
+
+def test_too_long_extra_system_rules_fail_when_the_service_is_built(tmp_path: Path) -> None:
+    document, _ = bar_document(tmp_path)
+    client, _ = scripted_client(tmp_path / "llm", _chart_script)
+
+    with pytest.raises(ValueError, match="answer_system_rules_too_long"):
+        AnswerService(
+            {document.source_sha256: document},
+            client,
+            settings=AnswerSettings(extra_system_rules="x" * 9_000),
+        )
+
+
+def test_a_journal_written_before_the_derivations_column_is_upgraded_in_place(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "answers-audit.sqlite"
+    store = AnswerAuditStore(path)
+    first = store.begin(_context())
+    assert first is not None
+    store.finish(first, _result())
+    with closing(sqlite3.connect(path)) as connection, connection:
+        connection.execute("ALTER TABLE answers DROP COLUMN derivations")
+
+    reopened = AnswerAuditStore(path)
+    second = reopened.begin(_context(question="after the upgrade"))
+    assert second is not None
+    derived = replace(
+        _result(),
+        derivations=(
+            VerifiedDerivation(
+                "usd",
+                "hkd / rate",
+                (DerivationOperand("hkd", Decimal("1234"), "c1", None),),
+                "158.21",
+                Decimal("158.2051282051282051282051282051282"),
+            ),
+        ),
+        rejected_derivations=(
+            RejectedDerivation("pct", "a / b", "9.99", DerivationFailure.RESULT_MISMATCH, "no"),
+        ),
+    )
+    reopened.finish(second, derived)
+
+    with closing(sqlite3.connect(path)) as connection:
+        rows = connection.execute("SELECT derivations FROM answers ORDER BY id").fetchall()
+    assert rows[0] == (None,)
+    verified, rejected = json.loads(rows[1][0])
+    assert verified["status"] == "verified" and verified["computed"].startswith("158.2051")
+    assert verified["inputs"] == [
+        {"name": "hkd", "value": "1234", "claim_id": "c1", "constant": None}
+    ]
+    assert rejected["status"] == "rejected" and rejected["reason"] == "result_mismatch"
+    record = read_answer(path, second)
+    assert record is not None and record.derivations == rows[1][0]
+    assert "derivations" in format_record(record)

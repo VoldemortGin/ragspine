@@ -3,26 +3,32 @@
 import asyncio
 import json
 import shutil
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi import FastAPI
 from httpx2 import ASGITransport, AsyncClient
 
+from enterprise_pdf_rag.adapters.answer_service import AnswerService, AnswerSettings
 from enterprise_pdf_rag.adapters.document_catalog import mount_document, scan_catalog
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.draft_publication import DraftPublication
 from enterprise_pdf_rag.adapters.http import app as app_module
+from enterprise_pdf_rag.adapters.http import documents as documents_module
 from enterprise_pdf_rag.adapters.http.documents import create_documents_app
 from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
+from enterprise_pdf_rag.answers.ports import MountedDocument
 from enterprise_pdf_rag.processing.retrieval import PinnedRetrievalHit, RetrievalContext
+from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
 from ragspine.common.evidence.providers.providers import LocalModelConfig, ProviderRequestError
 from ragspine.common.evidence.settings import get_settings
 from tests.enterprise_pdf_rag.adapters.generic_publication_helpers import (
     publish_generic_document,
 )
 from tests.enterprise_pdf_rag.adapters.test_document_catalog import CountingEmbedder
+from tests.enterprise_pdf_rag.answers.fake_llm import answered, scripted_client
 from tests.enterprise_pdf_rag.processing.test_persistent_retrieval import RecordingEmbedding
 
 _MISSING_ID = "f" * 64
@@ -556,3 +562,31 @@ def test_configured_app_legacy_root_env(
         _run(application, scenario)
     finally:
         get_settings.cache_clear()
+
+
+def test_answer_settings_reach_the_answer_service(
+    published: Published, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, *_ = published
+    seen: list[AnswerSettings | None] = []
+
+    def spy(
+        documents: Mapping[str, MountedDocument],
+        llm: JsonCompletionClient,
+        *,
+        settings: AnswerSettings | None = None,
+        **kwargs: Any,  # noqa: ANN401
+    ) -> AnswerService:
+        seen.append(settings)
+        return AnswerService(documents, llm, settings=settings, **kwargs)
+
+    monkeypatch.setattr(documents_module, "AnswerService", spy)
+    llm, _ = scripted_client(tmp_path / "llm", lambda _prompt: answered("unused"))
+    settings = AnswerSettings(extra_system_rules="Always answer in English.")
+
+    create_documents_app(
+        scan_catalog(root), embedder=OfflineDescriptionEmbedder(), llm=llm, answer_settings=settings
+    )
+    create_documents_app(scan_catalog(root), embedder=OfflineDescriptionEmbedder(), llm=llm)
+
+    assert seen == [settings, None]

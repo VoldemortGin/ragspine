@@ -35,6 +35,7 @@ from pydantic import Field
 from enterprise_pdf_rag.adapters import pdfspine_tsr
 from enterprise_pdf_rag.adapters.answer_audit import open_audit_store
 from enterprise_pdf_rag.adapters.answer_llm import make_answer_llm
+from enterprise_pdf_rag.adapters.answer_service import AnswerSettings
 from enterprise_pdf_rag.adapters.document_catalog import DocumentCatalog, scan_catalog
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.document_tree_extraction import (
@@ -86,6 +87,7 @@ from enterprise_pdf_rag.adapters.visual_requalification import (
     RequalificationSummary,
     requalify_visual_objects,
 )
+from enterprise_pdf_rag.answers.prompt import answer_system
 from enterprise_pdf_rag.processing.index_text import ONE_UNIT_EACH, IndexTextOptions
 from ragspine.common.evidence.configs import get_settings
 from ragspine.common.evidence.file_placement import recording_repairs
@@ -1677,6 +1679,9 @@ def run_folder_pipeline(
     answer_llm: JsonCompletionClient | None = None,
     progress: Progress | None = None,
     max_parallel_documents: int = 1,
+    answer_system_rules: str | None = None,
+    answer_derivations: bool = False,
+    answer_constants: Mapping[str, float] | None = None,
 ) -> FolderPipelineResult:
     """Ingest, requalify, qualify, index, publish and tree every PDF in ``folder``, then evaluate.
 
@@ -1740,7 +1745,14 @@ def run_folder_pipeline(
     unexpected exception is recorded as that document's failure (``continue_on_error``). An
     interrupt stops queued documents from starting and running ones at their next page, then
     is raised. The question set is still answered one question at a time.
+
+    ``answer_system_rules`` 追加到答案生成 system 文本之后(``answers.prompt.answer_system``);
+    ``None`` 或空白时 system 文本逐字节不变。超长在任何 ingest 之前抛 ``ValueError``。规则正文
+    不写进报告。``answer_derivations=True`` 放开模型计算/换算(ADR 0038:每个算出的数写成
+    derivation 由代码复算),``answer_constants`` 是派生可引用的常量白名单(须同时放开);
+    常量名或值非法、只给常量不放开,同样在任何写入之前抛 ``ValueError``,常量也不写进报告。
     """
+    answer_system(answer_system_rules, derivations=answer_derivations, constants=answer_constants)
     _check_per_pdf(max_live_calls_per_pdf)
     _check_parallel(max_parallel_documents)
     _check_budget("tree_max_live_calls", tree_max_live_calls)
@@ -1946,6 +1958,17 @@ def run_folder_pipeline(
                 reranker=reranker,
                 verify_every_request=settings.verify_every_request,
                 audit=open_audit_store(audit_path) if settings.answer_audit_enabled else None,
+                answer_settings=(
+                    None
+                    if answer_system_rules is None
+                    and not answer_derivations
+                    and answer_constants is None
+                    else AnswerSettings(
+                        extra_system_rules=answer_system_rules,
+                        allow_derivations=answer_derivations,
+                        answer_constants=answer_constants,
+                    )
+                ),
             )
             post = _asgi_post(app)
             member_pages = _member_pages(catalog)

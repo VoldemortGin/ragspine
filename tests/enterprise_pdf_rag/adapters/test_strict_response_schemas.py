@@ -25,17 +25,18 @@ from enterprise_pdf_rag.adapters.visual_semantic_schemas import (
     ImageObservationsDTO,
     VisualDescriptionDTO,
 )
-from enterprise_pdf_rag.answers.prompt import ModelAnswer, ModelClaim
+from enterprise_pdf_rag.answers.prompt import ModelAnswer, ModelAnswerWithDerivations, ModelClaim
 from ragspine.common.evidence.providers.json_completion import _response_schema
 
 # One entry per ``response_model`` passed to ``complete_json`` / ``complete_text_json``:
-# answer_service (ModelAnswer), query_translation (QueryTranslationDTO),
-# page_metadata_extraction (PageMetadataDTO), page_partition (PageLayoutDTO),
-# tree_retrieval (TreeRouteDTO), document_tree_extraction (TreeSummaryDTO),
+# answer_service (ModelAnswer, or ModelAnswerWithDerivations under ADR 0038),
+# query_translation (QueryTranslationDTO), page_metadata_extraction (PageMetadataDTO),
+# page_partition (PageLayoutDTO), tree_retrieval (TreeRouteDTO), document_tree_extraction (TreeSummaryDTO),
 # visual_semantics (three observation DTOs + VisualDescriptionDTO) and chart_semantics
 # (ChartObservationsDTO, FigureDescriptionDTO).
 RESPONSE_MODELS: tuple[type[BaseModel], ...] = (
     ModelAnswer,
+    ModelAnswerWithDerivations,
     QueryTranslationDTO,
     PageMetadataDTO,
     PageLayoutDTO,

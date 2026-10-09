@@ -17,6 +17,7 @@ from enterprise_pdf_rag.answers.models import (
     AnswerStatus,
     ClaimCitation,
     ClaimKind,
+    DerivationVerification,
     RejectedClaim,
     VerifiedClaim,
     from_refusal,
@@ -657,6 +658,8 @@ def prose_grounded(
     *,
     question: str = "",
     context_texts: Sequence[str] = (),
+    derived: Sequence[Decimal] = (),
+    constants: Sequence[Decimal] = (),
 ) -> tuple[bool, tuple[str, ...]]:
     """Every number or percentage in the prose must be grounded.
 
@@ -671,6 +674,11 @@ def prose_grounded(
     An enumeration marker opening a line or a sentence (``1.``, ``(2)``, ``第 3``,
     ``Step 4``) numbers a list item and is not a figure. Anything else escapes and the
     whole answer abstains.
+
+    ADR 0038(仅放开计算时非空):``derived`` 是已验证派生的复算值与结果,一个本会逃逸的
+    数字若等于其一,或与其一相差不超过该数字自身末位小数的半个单位(写成更少小数的
+    舍入),即视为有据;不做单位缩放(1.23 billion ≠ 1,234 million)。``constants`` 只含被
+    有效派生引用过的常量值,按值相等比较。两者为空时行为逐行不变。
     """
     allowed: set[Decimal] = set()
     for claim in verified:
@@ -681,16 +689,30 @@ def prose_grounded(
             allowed.update(value for _, value in _numbers(cited.quote))
     for text in context_texts:
         allowed.update(value for _, value in _numbers(text))
+    allowed.update(constants)
     asked = {_written_form(token, value) for token, value in _numbers(question)}
     prose = _ENUMERATOR_RE.sub(" ", answer)
     escaped = sorted(
         {
             token
             for token, value in _numbers(prose)
-            if value not in allowed and _written_form(token, value) not in asked
+            if value not in allowed
+            and _written_form(token, value) not in asked
+            and not _rounds_to(value, derived)
         }
     )
     return not escaped, tuple(escaped)
+
+
+def _rounds_to(value: Decimal, derived: Sequence[Decimal]) -> bool:
+    """``value`` 等于某个派生值,或是它按 ``value`` 自身末位小数舍入后的写法。"""
+    if not derived:
+        return False
+    exponent = value.as_tuple().exponent
+    if not isinstance(exponent, int):
+        return False
+    half = Decimal(5).scaleb(exponent - 1)
+    return any(value == item or abs(value - item) <= half for item in derived)
 
 
 def decide(
@@ -700,8 +722,13 @@ def decide(
     blocks_present: bool,
     question: str = "",
     context_texts: Sequence[str] = (),
+    derivations: DerivationVerification | None = None,
 ) -> tuple[AnswerStatus, AbstainReason | None, str | None]:
-    """Drop failed claims one by one; abstain on no verified claim or on ungrounded prose."""
+    """Drop failed claims one by one; abstain on no verified claim or on ungrounded prose.
+
+    ``derivations``(ADR 0038,默认 ``None`` 行为逐行不变):已验证派生的复算值、结果与
+    其引用的常量值进入 prose 的允许集合;弃答 detail 末尾追加被拒的派生及原因。
+    """
     if not blocks_present:
         return AnswerStatus.ABSTAINED, AbstainReason.NO_RELEVANT_MEMBER, "no context block"
     if model.abstain:
@@ -711,14 +738,30 @@ def decide(
             first = verification.rejected[0]
             return AnswerStatus.ABSTAINED, first.reason, f"{first.claim_id}: {first.detail}"
         return AnswerStatus.ABSTAINED, AbstainReason.NO_VERIFIED_CLAIM, "the model cited no claim"
+    derived: list[Decimal] = []
+    constants: list[Decimal] = []
+    if derivations is not None:
+        for derivation in derivations.verified:
+            derived.append(derivation.computed)
+            result = _decimal(derivation.result)
+            if result is not None:
+                derived.append(result)
+            constants.extend(item.value for item in derivation.inputs if item.constant)
     grounded, escaped = prose_grounded(
-        model.answer, verification.verified, question=question, context_texts=context_texts
+        model.answer,
+        verification.verified,
+        question=question,
+        context_texts=context_texts,
+        derived=derived,
+        constants=constants,
     )
     if not grounded:
         dropped = ", ".join(claim.claim_id for claim in verification.rejected) or "none"
-        return (
-            AnswerStatus.ABSTAINED,
-            AbstainReason.CLAIM_NOT_IN_EVIDENCE,
-            f"numbers outside verified claims: {', '.join(escaped)}; rejected claims: {dropped}",
+        detail = (
+            f"numbers outside verified claims: {', '.join(escaped)}; rejected claims: {dropped}"
         )
+        if derivations is not None and derivations.rejected:
+            failed = ", ".join(f"{item.name}({item.reason.value})" for item in derivations.rejected)
+            detail = f"{detail}; rejected derivations: {failed}"
+        return AnswerStatus.ABSTAINED, AbstainReason.CLAIM_NOT_IN_EVIDENCE, detail
     return AnswerStatus.ANSWERED, None, None

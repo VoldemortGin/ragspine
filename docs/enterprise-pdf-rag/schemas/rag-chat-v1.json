@@ -273,6 +273,14 @@
             "title": "Claims",
             "type": "array"
           },
+          "derivations": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/DerivationOut"
+            },
+            "title": "Derivations",
+            "type": "array"
+          },
           "document_sha256": {
             "title": "Document Sha256",
             "type": "string"
@@ -350,6 +358,14 @@
               "$ref": "#/$defs/RejectedClaimOut"
             },
             "title": "Rejected",
+            "type": "array"
+          },
+          "rejected_derivations": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/RejectedDerivationOut"
+            },
+            "title": "Rejected Derivations",
             "type": "array"
           },
           "schema_version": {
@@ -673,6 +689,105 @@
         "title": "CompletionDelta",
         "type": "object"
       },
+      "DerivationFailure": {
+        "description": "\u4e00\u6761\u6d3e\u751f\u8ba1\u7b97\u88ab\u62d2\u7684\u539f\u56e0(ADR 0038);\u88ab\u62d2\u53ea\u5f71\u54cd prose \u80fd\u5426\u5f15\u7528\u5b83\u7684\u7ed3\u679c\u3002",
+        "enum": [
+          "duplicate_name",
+          "invalid_input",
+          "unverified_claim",
+          "input_not_in_claim",
+          "unknown_constant",
+          "constant_mismatch",
+          "invalid_expression",
+          "division_by_zero",
+          "result_mismatch",
+          "invalid_result"
+        ],
+        "title": "DerivationFailure",
+        "type": "string"
+      },
+      "DerivationInputOut": {
+        "additionalProperties": false,
+        "description": "\u6d3e\u751f\u7684\u4e00\u4e2a\u64cd\u4f5c\u6570:\u6765\u81ea\u67d0\u6761\u5df2\u9a8c\u8bc1 claim(``claim_id``)\u6216\u67d0\u4e2a\u5e38\u91cf(``constant``)\u3002",
+        "properties": {
+          "claim_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claim Id"
+          },
+          "constant": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Constant"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value",
+          "claim_id",
+          "constant"
+        ],
+        "title": "DerivationInputOut",
+        "type": "object"
+      },
+      "DerivationOut": {
+        "additionalProperties": false,
+        "description": "\u4ee3\u7801\u590d\u7b97\u901a\u8fc7\u7684\u4e00\u6761\u6d3e\u751f(ADR 0038):``result`` \u662f\u56de\u7b54\u91cc\u7684\u5199\u6cd5,``computed`` \u662f\u590d\u7b97\u503c\u3002",
+        "properties": {
+          "computed": {
+            "title": "Computed",
+            "type": "string"
+          },
+          "expression": {
+            "title": "Expression",
+            "type": "string"
+          },
+          "inputs": {
+            "items": {
+              "$ref": "#/$defs/DerivationInputOut"
+            },
+            "title": "Inputs",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "expression",
+          "inputs",
+          "result",
+          "computed"
+        ],
+        "title": "DerivationOut",
+        "type": "object"
+      },
       "EvidenceKind": {
         "enum": [
           "native_element",
@@ -942,6 +1057,40 @@
           "detail"
         ],
         "title": "RejectedClaimOut",
+        "type": "object"
+      },
+      "RejectedDerivationOut": {
+        "additionalProperties": false,
+        "description": "\u590d\u7b97\u672a\u901a\u8fc7\u7684\u4e00\u6761\u6d3e\u751f\u53ca\u539f\u56e0;\u5b83\u7684\u7ed3\u679c\u4e0d\u80fd\u51fa\u73b0\u5728\u56de\u7b54\u91cc\u3002",
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "expression": {
+            "title": "Expression",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "reason": {
+            "$ref": "#/$defs/DerivationFailure"
+          },
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "expression",
+          "result",
+          "reason",
+          "detail"
+        ],
+        "title": "RejectedDerivationOut",
         "type": "object"
       },
       "SourceAnchor": {
@@ -1269,6 +1418,14 @@
             "title": "Claims",
             "type": "array"
           },
+          "derivations": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/DerivationOut"
+            },
+            "title": "Derivations",
+            "type": "array"
+          },
           "document_sha256": {
             "title": "Document Sha256",
             "type": "string"
@@ -1346,6 +1503,14 @@
               "$ref": "#/$defs/RejectedClaimOut"
             },
             "title": "Rejected",
+            "type": "array"
+          },
+          "rejected_derivations": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/RejectedDerivationOut"
+            },
+            "title": "Rejected Derivations",
             "type": "array"
           },
           "schema_version": {
@@ -1687,6 +1852,105 @@
         "title": "CompletionChoice",
         "type": "object"
       },
+      "DerivationFailure": {
+        "description": "\u4e00\u6761\u6d3e\u751f\u8ba1\u7b97\u88ab\u62d2\u7684\u539f\u56e0(ADR 0038);\u88ab\u62d2\u53ea\u5f71\u54cd prose \u80fd\u5426\u5f15\u7528\u5b83\u7684\u7ed3\u679c\u3002",
+        "enum": [
+          "duplicate_name",
+          "invalid_input",
+          "unverified_claim",
+          "input_not_in_claim",
+          "unknown_constant",
+          "constant_mismatch",
+          "invalid_expression",
+          "division_by_zero",
+          "result_mismatch",
+          "invalid_result"
+        ],
+        "title": "DerivationFailure",
+        "type": "string"
+      },
+      "DerivationInputOut": {
+        "additionalProperties": false,
+        "description": "\u6d3e\u751f\u7684\u4e00\u4e2a\u64cd\u4f5c\u6570:\u6765\u81ea\u67d0\u6761\u5df2\u9a8c\u8bc1 claim(``claim_id``)\u6216\u67d0\u4e2a\u5e38\u91cf(``constant``)\u3002",
+        "properties": {
+          "claim_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claim Id"
+          },
+          "constant": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Constant"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value",
+          "claim_id",
+          "constant"
+        ],
+        "title": "DerivationInputOut",
+        "type": "object"
+      },
+      "DerivationOut": {
+        "additionalProperties": false,
+        "description": "\u4ee3\u7801\u590d\u7b97\u901a\u8fc7\u7684\u4e00\u6761\u6d3e\u751f(ADR 0038):``result`` \u662f\u56de\u7b54\u91cc\u7684\u5199\u6cd5,``computed`` \u662f\u590d\u7b97\u503c\u3002",
+        "properties": {
+          "computed": {
+            "title": "Computed",
+            "type": "string"
+          },
+          "expression": {
+            "title": "Expression",
+            "type": "string"
+          },
+          "inputs": {
+            "items": {
+              "$ref": "#/$defs/DerivationInputOut"
+            },
+            "title": "Inputs",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "expression",
+          "inputs",
+          "result",
+          "computed"
+        ],
+        "title": "DerivationOut",
+        "type": "object"
+      },
       "EvidenceKind": {
         "enum": [
           "native_element",
@@ -1956,6 +2220,40 @@
           "detail"
         ],
         "title": "RejectedClaimOut",
+        "type": "object"
+      },
+      "RejectedDerivationOut": {
+        "additionalProperties": false,
+        "description": "\u590d\u7b97\u672a\u901a\u8fc7\u7684\u4e00\u6761\u6d3e\u751f\u53ca\u539f\u56e0;\u5b83\u7684\u7ed3\u679c\u4e0d\u80fd\u51fa\u73b0\u5728\u56de\u7b54\u91cc\u3002",
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "expression": {
+            "title": "Expression",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "reason": {
+            "$ref": "#/$defs/DerivationFailure"
+          },
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "expression",
+          "result",
+          "reason",
+          "detail"
+        ],
+        "title": "RejectedDerivationOut",
         "type": "object"
       },
       "SourceAnchor": {

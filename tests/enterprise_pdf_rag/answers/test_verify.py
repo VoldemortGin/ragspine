@@ -13,8 +13,13 @@ from enterprise_pdf_rag.answers.models import (
     AnswerStatus,
     ClaimCitation,
     ClaimKind,
+    DerivationFailure,
+    DerivationOperand,
+    DerivationVerification,
     RejectedClaim,
+    RejectedDerivation,
     VerifiedClaim,
+    VerifiedDerivation,
     from_refusal,
 )
 from enterprise_pdf_rag.answers.prompt import ModelAnswer, ModelClaim
@@ -920,3 +925,85 @@ def test_a_question_number_is_grounded_whatever_punctuation_follows_it() -> None
     # A year the question never names still escapes.
     ok, tokens = prose_grounded("In 2023, VONB grew +11%.", claims, question=asked)
     assert not ok and tokens == ("2023,",)
+
+
+# ADR 0038:放开计算时,prose 里的数字也可以是某条已验证派生的结果(按该数字自身的
+# 末位小数做舍入容差),或被有效派生引用过的常量值;不做单位缩放。
+_DERIVED = (Decimal("1234.5678"),)
+
+
+@pytest.mark.parametrize(
+    "prose",
+    [
+        "Revenue was US$1,234.57 million.",
+        "Revenue was 1,234.6.",
+        "Revenue was 1,235.",
+        "Revenue was 1234.5678.",
+    ],
+)
+def test_a_derived_number_is_grounded_at_its_written_precision(prose: str) -> None:
+    assert prose_grounded(prose, (), derived=_DERIVED) == (True, ())
+
+
+@pytest.mark.parametrize(
+    ("prose", "token"),
+    [("Revenue was 1,234.58.", "1,234.58"), ("Revenue was 1.23 billion.", "1.23")],
+)
+def test_a_derived_number_is_not_grounded_past_its_rounding_or_rescaled(
+    prose: str, token: str
+) -> None:
+    assert prose_grounded(prose, (), derived=_DERIVED) == (False, (token,))
+
+
+def test_a_derived_percentage_is_written_as_a_percentage() -> None:
+    derived = (Decimal("12.34"),)
+    for prose in ("Margin rose 12.34%.", "Margin rose 12.3%.", "Margin rose 12%."):
+        assert prose_grounded(prose, (), derived=derived) == (True, ())
+    assert prose_grounded("Margin rose 0.1234.", (), derived=derived) == (False, ("0.1234",))
+
+
+def test_only_a_constant_a_derivation_used_is_grounded() -> None:
+    assert prose_grounded("At 7.80 HK$ per US$.", (), constants=(Decimal("7.8"),)) == (True, ())
+    assert prose_grounded("At 7.80 HK$ per US$.", ()) == (False, ("7.80",))
+    # 常量按值相等比较,没有舍入容差。
+    assert prose_grounded("At 7.8 HK$ per US$.", (), constants=(Decimal("7.803"),))[0] is False
+
+
+def _derivations(*, rejected: bool = False) -> DerivationVerification:
+    verified = VerifiedDerivation(
+        "usd",
+        "hkd / rate",
+        (
+            DerivationOperand("hkd", Decimal("1234"), "v", None),
+            DerivationOperand("rate", Decimal("7.80"), None, "hkd_per_usd_default"),
+        ),
+        "158.21",
+        Decimal("158.2051282051282051282051282051282"),
+    )
+    failed = RejectedDerivation(
+        "pct", "a / b", "9.99", DerivationFailure.RESULT_MISMATCH, "computed 10"
+    )
+    return DerivationVerification((verified,), (failed,) if rejected else ())
+
+
+def test_decide_admits_verified_derivations_and_names_rejected_ones() -> None:
+    verification = ClaimVerification((_verified("HK$1,234 million"),), ())
+    converted = _answer(answer="US$158.21 million (HK$1,234 million at 7.80).")
+    assert decide(converted, verification, blocks_present=True)[:2] == (
+        AnswerStatus.ABSTAINED,
+        AbstainReason.CLAIM_NOT_IN_EVIDENCE,
+    )
+    assert decide(converted, verification, blocks_present=True, derivations=_derivations()) == (
+        AnswerStatus.ANSWERED,
+        None,
+        None,
+    )
+    invented = _answer(answer="US$158.21 million, up 9.99%.")
+    status, reason, detail = decide(
+        invented, verification, blocks_present=True, derivations=_derivations(rejected=True)
+    )
+    assert (status, reason) == (AnswerStatus.ABSTAINED, AbstainReason.CLAIM_NOT_IN_EVIDENCE)
+    assert detail == (
+        "numbers outside verified claims: 9.99%; rejected claims: none; "
+        "rejected derivations: pct(result_mismatch)"
+    )

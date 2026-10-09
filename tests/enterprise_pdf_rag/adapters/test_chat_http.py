@@ -3,7 +3,8 @@
 import json
 import re
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from decimal import Decimal
 from pathlib import Path
 from typing import Never
 
@@ -23,13 +24,21 @@ from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.draft_publication import DraftPublication
 from enterprise_pdf_rag.adapters.http import app as app_module
 from enterprise_pdf_rag.adapters.http.chat import create_chat_router, model_id, render_message
-from enterprise_pdf_rag.adapters.http.chat_schemas import ClaimOut
+from enterprise_pdf_rag.adapters.http.chat_schemas import AnswerEnvelope, ClaimOut
 from enterprise_pdf_rag.adapters.http.documents import create_documents_app
 from enterprise_pdf_rag.adapters.http.processing_schemas import DocumentTreeRecord
 from enterprise_pdf_rag.adapters.offline import OfflineDescriptionEmbedder
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.tree_retrieval import TreeRouteDTO
-from enterprise_pdf_rag.answers.models import AnswerRequest
+from enterprise_pdf_rag.answers.models import (
+    AnswerRequest,
+    AnswerResult,
+    AnswerStatus,
+    DerivationFailure,
+    DerivationOperand,
+    RejectedDerivation,
+    VerifiedDerivation,
+)
 from enterprise_pdf_rag.answers.prompt import ModelAnswer, ModelClaim
 from enterprise_pdf_rag.answers.verify import verify_claims
 from enterprise_pdf_rag.processing.context_builder import build_context_block
@@ -907,3 +916,61 @@ def test_configured_app_builds_one_answer_client_and_serves_chat(
         assert [len(prompts) for prompts in recorded] == ([1] if configuration == "valid" else [])
     finally:
         get_settings.cache_clear()
+
+
+def test_the_envelope_carries_verified_and_rejected_derivations() -> None:
+    operands = (
+        DerivationOperand("hkd", Decimal("1234"), "c1", None),
+        DerivationOperand("rate", Decimal("7.80"), None, "hkd_per_usd_default"),
+    )
+    result = AnswerResult(
+        AnswerStatus.ANSWERED,
+        "US$158.21 million",
+        (),
+        (),
+        None,
+        None,
+        "a" * 64,
+        "b" * 64,
+        "c" * 64,
+        (),
+        (),
+        None,
+        1,
+        False,
+        derivations=(
+            VerifiedDerivation(
+                "usd",
+                "hkd / rate",
+                operands,
+                "158.21",
+                Decimal("158.2051282051282051282051282051282"),
+            ),
+        ),
+        rejected_derivations=(
+            RejectedDerivation(
+                "pct", "a / b", "9.99", DerivationFailure.RESULT_MISMATCH, "computed 10"
+            ),
+        ),
+    )
+
+    payload = json.loads(AnswerEnvelope.from_domain(result).model_dump_json())
+
+    (derivation,) = payload["derivations"]
+    assert derivation["name"] == "usd" and derivation["result"] == "158.21"
+    assert derivation["computed"].startswith("158.205128")
+    assert derivation["inputs"] == [
+        {"name": "hkd", "value": "1234", "claim_id": "c1", "constant": None},
+        {"name": "rate", "value": "7.80", "claim_id": None, "constant": "hkd_per_usd_default"},
+    ]
+    assert payload["rejected_derivations"] == [
+        {
+            "name": "pct",
+            "expression": "a / b",
+            "result": "9.99",
+            "reason": "result_mismatch",
+            "detail": "computed 10",
+        }
+    ]
+    plain = AnswerEnvelope.from_domain(replace(result, derivations=(), rejected_derivations=()))
+    assert plain.derivations == () and plain.rejected_derivations == ()

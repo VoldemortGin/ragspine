@@ -4,7 +4,7 @@ from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from enterprise_pdf_rag.adapters.answer_audit import AnswerAuditStore
-from enterprise_pdf_rag.adapters.answer_service import AnswerService
+from enterprise_pdf_rag.adapters.answer_service import AnswerService, AnswerSettings
 from enterprise_pdf_rag.adapters.document_catalog import (
     CatalogEntry,
     DocumentCatalog,
@@ -146,6 +146,7 @@ def create_documents_app(
     reranker: ListwiseJudge | None = None,
     verify_every_request: bool = False,
     audit: AnswerAuditStore | None = None,
+    answer_settings: AnswerSettings | None = None,
 ) -> FastAPI:
     """Mount every ready entry once with the shared embedder; ``None`` serves evidence only.
 
@@ -154,7 +155,8 @@ def create_documents_app(
     Each mounted document's routing tree, where one was built, joins as the third retrieval
     channel (ADR 0019). ``verify_every_request`` makes each request repeat the whole
     mount-time verification. ``audit`` journals every answer locally
-    (``adapters/answer_audit``); ``None`` writes nothing.
+    (``adapters/answer_audit``); ``None`` writes nothing. ``answer_settings`` 透传给
+    ``AnswerService``(如 ``extra_system_rules``);``None`` 用默认设置。
     """
     mounted = mount_catalog(catalog, embedder=embedder, verify_every_request=verify_every_request)
     app = FastAPI(title="Enterprise PDF RAG — document catalog", version="0.1.0.dev0")
@@ -165,6 +167,7 @@ def create_documents_app(
         else AnswerService(
             mounted.documents,
             llm,
+            settings=answer_settings,
             reranker=reranker,
             trees=catalog_trees(mounted),
             audit=audit,

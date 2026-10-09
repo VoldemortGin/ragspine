@@ -17,13 +17,17 @@ from enterprise_pdf_rag.answers.models import (
     AnswerStatus,
     ClaimCitation,
     ClaimKind,
+    DerivationFailure,
+    DerivationOperand,
     FusedHit,
     MemberFilters,
     PageWindowStat,
     RejectedClaim,
+    RejectedDerivation,
     TranslatedQuery,
     TreeRoute,
     VerifiedClaim,
+    VerifiedDerivation,
 )
 from enterprise_pdf_rag.answers.query_mode import QueryMode
 from enterprise_pdf_rag.processing.context_builder import BlockKind
@@ -249,6 +253,64 @@ class TreeRouteOut(BoundaryModel):
         )
 
 
+class DerivationInputOut(BoundaryModel):
+    """派生的一个操作数:来自某条已验证 claim(``claim_id``)或某个常量(``constant``)。"""
+
+    name: str
+    value: str
+    claim_id: str | None
+    constant: str | None
+
+    @classmethod
+    def from_domain(cls, operand: DerivationOperand) -> "DerivationInputOut":
+        return cls(
+            name=operand.name,
+            value=str(operand.value),
+            claim_id=operand.claim_id,
+            constant=operand.constant,
+        )
+
+
+class DerivationOut(BoundaryModel):
+    """代码复算通过的一条派生(ADR 0038):``result`` 是回答里的写法,``computed`` 是复算值。"""
+
+    name: str
+    expression: str
+    inputs: tuple[DerivationInputOut, ...]
+    result: str
+    computed: str
+
+    @classmethod
+    def from_domain(cls, derivation: VerifiedDerivation) -> "DerivationOut":
+        return cls(
+            name=derivation.name,
+            expression=derivation.expression,
+            inputs=tuple(DerivationInputOut.from_domain(item) for item in derivation.inputs),
+            result=derivation.result,
+            computed=str(derivation.computed),
+        )
+
+
+class RejectedDerivationOut(BoundaryModel):
+    """复算未通过的一条派生及原因;它的结果不能出现在回答里。"""
+
+    name: str
+    expression: str
+    result: str
+    reason: DerivationFailure
+    detail: str
+
+    @classmethod
+    def from_domain(cls, derivation: RejectedDerivation) -> "RejectedDerivationOut":
+        return cls(
+            name=derivation.name,
+            expression=derivation.expression,
+            result=derivation.result,
+            reason=derivation.reason,
+            detail=derivation.detail,
+        )
+
+
 class AnswerEnvelope(BoundaryModel):
     """Verified claims, audit rejections and pinned provenance beside the OpenAI shape."""
 
@@ -283,6 +345,9 @@ class AnswerEnvelope(BoundaryModel):
     # whose id ``document_sha256`` is. Across documents ``document_sha256`` names the first
     # prompt member's document and each citation / member rank names its own.
     searched_documents: tuple[str, ...] = ()
+    # 放开计算时(ADR 0038)复算通过 / 被拒的派生(added after rag-chat-v1 shipped);默认为空。
+    derivations: tuple[DerivationOut, ...] = ()
+    rejected_derivations: tuple[RejectedDerivationOut, ...] = ()
 
     @classmethod
     def from_domain(cls, result: AnswerResult) -> "AnswerEnvelope":
@@ -317,6 +382,10 @@ class AnswerEnvelope(BoundaryModel):
             if result.tree_route is None
             else TreeRouteOut.from_domain(result.tree_route),
             searched_documents=result.searched_documents,
+            derivations=tuple(DerivationOut.from_domain(item) for item in result.derivations),
+            rejected_derivations=tuple(
+                RejectedDerivationOut.from_domain(item) for item in result.rejected_derivations
+            ),
         )
 
 
