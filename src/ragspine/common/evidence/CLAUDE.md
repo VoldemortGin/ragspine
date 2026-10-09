@@ -151,6 +151,15 @@ providers/    providers.py (explicit APP_LLM_* / embedding / APP_RERANK_* enviro
   (400 / 401 / 403 / 404 / 413 / 422, invalid replies) are recorded and replayed as before. Embedding
   requests retry the same way before ADR 0026 halves a batch.
   [ADR 0035](../../../../docs/enterprise-pdf-rag/adr/0035-transient-provider-errors.md).
+- **A client's lock never spans the network** — `JsonCompletionClient._lock` guards only counters,
+  the budget (`_take_call`) and the in-flight table; calls of one client overlap, and one request
+  fingerprint is in flight once (`_single_flight`: a concurrent caller waits, then replays). The
+  model and embedding transports keep one idle `http.client` connection per thread and host
+  (`providers._open_connection` / `_release_connection`, reused only after a fully read reply,
+  dropped when the idle socket turns readable). `LocalEmbeddingAdapter` is thread-safe and counts
+  per thread (`thread_counts`), which lets run-folder share it through
+  `APP_EMBEDDING_MAX_CONCURRENCY` (default 4).
+  [ADR 0039](../../../../docs/enterprise-pdf-rag/adr/0039-ingest-concurrency.md).
 - **A damaged model-cache entry is called again once, never stuck** — a record that does not
   parse, or a success record whose response is missing / not its digest, is re-sent under a
   claim (budgeted; `cache_only` still raises `invalid_cache_record` / `missing_cached_response`)
