@@ -223,7 +223,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("OPENAI_EMBEDDING_MODEL", "APP_EMBEDDING_MODEL"),
     )
     # 文档并行入库(enterprise-pdf-rag ADR 0033)时,共享 embedder 同时在途的调用数上限
-    # (ADR 0039);只对按线程计数的 embedder 生效,其余仍一次一个。
+    # (ADR 0042);只对按线程计数的 embedder 生效,其余仍一次一个。
     embedding_max_concurrency: int = Field(default=4, ge=1)
     rerank_api_key: SecretStr | None = None  # 本地 rerank(loopback)
     rerank_base_url: str | None = None

@@ -374,7 +374,7 @@ class _DocumentEmbedder:
     """One document's view of an embedder shared by documents running at once (ADR 0033).
 
     Calls go through the shared ``lock`` (``_embedding_gate``: a semaphore for an embedder that
-    counts per thread, ADR 0039, else one call at a time) and ``request_count`` counts only this
+    counts per thread, ADR 0042, else one call at a time) and ``request_count`` counts only this
     document's requests, so ``DraftIndex.embedding_requests`` reads what the serial run read.
     """
 
@@ -449,7 +449,7 @@ def _thread_counts(embedder: EmbeddingPort) -> tuple[int, int, int]:
 
 
 def _embedding_gate(embedder: EmbeddingPort, limit: int) -> LockType | Semaphore:
-    """What documents running at once share around embedding calls (ADR 0039): up to ``limit``
+    """What documents running at once share around embedding calls (ADR 0042): up to ``limit``
     calls at once for an embedder that counts per thread (``thread_counts``, so each
     document's counts stay exact), one at a time for any other (ADR 0033 §5)."""
     if callable(getattr(embedder, "thread_counts", None)):

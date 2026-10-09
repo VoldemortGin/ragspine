@@ -63,7 +63,7 @@ class ModelPagePartitioner:
             + json.dumps(observations, ensure_ascii=False, separators=(",", ":"))
         )
         if self.client.refuses_every_call():
-            # ADR 0039: nothing to replay and nothing to spend, so the PNG is never used.
+            # ADR 0041: nothing to replay and nothing to spend, so the PNG is never used.
             raise JsonCompletionError("call_budget_exhausted")
         completion = self.client.complete_json(
             task="page-layout-v2",

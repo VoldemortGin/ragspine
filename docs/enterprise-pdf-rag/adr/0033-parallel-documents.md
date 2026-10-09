@@ -7,7 +7,7 @@ disk changes: no file name, layout, fingerprint, cache key or artifact byte diff
 ingestion directory written before this ADR is reused as is. With `max_parallel_documents=1`
 (the default) the pipeline runs exactly as before, byte for byte.
 
-> Amended by [ADR 0039](0039-ingest-concurrency.md) (2026-10-09): `JsonCompletionClient` no
+> Amended by [ADR 0042](0042-ingest-concurrency.md) (2026-10-09): `JsonCompletionClient` no
 > longer holds its lock across the network call (one fingerprint is still in flight once), and
 > an embedder that counts per thread is shared through a semaphore
 > (`APP_EMBEDDING_MAX_CONCURRENCY`, default 4) instead of one lock (§5).

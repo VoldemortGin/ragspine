@@ -232,7 +232,7 @@ def test_spent_budget_with_other_cache_records_renders_and_is_refused_alike(
 def test_spent_budget_and_empty_cache_report_an_oversized_page_as_budget_deferred(
     tmp_path: Path,
 ) -> None:
-    """The one deviation ADR 0039 accepts: a page whose PNG would exceed the request's image
+    """The one deviation ADR 0041 accepts: a page whose PNG would exceed the request's image
     budget reads ``call_budget_exhausted`` while no call can be made, and its real code
     (``input_budget_exceeded``) the first time a record or a live call makes the render count."""
     store = LocalDocumentStore(tmp_path / "source")

@@ -151,7 +151,7 @@ class LocalEmbeddingAdapter:
         self._batch_failures = 0
         self._arrays_worked = False
         self._arrays_refused = False
-        # Shared by every thread calling at once (ADR 0039): counts and what batching learned
+        # Shared by every thread calling at once (ADR 0042): counts and what batching learned
         # change under ``_lock``; each thread also keeps its own counts (``thread_counts``).
         self._lock = threading.Lock()
         self._local = threading.local()

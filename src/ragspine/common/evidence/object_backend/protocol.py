@@ -189,7 +189,7 @@ class ModelCacheBackend(Protocol):
 
     def has_records(self) -> bool:
         """有没有任何一条请求记录(含 ``.retry-1``);claim / 响应 / 上下文不算。
-        没有记录就没有可重放的回答(ADR 0039)。"""
+        没有记录就没有可重放的回答(ADR 0041)。"""
         ...
 
     def response(self, digest: str) -> bytes | None:

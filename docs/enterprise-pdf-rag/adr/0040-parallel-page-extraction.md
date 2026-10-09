@@ -7,7 +7,7 @@ source manifest id and SVG byte is identical to the serial path, and with
 
 ## Context
 
-After [ADR 0039](0039-skip-the-layout-png-when-no-call-can-be-made.md) the first ingest of the
+After [ADR 0041](0041-skip-the-layout-png-when-no-call-can-be-made.md) the first ingest of the
 71-page AIA sample spends about 90 % of `extract_document` in `Page.get_svg_image` (72 calls,
 11 to 17 s). The loop opened the document once and walked the pages serially.
 

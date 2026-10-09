@@ -537,7 +537,7 @@ class JsonCompletionClient:
         self._sender = _send_once if sender is None else sender
         self._retry_failed = retry_failed
         # Guards the counters, the budget and ``_flights`` only, never a network call: calls
-        # of one client run at once (ADR 0039). One fingerprint is in flight at most once.
+        # of one client run at once (ADR 0042). One fingerprint is in flight at most once.
         self._lock = Lock()
         self._flights: dict[str, tuple[LockType, list[int]]] = {}
         self._dropped: set[str] = set()
@@ -639,7 +639,7 @@ class JsonCompletionClient:
         """True when every call that is not ``cache_only`` can only end in
         ``call_budget_exhausted``: no live call is left and the model cache holds no record a
         request could replay. A caller may then skip building a costly request body (the page
-        PNG, ADR 0039); while any record exists it cannot tell without the body's fingerprint."""
+        PNG, ADR 0041); while any record exists it cannot tell without the body's fingerprint."""
         return self._remaining == 0 and not self.backend.has_records()
 
     @property

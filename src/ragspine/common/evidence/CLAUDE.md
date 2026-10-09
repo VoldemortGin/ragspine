@@ -161,7 +161,7 @@ providers/    providers.py (explicit APP_LLM_* / embedding / APP_RERANK_* enviro
   dropped when the idle socket turns readable). `LocalEmbeddingAdapter` is thread-safe and counts
   per thread (`thread_counts`), which lets run-folder share it through
   `APP_EMBEDDING_MAX_CONCURRENCY` (default 4).
-  [ADR 0039](../../../../docs/enterprise-pdf-rag/adr/0039-ingest-concurrency.md).
+  [ADR 0042](../../../../docs/enterprise-pdf-rag/adr/0042-ingest-concurrency.md).
 - **A damaged model-cache entry is called again once, never stuck** — a record that does not
   parse, or a success record whose response is missing / not its digest, is re-sent under a
   claim (budgeted; `cache_only` still raises `invalid_cache_record` / `missing_cached_response`)

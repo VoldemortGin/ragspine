@@ -1,4 +1,4 @@
-# ADR 0039: Skip the layout PNG when no call can be made; the native SVG stays in the source
+# ADR 0041: Skip the layout PNG when no call can be made; the native SVG stays in the source
 
 Status: Accepted, 2026-10-09. Narrows the last rejected alternative of
 [ADR 0024](0024-source-verification-cache.md) ("deferring the layout PNG until the budget allows a

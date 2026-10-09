@@ -1,4 +1,4 @@
-"""Ingest concurrency (ADR 0039): model calls overlap, embeddings share a semaphore, HTTP keeps alive.
+"""Ingest concurrency (ADR 0042): model calls overlap, embeddings share a semaphore, HTTP keeps alive.
 
 No real network: model and embedding senders are fakes; the keep-alive tests talk to a loopback
 HTTP/1.1 server started here (``tests/conftest.py`` blocks every non-loopback socket).

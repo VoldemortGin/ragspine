@@ -1,4 +1,4 @@
-# ADR 0039: Model calls of one client overlap, embeddings share a semaphore, HTTP keeps alive
+# ADR 0042: Model calls of one client overlap, embeddings share a semaphore, HTTP keeps alive
 
 Status: Accepted, 2026-10-09. Amends `JsonCompletionClient` (its lock), §2 / §5 of
 [ADR 0033](0033-parallel-documents.md) (the client "serialises its calls"; "embedding calls go
