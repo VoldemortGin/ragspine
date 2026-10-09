@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from ragspine.common.evidence.file_placement import recording_repairs
+from ragspine.common.evidence.object_backend.files import FileModelCacheBackend
 from ragspine.common.evidence.object_backend.protocol import (
     DamagedEntry,
     ModelCacheBackend,
@@ -22,6 +23,7 @@ from ragspine.common.evidence.object_backend.protocol import (
     StageEntry,
     StoreConflict,
 )
+from ragspine.common.evidence.object_backend.sqlite import SqliteModelCacheBackend
 from tests.enterprise_pdf_rag.object_backend.conftest import (
     damage_object,
     damage_stage_entry,
@@ -318,6 +320,31 @@ def test_model_cache_response_and_context_roundtrip(model_cache: ModelCacheBacke
     model_cache.put_context(fingerprint, b'{"payload": 1}')
     model_cache.put_context(fingerprint, b'{"payload": 2}')  # 首写胜出,静默
     assert model_cache.context(fingerprint) == b'{"payload": 1}'
+
+
+def test_model_cache_has_records_only_once_a_record_is_written(
+    model_cache: ModelCacheBackend,
+) -> None:
+    """``has_records`` 只看请求记录:claim / 响应 / 上下文都不算(没有记录就无可重放)。"""
+    assert model_cache.has_records() is False
+    owner = live_owner()
+    assert model_cache.claim("7" * 64, owner) == 0
+    model_cache.put_response(sha(b"{}"), b"{}")
+    model_cache.put_context("6" * 64, b'{"payload": 1}')
+    assert model_cache.has_records() is False
+    model_cache.release("7" * 64, owner)
+    model_cache.put_record("5" * 64 + ".retry-1", b'{"retry": 1}')
+    assert model_cache.has_records() is True
+
+
+def test_sqlite_model_cache_has_records_sees_legacy_request_files(tmp_path: Path) -> None:
+    cache_dir = tmp_path / "model-cache"
+    FileModelCacheBackend(cache_dir).put_record("4" * 64, b'{"legacy": true}')
+    sqlite_cache = SqliteModelCacheBackend(cache_dir)
+    try:
+        assert sqlite_cache.has_records() is True
+    finally:
+        sqlite_cache.close()
 
 
 def test_model_cache_claim_lifecycle(model_cache: ModelCacheBackend) -> None:

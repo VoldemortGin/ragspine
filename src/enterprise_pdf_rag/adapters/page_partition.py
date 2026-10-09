@@ -7,7 +7,10 @@ from dataclasses import replace
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.figure_reasoning import render_svg_png
 from enterprise_pdf_rag.adapters.http.layout_schemas import PageLayoutDTO
-from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
+from ragspine.common.evidence.providers.json_completion import (
+    JsonCompletionClient,
+    JsonCompletionError,
+)
 from ragspine.extraction.evidence.figures.models import Confidence, content_id
 from ragspine.extraction.evidence.page.models import LayoutObject, PageInput, PagePartition
 from ragspine.extraction.evidence.page.service import (
@@ -59,6 +62,9 @@ class ModelPagePartitioner:
             "Source text observations:\n"
             + json.dumps(observations, ensure_ascii=False, separators=(",", ":"))
         )
+        if self.client.refuses_every_call():
+            # ADR 0039: nothing to replay and nothing to spend, so the PNG is never used.
+            raise JsonCompletionError("call_budget_exhausted")
         completion = self.client.complete_json(
             task="page-layout-v2",
             prompt=prompt,

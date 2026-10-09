@@ -1026,6 +1026,10 @@ class SqliteModelCacheBackend:
                 return
             raise StoreConflict("cache_conflict")
 
+    def has_records(self) -> bool:
+        row = self._core.connection().execute("SELECT 1 FROM requests LIMIT 1").fetchone()
+        return row is not None or (self._legacy("requests") and self._files.has_records())
+
     def response(self, digest: str) -> bytes | None:
         _require_digest(digest)
         row = (

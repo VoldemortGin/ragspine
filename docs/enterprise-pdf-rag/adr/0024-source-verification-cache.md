@@ -166,3 +166,11 @@ unchanged, replaces the sweep of `LocalDocumentStore.load` and `ProcessingStore.
 never write one. `APP_VERIFY_PERSISTED_RECEIPTS=false` restores this ADR exactly;
 `APP_VERIFY_EVERY_REQUEST=1` still verifies every call. The threat-model paragraph above now
 also applies across instances until a file's stat moves — see ADR 0034's threat model.
+
+## Amendment 2 (2026-10-09): the layout PNG is skipped when nothing can be replayed (ADR 0039)
+
+The last rejected alternative ("deferring the layout PNG until the budget allows a call") still
+holds whenever the model cache holds any record. [ADR 0039](0039-skip-the-layout-png-when-no-call-can-be-made.md)
+skips the render only when no live call is left **and** the cache holds no record at all, so no
+cached reply can be missed; the page then fails with the same `call_budget_exhausted` the client
+would have raised.
