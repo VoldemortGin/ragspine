@@ -73,3 +73,21 @@ def model_cache_backend(
     clear_probe_cache()
     yield kind
     get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_default_onnx_models(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    """Point the ONNX weights' default directory (ADR 0039) at an empty place.
+
+    A developer who ran a notebook has real weights under ``data/models/pdfspine-onnx``; tests
+    that mean "no weights configured" must not find them there.
+    """
+    from enterprise_pdf_rag.adapters import onnx_partition
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(
+            onnx_partition,
+            "DEFAULT_ONNX_MODELS_DIR",
+            tmp_path_factory.getbasetemp() / "no-default-onnx-models",
+        )
+        yield

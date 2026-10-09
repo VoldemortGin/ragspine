@@ -57,8 +57,11 @@ Amends [ADR 0028](0028-deterministic-text-page-partition.md) 与
 三个 notebook（`run_folder` / `ingest_timing` / `ingest_diagnostics`）此前只装 `..[pdf,service]`，
 onnxruntime 根本不在集群上，`LAYOUT_POLICY="auto"` 永远退到 `deterministic-text-pages`。现在：
 安装格装 `..[pdf,pdf-onnx,service]`（`ingest_timing` 沿用 run_folder 的安装）；新增 `onnx-check`
-格在开头打印 `onnx_partition.ensure_onnx_layout_weights(...)`（已配置 `APP_ONNX_LAYOUT_MODEL`
-但文件缺失时从 `ONNX_LAYOUT_MODEL_URL`——与 pdfspine `_onnx.LAYOUT_MODEL_URL` 相同的
-ModelScope RapidAI 地址——下载到该位置；没配置或下载失败只给出变量名与地址，不中断）、
+格在开头打印 `onnx_partition.ensure_onnx_layout_weights(...)`（权重缺失时从
+`ONNX_LAYOUT_MODEL_URL`——与 pdfspine `_onnx.LAYOUT_MODEL_URL` 相同的 ModelScope RapidAI
+地址，约 130MB——下载：配了 `APP_ONNX_LAYOUT_MODEL` / `PDFSPINE_ONNX_MODELS` 就下到那里，
+都没配就下到 `DEFAULT_ONNX_MODELS_DIR` = `<ROOT_DIR>/data/models/pdfspine-onnx/`（`data/` 不进
+git），`resolve_onnx_layout_model` 在其余位置都没有时最后找它——所以 pull 后不配任何变量，
+`LAYOUT_POLICY="auto"` 即选 `onnx-layout`；下载失败只给出地址，不中断）、
 `onnx_partition.onnx_layout_status(...)`（`可用=是/否, 权重=<路径|未配置>` + 缺什么怎么装）与
 当前 `APP_LAYOUT_FALLBACK`。权重许可门（ADR 0030）不变：权重不进仓库、不进 wheel。

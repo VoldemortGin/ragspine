@@ -19,6 +19,7 @@ from enterprise_pdf_rag.adapters.ingest_mode import (
     LAYOUT_FALLBACKS,
     IngestPlan,
     check_layout_fallback,
+    choose_layout_policy,
     ingest_plan,
     make_partitioner,
 )
@@ -32,6 +33,8 @@ from enterprise_pdf_rag.adapters.onnx_partition import (
     OnnxPagePartitioner,
     ensure_onnx_layout_weights,
     onnx_layout_status,
+    onnx_layout_unavailable,
+    resolve_onnx_layout_model,
 )
 from enterprise_pdf_rag.adapters.pdf_ingestion import ingest_pdf
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
@@ -437,16 +440,35 @@ def test_a_configured_file_path_is_downloaded_as_that_file(tmp_path: Path) -> No
     assert target.read_bytes() == b"weights"
 
 
-def test_without_a_configured_path_nothing_is_downloaded_and_the_setting_is_named(
-    monkeypatch: pytest.MonkeyPatch,
+def test_without_a_configured_path_weights_go_to_the_default_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # Databricks 上 pull 之后什么都不配也能用: 权重落到 <项目根>/data/models/pdfspine-onnx/.
     monkeypatch.delenv(ONNX_MODELS_ENV, raising=False)
+    default = tmp_path / "default-models"
+    monkeypatch.setattr(onnx_partition, "DEFAULT_ONNX_MODELS_DIR", default)
 
     def download(url: str, path: Path) -> None:
-        raise AssertionError("must not download without a configured location")
+        path.write_bytes(b"weights")
 
     message = ensure_onnx_layout_weights(None, download=download)
-    assert "APP_ONNX_LAYOUT_MODEL" in message and ONNX_LAYOUT_MODEL_URL in message
+    assert (default / ONNX_LAYOUT_MODEL_FILE).read_bytes() == b"weights"
+    assert str(default / ONNX_LAYOUT_MODEL_FILE) in message
+
+
+@pytest.mark.usefixtures("onnx_runtime_present")
+def test_weights_in_the_default_directory_are_found_without_configuration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(ONNX_MODELS_ENV, raising=False)
+    default = tmp_path / "default-models"
+    default.mkdir()
+    (default / ONNX_LAYOUT_MODEL_FILE).write_bytes(b"weights")
+    monkeypatch.setattr(onnx_partition, "DEFAULT_ONNX_MODELS_DIR", default)
+    assert resolve_onnx_layout_model(None) == default / ONNX_LAYOUT_MODEL_FILE
+    assert onnx_layout_unavailable(None) is None
+    policy, _reason = choose_layout_policy("auto", ingest_mode="lite", onnx_layout_model=None)
+    assert policy == "onnx-layout"
 
 
 def test_a_failed_download_names_the_url_instead_of_raising(tmp_path: Path) -> None:

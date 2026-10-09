@@ -28,7 +28,7 @@ import pdfspine
 
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.shared_pdf import opened_pdf, source_pdf
-from ragspine.common.evidence.configs import get_settings
+from ragspine.common.evidence.configs import ROOT_DIR, get_settings
 from ragspine.extraction.evidence.document.models import Bounds, DocumentSnapshot, TextSpan
 from ragspine.extraction.evidence.figures.models import Confidence, content_id
 from ragspine.extraction.evidence.page.geometry import contains
@@ -48,6 +48,9 @@ ONNX_PRODUCER_PREFIX = "page-layout-onnx-v1"
 ONNX_LAYOUT_MODEL_FILE = "pp_doc_layoutv3.onnx"
 # pdfspine 自己的模型目录环境变量(ragspine 设置 APP_ONNX_LAYOUT_MODEL 优先, 此变量兜底).
 ONNX_MODELS_ENV = "PDFSPINE_ONNX_MODELS"
+# 什么都没配置时的权重目录(ADR 0039): notebook 的 onnx-check 格把权重下载到这里, 解析时最后找它;
+# 在 data/ 下, 不进 git. 让 Databricks 上 pull 之后不配置任何变量也能用 ONNX 版面.
+DEFAULT_ONNX_MODELS_DIR = ROOT_DIR / "data" / "models" / "pdfspine-onnx"
 # 版面权重的下载地址(与 pdfspine ``_onnx.LAYOUT_MODEL_URL`` 一致; notebook 安装步骤用它).
 ONNX_LAYOUT_MODEL_URL = (
     "https://www.modelscope.cn/models/RapidAI/RapidLayout/resolve/v1.2.0/"
@@ -139,18 +142,13 @@ def _download(url: str, target: Path) -> None:
 def ensure_onnx_layout_weights(
     configured: str | None, *, download: Callable[[str, Path], None] = _download
 ) -> str:
-    """notebook 安装步骤: 已配置的位置缺权重就从 ``ONNX_LAYOUT_MODEL_URL`` 下载; 返回一行中文说明.
+    """notebook 安装步骤: 权重该在的位置缺文件就从 ``ONNX_LAYOUT_MODEL_URL`` 下载; 返回一行中文说明.
 
-    没配置位置时不下载(下载到 ragspine 读不到的地方等于没装), 只说该设哪个变量; 下载失败
-    不抛异常, 给出地址让人手工放置——之后的自检行与 ``"auto"`` 选择会如实显示它仍不可用.
+    位置: 已配置的 ``APP_ONNX_LAYOUT_MODEL`` / ``PDFSPINE_ONNX_MODELS``, 都没有时
+    ``DEFAULT_ONNX_MODELS_DIR``(解析时最后也找它). 下载失败不抛异常, 给出地址让人手工放置——
+    之后的自检行与 ``"auto"`` 选择会如实显示它仍不可用.
     """
-    target = _configured_target(configured)
-    if target is None:
-        return (
-            "ONNX 版面权重: 未配置位置, 未下载。请在 .env 设 APP_ONNX_LAYOUT_MODEL 指向一个目录"
-            "(Databricks 上用 Volume 里的绝对路径), 重跑本格即自动下载; 或手工下载 "
-            f"{ONNX_LAYOUT_MODEL_URL} 放进该目录。"
-        )
+    target = _configured_target(configured) or DEFAULT_ONNX_MODELS_DIR / ONNX_LAYOUT_MODEL_FILE
     if target.is_file():
         return f"ONNX 版面权重: 已存在 {target}"
     partial = target.with_name(target.name + ".part")
@@ -170,7 +168,13 @@ def ensure_onnx_layout_weights(
 def onnx_layout_status(configured: str | None) -> str:
     """notebook 开头的自检行: ONNX 版面是否可用 + 权重路径; 不可用时附带安装 / 配置提示."""
     target = _configured_target(configured)
-    weights = "未配置" if target is None else str(target)
+    default = DEFAULT_ONNX_MODELS_DIR / ONNX_LAYOUT_MODEL_FILE
+    if target is not None:
+        weights = str(target)
+    elif default.is_file():
+        weights = str(default)
+    else:
+        weights = f"未配置(默认位置 {default} 也没有)"
     problem = onnx_layout_unavailable(configured)
     if problem is None:
         return f"ONNX 版面自检: 可用=是, 权重={weights}"
@@ -178,7 +182,8 @@ def onnx_layout_status(configured: str | None) -> str:
 
 
 def resolve_onnx_layout_model(configured: str | None) -> Path:
-    """解析版面模型文件路径: 显式配置(文件或目录)优先, 其次 ``PDFSPINE_ONNX_MODELS`` 目录.
+    """解析版面模型文件路径: 显式配置(文件或目录)优先, 其次 ``PDFSPINE_ONNX_MODELS`` 目录,
+    最后 ``DEFAULT_ONNX_MODELS_DIR``(ADR 0039, 只在文件存在时).
 
     找不到就报错而不是静默回退: 静默回退会让每页都走模型版面, 用户以为省了调用实际没省.
     """
@@ -204,11 +209,15 @@ def resolve_onnx_layout_model(configured: str | None) -> Path:
                 "APP_ONNX_LAYOUT_MODEL 指向模型文件。"
             )
         return path
+    default = DEFAULT_ONNX_MODELS_DIR / ONNX_LAYOUT_MODEL_FILE
+    if default.is_file():
+        return default
     raise ValueError(
         '"onnx-layout" 版面策略需要本地 PP-DocLayoutV3 模型文件, 但没有配置路径。'
         f"请设置 APP_ONNX_LAYOUT_MODEL 指向 {ONNX_LAYOUT_MODEL_FILE}(或其所在目录; "
         f"Databricks 上放 Volume 并用绝对路径), 或设置环境变量 {ONNX_MODELS_ENV} 指向模型"
-        "目录。权重从 pdfspine 文档记录的 ModelScope(RapidAI)地址下载, 不随 wheel 分发。"
+        "目录, 或运行 notebook 的 onnx-check 格把权重自动下载到默认位置 "
+        f"{default}。权重从 pdfspine 文档记录的 ModelScope(RapidAI)地址下载, 不随 wheel 分发。"
     )
 
 
