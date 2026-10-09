@@ -12,6 +12,8 @@ and a nested scope uses the outer one's cache and leaves the closing to it.
 """
 
 import hashlib
+import threading
+from _thread import LockType
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -28,6 +30,8 @@ from ragspine.extraction.evidence.document.models import DocumentSnapshot
 class _Shared:
     pdfs: dict[str, bytes] = field(default_factory=dict)
     documents: dict[str, pdfspine.Document] = field(default_factory=dict)
+    # Pages of one run share its scope from several threads (ADR 0045): read / open once.
+    lock: LockType = field(default_factory=threading.Lock)
 
 
 _SHARED: ContextVar[_Shared | None] = ContextVar("enterprise_pdf_rag_shared_pdfs", default=None)
@@ -55,10 +59,11 @@ def source_pdf(sources: LocalDocumentStore, snapshot: DocumentSnapshot) -> bytes
     shared = _SHARED.get()
     if shared is None:
         return sources.get(ref)
-    data = shared.pdfs.get(ref.sha256)
-    if data is None or len(data) != ref.byte_length:
-        data = sources.get(ref)
-        shared.pdfs[ref.sha256] = data
+    with shared.lock:
+        data = shared.pdfs.get(ref.sha256)
+        if data is None or len(data) != ref.byte_length:
+            data = sources.get(ref)
+            shared.pdfs[ref.sha256] = data
     return data
 
 
@@ -74,7 +79,8 @@ def opened_pdf(pdf: bytes) -> Iterator[pdfspine.Document]:
             document.close()
         return
     key = hashlib.sha256(pdf).hexdigest()
-    reused = shared.documents.get(key)
-    if reused is None:
-        reused = shared.documents[key] = open_pdf(pdf)
+    with shared.lock:
+        reused = shared.documents.get(key)
+        if reused is None:
+            reused = shared.documents[key] = open_pdf(pdf)
     yield reused

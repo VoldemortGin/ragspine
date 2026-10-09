@@ -11,6 +11,10 @@ ingestion directory written before this ADR is reused as is. With `max_parallel_
 > longer holds its lock across the network call (one fingerprint is still in flight once), and
 > an embedder that counts per thread is shared through a semaphore
 > (`APP_EMBEDDING_MAX_CONCURRENCY`, default 4) instead of one lock (§5).
+>
+> Amended by [ADR 0045](0045-page-and-object-concurrency.md) (2026-10-09): pages and objects of
+> one document may now run at once (`APP_PAGE_CONCURRENCY`, default 1), lifting the "parallel
+> pages or objects" rejection below.
 
 ## Context
 

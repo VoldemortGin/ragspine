@@ -419,6 +419,7 @@ def _ingest_pdf(
         normalize_layout=False,
         activate=False,
         producer="generic-pdf-processing-v1",
+        page_concurrency=get_settings().page_concurrency,
     )
 
     def reporter(name: Literal["layout", "metadata"]) -> Callable[[int, int], None] | None:
