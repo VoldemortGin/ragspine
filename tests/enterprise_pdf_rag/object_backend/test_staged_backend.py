@@ -9,6 +9,7 @@
 - 发布目录的发布者租约:另一个活着的进程持有时写入即 ``StoreBusy``。
 """
 
+import os
 import sqlite3
 from collections.abc import Iterator
 from contextlib import closing
@@ -87,7 +88,7 @@ def test_killed_before_rename_leaves_the_published_version_untouched(
     def killed(_source: object, _target: object) -> None:
         raise KeyboardInterrupt  # 进程在 rename 之前被杀
 
-    monkeypatch.setattr(staged.os, "replace", killed)
+    monkeypatch.setattr(os, "replace", killed)
     with pytest.raises(KeyboardInterrupt):
         backend.commit()
     monkeypatch.undo()
@@ -183,9 +184,7 @@ def test_the_publisher_lease_is_released_on_close(tmp_path: Path) -> None:
 
 
 def _staged_settings(tmp_path: Path) -> Settings:
-    return Settings(  # type: ignore[call-arg]
-        object_store_backend="staged", object_store_staging_dir=tmp_path / "staging"
-    )
+    return Settings(object_store_backend="staged", object_store_staging_dir=tmp_path / "staging")
 
 
 def test_open_backend_shares_one_instance_per_store_root(tmp_path: Path) -> None:
@@ -197,6 +196,7 @@ def test_open_backend_shares_one_instance_per_store_root(tmp_path: Path) -> None
     assert isinstance(first, StagedBackend) and first is second and other is not first
     assert first.kind == "staged"
     assert first.work_dir.is_relative_to(tmp_path / "staging")
+    assert isinstance(other, StagedBackend)
     assert other.work_dir != first.work_dir  # 每个 store 根各自一份本地副本
 
     digest = _put(first, "stage one")
@@ -241,11 +241,11 @@ def test_default_settings_never_choose_the_staged_backend(
     monkeypatch.delenv("APP_OBJECT_STORE_BACKEND", raising=False)  # 测试进程钉的是 files
     monkeypatch.delenv("APP_OBJECT_STORE_STAGING_DIR", raising=False)
     assert Settings.model_fields["object_store_backend"].default == "auto"
-    assert Settings().object_store_backend == "auto"  # type: ignore[call-arg]
-    assert Settings().object_store_staging_dir is None  # type: ignore[call-arg]
-    files = open_backend(tmp_path / "s", settings=Settings(object_store_backend="files"))  # type: ignore[call-arg]
+    assert Settings().object_store_backend == "auto"
+    assert Settings().object_store_staging_dir is None
+    files = open_backend(tmp_path / "s", settings=Settings(object_store_backend="files"))
     assert isinstance(files, FileBackend)
-    auto = open_backend(tmp_path / "t", settings=Settings())  # type: ignore[call-arg]
+    auto = open_backend(tmp_path / "t", settings=Settings())
     assert not isinstance(auto, StagedBackend)
     auto.close()
     assert staged.registered() == ()

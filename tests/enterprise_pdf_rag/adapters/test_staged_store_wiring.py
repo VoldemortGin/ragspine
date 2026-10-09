@@ -46,7 +46,7 @@ def test_staged_run_publishes_whole_store_files_with_the_same_bytes(
     lite_env(monkeypatch)
     mixed_folder(tmp_path)
     boundaries: list[Path] = []
-    real_commit = folder_pipeline.commit_staged
+    real_commit = staged.commit_staged
 
     def spy(prefix: Path) -> int:
         boundaries.append(prefix)
@@ -61,6 +61,7 @@ def test_staged_run_publishes_whole_store_files_with_the_same_bytes(
     digest, _, requests = store_digest(tmp_path / "ingestion")
     assert (digest, requests) == (FULL_STORE_DIGEST, FULL_REQUESTS_DIGEST)
 
+    assert document.sha256 is not None
     document_root = (tmp_path / "ingestion").resolve() / document.sha256
     for store in ("source", "processing"):
         assert (document_root / store / "store.sqlite").is_file()
