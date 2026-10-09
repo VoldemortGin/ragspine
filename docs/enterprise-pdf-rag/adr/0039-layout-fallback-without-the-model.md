@@ -62,6 +62,8 @@ onnxruntime 根本不在集群上，`LAYOUT_POLICY="auto"` 永远退到 `determi
 地址，约 130MB——下载：配了 `APP_ONNX_LAYOUT_MODEL` / `PDFSPINE_ONNX_MODELS` 就下到那里，
 都没配就下到 `DEFAULT_ONNX_MODELS_DIR` = `<ROOT_DIR>/data/models/pdfspine-onnx/`（`data/` 不进
 git），`resolve_onnx_layout_model` 在其余位置都没有时最后找它——所以 pull 后不配任何变量，
-`LAYOUT_POLICY="auto"` 即选 `onnx-layout`；下载失败只给出地址，不中断）、
+`LAYOUT_POLICY="auto"` 即选 `onnx-layout`；同一格把 ADR 0031 的表格结构权重 `slanet-plus.onnx`
+（约 8MB）下到同一目录，`pdfspine_tsr` 在其余位置都没有时也最后找默认目录，于是
+`UNVERIFIED_TABLE_STRUCTURE="auto"` 即选 `tsr`；下载失败只给出地址，不中断）、
 `onnx_partition.onnx_layout_status(...)`（`可用=是/否, 权重=<路径|未配置>` + 缺什么怎么装）与
 当前 `APP_LAYOUT_FALLBACK`。权重许可门（ADR 0030）不变：权重不进仓库、不进 wheel。
