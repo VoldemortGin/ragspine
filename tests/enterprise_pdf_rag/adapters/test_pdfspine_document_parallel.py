@@ -1,5 +1,6 @@
 """Per-page parallel extraction (ADR 0040): same pages, same order, same errors as serial."""
 
+import os
 import threading
 import time
 from collections.abc import Callable
@@ -8,6 +9,7 @@ import pdfspine
 import pytest
 
 from enterprise_pdf_rag.adapters import pdfspine_document
+from enterprise_pdf_rag.adapters.pdf_password import open_pdf
 from enterprise_pdf_rag.adapters.pdfspine_document import PdfspineDocumentAdapter
 from ragspine.common.evidence.configs import get_settings
 from ragspine.extraction.evidence.document.models import PageExtraction
@@ -102,7 +104,7 @@ def test_a_failing_page_raises_the_serial_error_and_the_document_still_closes(
 
     _install(monkeypatch, fail)
     opened: list[pdfspine.Document] = []
-    real_open = pdfspine_document.open_pdf
+    real_open = open_pdf
 
     def spy(pdf: bytes) -> pdfspine.Document:
         opened.append(real_open(pdf))
@@ -118,7 +120,7 @@ def test_a_failing_page_raises_the_serial_error_and_the_document_still_closes(
 
 
 def test_the_worker_count_defaults_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(pdfspine_document.os, "cpu_count", lambda: 16)
+    monkeypatch.setattr(os, "cpu_count", lambda: 16)
     get_settings.cache_clear()
     try:
         monkeypatch.delenv("APP_PDF_EXTRACT_WORKERS", raising=False)
