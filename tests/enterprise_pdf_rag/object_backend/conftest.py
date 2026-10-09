@@ -1,4 +1,5 @@
-"""两后端 parametrize 的共享 fixture:同一套一致性测试在 files 与 sqlite 上双跑。"""
+"""后端 parametrize 的共享 fixture:同一套一致性测试在 files / sqlite / staged 上各跑一遍
+(staged 只是对象 store 的后端;模型缓存的一致性测试仍只在 files / sqlite 上双跑)。"""
 
 import hashlib
 import sqlite3
@@ -26,6 +27,7 @@ from ragspine.common.evidence.object_backend.sqlite import (
     SqliteBackend,
     SqliteModelCacheBackend,
 )
+from ragspine.common.evidence.object_backend.staged import StagedBackend
 from ragspine.extraction.evidence.document.models import AssetRef
 from ragspine.extraction.evidence.page.models import StageOutcome, StageState
 
@@ -36,9 +38,23 @@ def sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def staged_work_dir(root: Path) -> Path:
+    """测试里 staged 后端的本地工作目录(与 store 根同级)。"""
+    return root.parent / f"{root.name}.work"
+
+
+def db_file(kind: str, root: Path) -> Path:
+    """该后端的 store db 所在(staged 的 db 在本地工作目录)。"""
+    if kind == "staged":
+        return staged_work_dir(root) / "store.sqlite"
+    return root / "store.sqlite"
+
+
 def make_backend(kind: str, root: Path, **sqlite_kwargs: object) -> ObjectBackend:
     if kind == "files":
         return FileBackend(root)
+    if kind == "staged":
+        return StagedBackend(root, work_dir=staged_work_dir(root), **sqlite_kwargs)  # type: ignore[arg-type]
     return SqliteBackend(root, **sqlite_kwargs)  # type: ignore[arg-type]
 
 
@@ -48,8 +64,13 @@ def make_model_cache(kind: str, cache_dir: Path) -> ModelCacheBackend:
     return SqliteModelCacheBackend(cache_dir)
 
 
-@pytest.fixture(params=["files", "sqlite"])
+@pytest.fixture(params=["files", "sqlite", "staged"])
 def backend_kind(request: pytest.FixtureRequest) -> str:
+    return str(request.param)
+
+
+@pytest.fixture(params=["files", "sqlite"])
+def model_cache_kind(request: pytest.FixtureRequest) -> str:
     return str(request.param)
 
 
@@ -66,8 +87,8 @@ def backend(backend_kind: str, store_root: Path) -> Iterator[ObjectBackend]:
 
 
 @pytest.fixture
-def model_cache(backend_kind: str, tmp_path: Path) -> Iterator[ModelCacheBackend]:
-    built = make_model_cache(backend_kind, tmp_path / "model-cache")
+def model_cache(model_cache_kind: str, tmp_path: Path) -> Iterator[ModelCacheBackend]:
+    built = make_model_cache(model_cache_kind, tmp_path / "model-cache")
     yield built
     built.close()
 
@@ -102,7 +123,7 @@ def damage_object(kind: str, root: Path, digest: str, garbage: bytes = b"\x00dam
             path = root / "objects" / "sha256" / digest
         path.write_bytes(garbage)
         return
-    with closing(sqlite3.connect(root / "store.sqlite")) as connection, connection:
+    with closing(sqlite3.connect(db_file(kind, root))) as connection, connection:
         connection.execute(
             "UPDATE objects SET bytes = ?, encoding = 'raw' WHERE digest = ?", (garbage, digest)
         )
@@ -116,7 +137,7 @@ def damage_stage_entry(kind: str, root: Path, fingerprint: str) -> None:
         head, _, _ = payload.partition(b"\n")
         path.write_bytes(head + b"\n" + b"{not the envelope}" + b"\n")
         return
-    with closing(sqlite3.connect(root / "store.sqlite")) as connection, connection:
+    with closing(sqlite3.connect(db_file(kind, root))) as connection, connection:
         connection.execute(
             "UPDATE stage_cache SET envelope = ? WHERE fingerprint = ?",
             (b"{not the envelope}", fingerprint),

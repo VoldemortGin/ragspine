@@ -40,6 +40,7 @@ from ragspine.common.evidence.file_placement import (
 )
 from ragspine.common.evidence.object_backend import lease
 from ragspine.common.evidence.object_backend.protocol import (
+    BackendKind,
     ClaimOwner,
     DamagedEntry,
     PinToken,
@@ -134,7 +135,7 @@ class FileBackend:
     """现有文件布局,原样:``objects/sha256-sharded/``、``stage-cache-sharded/``、
     ``current-*`` 指针与 ``document-tree/`` 记录。"""
 
-    kind: Literal["files", "sqlite"] = "files"
+    kind: BackendKind = "files"
 
     def __init__(self, root: Path) -> None:
         self.root = root
@@ -493,7 +494,7 @@ class FileModelCacheBackend:
     """模型缓存的文件布局,原样:``requests/`` / ``responses/`` / ``contexts/`` 平铺
     (ADR 0029 §6:模型缓存不分层),claim 为 ``<record>.claim`` 与 ``.takeover-N``。"""
 
-    kind: Literal["files", "sqlite"] = "files"
+    kind: BackendKind = "files"
 
     def __init__(self, cache_dir: Path) -> None:
         self.cache_dir = cache_dir

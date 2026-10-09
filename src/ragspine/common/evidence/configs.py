@@ -171,7 +171,11 @@ class Settings(BaseSettings):
     # 注意:PR-1 只新增后端包,没有任何调用方读本字段——默认 auto 要等 PR-2/3 把
     # store / 模型缓存接到 open_backend 之后才会实际改变行为;在那之前全部路径仍走
     # 现有文件布局,行为与字节逐位不变。
-    object_store_backend: Literal["auto", "sqlite", "files"] = "auto"
+    object_store_backend: Literal["auto", "sqlite", "files", "staged"] = "auto"
+    # staged(opt-in,enterprise-pdf-rag ADR 0040):store db 在本地盘工作目录读写,阶段结束
+    # 整文件发布回 store 根(FUSE)。工作目录根 = 本项(APP_OBJECT_STORE_STAGING_DIR);
+    # None → <系统临时目录>/ragspine-staged。Databricks 上建议 /local_disk0/ragspine-staged。
+    object_store_staging_dir: Path | None = None
     # 内联进 db 的对象大小上限(字节);更大的对象外置到 objects/sha256-sharded/。
     object_store_inline_max_bytes: int = 262_144
     # 无论大小一律外置的媒体类型(逗号分隔;PDF 原件永远留文件系统)。
