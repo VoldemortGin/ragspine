@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/common/evidence/
-verified-against: 17c1dd3
+verified-against: 408994c
 ---
 
 # common/evidence — agent contract
@@ -24,6 +24,8 @@ configs.py    APP_* settings leaf: env (prefix APP_) > <ROOT_DIR>/.env >
               ROOT_DIR / DATA_DIR / LOG_DIR; resource_path(package, relative);
               onnx_layout_model (APP_ONNX_LAYOUT_MODEL — the local PP-DocLayoutV3 weights
               for the "onnx-layout" partitioner, enterprise-pdf-rag ADR 0030);
+              layout_fallback (APP_LAYOUT_FALLBACK, default "model" — model | onnx-accept |
+              text-only: what the layout routers hand an unsure page, enterprise-pdf-rag ADR 0039);
               verify_persisted_receipts (APP_VERIFY_PERSISTED_RECEIPTS, default true — reuse
               a store's persisted verification receipts, enterprise-pdf-rag ADR 0034)
 settings.py   compatibility re-export of configs.py (old import path)
