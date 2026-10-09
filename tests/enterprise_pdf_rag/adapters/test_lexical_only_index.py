@@ -220,3 +220,12 @@ def test_a_lexical_only_table_is_answered_from_bm25_and_the_setting_changes_the_
     assert reused is False
     assert back.retrieval_snapshot_id == default_index.retrieval_snapshot_id  # type: ignore[attr-defined]
     assert back.embedding_requests == 0  # type: ignore[attr-defined]
+
+
+def test_the_catalog_flags_exactly_the_members_indexed_lexical_only(tmp_path: Path) -> None:
+    on = _mount(publish_column_page(tmp_path / "lexical", options=_CHARTS))
+    assert {item.member_id for item in on.member_texts() if item.lexical_only} == {
+        item.member_id for item in _charts(on)
+    }
+    off = _mount(publish_column_page(tmp_path / "default"))
+    assert not any(item.lexical_only for item in off.member_texts())

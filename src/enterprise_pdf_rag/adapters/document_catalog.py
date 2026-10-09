@@ -16,6 +16,7 @@ from enterprise_pdf_rag.adapters.http.schemas import BoundaryModel
 from enterprise_pdf_rag.adapters.processing_retrieval import (
     CONTEXTUAL_POLICIES,
     ProcessingRetrieval,
+    is_lexical_only,
     lexical_member_text,
     member_anchor,
     member_units,
@@ -565,6 +566,7 @@ class MountedDocument:
             else ""
         )
         bbox = member_anchor(self._outputs.assets, member)
+        lexical_only = is_lexical_only(plan, member, vectors)
         column = binding.by_member.get(member.member_id, ())
         if column and header:
             # The lexical channel reads one more phrase than the embedding saw: the column's
@@ -582,6 +584,7 @@ class MountedDocument:
                 header=header,
                 bbox=bbox,
                 units=units,
+                lexical_only=lexical_only,
             )
         return MemberText(
             member.member_id,
@@ -597,6 +600,7 @@ class MountedDocument:
             header=header,
             bbox=bbox,
             units=units,
+            lexical_only=lexical_only,
         )
 
     def _pin(self, hit: PinnedRetrievalHit) -> QueryPin:

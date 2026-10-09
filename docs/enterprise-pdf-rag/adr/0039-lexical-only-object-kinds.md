@@ -101,3 +101,61 @@ unchanged in both settings.
   missing vector term as its BM25 term (channel-aware fusion), or route a question whose best
   BM25 hits are lexical-only members to `bm25_only`; re-measure with the real embedder and a
   lite 71-page release before turning the recommended value on.
+
+## Amendment 1 (2026-10-09): channel-aware fusion for lexical-only members
+
+**Decision.** `MemberText.lexical_only` marks a member its snapshot indexed lexical-only (its kind
+is in the index version's `lexical_only_kinds` and it holds no vector —
+`processing_retrieval.is_lexical_only`, set by the catalog). `HybridSearch` collects those ids from
+its lexical index and passes them to `fuse(..., lexical_only=...)`. When the fusion has a vector
+ranking, a flagged member that BM25 ranked and the vector channel did not earns its BM25 term a
+second time in place of the vector term it can never earn: `2/(k + bm25 rank)`, as if both
+channels agreed. Nothing else moves:
+
+- **Default is byte for byte.** No member is flagged unless `APP_INDEX_LEXICAL_ONLY_KINDS` is set
+  (and a snapshot indexed under it), and with an empty set `fuse` is plain RRF; pinned by
+  `test_an_empty_lexical_only_set_fuses_exactly_as_before`, and the default arm of the gold
+  measurement below reproduces every seat and every resolved mode of the original run.
+- **Only fusion.** With no vector ranking (`bm25_only`, or a vector channel that returned
+  nothing) every member is single-channel already, so no member is lifted and `bm25_only` ranks
+  exactly as before; `vector_only` has no BM25 term to copy. Non-flagged members score exactly
+  their RRF terms. `FusedHit.vector_rank` / `vector_score` stay `None` — no rank is invented.
+- **Ordering only.** Hydration, claim verification, the anti-fabrication checks and the
+  RESTRICTED exit filters read the same evidence; a lifted member is still resolved and verified
+  from its own stored evidence like any other hit.
+
+**Why this and not routing.** The alternative — route a question whose best BM25 hits are
+lexical-only to `bm25_only` — changes ADR 0018's classifier and drops the vector channel for
+every member of that question; on this set its seats are the `bm25_only` column below (p.17
+donut 7, period filter 19), worse than fusion with the amendment (3, 14). The amendment is one
+additive term behind an explicit flag, and the two are not stacked.
+
+**Measurement** (same release, gold set, offline token-hash embedder and channel limit as above;
+seat of the first member of the expected page and kind):
+
+| Mode | Arm | r@1 | r@3 | r@10 | r@50 | MRR |
+|---|---|---:|---:|---:|---:|---:|
+| auto | default | 7 | 8 | 9 | 13 | 0.486 |
+| auto | lexical-only, plain RRF | 3 | 3 | 3 | 13 | 0.210 |
+| auto | lexical-only, Amendment 1 | 6 | 8 | 9 | 14 | 0.439 |
+| rrf | default | 7 | 8 | 9 | 13 | 0.486 |
+| rrf | lexical-only, plain RRF | 2 | 2 | 2 | 13 | 0.153 |
+| rrf | lexical-only, Amendment 1 | 6 | 8 | 9 | 14 | 0.439 |
+| bm25_only | default | 6 | 6 | 8 | 13 | 0.409 |
+| bm25_only | lexical-only (either) | 6 | 6 | 8 | 14 | 0.410 |
+
+The p.17 donut questions return to seat 1 (agency share, both shares, rerank: 24–27 → 1), and the
+Chinese donut question gains a fused seat (none → 7). Still below the default: the three
+"Agency share of VONB" phrasings (p07 / p14: 1 → 3, p13: 8 → 14) and two diagram questions at the
+tail (p10: 23 → 24, p11: 43 → 48). In the default arm the vector channel ranked the p.17 donut
+**first** (its IR projection reads "Agency VONB 72%") while BM25 ranked it 7th; lexical-only, that
+vector signal is gone, so the best fusion can do is BM25 seat 7 counted twice (2/67), and a p.10
+lexical-only chart that BM25 seats 1st for the same words now sorts above it at 2/61. That is
+information the vector channel no longer has, not a fusion penalty, and no rank-based rule can
+recover it.
+
+**Consequence.** r@10 matches the default in all three modes, but `auto` / `rrf` MRR is 0.439
+against 0.486, so by the bar "no mode below the baseline in r@10 or MRR" `table,chart` is **still
+not the recommended value**; `.env.example` says so and no preset or notebook turns it on. Re-measure
+with the real embedder (where the vector channel is semantic rather than near-lexical) and a lite
+71-page release before deciding again.

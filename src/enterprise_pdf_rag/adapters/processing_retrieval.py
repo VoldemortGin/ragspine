@@ -174,6 +174,12 @@ def lexical_member_text(
     return contextual_index_text(body, context)
 
 
+def is_lexical_only(plan: RetrievalPlan, member: RetrievalMember, vectors: int) -> bool:
+    """Whether the snapshot indexed this member lexical-only: its kind is named, no vector."""
+    options = IndexTextOptions.from_index_version(plan.index_version)
+    return vectors == 0 and member.kind in options.lexical_only_kinds
+
+
 def member_units(
     assets: LocalDocumentStore,
     plan: RetrievalPlan,

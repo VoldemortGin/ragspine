@@ -332,8 +332,11 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   (`APP_INDEX_LEXICAL_ONLY_KINDS`, default empty = byte for byte; never `Text`; named in the index
   version, so a changed setting re-indexes) embeds no member of those kinds: BM25 alone scores it,
   a chart its PDF text layer inside its rectangle (`processing/lexical/chart_text_layer.py`, span
-  ids kept, never a model's text or a rendered number) — and under fusion such a member sorts below
-  anything both channels rank, so it is not on in any preset (ADR 0039).
+  ids kept, never a model's text or a rendered number). `MemberText.lexical_only` flags it, and
+  when a vector ranking is fused `fuse` scores its missing vector term as its BM25 term
+  (2/(k + bm25 rank)); with no flagged member, or under `bm25_only`, fusion is byte for byte RRF
+  (ADR 0039 Amendment 1). It still loses the vector channel's own signal, so it is not on in any
+  preset (ADR 0039).
 - **Page context informs, it never cites** (ADR 0017) — beside each hit the prompt prints the
   rest of that hit's page, one line per member in reading order, with no field path and no
   member id; it is generation context only. A claim naming it is an `unknown member` and is
