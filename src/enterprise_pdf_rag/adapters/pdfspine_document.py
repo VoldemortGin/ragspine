@@ -1,5 +1,7 @@
 """Preserve native PDF exports and independent, source-positioned text observations."""
 
+import os
+from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
 from xml.etree import ElementTree
 
@@ -11,6 +13,7 @@ from enterprise_pdf_rag.adapters.pdfspine_svg import (
     crop_native_svg,
     validate_native_svg,
 )
+from ragspine.common.evidence.configs import get_settings
 from ragspine.extraction.evidence.document.models import (
     Bounds,
     DocumentExtraction,
@@ -175,8 +178,20 @@ def _intersects(left: Bounds, right: Bounds) -> bool:
     return left[0] < right[2] and right[0] < left[2] and left[1] < right[3] and right[1] < left[3]
 
 
+def _page_workers(requested: int | None, page_count: int) -> int:
+    """Threads for per-page extraction: argument, else ``APP_PDF_EXTRACT_WORKERS``, else min(4, CPUs)."""
+    if requested is None:
+        requested = get_settings().pdf_extract_workers
+    if requested is None:
+        requested = min(4, os.cpu_count() or 1)
+    return max(1, min(requested, page_count))
+
+
 class PdfspineDocumentAdapter:
     """Export every page or explicitly fail; source qualification remains pending."""
+
+    def __init__(self, page_workers: int | None = None) -> None:
+        self._page_workers = page_workers
 
     def extract_document(self, pdf: bytes) -> DocumentExtraction:
         if not pdf.startswith(b"%PDF-"):
@@ -184,10 +199,19 @@ class PdfspineDocumentAdapter:
         source_digest = sha256(pdf).hexdigest()
         document = open_pdf(pdf)
         try:
-            pages = tuple(
-                _checked_page(document, source_digest=source_digest, page_index=page_index)
-                for page_index in range(document.page_count)
-            )
+            count = document.page_count
+
+            def extract(page_index: int) -> PageExtraction:
+                return _checked_page(document, source_digest=source_digest, page_index=page_index)
+
+            workers = _page_workers(self._page_workers, count)
+            if workers == 1:
+                pages = tuple(extract(page_index) for page_index in range(count))
+            else:
+                # One shared Document (only ``&self`` methods; SVG export releases the GIL).
+                # ``map`` yields in page order, so the first failing page raises, as serially.
+                with ThreadPoolExecutor(workers, thread_name_prefix="pdf-extract") as pool:
+                    pages = tuple(pool.map(extract, range(count)))
         finally:
             document.close()
         return DocumentExtraction(
