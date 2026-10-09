@@ -6,6 +6,7 @@
 
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pdfspine
 import pytest
@@ -13,6 +14,7 @@ from pdfspine.geometry import Rect
 from pydantic import TypeAdapter
 
 import enterprise_pdf_rag.adapters.onnx_partition as onnx_partition
+import enterprise_pdf_rag.adapters.pdfspine_tsr as pdfspine_tsr
 from enterprise_pdf_rag.adapters.deterministic_partition import partition_counts
 from enterprise_pdf_rag.adapters.folder_pipeline import run_folder_pipeline
 from enterprise_pdf_rag.adapters.ingest_mode import (
@@ -20,6 +22,7 @@ from enterprise_pdf_rag.adapters.ingest_mode import (
     IngestPlan,
     check_layout_fallback,
     choose_layout_policy,
+    choose_unverified_table_structure,
     ingest_plan,
     make_partitioner,
 )
@@ -422,12 +425,15 @@ def test_weights_are_downloaded_into_the_configured_directory(tmp_path: Path) ->
 
     models = tmp_path / "models"
     message = ensure_onnx_layout_weights(str(models), download=download)
-    assert [url for url, _target in fetched] == [ONNX_LAYOUT_MODEL_URL]
+    # 版面权重与表格结构权重(SLANet-plus, ADR 0031)放同一目录.
+    assert [url for url, _target in fetched] == [ONNX_LAYOUT_MODEL_URL, pdfspine_tsr.MODEL_URL]
     assert (models / ONNX_LAYOUT_MODEL_FILE).read_bytes() == b"weights"
+    assert (models / pdfspine_tsr.MODEL_FILE).read_bytes() == b"weights"
     assert str(models / ONNX_LAYOUT_MODEL_FILE) in message
+    assert str(models / pdfspine_tsr.MODEL_FILE) in message
     # 已经在了: 不再下载.
     ensure_onnx_layout_weights(str(models), download=download)
-    assert len(fetched) == 1
+    assert len(fetched) == 2
 
 
 def test_a_configured_file_path_is_downloaded_as_that_file(tmp_path: Path) -> None:
@@ -453,7 +459,26 @@ def test_without_a_configured_path_weights_go_to_the_default_directory(
 
     message = ensure_onnx_layout_weights(None, download=download)
     assert (default / ONNX_LAYOUT_MODEL_FILE).read_bytes() == b"weights"
+    assert (default / pdfspine_tsr.MODEL_FILE).read_bytes() == b"weights"
     assert str(default / ONNX_LAYOUT_MODEL_FILE) in message
+
+
+@pytest.mark.usefixtures("onnx_runtime_present")
+def test_table_structure_weights_in_the_default_directory_are_found(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(ONNX_MODELS_ENV, raising=False)
+    monkeypatch.setattr(
+        pdfspine_tsr, "get_settings", lambda: SimpleNamespace(onnx_layout_model=None)
+    )
+    default = tmp_path / "default-models"
+    default.mkdir()
+    monkeypatch.setattr(onnx_partition, "DEFAULT_ONNX_MODELS_DIR", default)
+    assert pdfspine_tsr.table_structure_unavailable() is not None
+    (default / pdfspine_tsr.MODEL_FILE).write_bytes(b"structure-weights")
+    assert pdfspine_tsr.table_structure_unavailable() is None
+    structure, _reason = choose_unverified_table_structure("auto", ingest_mode="lite")
+    assert structure == "tsr"
 
 
 @pytest.mark.usefixtures("onnx_runtime_present")
@@ -476,8 +501,10 @@ def test_a_failed_download_names_the_url_instead_of_raising(tmp_path: Path) -> N
         raise OSError("network unreachable")
 
     message = ensure_onnx_layout_weights(str(tmp_path / "models"), download=download)
-    assert ONNX_LAYOUT_MODEL_URL in message and "OSError" in message
+    assert ONNX_LAYOUT_MODEL_URL in message and pdfspine_tsr.MODEL_URL in message
+    assert "OSError" in message
     assert not (tmp_path / "models" / ONNX_LAYOUT_MODEL_FILE).exists()
+    assert not (tmp_path / "models" / pdfspine_tsr.MODEL_FILE).exists()
 
 
 @pytest.mark.usefixtures("onnx_runtime_present")

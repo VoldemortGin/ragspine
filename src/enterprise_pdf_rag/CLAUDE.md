@@ -186,7 +186,8 @@ adapters/     every SDK and I/O: pdfspine (every source PDF opens through pdf_pa
               under `layout="model"`; the notebooks' `onnx-check` cell prints
               `onnx_partition.ensure_onnx_layout_weights` / `onnx_layout_status`; with nothing
               configured the weights are downloaded to and found in `DEFAULT_ONNX_MODELS_DIR` =
-              `<ROOT_DIR>/data/models/pdfspine-onnx/`, last in the resolution order),
+              `<ROOT_DIR>/data/models/pdfspine-onnx/`, last in the resolution order — the
+              layout weights and `slanet-plus.onnx` alike, so "auto" picks onnx-layout and tsr),
               answer_llm.py (`make_answer_llm()`: the answer `JsonCompletionClient` built from
               settings, what `run_folder_pipeline` and `notebooks/run_folder.ipynb` call)
 resources/    packaged prompts / static data

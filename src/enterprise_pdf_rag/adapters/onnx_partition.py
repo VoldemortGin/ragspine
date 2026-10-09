@@ -139,30 +139,45 @@ def _download(url: str, target: Path) -> None:
         shutil.copyfileobj(response, sink)
 
 
-def ensure_onnx_layout_weights(
-    configured: str | None, *, download: Callable[[str, Path], None] = _download
-) -> str:
-    """notebook 安装步骤: 权重该在的位置缺文件就从 ``ONNX_LAYOUT_MODEL_URL`` 下载; 返回一行中文说明.
-
-    位置: 已配置的 ``APP_ONNX_LAYOUT_MODEL`` / ``PDFSPINE_ONNX_MODELS``, 都没有时
-    ``DEFAULT_ONNX_MODELS_DIR``(解析时最后也找它). 下载失败不抛异常, 给出地址让人手工放置——
-    之后的自检行与 ``"auto"`` 选择会如实显示它仍不可用.
-    """
-    target = _configured_target(configured) or DEFAULT_ONNX_MODELS_DIR / ONNX_LAYOUT_MODEL_FILE
+def _fetch(label: str, url: str, target: Path, download: Callable[[str, Path], None]) -> str:
+    """缺文件就下载到 ``target``(先写 ``.part`` 再改名); 返回一行中文说明, 失败不抛异常."""
     if target.is_file():
-        return f"ONNX 版面权重: 已存在 {target}"
+        return f"{label}: 已存在 {target}"
     partial = target.with_name(target.name + ".part")
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        download(ONNX_LAYOUT_MODEL_URL, partial)
+        download(url, partial)
         partial.replace(target)
     except OSError as error:
         partial.unlink(missing_ok=True)
-        return (
-            f"ONNX 版面权重: 下载失败({type(error).__name__}: {error})。请手工下载 "
-            f"{ONNX_LAYOUT_MODEL_URL} 放到 {target}"
+        return f"{label}: 下载失败({type(error).__name__}: {error})。请手工下载 {url} 放到 {target}"
+    return f"{label}: 已下载到 {target}"
+
+
+def ensure_onnx_layout_weights(
+    configured: str | None, *, download: Callable[[str, Path], None] = _download
+) -> str:
+    """notebook 安装步骤: 版面权重与表格结构权重缺文件就下载; 返回中文说明(每个文件一行).
+
+    版面权重的位置: 已配置的 ``APP_ONNX_LAYOUT_MODEL`` / ``PDFSPINE_ONNX_MODELS``, 都没有时
+    ``DEFAULT_ONNX_MODELS_DIR``(解析时最后也找它); SLANet-plus(ADR 0031)放在同一目录, 正是
+    ``pdfspine_tsr`` 找它的地方. 下载失败不抛异常, 给出地址让人手工放置——之后的自检行与
+    ``"auto"`` 选择会如实显示它仍不可用.
+    """
+    from enterprise_pdf_rag.adapters import pdfspine_tsr
+
+    target = _configured_target(configured) or DEFAULT_ONNX_MODELS_DIR / ONNX_LAYOUT_MODEL_FILE
+    return "\n".join(
+        (
+            _fetch("ONNX 版面权重", ONNX_LAYOUT_MODEL_URL, target, download),
+            _fetch(
+                "表格结构权重",
+                pdfspine_tsr.MODEL_URL,
+                target.parent / pdfspine_tsr.MODEL_FILE,
+                download,
+            ),
         )
-    return f"ONNX 版面权重: 已下载到 {target}"
+    )
 
 
 def onnx_layout_status(configured: str | None) -> str:

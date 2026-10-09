@@ -66,7 +66,8 @@ def _pil() -> ModuleType:
 
 def _model_path(explicit: Path | None) -> Path:
     """Explicit path, else beside the ONNX layout weights (``APP_ONNX_LAYOUT_MODEL``, a file or
-    its directory: one weights directory serves ADR 0030 and this), else ``PDFSPINE_ONNX_MODELS``.
+    its directory: one weights directory serves ADR 0030 and this), else ``PDFSPINE_ONNX_MODELS``,
+    else the default weights directory when the file is there (ADR 0039).
     """
     if explicit is not None:
         return explicit.expanduser()
@@ -76,6 +77,12 @@ def _model_path(explicit: Path | None) -> Path:
         return (configured if configured.is_dir() else configured.parent) / MODEL_FILE
     root = os.environ.get(MODELS_ENV)
     if not root:
+        # ADR 0039: 什么都没配置时, notebook 的 onnx-check 格把权重下载到的默认目录.
+        from enterprise_pdf_rag.adapters import onnx_partition
+
+        default = onnx_partition.DEFAULT_ONNX_MODELS_DIR / MODEL_FILE
+        if default.is_file():
+            return default
         raise TableStructureUnavailable(
             f"表格结构识别 (unverified_table_structure='tsr') 需要本地 SLANet-plus 模型, 但未设置 "
             f"APP_ONNX_LAYOUT_MODEL 或 {MODELS_ENV}。请从 {MODEL_URL} 下载 {MODEL_FILE}"
