@@ -33,7 +33,11 @@ from enterprise_pdf_rag.adapters.object_processing import ProcessingObjectAdapte
 from enterprise_pdf_rag.adapters.page_metadata_extraction import PAGE_METADATA_STAGE
 from enterprise_pdf_rag.adapters.processing_retrieval import ProcessingRetrieval
 from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
-from enterprise_pdf_rag.processing.index_text import PageIndexContext
+from enterprise_pdf_rag.processing.index_text import (
+    ONE_UNIT_EACH,
+    IndexTextOptions,
+    PageIndexContext,
+)
 from ragspine.extraction.evidence.document.models import (
     AssetRef,
     Bounds,
@@ -268,12 +272,19 @@ def _metadata_stage(
     return StageOutcome(PAGE_METADATA_STAGE, fingerprint, StageState.SUCCEEDED, "authored", ref)
 
 
-def publish_column_page(root: Path, *, charts: int = 3) -> ColumnPage:
+def publish_column_page(
+    root: Path,
+    *,
+    charts: int = 3,
+    options: IndexTextOptions = ONE_UNIT_EACH,
+    embedder: RecordingEmbedding | None = None,
+) -> ColumnPage:
     """Publish a two-page document whose second page prints ``charts`` charts side by side.
 
     ``charts`` is how many of the three headed columns actually carry a chart: three read
     as columns, one is never ambiguous, and two leave the third heading standing over
-    nothing — the two layouts a binding must refuse.
+    nothing — the two layouts a binding must refuse. ``options`` is the index-text layout
+    the release is indexed with; ``embedder`` records what it embedded.
     """
     pdf_bytes = f"authored-column-page-source-{charts}".encode()
     document_id = sha256(pdf_bytes).hexdigest()
@@ -381,9 +392,9 @@ def publish_column_page(root: Path, *, charts: int = 3) -> ColumnPage:
     assert page_metadata.title is not None
     context = PageIndexContext(document_metadata.display_title.text, page_metadata.title.text, None)
     scope = ProcessingScope(manifest_id, pdf.sha256, 2, (0, 1))
-    publication = ProcessingRetrieval(sources, outputs, RecordingEmbedding()).build(
-        scope, tuple((1, record) for record in records), {1: context}
-    )
+    publication = ProcessingRetrieval(
+        sources, outputs, RecordingEmbedding() if embedder is None else embedder
+    ).build(scope, tuple((1, record) for record in records), {1: context}, options)
     pages: list[PageProcessingRecord] = []
     for index, (source_page, objects, owned, metadata) in enumerate(
         (

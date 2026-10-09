@@ -345,7 +345,8 @@ class ProcessingStore:
 
         A member's embedding artifact is either one ``RetrievalEmbedding`` (one vector) or a
         ``RetrievalUnitEmbeddings`` (its row units, or none for an unscored running member,
-        which only a snapshot indexed with ``drop_running_lines`` may hold).
+        which only a snapshot indexed with ``drop_running_lines`` may hold, or for a member of
+        a kind the snapshot indexed lexical-only).
         """
         options = IndexTextOptions.from_index_version(plan.index_version)
         ids = [entry.member_id for entry in index.entries]
@@ -369,7 +370,11 @@ class ProcessingStore:
                 or units.fingerprint != member.embedding_fingerprint
                 or vectors != indexed.get(member.member_id, [])
                 or any(len(vector) != member.embedding_dimensions for vector in vectors)
-                or (not vectors and not options.drop_running_lines)
+                or (
+                    not vectors
+                    and not options.drop_running_lines
+                    and member.kind not in options.lexical_only_kinds
+                )
             ):
                 raise ValueError("Index vector does not match its actual embedding artifact")
 

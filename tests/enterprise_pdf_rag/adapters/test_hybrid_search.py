@@ -793,3 +793,82 @@ def test_search_without_tree_pages_is_pinned_to_the_two_channel_fusion() -> None
     )
     assert search.search(question, top_k=3, mode="rrf").hits == expected
     assert search.search(question, top_k=3, mode="rrf", tree_pages=()).hits == expected
+
+
+# ---- ADR 0039 Amendment 1: a lexical-only member's missing vector term ---------------------
+
+
+def _ranked(*member_ids: str, score: float = 1.0) -> tuple[PinnedRetrievalHit, ...]:
+    return tuple(PinnedRetrievalHit(_SNAPSHOT, member_id, score) for member_id in member_ids)
+
+
+def test_an_empty_lexical_only_set_fuses_exactly_as_before() -> None:
+    vector = _ranked("m-a", "m-b", "m-d")
+    lexical = _ranked("m-c", "m-b", "m-a")
+    tree = _ranked("m-e")
+    assert fuse(vector, lexical, tree, lexical_only=frozenset()) == fuse(vector, lexical, tree)
+    expected = rrf_fuse([["m-a", "m-b", "m-d"], ["m-c", "m-b", "m-a"]], 60)
+    expected["m-e"] = 1.0 / 601
+    assert {hit.member_id: hit.fused_score for hit in fuse(vector, lexical, tree)} == expected
+
+
+def test_a_lexical_only_member_counts_its_bm25_term_for_the_vector_channel_it_cannot_enter() -> (
+    None
+):
+    """BM25 seat 1 alone earns 1/61, below a member both channels seat 10th (2/70); a member
+    with no vector at all earns its BM25 term twice instead, 2/61, as if both channels agreed."""
+    fillers = [f"m-{index:02d}" for index in range(1, 10)]
+    vector = _ranked(*fillers, "m-both")
+    lexical = _ranked("m-chart", *fillers[:8], "m-both")
+    plain = fuse(vector, lexical)
+    assert [hit.member_id for hit in plain].index("m-chart") > [
+        hit.member_id for hit in plain
+    ].index("m-both")
+
+    fused = fuse(vector, lexical, lexical_only=frozenset({"m-chart"}))
+    by_id = {hit.member_id: hit for hit in fused}
+    assert fused[0].member_id == "m-chart"
+    assert by_id["m-chart"].fused_score == 2.0 / 61
+    # The hit still says which channel ranked it: no vector rank is invented.
+    assert (by_id["m-chart"].vector_rank, by_id["m-chart"].vector_score) == (None, None)
+    assert by_id["m-chart"].lexical_rank == 1
+    # Every other member scores exactly what plain RRF gave it.
+    assert {m: h.fused_score for m, h in by_id.items() if m != "m-chart"} == {
+        hit.member_id: hit.fused_score for hit in plain if hit.member_id != "m-chart"
+    }
+
+
+def test_the_lexical_only_term_needs_both_a_bm25_seat_and_no_vector_seat() -> None:
+    vector = _ranked("m-a", "m-b")
+    lexical = _ranked("m-b", "m-c")
+    plain = fuse(vector, lexical)
+    # A flagged member the vector channel did rank, or one BM25 did not, is fused as before;
+    # so is every member when the fusion has no vector ranking at all (a bm25_only query).
+    assert fuse(vector, lexical, lexical_only=frozenset({"m-a", "m-b", "m-z"})) == plain
+    assert fuse((), lexical, lexical_only=frozenset({"m-c"})) == fuse((), lexical)
+
+
+def _lexical_only_members() -> tuple[MemberText, ...]:
+    return tuple(
+        MemberText(member_id, ObjectKind.CHART, 0, text, lexical_only=True)
+        if member_id == "m-b"
+        else MemberText(member_id, ObjectKind.TEXT, 0, text)
+        for member_id, text in sorted(_TEXTS.items())
+    )
+
+
+def test_hybrid_search_lifts_a_lexical_only_member_only_when_both_channels_fuse() -> None:
+    # m-b is BM25's first seat for "expense ratio declined" and holds no vector.
+    flagged = _FakeDocument(("m-c", "m-a"), members=_lexical_only_members())
+    plain = _FakeDocument(("m-c", "m-a"))
+    query = "expense ratio declined agency"
+    assert HybridSearch(plain).search(query, top_k=3, mode="rrf").hits[0].member_id == "m-a"
+    lifted = HybridSearch(flagged).search(query, top_k=3, mode="rrf").hits
+    assert lifted[0].member_id == "m-b"
+    assert lifted[0].fused_score == 2.0 / 61
+    # BM25 alone and the vector channel alone rank exactly as without the flag.
+    for mode in ("bm25_only", "vector_only"):
+        assert (
+            HybridSearch(flagged).search(query, top_k=3, mode=mode).hits
+            == HybridSearch(plain).search(query, top_k=3, mode=mode).hits
+        )

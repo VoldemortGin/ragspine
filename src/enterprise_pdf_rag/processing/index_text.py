@@ -13,6 +13,8 @@ Two index-layout switches (``IndexTextOptions``) change *how many* units a membe
 as, never what a unit says: a long verbatim-rows table (ADR 0027) or pending inferred grid
 (ADR 0031) becomes one unit per figure row with its header rows repeated, and a running header / footer scores as no unit
 at all. Every character of a unit is still printed by the table or by the page context.
+A third switch, ``lexical_only_kinds``, leaves the members of those kinds out of the vector
+channel: they keep their units, scored by BM25 alone.
 """
 
 import re
@@ -32,6 +34,7 @@ from ragspine.extraction.evidence.objects.tables.table_inferred_grid import (
 from ragspine.extraction.evidence.objects.tables.table_models import TableIR
 from ragspine.extraction.evidence.objects.tables.table_rows import TableRow, TableRowsIR
 from ragspine.extraction.evidence.objects.typed_ir import DiagramIR, FormulaIR, TypedIR
+from ragspine.extraction.evidence.page.models import ObjectKind
 
 # The index layout every snapshot had before the switches: one unit, one vector per member.
 INDEX_VERSION = "immutable-cosine-index-v1"
@@ -39,6 +42,8 @@ INDEX_VERSION = "immutable-cosine-index-v1"
 UNIT_INDEX_VERSION = "immutable-cosine-unit-index-v1"
 _ROW_UNITS = "table-row-units-v1"
 _RUNNING = "running-lines-unscored-v1"
+# ``lexical-only-v1=<Kind>,<Kind>``: members of those kinds hold no vector, BM25 scores them.
+_LEXICAL_ONLY = "lexical-only-v1"
 # Header rows are the rows above the first figure row; deeper than this is not a header we
 # can trust, so only the first row is repeated.
 MAX_HEADER_ROWS = 4
@@ -59,6 +64,14 @@ class IndexTextOptions:
     table_row_units: bool = False
     # A Text member every line of which is a running header / footer scores as no unit.
     drop_running_lines: bool = False
+    # Members of these kinds are not embedded: BM25 alone scores their units (a chart's
+    # being its PDF text layer), and they stay resolvable, citable and in their page window.
+    lexical_only_kinds: frozenset[ObjectKind] = frozenset()
+
+    def __post_init__(self) -> None:
+        # A Text member without a vector is a running line; Text keeps the vector channel.
+        if ObjectKind.TEXT in self.lexical_only_kinds:
+            raise ValueError("Text members cannot be lexical-only")
 
     @property
     def index_version(self) -> str:
@@ -70,6 +83,9 @@ class IndexTextOptions:
             )
             if on
         ]
+        if self.lexical_only_kinds:
+            kinds = ",".join(sorted(kind.value for kind in self.lexical_only_kinds))
+            features.append(f"{_LEXICAL_ONLY}={kinds}")
         return f"{UNIT_INDEX_VERSION}:{'+'.join(features)}" if features else INDEX_VERSION
 
     @classmethod
@@ -78,9 +94,20 @@ class IndexTextOptions:
         if not version.startswith(UNIT_INDEX_VERSION + ":"):
             return cls()
         features = set(version.removeprefix(UNIT_INDEX_VERSION + ":").split("+"))
-        if not features or not features <= {_ROW_UNITS, _RUNNING}:
+        lexical = {feature for feature in features if feature.startswith(_LEXICAL_ONLY + "=")}
+        kinds: set[ObjectKind] = set()
+        for feature in lexical:
+            try:
+                kinds.update(
+                    ObjectKind(name)
+                    for name in feature.removeprefix(_LEXICAL_ONLY + "=").split(",")
+                )
+            except ValueError:
+                raise ValueError(f"unknown index version {version!r}") from None
+        features -= lexical
+        if (not features and not kinds) or not features <= {_ROW_UNITS, _RUNNING}:
             raise ValueError(f"unknown index version {version!r}")
-        return cls(_ROW_UNITS in features, _RUNNING in features)
+        return cls(_ROW_UNITS in features, _RUNNING in features, frozenset(kinds))
 
 
 # Both switches off: the layout every snapshot had before them.

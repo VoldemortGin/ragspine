@@ -152,6 +152,9 @@ class Settings(BaseSettings):
     # 整份快照的重读。关掉(false)即回到 ADR 0024:每个实例各全量读一遍;verify_every_request
     # 打开时凭据也一律不用。最终发布(publish_draft)与所有消费性读取始终真读。
     verify_persisted_receipts: bool = True
+    # 建索引时只进 lexical(BM25)通道、不送 embedding 的对象种类,逗号分隔(如 "table,chart");
+    # 空 = 全部照旧进两个通道。种类集合写进索引版本,改它会重建索引而不是复用旧发布。
+    index_lexical_only_kinds: str = ""
     # 单次模型调用的等待上限(秒)。默认与 JsonCompletionClient 自身的默认一致;页级上下文
     # (ADR 0017)让"总结某一节"这类问题的 prompt 与生成都更长,超过默认即 503,所以它可配。
     # 上限 180 与该客户端的构造校验一致。

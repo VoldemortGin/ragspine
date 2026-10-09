@@ -155,6 +155,7 @@ def fuse(
     *,
     k: float = 60.0,
     tree_k: float = 600.0,
+    lexical_only: frozenset[str] = frozenset(),
 ) -> tuple[FusedHit, ...]:
     """Reciprocal rank fusion of the channel rankings pinned to the same snapshot.
 
@@ -162,6 +163,11 @@ def fuse(
     own, much larger ``tree_k``, because its rank is a page set read in reading order and
     not a relevance it ever measured. ``tree`` defaults to empty, which fuses exactly as
     the two-channel call always did.
+
+    ``lexical_only`` names the members indexed without a vector (ADR 0039). When the fusion
+    has a vector ranking, such a member BM25 ranked earns its BM25 term once more in place of
+    the vector term it could never earn (ADR 0039 Amendment 1). Empty — the default, and
+    every snapshot indexed without the setting — changes nothing.
     """
     snapshots = {hit.snapshot_id for hit in (*vector, *lexical, *tree)}
     if len(snapshots) > 1:
@@ -177,6 +183,14 @@ def fuse(
     # channels rank scores at least 2/(60 + 50) = 0.0182: agreement beats depth. That margin
     # is what ``rrf_k`` buys — do not change it.
     fused = rrf_fuse([list(vector_ranks), list(lexical_ranks)], k)
+    # A lexical-only member cannot enter the vector channel, so plain RRF would hold it to a
+    # single term: BM25 seat 1 (1/61) below any member both channels seat 10th (2/70). Its
+    # missing vector term is scored as its BM25 term instead, as if both channels agreed.
+    # Without a vector ranking (``bm25_only``) every member is single-channel and nothing moves.
+    if vector_ranks:
+        for member_id in lexical_only:
+            if member_id in lexical_ranks and member_id not in vector_ranks:
+                fused[member_id] += 1.0 / (k + lexical_ranks[member_id][0])
     # The tree is not a peer of those two. Its rank orders the routed pages in reading order,
     # which is not a relevance, so it is fused at ``tree_k`` instead of ``k``: the best a
     # routed member can earn is 1/(tree_k + 1), and the least a member one scoring channel
@@ -267,6 +281,9 @@ class HybridSearch:
             index = build_lexical_index(document)
             cache[key] = index
         self._index = index
+        self._lexical_only = frozenset(
+            member.member_id for member in index.members if member.lexical_only
+        )
 
     @property
     def index(self) -> LexicalIndex:
@@ -384,6 +401,7 @@ class HybridSearch:
             self._tree_rank(tree_pages, allowed, tree_members),
             k=self._rrf_k,
             tree_k=self._tree_rrf_k,
+            lexical_only=self._lexical_only,
         )
         if self._reranker is None or not fused:
             return SearchOutcome(resolved, fused[:top_k])

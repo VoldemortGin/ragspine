@@ -27,7 +27,9 @@ configs.py    APP_* settings leaf: env (prefix APP_) > <ROOT_DIR>/.env >
               layout_fallback (APP_LAYOUT_FALLBACK, default "model" — model | onnx-accept |
               text-only: what the layout routers hand an unsure page, enterprise-pdf-rag ADR 0039);
               verify_persisted_receipts (APP_VERIFY_PERSISTED_RECEIPTS, default true — reuse
-              a store's persisted verification receipts, enterprise-pdf-rag ADR 0034)
+              a store's persisted verification receipts, enterprise-pdf-rag ADR 0034);
+              index_lexical_only_kinds (APP_INDEX_LEXICAL_ONLY_KINDS, default empty — kinds
+              indexed BM25-only with no vector, enterprise-pdf-rag ADR 0039)
 settings.py   compatibility re-export of configs.py (old import path)
 logging.py    the one logging config + lineage / privacy discipline for AI artifacts
 file_placement.py  link_new_file (create-if-absent by hard link; rename + re-read fallback where
