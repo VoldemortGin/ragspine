@@ -93,6 +93,7 @@ from ragspine.common.evidence.configs import get_settings
 from ragspine.common.evidence.file_placement import recording_repairs
 from ragspine.common.evidence.object_backend.probe import probe_directory
 from ragspine.common.evidence.object_backend.protocol import StoreBusy
+from ragspine.common.evidence.object_backend.staged import commit_staged, release_staged
 from ragspine.common.evidence.providers.json_completion import (
     JsonCompletionClient,
     one_sampling_probe,
@@ -885,8 +886,8 @@ def _resolved_backend_kind(ingestion_root: Path) -> str:
     (explicit ``sqlite`` is reported as such; an unavailable directory then fails the
     stores themselves, never silently)."""
     mode = get_settings().object_store_backend
-    if mode == "files":
-        return "files"
+    if mode in ("files", "staged"):
+        return mode
     ingestion_root.mkdir(parents=True, exist_ok=True)
     return "sqlite" if mode == "sqlite" or probe_directory(ingestion_root).ok else "files"
 
@@ -932,6 +933,9 @@ def _run_document(
     # sqlite backend's connections and writer lease are released (ADR 0036).
     sources: LocalDocumentStore | None = None
     outputs: ProcessingStore | None = None
+    # ADR 0040: the staged backend's local copies of this document's stores are published at
+    # every stage boundary; a no-op for every other backend (nothing is registered).
+    document_root = root.expanduser().resolve() / digest
 
     def allot(wanted: int) -> int:
         """Grant this document's ingest budget from the shared total and announce it."""
@@ -968,6 +972,7 @@ def _run_document(
         ingested: IngestionSummary | None = run.get("ingestion")
         if ingested is not None:
             run["published_ingest_mode"] = _current_mode(Path(ingested.processing_store))
+            release_staged(document_root)  # that read reopened the store
         if repairs:
             run["storage_repairs"] = dict(sorted(repairs.items()))
         done = DocumentRun(status=status, elapsed_s=round(perf_counter() - started, 3), **run)
@@ -992,6 +997,7 @@ def _run_document(
     def enter(name: PipelineStage) -> PipelineStage:
         if cancel is not None and cancel.is_set():
             raise _Cancelled
+        commit_staged(document_root)
         _emit(progress, "document_progress", pdf=str(pdf), stage=name)
         return name
 
@@ -1094,6 +1100,7 @@ def _run_document(
             budget.spend(tree_calls, granted)
             allotment["held"] = 0
             run["tree"] = tree
+        commit_staged(document_root)
     except errors as error:
         if not continue_on_error:
             raise
@@ -1111,6 +1118,7 @@ def _run_document(
             outputs.close()
         if sources is not None:
             sources.close()
+        release_staged(document_root)
     return finish("published")
 
 

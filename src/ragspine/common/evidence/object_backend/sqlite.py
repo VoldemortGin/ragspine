@@ -46,6 +46,7 @@ from ragspine.common.evidence.object_backend.files import (
     _artifact_digest,
 )
 from ragspine.common.evidence.object_backend.protocol import (
+    BackendKind,
     BackendSchemaError,
     ClaimOwner,
     DamagedEntry,
@@ -499,13 +500,14 @@ class _SqliteCore:
 class SqliteBackend:
     """一个 store 根目录的 sqlite 后端;``FileBackend`` 兼作只读 legacy 层与外置对象层。"""
 
-    kind: Literal["files", "sqlite"] = "sqlite"
+    kind: BackendKind = "sqlite"
 
     def __init__(
         self,
         root: Path,
         *,
         db_name: str = "store.sqlite",
+        db_path: Path | None = None,
         synchronous: str = "FULL",
         inline_max_bytes: int = DEFAULT_INLINE_MAX_BYTES,
         external_media_types: frozenset[str] = frozenset({"application/pdf"}),
@@ -513,7 +515,9 @@ class SqliteBackend:
     ) -> None:
         self.root = root
         self._files = FileBackend(root)
-        self._core = _SqliteCore(root / db_name, STORE_SCHEMA, synchronous=synchronous)
+        # db_path:db 放在别处(StagedBackend 的本地工作副本);缺省 = <root>/<db_name>。
+        db_file = root / db_name if db_path is None else db_path
+        self._core = _SqliteCore(db_file, STORE_SCHEMA, synchronous=synchronous)
         self._inline_max_bytes = inline_max_bytes
         self._external_media_types = external_media_types
         self._max_db_bytes = max_db_bytes
@@ -970,7 +974,7 @@ class SqliteModelCacheBackend:
     探测它在不在,之后不再探测(旧文件只由 PR-3 之前的代码写出;此后才出现的旧目录由
     下一个实例看到)。"""
 
-    kind: Literal["files", "sqlite"] = "sqlite"
+    kind: BackendKind = "sqlite"
 
     def __init__(
         self,

@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol, runtime_checkable
 
-BackendKind = Literal["files", "sqlite"]
+BackendKind = Literal["files", "sqlite", "staged"]
 
 
 @dataclass(frozen=True, slots=True)
