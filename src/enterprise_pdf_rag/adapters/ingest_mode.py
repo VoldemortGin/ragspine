@@ -17,12 +17,15 @@ pages -> onnx -> per-page model fallback), also chosen explicitly only.
 ``unverified_tables_as_rows`` (ADR 0027) indexes a Table with no detected grid as its verbatim
 printed rows; lite turns it on. ``table_row_index_units`` / ``drop_running_lines_from_index``
 lay out the index text (row units for a long row table, nothing for a running header /
-footer); lite turns both on.
+footer); lite turns both on. ``lexical_only_kinds`` keeps the members of those kinds out of
+the vector channel (BM25 alone scores them); no preset sets it — ``run_folder_pipeline``
+reads ``APP_INDEX_LEXICAL_ONLY_KINDS`` (empty by default).
 ``unverified_table_structure="tsr"`` (ADR 0031) first asks a local table-structure model for
 that table's grid, kept pending, and falls back to the rows; both presets keep ``"rows"``.
 """
 
-from dataclasses import dataclass, replace
+from collections.abc import Iterable
+from dataclasses import dataclass, field, replace
 from typing import Final, Literal, get_args
 
 from enterprise_pdf_rag.adapters.deterministic_partition import make_text_page_partitioner
@@ -37,7 +40,7 @@ from enterprise_pdf_rag.adapters.pdfspine_tsr import table_structure_unavailable
 from enterprise_pdf_rag.processing.index_text import IndexTextOptions
 from ragspine.common.evidence.providers.json_completion import JsonCompletionClient
 from ragspine.extraction.evidence.document.models import DocumentSnapshot
-from ragspine.extraction.evidence.page.models import ProcessingManifest
+from ragspine.extraction.evidence.page.models import ObjectKind, ProcessingManifest
 from ragspine.extraction.evidence.page.ports import PagePartitioner
 
 type IngestMode = Literal["full", "lite"]
@@ -94,13 +97,17 @@ class IngestPlan:
     # Keep a Text member that prints only running header / footer lines out of both
     # retrieval channels; it stays citable and in its page window (ADR 0028 Amendment 1).
     drop_running_lines_from_index: bool = False
+    # Keep the members of these kinds out of the vector channel: BM25 alone scores them, a
+    # chart its PDF text layer. Empty in both presets (``APP_INDEX_LEXICAL_ONLY_KINDS``).
+    lexical_only_kinds: frozenset[ObjectKind] = field(default_factory=frozenset)
 
     @property
     def index_options(self) -> IndexTextOptions:
-        """The index-text layout the index stage builds; both off keeps full's bytes."""
+        """The index-text layout the index stage builds; all off keeps full's bytes."""
         return IndexTextOptions(
             table_row_units=self.table_row_index_units,
             drop_running_lines=self.drop_running_lines_from_index,
+            lexical_only_kinds=self.lexical_only_kinds,
         )
 
     @property
@@ -141,6 +148,27 @@ def check_ingest_mode(value: str) -> IngestMode:
     if value not in _PLANS:
         raise ValueError(f"ingest_mode must be one of {list(INGEST_MODES)}, not {value!r}")
     return _PLANS[value].mode
+
+
+def lexical_only_kinds(value: str | Iterable[str]) -> frozenset[ObjectKind]:
+    """Kind names (comma separated, any case; ``APP_INDEX_LEXICAL_ONLY_KINDS``) as kinds.
+
+    Blank is the empty set. An unknown name, or ``Text`` (a Text member without a vector is a
+    running line), is a ``ValueError`` naming the setting and the accepted kinds.
+    """
+    names = value.split(",") if isinstance(value, str) else list(value)
+    accepted = {kind.value.lower(): kind for kind in ObjectKind if kind is not ObjectKind.TEXT}
+    kinds: set[ObjectKind] = set()
+    for name in (name.strip() for name in names):
+        if not name:
+            continue
+        if name.lower() not in accepted:
+            raise ValueError(
+                f"APP_INDEX_LEXICAL_ONLY_KINDS: {name!r} is not one of "
+                f"{sorted(kind.value for kind in accepted.values())}"
+            )
+        kinds.add(accepted[name.lower()])
+    return frozenset(kinds)
 
 
 def check_layout_policy(value: str) -> LayoutPolicy:
@@ -243,9 +271,12 @@ def ingest_plan(
     table_row_index_units: bool | None = None,
     drop_running_lines_from_index: bool | None = None,
     unverified_table_structure: UnverifiedTableStructure | None = None,
+    lexical_only: str | Iterable[str] | None = None,
 ) -> IngestPlan:
     """The switches one mode sets; a non-``None`` override replaces that one switch."""
     plan = _PLANS[check_ingest_mode(mode)]
+    if lexical_only is not None:
+        plan = replace(plan, lexical_only_kinds=lexical_only_kinds(lexical_only))
     if table_row_index_units is not None:
         plan = replace(plan, table_row_index_units=table_row_index_units)
     if drop_running_lines_from_index is not None:

@@ -7,6 +7,7 @@ from math import sqrt
 
 from pydantic import TypeAdapter
 
+from enterprise_pdf_rag.adapters.aia_ingestion import read_text_sidecar
 from enterprise_pdf_rag.adapters.bar_publication import parse_displayed_bar_receipt
 from enterprise_pdf_rag.adapters.chart_member_validation import (
     uses_displayed_bar_policy,
@@ -32,6 +33,7 @@ from enterprise_pdf_rag.processing.index_text import (
     member_index_text,
     table_row_units,
 )
+from enterprise_pdf_rag.processing.lexical.chart_text_layer import chart_text_layer
 from enterprise_pdf_rag.processing.retrieval import (
     IndexEntry,
     PinnedRetrievalHit,
@@ -142,6 +144,36 @@ def member_text(
     return contextual_index_text(body, context)
 
 
+def lexical_member_text(
+    sources: LocalDocumentStore,
+    assets: LocalDocumentStore,
+    plan: RetrievalPlan,
+    member: RetrievalMember,
+    context: PageIndexContext | None,
+    vectors: int,
+) -> str:
+    """The text BM25 scores for one pinned member; ``member_text`` but for a lexical-only chart.
+
+    A chart its snapshot indexed lexical-only (no vector) scores the PDF text layer printed
+    inside its rectangle (``chart_text_layer``), read from the pinned source page: never its
+    description, never a value its IR rendered. Every other member scores ``member_text``.
+    """
+    options = IndexTextOptions.from_index_version(plan.index_version)
+    if member.kind is not ObjectKind.CHART or member.kind not in options.lexical_only_kinds:
+        return member_text(assets, plan, member, context)
+    if vectors:
+        return member_text(assets, plan, member, context)
+    bbox = member_anchor(assets, member)
+    if bbox is None:
+        raise ValueError("A lexical-only chart member carries no page rectangle")
+    source = sources.load(plan.scope.source_manifest_id)
+    spans = read_text_sidecar(sources, source, member.page_index).spans
+    body = chart_text_layer(member.page_index, spans, bbox).text
+    if plan.qualification_policy not in CONTEXTUAL_POLICIES:
+        return body
+    return contextual_index_text(body, context)
+
+
 def member_units(
     assets: LocalDocumentStore,
     plan: RetrievalPlan,
@@ -152,12 +184,14 @@ def member_units(
     """The units a unit index scored this member as (``MemberText.units``); no validation.
 
     ``vectors`` is how many index vectors the snapshot holds for the member: none marks a
-    running header / footer, and a row-units table must hold exactly one per unit. ``None``
-    means the member scores its ``member_text`` as one unit, which every member of a
-    snapshot indexed without the switches does.
+    running header / footer (or a lexical-only member, which keeps its units for BM25), and a
+    row-units table must hold exactly one per unit. ``None`` means the member scores its
+    ``member_text`` as one unit, which every member of a snapshot indexed without the
+    switches does.
     """
     options = IndexTextOptions.from_index_version(plan.index_version)
-    if options.drop_running_lines and vectors == 0:
+    lexical = vectors == 0 and member.kind in options.lexical_only_kinds
+    if options.drop_running_lines and vectors == 0 and not lexical:
         return ()
     if not options.table_row_units or member.kind is not ObjectKind.TABLE:
         return None
@@ -171,6 +205,8 @@ def member_units(
         units = inferred_table_row_units(
             TypeAdapter(TableIR).validate_json(assets.get(member.ir)), scoped
         )
+    if lexical:
+        return units
     if len(units or ("",)) != vectors:
         raise ValueError("Row units differ from the vectors their snapshot indexed")
     return units
@@ -263,6 +299,8 @@ class ProcessingRetrieval:
         self.row_unit_tables = 0
         self.row_units = 0
         self.unscored_running = 0
+        # Members of a lexical-only kind: in the plan and BM25, holding no vector.
+        self.lexical_only = 0
 
     @shared_pdfs()
     def build(
@@ -284,13 +322,17 @@ class ProcessingRetrieval:
         verbatim-rows table as one vector per row unit (all its units under one cache entry);
         ``drop_running_lines`` embeds a Text member that prints only running header / footer
         lines not at all, so neither channel scores it - it stays a member, resolvable,
-        quotable and in its page window. The snapshot's ``index_version`` names the switches.
+        quotable and in its page window. ``lexical_only_kinds`` embeds the members of those
+        kinds not at all: they hold no vector, and BM25 alone scores their units (a chart its
+        PDF text layer, ``lexical_member_text``). The snapshot's ``index_version`` names the
+        switches.
         """
         self.embedding_requests = 0
         self.embedded_objects = 0
         self.row_unit_tables = 0
         self.row_units = 0
         self.unscored_running = 0
+        self.lexical_only = 0
         running = read_running_spans(self.sources, scope) if options.drop_running_lines else None
         pending: list[
             tuple[
@@ -300,6 +342,7 @@ class ProcessingRetrieval:
                 tuple[AssetRef, ...],
                 str,
                 tuple[str, ...] | None,
+                bool,
             ]
         ] = []
         for page_index, record in records:
@@ -419,21 +462,34 @@ class ProcessingRetrieval:
             ):
                 units = ()
             pending.append(
-                (page_index, record, (ir, description, qualification, svg), lineage, text, units)
+                (
+                    page_index,
+                    record,
+                    (ir, description, qualification, svg),
+                    lineage,
+                    text,
+                    units,
+                    record.kind in options.lexical_only_kinds,
+                )
             )
-        if pending and all(item[5] == () for item in pending):
+        if pending and all(item[5] == () or item[6] for item in pending):
             # Nothing else would give the snapshot a vector dimension; score them after all.
-            pending = [(*item[:5], None) for item in pending]
+            pending = [(*item[:5], None if item[5] == () else item[5], False) for item in pending]
         self._embed_uncached(
             [
                 (refs[1], (text,) if units is None else units, units is not None)
-                for _, _, refs, _, text, units in pending
-                if units != ()
+                for _, _, refs, _, text, units, lexical in pending
+                if units != () and not lexical
             ]
         )
         vectors: dict[int, tuple[AssetRef, tuple[tuple[float, ...], ...]]] = {}
-        for position, (_, _, refs, _, text, units) in enumerate(pending):
-            if units is None:
+        for position, (_, _, refs, _, text, units, lexical) in enumerate(pending):
+            if lexical:
+                self.lexical_only += 1
+                if units:
+                    self.row_unit_tables += 1
+                    self.row_units += len(units)
+            elif units is None:
                 ref, embedding = self._embedding(refs[1], text)
                 vectors[position] = (ref, (embedding.vector,))
             elif units:
@@ -446,13 +502,14 @@ class ProcessingRetrieval:
             raise ValueError("One retrieval snapshot cannot mix embedding dimensions")
         members: list[RetrievalMember] = []
         entries: list[IndexEntry] = []
-        for position, (page_index, record, refs, lineage, _, _) in enumerate(pending):
+        for position, (page_index, record, refs, lineage, _, _, lexical) in enumerate(pending):
             ir, description, qualification, svg = refs
             if position in vectors:
                 embedding_ref, scored = vectors[position]
             else:
                 embedding_ref, scored = self._unscored(description), ()
-                self.unscored_running += 1
+                if not lexical:
+                    self.unscored_running += 1
             member = RetrievalMember(
                 record.object_id,
                 record.kind,

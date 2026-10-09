@@ -18,7 +18,7 @@ import json
 import re
 from _thread import LockType
 from collections import Counter
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import replace
 from hashlib import sha256
@@ -1666,6 +1666,7 @@ def run_folder_pipeline(
     table_row_index_units: bool | None = None,
     drop_running_lines_from_index: bool | None = None,
     unverified_table_structure: UnverifiedTableStructure | None = None,
+    lexical_only_kinds: str | Iterable[str] | None = None,
     max_questions: int | None = None,
     question_selection: QuestionSelectionMode = "first",
     only_question_docs: bool = False,
@@ -1729,6 +1730,8 @@ def run_folder_pipeline(
     ``table_row_index_units`` / ``drop_running_lines_from_index`` override the index-text
     layout the same way (on in lite, off in full): a long row table scores as one unit per
     figure row with its header repeated, and a running header / footer scores as nothing.
+    ``lexical_only_kinds`` (``None`` reads ``APP_INDEX_LEXICAL_ONLY_KINDS``, empty by default)
+    embeds no member of those kinds: BM25 alone scores them, a chart its PDF text layer.
 
     Raises ``ValueError`` for an invalid budget, ``FileNotFoundError`` for a missing folder or
     question set and ``PreflightError`` for a missing or unreachable dependency, all before
@@ -1766,6 +1769,11 @@ def run_folder_pipeline(
         table_row_index_units=table_row_index_units,
         drop_running_lines_from_index=drop_running_lines_from_index,
         unverified_table_structure=unverified_table_structure,
+        lexical_only=(
+            get_settings().index_lexical_only_kinds
+            if lexical_only_kinds is None
+            else lexical_only_kinds
+        ),
     )
     tree = plan.build_tree if build_tree is None else build_tree
     settings = get_settings()

@@ -16,8 +16,8 @@ from enterprise_pdf_rag.adapters.http.schemas import BoundaryModel
 from enterprise_pdf_rag.adapters.processing_retrieval import (
     CONTEXTUAL_POLICIES,
     ProcessingRetrieval,
+    lexical_member_text,
     member_anchor,
-    member_text,
     member_units,
     resolve_processing_context,
 )
@@ -554,7 +554,9 @@ class MountedDocument:
         vectors: int,
     ) -> MemberText:
         context = self._contexts.get(member.page_index)
-        text = member_text(self._outputs.assets, plan, member, context)
+        text = lexical_member_text(
+            self._sources, self._outputs.assets, plan, member, context, vectors
+        )
         units = member_units(self._outputs.assets, plan, member, context, vectors)
         # Reported only when the policy actually prefixed it, so ``body`` stays exact.
         header = (

@@ -108,6 +108,8 @@ class DraftIndex(BoundaryModel):
     row_unit_tables: int = 0
     row_units: int = 0
     unscored_running_members: int = 0
+    # Members of a lexical-only kind (``IndexTextOptions.lexical_only_kinds``): no vector.
+    lexical_only_members: int = 0
     indexed: Literal[True] = True
     activated: Literal[False] = False
     retrieval_status: Literal["indexed; publication pending"] = "indexed; publication pending"
@@ -185,6 +187,7 @@ def index_draft(
             row_unit_tables=retrieval.row_unit_tables,
             row_units=retrieval.row_units,
             unscored_running_members=retrieval.unscored_running,
+            lexical_only_members=retrieval.lexical_only,
             review_path=None if written is None else str(written),
         )
     finally:
