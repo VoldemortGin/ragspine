@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/common/evidence/
-verified-against: 1c6d2ab
+verified-against: 839493c
 ---
 
 # common/evidence — agent contract
@@ -55,7 +55,13 @@ object_backend/  the store persistence seam (sqlite object-store PR-1): ObjectBa
               own model cache — parent dir a staged store — is a StagedModelCacheBackend
               published with it, the root answer cache stays on files; staged inlines up to
               8 MiB unless APP_OBJECT_STORE_INLINE_MAX_BYTES is set; auto falling back to files
-              warns + traces failure_code once per dir; enterprise-pdf-rag ADR 0044 / 0046).
+              warns + traces failure_code once per dir; enterprise-pdf-rag ADR 0044 / 0046.
+              ADR 0047: <doc>/source, <doc>/processing and <doc>/processing/model-cache are
+              scopes of one StagedDocument — one shared _SqliteCore, a shared content-addressed
+              objects table + per-scope refs / prefixed tables (SqliteBackend(core=, scope=)),
+              the PDF inline up to 64 MiB, published whole as <doc>/document.sqlite; an old
+              per-store db → LayoutMismatch(layout_mismatch), and non-staged modes refuse a
+              document.sqlite the same way).
               **Wired for the stores
               (PR-2)** — LocalDocumentStore / ProcessingStore / scan_catalog / mount pins
               read and write only through it — **and the model cache (PR-3)**:

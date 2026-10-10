@@ -5,6 +5,8 @@ backend; its §3 "model cache stays on files" is narrowed, see its Amendment 1) 
 [ADR 0036](0036-sqlite-object-backend.md) §6 (the `auto` fallback is no longer silent). Opt-in
 like ADR 0044: with `APP_OBJECT_STORE_BACKEND` = `auto` / `sqlite` / `files` nothing changes,
 byte for byte. It changes **no hash, no fingerprint, no envelope byte and no published id**.
+For the document stores this is amended by [ADR 0047](0047-one-sqlite-per-document.md): the two
+stores, the document's model cache and the PDF now share one `document.sqlite` — one file.
 
 ## Context
 
