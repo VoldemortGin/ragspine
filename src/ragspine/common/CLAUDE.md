@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/common/
-verified-against: 839493c
+verified-against: 9d41bc3
 ---
 
 # common — agent contract
