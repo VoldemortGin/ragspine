@@ -42,6 +42,7 @@ from tests.enterprise_pdf_rag.adapters.lite_ingest_helpers import (
     FULL_STORE_DIGEST,
     FULL_STORE_FILES,
     _db_logical_files,
+    _document_db_files,
     lite_env,
     mixed_folder,
     store_digest,
@@ -145,7 +146,11 @@ def _run(
 
 
 def _cache_dirs(root: Path) -> list[Path]:
-    return sorted(path for path in root.rglob("model-cache") if path.is_dir())
+    """Every model-cache directory, and each staged document's (ADR 0047: its rows live in
+    ``<doc>/document.sqlite``, the directory itself need not exist)."""
+    found = {path for path in root.rglob("model-cache") if path.is_dir()}
+    found.update(db.parent / "processing" / "model-cache" for db in root.rglob("document.sqlite"))
+    return sorted(found)
 
 
 def _assert_no_claim_left(root: Path) -> None:
@@ -158,7 +163,9 @@ def _logical_tree(root: Path) -> Path:
     ``model-cache.sqlite*`` is replaced by the records / responses / contexts it holds, and every
     ``store.sqlite*`` by the objects / stage entries / pointers / records it holds, as the files
     layout would store them (a sqlite file is not byte-deterministic, its content is)."""
-    if not any(root.rglob("model-cache.sqlite")) and not any(root.rglob("store.sqlite")):
+    if not any(
+        any(root.rglob(name)) for name in ("model-cache.sqlite", "store.sqlite", "document.sqlite")
+    ):
         return root
     logical = root.parent / f"{root.name}.logical"
     shutil.rmtree(logical, ignore_errors=True)
@@ -167,6 +174,13 @@ def _logical_tree(root: Path) -> Path:
             target = logical / path.relative_to(root)
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(path, target)
+    for db in sorted(root.rglob("document.sqlite")):
+        for name, row in _document_db_files(db).items():
+            if name.startswith("processing/model-cache/"):
+                continue  # the model cache is rebuilt below, as for model-cache.sqlite
+            target = logical / db.parent.relative_to(root) / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(row)
     for db in sorted(root.rglob("store.sqlite")):
         for name, row in _db_logical_files(db).items():
             target = logical / db.parent.relative_to(root) / name

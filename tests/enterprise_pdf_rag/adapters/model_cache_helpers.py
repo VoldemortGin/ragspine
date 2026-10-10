@@ -19,8 +19,15 @@ DB_NAME = "model-cache.sqlite"
 
 
 def _db(cache: Path) -> Path | None:
+    """``<cache>/model-cache.sqlite``; for a document's ``processing/model-cache`` written by the
+    staged backend, the document's single ``document.sqlite`` (ADR 0047: same table names)."""
     path = cache / DB_NAME
-    return path if path.is_file() else None
+    if path.is_file():
+        return path
+    document = cache.parent.parent / "document.sqlite"
+    if cache.name == "model-cache" and cache.parent.name == "processing" and document.is_file():
+        return document
+    return None
 
 
 def _rows(cache: Path, sql: str, parameters: tuple[object, ...] = ()) -> list[tuple[Any, ...]]:

@@ -498,6 +498,15 @@ class StagedDocumentBackend(SqliteBackend):
             scope=scope,
         )
         self.document = document
+        self._root_made = False
+
+    def _before_write(self) -> None:
+        """写之前:取文档的发布者租约;第一次写时建出 store 根目录(外置对象、审阅页写在那里;
+        每个 store 根一个 db 时它随 db 出现,这里 db 不在它下面)。"""
+        self.document._claim_publisher()
+        if not self._root_made:
+            self.root.mkdir(parents=True, exist_ok=True)
+            self._root_made = True
 
     @property
     def work_dir(self) -> Path:
@@ -516,7 +525,7 @@ class StagedDocumentBackend(SqliteBackend):
     def put_object(
         self, digest: str, data: bytes, media_type: str, *, replace: bool = False
     ) -> Literal["placed", "existing"]:
-        self.document._claim_publisher()
+        self._before_write()
         result = super().put_object(digest, data, media_type, replace=replace)
         if result == "placed":
             self.document._writes += 1
@@ -525,19 +534,19 @@ class StagedDocumentBackend(SqliteBackend):
     def put_stage_entry(
         self, fingerprint: str, entry: StageEntry, *, replace: bool = False
     ) -> Literal["placed", "existing"]:
-        self.document._claim_publisher()
+        self._before_write()
         result = super().put_stage_entry(fingerprint, entry, replace=replace)
         if result == "placed":
             self.document._writes += 1
         return result
 
     def set_pointer(self, name: str, digest: str) -> None:
-        self.document._claim_publisher()
+        self._before_write()
         super().set_pointer(name, digest)
         self.document._writes += 1
 
     def put_record(self, name: str, data: bytes) -> None:
-        self.document._claim_publisher()
+        self._before_write()
         super().put_record(name, data)
         self.document._writes += 1
 
