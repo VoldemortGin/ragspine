@@ -306,7 +306,7 @@ def test_staged_drops_the_derived_bytes_by_default(
     assert requests == FULL_REQUESTS_DIGEST and digest != FULL_STORE_DIGEST
 
     staged.release_staged(tmp_path)
-    _env(monkeypatch, APP_OBJECT_STORE_BACKEND="sqlite")
+    _env(monkeypatch, APP_OBJECT_STORE_BACKEND="staged")
     _, outputs, manifest = _published(_document_root(result))
     assert all(
         outputs.assets.backend.get_content(stage.artifact.sha256) is None
