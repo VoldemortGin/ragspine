@@ -40,6 +40,9 @@ def staged_backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[
     staging = tmp_path / "staging"
     monkeypatch.setenv("APP_OBJECT_STORE_BACKEND", "staged")
     monkeypatch.setenv("APP_OBJECT_STORE_STAGING_DIR", str(staging))
+    # ADR 0048: staged 默认不落盘派生产物;这里钉死的是 staged 机制本身的逐字节等价,
+    # 所以显式落盘。staged 的默认值见 test_derived_artifacts。
+    monkeypatch.setenv("APP_PERSIST_DERIVED_ARTIFACTS", "true")
     get_settings.cache_clear()
     clear_probe_cache()
     yield staging

@@ -10,6 +10,7 @@ from enterprise_pdf_rag.adapters.bar_qualification import (
     QualifiedBarProjection,
     qualify_displayed_bar,
 )
+from enterprise_pdf_rag.adapters.derived_artifacts import derived_artifact
 from enterprise_pdf_rag.adapters.description_normalization import (
     DescriptionNormalizationReceipt,
     NormalizedDescription,
@@ -178,7 +179,11 @@ def _inputs(
         region_id=region_id,
         context_span_ids=context_ids,
     )
-    if prepared.model_view != view or prepared.svg.svg.encode() != assets.get(source_svg):
+    expected_svg = prepared.svg.svg.encode()
+    if (
+        prepared.model_view != view
+        or derived_artifact(assets, source_svg, lambda: expected_svg) != expected_svg
+    ):
         raise ValueError("displayed_bar_view_or_svg_source_mismatch")
     chart = TypeAdapter(ChartIR).validate_json(assets.get(raw_chart), strict=True, extra="forbid")
     previous = TypeAdapter(TextDescription).validate_json(

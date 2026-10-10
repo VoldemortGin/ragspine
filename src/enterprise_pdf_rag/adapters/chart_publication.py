@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 
 from enterprise_pdf_rag.adapters.aia_ingestion import read_text_sidecar
+from enterprise_pdf_rag.adapters.derived_artifacts import derived_artifact
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.donut_qualification import DonutQualification
 from enterprise_pdf_rag.adapters.figure_label_qualification import (
@@ -236,7 +237,11 @@ def _load_chart_inputs(
         region_id=receipt.region_id,
         context_span_ids=context_ids,
     )
-    if view != prepared.model_view or assets.get(member.source_svg) != prepared.svg.svg.encode():
+    expected_svg = prepared.svg.svg.encode()
+    if (
+        view != prepared.model_view
+        or derived_artifact(assets, member.source_svg, lambda: expected_svg) != expected_svg
+    ):
         raise ValueError("Chart SVG or model view differs from the pinned source derivation")
     raw_chart = TypeAdapter(ChartIR).validate_json(assets.get(receipt.raw_chart), strict=True)
     raw_description = TypeAdapter(TextDescription).validate_json(

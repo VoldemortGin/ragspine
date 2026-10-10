@@ -2,11 +2,17 @@
 
 import hashlib
 import re
+from collections.abc import Sequence
 from contextlib import AbstractContextManager
 from pathlib import Path
 
 from pydantic import TypeAdapter
 
+from enterprise_pdf_rag.adapters.derived_artifacts import (
+    DERIVED_MEDIA_TYPES,
+    mark_recomputable,
+    recomputable,
+)
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.http.processing_schemas import (
     DocumentTreeRecord,
@@ -26,6 +32,7 @@ from enterprise_pdf_rag.processing.retrieval import (
     RetrievalUnitEmbeddings,
     retrieval_dependencies,
 )
+from ragspine.common.evidence.configs import Settings, get_settings
 from ragspine.common.evidence.file_placement import note_repair
 from ragspine.common.evidence.object_backend.files import INLINE_ARTIFACT_LIMIT
 from ragspine.common.evidence.object_backend.protocol import (
@@ -44,6 +51,15 @@ from ragspine.extraction.evidence.page.models import (
     StageOutcome,
     StageState,
 )
+
+
+def persist_derived_default(settings: Settings | None = None) -> bool:
+    """ADR 0048: ``APP_PERSIST_DERIVED_ARTIFACTS`` when set explicitly; unset → false under
+    the ``staged`` object backend, true everywhere else (byte for byte as before)."""
+    settings = get_settings() if settings is None else settings
+    if "persist_derived_artifacts" in settings.model_fields_set:
+        return settings.persist_derived_artifacts
+    return settings.object_store_backend != "staged"
 
 
 class ProcessingStore:
@@ -68,8 +84,13 @@ class ProcessingStore:
         verify_every_load: bool | None = None,
         persisted_receipts: bool | None = None,
         record_receipts: bool = True,
+        persist_derived: bool | None = None,
     ) -> None:
         self.root = root
+        # ADR 0048: whether ``cache_output(..., derived=True)`` writes the bytes.
+        self.persist_derived = (
+            persist_derived_default() if persist_derived is None else persist_derived
+        )
         # One backend per store root (ADR 0036), shared with the asset store so the writer
         # lease and the connections are held once; ``close()`` releases them.
         self._backend = open_backend(root) if backend is None else backend
@@ -99,6 +120,7 @@ class ProcessingStore:
             backend=self._backend,
             verify_every_request=self._verify_every_request,
             verify_every_load=True,
+            persist_derived=self.persist_derived,
         )
 
     @property
@@ -162,6 +184,9 @@ class ProcessingStore:
             # The entry names an object: a copy inline elsewhere does not make it whole.
             self.assets.get_object(artifact)
         except (OSError, ValueError):
+            if recomputable(self.assets, artifact):
+                # ADR 0048: a derived output recorded without its bytes is whole.
+                return outcome, False
             return None, self._damaged(fingerprint)
         return outcome, False
 
@@ -189,13 +214,26 @@ class ProcessingStore:
         payload: bytes,
         *,
         media_type: str = "application/json",
+        derived: bool = False,
     ) -> StageOutcome:
         """Store a succeeded stage's output and cache it under ``fingerprint``; the outcome.
 
         An output of 1 to ``INLINE_ARTIFACT_LIMIT`` bytes is written inside the pointer, after
         the envelope, and never as an object (ADR 0029 Amendment 2); a larger one is put as an
         object, exactly as ``put`` + ``cache`` did. Same outcome, same digest either way.
+
+        ``derived`` marks an output recomputable from the pinned page SVG and the object's
+        geometry (ADR 0048); with ``persist_derived`` off only its entry and a marker are
+        written — same envelope, same outcome, no bytes.
         """
+        if derived and not self.persist_derived and media_type in DERIVED_MEDIA_TYPES:
+            ref = AssetRef(hashlib.sha256(payload).hexdigest(), media_type, len(payload))
+            outcome = StageOutcome(stage, fingerprint, StageState.SUCCEEDED, producer, ref)
+            # An entry written earlier (bytes and all) is kept as it is, unmarked.
+            if self.cached(fingerprint) is None:
+                mark_recomputable(self.assets, ref)
+            self._cache(outcome)
+            return outcome
         if not 0 < len(payload) <= INLINE_ARTIFACT_LIMIT:
             ref = self.assets.put(payload, media_type=media_type)
             outcome = StageOutcome(stage, fingerprint, StageState.SUCCEEDED, producer, ref)
@@ -231,9 +269,14 @@ class ProcessingStore:
         self._backend.set_pointer("current-processing", digest)
         return digest
 
+    def held(self, refs: Sequence[AssetRef]) -> tuple[AssetRef, ...]:
+        """``refs`` less the derived ones recorded without bytes (ADR 0048): those are checked
+        by digest when a reader recomputes them, never read back here."""
+        return tuple(ref for ref in refs if not recomputable(self.assets, ref))
+
     def save_draft(self, manifest: ProcessingManifest, *, sources: LocalDocumentStore) -> str:
         """Validate an immutable release without changing active discovery state."""
-        for ref in processing_assets(manifest):
+        for ref in self.held(processing_assets(manifest)):
             self.assets.verify(ref)
         ref = self.assets.put(
             ProcessingEnvelope(manifest=manifest).model_dump_json().encode(),
@@ -250,7 +293,7 @@ class ProcessingStore:
         manifest = ProcessingEnvelope.model_validate_json(
             self.assets.read_content(snapshot_id)
         ).manifest
-        self.assets.verify_snapshot(snapshot_id, processing_assets(manifest))
+        self.assets.verify_snapshot(snapshot_id, self.held(processing_assets(manifest)))
         pages = self.load_page_metadata(manifest)
         if manifest.document_metadata != summarize_document(tuple(pages.values())):
             raise ValueError("Document metadata differs from its page metadata stages")
@@ -311,7 +354,7 @@ class ProcessingStore:
         ):
             raise ValueError("Retrieval publication has a different dependency closure")
         if plan.index_version.startswith(UNIT_INDEX_VERSION + ":"):
-            for ref in publication.dependencies:
+            for ref in self.held(publication.dependencies):
                 self.assets.verify(ref, receipt=True)
             self._check_unit_index(plan, index)
             return plan, index
@@ -320,7 +363,7 @@ class ProcessingStore:
         ):
             raise ValueError("Retrieval index readiness does not cover the exact members")
         indexed = {entry.member_id: entry.vector for entry in index.entries}
-        for ref in publication.dependencies:
+        for ref in self.held(publication.dependencies):
             self.assets.verify(ref, receipt=True)
         for member in plan.members:
             embedding = TypeAdapter(RetrievalEmbedding).validate_json(

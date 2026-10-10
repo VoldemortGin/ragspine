@@ -61,7 +61,10 @@ object_backend/  the store persistence seam (sqlite object-store PR-1): ObjectBa
               objects table + per-scope refs / prefixed tables (SqliteBackend(core=, scope=)),
               the PDF inline up to 64 MiB, published whole as <doc>/document.sqlite; an old
               per-store db → LayoutMismatch(layout_mismatch), and non-staged modes refuse a
-              document.sqlite the same way).
+              document.sqlite the same way;
+              Settings.persist_derived_artifacts / APP_PERSIST_DERIVED_ARTIFACTS — whether the
+              object SVG crops / PNG renders are written, unset = off under staged, on
+              elsewhere — is read by ProcessingStore, never by a backend; ADR 0048).
               **Wired for the stores
               (PR-2)** — LocalDocumentStore / ProcessingStore / scan_catalog / mount pins
               read and write only through it — **and the model cache (PR-3)**:

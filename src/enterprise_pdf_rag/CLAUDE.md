@@ -426,7 +426,15 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   working copy published whole at each run-folder stage boundary — **one file per document** on
   the mount, `<sha256>/document.sqlite` (objects inline up to 8 MiB); an old per-store db there,
   or a `document.sqlite` opened by `files` / `sqlite` / `auto`, is `layout_mismatch`; the root
-  answer cache stays on files; `auto` falling back to files logs a warning + trace. A mount verifies
+  answer cache stays on files; `auto` falling back to files logs a warning + trace. Derived object
+  artifacts — the SVG crops (`native_crop`, `svg`) and resvg PNGs (`model_render`) — are
+  written only while `APP_PERSIST_DERIVED_ARTIFACTS` is on (unset: off under `staged`, on
+  elsewhere); off, their stage entry, envelope and digest stay, a `derived-artifacts/<sha256>.json`
+  record marks them, and every reader (`adapters/derived_artifacts.py`: proofs, requalification,
+  review export) recomputes them from the page SVG + layout item and refuses anything off the
+  recorded digest with `DerivedArtifactDrift` + trace `derived_artifact_drift` — same ids, same
+  review pages ([ADR 0048](../../docs/enterprise-pdf-rag/adr/0048-derived-artifacts-recomputed-on-demand.md)).
+  A mount verifies
   its **whole** pinned release once, when it is mounted — every asset digest, the source it was
   cut from, every member's evidence. Every later request re-reads the one file that names all
   of it, the pinned manifest object whose digest **is** the processing id, and refuses any
