@@ -5,9 +5,9 @@
   本地工作副本在 ``APP_OBJECT_STORE_STAGING_DIR`` 下;
 - 每个阶段边界都提交了该文档的 store,文档结束后注册表里不再有它;
 - 本地盘被清空后重跑:从发布版拷回,零模型调用,同一发布 id;
-- ADR 0046:文档自己的模型缓存也 staged,文档结束后发布目录只有 4 个整文件
-  (两个 store.sqlite、model-cache.sqlite、PDF 原件),没有 -wal / -shm / 租约 / 临时名;
-  在某次发布的 rename 之前被杀后重跑能恢复。
+- ADR 0046:文档自己的模型缓存也 staged;在某次发布的 rename 之前被杀后重跑能恢复。
+- ADR 0047:每份文档一个 db——文档结束后发布目录只有 **1 个**整文件 ``document.sqlite``
+  (两个 store、模型缓存与 PDF 原件都在里面),没有 -wal / -shm / 租约 / 临时名。
 """
 
 import os
@@ -70,15 +70,17 @@ def test_staged_run_publishes_whole_store_files_with_the_same_bytes(
 
     assert document.sha256 is not None
     document_root = (tmp_path / "ingestion").resolve() / document.sha256
-    for store in ("source", "processing"):
-        assert (document_root / store / "store.sqlite").is_file()
-        leftovers = [
-            path.name
-            for path in (document_root / store).iterdir()
-            if path.name.startswith(("store.sqlite-", "store.sqlite.", ".store.sqlite"))
-        ]
-        assert leftovers == []
-    assert any(staged_backend.rglob("store.sqlite"))  # 本地工作副本
+    assert (document_root / "document.sqlite").is_file()
+    assert not any(document_root.rglob("store.sqlite")) and not any(
+        document_root.rglob("model-cache.sqlite")
+    )
+    leftovers = [
+        path.name
+        for path in document_root.iterdir()
+        if path.name.startswith(("document.sqlite-", "document.sqlite.", ".document.sqlite"))
+    ]
+    assert leftovers == []
+    assert any(staged_backend.rglob("document.sqlite"))  # 本地工作副本
     # requalify / qualify / index / publish 四个阶段边界 + 文档结束各提交一次。
     assert boundaries == [document_root] * 5
     assert not [root for root in staged.registered() if root.is_relative_to(document_root)]
@@ -98,10 +100,7 @@ def test_staged_rerun_after_local_disk_loss_restores_and_calls_nothing(
     assert document.status == "published" and document.publication is not None
     assert document.publication.published_processing_id == FULL_PUBLISHED_ID
     assert sum(tasks.values()) == 0
-    assert any(staged_backend.rglob("store.sqlite"))
-
-
-_PDF_COPY = re.compile(r"^source/objects/sha256-sharded/[0-9a-f]{2}/[0-9a-f]{64}$")
+    assert any(staged_backend.rglob("document.sqlite"))
 
 
 def _document_files(document_root: Path) -> list[str]:
@@ -112,7 +111,7 @@ def _document_files(document_root: Path) -> list[str]:
     )
 
 
-def test_staged_run_leaves_four_whole_files_per_document(
+def test_staged_run_leaves_one_whole_file_per_document(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, staged_backend: Path
 ) -> None:
     lite_env(monkeypatch)
@@ -122,17 +121,15 @@ def test_staged_run_leaves_four_whole_files_per_document(
     assert document.status == "published" and document.sha256 is not None
     document_root = (tmp_path / "ingestion").resolve() / document.sha256
 
-    files = _document_files(document_root)
-    assert len(files) == 4, files
-    assert files[:3] == [
-        "processing/model-cache/model-cache.sqlite",
-        "processing/store.sqlite",
-        "source/objects/sha256-sharded/" + files[2].split("/", 3)[3],
-    ]
-    assert _PDF_COPY.match(files[2]) and files[3] == "source/store.sqlite"
-    for db in ("processing/model-cache/model-cache.sqlite", "processing/store.sqlite"):
-        with closing(sqlite3.connect(document_root / db)) as connection:
-            assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+    assert _document_files(document_root) == ["document.sqlite"]
+    published = document_root / "document.sqlite"
+    with closing(sqlite3.connect(published)) as connection:
+        assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+        # PDF 原件在库里(内联行),字节与源文件一致。
+        (pdf,) = connection.execute(
+            "SELECT bytes FROM source_objects WHERE media_type = 'application/pdf'"
+        ).fetchone()
+    assert bytes(pdf) == (tmp_path / "pdfs" / "mixed.pdf").read_bytes()
     assert staged.registered() == ()
 
 

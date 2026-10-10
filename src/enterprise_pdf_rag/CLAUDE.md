@@ -1,6 +1,6 @@
 ---
 covers: src/enterprise_pdf_rag/
-verified-against: a8a3ec1
+verified-against: 839493c
 ---
 
 # enterprise_pdf_rag — agent contract
@@ -420,11 +420,13 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   objects such as the PDF stay sharded files) — same digests, envelopes and published ids; one
   page's writes share a `transaction()`. `staged` (opt-in, [ADR
   0044](../../docs/enterprise-pdf-rag/adr/0044-staged-object-backend.md) /
-  [0046](../../docs/enterprise-pdf-rag/adr/0046-four-files-per-document.md)) keeps those dbs and
-  the document's own `processing/model-cache` in local working copies published whole at each
-  run-folder stage boundary — four files per document on the mount (two `store.sqlite`,
-  `model-cache/model-cache.sqlite`, the PDF; objects inline up to 8 MiB), the root answer cache
-  stays on files; `auto` falling back to files logs a warning + trace. A mount verifies
+  [0046](../../docs/enterprise-pdf-rag/adr/0046-four-files-per-document.md) /
+  [0047](../../docs/enterprise-pdf-rag/adr/0047-one-sqlite-per-document.md)) keeps a document's
+  two stores, its own `processing/model-cache` and the PDF (≤ 64 MiB) as scopes of **one** local
+  working copy published whole at each run-folder stage boundary — **one file per document** on
+  the mount, `<sha256>/document.sqlite` (objects inline up to 8 MiB); an old per-store db there,
+  or a `document.sqlite` opened by `files` / `sqlite` / `auto`, is `layout_mismatch`; the root
+  answer cache stays on files; `auto` falling back to files logs a warning + trace. A mount verifies
   its **whole** pinned release once, when it is mounted — every asset digest, the source it was
   cut from, every member's evidence. Every later request re-reads the one file that names all
   of it, the pinned manifest object whose digest **is** the processing id, and refuses any

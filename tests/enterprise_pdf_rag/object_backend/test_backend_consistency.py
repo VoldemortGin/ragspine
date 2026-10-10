@@ -25,6 +25,7 @@ from ragspine.common.evidence.object_backend.protocol import (
 )
 from ragspine.common.evidence.object_backend.sqlite import SqliteModelCacheBackend
 from tests.enterprise_pdf_rag.object_backend.conftest import (
+    DOCUMENT_SCOPE,
     damage_object,
     damage_stage_entry,
     db_file,
@@ -304,6 +305,10 @@ def test_an_uncompressed_row_of_a_compressible_type_still_reads(
             " created_at) VALUES (?, ?, 'image/svg+xml', 'raw', 0, ?, 0)",
             (digest, len(data), data),
         )
+        if backend_kind == "document":  # 文档 db:对象行共用,scope 成员表另记
+            connection.execute(
+                f"INSERT INTO {DOCUMENT_SCOPE}_object_refs (digest) VALUES (?)", (digest,)
+            )
     assert backend.get_object(digest) == data
     assert backend.get_content(digest) == data
     assert backend.put_object(digest, data, "image/svg+xml") == "existing"  # 不改写旧行
@@ -445,7 +450,7 @@ def _plant_legacy_claim(cache_dir: Path, key: str, content: bytes, *, generation
     return path
 
 
-@pytest.mark.parametrize("kind", ["files", "sqlite", "staged"])
+@pytest.mark.parametrize("kind", ["files", "sqlite", "staged", "document"])
 def test_a_legacy_claim_file_is_judged_then_taken_over_at_its_next_generation(
     tmp_path: Path, kind: str
 ) -> None:

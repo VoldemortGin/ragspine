@@ -1,7 +1,8 @@
-"""ADR 0046:文档自己的模型缓存 staged 之后,claim / 单飞 / 预算 / 429 共享冷却的语义不变。
+"""ADR 0046 / 0047:文档自己的模型缓存 staged 之后,claim / 单飞 / 预算 / 429 共享冷却的语义不变。
 
 ADR 0042(一个 client 的并发调用)与 ADR 0045(文档内页级并发)的回归用例原样再跑一遍,
-只是模型缓存换成随文档 store 发布的 ``StagedModelCacheBackend``。
+只是模型缓存换成文档 db(``document.sqlite``,ADR 0047)里的 ``StagedDocumentModelCache``
+scope——与同文档的两个 store 共用一个 db、一个连接池与一把写者租约。
 """
 
 from collections.abc import Iterator
@@ -61,12 +62,10 @@ def document_cache(tmp_path: Path, staged_env: Path) -> Iterator[Path]:
 
 
 def _assert_staged_and_published(cache_dir: Path, tmp_path: Path) -> None:
-    assert any(
-        isinstance(backend, staged.StagedModelCacheBackend) for backend in staged._REGISTRY.values()
-    )
+    assert any(isinstance(backend, staged.StagedDocument) for backend in staged._REGISTRY.values())
     staged.release_staged(tmp_path / "doc")
-    assert (cache_dir / "model-cache.sqlite").is_file()
-    assert not (cache_dir / "requests").exists()  # 没有走文件布局
+    assert (tmp_path / "doc" / "document.sqlite").is_file()
+    assert not cache_dir.exists()  # 没有走文件布局,也没有单独的 model-cache.sqlite
 
 
 @pytest.mark.parametrize(
@@ -91,7 +90,8 @@ def test_pages_at_once_on_staged_stores_write_what_the_serial_run_writes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _pages_bytes(tmp_path, monkeypatch)
-    assert any((tmp_path / "both").rglob("model-cache.sqlite"))
+    assert any((tmp_path / "both").rglob("document.sqlite"))
+    assert not any((tmp_path / "both").rglob("model-cache.sqlite"))
 
 
 @pytest.mark.usefixtures("staged_env")

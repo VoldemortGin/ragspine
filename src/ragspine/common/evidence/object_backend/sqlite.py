@@ -28,9 +28,10 @@ import sqlite3
 import threading
 import zlib
 from _thread import LockType
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager, nullcontext, suppress
 from contextvars import ContextVar
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
@@ -140,6 +141,65 @@ CREATE TABLE IF NOT EXISTS claims(
   created_at REAL NOT NULL,
   lease_seconds INTEGER NOT NULL);
 """
+
+# 每份文档一个 db(enterprise-pdf-rag ADR 0047,staged 模式):两个对象 store 是 db 里的两个
+# scope。内容寻址的 ``objects`` 共用(同 digest 只存一行字节),每个 scope 用自己的成员表
+# ``<scope>_object_refs`` 与只读视图 ``<scope>_objects`` 读;stage-cache / 指针 / records 各一份
+# 带 scope 前缀的表。文档的模型缓存表(requests / responses / contexts / claims)独此一份。
+DOCUMENT_SCOPES = ("source", "processing")
+_SCOPED_STORE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS {scope}_object_refs(digest TEXT NOT NULL PRIMARY KEY);
+CREATE VIEW IF NOT EXISTS {scope}_objects AS SELECT objects.* FROM objects
+  JOIN {scope}_object_refs ON {scope}_object_refs.digest = objects.digest;
+CREATE TABLE IF NOT EXISTS {scope}_stage_cache(
+  fingerprint TEXT NOT NULL PRIMARY KEY CHECK(length(fingerprint)=64),
+  envelope_digest TEXT NOT NULL,
+  envelope BLOB NOT NULL,
+  stage TEXT NOT NULL,
+  producer TEXT NOT NULL,
+  artifact_digest TEXT NOT NULL,
+  product BLOB,
+  product_encoding TEXT NOT NULL DEFAULT 'raw',
+  created_at REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS {scope}_stage_cache_by_artifact ON {scope}_stage_cache(artifact_digest);
+CREATE TABLE IF NOT EXISTS {scope}_pointers(name TEXT PRIMARY KEY, digest TEXT NOT NULL, updated_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS {scope}_records(name TEXT PRIMARY KEY, bytes BLOB NOT NULL, updated_at REAL NOT NULL);
+"""
+_OBJECTS_TABLE = STORE_SCHEMA[STORE_SCHEMA.index("CREATE TABLE IF NOT EXISTS objects(") :].split(
+    ";\n", 1
+)[0]
+DOCUMENT_SCHEMA = (
+    "\nCREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);\n"
+    + _OBJECTS_TABLE
+    + ";\n"
+    + "".join(_SCOPED_STORE_SCHEMA.lstrip("\n").format(scope=scope) for scope in DOCUMENT_SCOPES)
+    + MODEL_CACHE_SCHEMA.split(";\n", 1)[1]
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _Tables:
+    """一个对象 store 读写的表名。缺省 = 每个 store 根一个 db 的原表名(SQL 逐字不变);
+    文档 db 的 scope:读对象走视图、写对象进共用 ``objects`` 并记成员行。"""
+
+    objects: str = "objects"
+    refs: str | None = None
+    stage_cache: str = "stage_cache"
+    pointers: str = "pointers"
+    records: str = "records"
+
+    @classmethod
+    def scoped(cls, scope: str) -> "_Tables":
+        if scope not in DOCUMENT_SCOPES:
+            raise ValueError("Unknown document scope")
+        return cls(
+            f"{scope}_objects",
+            f"{scope}_object_refs",
+            f"{scope}_stage_cache",
+            f"{scope}_pointers",
+            f"{scope}_records",
+        )
+
 
 # 本进程已持有的写者租约:db 路径 → 持有它的后端实例数(同进程可重入,见 §4)。
 _WRITER_LOCK = Lock()
@@ -513,20 +573,31 @@ class SqliteBackend:
         inline_max_bytes: int = DEFAULT_INLINE_MAX_BYTES,
         external_media_types: frozenset[str] = frozenset({"application/pdf"}),
         max_db_bytes: int = DEFAULT_MAX_DB_BYTES,
+        media_inline_max_bytes: Mapping[str, int] | None = None,
+        core: _SqliteCore | None = None,
+        scope: str | None = None,
     ) -> None:
         self.root = root
         self._files = FileBackend(root)
         # db_path:db 放在别处(StagedBackend 的本地工作副本);缺省 = <root>/<db_name>。
+        # core + scope:文档 db 里的一个 scope(ADR 0047),连接 / 事务 / 写者租约与同文档的
+        # 其他 scope 共用(调用方拥有 core,本实例不关它)。
         db_file = root / db_name if db_path is None else db_path
-        self._core = _SqliteCore(db_file, STORE_SCHEMA, synchronous=synchronous)
+        self._core = (
+            _SqliteCore(db_file, STORE_SCHEMA, synchronous=synchronous) if core is None else core
+        )
+        self._tables = _Tables() if scope is None else _Tables.scoped(scope)
         self._inline_max_bytes = inline_max_bytes
         self._external_media_types = external_media_types
         self._max_db_bytes = max_db_bytes
+        # 按媒体类型的内联上限(文档 db 的 PDF 例外);缺省没有例外。
+        self._media_inline_max_bytes = dict(media_inline_max_bytes or {})
 
     # ---- 内容寻址对象 ------------------------------------------------------------------
 
     def _external(self, data: bytes, media_type: str) -> bool:
-        if media_type in self._external_media_types or len(data) > self._inline_max_bytes:
+        limit = self._media_inline_max_bytes.get(media_type, self._inline_max_bytes)
+        if media_type in self._external_media_types or len(data) > limit:
             return True
         if len(data) <= _OVERFLOW_INLINE_MAX:
             return False
@@ -540,7 +611,8 @@ class SqliteBackend:
         if connection is None:
             return None
         row = connection.execute(
-            "SELECT byte_length, encoding, external, bytes FROM objects WHERE digest = ?",
+            "SELECT byte_length, encoding, external, bytes"
+            f" FROM {self._tables.objects} WHERE digest = ?",
             (digest,),
         ).fetchone()
         if row is None:
@@ -582,7 +654,7 @@ class SqliteBackend:
         if connection is None:
             return None
         rows = connection.execute(
-            "SELECT product, product_encoding FROM stage_cache"
+            f"SELECT product, product_encoding FROM {self._tables.stage_cache}"
             " WHERE artifact_digest = ? AND product IS NOT NULL",
             (digest,),
         ).fetchall()
@@ -625,7 +697,8 @@ class SqliteBackend:
             None
             if connection is None
             else connection.execute(
-                "SELECT encoding, external, bytes FROM objects WHERE digest = ?", (digest,)
+                f"SELECT encoding, external, bytes FROM {self._tables.objects} WHERE digest = ?",
+                (digest,),
             ).fetchone()
         )
         if row is None:
@@ -658,10 +731,11 @@ class SqliteBackend:
                 " VALUES (?, ?, ?, ?, 0, ?, ?)",
                 (digest, len(data), media_type, encoding, blob, time()),
             )
+            joined = self._join_scope(digest)
             if cursor.rowcount == 1:
                 return "placed"
             if self._row_intact(digest, data):
-                return "existing"
+                return "placed" if joined else "existing"
             connection.execute(
                 "UPDATE objects SET byte_length = ?, media_type = ?, encoding = ?,"
                 " external = 0, bytes = ? WHERE digest = ?",
@@ -682,6 +756,7 @@ class SqliteBackend:
                 " VALUES (?, ?, ?, 'raw', 1, NULL, ?)",
                 (digest, len(data), media_type, time()),
             )
+            joined = self._join_scope(digest)
             if cursor.rowcount == 1:
                 return result
             row = connection.execute(
@@ -696,7 +771,17 @@ class SqliteBackend:
                 )
                 note_repair("object")
                 return "placed"
-            return result
+            return "placed" if joined else result
+
+    def _join_scope(self, digest: str) -> bool:
+        """文档 db 的 scope:记一条成员行(字节已在共用的 ``objects`` 里);新成员 → ``True``。
+        须在写事务内调用;每个 store 根一个 db 时什么都不做。"""
+        if self._tables.refs is None:
+            return False
+        cursor = self._core.connection().execute(
+            f"INSERT OR IGNORE INTO {self._tables.refs} (digest) VALUES (?)", (digest,)
+        )
+        return cursor.rowcount == 1
 
     def _row_intact(self, digest: str, data: bytes) -> bool:
         """``INSERT OR IGNORE`` 被忽略后的读回校验:行里就是这些字节吗?"""
@@ -726,7 +811,7 @@ class SqliteBackend:
         rows = (
             []
             if connection is None
-            else connection.execute("SELECT digest FROM objects").fetchall()
+            else connection.execute(f"SELECT digest FROM {self._tables.objects}").fetchall()
         )
         names = {str(row[0]) for row in rows}
         names.update(self._files.object_names())
@@ -742,7 +827,7 @@ class SqliteBackend:
             if connection is None
             else connection.execute(
                 "SELECT envelope_digest, envelope, product, product_encoding"
-                " FROM stage_cache WHERE fingerprint = ?",
+                f" FROM {self._tables.stage_cache} WHERE fingerprint = ?",
                 (fingerprint,),
             ).fetchone()
         )
@@ -787,14 +872,16 @@ class SqliteBackend:
             connection = self._core.connection()
             if replace:
                 connection.execute(
-                    "INSERT OR REPLACE INTO stage_cache (fingerprint, envelope_digest, envelope,"
+                    f"INSERT OR REPLACE INTO {self._tables.stage_cache} (fingerprint,"
+                    " envelope_digest, envelope,"
                     " stage, producer, artifact_digest, product, product_encoding, created_at)"
                     " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     row_values,
                 )
                 return "placed"
             cursor = connection.execute(
-                "INSERT OR IGNORE INTO stage_cache (fingerprint, envelope_digest, envelope,"
+                f"INSERT OR IGNORE INTO {self._tables.stage_cache} (fingerprint, envelope_digest,"
+                " envelope,"
                 " stage, producer, artifact_digest, product, product_encoding, created_at)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 row_values,
@@ -802,7 +889,8 @@ class SqliteBackend:
             if cursor.rowcount == 1:
                 return "placed"
             existing = connection.execute(
-                "SELECT envelope_digest, envelope FROM stage_cache WHERE fingerprint = ?",
+                f"SELECT envelope_digest, envelope FROM {self._tables.stage_cache}"
+                " WHERE fingerprint = ?",
                 (fingerprint,),
             ).fetchone()
             if existing is not None:
@@ -813,7 +901,8 @@ class SqliteBackend:
                     raise StoreConflict("Conflicting immutable stage cache entry")
             # 行已损坏(信封不是其摘要):以这份完好条目替换(ADR 0029 的自愈)。
             connection.execute(
-                "INSERT OR REPLACE INTO stage_cache (fingerprint, envelope_digest, envelope,"
+                f"INSERT OR REPLACE INTO {self._tables.stage_cache} (fingerprint, envelope_digest,"
+                " envelope,"
                 " stage, producer, artifact_digest, product, product_encoding, created_at)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 row_values,
@@ -829,7 +918,7 @@ class SqliteBackend:
             None
             if connection is None
             else connection.execute(
-                "SELECT digest FROM pointers WHERE name = ?", (name,)
+                f"SELECT digest FROM {self._tables.pointers} WHERE name = ?", (name,)
             ).fetchone()
         )
         if row is not None:
@@ -841,7 +930,8 @@ class SqliteBackend:
         _require_digest(digest)
         with self._core.transaction():
             self._core.connection().execute(
-                "INSERT OR REPLACE INTO pointers (name, digest, updated_at) VALUES (?, ?, ?)",
+                f"INSERT OR REPLACE INTO {self._tables.pointers} (name, digest, updated_at)"
+                " VALUES (?, ?, ?)",
                 (name, digest, time()),
             )
 
@@ -850,7 +940,9 @@ class SqliteBackend:
         row = (
             None
             if connection is None
-            else connection.execute("SELECT bytes FROM records WHERE name = ?", (name,)).fetchone()
+            else connection.execute(
+                f"SELECT bytes FROM {self._tables.records} WHERE name = ?", (name,)
+            ).fetchone()
         )
         if row is not None:
             return bytes(row[0])
@@ -859,7 +951,8 @@ class SqliteBackend:
     def put_record(self, name: str, data: bytes) -> None:
         with self._core.transaction():
             self._core.connection().execute(
-                "INSERT OR REPLACE INTO records (name, bytes, updated_at) VALUES (?, ?, ?)",
+                f"INSERT OR REPLACE INTO {self._tables.records} (name, bytes, updated_at)"
+                " VALUES (?, ?, ?)",
                 (name, data, time()),
             )
 
@@ -920,8 +1013,8 @@ class SqliteBackend:
         if connection is not None:
             marks = ",".join("?" for _ in batch)
             for row in connection.execute(
-                "SELECT digest, byte_length, encoding, external, bytes FROM objects"
-                f" WHERE digest IN ({marks})",
+                "SELECT digest, byte_length, encoding, external, bytes"
+                f" FROM {self._tables.objects} WHERE digest IN ({marks})",
                 batch,
             ):
                 rows[str(row[0])] = (int(row[1]), str(row[2]), int(row[3]), row[4])
@@ -984,15 +1077,21 @@ class SqliteModelCacheBackend:
         db_name: str = "model-cache.sqlite",
         db_path: Path | None = None,
         synchronous: str = "FULL",
+        core: _SqliteCore | None = None,
     ) -> None:
         self.cache_dir = cache_dir
         self._files = FileModelCacheBackend(cache_dir)
         # db_path:db 放在别处(StagedModelCacheBackend 的本地工作副本);缺省 = <cache_dir>/<db_name>。
-        self._core = _SqliteCore(
-            cache_dir / db_name if db_path is None else db_path,
-            MODEL_CACHE_SCHEMA,
-            synchronous=synchronous,
-            writer_scope="transaction",
+        # core:文档 db(ADR 0047)的共用连接 / 事务 / 按进程的写者租约(调用方拥有)。
+        self._core = (
+            _SqliteCore(
+                cache_dir / db_name if db_path is None else db_path,
+                MODEL_CACHE_SCHEMA,
+                synchronous=synchronous,
+                writer_scope="transaction",
+            )
+            if core is None
+            else core
         )
         self._legacy_dirs: dict[str, bool] = {}
 

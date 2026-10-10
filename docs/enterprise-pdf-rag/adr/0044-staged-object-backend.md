@@ -127,3 +127,9 @@ local disk lost now resumes from the model cache as last published (its stage bo
 from a per-call file layout. Staged object stores also inline up to 8 MiB by default, the
 `atexit` hook finishes (closes and releases) instead of only committing, and the publisher claim
 is taken under a lock (page threads, ADR 0045). Result: four files per document on the mount.
+
+## Amendment 2 (2026-10-10, [ADR 0047](0047-one-sqlite-per-document.md)): one db per document
+
+A document's `source` and `processing` store roots and its `processing/model-cache` are three
+scopes of one `StagedDocument`, published whole as `<doc>/document.sqlite` (one publisher lease,
+one commit per boundary); the PDF is inlined. Other staged store roots keep §1's one db per root.

@@ -444,7 +444,9 @@ def mixed_folder(tmp_path: Path) -> Path:
 # ``FULL_STORE_DIGEST`` is pinned to one value whatever the backend.
 _SHARDED = re.compile(r"(?P<dir>[^/]+)-sharded/[0-9a-f]{2}/(?P<name>[^/]+)$")
 # The backend db and its side files never enter the logical view themselves.
-_DB_ARTIFACTS = re.compile(r"(^|/)(store|model-cache)\.sqlite(-wal|-shm|\.writer.*|\.corrupt-.*)?$")
+_DB_ARTIFACTS = re.compile(
+    r"(^|/)(store|model-cache|document)\.sqlite(-wal|-shm|\.writer.*|\.publisher|\.corrupt-.*)?$"
+)
 
 
 def _logical(relative: str) -> str:
@@ -461,28 +463,44 @@ def _decode_row(blob: bytes, encoding: str) -> bytes:
     return zlib.decompress(blob) if encoding == "zlib" else bytes(blob)
 
 
-def _db_logical_files(db: Path) -> dict[str, bytes]:
-    """One store db's rows as the byte-identical file layout they stand for (ADR 0036)."""
+def _db_logical_files(db: Path, scope: str | None = None) -> dict[str, bytes]:
+    """One store db's rows as the byte-identical file layout they stand for (ADR 0036); with
+    ``scope``, that store's rows in a document db (ADR 0047: ``<scope>_``-prefixed tables)."""
+    prefix = "" if scope is None else f"{scope}_"
     out: dict[str, bytes] = {}
     with closing(sqlite3.connect(db)) as connection:
         for digest, encoding, external, blob in connection.execute(
-            "SELECT digest, encoding, external, bytes FROM objects"
+            f"SELECT digest, encoding, external, bytes FROM {prefix}objects"
         ):
             if external:
                 continue  # 外置对象本来就是文件,rglob 会看到它
             out[f"objects/sha256/{digest}"] = _decode_row(blob, str(encoding))
         for fingerprint, envelope_digest, envelope, product, product_encoding in connection.execute(
             "SELECT fingerprint, envelope_digest, envelope, product, product_encoding"
-            " FROM stage_cache"
+            f" FROM {prefix}stage_cache"
         ):
             payload = str(envelope_digest).encode() + b"\n" + bytes(envelope) + b"\n"
             if product is not None:
                 payload += _decode_row(product, str(product_encoding))
             out[f"stage-cache/{fingerprint}"] = payload
-        for name, digest in connection.execute("SELECT name, digest FROM pointers"):
+        for name, digest in connection.execute(f"SELECT name, digest FROM {prefix}pointers"):
             out[str(name)] = str(digest).encode() + b"\n"
-        for name, blob in connection.execute("SELECT name, bytes FROM records"):
+        for name, blob in connection.execute(f"SELECT name, bytes FROM {prefix}records"):
             out[str(name)] = bytes(blob)
+    return out
+
+
+def _document_db_files(db: Path) -> dict[str, bytes]:
+    """A document's single ``document.sqlite`` (ADR 0047) as the files its two stores and its
+    model cache stand for, relative to the document directory."""
+    out = {
+        f"{scope}/{name}": data
+        for scope in ("source", "processing")
+        for name, data in _db_logical_files(db, scope).items()
+    }
+    out.update(
+        (f"processing/model-cache/{name}", data) for name, data in _model_cache_db_files(db).items()
+    )
     return out
 
 
@@ -528,6 +546,7 @@ def store_digest(root: Path) -> tuple[str, int, str]:
             expand = {
                 "store.sqlite": _db_logical_files,
                 "model-cache.sqlite": _model_cache_db_files,
+                "document.sqlite": _document_db_files,
             }
             if path.name in expand:
                 prefix = path.parent.relative_to(root).as_posix()

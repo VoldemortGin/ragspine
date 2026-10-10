@@ -7,9 +7,12 @@
   ``commit_staged`` / ``release_staged`` 按目录前缀提交 / 收尾;
 - 默认配置不走 staged;staged 模式下根级模型缓存仍是文件布局;
 - 发布目录的发布者租约:另一个活着的进程持有时写入即 ``StoreBusy``;
-- ADR 0046:文档自己的模型缓存(``processing/model-cache``)随它的 store 一起 staged、
+- ADR 0046:store 根下的模型缓存(``<store>/model-cache``)随它的 store 一起 staged、
   整文件发布、可续跑;staged 默认内联到 8 MiB(zlib,digest 仍是原始字节的);
   文档结束后发布目录只剩整文件,没有 -wal / -shm / 租约。
+
+ADR 0047 起,名为 ``source`` / ``processing`` 的 store 根是文档 db 的 scope(见
+``test_document_db.py``);这里的用例用别的根名,钉住每个 store 根一个 db 的这条路径。
 """
 
 import hashlib
@@ -200,9 +203,9 @@ def _staged_settings(tmp_path: Path) -> Settings:
 def test_open_backend_shares_one_instance_per_store_root(tmp_path: Path) -> None:
     settings = _staged_settings(tmp_path)
     document = tmp_path / "ingestion" / "doc-a"
-    first = open_backend(document / "source", settings=settings)
-    second = open_backend(document / "source", settings=settings)
-    other = open_backend(document / "processing", settings=settings)
+    first = open_backend(document / "store-a", settings=settings)
+    second = open_backend(document / "store-a", settings=settings)
+    other = open_backend(document / "store-b", settings=settings)
     assert isinstance(first, StagedBackend) and first is second and other is not first
     assert first.kind == "staged"
     assert first.work_dir.is_relative_to(tmp_path / "staging")
@@ -212,24 +215,24 @@ def test_open_backend_shares_one_instance_per_store_root(tmp_path: Path) -> None
     digest = _put(first, "stage one")
     first.close()  # store 的 close:注册表仍持有,不收尾
     second.close()
-    assert not (document / "source" / "store.sqlite").exists()
+    assert not (document / "store-a" / "store.sqlite").exists()
 
     assert commit_staged(document) == 1  # 阶段边界:只有写过的那个被提交
-    assert _published_digests(document / "source") == {digest}
-    third = open_backend(document / "source", settings=settings)
+    assert _published_digests(document / "store-a") == {digest}
+    third = open_backend(document / "store-a", settings=settings)
     assert third is first  # 阶段间同一实例
     third.close()
 
     _put(first, "stage two")
     release_staged(document)  # 文档结束:提交并收尾,离开注册表
-    assert len(_published_digests(document / "source")) == 2
-    assert open_backend(document / "source", settings=settings) is not first
+    assert len(_published_digests(document / "store-a")) == 2
+    assert open_backend(document / "store-a", settings=settings) is not first
 
 
 def test_documents_never_share_a_local_copy(tmp_path: Path) -> None:
     settings = _staged_settings(tmp_path)
-    a = open_backend(tmp_path / "ingestion" / "a" / "source", settings=settings)
-    b = open_backend(tmp_path / "ingestion" / "b" / "source", settings=settings)
+    a = open_backend(tmp_path / "ingestion" / "a" / "store-a", settings=settings)
+    b = open_backend(tmp_path / "ingestion" / "b" / "store-a", settings=settings)
     _put(a, "only in a")
     assert commit_staged(tmp_path / "ingestion" / "b") == 0
     assert isinstance(a, StagedBackend) and isinstance(b, StagedBackend)
@@ -273,7 +276,7 @@ def _document(tmp_path: Path) -> Path:
 
 def _open_document_cache(tmp_path: Path) -> tuple[ObjectBackend, StagedModelCacheBackend]:
     settings = _staged_settings(tmp_path)
-    processing = _document(tmp_path) / "processing"
+    processing = _document(tmp_path) / "store-b"
     store = open_backend(processing, settings=settings)
     cache = open_backend(processing / "model-cache", "model-cache", settings=settings)
     assert isinstance(cache, StagedModelCacheBackend)
@@ -281,7 +284,7 @@ def _open_document_cache(tmp_path: Path) -> tuple[ObjectBackend, StagedModelCach
 
 
 def _published_cache(tmp_path: Path) -> Path:
-    return _document(tmp_path) / "processing" / "model-cache" / "model-cache.sqlite"
+    return _document(tmp_path) / "store-b" / "model-cache" / "model-cache.sqlite"
 
 
 def _published_records(path: Path) -> dict[str, bytes]:
@@ -303,7 +306,7 @@ def test_a_document_model_cache_is_staged_with_its_store_and_published_whole(
     assert cache.kind == "staged"
     assert cache.work_dir.is_relative_to(tmp_path / "staging")
     again = open_backend(
-        _document(tmp_path) / "processing" / "model-cache",
+        _document(tmp_path) / "store-b" / "model-cache",
         "model-cache",
         settings=_staged_settings(tmp_path),
     )
@@ -322,9 +325,7 @@ def test_a_document_model_cache_is_staged_with_its_store_and_published_whole(
     store.close()
     release_staged(_document(tmp_path))
     # 文档结束:发布目录只剩整文件,没有 -wal / -shm / .writer / .publisher / 临时名。
-    assert _files_under(tmp_path / "ingestion") == [
-        "doc-a/processing/model-cache/model-cache.sqlite"
-    ]
+    assert _files_under(tmp_path / "ingestion") == ["doc-a/store-b/model-cache/model-cache.sqlite"]
     assert staged.registered() == ()
 
 
@@ -390,7 +391,7 @@ def test_a_model_cache_outside_any_staged_store_stays_on_the_file_layout(
     tmp_path: Path,
 ) -> None:
     settings = _staged_settings(tmp_path)
-    open_backend(_document(tmp_path) / "processing", settings=settings).close()
+    open_backend(_document(tmp_path) / "store-b", settings=settings).close()
     root_cache = open_backend(
         tmp_path / "ingestion" / "model-cache", "model-cache", settings=settings
     )
@@ -406,7 +407,7 @@ def test_staged_mode_inlines_objects_up_to_8_mib_compressed_by_default(tmp_path:
     assert STAGED_INLINE_MAX_BYTES == 8 * 1024 * 1024
     data = _svg(2_400_000)  # 与 71 页样本最大的页 SVG 同量级
     digest = hashlib.sha256(data).hexdigest()
-    root = _document(tmp_path) / "source"
+    root = _document(tmp_path) / "store-a"
     backend = open_backend(root, settings=_staged_settings(tmp_path))
     assert isinstance(backend, StagedBackend)
     backend.put_object(digest, data, "image/svg+xml")
@@ -432,7 +433,7 @@ def test_an_explicit_inline_limit_still_wins_in_staged_mode(tmp_path: Path) -> N
         object_store_staging_dir=tmp_path / "staging",
         object_store_inline_max_bytes=DEFAULT_INLINE_MAX_BYTES,
     )
-    root = _document(tmp_path) / "source"
+    root = _document(tmp_path) / "store-a"
     backend = open_backend(root, settings=settings)
     backend.put_object(digest, data, "image/svg+xml")
     backend.close()
