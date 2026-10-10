@@ -68,6 +68,12 @@ class BackendSchemaError(BackendUnavailable):
     """db 的 ``application_id`` / ``user_version`` 不是本代码可写的版本(版本门)。"""
 
 
+class LayoutMismatch(BackendUnavailable):
+    """文档目录的落盘布局与所选后端不符(原因码 ``layout_mismatch``,enterprise-pdf-rag
+    ADR 0047):staged 遇到旧的每 store 一个 db,或别的模式遇到 staged 的 ``document.sqlite``。
+    绝不静默当成空 store;文案固定,不含路径。"""
+
+
 class StoreConflict(ValueError):
     """不可变条目首写胜出后的冲突:已有条目完好且是另一份字节。"""
 

@@ -1,5 +1,6 @@
-"""后端 parametrize 的共享 fixture:同一套一致性测试在 files / sqlite / staged 上各跑一遍
-(对象 store 与模型缓存都是;staged 模型缓存是文档自己的那一份,ADR 0046)。"""
+"""后端 parametrize 的共享 fixture:同一套一致性测试在 files / sqlite / staged / document 上各跑
+一遍(对象 store 与模型缓存都是;staged 模型缓存是文档自己的那一份,ADR 0046;document 是
+每份文档一个 db 里的一个 scope,ADR 0047)。"""
 
 import hashlib
 import sqlite3
@@ -29,6 +30,7 @@ from ragspine.common.evidence.object_backend.sqlite import (
 )
 from ragspine.common.evidence.object_backend.staged import (
     StagedBackend,
+    StagedDocument,
     StagedModelCacheBackend,
 )
 from ragspine.extraction.evidence.document.models import AssetRef
@@ -46,11 +48,27 @@ def staged_work_dir(root: Path) -> Path:
     return root.parent / f"{root.name}.work"
 
 
+# document 后端在一个文档 db 里用的 scope(表前缀 ``processing_``)。
+DOCUMENT_SCOPE = "processing"
+
+
 def db_file(kind: str, root: Path) -> Path:
-    """该后端的 store db 所在(staged 的 db 在本地工作目录)。"""
+    """该后端的 store db 所在(staged / document 的 db 在本地工作目录)。"""
     if kind == "staged":
         return staged_work_dir(root) / "store.sqlite"
+    if kind == "document":
+        return staged_work_dir(root) / "document.sqlite"
     return root / "store.sqlite"
+
+
+def table(kind: str, name: str) -> str:
+    """该后端 db 里 ``stage_cache`` / ``pointers`` / ``records`` 的表名(document 带 scope 前缀)。"""
+    return f"{DOCUMENT_SCOPE}_{name}" if kind == "document" else name
+
+
+def _document(root: Path) -> StagedDocument:
+    """测试用的一个文档 db:发布目录与 store 根同级,本地工作目录同 staged。"""
+    return StagedDocument(root.parent / f"{root.name}.document", work_dir=staged_work_dir(root))
 
 
 def make_backend(kind: str, root: Path, **sqlite_kwargs: object) -> ObjectBackend:
@@ -58,6 +76,8 @@ def make_backend(kind: str, root: Path, **sqlite_kwargs: object) -> ObjectBacken
         return FileBackend(root)
     if kind == "staged":
         return StagedBackend(root, work_dir=staged_work_dir(root), **sqlite_kwargs)  # type: ignore[arg-type]
+    if kind == "document":
+        return _document(root).object_scope(DOCUMENT_SCOPE, root, **sqlite_kwargs)  # type: ignore[arg-type]
     return SqliteBackend(root, **sqlite_kwargs)  # type: ignore[arg-type]
 
 
@@ -66,15 +86,17 @@ def make_model_cache(kind: str, cache_dir: Path) -> ModelCacheBackend:
         return FileModelCacheBackend(cache_dir)
     if kind == "staged":
         return StagedModelCacheBackend(cache_dir, work_dir=staged_work_dir(cache_dir))
+    if kind == "document":
+        return _document(cache_dir).model_cache_scope(cache_dir)
     return SqliteModelCacheBackend(cache_dir)
 
 
-@pytest.fixture(params=["files", "sqlite", "staged"])
+@pytest.fixture(params=["files", "sqlite", "staged", "document"])
 def backend_kind(request: pytest.FixtureRequest) -> str:
     return str(request.param)
 
 
-@pytest.fixture(params=["files", "sqlite", "staged"])
+@pytest.fixture(params=["files", "sqlite", "staged", "document"])
 def model_cache_kind(request: pytest.FixtureRequest) -> str:
     return str(request.param)
 
@@ -144,7 +166,7 @@ def damage_stage_entry(kind: str, root: Path, fingerprint: str) -> None:
         return
     with closing(sqlite3.connect(db_file(kind, root))) as connection, connection:
         connection.execute(
-            "UPDATE stage_cache SET envelope = ? WHERE fingerprint = ?",
+            f"UPDATE {table(kind, 'stage_cache')} SET envelope = ? WHERE fingerprint = ?",
             (b"{not the envelope}", fingerprint),
         )
 
