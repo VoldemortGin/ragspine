@@ -1233,6 +1233,15 @@ def test_parallel_documents_default_to_four_with_the_reasons_and_reach_the_run()
     assert "MAX_PARALLEL_DOCUMENTS" in intro and "slot" in intro
 
 
+def test_document_filter_defaults_to_none_and_reaches_the_run() -> None:
+    config = _code_cell("config")
+    assert re.search(r'^NB_DOCUMENT_FILTER\s*=\s*""', config, re.MULTILINE)
+    # The comment says the form (JSON), the semantics and that nothing is inferred from questions.
+    for words in ("JSON", "documents.csv", "APP_DOCUMENT_TAG_PATH_TEMPLATE", "不会从题集"):
+        assert words in config, words
+    assert "document_filter=NB_DOCUMENT_FILTER" in _code_cell("run")
+
+
 def _run_progress(
     monkeypatch: pytest.MonkeyPatch, events: list[tuple[str, dict[str, object]]]
 ) -> str:
@@ -1267,6 +1276,7 @@ def _run_progress(
         "EFFECTIVE_LAYOUT",
         "REQUALIFY",
         "REPORT_DIR",
+        "NB_DOCUMENT_FILTER",
     ]
     namespace: dict[str, Any] = dict.fromkeys(names)
     namespace["MAX_PARALLEL_DOCUMENTS"] = 4

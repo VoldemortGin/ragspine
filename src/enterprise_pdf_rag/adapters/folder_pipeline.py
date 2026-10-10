@@ -36,8 +36,18 @@ from enterprise_pdf_rag.adapters import pdfspine_tsr
 from enterprise_pdf_rag.adapters.answer_audit import open_audit_store
 from enterprise_pdf_rag.adapters.answer_llm import make_answer_llm
 from enterprise_pdf_rag.adapters.answer_service import AnswerSettings
-from enterprise_pdf_rag.adapters.document_catalog import DocumentCatalog, scan_catalog
+from enterprise_pdf_rag.adapters.document_catalog import (
+    DocumentCatalog,
+    filter_catalog,
+    scan_catalog,
+)
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
+from enterprise_pdf_rag.adapters.document_tags import (
+    FilterInput,
+    parse_document_filter,
+    resolve_document_tags,
+    save_document_tags,
+)
 from enterprise_pdf_rag.adapters.document_tree_extraction import (
     DocumentTreeSummary,
     annotate_document_tree,
@@ -108,6 +118,7 @@ from ragspine.common.evidence.providers.providers import (
     load_llm_config,
     load_local_model_config,
 )
+from ragspine.common.observability.trace import emit_trace
 from ragspine.eval.retrieval_only import (
     BatchQuestion,
     content_hit,
@@ -248,6 +259,8 @@ class DocumentRun(BoundaryModel):
     # transiently once their retries were spent — left unrecorded, so a rerun calls them again.
     retries: int = 0
     transient_failures: int = 0
+    # ADR 0049: this PDF's logical tags, from the folder's sidecar and the path template.
+    tags: dict[str, str] = Field(default_factory=dict)
 
 
 class EvalCase(BoundaryModel):
@@ -320,6 +333,10 @@ class FolderPipelineResult(BoundaryModel):
     # What a light question set's answers searched (ADR 0032): every published document of
     # the run (the default), or only the document each question's ``doc`` names.
     retrieval_scope: RetrievalScope = "all_documents"
+    # ADR 0049: the caller's tag filter (values sorted), and how many of this run's published
+    # documents it left for the questions; None without a filter / without a question set.
+    document_filter: dict[str, list[str]] | None = None
+    documents_searched: int | None = None
 
     @property
     def ok(self) -> bool:
@@ -1604,7 +1621,30 @@ def _transient_lines(result: FolderPipelineResult) -> list[str]:
     ]
 
 
+def _tag_cell(tags: Mapping[str, str]) -> str:
+    return (
+        "; ".join(f"{name}={value}" for name, value in sorted(tags.items())).replace("|", "\\|")
+        or "-"
+    )
+
+
+def _document_filter_lines(result: FolderPipelineResult) -> list[str]:
+    if result.document_filter is None:
+        return []
+    searched = (
+        ""
+        if result.documents_searched is None
+        else f" ({result.documents_searched} of "
+        f"{sum(item.status == 'published' for item in result.documents)} published documents "
+        "searched)"
+    )
+    return [
+        f"- document filter: `{json.dumps(result.document_filter, ensure_ascii=False)}`{searched}"
+    ]
+
+
 def _markdown(result: FolderPipelineResult) -> str:
+    tagged = any(item.tags for item in result.documents)
     lines = [
         "# Folder pipeline report",
         "",
@@ -1626,10 +1666,12 @@ def _markdown(result: FolderPipelineResult) -> str:
         ),
         *_transient_lines(result),
         *_question_docs_lines(result.question_docs),
+        *_document_filter_lines(result),
         "",
         "| pdf | sha256 | status | stage | pages | eligible | index reused | live calls | s "
-        "| mode | published mode | error |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| mode | published mode | error |" + (" tags |" if tagged else ""),
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
+        + (" --- |" if tagged else ""),
     ]
     for item in result.documents:
         eligible = "-" if item.qualification is None else item.qualification.eligible_member_count
@@ -1644,6 +1686,7 @@ def _markdown(result: FolderPipelineResult) -> str:
             f"{item.failed_stage or '-'} | {pages} | {eligible} | {item.index_reused} | "
             f"{item.live_calls} | {item.elapsed_s:.1f} | {item.ingest_mode} | "
             f"{item.published_ingest_mode or '-'} | {error} |"
+            + (f" {_tag_cell(item.tags)} |" if tagged else "")
         )
     skipped = [
         (Path(item.pdf_path).name, item.ingestion)
@@ -1726,6 +1769,7 @@ def run_folder_pipeline(
     answer_system_rules: str | None = None,
     answer_derivations: bool = False,
     answer_constants: Mapping[str, float] | None = None,
+    document_filter: FilterInput = None,
 ) -> FolderPipelineResult:
     """Ingest, requalify, qualify, index, publish and tree every PDF in ``folder``, then evaluate.
 
@@ -1797,6 +1841,14 @@ def run_folder_pipeline(
     不写进报告。``answer_derivations=True`` 放开模型计算/换算(ADR 0038:每个算出的数写成
     derivation 由代码复算),``answer_constants`` 是派生可引用的常量白名单(须同时放开);
     常量名或值非法、只给常量不放开,同样在任何写入之前抛 ``ValueError``,常量也不写进报告。
+
+    Document tags (ADR 0049): each PDF's tags are read from ``<folder>/documents.csv`` and the
+    ``APP_DOCUMENT_TAG_PATH_TEMPLATE`` path template (sidecar wins key by key), shown on
+    ``DocumentRun.tags`` and recorded under the ingestion root outside every fingerprint, so
+    re-tagging never re-ingests. ``document_filter`` (a mapping or its JSON string, e.g.
+    ``{"year": ["2024"], "region": "HK"}``: values OR, keys AND; ``None`` / empty = no filter)
+    narrows only the published documents the questions are asked across; every PDF is still
+    ingested. A malformed filter, sidecar or template is a ``ValueError`` before any work.
     """
     answer_system(answer_system_rules, derivations=answer_derivations, constants=answer_constants)
     _check_per_pdf(max_live_calls_per_pdf)
@@ -1805,6 +1857,7 @@ def run_folder_pipeline(
     _check_budget("answer_max_live_calls", answer_max_live_calls)
     _check_total(max_live_calls_total)
     _check_max_questions(max_questions)
+    tag_filter = parse_document_filter(document_filter)
     plan = ingest_plan(
         ingest_mode,
         layout_policy=layout_policy,
@@ -1833,6 +1886,10 @@ def run_folder_pipeline(
         raise FileNotFoundError(f"folder not found: {folder}")
     question_set = None if questions is None else _load_questions(questions)
     pdfs = discover_pdfs(folder)
+    tagging = resolve_document_tags(folder, pdfs, template=settings.document_tag_path_template)
+    if tagging.configured:
+        emit_trace(None, event="document_tags_resolved", **tagging.counts)
+        _emit(progress, "document_tags_resolved", **tagging.counts)
     digests: dict[Path, str] = {}
 
     def digest_of(pdf: Path) -> str:
@@ -1969,21 +2026,43 @@ def run_folder_pipeline(
             documents.insert(index, run)
             tree_total += tree_calls
     ingest_total = sum(item.live_calls for item in documents)
+    documents = [
+        item.model_copy(update={"tags": tagging.tags[Path(item.pdf_path)]})
+        if Path(item.pdf_path) in tagging.tags
+        else item
+        for item in documents
+    ]
+    # The folder is the tags' source of truth: this run's documents get exactly the tags it
+    # read (none clears them); written only when that changes the record.
+    save_document_tags(
+        root,
+        {
+            item.sha256: item.tags
+            for item in documents
+            if item.sha256 is not None and item.status != "duplicate_of"
+        },
+    )
 
     summary: EvalSummary | None = None
+    searched: int | None = None
     answer_total = 0
     answer_client: JsonCompletionClient | None = None
     if question_set is not None:
         shas = {item.sha256 for item in documents if item.status == "published"}
         scanned = scan_catalog(root)
-        catalog = scanned.model_copy(
-            update={
-                "documents": tuple(
-                    entry for entry in scanned.documents if entry.document_id in shas
-                )
-            }
+        catalog = filter_catalog(
+            scanned.model_copy(
+                update={
+                    "documents": tuple(
+                        entry for entry in scanned.documents if entry.document_id in shas
+                    )
+                }
+            ),
+            tag_filter,
         )
         mounted = frozenset(entry.document_id for entry in catalog.ready)
+        if tag_filter is not None:
+            searched = len(mounted)
         llm = answer_llm
         answer_granted = 0
         if llm is None:
@@ -2073,6 +2152,10 @@ def run_folder_pipeline(
         layout_policy=plan.layout,
         object_backend=backend_kind,
         retrieval_scope="question_doc" if restrict_to_question_doc else "all_documents",
+        document_filter=None
+        if tag_filter is None
+        else {name: sorted(values) for name, values in sorted(tag_filter.items())},
+        documents_searched=searched,
     )
     if report_dir is not None:
         target = report_dir.expanduser().resolve()

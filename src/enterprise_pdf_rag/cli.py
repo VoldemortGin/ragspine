@@ -252,6 +252,13 @@ def _parser() -> argparse.ArgumentParser:
         help="Stop at the first failing PDF instead of recording it and continuing",
     )
     run_folder.add_argument(
+        "--document-filter",
+        default=None,
+        help="Only ask the questions across published documents whose tags match this JSON "
+        'object, e.g. {"year": ["2024"], "region": "HK"} (values OR, keys AND; ADR 0049); '
+        "default: every document",
+    )
+    run_folder.add_argument(
         "--report-dir",
         type=Path,
         default=None,
@@ -564,6 +571,7 @@ def main(argv: list[str] | None = None) -> int:
                     continue_on_error=not arguments.fail_fast,
                     report_dir=arguments.report_dir,
                     max_parallel_documents=arguments.max_parallel_documents,
+                    document_filter=arguments.document_filter,
                 )
             except (ValueError, FileNotFoundError) as error:
                 sys.stdout.write(json.dumps({"error": str(error)}, indent=2) + "\n")
