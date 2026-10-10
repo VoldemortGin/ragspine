@@ -11,6 +11,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 
 from enterprise_pdf_rag.adapters.aia_ingestion import read_text_sidecar
+from enterprise_pdf_rag.adapters.derived_artifacts import derived_artifact
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.pdfspine_formula import observe_formula
 from enterprise_pdf_rag.adapters.pdfspine_svg import crop_native_svg
@@ -219,7 +220,7 @@ def validate_formula_member(
         height=source_page.height,
         bbox=receipt.source.bbox,
     ).encode()
-    if assets.get(member.source_svg) != expected_crop:
+    if derived_artifact(assets, member.source_svg, lambda: expected_crop) != expected_crop:
         raise ValueError("Formula SVG crop does not derive from the pinned source page and anchor")
     if set(member.lineage_refs) != {receipt.observation, *receipt.lineage} or len(
         member.lineage_refs

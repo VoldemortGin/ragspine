@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 
 from enterprise_pdf_rag.adapters.aia_ingestion import read_text_sidecar
+from enterprise_pdf_rag.adapters.derived_artifacts import derived_artifact
 from enterprise_pdf_rag.adapters.diagram_qualification import qualify_diagram
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.pdfspine_svg import crop_native_svg
@@ -95,7 +96,7 @@ def resolve_diagram_member(
         height=page.height,
         bbox=anchor.bbox,
     ).encode()
-    if assets.get(member.source_svg) != expected_crop:
+    if derived_artifact(assets, member.source_svg, lambda: expected_crop) != expected_crop:
         raise ValueError("Diagram SVG crop does not derive from the pinned source page and anchor")
     raw_ir = TypeAdapter(DiagramIR).validate_json(assets.get(receipt.raw_ir), strict=True)
     if raw_ir.source != anchor or raw_ir.object_id != member.object_id:

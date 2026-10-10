@@ -6,6 +6,7 @@ from pydantic import TypeAdapter
 
 from enterprise_pdf_rag.adapters import pdfspine_tsr
 from enterprise_pdf_rag.adapters.aia_ingestion import read_text_sidecar
+from enterprise_pdf_rag.adapters.derived_artifacts import derived_artifact
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.pdfspine_svg import crop_native_svg
 from enterprise_pdf_rag.adapters.pdfspine_tables import fill_rectangles, ruling_segments
@@ -168,7 +169,7 @@ def validate_literal_member(
         height=page.height,
         bbox=anchor.bbox,
     ).encode()
-    if assets.get(member.source_svg) != expected_crop:
+    if derived_artifact(assets, member.source_svg, lambda: expected_crop) != expected_crop:
         raise ValueError("Literal SVG crop does not derive from the pinned source page and anchor")
     payload = assets.get(member.ir)
     if rows:

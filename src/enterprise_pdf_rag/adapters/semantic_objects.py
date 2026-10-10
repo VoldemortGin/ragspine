@@ -19,6 +19,7 @@ from enterprise_pdf_rag.adapters.chart_semantics import (
     ModelOutputBindingError,
     describe_from_ir,
 )
+from enterprise_pdf_rag.adapters.derived_artifacts import derived_artifact
 from enterprise_pdf_rag.adapters.diagram_publication import DiagramPublicationReceipt
 from enterprise_pdf_rag.adapters.diagram_qualification import (
     DiagramQualificationError,
@@ -97,8 +98,14 @@ class _Writer:
     producer: str
 
     def save(
-        self, stage: str, payload: bytes, media_type: str = "application/json"
+        self,
+        stage: str,
+        payload: bytes,
+        media_type: str = "application/json",
+        *,
+        derived: bool = False,
     ) -> StageOutcome:
+        """``derived``: recomputable from the page SVG + geometry, persisted per ADR 0048."""
         fingerprint = sha256(
             repr(
                 (
@@ -112,7 +119,7 @@ class _Writer:
             ).encode()
         ).hexdigest()
         return self.outputs.cache_output(
-            stage, fingerprint, self.producer, payload, media_type=media_type
+            stage, fingerprint, self.producer, payload, media_type=media_type, derived=derived
         )
 
     def diagnostic(
@@ -241,7 +248,7 @@ class SemanticObjectAdapter:
             tuple(span for span in page.text.spans if span.span_id in item.source_span_ids),
         )
         stages = [
-            writer.save("native_crop", crop, "image/svg+xml"),
+            writer.save("native_crop", crop, "image/svg+xml", derived=True),
             writer.save("source_text", TypeAdapter(TextSidecar).dump_json(sidecar)),
         ]
         if item.kind is ObjectKind.CHART:
@@ -266,8 +273,8 @@ class SemanticObjectAdapter:
             self.skipped_calls["formula"] += 2
         stages.extend(
             (
-                writer.save("svg", result.crop_svg, "image/svg+xml"),
-                writer.save("model_render", result.model_png, "image/png"),
+                writer.save("svg", result.crop_svg, "image/svg+xml", derived=True),
+                writer.save("model_render", result.model_png, "image/png", derived=True),
                 writer.save("model_view", result.model_view_json),
             )
         )
@@ -403,7 +410,7 @@ class SemanticObjectAdapter:
         result = PdfspineTableAdapter().extract(
             source_pdf(self.sources, source), page=page, item=item
         )
-        svg = writer.save("svg", crop, "image/svg+xml")
+        svg = writer.save("svg", crop, "image/svg+xml", derived=True)
         stages.extend(
             (
                 svg,
@@ -756,12 +763,18 @@ class SemanticObjectAdapter:
             )
         except ValueError as error:
             return self._unavailable(writer, stages, _error(error))
-        svg = writer.save("svg", prepared.svg.svg.encode(), "image/svg+xml")
+        svg = writer.save("svg", prepared.svg.svg.encode(), "image/svg+xml", derived=True)
         view = writer.save(
             "model_view",
             TypeAdapter[object](type(prepared.model_view)).dump_json(prepared.model_view),
         )
-        stages.extend((svg, view, writer.save("model_render", prepared.rendered.png, "image/png")))
+        stages.extend(
+            (
+                svg,
+                view,
+                writer.save("model_render", prepared.rendered.png, "image/png", derived=True),
+            )
+        )
         chart: ChartIR | None = None
         description: TextDescription | None = None
         chart_stage: StageOutcome | None = None
@@ -954,14 +967,23 @@ class SemanticObjectAdapter:
             )
         )
 
-    @staticmethod
     def _unavailable(
-        writer: _Writer, stages: list[StageOutcome], reason: str
+        self, writer: _Writer, stages: list[StageOutcome], reason: str
     ) -> ObjectProcessingRecord:
         crop = next(stage for stage in stages if stage.stage == "native_crop")
+        crop_bytes = derived_artifact(
+            writer.outputs.assets,
+            _ref(crop),
+            lambda: crop_native_svg(
+                self.sources.get(writer.page.native_svg).decode(),
+                width=writer.page.width,
+                height=writer.page.height,
+                bbox=writer.item.bbox,
+            ).encode(),
+        )
         stages.extend(
             (
-                writer.save("svg", writer.outputs.assets.get(_ref(crop)), "image/svg+xml"),
+                writer.save("svg", crop_bytes, "image/svg+xml", derived=True),
                 writer.diagnostic("ir", reason, failed=True),
                 writer.diagnostic(
                     "description", "The source view could not be prepared: " + reason

@@ -36,7 +36,15 @@ class ProcessingObjectAdapter:
             native.decode("utf-8"), width=page.width, height=page.height, bbox=item.bbox
         )
         stages = [
-            self._save("svg", "native-svg-crop-v1", crop.encode(), page, item, "image/svg+xml")
+            self._save(
+                "svg",
+                "native-svg-crop-v1",
+                crop.encode(),
+                page,
+                item,
+                "image/svg+xml",
+                derived=True,
+            )
         ]
         container = (
             item.kind is ObjectKind.GROUP
@@ -140,6 +148,8 @@ class ProcessingObjectAdapter:
         page: PageInput,
         item: LayoutObject,
         media_type: str = "application/json",
+        *,
+        derived: bool = False,
     ) -> StageOutcome:
         fingerprint = sha256(
             repr(
@@ -154,5 +164,5 @@ class ProcessingObjectAdapter:
             ).encode()
         ).hexdigest()
         return self.outputs.cache_output(
-            stage, fingerprint, producer, payload, media_type=media_type
+            stage, fingerprint, producer, payload, media_type=media_type, derived=derived
         )

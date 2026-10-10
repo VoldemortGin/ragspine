@@ -4,6 +4,8 @@ import json
 import re
 import tempfile
 from collections import defaultdict
+from collections.abc import Callable
+from functools import partial
 from hashlib import sha256
 from html import escape
 from pathlib import Path
@@ -17,6 +19,7 @@ from enterprise_pdf_rag.adapters.chart_member_validation import (
 from enterprise_pdf_rag.adapters.chart_publication import parse_chart_receipt
 from enterprise_pdf_rag.adapters.chart_qa_evaluation import read_evaluation
 from enterprise_pdf_rag.adapters.chart_qa_v2_evaluation import read_bar_evaluation
+from enterprise_pdf_rag.adapters.derived_artifacts import object_stage_bytes
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
 from enterprise_pdf_rag.adapters.figure_label_qualification import FIGURE_LABEL_SCOPES
 from enterprise_pdf_rag.adapters.http.processing_schemas import ProcessingEnvelope
@@ -53,17 +56,21 @@ def _write_stage(
     folder: Path,
     stage: StageOutcome,
     filename: str | None = None,
+    read: Callable[[StageOutcome], bytes] | None = None,
 ) -> str:
     artifact = stage.artifact
     if artifact is None:
         return escape(f"{stage.state}: {stage.diagnostic}")
     name = _stage_file(stage) if filename is None else filename
-    (folder / name).write_bytes(outputs.assets.get(artifact))
+    (folder / name).write_bytes(outputs.assets.get(artifact) if read is None else read(stage))
     return f'<a href="{escape(name, quote=True)}">{escape(stage.stage)}</a> — {escape(stage.state)}'
 
 
 def _object(
-    outputs: ProcessingStore, folder: Path, record: ObjectProcessingRecord
+    outputs: ProcessingStore,
+    folder: Path,
+    record: ObjectProcessingRecord,
+    read: Callable[[StageOutcome], bytes],
 ) -> tuple[str, str]:
     directory = "object-" + sha256(record.object_id.encode()).hexdigest()[:20]
     target = folder / "objects" / directory
@@ -71,11 +78,14 @@ def _object(
     (target / "status.json").write_bytes(
         TypeAdapter(ObjectProcessingRecord).dump_json(record, indent=2)
     )
-    stages = "".join(f"<li>{_write_stage(outputs, target, stage)}</li>" for stage in record.stages)
-    svg = next((stage.artifact for stage in record.stages if stage.stage == "svg"), None)
-    preview = (
-        "" if svg is None else re.sub(r"^\s*<\?xml[^>]*\?>", "", outputs.assets.get(svg).decode())
+    stages = "".join(
+        f"<li>{_write_stage(outputs, target, stage, read=read)}</li>" for stage in record.stages
     )
+    svg = next(
+        (stage for stage in record.stages if stage.stage == "svg" and stage.artifact is not None),
+        None,
+    )
+    preview = "" if svg is None else re.sub(r"^\s*<\?xml[^>]*\?>", "", read(svg).decode())
     body = f'<p><a href="../../review.html">返回本页</a></p><p>类型: {escape(record.kind.value)}; 这是来源/模型产物审阅, 保存成功不代表语义已验证。</p><div class="source">{preview}</div><ul>{stages}</ul><p><a href="status.json">状态与实际产物引用</a></p>'
     (target / "review.html").write_text(_html(f"对象 {record.kind.value}", body), encoding="utf-8")
     return (
@@ -282,7 +292,23 @@ def export_processing_review(
         layout = _write_stage(outputs, folder, page.partition, "layout.json")
         if page.raw_partition is not None:
             layout += "; " + _write_stage(outputs, folder, page.raw_partition, "layout.raw.json")
-        object_links = "".join(_object(outputs, folder, item)[1] for item in page.objects)
+        object_links = "".join(
+            _object(
+                outputs,
+                folder,
+                item,
+                # ADR 0048: a derived stage recorded without bytes is recomputed and checked.
+                partial(
+                    object_stage_bytes,
+                    sources,
+                    outputs.assets,
+                    manifest.scope,
+                    page,
+                    object_id=item.object_id,
+                ),
+            )[1]
+            for item in page.objects
+        )
         native = sources.get(source.manifest.pages[page.page_index].svg).decode()
         native = re.sub(r"^\s*<\?xml[^>]*\?>", "", native)
         body = f'<p><a href="../review.html">返回批次</a></p><p>来源: {escape(source.manifest.filename)}, 物理第 {page.page_index + 1} 页。</p><p>{canonical}; {layout}</p><div class="source">{native}</div><ul>{object_links}</ul><p>布局为带来源的推断。所有具体结果和未完成原因见对象状态, 不能将 source saved 视为语义完成。</p>'

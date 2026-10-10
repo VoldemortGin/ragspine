@@ -185,6 +185,11 @@ class Settings(BaseSettings):
     # 单个 store db 的保护阈(字节;默认 400 MiB,Workspace 单文件 500 MB 限制之下):
     # 超过后 > 16 KiB 的新对象一律外置。
     object_store_max_db_bytes: int = 400 * 1024 * 1024
+    # 派生产物(对象 SVG 裁剪 native_crop / svg、模型 PNG model_render)是否落盘
+    # (enterprise-pdf-rag ADR 0048)。true:照旧落盘,逐字节不变;false:只记 stage 信封与
+    # digest,字节不落盘,读时从页 SVG + 对象几何确定性重算并核对 digest。没显式设置时按
+    # 后端取默认:staged → false,其余 → true(解析见 processing_store.persist_derived_default)。
+    persist_derived_artifacts: bool = True
 
     # notebook / 一键流程(run_folder_pipeline)的输入输出位置,环境变量名不带 APP_ 前缀。
     # 都可缺省且不校验存在性;相对路径相对项目根,~ 展开;空串视为未设置。

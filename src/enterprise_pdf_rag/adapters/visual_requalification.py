@@ -9,7 +9,9 @@ those stored bytes alone — no model, no network, no re-inference — and saves
 as a new content-addressed draft. Nothing is indexed or published and no pointer moves.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, replace
+from functools import partial
 from hashlib import sha256
 from typing import Literal
 
@@ -20,6 +22,7 @@ from enterprise_pdf_rag.adapters.chart_publication import (
     ChartPublicationReceipt,
     parse_chart_receipt,
 )
+from enterprise_pdf_rag.adapters.derived_artifacts import derived_artifact, object_stage_bytes
 from enterprise_pdf_rag.adapters.diagram_publication import DiagramPublicationReceipt
 from enterprise_pdf_rag.adapters.diagram_qualification import (
     DiagramQualificationError,
@@ -153,6 +156,7 @@ def _requalify_diagram(
     spans: tuple[TextSpan, ...],
     source_manifest_id: str,
     dry_run: bool,
+    read: Callable[[StageOutcome], bytes],
 ) -> tuple[ObjectProcessingRecord, ObjectRequalification]:
     """Prove one Diagram against its stored crop and the page's source occurrences.
 
@@ -180,7 +184,8 @@ def _requalify_diagram(
     ir = TypeAdapter(DiagramIR).validate_json(outputs.assets.get(inputs["ir"]), strict=True)
     try:
         qualified = qualify_diagram(
-            svg=outputs.assets.get(inputs["svg"]),
+            # ADR 0048: recomputed and digest-checked when the store kept no bytes.
+            svg=read(next(stage for stage in record.stages if stage.stage == "svg")),
             spans=spans,
             ir=ir,
             source_manifest_id=source_manifest_id,
@@ -310,7 +315,8 @@ def _requalify_chart(
         outputs.assets.get(inputs["description"]), strict=True
     )
     reason: str | None = None
-    if prepared.svg.svg.encode() != outputs.assets.get(inputs["svg"]):
+    expected_svg = prepared.svg.svg.encode()
+    if derived_artifact(outputs.assets, inputs["svg"], lambda: expected_svg) != expected_svg:
         reason = "Stored chart SVG does not derive from the pinned source page and model view"
     else:
         try:
@@ -399,6 +405,14 @@ def requalify_visual_objects(
                     spans=spans,
                     source_manifest_id=manifest.scope.source_manifest_id,
                     dry_run=dry_run,
+                    read=partial(
+                        object_stage_bytes,
+                        sources,
+                        outputs.assets,
+                        manifest.scope,
+                        page,
+                        object_id=record.object_id,
+                    ),
                 )
             elif record.kind is ObjectKind.CHART:
                 revised, verdict = _requalify_chart(
