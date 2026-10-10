@@ -27,6 +27,7 @@ from ragspine.common.evidence.object_backend.sqlite import SqliteModelCacheBacke
 from tests.enterprise_pdf_rag.object_backend.conftest import (
     damage_object,
     damage_stage_entry,
+    db_file,
     expired_owner,
     live_owner,
     make_backend,
@@ -285,6 +286,30 @@ def test_zlib_roundtrip_keeps_bytes_and_digest(backend: ObjectBackend, backend_k
         assert hashlib.sha256(zlib.decompress(blob)).hexdigest() == digest
 
 
+def test_an_uncompressed_row_of_a_compressible_type_still_reads(
+    backend_kind: str, tmp_path: Path
+) -> None:
+    """压缩之前写下的行(encoding = raw 的 SVG / JSON)照样读得出,digest 不变。"""
+    if backend_kind == "files":
+        pytest.skip("文件布局没有 db 行")
+    root = tmp_path / "s"
+    backend = make_backend(backend_kind, root)
+    seed = b"seed"
+    backend.put_object(sha(seed), seed, "text/plain")  # 建库
+    data = b"<svg>" + b"<g/>" * 2000 + b"</svg>"
+    digest = sha(data)
+    with closing(sqlite3.connect(db_file(backend_kind, root))) as connection, connection:
+        connection.execute(
+            "INSERT INTO objects (digest, byte_length, media_type, encoding, external, bytes,"
+            " created_at) VALUES (?, ?, 'image/svg+xml', 'raw', 0, ?, 0)",
+            (digest, len(data), data),
+        )
+    assert backend.get_object(digest) == data
+    assert backend.get_content(digest) == data
+    assert backend.put_object(digest, data, "image/svg+xml") == "existing"  # 不改写旧行
+    backend.close()
+
+
 # ---- 模型缓存(双跑)--------------------------------------------------------------------
 
 
@@ -420,7 +445,7 @@ def _plant_legacy_claim(cache_dir: Path, key: str, content: bytes, *, generation
     return path
 
 
-@pytest.mark.parametrize("kind", ["files", "sqlite"])
+@pytest.mark.parametrize("kind", ["files", "sqlite", "staged"])
 def test_a_legacy_claim_file_is_judged_then_taken_over_at_its_next_generation(
     tmp_path: Path, kind: str
 ) -> None:

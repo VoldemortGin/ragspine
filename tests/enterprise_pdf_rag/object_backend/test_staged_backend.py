@@ -5,12 +5,19 @@
 - 断点续跑:本地没有工作副本 → 从发布版整文件拷回;发布版没被别处换过 → 保留本地进度;
 - 注册表:同一 store 根在进程内共享一个实例,store 的 close 不收尾,
   ``commit_staged`` / ``release_staged`` 按目录前缀提交 / 收尾;
-- 默认配置不走 staged;staged 模式下模型缓存仍是文件布局;
-- 发布目录的发布者租约:另一个活着的进程持有时写入即 ``StoreBusy``。
+- 默认配置不走 staged;staged 模式下根级模型缓存仍是文件布局;
+- 发布目录的发布者租约:另一个活着的进程持有时写入即 ``StoreBusy``;
+- ADR 0046:文档自己的模型缓存(``processing/model-cache``)随它的 store 一起 staged、
+  整文件发布、可续跑;staged 默认内联到 8 MiB(zlib,digest 仍是原始字节的);
+  文档结束后发布目录只剩整文件,没有 -wal / -shm / 租约。
 """
 
+import hashlib
+import json
 import os
+import shutil
 import sqlite3
+import zlib
 from collections.abc import Iterator
 from contextlib import closing
 from pathlib import Path
@@ -23,9 +30,12 @@ from ragspine.common.evidence.object_backend.files import FileBackend, FileModel
 from ragspine.common.evidence.object_backend.probe import clear_probe_cache
 from ragspine.common.evidence.object_backend.protocol import ObjectBackend, StoreBusy
 from ragspine.common.evidence.object_backend.registry import open_backend
+from ragspine.common.evidence.object_backend.sqlite import DEFAULT_INLINE_MAX_BYTES
 from ragspine.common.evidence.object_backend.staged import (
     PUBLISHER_CLAIM_FORMAT,
+    STAGED_INLINE_MAX_BYTES,
     StagedBackend,
+    StagedModelCacheBackend,
     commit_staged,
     release_staged,
 )
@@ -249,3 +259,207 @@ def test_default_settings_never_choose_the_staged_backend(
     assert not isinstance(auto, StagedBackend)
     auto.close()
     assert staged.registered() == ()
+
+
+# ---- ADR 0046:每份文档 4 个文件 ---------------------------------------------------------
+
+_KEY = "a" * 64
+_RECORD = b'{"request_fingerprint": "' + b"a" * 64 + b'", "response_digest": null}'
+
+
+def _document(tmp_path: Path) -> Path:
+    return tmp_path / "ingestion" / "doc-a"
+
+
+def _open_document_cache(tmp_path: Path) -> tuple[ObjectBackend, StagedModelCacheBackend]:
+    settings = _staged_settings(tmp_path)
+    processing = _document(tmp_path) / "processing"
+    store = open_backend(processing, settings=settings)
+    cache = open_backend(processing / "model-cache", "model-cache", settings=settings)
+    assert isinstance(cache, StagedModelCacheBackend)
+    return store, cache
+
+
+def _published_cache(tmp_path: Path) -> Path:
+    return _document(tmp_path) / "processing" / "model-cache" / "model-cache.sqlite"
+
+
+def _published_records(path: Path) -> dict[str, bytes]:
+    with closing(sqlite3.connect(path)) as connection:
+        return {
+            str(key): bytes(record)
+            for key, record in connection.execute("SELECT record_key, record FROM requests")
+        }
+
+
+def _files_under(root: Path) -> list[str]:
+    return sorted(path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file())
+
+
+def test_a_document_model_cache_is_staged_with_its_store_and_published_whole(
+    tmp_path: Path,
+) -> None:
+    store, cache = _open_document_cache(tmp_path)
+    assert cache.kind == "staged"
+    assert cache.work_dir.is_relative_to(tmp_path / "staging")
+    again = open_backend(
+        _document(tmp_path) / "processing" / "model-cache",
+        "model-cache",
+        settings=_staged_settings(tmp_path),
+    )
+    assert again is cache  # 同一文档的各个 client 共享一个实例
+    cache.put_record(_KEY, _RECORD)
+    assert not _published_cache(tmp_path).exists()  # 运行期只写本地
+
+    assert commit_staged(_document(tmp_path)) == 1  # store 没写过:只发布模型缓存
+    published = _published_cache(tmp_path)
+    assert _published_records(published) == {_KEY: _RECORD}
+    with closing(sqlite3.connect(published)) as connection:
+        assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+    assert commit_staged(_document(tmp_path)) == 0  # 没有新写入:不重发
+    assert cache.counts["commits"] == 1
+
+    store.close()
+    release_staged(_document(tmp_path))
+    # 文档结束:发布目录只剩整文件,没有 -wal / -shm / .writer / .publisher / 临时名。
+    assert _files_under(tmp_path / "ingestion") == [
+        "doc-a/processing/model-cache/model-cache.sqlite"
+    ]
+    assert staged.registered() == ()
+
+
+def test_a_staged_model_cache_resumes_from_the_published_file(tmp_path: Path) -> None:
+    store, cache = _open_document_cache(tmp_path)
+    cache.put_record(_KEY, _RECORD)
+    store.close()
+    release_staged(_document(tmp_path))
+    shutil.rmtree(tmp_path / "staging")  # 新集群:本地盘是空的
+
+    store, cache = _open_document_cache(tmp_path)
+    assert cache.counts["restores"] == 1
+    assert cache.record(_KEY) == _RECORD
+    store.close()
+    release_staged(_document(tmp_path))
+    assert cache.counts["commits"] == 0  # 只读回放:不重发
+
+
+def test_a_killed_model_cache_publish_keeps_the_published_version_and_recovers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, cache = _open_document_cache(tmp_path)
+    cache.put_record(_KEY, _RECORD)
+    commit_staged(_document(tmp_path))
+    before = _published_cache(tmp_path).read_bytes()
+    cache.put_record("b" * 64, b'{"second": true}')
+
+    def killed(_source: object, _target: object) -> None:
+        raise KeyboardInterrupt  # 进程在 rename 之前被杀
+
+    monkeypatch.setattr(os, "replace", killed)
+    with pytest.raises(KeyboardInterrupt):
+        commit_staged(_document(tmp_path))
+    monkeypatch.undo()
+    assert _published_cache(tmp_path).read_bytes() == before
+
+    assert commit_staged(_document(tmp_path)) == 1  # 下一次提交补上
+    assert set(_published_records(_published_cache(tmp_path))) == {_KEY, "b" * 64}
+    assert not list(_published_cache(tmp_path).parent.glob(".model-cache.sqlite.staging-*"))
+    store.close()
+    release_staged(_document(tmp_path))
+
+
+def test_crashed_model_cache_progress_is_published_by_the_next_run(tmp_path: Path) -> None:
+    store, cache = _open_document_cache(tmp_path)
+    cache.put_record(_KEY, _RECORD)
+    commit_staged(_document(tmp_path))
+    cache.put_record("b" * 64, b'{"pending": true}')  # 阶段中途"崩溃":本地有,发布版没有
+    cache._core.close()  # 模拟进程消失(不走收尾提交)
+    staged._REGISTRY.clear()
+    store.close()
+
+    store, resumed = _open_document_cache(tmp_path)
+    assert resumed is not cache and resumed.counts["restores"] == 0
+    assert resumed.record("b" * 64) == b'{"pending": true}'
+    assert commit_staged(_document(tmp_path)) == 1
+    assert set(_published_records(_published_cache(tmp_path))) == {_KEY, "b" * 64}
+    store.close()
+    release_staged(_document(tmp_path))
+
+
+def test_a_model_cache_outside_any_staged_store_stays_on_the_file_layout(
+    tmp_path: Path,
+) -> None:
+    settings = _staged_settings(tmp_path)
+    open_backend(_document(tmp_path) / "processing", settings=settings).close()
+    root_cache = open_backend(
+        tmp_path / "ingestion" / "model-cache", "model-cache", settings=settings
+    )
+    assert isinstance(root_cache, FileModelCacheBackend)  # 根级答案缓存:多进程写,不 staged
+
+
+def _svg(size: int) -> bytes:
+    body = b"".join(b'<path d="M%d 0 L0 %d"/>' % (index, index) for index in range(size // 24))
+    return b'<svg xmlns="http://www.w3.org/2000/svg">' + body + b"</svg>"
+
+
+def test_staged_mode_inlines_objects_up_to_8_mib_compressed_by_default(tmp_path: Path) -> None:
+    assert STAGED_INLINE_MAX_BYTES == 8 * 1024 * 1024
+    data = _svg(2_400_000)  # 与 71 页样本最大的页 SVG 同量级
+    digest = hashlib.sha256(data).hexdigest()
+    root = _document(tmp_path) / "source"
+    backend = open_backend(root, settings=_staged_settings(tmp_path))
+    assert isinstance(backend, StagedBackend)
+    backend.put_object(digest, data, "image/svg+xml")
+    assert backend.get_object(digest) == data
+    backend.close()
+    release_staged(_document(tmp_path))
+    assert _files_under(root) == ["store.sqlite"]  # 没有外置文件
+    with closing(sqlite3.connect(root / "store.sqlite")) as connection:
+        length, encoding, external, blob = connection.execute(
+            "SELECT byte_length, encoding, external, bytes FROM objects WHERE digest = ?",
+            (digest,),
+        ).fetchone()
+    assert (length, encoding, external) == (len(data), "zlib", 0)
+    assert len(blob) < len(data) // 4
+    assert hashlib.sha256(zlib.decompress(blob)).hexdigest() == digest  # digest 按原始字节
+
+
+def test_an_explicit_inline_limit_still_wins_in_staged_mode(tmp_path: Path) -> None:
+    data = _svg(400_000)
+    digest = hashlib.sha256(data).hexdigest()
+    settings = Settings(
+        object_store_backend="staged",
+        object_store_staging_dir=tmp_path / "staging",
+        object_store_inline_max_bytes=DEFAULT_INLINE_MAX_BYTES,
+    )
+    root = _document(tmp_path) / "source"
+    backend = open_backend(root, settings=settings)
+    backend.put_object(digest, data, "image/svg+xml")
+    backend.close()
+    release_staged(_document(tmp_path))
+    assert (root / "objects" / "sha256-sharded" / digest[:2] / digest).read_bytes() == data
+
+
+def test_the_sqlite_backend_keeps_the_256_kib_default(tmp_path: Path) -> None:
+    data = _svg(400_000)
+    digest = hashlib.sha256(data).hexdigest()
+    backend = open_backend(tmp_path / "s", settings=Settings(object_store_backend="sqlite"))
+    backend.put_object(digest, data, "image/svg+xml")
+    backend.close()
+    assert (tmp_path / "s" / "objects" / "sha256-sharded" / digest[:2] / digest).is_file()
+
+
+def test_the_model_cache_signature_ignores_claims(tmp_path: Path) -> None:
+    """claim 只是运行期互斥:只有 claim 进出的模型缓存不必重发。"""
+    store, cache = _open_document_cache(tmp_path)
+    cache.put_record(_KEY, _RECORD)
+    assert commit_staged(_document(tmp_path)) == 1
+    owner = live_owner()
+    assert cache.claim("c" * 64, owner) == 0
+    cache.release("c" * 64, owner)
+    assert commit_staged(_document(tmp_path)) == 0
+    store.close()
+    release_staged(_document(tmp_path))
+    assert (
+        json.loads(_published_records(_published_cache(tmp_path))[_KEY])["response_digest"] is None
+    )

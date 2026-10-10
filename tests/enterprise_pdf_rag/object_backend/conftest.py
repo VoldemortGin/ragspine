@@ -1,5 +1,5 @@
 """后端 parametrize 的共享 fixture:同一套一致性测试在 files / sqlite / staged 上各跑一遍
-(staged 只是对象 store 的后端;模型缓存的一致性测试仍只在 files / sqlite 上双跑)。"""
+(对象 store 与模型缓存都是;staged 模型缓存是文档自己的那一份,ADR 0046)。"""
 
 import hashlib
 import sqlite3
@@ -27,7 +27,10 @@ from ragspine.common.evidence.object_backend.sqlite import (
     SqliteBackend,
     SqliteModelCacheBackend,
 )
-from ragspine.common.evidence.object_backend.staged import StagedBackend
+from ragspine.common.evidence.object_backend.staged import (
+    StagedBackend,
+    StagedModelCacheBackend,
+)
 from ragspine.extraction.evidence.document.models import AssetRef
 from ragspine.extraction.evidence.page.models import StageOutcome, StageState
 
@@ -61,6 +64,8 @@ def make_backend(kind: str, root: Path, **sqlite_kwargs: object) -> ObjectBacken
 def make_model_cache(kind: str, cache_dir: Path) -> ModelCacheBackend:
     if kind == "files":
         return FileModelCacheBackend(cache_dir)
+    if kind == "staged":
+        return StagedModelCacheBackend(cache_dir, work_dir=staged_work_dir(cache_dir))
     return SqliteModelCacheBackend(cache_dir)
 
 
@@ -69,7 +74,7 @@ def backend_kind(request: pytest.FixtureRequest) -> str:
     return str(request.param)
 
 
-@pytest.fixture(params=["files", "sqlite"])
+@pytest.fixture(params=["files", "sqlite", "staged"])
 def model_cache_kind(request: pytest.FixtureRequest) -> str:
     return str(request.param)
 

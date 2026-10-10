@@ -14,10 +14,14 @@
 - **进程内共享**:``acquire_staged`` 按 store 根把实例放进注册表,阶段间(各 stage 各开一个
   store)拿到的是同一个实例;store 的 ``close`` 只放掉自己的引用。``commit_staged`` /
   ``release_staged`` 按目录前缀提交 / 收尾(``folder_pipeline`` 在阶段边界调用);
-  进程退出时 ``atexit`` 再提交一次没提交的(失败只计数)。
+  进程退出时 ``atexit`` 提交没提交的(失败只计数)并收尾(连接、发布者租约)。
 - **隐私**:``counts`` 只有计数与毫秒;异常只有固定文案 / 原因码,不含路径与正文。
 
-只用于对象 store;模型缓存在 staged 模式下走文件布局(注册表负责)。
+``StagedModelCacheBackend``(enterprise-pdf-rag ADR 0046):文档自己的模型缓存
+(``<processing store>/model-cache``)同样在本地读写、随文档的 store 在阶段边界整文件发布成
+``model-cache/model-cache.sqlite``;它的"有没有新写入"看内容签名(claim 进出不算)。
+根级答案缓存(多进程写)不在此列,仍走文件布局(注册表负责)。staged 对象 store 默认把
+内联上限提到 ``STAGED_INLINE_MAX_BYTES``(8 MiB;显式设置仍优先),大 SVG 也压进 db。
 """
 
 import atexit
@@ -46,9 +50,13 @@ from ragspine.common.evidence.object_backend.sqlite import (
     DEFAULT_MAX_DB_BYTES,
     WRITER_LEASE_SECONDS,
     SqliteBackend,
+    SqliteModelCacheBackend,
 )
 
 PUBLISHER_CLAIM_FORMAT = "object-store-staged-publisher-v1"
+# staged 对象 store 的默认内联上限(ADR 0046):发布目录只留整文件;db 超过
+# ``max_db_bytes`` 后 > 16 KiB 的新对象仍外置(ADR 0036 的保护阈)。
+STAGED_INLINE_MAX_BYTES = 8 * 1024 * 1024
 _COPY_CHUNK = 8 * 1024 * 1024
 # 一份文件状态:(size, mtime_ns);不存在 → None。FUSE 上 inode 不可信,不纳入。
 FileMarks = tuple[int, int] | None
@@ -70,11 +78,19 @@ _SIGNATURE_SQL = (
     "SELECT count(*), max(updated_at) FROM pointers",
     "SELECT count(*), max(updated_at) FROM records",
 )
+# 模型缓存的内容签名:claims 是运行期互斥,不算内容(只有 claim 进出不重发)。
+_MODEL_CACHE_SIGNATURE_SQL = (
+    "SELECT count(*), max(created_at) FROM requests",
+    "SELECT count(*), max(created_at) FROM responses",
+    "SELECT count(*), max(created_at) FROM contexts",
+)
 
 
-def _signature(connection: sqlite3.Connection) -> list[list[object]] | None:
+def _signature(
+    connection: sqlite3.Connection, statements: tuple[str, ...] = _SIGNATURE_SQL
+) -> list[list[object]] | None:
     try:
-        return [list(connection.execute(sql).fetchone()) for sql in _SIGNATURE_SQL]
+        return [list(connection.execute(sql).fetchone()) for sql in statements]
     except sqlite3.Error:
         return None
 
@@ -101,38 +117,22 @@ def _copy_whole(source: Path, target: Path) -> int:
     return size
 
 
-class StagedBackend(SqliteBackend):
-    """``root`` = 发布目录(store 根);db 在 ``work_dir``;``commit()`` 整文件发布。"""
+class _StagedDb:
+    """一份本地工作 db 与它在发布目录里的整文件:拷回 / 内容签名 / 发布者租约 / 整文件发布 /
+    引用计数收尾。对象 store 与文档模型缓存共用(``_signature_sql`` 各自的表)。"""
 
-    kind: BackendKind = "staged"
+    _signature_sql: tuple[str, ...] = _SIGNATURE_SQL
 
-    def __init__(
-        self,
-        root: Path,
-        *,
-        work_dir: Path,
-        db_name: str = "store.sqlite",
-        synchronous: str = "FULL",
-        inline_max_bytes: int = DEFAULT_INLINE_MAX_BYTES,
-        external_media_types: frozenset[str] = frozenset({"application/pdf"}),
-        max_db_bytes: int = DEFAULT_MAX_DB_BYTES,
-    ) -> None:
-        super().__init__(
-            root,
-            db_name=db_name,
-            db_path=work_dir / db_name,
-            synchronous=synchronous,
-            inline_max_bytes=inline_max_bytes,
-            external_media_types=external_media_types,
-            max_db_bytes=max_db_bytes,
-        )
+    def _setup_staging(self, published_dir: Path, work_dir: Path, db_name: str) -> None:
         self.work_dir = work_dir
         self.counts: Counter[str] = Counter()
-        self._published = root / db_name
+        self._key = published_dir  # 注册表的键 = 发布目录
+        self._published = published_dir / db_name
         self._local = work_dir / db_name
         self._marker = work_dir / f"{db_name}.published"
-        self._publisher_base = root / f"{db_name}.publisher"
+        self._publisher_base = published_dir / f"{db_name}.publisher"
         self._commit_lock = threading.Lock()
+        self._claim_lock = threading.Lock()
         self._publisher = False
         self._refs = 1
         self._closed = False
@@ -140,6 +140,9 @@ class StagedBackend(SqliteBackend):
         self._writes = 0
         self._committed = 0
         self._prepare()
+
+    def _close_db(self) -> None:
+        raise NotImplementedError
 
     # ---- 打开:拷回 / 保留本地 -------------------------------------------------------
 
@@ -159,7 +162,7 @@ class StagedBackend(SqliteBackend):
 
     def _local_signature(self) -> list[list[object]] | None:
         with closing(sqlite3.connect(self._local)) as connection:
-            return _signature(connection)
+            return _signature(connection, self._signature_sql)
 
     def _prepare(self) -> None:
         self.work_dir.mkdir(parents=True, exist_ok=True)
@@ -182,17 +185,116 @@ class StagedBackend(SqliteBackend):
     # ---- 写:先取发布者租约,再记代次 ----------------------------------------------------
 
     def _claim_publisher(self) -> None:
-        if self._publisher:
-            return
-        owner = lease.current_owner(PUBLISHER_CLAIM_FORMAT, WRITER_LEASE_SECONDS)
-        content = lease.owner_payload(PUBLISHER_CLAIM_FORMAT, owner)
-        if lease.holder_process(self._publisher_base) != lease.PROCESS_TOKEN:
-            generation = lease.acquire_lease(
-                self._publisher_base, content, claim_format=PUBLISHER_CLAIM_FORMAT
-            )
-            if generation is None:
-                raise StoreBusy("store_busy")
-        self._publisher = True
+        # 锁内判断:文档内页级并发(ADR 0045)的几个线程可能同时首写,只取一次——否则后来的
+        # 线程看见本进程刚写下的活租约,会被当成"别人持有"而 StoreBusy。
+        with self._claim_lock:
+            if self._publisher:
+                return
+            owner = lease.current_owner(PUBLISHER_CLAIM_FORMAT, WRITER_LEASE_SECONDS)
+            content = lease.owner_payload(PUBLISHER_CLAIM_FORMAT, owner)
+            if lease.holder_process(self._publisher_base) != lease.PROCESS_TOKEN:
+                generation = lease.acquire_lease(
+                    self._publisher_base, content, claim_format=PUBLISHER_CLAIM_FORMAT
+                )
+                if generation is None:
+                    raise StoreBusy("store_busy")
+            self._publisher = True
+
+    # ---- 提交与收尾 --------------------------------------------------------------------
+
+    @property
+    def dirty(self) -> bool:
+        return self._writes != self._committed
+
+    def commit(self) -> bool:
+        """把已提交的 db 状态整文件发布到发布目录;没有新写入 → ``False``(什么都不碰)。
+
+        在任何 ``transaction()`` 之外调用(进行中的事务不在快照里,留给下一次提交)。"""
+        with self._commit_lock:
+            if not self._local.is_file() or not self.dirty:
+                return False
+            seen = self._writes
+            started = perf_counter()
+            self._claim_publisher()
+            for leftover in self._key.glob(f".{self._published.name}.staging-*"):
+                with suppress(OSError):
+                    leftover.unlink()  # 被杀的提交留下的临时文件(持租约者才清)
+            snapshot = self.work_dir / f"{self._published.name}.snapshot"
+            snapshot.unlink(missing_ok=True)
+            with (
+                closing(sqlite3.connect(self._local)) as source,
+                closing(sqlite3.connect(snapshot)) as target,
+            ):
+                source.backup(target)
+                target.execute("PRAGMA journal_mode = DELETE")  # 自足的单文件,无 -wal
+                signature = _signature(target, self._signature_sql)
+            try:
+                self.counts["published_bytes"] += _copy_whole(snapshot, self._published)
+            finally:
+                snapshot.unlink(missing_ok=True)
+            self._committed = seen
+            self._write_marker(signature)
+            self.counts["commits"] += 1
+            self.counts["commit_ms"] += round((perf_counter() - started) * 1000)
+            return True
+
+    def close(self) -> None:
+        """放掉一个引用;最后一个引用提交(失败只计数,本地副本留给续跑)并释放连接与租约。"""
+        with _REGISTRY_LOCK:
+            if self._closed:
+                return
+            self._refs -= 1
+            if self._refs > 0:
+                return
+            if _REGISTRY.get(self._key) is self:
+                del _REGISTRY[self._key]
+        self._finish()
+
+    def _finish(self) -> None:
+        """提交(失败只计数)、关连接(检查点 TRUNCATE)、删发布者租约;只做一次。"""
+        with _REGISTRY_LOCK:
+            if self._closed:
+                return
+            self._closed = True
+        try:
+            _commit_quietly(self)
+        finally:
+            self._close_db()
+            if self._publisher:
+                lease.release_lease(self._publisher_base)
+                self._publisher = False
+
+
+class StagedBackend(_StagedDb, SqliteBackend):
+    """``root`` = 发布目录(store 根);db 在 ``work_dir``;``commit()`` 整文件发布。"""
+
+    kind: BackendKind = "staged"
+
+    def __init__(
+        self,
+        root: Path,
+        *,
+        work_dir: Path,
+        db_name: str = "store.sqlite",
+        synchronous: str = "FULL",
+        inline_max_bytes: int = DEFAULT_INLINE_MAX_BYTES,
+        external_media_types: frozenset[str] = frozenset({"application/pdf"}),
+        max_db_bytes: int = DEFAULT_MAX_DB_BYTES,
+    ) -> None:
+        SqliteBackend.__init__(
+            self,
+            root,
+            db_name=db_name,
+            db_path=work_dir / db_name,
+            synchronous=synchronous,
+            inline_max_bytes=inline_max_bytes,
+            external_media_types=external_media_types,
+            max_db_bytes=max_db_bytes,
+        )
+        self._setup_staging(root, work_dir, db_name)
+
+    def _close_db(self) -> None:
+        SqliteBackend.close(self)
 
     def put_object(
         self, digest: str, data: bytes, media_type: str, *, replace: bool = False
@@ -222,68 +324,49 @@ class StagedBackend(SqliteBackend):
         super().put_record(name, data)
         self._writes += 1
 
-    # ---- 提交与收尾 --------------------------------------------------------------------
+
+class StagedModelCacheBackend(_StagedDb, SqliteModelCacheBackend):
+    """文档自己的模型缓存(ADR 0046):``cache_dir`` = 发布目录;db 在 ``work_dir``。
+
+    claim / 单飞 / 预算 / 429 冷却的语义与 ``SqliteModelCacheBackend`` 相同(同一份代码,
+    只是 db 在本地);"有没有新写入"看内容签名(请求记录 / 响应 / 上下文),所以只读回放、
+    只有 claim 进出的一轮不重发。发布者租约在第一次发布前取。"""
+
+    kind: BackendKind = "staged"
+    _signature_sql = _MODEL_CACHE_SIGNATURE_SQL
+
+    def __init__(
+        self,
+        cache_dir: Path,
+        *,
+        work_dir: Path,
+        db_name: str = "model-cache.sqlite",
+        synchronous: str = "FULL",
+    ) -> None:
+        SqliteModelCacheBackend.__init__(
+            self,
+            cache_dir,
+            db_name=db_name,
+            db_path=work_dir / db_name,
+            synchronous=synchronous,
+        )
+        self._setup_staging(cache_dir, work_dir, db_name)
 
     @property
     def dirty(self) -> bool:
-        return self._writes != self._committed
+        if not self._local.is_file():
+            return False
+        recorded = (self._read_marker() or {}).get("signature")
+        return self._local_signature() != recorded
 
-    def commit(self) -> bool:
-        """把已提交的 db 状态整文件发布到 store 根;没有新写入 → ``False``(什么都不碰)。
-
-        在任何 ``transaction()`` 之外调用(进行中的事务不在快照里,留给下一次提交)。"""
-        with self._commit_lock:
-            if not self.dirty or not self._local.is_file():
-                return False
-            seen = self._writes
-            started = perf_counter()
-            self._claim_publisher()
-            for leftover in self.root.glob(f".{self._published.name}.staging-*"):
-                with suppress(OSError):
-                    leftover.unlink()  # 被杀的提交留下的临时文件(持租约者才清)
-            snapshot = self.work_dir / f"{self._published.name}.snapshot"
-            snapshot.unlink(missing_ok=True)
-            with (
-                closing(sqlite3.connect(self._local)) as source,
-                closing(sqlite3.connect(snapshot)) as target,
-            ):
-                source.backup(target)
-                target.execute("PRAGMA journal_mode = DELETE")  # 自足的单文件,无 -wal
-                signature = _signature(target)
-            try:
-                self.counts["published_bytes"] += _copy_whole(snapshot, self._published)
-            finally:
-                snapshot.unlink(missing_ok=True)
-            self._committed = seen
-            self._write_marker(signature)
-            self.counts["commits"] += 1
-            self.counts["commit_ms"] += round((perf_counter() - started) * 1000)
-            return True
-
-    def close(self) -> None:
-        """放掉一个引用;最后一个引用提交(失败只计数,本地副本留给续跑)并释放连接与租约。"""
-        with _REGISTRY_LOCK:
-            if self._closed:
-                return
-            self._refs -= 1
-            if self._refs > 0:
-                return
-            self._closed = True
-            if _REGISTRY.get(self.root) is self:
-                del _REGISTRY[self.root]
-        try:
-            _commit_quietly(self)
-        finally:
-            super().close()
-            if self._publisher:
-                lease.release_lease(self._publisher_base)
-                self._publisher = False
+    def _close_db(self) -> None:
+        SqliteModelCacheBackend.close(self)
 
 
 # ---- 进程内注册表 ----------------------------------------------------------------------
 
 _REGISTRY_LOCK = threading.Lock()
-_REGISTRY: dict[Path, StagedBackend] = {}
+_REGISTRY: dict[Path, _StagedDb] = {}
 
 
 def work_dir_for(root: Path, staging_root: Path) -> Path:
@@ -315,10 +398,33 @@ def acquire_staged(
             )
             _REGISTRY[key] = backend
         backend._refs += 1
+        assert isinstance(backend, StagedBackend)
         return backend
 
 
-def _under(prefix: Path) -> list[StagedBackend]:
+def acquire_staged_model_cache(
+    cache_dir: Path, *, synchronous: str = "FULL"
+) -> StagedModelCacheBackend | None:
+    """``cache_dir`` 的父目录是本进程正在 staged 的 store 根(文档的 processing store)→
+    共享的 staged 模型缓存(本地副本与那个 store 同一 staging 根);否则 ``None``(调用方
+    走文件布局,如根级答案缓存)。注册表持有唯一的引用:模型缓存的使用者(``JsonCompletionClient``)
+    从不 close,由文档结束时的 ``release_staged`` 收尾。"""
+    key = cache_dir.expanduser().resolve()
+    with _REGISTRY_LOCK:
+        existing = _REGISTRY.get(key)
+        if isinstance(existing, StagedModelCacheBackend):
+            return existing
+        owner = _REGISTRY.get(key.parent)
+        if not isinstance(owner, StagedBackend):
+            return None
+        backend = StagedModelCacheBackend(
+            key, work_dir=work_dir_for(key, owner.work_dir.parent), synchronous=synchronous
+        )
+        _REGISTRY[key] = backend
+        return backend
+
+
+def _under(prefix: Path) -> list[_StagedDb]:
     base = prefix.expanduser().resolve()
     with _REGISTRY_LOCK:
         return [backend for key, backend in _REGISTRY.items() if key.is_relative_to(base)]
@@ -340,14 +446,14 @@ def release_staged(prefix: Path) -> None:
     引用(文档结束;还有 store 开着时由最后一个 ``close`` 收尾)。"""
     for backend in _under(prefix):
         with _REGISTRY_LOCK:
-            if _REGISTRY.get(backend.root) is not backend:
+            if _REGISTRY.get(backend._key) is not backend:
                 continue
-            del _REGISTRY[backend.root]
+            del _REGISTRY[backend._key]
         _commit_quietly(backend)
         backend.close()
 
 
-def _commit_quietly(backend: StagedBackend) -> None:
+def _commit_quietly(backend: _StagedDb) -> None:
     try:
         backend.commit()
     except (OSError, sqlite3.Error, StoreBusy):
@@ -355,6 +461,10 @@ def _commit_quietly(backend: StagedBackend) -> None:
 
 
 @atexit.register
-def _commit_at_exit() -> None:
+def _finish_at_exit() -> None:
+    """进程退出:提交并收尾所有还登记着的实例(连接检查点、发布者租约删除)。"""
     for backend in _under(Path("/")):
-        _commit_quietly(backend)
+        with _REGISTRY_LOCK:
+            if _REGISTRY.get(backend._key) is backend:
+                del _REGISTRY[backend._key]
+        backend._finish()

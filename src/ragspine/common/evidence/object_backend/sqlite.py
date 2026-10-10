@@ -982,12 +982,14 @@ class SqliteModelCacheBackend:
         cache_dir: Path,
         *,
         db_name: str = "model-cache.sqlite",
+        db_path: Path | None = None,
         synchronous: str = "FULL",
     ) -> None:
         self.cache_dir = cache_dir
         self._files = FileModelCacheBackend(cache_dir)
+        # db_path:db 放在别处(StagedModelCacheBackend 的本地工作副本);缺省 = <cache_dir>/<db_name>。
         self._core = _SqliteCore(
-            cache_dir / db_name,
+            cache_dir / db_name if db_path is None else db_path,
             MODEL_CACHE_SCHEMA,
             synchronous=synchronous,
             writer_scope="transaction",

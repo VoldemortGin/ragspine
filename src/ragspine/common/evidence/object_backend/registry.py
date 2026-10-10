@@ -9,16 +9,22 @@
 
 - ``files``:直接返回文件布局实现,不探测;
 - ``sqlite``:显式要求 sqlite;探测失败即抛 ``BackendUnavailable``(绝不静默回退);
-- ``auto``(默认):探测可用 → sqlite,否则回退文件布局;
+- ``auto``(默认):探测可用 → sqlite,否则回退文件布局——回退时每个目录一条 warning +
+  一条 trace(``event=object_backend_fallback``、``failure_code``,只带探测失败码,不带路径);
 - ``staged``(opt-in,enterprise-pdf-rag ADR 0044):对象 store 的 db 在本地工作目录
   (``APP_OBJECT_STORE_STAGING_DIR``)读写、阶段结束整文件发布回 ``root``,进程内每个 root
-  共享一个 ``StagedBackend``;工作目录探测失败即 ``BackendUnavailable``。模型缓存走文件布局。
+  共享一个 ``StagedBackend``;工作目录探测失败即 ``BackendUnavailable``。没显式设置
+  ``APP_OBJECT_STORE_INLINE_MAX_BYTES`` 时内联上限是 8 MiB(ADR 0046)。模型缓存:父目录是本进程
+  正在 staged 的 store(文档自己的 ``processing/model-cache``)→ ``StagedModelCacheBackend``,
+  随那个 store 一起发布(ADR 0046);其余(根级答案缓存)走文件布局。
 
 本 PR(PR-1)只提供注册表;没有任何调用方读它——store / 模型缓存在 PR-2/3 接线。
 """
 
+import logging
 import tempfile
 from pathlib import Path
+from threading import Lock
 from typing import Literal, overload
 
 from ragspine.common.evidence.configs import Settings, get_settings
@@ -33,9 +39,18 @@ from ragspine.common.evidence.object_backend.sqlite import (
     SqliteBackend,
     SqliteModelCacheBackend,
 )
-from ragspine.common.evidence.object_backend.staged import acquire_staged
+from ragspine.common.evidence.object_backend.staged import (
+    STAGED_INLINE_MAX_BYTES,
+    acquire_staged,
+    acquire_staged_model_cache,
+)
+from ragspine.common.observability.trace import emit_trace
 
 BackendRole = Literal["object", "model-cache"]
+_LOGGER = logging.getLogger(__name__)
+# auto 回退已告警过的目录(进程内,每个目录一次)。
+_WARNED_LOCK = Lock()
+_WARNED: set[Path] = set()
 
 
 def external_media_types(settings: Settings) -> frozenset[str]:
@@ -68,7 +83,10 @@ def open_backend(
     if mode == "files":
         return _files(root, kind)
     if mode == "staged":
-        return _files(root, kind) if kind == "model-cache" else _staged(root, settings)
+        if kind == "model-cache":
+            staged = acquire_staged_model_cache(root, synchronous=settings.object_store_synchronous)
+            return _files(root, kind) if staged is None else staged
+        return _staged(root, settings)
     result = probe_directory(root)
     if result.ok:
         return _sqlite(root, kind, settings)
@@ -78,7 +96,28 @@ def open_backend(
             f"失败(失败码 {result.code})。不会静默回退:要继续使用文件布局,请把"
             " APP_OBJECT_STORE_BACKEND 设回 files(或删掉该设置用默认的 auto 自动回退)。"
         )
+    _note_fallback(root, result.code)
     return _files(root, kind)
+
+
+def _note_fallback(root: Path, code: str | None) -> None:
+    """``auto`` 退到文件布局:每个目录一条 warning + 一条 trace,只带失败码(隐私:不带路径)。"""
+    key = root.expanduser().resolve()
+    with _WARNED_LOCK:
+        if key in _WARNED:
+            return
+        _WARNED.add(key)
+    _LOGGER.warning(
+        "APP_OBJECT_STORE_BACKEND=auto: sqlite 可用性探测失败(%s),该目录回退到文件布局"
+        "(文件数会多很多;Databricks 上可改用 APP_OBJECT_STORE_BACKEND=staged)",
+        code,
+    )
+    emit_trace(
+        event="object_backend_fallback",
+        requested="auto",
+        backend="files",
+        failure_code=code or "unknown",
+    )
 
 
 def _files(root: Path, kind: BackendRole) -> ObjectBackend | ModelCacheBackend:
@@ -112,11 +151,16 @@ def _staged(root: Path, settings: Settings) -> ObjectBackend:
             f"(失败码 {result.code})。请把 APP_OBJECT_STORE_STAGING_DIR 指向本地盘"
             "(如 /local_disk0/ragspine-staged),或把 APP_OBJECT_STORE_BACKEND 设回 files / auto。"
         )
+    inline_max_bytes = (
+        settings.object_store_inline_max_bytes
+        if "object_store_inline_max_bytes" in settings.model_fields_set
+        else STAGED_INLINE_MAX_BYTES
+    )
     return acquire_staged(
         root,
         staging_root=staging_root,
         synchronous=settings.object_store_synchronous,
-        inline_max_bytes=settings.object_store_inline_max_bytes,
+        inline_max_bytes=inline_max_bytes,
         external_media_types=external_media_types(settings),
         max_db_bytes=settings.object_store_max_db_bytes,
     )

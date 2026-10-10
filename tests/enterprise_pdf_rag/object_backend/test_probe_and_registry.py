@@ -1,5 +1,6 @@
 """探测的各失败路径(含 Volumes 式随机写不可用与 -shm 不可用)与注册表的三种模式。"""
 
+import logging
 import sqlite3
 from collections.abc import Sequence
 from pathlib import Path
@@ -136,6 +137,47 @@ def test_auto_mode_falls_back_to_files_when_the_probe_fails(tmp_path: Path) -> N
     probe_directory(tmp_path / "store", refresh=True, connect=refuse)  # 毒化该目录的缓存
     backend = open_backend(tmp_path / "store", settings=_settings(object_store_backend="auto"))
     assert isinstance(backend, FileBackend)
+
+
+def test_auto_fallback_warns_once_per_directory_with_the_probe_code_and_traces_it(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """auto 退到文件布局不再静默:一条 warning + 一条 trace,只有失败码,不带路径。"""
+
+    def refuse(_path: str) -> sqlite3.Connection:
+        raise sqlite3.OperationalError("disk I/O error")
+
+    probe_directory(tmp_path / "store", refresh=True, connect=refuse)
+    caplog.set_level(logging.INFO)
+    settings = _settings(object_store_backend="auto")
+    assert isinstance(open_backend(tmp_path / "store", settings=settings), FileBackend)
+    assert isinstance(open_backend(tmp_path / "store", settings=settings), FileBackend)
+
+    warnings = [
+        record
+        for record in caplog.records
+        if record.levelno == logging.WARNING and record.name.endswith("object_backend.registry")
+    ]
+    assert len(warnings) == 1  # 同一目录只告警一次
+    assert "sqlite_connect" in warnings[0].getMessage()
+    traces = [record for record in caplog.records if record.name == "ragspine.trace"]
+    assert len(traces) == 1
+    assert traces[0].__dict__["event"] == "object_backend_fallback"
+    assert traces[0].__dict__["failure_code"] == "sqlite_connect"
+    assert traces[0].__dict__["backend"] == "files"
+    for record in [*warnings, *traces]:
+        assert str(tmp_path) not in record.getMessage()
+        assert all(str(tmp_path) not in str(value) for value in record.__dict__.values())
+
+
+def test_auto_mode_that_resolves_to_sqlite_stays_quiet(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    backend = open_backend(tmp_path / "store", settings=_settings(object_store_backend="auto"))
+    backend.close()
+    assert not [record for record in caplog.records if record.levelno >= logging.WARNING]
+    assert not [record for record in caplog.records if record.name == "ragspine.trace"]
 
 
 def test_explicit_sqlite_mode_refuses_when_the_probe_fails(tmp_path: Path) -> None:
