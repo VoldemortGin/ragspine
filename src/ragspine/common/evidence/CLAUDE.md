@@ -1,7 +1,7 @@
 ---
 covers:
   - src/ragspine/common/evidence/
-verified-against: a8a3ec1
+verified-against: 1c6d2ab
 ---
 
 # common/evidence — agent contract
@@ -51,8 +51,12 @@ object_backend/  the store persistence seam (sqlite object-store PR-1): ObjectBa
               (lease.py), and open_backend(root, kind) (registry.py: files | sqlite — probe
               failure raises, never silently falls back | auto | staged — opt-in, staged.py:
               the store db in a local working copy, published whole to the store root at each
-              ingest stage boundary, one shared instance per root per process, model cache on
-              files; enterprise-pdf-rag ADR 0044). **Wired for the stores
+              ingest stage boundary, one shared instance per root per process; a document's
+              own model cache — parent dir a staged store — is a StagedModelCacheBackend
+              published with it, the root answer cache stays on files; staged inlines up to
+              8 MiB unless APP_OBJECT_STORE_INLINE_MAX_BYTES is set; auto falling back to files
+              warns + traces failure_code once per dir; enterprise-pdf-rag ADR 0044 / 0046).
+              **Wired for the stores
               (PR-2)** — LocalDocumentStore / ProcessingStore / scan_catalog / mount pins
               read and write only through it — **and the model cache (PR-3)**:
               JsonCompletionClient opens its cache through it (below). A store db holds its

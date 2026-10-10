@@ -418,7 +418,13 @@ hook, absolute imports, closed import whitelist outside `adapters/`), `check_arc
   layout above byte for byte; `sqlite` keeps objects, stage entries, `current-*` pointers,
   document-tree records and receipts as rows of one `store.sqlite` per store root (external
   objects such as the PDF stay sharded files) — same digests, envelopes and published ids; one
-  page's writes share a `transaction()`. A mount verifies
+  page's writes share a `transaction()`. `staged` (opt-in, [ADR
+  0044](../../docs/enterprise-pdf-rag/adr/0044-staged-object-backend.md) /
+  [0046](../../docs/enterprise-pdf-rag/adr/0046-four-files-per-document.md)) keeps those dbs and
+  the document's own `processing/model-cache` in local working copies published whole at each
+  run-folder stage boundary — four files per document on the mount (two `store.sqlite`,
+  `model-cache/model-cache.sqlite`, the PDF; objects inline up to 8 MiB), the root answer cache
+  stays on files; `auto` falling back to files logs a warning + trace. A mount verifies
   its **whole** pinned release once, when it is mounted — every asset digest, the source it was
   cut from, every member's evidence. Every later request re-reads the one file that names all
   of it, the pinned manifest object whose digest **is** the processing id, and refuses any

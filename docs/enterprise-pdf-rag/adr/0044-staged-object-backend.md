@@ -113,3 +113,17 @@ document, and a rerun after the local disk was wiped: restored, zero model calls
 - **Commit on every page**: whole-file copies per page cost more than they save; stage
   boundaries are where a resume needs a consistent point.
 - **Staging the model cache**: shared by processes; would need merge logic, not a copy.
+
+## Amendment 1 (2026-10-09, [ADR 0046](0046-four-files-per-document.md)): the document's model cache is staged
+
+§3's reason for keeping the model cache on files — "the root-level answer cache is written by
+several processes" — holds for `<ingestion root>/model-cache` only. The ingest model cache is
+`<document>/processing/model-cache`: one per document, written only by the process that holds
+that document's publisher lease. In staged mode it is now a `StagedModelCacheBackend` (local
+sqlite working copy, published whole with the stores at every stage boundary as
+`processing/model-cache/model-cache.sqlite`); the root-level answer cache stays on files. The
+"rejected: staging the model cache" alternative below is narrowed accordingly. A crash with the
+local disk lost now resumes from the model cache as last published (its stage boundary), not
+from a per-call file layout. Staged object stores also inline up to 8 MiB by default, the
+`atexit` hook finishes (closes and releases) instead of only committing, and the publisher claim
+is taken under a lock (page threads, ADR 0045). Result: four files per document on the mount.
