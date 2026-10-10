@@ -1,5 +1,6 @@
 """Read-only catalog of published documents and pinned read-only mounts; no model calls."""
 
+import logging
 import re
 from collections import Counter, OrderedDict
 from collections.abc import Mapping, Sequence
@@ -8,10 +9,17 @@ from pathlib import Path
 from threading import Lock
 from typing import Literal
 
+from pydantic import Field
+
 from enterprise_pdf_rag.adapters.aia_ingestion import read_text_sidecar
 from enterprise_pdf_rag.adapters.chart_qa import StoredChartResolver
 from enterprise_pdf_rag.adapters.chart_qa_displayed import StoredDisplayResolver
 from enterprise_pdf_rag.adapters.document_store import LocalDocumentStore
+from enterprise_pdf_rag.adapters.document_tags import (
+    DocumentFilter,
+    load_document_tags,
+    tags_match,
+)
 from enterprise_pdf_rag.adapters.http.schemas import BoundaryModel
 from enterprise_pdf_rag.adapters.processing_retrieval import (
     CONTEXTUAL_POLICIES,
@@ -34,6 +42,7 @@ from enterprise_pdf_rag.processing.retrieval import (
 from ragspine.common.evidence.configs import get_settings
 from ragspine.common.evidence.object_backend.files import FileBackend
 from ragspine.common.evidence.object_backend.sqlite import SqliteBackend
+from ragspine.common.observability.trace import emit_trace
 from ragspine.extraction.evidence.document.models import AssetRef, Bounds
 from ragspine.extraction.evidence.figures.chart_qa.displayed_models import DisplayedLookupContext
 from ragspine.extraction.evidence.figures.chart_qa.models import ChartContext, QueryPin
@@ -59,6 +68,7 @@ type CatalogRetrievalStatus = Literal["ready", "not_indexed", "corrupt"]
 
 _DOCUMENT_ID = re.compile(r"[0-9a-f]{64}")
 _MOUNT_REFUSAL = "Embedding provider differs from the published index; refusing to mount"
+_LOGGER = logging.getLogger(__name__)
 
 
 class CatalogEntry(BoundaryModel):
@@ -90,6 +100,9 @@ class CatalogEntry(BoundaryModel):
     regions: tuple[str, ...] = ()
     # A routing tree (ADR 0019) was folded and summarised for the pinned processing id.
     tree_available: bool = False
+    # Logical tags (ADR 0049): mutable, user-given, outside every content address; empty
+    # when the ingestion root records none for this document.
+    tags: dict[str, str] = Field(default_factory=dict)
 
     @property
     def display_name(self) -> str:
@@ -320,9 +333,19 @@ def scan_catalog(ingestion_root: Path, *, legacy_roots: Sequence[Path] = ()) -> 
                 expected_sha=None,
             )
         )
+    try:
+        tags = load_document_tags(ingestion_root)
+    except ValueError:
+        # Tags are metadata, never evidence: an unreadable record leaves every entry untagged
+        # (so a tag filter keeps none of them) and is said, never hidden.
+        _LOGGER.warning("document tags record unreadable; documents listed without tags")
+        emit_trace(event="document_tags_unreadable", documents=len(entries))
+        tags = {}
     seen: set[str] = set()
     documents: list[CatalogEntry] = []
     for entry in entries:
+        if entry.document_id in tags:
+            entry = entry.model_copy(update={"tags": tags[entry.document_id]})
         if entry.document_id in seen:
             entry = entry.model_copy(
                 update={
@@ -338,6 +361,25 @@ def scan_catalog(ingestion_root: Path, *, legacy_roots: Sequence[Path] = ()) -> 
         legacy_roots=tuple(str(root) for root in resolved_legacy),
         documents=tuple(documents),
         unpublished=tuple(unpublished),
+    )
+
+
+def filter_catalog(
+    catalog: DocumentCatalog, document_filter: DocumentFilter | None
+) -> DocumentCatalog:
+    """The catalog's documents whose tags pass an explicit filter (ADR 0049); ``None`` keeps all.
+
+    The candidate set is all it changes: what a kept document retrieves, how it ranks and what
+    reaches a prompt stay exactly as without the filter.
+    """
+    if document_filter is None:
+        return catalog
+    return catalog.model_copy(
+        update={
+            "documents": tuple(
+                entry for entry in catalog.documents if tags_match(entry.tags, document_filter)
+            )
+        }
     )
 
 

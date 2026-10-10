@@ -2816,6 +2816,13 @@
             "title": "Source Store",
             "type": "string"
           },
+          "tags": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "object"
+          },
           "tree_available": {
             "default": false,
             "title": "Tree Available",
@@ -3210,6 +3217,13 @@
           "source_store": {
             "title": "Source Store",
             "type": "string"
+          },
+          "tags": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "object"
           },
           "tree_available": {
             "default": false,
