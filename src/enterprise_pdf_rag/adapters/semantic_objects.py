@@ -1,10 +1,12 @@
 """Persist independently inferred object branches and separately scoped qualifications."""
 
 import json
+import logging
 import re
 from collections import Counter
 from dataclasses import dataclass
 from hashlib import sha256
+from time import perf_counter
 from typing import Literal
 
 from pydantic import TypeAdapter
@@ -20,6 +22,11 @@ from enterprise_pdf_rag.adapters.chart_semantics import (
     describe_from_ir,
 )
 from enterprise_pdf_rag.adapters.derived_artifacts import derived_artifact
+from enterprise_pdf_rag.adapters.deterministic_chart_proposer import (
+    PROPOSER_PRODUCER,
+    ProposalRejected,
+    propose_chart,
+)
 from enterprise_pdf_rag.adapters.diagram_publication import DiagramPublicationReceipt
 from enterprise_pdf_rag.adapters.diagram_qualification import (
     DiagramQualificationError,
@@ -42,6 +49,7 @@ from enterprise_pdf_rag.adapters.processing_store import ProcessingStore
 from enterprise_pdf_rag.adapters.shared_pdf import opened_pdf, source_pdf
 from enterprise_pdf_rag.adapters.source_objects import source_table_description
 from enterprise_pdf_rag.adapters.visual_semantics import VisualInference, VisualSemanticAdapter
+from ragspine.common.evidence.configs import get_settings
 from ragspine.common.evidence.providers.json_completion import (
     JsonCompletionClient,
     JsonCompletionError,
@@ -88,6 +96,9 @@ from ragspine.extraction.evidence.page.models import (
     StageOutcome,
     StageState,
 )
+
+_LOGGER = logging.getLogger(__name__)
+_UNQUALIFIED_RUN = "Raw inference run: independent qualification/admission has not run; both branches remain pending."
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,6 +200,10 @@ class SemanticObjectAdapter:
         )
         # Model calls left unsent by the plan, by ``ingest_mode.SKIPPED_CALL_KINDS`` category.
         self.skipped_calls: Counter[str] = Counter()
+        # ADR 0037: a fully labelled simple chart is proposed from its own print first;
+        # ``chart_proposals`` counts ``proposed`` / ``fallback`` outcomes, never content.
+        self.chart_proposer = get_settings().chart_deterministic_first
+        self.chart_proposals: Counter[str] = Counter()
         if (
             len(set(description_corrections)) != len(description_corrections)
             or len(description_corrections) > 2
@@ -775,6 +790,10 @@ class SemanticObjectAdapter:
                 writer.save("model_render", prepared.rendered.png, "image/png", derived=True),
             )
         )
+        if self.chart_proposer:
+            proposed = self._proposed_chart(page, prepared, writer, stages, svg, view)
+            if proposed is not None:
+                return proposed
         chart: ChartIR | None = None
         description: TextDescription | None = None
         chart_stage: StageOutcome | None = None
@@ -816,12 +835,7 @@ class SemanticObjectAdapter:
             description, description_stage = self._model_description(prepared, writer, stages)
         qualified_count = 0
         if self.qualification_policy == "none":
-            stages.append(
-                writer.diagnostic(
-                    "qualification",
-                    "Raw inference run: independent qualification/admission has not run; both branches remain pending.",
-                )
-            )
+            stages.append(writer.diagnostic("qualification", _UNQUALIFIED_RUN))
         elif (
             chart is None or description is None or chart_stage is None or description_stage is None
         ):
@@ -847,6 +861,84 @@ class SemanticObjectAdapter:
             except ValueError as error:
                 stages.append(writer.diagnostic("qualification", _error(error)))
         return ObjectProcessingRecord(item.object_id, item.kind, tuple(stages), qualified_count)
+
+    def _proposed_chart(
+        self,
+        page: PageInput,
+        prepared: PreparedFigure,
+        writer: _Writer,
+        stages: list[StageOutcome],
+        svg: StageOutcome,
+        view: StageOutcome,
+    ) -> ObjectProcessingRecord | None:
+        """ADR 0037: the deterministic IR and its label description, or ``None`` to fall back.
+
+        Nothing is written unless the proposal was admitted, so a fallback leaves the model
+        path exactly as it was. An admitted proposal is saved under its own stage producer
+        (never the model's fingerprint) and is qualified exactly as a model IR would be.
+        """
+        started = perf_counter()
+        try:
+            proposal = propose_chart(
+                prepared,
+                policy=self.qualification_policy,
+                source_pdf=lambda: source_pdf(
+                    self.sources, self.sources.load(page.source_manifest_id)
+                ),
+            )
+        except ProposalRejected as rejection:
+            self.chart_proposals["fallback"] += 1
+            _LOGGER.debug(
+                "chart_proposal outcome=fallback code=%s elapsed_ms=%.1f",
+                rejection.code,
+                (perf_counter() - started) * 1000,
+            )
+            return None
+        self.chart_proposals["proposed"] += 1
+        _LOGGER.debug(
+            "chart_proposal outcome=proposed rule=%s points=%d elapsed_ms=%.1f",
+            proposal.rule,
+            len(proposal.chart.points),
+            (perf_counter() - started) * 1000,
+        )
+        writer = _Writer(
+            writer.outputs, writer.page, writer.item, writer.producer + ":" + PROPOSER_PRODUCER
+        )
+        chart_stage = writer.save("ir", TypeAdapter(ChartIR).dump_json(proposal.chart))
+        description_stage = writer.save(
+            "description", TypeAdapter(TextDescription).dump_json(proposal.description)
+        )
+        stages.extend(
+            (
+                chart_stage,
+                writer.save(
+                    "ir_diagnostics",
+                    json.dumps({"diagnostics": [], "producer": proposal.chart.producer}).encode(),
+                ),
+                description_stage,
+            )
+        )
+        qualified_count = 0
+        if self.qualification_policy == "none":
+            stages.append(writer.diagnostic("qualification", _UNQUALIFIED_RUN))
+        else:
+            try:
+                qualified_count = self._qualify(
+                    prepared,
+                    proposal.chart,
+                    proposal.description,
+                    writer,
+                    stages,
+                    chart_stage,
+                    description_stage,
+                    svg,
+                    view,
+                )
+            except ValueError as error:
+                stages.append(writer.diagnostic("qualification", _error(error)))
+        return ObjectProcessingRecord(
+            writer.item.object_id, writer.item.kind, tuple(stages), qualified_count
+        )
 
     def _model_description(
         self, prepared: PreparedFigure, writer: _Writer, stages: list[StageOutcome]

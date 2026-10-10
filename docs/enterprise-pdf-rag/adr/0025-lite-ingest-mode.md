@@ -105,7 +105,8 @@ notebook status table's `mode` / `skipped_calls` columns. Counts and codes only.
   ADR only leaves the selection point (`IngestPlan.layout`, `make_partitioner`) and the reusable
   geometry (`page/text_lines.py`: `text_lines`, `headline`, `running_lines`).
 - **Deterministic chart IR**: the user keeps the chart IR on the model — it is the only source of
-  a chart's numbers.
+  a chart's numbers. (Since reversed for fully labelled simple bar / donut charts by [ADR
+  0037](0037-deterministic-chart-proposer.md).)
 - **Unruled tables as verbatim rows** and **batched embeddings**: separate changes on their own
   branches; lite will switch the former on when it lands.
 

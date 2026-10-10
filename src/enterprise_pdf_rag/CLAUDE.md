@@ -175,7 +175,8 @@ adapters/     every SDK and I/O: pdfspine (every source PDF opens through pdf_pa
               deterministic text pages -> pdfspine's local PP-DocLayoutV3 (`find_layout()`,
               in-process ONNX, zero LLM calls, producer
               `page-layout-onnx-v1:pdfspine/<ver>:<weights sha256[:12]>`) -> per-page model
-              fallback with `onnx_*` reason codes; chart IR stays model-only; a two-threshold
+              fallback with `onnx_*` reason codes; chart IR stays with the model unless
+              deterministic_chart_proposer.py settles it first (ADR 0037); a two-threshold
               guard (accept >= 0.5, suspect visuals in [0.3, 0.5) force the fallback) keeps a
               low-score chart from being silently dropped; weights via `APP_ONNX_LAYOUT_MODEL`
               or `PDFSPINE_ONNX_MODELS`, missing runtime/weights is a pre-ingest error, never a

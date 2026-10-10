@@ -158,6 +158,11 @@ class Settings(BaseSettings):
     # 文档逻辑标签的目录模板(enterprise-pdf-rag ADR 0049),如 "{region}/{year}/{file}":按 PDF
     # 相对 PDF 目录的路径逐级取标签,必须含 {file};不匹配的文档无标签、不报错。空 = 不从目录取。
     document_tag_path_template: str = ""
+
+    # 确定性图表提案器(enterprise-pdf-rag ADR 0037):竖直柱 / 两扇区环形图里每个点都印着显式
+    # 百分比标签时,先由图内印刷文字 + 原生几何提出 ChartIR,过与模型 IR 同一条资格链才跳过 VLM;
+    # 任何一步判不出即原样回退模型路径。关掉(false)即与改动前逐字节一致。
+    chart_deterministic_first: bool = True
     # 单次模型调用的等待上限(秒)。默认与 JsonCompletionClient 自身的默认一致;页级上下文
     # (ADR 0017)让"总结某一节"这类问题的 prompt 与生成都更长,超过默认即 503,所以它可配。
     # 上限 180 与该客户端的构造校验一致。
