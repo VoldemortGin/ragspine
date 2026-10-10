@@ -279,6 +279,36 @@ def test_selfcheck_reports_replace_failure_and_skips_cleanly_without_pdfs(
     assert "os.replace 也不可用" in _conclusion(output)
 
 
+@pytest.mark.parametrize(
+    ("mode", "probe_ok", "expected"),
+    [
+        ("files", True, "将使用的对象库后端: files"),
+        ("auto", True, "将使用的对象库后端: sqlite"),
+        ("auto", False, "探测失败码 sqlite_wal"),
+        ("staged", True, "将使用的对象库后端: staged"),
+    ],
+)
+def test_selfcheck_prints_the_object_backend_the_run_will_use_and_why(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str, probe_ok: bool, expected: str
+) -> None:
+    """ADR 0046: auto 静默退到文件布局在 FUSE 上会写出上万个文件; 自检格把将用的后端与原因打印出来。"""
+    from ragspine.common.evidence.object_backend import probe
+
+    monkeypatch.setenv("APP_OBJECT_STORE_BACKEND", mode)
+    monkeypatch.setenv("APP_OBJECT_STORE_STAGING_DIR", str(tmp_path / "staging"))
+    configs.get_settings.cache_clear()
+    if not probe_ok:
+        monkeypatch.setattr(
+            probe, "probe_directory", lambda *_a, **_k: probe.ProbeResult(False, "sqlite_wal")
+        )
+    try:
+        output, _, ingestion_tree = _run_selfcheck(tmp_path)
+    finally:
+        configs.get_settings.cache_clear()
+    assert expected in output
+    assert ingestion_tree == []
+
+
 def test_the_evaluation_section_is_gone() -> None:
     joined = "\n".join(_source(cell) for cell in _notebook()["cells"]).casefold()
     assert "deepeval" not in joined and "data/eval" not in joined
