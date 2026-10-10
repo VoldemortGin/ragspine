@@ -66,7 +66,17 @@ adapters/     every SDK and I/O: pdfspine (every source PDF opens through pdf_pa
               it with a ValueError naming that setting), http/ (FastAPI app factory; documents.py + chat.py
               serve document-catalog mode), local models, stores, draft_publication.py
               (qualify / index / publish), page_metadata_extraction.py (page_metadata stage),
-              document_catalog.py (scan / mount), hybrid_search.py (BM25 + RRF + opt-in
+              document_catalog.py (scan / mount; `filter_catalog` narrows the candidate
+              documents by an explicit tag filter), document_tags.py (ADR 0049: logical tags
+              from `<PDF folder>/documents.csv` — `file` + any columns — and the path template
+              `APP_DOCUMENT_TAG_PATH_TEMPLATE` (`{region}/{year}/{file}`), sidecar wins key by
+              key, unmatched = no tags + a count; recorded in `<ingestion root>/document-tags.json`
+              (backend `put_record`, keyed by source sha256, outside every fingerprint, so
+              re-tagging never re-ingests) → `CatalogEntry.tags` / `DocumentRun.tags` / a
+              `report.md` column; the filter — values OR, keys AND — only from the caller:
+              `run_folder_pipeline(document_filter=…)`, `run-folder --document-filter`, notebook
+              `NB_DOCUMENT_FILTER`; it removes whole documents from the question phase, never
+              inferred from a question set; default none = byte for byte), hybrid_search.py (BM25 + RRF + opt-in
               rerank borrowed from ragspine; the channels a query uses are chosen, not
               fixed — ADR 0018), cross_document.py (ADR 0032: every mounted document as one
               `MountedDocument` corpus — one BM25 over the union, each document's vector top
